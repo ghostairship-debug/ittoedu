@@ -1,4 +1,6 @@
 // @vitest-environment node
+import { componentSurfaces } from '../../src/shared/contracts/component-platform/project'
+import { testContainerInstance } from '../helpers/glxWorkFixture'
 import { expect, it } from 'vitest'
 import { randomUUID } from 'node:crypto'
 import { DocumentRegistry } from '../../src/core/documents/DocumentRegistry'
@@ -36,12 +38,12 @@ function project() {
     style: { textShadow: '2px 3px 4px #000000, -1px -2px 0px #ff0000' }, frame: { width: 160, height: 60, transform: [1, 0, 0, 1, 20, 30] } }
   value.instances.b = { id: 'b', definitionId: TEXT_DEFINITION.id, data: JSON.parse(JSON.stringify(b)),
     frame: { width: 200, height: 90, transform: [1, 0, 0, 1, 500, 300] } }
-  value.surfaces[0].childIds = ['a', 'b']
+  testContainerInstance(value, 0).childIds = ['a', 'b']
   return value
 }
 
 it('matches only supplied professional color and two shadow layers, preserving B body/size/frame through save and Undo', async () => {
-  const p = project(), driver = new CourseV10Driver(), surfaceId = p.surfaces[0].id
+  const p = project(), driver = new CourseV10Driver(), surfaceId = componentSurfaces(p)[0].id
   const b: ToolTarget = { kind: 'course-instance', surfaceId, instanceId: 'b' }
   const f = await fixture(driver, { kind: 'course-v10', project: p, resources: { assets: {}, components: {} } }, [b])
   const target = await f.gateway.issueTarget('format', f.session.documentId, b)
@@ -72,7 +74,7 @@ it('matches only supplied professional color and two shadow layers, preserving B
 })
 
 it('formats a frozen professional text range without modifying unselected text/formula/appearance or widening to object.update', async () => {
-  const p = project(), surfaceId = p.surfaces[0].id, original = createTextComponentData({ inlines: [
+  const p = project(), surfaceId = componentSurfaces(p)[0].id, original = createTextComponentData({ inlines: [
     { type: 'text', text: '左😀', style: { italic: true } }, { type: 'text', text: '选中文', style: { fontSize: 27 } },
     { type: 'math', formulaId: 'formula-a', latex: 'x+1', accessibleText: 'x 加一' }, { type: 'text', text: '右', style: { underline: true } },
   ] })
@@ -120,7 +122,7 @@ it('does not advertise formatting for a plain text file', async () => {
 })
 
 it('keeps explicit style precedence over copied appearance and rejects an unobserved source before writing', async () => {
-  const p = project(), surfaceId = p.surfaces[0].id
+  const p = project(), surfaceId = componentSurfaces(p)[0].id
   const b: ToolTarget = { kind: 'course-instance', surfaceId, instanceId: 'b' }
   const f = await fixture(new CourseV10Driver(), { kind: 'course-v10', project: p, resources: { assets: {}, components: {} } }, [b])
   const target = await f.gateway.issueTarget('format', f.session.documentId, b)

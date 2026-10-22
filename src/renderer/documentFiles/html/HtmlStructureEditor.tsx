@@ -1,16 +1,23 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { DocumentSnapshot } from '../../../shared/workbench/document'
 import type { HtmlPreviewLease } from '../../../shared/workbench/htmlPreview'
-import { inspectHtmlSource, flattenHtmlSourceNodes, type HtmlSourceNode } from '../../../shared/html/htmlSourceStructure'
+import { type HtmlSourceNode } from '../../../shared/html/htmlSourceStructure'
 import { htmlSourceEditCommandSchema, type HtmlSourceEditCommand } from '../../../shared/html/sourceEditCommands'
 import { createHtmlGrapesProjection } from './htmlGrapesProjection'
 import 'grapesjs/dist/css/grapes.min.css'
+import { htmlNodePath, htmlTargetNode, type HtmlEditingTarget } from './htmlEditingTarget'
+import type { HtmlTargetReport } from './htmlPreviewController'
+import { HtmlSourceAnalysis } from './htmlSourceAnalysis'
 
 export interface HtmlStructureEditorProps {
   committed: DocumentSnapshot
+  analysis: HtmlSourceAnalysis
   lease: HtmlPreviewLease
   pendingDraft?: boolean
   loading?: boolean
+  active?: boolean
+  target?: HtmlEditingTarget | null
+  onTargetChange?(target: HtmlEditingTarget, node: HtmlSourceNode, path: HtmlTargetReport['domPath'] | undefined): void
 }
 
 function nodeLabel(node: HtmlSourceNode): string {
@@ -19,12 +26,28 @@ function nodeLabel(node: HtmlSourceNode): string {
 }
 
 /** Controls are projections of the committed source. Every application returns to its existing Main transaction. */
-export function HtmlStructureEditor({ committed, lease, pendingDraft = false, loading = false }: HtmlStructureEditorProps) {
-  const source = committed.model.kind === 'text' ? committed.model.source : ''
-  const structure = useMemo(() => inspectHtmlSource(source), [source])
-  const nodes = useMemo(() => flattenHtmlSourceNodes(structure.roots), [structure])
+export function HtmlStructureEditor({ committed, lease, analysis, pendingDraft = false, loading = false, active = true, target, onTargetChange }: HtmlStructureEditorProps) {
+  const displayedAnalysis = useRef(analysis)
+  if (active) displayedAnalysis.current = analysis
+  const source = displayedAnalysis.current.source
+  const structure = displayedAnalysis.current.structure
+  const nodes = displayedAnalysis.current.nodes
   const [tab, setTab] = useState<'structure' | 'styles' | 'data'>('structure')
-  const [selectedKey, setSelectedKey] = useState('')
+  const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set())
+  const selectedKey = htmlTargetNode(target, nodes, committed.revision)?.key ?? ''
+  useEffect(() => {
+    if (!active || !selectedKey) return
+    const ancestors: string[] = []
+    const find = (children: readonly HtmlSourceNode[]): boolean => {
+      for (const node of children) {
+        if (node.key === selectedKey) return true
+        if (find(node.children)) { ancestors.push(node.key); return true }
+      }
+      return false
+    }
+    find(structure.roots)
+    setExpanded(previous => ancestors.every(key => previous.has(key)) ? previous : new Set([...previous, ...ancestors]))
+  }, [active, selectedKey, structure])
   const [ruleIndex, setRuleIndex] = useState(0)
   const [dataIndex, setDataIndex] = useState(0)
   const [value, setValue] = useState('')
@@ -38,11 +61,22 @@ export function HtmlStructureEditor({ committed, lease, pendingDraft = false, lo
   const grapesContainer = useRef<HTMLDivElement>(null)
   const grapes = useRef<ReturnType<typeof createHtmlGrapesProjection> | null>(null)
   const commit = useRef<(command: HtmlSourceEditCommand) => Promise<void>>(async () => {})
+  const currentSelection = useRef({ active, onTargetChange, nodes, structure, revision: committed.revision })
+  currentSelection.current = { active, onTargetChange, nodes, structure, revision: committed.revision }
+  const selectNode = (key: string) => {
+    const current = currentSelection.current
+    if (!current.active) return
+    const node = current.nodes.find(node => node.key === key)
+    if (!node) return
+    current.onTargetChange?.({ revision: current.revision, ...(node.address ? { source: node.address } : {}),
+      ...(node.attributes['data-cw-author-key'] ? { authorKey: node.attributes['data-cw-author-key'] } : {}) }, node, htmlNodePath(current.structure.roots, key))
+    setIssue(null)
+  }
   const selected = nodes.find(node => node.key === selectedKey)
   const parent = nodes.find(node => node.children.some(child => child.key === selectedKey))
   const rule = structure.rules[ruleIndex], data = structure.data[dataIndex]
-  const editable = !pendingDraft && !busy && !loading
-  useEffect(() => { setSelectedKey(''); setIssue(null) }, [committed.documentId, committed.epoch, committed.revision])
+  const editable = active && !pendingDraft && !busy && !loading
+  useEffect(() => { setIssue(null) }, [committed.documentId, committed.epoch, committed.revision])
   useEffect(() => {
     if (tab === 'structure') setValue(selected?.value ?? '')
     setAttributeValue(selected?.attributes[attribute] ?? ''); setParentKey(parent?.key ?? '')
@@ -76,21 +110,25 @@ export function HtmlStructureEditor({ committed, lease, pendingDraft = false, lo
   }
   useEffect(() => {
     if (!grapesContainer.current) return
-    const projection = createHtmlGrapesProjection(grapesContainer.current, { commit: command => commit.current(command), select: setSelectedKey })
+    const projection = createHtmlGrapesProjection(grapesContainer.current, { commit: command => commit.current(command), select: selectNode })
     grapes.current = projection
     return () => { projection.dispose(); if (grapes.current === projection) grapes.current = null }
   }, [committed.documentId, committed.epoch])
-  useEffect(() => { grapes.current?.project(source, lease.url) }, [source, committed.documentId, committed.epoch, committed.revision, lease.url])
-  useEffect(() => { if (selectedKey) grapes.current?.select(selectedKey) }, [selectedKey])
+  useEffect(() => { if (active) grapes.current?.project(source, lease.url, structure) }, [active, source, committed.documentId, committed.epoch, committed.revision, lease.url, structure])
+  useEffect(() => { if (active) grapes.current?.select(selectedKey) }, [active, selectedKey])
   const applyJson = () => {
     if (!data) return
     try { void apply({ type: 'data', target: data.address, path: [], value: JSON.parse(value) }) }
     catch { setIssue('JSON 格式不完整，请先修正。') }
   }
   const tree = (children: readonly HtmlSourceNode[]) => <ul role="group">{children.map(node => <li key={node.key}>
-    <button type="button" aria-pressed={selectedKey === node.key} onClick={() => { setSelectedKey(node.key); setIssue(null) }}
+    {node.children.length > 0 && <button type="button" aria-label={`${expanded.has(node.key) ? '折叠' : '展开'} ${nodeLabel(node)}`}
+      aria-expanded={expanded.has(node.key)} onClick={() => setExpanded(previous => {
+        const next = new Set(previous); if (next.has(node.key)) next.delete(node.key); else next.add(node.key); return next
+      })}>{expanded.has(node.key) ? '−' : '+'}</button>}
+    <button type="button" aria-pressed={selectedKey === node.key} onClick={() => selectNode(node.key)}
       title={node.kind === 'source' ? '程序和样式保留源码；可在对应页签或源码视图修改' : undefined}>{nodeLabel(node)}</button>
-    {node.children.length > 0 && tree(node.children)}
+    {node.children.length > 0 && expanded.has(node.key) && tree(node.children)}
   </li>)}</ul>
   const styleForm = (shared: boolean) => <fieldset disabled={!editable}>
     <legend>{shared ? '修改共享规则' : '修改当前元素样式'}</legend>
@@ -106,7 +144,8 @@ export function HtmlStructureEditor({ committed, lease, pendingDraft = false, lo
     </div>
   </fieldset>
 
-  return <aside className="html-structure-editor" aria-label="HTML 结构与样式">
+  return <aside hidden={!active} className="html-structure-editor" aria-label="HTML 结构与样式">
+    {active && target?.authorKey && !selected && <p role="status">当前内容由程序生成，尚无可对应的静态结构节点；可保留当前作者字段编辑，或在源码视图修改实现。</p>}
     <div ref={grapesContainer} aria-label="HTML 可视结构编辑" style={{ minHeight: 280, pointerEvents: editable ? undefined : 'none' }} />
     <div role="group" aria-label="HTML 编辑内容" className="html-structure-editor__tabs">
       <button type="button" aria-pressed={tab === 'structure'} onClick={() => setTab('structure')}>结构</button>

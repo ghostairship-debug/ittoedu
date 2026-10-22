@@ -3,6 +3,10 @@ import {panComponentSpatialCamera,zoomComponentSpatialCamera,type ComponentSpati
 export function bindSpatialInput(element: HTMLElement, camera: ComponentSpatialCameraPort): () => void {
     let space = false, drag: { id: number; point: { x: number; y: number } } | undefined
     const editable = (target: EventTarget | null) => target instanceof Element && Boolean(target.closest('input,textarea,select,[contenteditable="true"]'))
+    const insideComponent = (target: EventTarget | null) => {
+      const component = target instanceof Element ? target.closest('[data-component-instance-id]') : null
+      return Boolean(component && component !== element && element.contains(component))
+    }
     const geometry = () => {
       const rect = element.getBoundingClientRect()
       return createStageGeometry({ width: element.clientWidth || rect.width, height: element.clientHeight || rect.height }, rect)
@@ -13,7 +17,7 @@ export function bindSpatialInput(element: HTMLElement, camera: ComponentSpatialC
     const blur = () => { space = false; drag = undefined }
     const down = (event: PointerEvent) => {
       if (event.button !== 0 && event.button !== 1 || editable(event.target)) return
-      if (!space && event.button !== 1 && event.target instanceof Element && event.target.closest('[data-component-instance-id]')) return
+      if (!space && event.button !== 1 && insideComponent(event.target)) return
       event.preventDefault(); element.focus({ preventScroll: true })
       drag = { id: event.pointerId, point: point(event) }; element.setPointerCapture?.(event.pointerId)
     }
@@ -25,7 +29,7 @@ export function bindSpatialInput(element: HTMLElement, camera: ComponentSpatialC
     }
     const up = (event: PointerEvent) => { if (drag?.id === event.pointerId) { drag = undefined; if (element.hasPointerCapture?.(event.pointerId)) element.releasePointerCapture(event.pointerId) } }
     const wheel = (event: WheelEvent) => {
-      if (editable(event.target) || !event.ctrlKey && !event.metaKey && event.target instanceof Element && event.target.closest('[data-component-instance-id]')) return
+      if (editable(event.target) || !event.ctrlKey && !event.metaKey && insideComponent(event.target)) return
       event.preventDefault()
       const current = camera.read(), frame = geometry()
       camera.set(zoomComponentSpatialCamera(current, Math.max(0.01, current.zoom * Math.exp(-event.deltaY * 0.002)), frame.toAuthor({ x: event.clientX, y: event.clientY }),

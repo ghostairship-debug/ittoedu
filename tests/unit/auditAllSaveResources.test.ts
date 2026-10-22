@@ -1,4 +1,5 @@
 // @vitest-environment node
+import { testContainerInstance } from '../helpers/glxWorkFixture'
 import { promises as fs } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -68,7 +69,7 @@ describe('Audit JSON and file attachment consumers', () => {
     const project = createBlankCourseProjectV10()
     Object.defineProperty(project.definitions, '__proto__', { value: { id: '__proto__', role: 'content', implementation: { kind: 'source', language: 'javascript', workspace: { ownerId: '__proto__', entry: 'main.js' } } }, enumerable: true })
     Object.defineProperty(project.instances, 'constructor', { value: { id: 'constructor', definitionId: '__proto__', data: JSON.parse('{"__proto__":{"prototype":"kept"}}') }, enumerable: true })
-    project.surfaces[0].childIds.push('constructor')
+    testContainerInstance(project, 0).childIds.push('constructor')
     Object.defineProperty(project.assets, '__proto__', { value: { id: '__proto__', path: '__proto__', kind: 'image' }, enumerable: true })
     project.assets.literal = { id: 'literal', path: 'prototype/constructor/__proto__/image.png', kind: 'image' }
     const resources = { assets: Object.fromEntries([['__proto__', new Uint8Array([1, 2])], ['literal', new Uint8Array([4])]]), components: Object.fromEntries([['__proto__', Object.fromEntries(Object.entries({

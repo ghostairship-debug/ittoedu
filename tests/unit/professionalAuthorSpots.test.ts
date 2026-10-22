@@ -1,3 +1,4 @@
+import { createTestProjectFromLegacy } from '../helpers/glxWorkFixture'
 // @vitest-environment node
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
@@ -17,11 +18,11 @@ import type { DocumentEvent, DocumentResources } from '../../src/shared/workbenc
 import type { DocumentHostAPI } from '../../src/shared/workbench/desktop'
 
 const emptyResources = (): DocumentResources => ({ assets: {}, components: {} })
-const projectFor = (definitions: CourseProjectV10['definitions'], instances: CourseProjectV10['instances']): CourseProjectV10 => ({
+const projectFor = (definitions: CourseProjectV10['definitions'], instances: CourseProjectV10['instances']): CourseProjectV10 => (createTestProjectFromLegacy({
   schemaVersion: 10, id: 'professional-fields', revision: 0, title: '专业字段', definitions, instances,
   surfaces: [{ id: 'page', kind: 'slide', title: '页', childIds: Object.keys(instances), designSize: { width: 1280, height: 720 } }],
   global: { underlay: [], overlay: [] }, assets: {},
-})
+}))
 let dom: JSDOM
 beforeEach(() => {
   dom = new JSDOM('<!doctype html><html><body></body></html>')

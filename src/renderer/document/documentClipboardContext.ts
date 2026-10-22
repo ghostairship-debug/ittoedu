@@ -10,7 +10,10 @@ import { parseComponentPackageFiles } from '../../core/drivers/codecs/importComp
 import { courseProjectV10Schema, componentFlowPlacementSchema } from '../../shared/contracts/component-platform/schema'
 import { extractComponentLibraryEntry } from '../../core/components/library'
 import type { CourseObjectClipboardSource } from '../composition/crossSurfaceCommands'
-import { owningContainer, type CourseProjectV10 } from '../../shared/contracts/component-platform/project'
+import { componentDefinitionBuiltinKey, owningContainer, resolveComponentPresentation, type CourseProjectV10, type JsonValue } from '../../shared/contracts/component-platform/project'
+import { normalizeWorkProject } from '../../shared/contracts/component-platform/workProjectMigration'
+import type { ComponentLibraryEntry } from '../../shared/contracts/component-platform/library'
+import { equalComponentValue } from '../../core/drivers/courseV10Operations'
 
 const bytesSchema = z.array(z.number().int().min(0).max(255))
 const contextSchema = z.object({
@@ -23,11 +26,11 @@ const contextSchema = z.object({
 }).strict()
 export type DocumentClipboardContext = z.infer<typeof contextSchema>
 
-/** Formal V10 bytes are separate from the PM manifest and native file packages. */
+/** Formal project bytes are separate from the PM manifest and native file packages. */
 const courseContextSchema = z.object({
   kind: z.literal('cw-course-v10-resources'),
   documentId: z.string().optional(),
-  project: courseProjectV10Schema,
+  project: z.preprocess(input => normalizeWorkProject(input), courseProjectV10Schema),
   roots: z.array(z.string()),
   resources: z.object({
     assets: ownRecordSchema(z.string(), bytesSchema),
@@ -41,25 +44,97 @@ export type CourseDocumentClipboardContext = z.infer<typeof courseContextSchema>
 
 /** Capture once from the source document; library extraction owns the closure. */
 export function createCourseDocumentClipboardContext(source: CourseObjectClipboardSource): CourseDocumentClipboardContext {
-  const { entry, diagnostics } = source.roots.length ? extractComponentLibraryEntry(source.project, source.resources, {
+  const { entry: extractedEntry, diagnostics } = source.roots.length ? extractComponentLibraryEntry(source.project, source.resources, {
     id: `clipboard_${crypto.randomUUID()}`, title: '复制正文对象', rootIds: [...source.roots],
-  }) : { entry: { definitions:{},example:{instances:{},rootIds:[]},assets:{},resources: { assets: {}, components: {} } }, diagnostics: [] }
-  const ids=new Set(Object.keys(entry.example.instances)),roots=entry.example.rootIds
-  const globals:{underlay:string[];overlay:string[]}={underlay:[],overlay:[]},surfaces:CourseProjectV10['surfaces']=[]
-  const owner=(id:string)=>{let current=owningContainer(source.project,id);while(current?.kind==='instance')current=owningContainer(source.project,current.instanceId);return current}
-  for(const id of roots){const current=owner(id);if(current?.kind==='global')globals[current.plane].push(id)}
-  for(const original of source.project.surfaces){const childIds=roots.filter(id=>{const current=owner(id);return current?.kind==='surface' && current.surfaceId===original.id});if(!childIds.length)continue
-    const presentation=original.presentation ? {...structuredClone(original.presentation),states:original.presentation.states.flatMap(state=>{
-      const overrides=Object.fromEntries(Object.entries(state.overrides).filter(([id])=>ids.has(id))),order=state.order?.filter(id=>childIds.includes(id))
-      return Object.keys(overrides).length || order?.length ? [{...structuredClone(state),overrides,...(order?{order}:{})}] : []
-    })}:undefined
-    if(presentation){if(!presentation.states.some(state=>state.id===presentation.initialStateId))delete presentation.initialStateId;if(!presentation.states.some(state=>state.id===presentation.thumbnailStateId))delete presentation.thumbnailStateId}
-    surfaces.push({id:original.id,kind:original.kind,title:original.title,childIds,...(original.designSize?{designSize:structuredClone(original.designSize)}:{}),...(original.flow?{flow:structuredClone(original.flow)}:{}),...(presentation?.states.length?{presentation}:{})})
+  }) : { entry: { schemaVersion: 2 as const, id: 'empty-clipboard', title: '复制正文对象', definitions:{},example:{instances:{},rootIds:[]},assets:{},resources: { assets: {}, components: {} } }, diagnostics: [] }
+  const entry: ComponentLibraryEntry = extractedEntry
+  const ids = new Set(Object.keys(entry.example.instances)), roots = entry.example.rootIds
+  const project: CourseProjectV10 = { schemaVersion: 11, id: source.project.id, revision: source.project.revision,
+    title: source.project.title, definitions: entry.definitions, instances: entry.example.instances, assets: entry.assets,
+    global: structuredClone(entry.global ?? { underlay: [], overlay: [] }), rootIds: [],
+    ...(entry.logic ? { logic: structuredClone(entry.logic) } : {}) }
+  // Keep the nearest real container as clipboard context. It supplies Flow placement and
+  // local state overrides, while only the selected roots are pasted into the destination.
+  const contexts = new Map<string, string[]>()
+  const recordRoot = (id: string) => {
+    let owner = owningContainer(source.project, id)
+    while (owner?.kind === 'instance' && !source.project.instances[owner.instanceId]?.container && !source.project.rootIds.includes(owner.instanceId))
+      owner = owningContainer(source.project, owner.instanceId)
+    if (owner?.kind === 'global') { if (!project.global[owner.plane].includes(id)) project.global[owner.plane].push(id) }
+    else if (owner?.kind === 'instance' && !ids.has(owner.instanceId)) {
+      const children = contexts.get(owner.instanceId) ?? []
+      if (!children.includes(id)) contexts.set(owner.instanceId, [...children, id])
+    } else if (!project.rootIds.includes(id)) project.rootIds.push(id)
   }
-  const project:CourseProjectV10={schemaVersion:10,id:source.project.id,revision:source.project.revision,title:source.project.title,definitions:entry.definitions,instances:entry.example.instances,assets:entry.assets,global:globals,surfaces}
-  const stateKeys=new Set<string>()
-  for(const instance of Object.values(project.instances)){const data=instance.data as {answer?:{stateKey?:string;validityKey?:string}};if(data?.answer){if(data.answer.stateKey)stateKeys.add(data.answer.stateKey);if(data.answer.validityKey)stateKeys.add(data.answer.validityKey)}}
-  if(stateKeys.size && source.project.logic)project.logic={courseState:source.project.logic.courseState.filter(state=>stateKeys.has(state.key)),navigationGuards:[]}
+  roots.forEach(recordRoot)
+  const stateFamilies = new Map<string, Map<string, Record<string, JsonValue>>>()
+  // Close the effective states before filtering their overrides: a selected object's
+  // rule family or resource can exist only in one named state.
+  for (const containerId of contexts.keys()) for (const state of source.project.instances[containerId].container?.presentation?.states ?? []) {
+    const variant = extractComponentLibraryEntry(resolveComponentPresentation(source.project, containerId, state.id), source.resources,
+      { id: entry.id, title: entry.title, rootIds: [...source.roots] })
+    Object.assign(project.definitions, variant.entry.definitions)
+    Object.assign(project.assets, variant.entry.assets)
+    Object.assign(entry.resources.assets, variant.entry.resources.assets)
+    for (const [ownerId, files] of Object.entries(variant.entry.resources.components))
+      entry.resources.components[ownerId] = { ...entry.resources.components[ownerId], ...files }
+    const families: Record<string, JsonValue> = {}
+    for (const [id, instance] of Object.entries(variant.entry.example.instances)) {
+      const interaction = componentDefinitionBuiltinKey(project.definitions[instance.definitionId]) === 'guoling.interactions'
+      if (interaction) families[id] = instance.data
+      if (!ids.has(id)) {
+        ids.add(id)
+        project.instances[id] = { ...structuredClone(instance), ...(interaction ? { data: { rules: [] } } : {}) }
+        recordRoot(id)
+      }
+    }
+    const states = stateFamilies.get(containerId) ?? new Map<string, Record<string, JsonValue>>()
+    states.set(state.id, families); stateFamilies.set(containerId, states)
+    if (variant.entry.logic) {
+      project.logic ??= { courseState: [], navigationGuards: [] }
+      for (const declaration of variant.entry.logic.courseState)
+        if (!project.logic.courseState.some(current => current.key === declaration.key)) project.logic.courseState.push(declaration)
+    }
+    diagnostics.push(...variant.diagnostics)
+  }
+  for (const [containerId, childIds] of contexts) {
+    const original = source.project.instances[containerId], wrapper = structuredClone(original)
+    wrapper.childIds = childIds
+    if (!wrapper.container) wrapper.data = {}
+    const retainedIds = new Set([...ids, ...contexts.keys()])
+    if (wrapper.attachments) wrapper.attachments = wrapper.attachments.filter(attachment => {
+      if (!retainedIds.has(attachment.instanceId)) return false
+      const target = attachment.target
+      return target.kind === 'instance' || target.kind === 'text-range' ? retainedIds.has(target.instanceId)
+        : target.kind === 'surface' ? retainedIds.has(target.surfaceId) : true
+    })
+    const presentation = wrapper.container?.presentation
+    if (presentation) {
+      presentation.states = presentation.states.flatMap(state => {
+        const overrides = Object.fromEntries(Object.entries(state.overrides).filter(([id]) => ids.has(id)))
+        const families = stateFamilies.get(containerId)?.get(state.id) ?? {}
+        for (const id of ids) if (componentDefinitionBuiltinKey(project.definitions[project.instances[id].definitionId]) === 'guoling.interactions') {
+          const data = families[id] ?? { rules: [] }
+          if (overrides[id]?.data !== undefined || !equalComponentValue(data, project.instances[id].data))
+            overrides[id] = { ...overrides[id], data }
+        }
+        const order = state.order?.filter(id => childIds.includes(id))
+        return Object.keys(overrides).length || order?.length ? [{ ...state, overrides, ...(order ? { order } : {}) }] : []
+      })
+      if (!presentation.states.some(state => state.id === presentation.initialStateId)) delete presentation.initialStateId
+      if (!presentation.states.some(state => state.id === presentation.thumbnailStateId)) delete presentation.thumbnailStateId
+      if (!presentation.states.length) delete wrapper.container!.presentation
+    }
+    project.instances[containerId] = wrapper
+    project.definitions[wrapper.definitionId] = structuredClone(source.project.definitions[wrapper.definitionId])
+    project.rootIds.push(containerId)
+  }
+  // Library extraction marks excluded host scopes with its surface binding alias.
+  // The clipboard now contains those real scope instances, including Source roots.
+  for (const instance of Object.values(project.instances)) if (instance.attachments)
+    instance.attachments = instance.attachments.map(attachment => attachment.target.kind === 'surface'
+      && project.instances[attachment.target.surfaceId]
+      ? { ...attachment, target: { kind: 'instance' as const, instanceId: attachment.target.surfaceId } } : attachment)
   return courseContextSchema.parse({
     kind: 'cw-course-v10-resources', documentId: source.documentId,
     project, roots: [...source.roots],

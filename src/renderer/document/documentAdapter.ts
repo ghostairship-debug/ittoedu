@@ -1,5 +1,5 @@
 import { type Node as PMNode, type Mark } from 'prosemirror-model'
-import { documentContentSchema, documentVisibleTextSlots, normalizeDocumentText, type DocumentBlock, type DocumentContent, type FlowInline, type FlowTextContent } from '../../shared/document/content'
+import { documentBlockSchema, documentContentSchema, documentVisibleTextSlots, normalizeDocumentText, type DocumentBlock, type DocumentContent, type FlowInline, type FlowTextContent } from '../../shared/document/content'
 import type { DocumentPoint, DocumentSlot } from '../../shared/document/ports'
 import { documentEditorSchema as schema } from './editorSchema'
 import { TableMap } from 'prosemirror-tables'
@@ -44,7 +44,8 @@ function readInlines(node: PMNode): FlowTextContent {
   return normalizeDocumentText({ inlines })
 }
 function blockNode(block: DocumentBlock): PMNode {
-  const { id, ...data } = structuredClone(block)
+  const { id, ...fields } = block
+  const data = structuredClone('blocks' in fields ? { ...fields, blocks: [] } : fields)
   const attrs = { id, data }
   switch (block.type) {
     case 'table': {
@@ -62,6 +63,7 @@ function blockNode(block: DocumentBlock): PMNode {
     case 'formula': return schema.nodes.formula.create(attrs)
     case 'code': return schema.nodes.code_block.create(attrs, block.code ? schema.text(block.code) : undefined)
     case 'section': return schema.nodes.section.create(attrs, [schema.nodes.slot.create({ key: 'title' }, inlineNodes(block.title)), ...block.blocks.map(blockNode)])
+    case 'course-instance': return block.blocks ? schema.nodes.layout_group.create(attrs, block.blocks.map(blockNode)) : schema.nodes.object.create(attrs)
     default: {
       const slots = documentVisibleTextSlots(block)
       return slots.length ? schema.nodes.compound.create(attrs, slots.map(slot => schema.nodes.slot.create({ key: slot.key }, inlineNodes(slot.content)))) : schema.nodes.object.create(attrs)
@@ -92,7 +94,7 @@ function readBlock(node: PMNode): DocumentBlock {
     node.forEach(child => { block.items.push({ id: child.attrs.key.slice(5), content: readInlines(child) }) })
     return block
   }
-  if (block.type === 'section') block.blocks = []
+  if (block.type === 'section' || block.type === 'course-instance' && node.type.name === 'layout_group') block.blocks = []
   if (block.type === 'quote') { block.content = { inlines: [] }; delete block.citation }
   if (block.type === 'callout') { block.body = { inlines: [] }; delete block.title }
   if (block.type === 'media') delete block.caption
@@ -102,7 +104,7 @@ function readBlock(node: PMNode): DocumentBlock {
   }
   node.forEach(child => {
     if (child.type.name === 'slot') setSlot(block, child.attrs.key, readInlines(child))
-    else if (block.type === 'section') block.blocks.push(readBlock(child))
+    else if (block.type === 'section' || block.type === 'course-instance' && block.blocks) block.blocks!.push(readBlock(child))
   })
   return block
 }
@@ -110,6 +112,10 @@ export function fromEditorDocument(node: PMNode): DocumentContent {
   const blocks: DocumentBlock[] = []
   node.forEach(child => blocks.push(readBlock(child)))
   return documentContentSchema.parse({ blocks })
+}
+/** Read the requested professional block without converting unrelated document content. */
+export function fromEditorBlock(node: PMNode): DocumentBlock {
+  return documentBlockSchema.parse(readBlock(node))
 }
 export function editorPositionToPoint(doc: PMNode, position: number, affinity: 'before' | 'after' = 'after'): DocumentPoint | null {
   const resolved = doc.resolve(position)

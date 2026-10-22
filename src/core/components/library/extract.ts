@@ -1,7 +1,7 @@
 import type { ComponentLibraryEntry } from '../../../shared/contracts/component-platform/library'
-import type { ComponentDefinition, ComponentImplementation, ComponentInstance, CourseProjectV10 } from '../../../shared/contracts/component-platform/project'
+import type { ComponentDefinition, ComponentImplementation, ComponentInstance, ComponentSurface, CourseProjectV10 } from '../../../shared/contracts/component-platform/project'
 import { createComponentReferenceCapture, interactionReferenceTargets, sourceModuleBindings, type ComponentReferenceCapture } from './references'
-import { componentDefinitionBuiltinKey } from '../../../shared/contracts/component-platform/project'
+import { componentDefinitionBuiltinKey, componentSurface } from '../../../shared/contracts/component-platform/project'
 import { associatedComponentInteractionRules, componentInteractionDataSchema } from '../../../shared/componentInteractionData'
 import type { LibraryDiagnostic, LibraryExtractResult, LibraryReferenceAdapter } from './types'
 import { resolveComponentBackground, resolveComponentPresentation, isComponentVisibleAtSurface, owningContainer } from '../../../shared/contracts/component-platform/project'
@@ -27,15 +27,22 @@ export function extractComponentLibraryEntry(project: CourseProjectV10, resource
   const definitions: Record<string, ComponentDefinition> = Object.create(null)
   const assetIds = new Set<string>()
   const components: ComponentLibraryEntry['resources']['components'] = Object.create(null)
-  const selectedSurfaces = options.surfaceIds?.length ? project.surfaces.filter(surface => options.surfaceIds!.includes(surface.id)) : []
+  const selectedSurfaces = (options.surfaceIds ?? []).flatMap(id => { const surface = componentSurface(project, id); return surface ? [surface] : [] })
   if (options.surfaceIds?.some(id => !selectedSurfaces.some(surface => surface.id === id))) throw new Error('提炼页面已不存在')
   if (options.kind === 'page' && selectedSurfaces.length !== 1) throw new Error('页面模板需要选择一个页面')
-  const surfaces = selectedSurfaces.map(surface => ({ ...structuredClone(surface), background: mergeComponentBackground(undefined, { mode: 'own', ...structuredClone(resolveComponentBackground(project, surface)) }) }))
+  let surfaces: ComponentSurface[] = selectedSurfaces.map(surface => ({ ...structuredClone(surface), background: mergeComponentBackground(undefined, { mode: 'own', ...structuredClone(resolveComponentBackground(project, surface)) }) }))
   const selectedSurfaceIds = new Set(surfaces.map(surface => surface.id))
   const global = { underlay: [] as string[], overlay: [] as string[] }
   for (const plane of ['underlay', 'overlay'] as const) global[plane] = project.global[plane].filter(id =>
     componentDefinitionBuiltinKey(project.definitions[project.instances[id].definitionId]) !== 'guoling.interactions' && selectedSurfaces.some(surface => isComponentVisibleAtSurface(project.instances[id], surface.id)
       || surface.presentation?.states.some(state => isComponentVisibleAtSurface(resolveComponentPresentation(project, surface.id, state.id).instances[id], surface.id))))
+  if (global.underlay.length) for (const surface of surfaces) {
+    const original = selectedSurfaces.find(value => value.id === surface.id)!
+    if (original.background?.mode === 'own') continue
+    surface.background = structuredClone(original.background)
+    if (project.background) diagnostics.push({ code: 'background-host-inherited',
+      message: '模板保留全局背景对象和页面继承关系；基础底色/底图使用插入目标作品背景，避免把作品底图提升为遮挡动态层的页面背景。' })
+  }
   const implementation = (original: ComponentImplementation): ComponentImplementation => {
     if (original.kind !== 'source') return structuredClone(original)
     const sourceReferences = references.sourceResourceReferences(original)
@@ -69,8 +76,14 @@ export function extractComponentLibraryEntry(project: CourseProjectV10, resource
     if (Object.hasOwn(instances, id)) return
     const original = Object.hasOwn(project.instances,id) ? project.instances[id] : undefined
     if (!original) throw new Error(`提炼对象不存在：${id}`)
-    instances[id] = { ...structuredClone(original), ...(selectedSurfaces.length && original.visibility ? { visibility: { mode: 'include' as const, surfaceIds: selectedSurfaces.filter(surface => isComponentVisibleAtSurface({ ...original, visible: true }, surface.id)).map(surface => surface.id) } } : {}), ...(original.implementationOverride
+    instances[id] = { ...structuredClone(original), ...(selectedSurfaces.length && [...global.underlay, ...global.overlay].includes(id) ? { visibility: { mode: 'include' as const, surfaceIds: selectedSurfaces.filter(surface => isComponentVisibleAtSurface({ ...original, visible: true }, surface.id)).map(surface => surface.id) } } : {}), ...(original.implementationOverride
       ? { implementationOverride: implementation(original.implementationOverride) } : {}) }
+    if (instances[id].container) {
+      // A detached page template retains its one root appearance; nested containers keep authored inheritance.
+      const selected = surfaces.find(surface => surface.id === id)
+      if (selected) instances[id].container!.background = selected.background
+      selectedSurfaceIds.add(id)
+    }
     definition(original.definitionId)
     for (const dependency of instances[id].implementationOverride?.kind === 'source' ? Object.values(sourceModuleBindings(instances[id].implementationOverride)) : []) {
       if (!Object.hasOwn(project.definitions,dependency) || project.definitions[dependency].implementation.kind !== 'source') {diagnostics.push({code:'missing-source-dependency',message:`保留待修复的模块声明：${dependency}；实际导入由编译器诊断`});continue}
@@ -81,10 +94,13 @@ export function extractComponentLibraryEntry(project: CourseProjectV10, resource
     for (const childId of original.childIds ?? []) visit(childId)
     for (const attachment of original.attachments ?? []) visit(attachment.instanceId)
   }
-  const requestedRoots = [...options.rootIds ?? [], ...surfaces.flatMap(surface => surface.childIds), ...global.underlay, ...global.overlay]
+  const requestedRoots = [...options.rootIds ?? [], ...surfaces.map(surface => surface.id), ...global.underlay, ...global.overlay]
   requestedRoots.forEach(visit)
+  // These descriptors share only this detached entry's container configuration, never the live project.
+  surfaces = Object.values(instances).flatMap(instance => instance.container
+    ? [{ ...instance.container, id: instance.id, title: instance.name ?? instance.id, childIds: instance.childIds ?? [] }] : [])
   const selected=new Set(Object.keys(instances))
-  const familySnapshots = [associatedComponentInteractionRules(project, selected), ...selectedSurfaces.flatMap(surface => (surface.presentation?.states ?? [])
+  const familySnapshots = [associatedComponentInteractionRules(project, selected), ...surfaces.flatMap(surface => (surface.presentation?.states ?? [])
     .map(state => associatedComponentInteractionRules(project, selected, new Set(), Object.fromEntries(Object.entries(state.overrides)
       .flatMap(([id, override]) => override.data === undefined ? [] : [[id, override.data]])))))]
   const externalIds = new Set(familySnapshots.flat().filter(family => !selected.has(family.instance.id)).map(family => family.instance.id))
@@ -99,6 +115,12 @@ export function extractComponentLibraryEntry(project: CourseProjectV10, resource
       if (!global[plane].includes(id)) global[plane].push(id)
     }
   }
+  // A local rule's excluded container scope is an external host binding, not an ordinary missing object target.
+  for (const instance of Object.values(instances)) if (componentDefinitionBuiltinKey(definitions[instance.definitionId]) === 'guoling.interactions') {
+    instance.attachments = instance.attachments?.map(attachment => attachment.target.kind === 'instance'
+      && !instances[attachment.target.instanceId] && (project.instances[attachment.target.instanceId]?.container || project.rootIds.includes(attachment.target.instanceId))
+      ? { ...attachment, target: { kind: 'surface', surfaceId: attachment.target.instanceId } } : attachment)
+  }
   let snapshot = 1
   for (const surface of surfaces) for (const state of surface.presentation?.states ?? []) {
     const families = familySnapshots[snapshot++]
@@ -111,7 +133,8 @@ export function extractComponentLibraryEntry(project: CourseProjectV10, resource
   }
   if (!Object.keys(instances).length && !surfaces.length) throw new Error('请选择至少一个提炼对象或页面')
   const children = new Set(Object.values(instances).flatMap(instance => instance.childIds ?? []))
-  const rootIds = [...new Set([...requestedRoots, ...Object.keys(instances)])].filter(id => !children.has(id))
+  const globalIds = new Set([...global.underlay, ...global.overlay])
+  const rootIds = [...new Set([...requestedRoots, ...Object.keys(instances)])].filter(id => !children.has(id) && !globalIds.has(id))
   for (const surface of surfaces) {
     componentBackgroundAssetIds(surface.background).forEach(id => assetIds.add(id))
     for (const state of surface.presentation?.states ?? []) {
@@ -173,10 +196,10 @@ export function extractComponentLibraryEntry(project: CourseProjectV10, resource
   const declarations = project.logic?.courseState.filter(state => referencedStateKeys.has(state.key)) ?? []
   const logic = surfaces.length ? project.logic && structuredClone(project.logic)
     : declarations.length ? { courseState: structuredClone(declarations), navigationGuards: [] } : undefined
-  return { entry: { schemaVersion: 1, id: options.id, title: options.title, definitions,
+  return { entry: { schemaVersion: 2, id: options.id, title: options.title, definitions,
     example: { instances, rootIds }, assets, resources: { assets: bytes, components },
-    ...(!surfaces.length && (global.underlay.length || global.overlay.length) ? { global } : {}),
-    ...(surfaces.length ? { kind: options.kind ?? (surfaces.length === 1 ? 'page' : 'structure'), surfaces, global,
+    ...(global.underlay.length || global.overlay.length ? { global } : {}),
+    ...(surfaces.length ? { kind: options.kind ?? (selectedSurfaces.length ? selectedSurfaces.length === 1 ? 'page' : 'structure' : 'objects'),
       ...(project.theme ? { theme: structuredClone(project.theme) } : {}), ...(project.designTokens ? { designTokens: structuredClone(project.designTokens) } : {}),
     } : {}),
     ...(logic ? { logic } : {}),

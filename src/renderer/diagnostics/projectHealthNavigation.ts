@@ -1,12 +1,15 @@
 import type { ComponentProjectDiagnosticTarget, ComponentProjectHealthFinding } from '../../shared/componentProjectHealth'
-import { owningContainer, type CourseProjectV10 } from '../../shared/contracts/component-platform/project'
+import { componentSurface, owningContainer, type CourseProjectV10 } from '../../shared/contracts/component-platform/project'
 import type { EditingScope, SidebarTab } from '../store/slices/editorShellSlice'
+import type { EditorStoreKernel } from '../store/editorStoreKernel'
 
 export type ProjectHealthRoute = {
   available: true
   scope: EditingScope
   tab: SidebarTab
   surfaceId?: string
+  rootInstanceId?: string
+  editingContainerId?: string
   instanceId?: string
 } | { available: false; reason: string }
 
@@ -36,21 +39,43 @@ export function resolveCourseProjectDiagnosticTargetRoute(
   if (target.kind === 'project') return base
   if (target.kind === 'asset') return project.assets[target.assetId] ? base : { available: false, reason: '诊断素材已不存在。' }
   if (target.kind === 'definition') return project.definitions[target.definitionId] ? base : { available: false, reason: '诊断组件定义已不存在。' }
-  if (target.kind === 'surface') return project.surfaces.some(surface => surface.id === target.surfaceId)
-    ? { ...base, surfaceId: target.surfaceId } : { available: false, reason: '诊断页面已不存在。' }
-
-  if (!project.instances[target.instanceId]) return { available: false, reason: '诊断实例已不存在。' }
-  let id = target.instanceId
+  const instanceId = target.kind === 'surface' ? target.surfaceId : target.instanceId
+  if (target.kind === 'surface' && !componentSurface(project, instanceId) && !project.rootIds.includes(instanceId)) return { available: false, reason: '诊断页面已不存在。' }
+  if (!project.instances[instanceId]) return { available: false, reason: '诊断实例已不存在。' }
+  const selection = target.kind === 'instance' ? { instanceId } : {}
+  let id = instanceId, containerId = target.kind === 'surface' && project.instances[instanceId].container ? instanceId : undefined
   const visited = new Set<string>()
   while (!visited.has(id)) {
     visited.add(id)
+    if (project.rootIds.includes(id)) {
+      const surfaceId = containerId ?? (project.instances[id]?.container ? id : undefined)
+      return { ...base, ...selection, scope: 'scene', ...(surfaceId ? { surfaceId } : {}),
+        ...(!surfaceId || surfaceId !== id ? { rootInstanceId: id } : {}),
+        ...(containerId && containerId !== id ? { editingContainerId: containerId } : {}) }
+    }
     const owner = owningContainer(project, id)
-    if (owner?.kind === 'surface') return { ...base, scope: 'scene', surfaceId: owner.surfaceId, instanceId: target.instanceId }
-    if (owner?.kind === 'global') return { ...base, scope: 'global', instanceId: target.instanceId }
+    if (owner?.kind === 'global') return { ...base, ...selection, scope: 'global',
+      ...(containerId ? { surfaceId: containerId, editingContainerId: containerId } : {}) }
     if (owner?.kind !== 'instance' || !project.instances[owner.instanceId]) break
+    if (!containerId && project.instances[owner.instanceId].container) containerId = owner.instanceId
     id = owner.instanceId
   }
   return { available: false, reason: '诊断实例没有可定位的页面或全局归属。' }
+}
+
+/** Existing Bridge operations perform the route; nested editing never becomes work navigation. */
+export function selectCourseProjectDiagnosticRoute(kernel: Pick<EditorStoreKernel, 'bridge' | 'readView' | 'selectSurface' | 'selectInstances'>,
+  route: Extract<ProjectHealthRoute, { available: true }>, setEditingScope?: (scope: EditingScope) => void): void {
+  const view = kernel.readView(), documentId = view.activeDocumentId
+  if (!documentId) return
+  const rootId = route.rootInstanceId ?? (!route.editingContainerId ? route.surfaceId : undefined)
+    ?? (route.scope === 'global' && route.instanceId && !route.editingContainerId ? view.rootInstanceId : undefined)
+  if (rootId) kernel.selectSurface(rootId, documentId)
+  if (route.editingContainerId) kernel.bridge.enterContainer(documentId, route.editingContainerId)
+  // Changing the existing editing scope clears selection. Keep it between
+  // choosing the actual container and selecting the diagnostic instance.
+  setEditingScope?.(route.scope)
+  kernel.selectInstances(route.instanceId ? [route.instanceId] : [], route.surfaceId ?? null, documentId)
 }
 
 /** Delivery and health UI use the same ownership router, including path-only producer findings. */

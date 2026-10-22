@@ -1,4 +1,6 @@
 // @vitest-environment node
+import { componentSurfaces } from '../../src/shared/contracts/component-platform/project'
+import { testContainerInstance } from '../helpers/glxWorkFixture'
 import { promises as fs } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -14,6 +16,7 @@ import { CourseV10Driver } from '../../src/core/drivers/CourseV10Driver'
 import { captureComponentOperation } from '../../src/core/drivers/courseV10Operations'
 import { componentProjectFiles } from '../../src/core/projectFiles/componentPlatform/projection'
 import { captureComponentSourceSession } from '../../src/renderer/components/ComponentSourceEditor'
+import { loadBuiltinComponentSource } from '../../src/core/components/source/builtinSources'
 import { CourseV10DocumentBridge } from '../../src/renderer/documents/CourseV10DocumentBridge'
 import { createTextComponentData, TEXT_DEFINITION } from '../../src/components/text'
 
@@ -197,14 +200,15 @@ describe('Audit save owners', () => {
   })
 
   it('CA128 valid formal whitespace IDs keep all project file observations available', async () => {
-    const project = projectWithText(), surface = project.surfaces[0]!
-    surface.kind = 'flow'; const id = surface.childIds[0] ?? project.global.overlay[0]!, original = project.instances[id]!
+    const project = projectWithText(), surface = componentSurfaces(project)[0]!
+    testContainerInstance(project, 0).container.kind = 'flow'; const id = surface.childIds[0] ?? project.global.overlay[0]!, original = project.instances[id]!
     delete project.instances[id]; const adapted = { ...original, id: ' intro ' }; project.instances[adapted.id] = adapted
-    surface.childIds = [adapted.id]; project.global.overlay = project.global.overlay.filter(value => value !== id)
+    testContainerInstance(project, 0).childIds = [adapted.id]; project.global.overlay = project.global.overlay.filter(value => value !== id)
     expect(componentProjectFiles(project, { assets: {}, components: {} }).find(file => file.path.endsWith('.body.md'))?.content).toBeDefined()
   })
 
   it('CA253 a definition draft can reload its baseline after the representative was removed', async () => {
+    await loadBuiltinComponentSource('guoling.text')
     const f = await fixture(), project = projectWithText(), id = project.global.overlay[0]!, definitionId = project.instances[id]!.definitionId
     delete project.instances[id]; project.global.overlay = []
     const snapshot = await f.host.internalAPI.create({ kind: 'course-v10', project, resources: { assets: {}, components: {} } }, 'definition.glx')

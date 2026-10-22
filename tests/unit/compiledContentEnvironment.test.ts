@@ -1,3 +1,4 @@
+import { testContainerInstance } from '../helpers/glxWorkFixture'
 // @vitest-environment node
 import { build } from 'esbuild'
 import { chromium } from '@playwright/test'
@@ -39,7 +40,7 @@ it('loads provided runtime modules lazily in the original Root and native child 
   }}
   const project=createBlankCourseProjectV10('Runtime import context')
   project.definitions.web={id:'web',role:'content',implementation:{kind:'builtin',key:'guoling.html-program'}}
-  project.instances.web={id:'web',definitionId:'web',data};project.surfaces[0].childIds=['web']
+  project.instances.web={id:'web',definitionId:'web',data};testContainerInstance(project, 0).childIds=['web']
   const original=structuredClone(data)
   const compilation=new InMemoryComponentCompilation(createEsbuildComponentCompiler())
   const author=await projectWebModuleGraph(project.instances.web,input=>compilation.compile(input))
@@ -108,7 +109,7 @@ it('starts prepared module and defer in source order without awaiting dependency
     } }
   const project=createBlankCourseProjectV10('Module/defer source order')
   project.definitions.web={id:'web',role:'content',implementation:{kind:'builtin',key:'guoling.html-program'}}
-  project.instances.web={id:'web',definitionId:'web',data};project.surfaces[0].childIds=['web']
+  project.instances.web={id:'web',definitionId:'web',data};testContainerInstance(project, 0).childIds=['web']
   const published=await buildPublishedCourseV3({project,assetBytes:{}},{compilation:new InMemoryComponentCompilation(createEsbuildComponentCompiler())})
   expect(published.diagnostics).toEqual([])
   const output=compilePublishedWebProgram(published.payload.instances.web.data as unknown as WebRuntimeData)
@@ -482,7 +483,7 @@ it('runs prepared native child ESM with local parent, healthy shared exports and
   const project = createBlankCourseProjectV10('Native child ESM')
   project.definitions.web = { id: 'web', role: 'content', implementation: { kind: 'builtin', key: 'guoling.html-program' } }
   project.instances.web = { id: 'web', definitionId: 'web', data }
-  project.surfaces[0].childIds = ['web']
+  testContainerInstance(project, 0).childIds = ['web']
   const before = structuredClone(data)
   const compilation = new InMemoryComponentCompilation(createEsbuildComponentCompiler())
   const published = await buildPublishedCourseV3({ project, assetBytes: {} }, { compilation })
@@ -540,7 +541,7 @@ it('keeps healthy Web modules live when an unprepared dynamic import is untrigge
   } }
   const project = createBlankCourseProjectV10('Dynamic request locality')
   project.definitions.web = { id: 'web', role: 'content', implementation: { kind: 'builtin', key: 'guoling.html-program' } }
-  project.instances.web = { id: 'web', definitionId: 'web', data };project.surfaces[0].childIds = ['web']
+  project.instances.web = { id: 'web', definitionId: 'web', data };testContainerInstance(project, 0).childIds = ['web']
   const published = await buildPublishedCourseV3({ project, assetBytes: {} }, { compilation: new InMemoryComponentCompilation(createEsbuildComponentCompiler()) })
   const output = compilePublishedWebProgram(published.payload.instances.web.data as unknown as WebRuntimeData)
   expect(output.diagnostics).toEqual([])
@@ -604,7 +605,7 @@ it('preserves dynamic import options through both producer phases and their call
   } }
   const project = createBlankCourseProjectV10('Dynamic import options')
   project.definitions.web = { id: 'web', role: 'content', implementation: { kind: 'builtin', key: 'guoling.html-program' } }
-  project.instances.web = { id: 'web', definitionId: 'web', data };project.surfaces[0].childIds = ['web']
+  project.instances.web = { id: 'web', definitionId: 'web', data };testContainerInstance(project, 0).childIds = ['web']
   const published = await buildPublishedCourseV3({ project, assetBytes: {} }, { compilation: new InMemoryComponentCompilation(createEsbuildComponentCompiler()) })
   expect(published.diagnostics.every(issue=>issue.code==='source-compile-warning')).toBe(true)
   const runtimeData = published.payload.instances.web.data as unknown as WebRuntimeData
@@ -665,7 +666,7 @@ it('loads prepared Web and native child modules with native import options and t
   } }
   const project = createBlankCourseProjectV10('Prepared import options')
   project.definitions.web = { id:'web',role:'content',implementation:{kind:'builtin',key:'guoling.html-program'} }
-  project.instances.web = {id:'web',definitionId:'web',data};project.surfaces[0].childIds=['web']
+  project.instances.web = {id:'web',definitionId:'web',data};testContainerInstance(project, 0).childIds=['web']
   const before=structuredClone(data)
   const published=await buildPublishedCourseV3({project,assetBytes:{}},{compilation:new InMemoryComponentCompilation(createEsbuildComponentCompiler())})
   expect(published.diagnostics).toEqual([]);expect(data).toEqual(before)
@@ -770,7 +771,7 @@ it('keeps healthy Web modules live until an unsupported Worker constructor is ac
   }}
   const project=createBlankCourseProjectV10('Worker diagnostic locality')
   project.definitions.web={id:'web',role:'content',implementation:{kind:'builtin',key:'guoling.html-program'}}
-  project.instances.web={id:'web',definitionId:'web',data};project.surfaces[0].childIds=['web']
+  project.instances.web={id:'web',definitionId:'web',data};testContainerInstance(project, 0).childIds=['web']
   const before=structuredClone(data)
   const published=await buildPublishedCourseV3({project,assetBytes:{}},{compilation:new InMemoryComponentCompilation(createEsbuildComponentCompiler())})
   expect(published.diagnostics).toEqual([]);expect(data).toEqual(before)
@@ -820,7 +821,7 @@ it('keeps classic programs and HTML handlers with dormant Worker constructors us
     <script>window.laterRead=count;window.independentSibling=1;</script></section>`}
   const project=createBlankCourseProjectV10('Classic Worker locality')
   project.definitions.web={id:'web',role:'content',implementation:{kind:'builtin',key:'guoling.html-program'}}
-  project.instances.web={id:'web',definitionId:'web',data};project.surfaces[0].childIds=['web']
+  project.instances.web={id:'web',definitionId:'web',data};testContainerInstance(project, 0).childIds=['web']
   const before=structuredClone(data)
   const published=await buildPublishedCourseV3({project,assetBytes:{}},{compilation:new InMemoryComponentCompilation(createEsbuildComponentCompiler())})
   expect(published.diagnostics).toEqual([]);expect(data).toEqual(before)
@@ -871,7 +872,7 @@ it('keeps Web modules, classic programs and handlers with dormant Function and e
   }}
   const project=createBlankCourseProjectV10('Dynamic program locality')
   project.definitions.web={id:'web',role:'content',implementation:{kind:'builtin',key:'guoling.html-program'}}
-  project.instances.web={id:'web',definitionId:'web',data};project.surfaces[0].childIds=['web']
+  project.instances.web={id:'web',definitionId:'web',data};testContainerInstance(project, 0).childIds=['web']
   const before=structuredClone(data)
   const published=await buildPublishedCourseV3({project,assetBytes:{}},{compilation:new InMemoryComponentCompilation(createEsbuildComponentCompiler())})
   expect(published.diagnostics.some(issue=>issue.code==='source-compile-warning'&&issue.message.includes('Using direct eval'))).toBe(true)
@@ -920,7 +921,7 @@ it('keeps Web modules, classic programs and handlers with dormant string timers 
   }}
   const project=createBlankCourseProjectV10('String timer locality')
   project.definitions.web={id:'web',role:'content',implementation:{kind:'builtin',key:'guoling.html-program'}}
-  project.instances.web={id:'web',definitionId:'web',data};project.surfaces[0].childIds=['web']
+  project.instances.web={id:'web',definitionId:'web',data};testContainerInstance(project, 0).childIds=['web']
   const before=structuredClone(data)
   const published=await buildPublishedCourseV3({project,assetBytes:{}},{compilation:new InMemoryComponentCompilation(createEsbuildComponentCompiler())})
   expect(published.diagnostics).toEqual([]);expect(data).toEqual(before)
@@ -965,7 +966,7 @@ it('keeps Web modules, classic programs and handlers with dormant document parse
   }}
   const project=createBlankCourseProjectV10('Document parser locality')
   project.definitions.web={id:'web',role:'content',implementation:{kind:'builtin',key:'guoling.html-program'}}
-  project.instances.web={id:'web',definitionId:'web',data};project.surfaces[0].childIds=['web']
+  project.instances.web={id:'web',definitionId:'web',data};testContainerInstance(project, 0).childIds=['web']
   const before=structuredClone(data)
   const published=await buildPublishedCourseV3({project,assetBytes:{}},{compilation:new InMemoryComponentCompilation(createEsbuildComponentCompiler())})
   expect(published.diagnostics).toEqual([]);expect(data).toEqual(before)
@@ -1012,7 +1013,7 @@ it('runs fixed import meta URL reads through the shared graph and Root Web and n
   }}
   const project=createBlankCourseProjectV10('Fixed meta URL')
   project.definitions.web={id:'web',role:'content',implementation:{kind:'builtin',key:'guoling.html-program'}}
-  project.instances.web={id:'web',definitionId:'web',data};project.surfaces[0].childIds=['web']
+  project.instances.web={id:'web',definitionId:'web',data};testContainerInstance(project, 0).childIds=['web']
   const before=structuredClone(project),compilation=new InMemoryComponentCompilation(createEsbuildComponentCompiler())
   const author=await projectWebModuleGraph(project.instances.web,input=>compilation.compile(input))
   const authorData=author.data as unknown as WebRuntimeData

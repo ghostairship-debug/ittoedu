@@ -1,3 +1,4 @@
+import { componentContainers, componentSurfaces } from '../../../shared/contracts/component-platform/project'
 import type { EditorStoreKernel } from '../editorStoreKernel'
 import type { ComponentEdit } from '../../../shared/contracts/component-platform/operations'
 import type { CapturedComponentOperation } from '../../documents/CourseV10DocumentBridge'
@@ -32,32 +33,35 @@ export function createCourseStructureSlice(kernel: EditorStoreKernel, ports: Cou
     async addCourseContent(action: CourseEditorPrimaryAction | CourseEditorDropdownAction, options: { surfaceId?: string } = {}): Promise<CourseStructureResult> {
       const project = kernel.readDocument()
       const kind = action === 'flow-page' ? 'flow' : action === 'spatial-page' ? 'spatial' : 'slide'
-      const current = project.surfaces.find(surface => surface.id === options.surfaceId)
+      const current = componentContainers(project).find(surface => surface.id === options.surfaceId)
       const surface = createCourseSurface(project, { kind, referenceSurfaceId: current?.id })
-      const index = action === 'scene' && current ? project.surfaces.indexOf(current) + 1 : project.surfaces.length
+      const pages = componentSurfaces(project), currentIndex = pages.findIndex(page => page.id === current?.id)
+      const index = action === 'scene' && currentIndex >= 0 ? currentIndex + 1 : pages.length
       return commit([{ type: 'surface.insert', surface, index }], '已新增页面', surface.id)
     },
     addScene(): Promise<CourseStructureResult> {
       const project = kernel.readDocument()
-      const surface = project.surfaces.find(value => value.id === ports.readActiveLocationId())
+      const surface = componentContainers(project).find(value => value.id === ports.readActiveLocationId())
       return this.addCourseContent(surface?.kind === 'flow' ? 'flow-page' : surface?.kind === 'spatial' ? 'spatial-page' : 'scene', { surfaceId: surface?.id })
     },
     reorderCourseSurfaces(surfaceIds: string[]): Promise<CourseStructureResult> {
       const project = kernel.readDocument()
-      if (surfaceIds.length !== project.surfaces.length || new Set(surfaceIds).size !== surfaceIds.length || surfaceIds.some(id => !project.surfaces.some(s => s.id === id))) return Promise.resolve(failure('页面顺序已改变，请重新拖动'))
-      const order = project.surfaces.map(surface => surface.id)
+      if (surfaceIds.length !== componentSurfaces(project).length || new Set(surfaceIds).size !== surfaceIds.length || surfaceIds.some(id => !componentContainers(project).some(s => s.id === id))) return Promise.resolve(failure('页面顺序已改变，请重新拖动'))
+      const containers = new Set(surfaceIds), requested = [...surfaceIds]
+      const desired = project.rootIds.map(id => containers.has(id) ? requested.shift()! : id)
+      const order = [...project.rootIds]
       const edits: ComponentEdit[] = []
-      surfaceIds.forEach((id, index) => { const previous = order.indexOf(id); if (previous !== index) { edits.push({ type: 'surface.move', surfaceId: id, index }); order.splice(previous, 1); order.splice(index, 0, id) } })
+      desired.forEach((id, index) => { const previous = order.indexOf(id); if (previous !== index) { edits.push({ type: 'instance.move', instanceId: id, container: { kind: 'project' }, index }); order.splice(previous, 1); order.splice(index, 0, id) } })
       return commit(edits, '已调整页面顺序')
     },
     captureCourseSurfaceDelete(surfaceId: string): CapturedComponentOperation {
       const target = kernel.captureTarget()
-      assertCourseSurfaceRemoval(target.project)
+      assertCourseSurfaceRemoval(target.project, surfaceId)
       return kernel.capture([{ type: 'surface.remove', surfaceId }], target)
     },
     deleteCourseSurface(surfaceId: string, captured?: CapturedComponentOperation): Promise<CourseStructureResult> {
       if (!captured) {
-        try { assertCourseSurfaceRemoval(kernel.readDocument()) }
+        try { assertCourseSurfaceRemoval(kernel.readDocument(), surfaceId) }
         catch { return Promise.resolve(failure(LAST_COURSE_PAGE_REASON)) }
       }
       return commit([{ type: 'surface.remove', surfaceId }], '已删除页面', undefined, captured)
@@ -74,7 +78,7 @@ export function createCourseStructureSlice(kernel: EditorStoreKernel, ports: Cou
       return commit(surfaceSettingsEdits(kernel.readDocument(), surfaceId, { title: title.trim() }), '已重命名')
     },
     resizeSlideCanvas(designSize: SlideCanvasSize): Promise<CourseStructureResult> {
-      const edits: ComponentEdit[] = kernel.readDocument().surfaces.filter(surface => surface.kind === 'slide').map(surface => ({ type: 'surface.designSize.set', surfaceId: surface.id, designSize }))
+      const edits: ComponentEdit[] = componentSurfaces(kernel.readDocument()).filter(surface => surface.kind === 'slide').map(surface => ({ type: 'surface.designSize.set', surfaceId: surface.id, designSize }))
       return commit(edits, '已修改画布尺寸')
     },
     resizeSlideSceneCanvas(surfaceId: string, _sceneId: string, designSize: SlideCanvasSize | null): Promise<CourseStructureResult> {

@@ -36,7 +36,8 @@ describe('sharedDocumentEditor', () => {
       expect(onDraft.mock.calls.at(-1)?.[0]).toBe(source)
       expect((await handle.current!.drainSource()).source).toBe(source)
       expect((await handle.current!.drainSource()).ready).toBe(true)
-      expect(view.getByRole('textbox', { name: '正文源文编辑' })).toBeInTheDocument()
+      expect(view.getByRole('textbox', { name: '正文编辑' })).toBeInTheDocument()
+      expect(view.container.querySelector('pre')?.textContent).toBe(source.trimEnd())
     } finally { view.unmount() }
   })
   it('uses one full toolbar for inline range and caret formatting while retaining Flow selection tools', () => {
@@ -277,4 +278,90 @@ describe('sharedDocumentEditor', () => {
     expect(editor.change).toHaveBeenCalledOnce()
     editor.cleanup()
   })
+})
+
+
+it.each([[2, 2], [1, 3]])('retains the current field owner through a late revision and lets the same PM selection %s:%s reclaim ownership', (from, to) => {
+  const factory = vi.spyOn(editorSession, 'createLayoutEditor')
+  const initial = { content: { blocks: [{ id: 'body', type: 'paragraph' as const,
+    content: { inlines: [{ type: 'text' as const, text: '正文' }] } }] }, resources: emptyDocumentResources() }
+  let owner = 'document'
+  const onSelection = vi.fn(() => { owner = 'document' }), onContextualTargetChange = vi.fn(), onChange = vi.fn()
+  const props = { document: initial, target: 'flow' as const, onSelection, onContextualTargetChange, onChange, onDraft() {}, onUndo() {}, onRedo() {} }
+  const ui = render(<SharedDocumentEditor {...props} revision="1" />)
+  const editor = factory.mock.results.at(-1)!.value as ReturnType<typeof editorSession.createLayoutEditor>
+  try {
+    act(() => editor.view.dispatch(editor.view.state.tr.setSelection(TextSelection.create(editor.view.state.doc, from, to))))
+    owner = 'image-field'
+    onSelection.mockClear()
+    onContextualTargetChange.mockClear()
+    // Flow passes this existing precise-field fact while a registered field owns selection.
+    ui.rerender(<SharedDocumentEditor {...props} revision="2" contextualCardSuppressed />)
+    expect(onSelection).not.toHaveBeenCalled()
+    expect(onContextualTargetChange).not.toHaveBeenCalled()
+    expect(owner).toBe('image-field')
+    expect(factory).toHaveBeenCalledTimes(1)
+    expect(editor.view.dom.textContent).toBe('正文')
+    const state = editor.view.state
+    fireEvent.click(editor.view.dom.querySelector('[data-flow-idle-rich-text]')!)
+    expect(onSelection).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ kind: 'text', revision: '2' }))
+    expect(onContextualTargetChange).toHaveBeenCalledTimes(1)
+    expect(owner).toBe('document')
+    expect(editor.view.state.doc.eq(state.doc)).toBe(true)
+    expect(editor.view.state.selection.eq(state.selection)).toBe(true)
+    expect(onChange).not.toHaveBeenCalled()
+    onSelection.mockClear()
+    ui.rerender(<SharedDocumentEditor {...props} revision="3" />)
+    expect(onSelection).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ kind: 'text', revision: '3' }))
+    expect(owner).toBe('document')
+    expect(factory).toHaveBeenCalledTimes(1)
+    expect(onChange).not.toHaveBeenCalled()
+  } finally { cleanup(); factory.mockRestore() }
+})
+
+
+it.each(['external', 'focused', 'content', 'explicit'] as const)('keeps an external owner only for blurred DOM selection reconstruction: %s', mode => {
+  const factory = vi.spyOn(editorSession, 'createLayoutEditor'), handle = createRef<SharedDocumentEditorHandle>()
+  const initial = { content: { blocks: [{ id: 'body', type: 'paragraph' as const,
+    content: { inlines: [{ type: 'text' as const, text: '正文' }] } }] }, resources: emptyDocumentResources() }
+  let owner = 'external'
+  const onSelection = vi.fn(() => { owner = 'document' }), onContextualTargetChange = vi.fn(), onChange = vi.fn()
+  const ui = render(<SharedDocumentEditor ref={handle} document={initial} target="flow" revision="1" contextualCardSuppressed
+    onSelection={onSelection} onContextualTargetChange={onContextualTargetChange} onChange={onChange} onDraft={() => {}} onUndo={() => {}} onRedo={() => {}} />)
+  const editor = factory.mock.results.at(-1)!.value as ReturnType<typeof createLayoutEditor>
+  // This ownership check delegates viewport scrolling because JSDOM has no Range geometry.
+  editor.view.setProps({ handleScrollToSelection: () => true })
+  const button = document.createElement('button'); button.textContent = 'external field action'; document.body.append(button)
+  try {
+    act(() => editor.view.dispatch(editor.view.state.tr.setSelection(TextSelection.create(editor.view.state.doc, 2))))
+    button.focus()
+    expect(editor.view.hasFocus()).toBe(false)
+    owner = 'external'; onSelection.mockClear(); onContextualTargetChange.mockClear(); onChange.mockClear()
+    const before = editor.view.state.doc
+    if (mode === 'explicit') {
+      act(() => { expect(handle.current!.focusBlock('body')).toBe(true) })
+      expect(editor.view.hasFocus()).toBe(true)
+    } else {
+      if (mode === 'focused') act(() => editor.view.focus())
+      const text = editor.view.dom.querySelector('p')!.firstChild!
+      if (mode === 'content') text.textContent = '正文修改'
+      const range = document.createRange(); range.setStart(text, 0); range.collapse(true)
+      document.getSelection()!.removeAllRanges(); document.getSelection()!.addRange(range)
+      // Invoke the real per-view DOM reader with unchanged content or the actual text mutation.
+      const observer = (editor.view as unknown as { domObserver: { handleDOMChange(from: number, to: number, typeOver: boolean, added: globalThis.Node[]): void } }).domObserver
+      act(() => observer.handleDOMChange(0, editor.view.state.doc.content.size, false, []))
+    }
+    expect(editor.view.state.selection.from).toBe(1)
+    if (mode === 'external') {
+      expect(editor.view.state.doc.eq(before)).toBe(true)
+      expect(owner).toBe('external'); expect(onSelection).not.toHaveBeenCalled(); expect(onContextualTargetChange).not.toHaveBeenCalled(); expect(onChange).not.toHaveBeenCalled()
+      // An actual ordinary text click still reacquires the same local PM caret.
+      fireEvent.click(editor.view.dom.querySelector('p')!)
+      expect(owner).toBe('document'); expect(onSelection).toHaveBeenCalledOnce(); expect(onContextualTargetChange).toHaveBeenCalledOnce()
+    } else {
+      expect(owner).toBe('document'); expect(onSelection).toHaveBeenCalledOnce(); expect(onContextualTargetChange).toHaveBeenCalledOnce()
+      if (mode === 'content') { expect(onChange).toHaveBeenCalledOnce(); expect(editor.view.state.doc.textContent).toBe('正文修改') }
+      else { expect(onChange).not.toHaveBeenCalled(); expect(editor.view.state.doc.eq(before)).toBe(true) }
+    }
+  } finally { ui.unmount(); button.remove(); factory.mockRestore() }
 })

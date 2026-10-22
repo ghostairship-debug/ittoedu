@@ -1,4 +1,5 @@
 // @vitest-environment node
+import { createTestProjectFromLegacy } from '../../../helpers/glxWorkFixture'
 import { createRequire } from 'node:module'
 import { promises as fs } from 'node:fs'
 import os from 'node:os'
@@ -25,10 +26,10 @@ it('one normal Store save drains unblurred source JSON and numeric inputs into t
   let documentId: string | undefined
   try {
     const host = new DocumentHostService(path.join(directory, 'documents'))
-    const project: CourseProjectV10 = { schemaVersion: 10, id: 'store-source', revision: 0, title: 'Store save', definitions: {
+    const project: CourseProjectV10 = createTestProjectFromLegacy({ schemaVersion: 10, id: 'store-source', revision: 0, title: 'Store save', definitions: {
       custom: { id: 'custom', role: 'content', implementation: { kind: 'source', language: 'javascript', workspace: { ownerId: 'code', entry: 'main.js' } } },
     }, instances: { a: { id: 'a', name: 'A', definitionId: 'custom', data: { label: 'Original' }, frame: { width: 180, height: 90, transform: [1, 0, 0, 1, 35, 41] } } },
-    surfaces: [{ id: 'page', kind: 'slide', title: 'Page', childIds: ['a'] }], global: { underlay: [], overlay: [] }, assets: {} }
+    surfaces: [{ id: 'page', kind: 'slide', title: 'Page', childIds: ['a'] }], global: { underlay: [], overlay: [] }, assets: {} })
     const initial = await host.internalAPI.create({ kind: 'course-v10', project, resources: { assets: {}, components: { code: { 'main.js': new TextEncoder().encode('export const value = 42;') } } } }, 'saved.h5lesson')
     documentId = initial.documentId
     const filename = path.join(directory, 'saved.h5lesson')

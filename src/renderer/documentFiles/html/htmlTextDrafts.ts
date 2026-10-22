@@ -3,6 +3,7 @@ import type { HtmlSelectedTarget } from './htmlPreviewController'
 import type { ComponentAuthorRecord } from '../../../shared/contracts/component-platform/runtime'
 import { patchHtmlAuthoringRecords, readHtmlAuthoringRecords } from '../../../shared/html/htmlAuthoringRecords'
 import { equalComponentValue } from '../../../core/drivers/courseV10Operations'
+import type { HtmlSourceAnalysis } from './htmlSourceAnalysis'
 
 export interface HtmlTextDraft {
   readonly id: number
@@ -25,9 +26,9 @@ function textRange(target: HtmlSelectedTarget, source: string) {
     ? { from: valueSpan.start, to: valueSpan.end } : null
 }
 
-function mapped(draft: HtmlTextDraft, source: string) {
+function mapped(draft: HtmlTextDraft, source: string, records: () => ReturnType<typeof readHtmlAuthoringRecords>) {
   const address = draft.authoring ?? draft.sourceAuthoring
-  const current = address && readHtmlAuthoringRecords(source)[address.authorKey]
+  const current = address && records()[address.authorKey]
   if (current && address) {
     const expected = structuredClone(draft.sourceAuthoring ? { ...address.record.binding, baseline: draft.original } : address.record.binding)
     // The exact source adapter can anchor this same selected static element on its first geometry edit.
@@ -62,10 +63,24 @@ export class HtmlTextDrafts {
   private sequence = 0
   private readonly listeners = new Set<() => void>()
   private prepared: PreparedTextDrafts[] = []
+  private analysis: HtmlSourceAnalysis | undefined
+  setAnalysis(value: HtmlSourceAnalysis) { this.analysis = value }
+  private recordsSource: string | undefined
+  private records: ReturnType<typeof readHtmlAuthoringRecords> | undefined
+  private mapped(draft: HtmlTextDraft, source: string) {
+    return mapped(draft, source, () => {
+      if (source !== this.recordsSource || !this.records) {
+        this.records = this.analysis?.source === source ? this.analysis.authoring.authoringRecords : readHtmlAuthoringRecords(source)
+        this.recordsSource = source
+      }
+      return this.records
+    })
+  }
   readonly subscribe = (listener: () => void) => { this.listeners.add(listener); return () => { this.listeners.delete(listener) } }
   readonly read = () => this.drafts
   private publish(drafts: readonly HtmlTextDraft[]) {
     this.drafts = drafts
+    if (!drafts.length) { this.recordsSource = undefined; this.records = undefined }
     for (const listener of this.listeners) listener()
   }
   private wasPrepared(id: number): boolean { return this.prepared.some(value => value.drafts.some(draft => draft.id === id)) }
@@ -77,10 +92,10 @@ export class HtmlTextDrafts {
       const prepared = this.prepared[index]!
       const submitted = prepared.drafts.find(value => value.id === draft.id)
       if (!submitted) continue
-      try { return mapped({ ...draft, source: prepared.source, original: submitted.value, from: submitted.from, to: submitted.to }, source) }
+      try { return this.mapped({ ...draft, source: prepared.source, original: submitted.value, from: submitted.from, to: submitted.to }, source) }
       catch { /* This source does not contain that submitted span; try an earlier baseline. */ }
     }
-    return mapped(draft, source)
+    return this.mapped(draft, source)
   }
 
   find(target: HtmlSelectedTarget, source: string): HtmlTextDraft | undefined {
@@ -89,7 +104,7 @@ export class HtmlTextDrafts {
     const range = textRange(target, source)
     if (!range) return undefined
     return this.drafts.find(draft => {
-      try { const next = mapped(draft, source); return next.from === range.from && next.to === range.to }
+      try { const next = this.mapped(draft, source); return next.from === range.from && next.to === range.to }
       catch { return false }
     })
   }
@@ -134,7 +149,7 @@ export class HtmlTextDrafts {
     }
     const next = drafts.map(draft => {
       try {
-        const range = mapped(draft, source)
+        const range = this.mapped(draft, source)
         return draft.source === source && !draft.issue ? draft : { ...draft, source, from: range.from, to: range.to, issue: undefined }
       } catch {
         return draft.issue ? draft : { ...draft, issue: sourceChanged }
@@ -143,7 +158,7 @@ export class HtmlTextDrafts {
     if (next.length !== this.drafts.length || next.some((draft, index) => draft !== this.drafts[index])) this.publish(next)
   }
 
-  prepare(source: string): { ready: boolean; source: string } {
+  prepare(source: string, sourceChangeHints?: Array<{ from: number; to: number; inserted: number }>): { ready: boolean; source: string } {
     const located = this.drafts.map(draft => {
       try { return { ...draft, ...this.rangeForSave(draft, source), issue: undefined } }
       catch { return { ...draft, issue: sourceChanged } }
@@ -154,9 +169,11 @@ export class HtmlTextDrafts {
     if (located.some(draft => draft.issue)) return { ready: false, source }
     const sorted = located.filter(draft => !draft.authoring).sort((a, b) => a.from - b.from)
     const submitted: PreparedTextDrafts['drafts'] = []
+    const staticChanges: Array<{ from: number; to: number; inserted: number }> = []
     let result = '', position = 0
     for (const draft of sorted) {
       const text = encoded(draft.value, source, source.slice(draft.from, draft.to))
+      staticChanges.push({ from: draft.from, to: draft.to, inserted: text.length })
       result += source.slice(position, draft.from)
       const from = result.length
       result += text
@@ -164,6 +181,7 @@ export class HtmlTextDrafts {
       position = draft.to
     }
     result += source.slice(position)
+    sourceChangeHints?.push(...staticChanges.reverse())
     const dynamic = located.filter(draft => draft.authoring)
     if (dynamic.length || sorted.some(draft => draft.sourceAuthoring)) {
       const records = readHtmlAuthoringRecords(result)
@@ -182,7 +200,7 @@ export class HtmlTextDrafts {
         changed = true
         submitted.push({ id: draft.id, value: draft.value, from: 0, to: 0 })
       }
-      if (changed) result = patchHtmlAuthoringRecords(result, records)
+      if (changed) result = patchHtmlAuthoringRecords(result, records, {}, sourceChangeHints)
     }
     if (submitted.length) {
       const prepared = { source: result, drafts: submitted }

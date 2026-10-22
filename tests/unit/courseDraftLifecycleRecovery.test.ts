@@ -2,7 +2,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createBlankCourseProjectV10 } from '../../src/core/course/createCourseProjectV10'
 import { courseDraftLifecycle, createCourseInputLifecycle, registerCourseDraftProvider, type CourseDraftProvider } from '../../src/renderer/authoring/courseDraftLifecycle'
-import type { AuthoringDraftRecovery, AuthoringRecoveryRecord, AdvancedDraftRecovery, PropertyDraftRecovery } from '../../src/shared/workbench/desktop'
+import type { AuthoringDraftRecovery, AuthoringDraftWrite, AuthoringRecoveryRecord, AdvancedDraftRecovery, PropertyDraftRecovery } from '../../src/shared/workbench/desktop'
 import { createV10StoreHost, deferred } from '../helpers/courseV10StoreHost'
 
 const fixtures: Awaited<ReturnType<typeof createV10StoreHost>>[] = []
@@ -147,13 +147,41 @@ describe('course input durable adoption', () => {
     expect(h.write).not.toHaveBeenCalled()
   })
 
-  it('writes empty advanced and properties slices without clearing Flow or Source recovery', async () => {
+  it('skips unchanged drafts and clears only its own slices when real input becomes empty', async () => {
     const h = await fixture(), write = vi.fn(async () => {}), clear = vi.fn()
-    const inputs = createCourseInputLifecycle(h.bridge, { capture: () => ({ snapshot: h.snapshot, records: { advanced: [], properties: [] }, flowDraft: null }),
+    let advanced: AdvancedDraftRecovery[] = [{ ...h.record('pending'), documentId: h.snapshot.documentId, epoch: h.snapshot.epoch }]
+    const inputs = createCourseInputLifecycle(h.bridge, { capture: () => ({ snapshot: h.snapshot, records: { advanced, properties: [] }, flowDraft: null }),
       drain: async () => {}, restore: () => ({ advanced: [], properties: [] }), suspend() {}, resume() {}, error() {}, status() {} })
     inputs.connect({ ...h.api, writeAuthoringDrafts: write, clearAuthoringDrafts: clear })
     await inputs.persist([h.snapshot.documentId])
-    expect(write).toHaveBeenCalledExactlyOnceWith(h.snapshot.documentId, { advanced: [], properties: [] }, h.snapshot.epoch)
+    await inputs.persist([h.snapshot.documentId])
+    expect(write).toHaveBeenCalledOnce()
+    advanced = []
+    await inputs.persist([h.snapshot.documentId])
+    expect(write).toHaveBeenLastCalledWith(h.snapshot.documentId, { advanced: [], properties: [] }, h.snapshot.epoch)
+    expect(write).toHaveBeenCalledTimes(2)
     expect(clear).not.toHaveBeenCalled()
+  })
+  it('clears newer empty input after a pending background nonempty write and retries failed writes', async () => {
+    const h = await fixture(), entered = deferred(), release = deferred()
+    let advanced: AdvancedDraftRecovery[] = [], disk: AdvancedDraftRecovery[] = []
+    const write = vi.fn(async (_id: string, value: AuthoringDraftWrite) => { const records = value.advanced ?? []; if (records.length) { entered.resolve(); await release.promise }; disk = records })
+    const inputs = createCourseInputLifecycle(h.bridge, { capture: () => ({ snapshot: h.snapshot, records: { advanced, properties: [] }, flowDraft: null }),
+      drain: async () => {}, restore: () => ({ advanced: [], properties: [] }), suspend() {}, resume() {}, error() {}, status() {} })
+    inputs.connect({ ...h.api, writeAuthoringDrafts: write })
+    await inputs.restore(h.snapshot.documentId)
+    advanced = [{ ...h.record('pending'), documentId: h.snapshot.documentId, epoch: h.snapshot.epoch }]
+    const background = inputs.persist([h.snapshot.documentId]); await entered.promise
+    advanced = []
+    const closing = inputs.prepare([h.snapshot.documentId])
+    release.resolve(); await background
+    expect(await closing).toBe(true)
+    expect(disk).toEqual([])
+    expect(write).toHaveBeenCalledTimes(2)
+    advanced = [{ ...h.record('retry'), documentId: h.snapshot.documentId, epoch: h.snapshot.epoch }]
+    write.mockRejectedValueOnce(new Error('disk busy'))
+    expect(await inputs.prepare([h.snapshot.documentId])).toBe(false)
+    expect(await inputs.prepare([h.snapshot.documentId])).toBe(true)
+    expect(disk).toEqual(advanced)
   })
 })

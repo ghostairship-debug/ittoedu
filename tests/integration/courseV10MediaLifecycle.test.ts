@@ -20,7 +20,7 @@ function fixture() {
     data: courseAuthorData({ ...createImageData('original'), alt: id, flipX: true, fit: 'cover', crop: { left: .1, top: 0, right: 0, bottom: .2 },
       safeAreas: [{ id: 'subject', label: '主体', x: .1, y: .1, width: .8, height: .8 }] }),
     frame: { width: 320, height: 180, transform: [1, 0, 0, 1, id === 'A' ? 40 : 400, 50] } }
-  project.surfaces[0].childIds.push('A', 'B')
+  project.instances[project.rootIds[0]].childIds!.push('A', 'B')
   return { project, resources: { assets: { original: original.bytes }, components: {} } }
 }
 

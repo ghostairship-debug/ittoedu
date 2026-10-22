@@ -1,4 +1,6 @@
 // @vitest-environment node
+import { setRootContainers } from '../helpers/glxWorkFixture'
+import { componentSurfaces } from '../../src/shared/contracts/component-platform/project'
 import { afterEach, expect, it, vi } from 'vitest'
 import { readFileSync } from 'node:fs'
 import type { DocumentSnapshot } from '../../src/shared/workbench/document'
@@ -61,7 +63,7 @@ function deferred<T>() {
 }
 const identity = { documentId: 'document', epoch: 'epoch', revision: 0, locationId: 'page', viewGeneration: 'view-1' }
 const project = createBlankCourseProjectV10('Observation lifecycle')
-project.surfaces[0]!.id = identity.locationId
+setRootContainers(project, [{ ...componentSurfaces(project)[0]!, id: identity.locationId }])
 const snapshot = { model: { kind: 'course-v10', project, resources: { assets: {}, components: {} } } } as any
 function fallbackInput() {
   const candidate = new CourseV9Driver().load(new Uint8Array(readFileSync('tests/fixtures/course-project-v9/surface-runtime.h5lesson')))

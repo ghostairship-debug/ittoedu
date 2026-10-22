@@ -70,6 +70,7 @@ import {
   BufferedInput,
   FontFamilyPicker,
   PropertyDraftBoundary,
+  PropertyDraftFieldBoundary,
   SelectField,
   ToggleRow,
 } from './PropertyControls'
@@ -112,12 +113,11 @@ export interface FlowPropertiesCommands {
   readonly setToc?: (toc: 'auto' | 'hidden') => void
   readonly setWidthMode?: (widthMode: 'fluid' | 'reading') => void
   readonly setPaperWidth?: (width: number) => void | Promise<void>
-  readonly renamePage: (surfaceId: string, title: string) => void
-  readonly setPaperBackground: (surfaceId: string, backgroundColor: string) => void
+  readonly renamePage: (surfaceId: string, title: string) => void | Promise<void>
   readonly updateSurfaceBackground: (patch: FlowSurfaceBackgroundFields) => void
   readonly previewSurfaceBackground?: (patch: { backgroundColor?: string | null }) => void
   readonly importSurfaceBackgroundAsset: SharedBackgroundImportHandler
-  readonly patchSelectedBlock: (patch: Record<string, unknown>) => void | string | null
+  readonly patchSelectedBlock: (patch: Record<string, unknown>) => void | string | null | Promise<void>
   readonly patchOverlayProperties: (patch: Record<string, unknown>) => void
   readonly replaceMediaAsset: (assetId: string) => void
   readonly importReplacementMedia: (imported: FlowImportedMediaBytes) => Promise<void> | void
@@ -129,7 +129,7 @@ export interface FlowPropertiesCommands {
   ) => Promise<void> | void
   readonly deleteSelectedBlocks: () => void
   readonly formatBlock: (spec: FlowBlockFormatCommand) => void
-  readonly formatTextStyle: (style: TextRunStyle) => void
+  readonly formatTextStyle: (style: TextRunStyle) => void | Promise<void>
   readonly patchOverlayPaperSpace: (paperSpace: 'viewport' | 'paper') => void
   readonly commitOverlayFormula: (ast: FormulaAstNode, accessibleText: string) => void
   readonly beginTableFieldEdit: (field: 'table-caption' | 'table-header', columnId?: string) => void
@@ -155,6 +155,7 @@ export interface FlowPropertiesContext {
   readonly structureDisabledReason?: string | null
   readonly textEdit: FlowTextEditSession | null
   readonly draftBindingKey: string
+  readonly textFormatIdentity?: string
   /** Course-wide background fields, needed only to resolve the Flow surface's effective preview. */
   readonly course: CourseBackgroundFields
   readonly commands: FlowPropertiesCommands
@@ -179,6 +180,12 @@ function flowFormatFieldDescription<T>(
   return `${label}：${String(field.value)}`
 }
 
+/** Buffered fields keep their draft until the existing command accepts the change. */
+async function commitBlockProperties(commands: FlowPropertiesCommands, patch: Record<string, unknown>): Promise<void> {
+  const error = await commands.patchSelectedBlock(patch)
+  if (error) throw new Error(error)
+}
+
 function FlowPageProperties({ context }: { context: FlowPropertiesContext }) {
   const { view, commands } = context
   const effective = view.effectiveBackground
@@ -191,7 +198,7 @@ function FlowPageProperties({ context }: { context: FlowPropertiesContext }) {
         onCommit={(title) => commands.renamePage(view.surfaceId, title)}
       />
       <p className="property-hint">
-        标题和段落在稿纸里编辑。这里只改页面名称与稿纸底色/背景图，不会出现 1280×720 场景背景。
+        标题和段落在稿纸里编辑。这里只改页面名称与流式 Surface 背景；稿纸负责正文宽度和连续排版。
       </p>
       <SelectField
         label="讲义宽度"
@@ -217,6 +224,7 @@ function FlowPageProperties({ context }: { context: FlowPropertiesContext }) {
           value: view.backgroundMode,
           onChange: (backgroundMode) => commands.updateSurfaceBackground({ backgroundMode }),
         }}
+        onTransparent={() => commands.updateSurfaceBackground({ backgroundMode: 'own', backgroundColor: 'transparent', backgroundAssetId: null })}
         onColorChange={(backgroundColor) => commands.updateSurfaceBackground({ backgroundColor })}
         onPreviewColorChange={commands.previewSurfaceBackground ? (backgroundColor) => commands.previewSurfaceBackground!({ backgroundColor }) : undefined}
         onAssetChange={(backgroundAssetId) => commands.updateSurfaceBackground({ backgroundAssetId })}
@@ -255,7 +263,7 @@ function FlowMediaBlockProperties({
         <BufferedInput
           label="替代文本"
           value={block.altText ?? ''}
-          onCommit={(altText) => patchMedia({ altText })}
+          onCommit={(altText) => commitBlockProperties(commands, { altText })}
         />
       ) : null}
       {!block.caption ? <button type="button" onClick={() => patchMedia({ caption: { inlines: [] } })}>添加题注</button> : <p className="property-hint">在正文中编辑题注。</p>}
@@ -471,7 +479,7 @@ function FlowBlockProperties({ context }: { context: FlowPropertiesContext }) {
                 value={('lineSpacing' in block && typeof block.lineSpacing === 'number') ? block.lineSpacing : ''}
                 onCommit={(value) => {
                   const lineSpacing = value === '' ? undefined : Number(value)
-                  patchBlockLayout({ lineSpacing })
+                  return commitBlockProperties(commands, { lineSpacing })
                 }}
               />
             </div>
@@ -526,12 +534,9 @@ function FlowBlockProperties({ context }: { context: FlowPropertiesContext }) {
         {block.type === 'course-component' ? (
           <div data-testid="flow-course-component-properties">
             <p className="property-hint">组件：components/{block.name}.html</p>
-            <BufferedInput label="标题" value={block.title ?? ''} onCommit={(title) => {
-              const error = commands.patchSelectedBlock({ title })
-              if (error) throw new Error(error)
-            }} />
+            <BufferedInput label="标题" value={block.title ?? ''} onCommit={(title) => commitBlockProperties(commands, { title })} />
             <BufferedInput label="高度" type="number" min={80} max={4000} value={block.height ?? FLOW_COMPONENT_BLOCK_HEIGHT}
-              onCommit={(value) => { const height = Number(value); if (height >= 80 && height <= 4000) commands.patchSelectedBlock({ height }) }} />
+              onCommit={(value) => { const height = Number(value); if (height >= 80 && height <= 4000) return commitBlockProperties(commands, { height }) }} />
             <SelectField<'none' | 'left' | 'right'>
               label="文字环绕"
               disabled={Boolean(context.structureDisabledReason)}
@@ -567,9 +572,9 @@ function FlowBlockProperties({ context }: { context: FlowPropertiesContext }) {
       {block.type === 'chart' ? (
         <section className="property-section" data-testid="flow-chart-properties">
           <ChartProperties node={{ id: block.id, type: 'chart', ...block.chart }} bindingKey={context.draftBindingKey}
-            commands={{ ...createChartPropertiesCommands(block.chart, chart => commands.patchSelectedBlock({ chart }) ?? null, commands.reportError), connectCanvasText: commands.connectChartCanvasText }} />
+            commands={{ ...createChartPropertiesCommands(block.chart, async chart => (await commands.patchSelectedBlock({ chart })) ?? null, commands.reportError), connectCanvasText: commands.connectChartCanvasText }} />
           <BufferedInput label="图表高度" type="number" min={160} max={1600} value={block.height}
-            onCommit={value => { const height = Number(value); if (height >= 160 && height <= 1600) commands.patchSelectedBlock({ height }) }} />
+            onCommit={value => { const height = Number(value); if (height >= 160 && height <= 1600) return commitBlockProperties(commands, { height }) }} />
           <button type="button" onClick={() => commands.moveSelectedBlock('up')}>上移</button>
           <button type="button" onClick={() => commands.moveSelectedBlock('down')}>下移</button>
         </section>
@@ -578,6 +583,7 @@ function FlowBlockProperties({ context }: { context: FlowPropertiesContext }) {
         <FlowFormulaBlockProperties context={context} block={block} />
       ) : null}
       {selectionFormat.richText ? (
+        <PropertyDraftFieldBoundary fieldKey={['flow-text-format', context.textFormatIdentity ?? 'block']}>
         <section
           className="property-section"
           data-testid="flow-selection-format-properties"
@@ -622,7 +628,7 @@ function FlowBlockProperties({ context }: { context: FlowPropertiesContext }) {
                 placeholder={fontSizeField.state === 'mixed' ? '混合' : '默认'}
                 onCommit={(value) => {
                   const fontSize = value === '' ? undefined : Number(value)
-                  commands.formatTextStyle({ fontSize })
+                  return commands.formatTextStyle({ fontSize })
                 }}
               />
             </div>
@@ -665,6 +671,7 @@ function FlowBlockProperties({ context }: { context: FlowPropertiesContext }) {
             </div>
           </fieldset>
         </section>
+        </PropertyDraftFieldBoundary>
       ) : null}
     </div>
   )
@@ -788,10 +795,7 @@ export function FlowPropertiesPanel({ context }: { context: FlowPropertiesContex
             <SelectField<'none' | 'left' | 'right'> label="文字环绕" value={context.flowLayout?.wrap ?? 'none'} disabled={Boolean(context.structureDisabledReason)}
               options={[{ value: 'none', label: '不环绕（独占一行）' }, { value: 'left', label: '居左环绕' }, { value: 'right', label: '居右环绕' }]}
               onChange={wrap => context.commands.patchSelectedBlock({ wrap })} />
-            {context.block?.type === 'media' && <BufferedInput label="替代文本" value={context.block.altText ?? ''} onCommit={altText => {
-              const error = context.commands.patchSelectedBlock({ altText })
-              if (error) throw new Error(error)
-            }} />}
+            {context.block?.type === 'media' && <BufferedInput label="替代文本" value={context.block.altText ?? ''} onCommit={altText => commitBlockProperties(context.commands, { altText })} />}
             {(context.block?.type === 'media' || context.block?.type === 'table') && <>
               {!context.block.caption && <button type="button" onClick={() => context.commands.patchSelectedBlock({ caption: { inlines: [] } })}>{context.block.type === 'table' ? '添加表格标题说明' : '添加题注'}</button>}
               <p className="property-hint">在正文中直接编辑{context.block.type === 'table' ? '表头、单元格和表格标题说明' : '题注'}；选中文字可设置格式。</p>

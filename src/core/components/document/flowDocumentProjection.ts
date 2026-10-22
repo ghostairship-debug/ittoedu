@@ -1,7 +1,9 @@
+import { componentContainers } from '../../../shared/contracts/component-platform/project'
 import { componentDataEdits } from '../../course/componentDataEdits'
+import { equalComponentValue } from '../../drivers/courseV10Operations'
 import { allDocumentTextSlots, inlineComponentIds, documentTextRanges, projectDataTextRanges, type DocumentRangeProjection } from '../../../shared/document/textInteraction'
 import type { ComponentEdit, ComponentInstance, CourseProjectV10, JsonValue } from '../../../shared/contracts/component-platform'
-import { documentBlockSchema, documentContentSchema, type DocumentBlock } from '../../../shared/document/content'
+import { documentBlockChildren, documentBlockSchema, documentContentSchema, documentTextSlots, normalizeDocumentText, type DocumentBlock } from '../../../shared/document/content'
 import { documentResourceReferences } from '../../../shared/document/resources'
 import type { MarkdownDocument } from '../../../shared/document/markdown'
 import { createTextComponentData, textComponentDataSchema, formulaComponentDataSchema, createFormulaComponentData } from '../../../components/text/data'
@@ -14,9 +16,10 @@ import { CHART_DEFINITION, chartDataSchema } from '../../../components/chart'
 import { TABLE_DEFINITION } from '../../../components/table/adapters'
 import { createTableData, parseTableData } from '../../../components/table/data'
 import { componentDefinitionBuiltinKey,type ComponentSurface } from '../../../shared/contracts/component-platform'
+import { isNativeFlowLayoutGroup } from '../../../shared/flowNativeLayout'
 
 function flowSurface(project: CourseProjectV10, surfaceId: string): ComponentSurface {
-  const surface = project.surfaces.find(value => value.id === surfaceId)
+  const surface = componentContainers(project).find(value => value.id === surfaceId)
   if (!surface || surface.kind !== 'flow') throw new Error('当前表面不是讲义')
   return surface
 }
@@ -29,6 +32,27 @@ const same = (left: unknown, right: unknown) => JSON.stringify(left) === JSON.st
 export function isDocumentBlock(project: CourseProjectV10, instance: ComponentInstance): boolean {
   const key = componentDefinitionBuiltinKey(project.definitions[instance.definitionId])
   return key === 'guoling.text' || key === DOCUMENT_BLOCK_DEFINITION.id
+}
+/** Natural reading groups expose native content, while free composition and programs stay atomic. */
+export function isFlowReadingGroup(project: CourseProjectV10, instanceId: string): boolean {
+  const group = project.instances[instanceId]
+  if (!group || group.container || !isNativeFlowLayoutGroup(group, project.definitions[group.definitionId])) return false
+  let text = false
+  const children = (group.childIds ?? []).filter(id => project.definitions[project.instances[id]?.definitionId]?.role !== 'behavior')
+  if (!children.length) return true // A previously expanded empty group remains a valid insertion scope.
+  for (const id of children) {
+    const child = project.instances[id], definition = child && project.definitions[child.definitionId]
+    if (!child || child.container || child.implementationOverride || definition?.implementation.kind !== 'builtin') return false
+    const key = definition.implementation.key
+    if (key === 'guoling.group') {
+      if (!isFlowReadingGroup(project, id)) return false
+      text = true
+    } else if (key === TEXT_DEFINITION.id || key === DOCUMENT_BLOCK_DEFINITION.id) {
+      if (child.frame) return false
+      text = true
+    } else if (![IMAGE_DEFINITION.id, VIDEO_DEFINITION.id, AUDIO_DEFINITION.id, CHART_DEFINITION.id, TABLE_DEFINITION.id, FORMULA_DEFINITION.id].includes(key)) return false
+  }
+  return text
 }
 /** Identity and section children come from instances; this is an editor projection, never a saved body. */
 export function projectFlowBlock(project: CourseProjectV10, instanceId: string): DocumentBlock {
@@ -64,6 +88,11 @@ export function projectFlowBlock(project: CourseProjectV10, instanceId: string):
       rows:data.rows.map((row:any)=>({id:row.id,cells:Object.fromEntries(row.cells.map((cell:any)=>[cell.columnId,cell.content ?? {inlines:[{type:'text',text:cell.text}]}]))})),
       ...(data.caption ? {caption:data.caption}:{}),...(data.merges ? {merges:data.merges}:{})}
   }
+  if (isFlowReadingGroup(project, instanceId)) {
+    const title = project.definitions[instance.definitionId]?.title
+    return { id: instance.id, type: 'course-instance', ...(title ? { title } : {}), blocks: (instance.childIds ?? [])
+      .filter(id => project.definitions[project.instances[id]?.definitionId]?.role !== 'behavior').map(id => projectFlowBlock(project, id)) }
+  }
   if (implementation?.kind === 'builtin' && implementation.key === CHART_DEFINITION.id && !instance.implementationOverride) {
     return { id: instance.id, type: 'chart', chart: chartDataSchema.parse(instance.data), height: instance.frame?.height ?? 400 }
   }
@@ -84,10 +113,36 @@ export function flowDocumentBlock(project: CourseProjectV10, surfaceId: string, 
   const find = (blocks: readonly DocumentBlock[]): DocumentBlock | undefined => {
     for (const block of blocks) {
       if (block.id === instanceId) return block
-      if (block.type === 'section') { const child = find(block.blocks); if (child) return child }
+      const children = documentBlockChildren(block)
+      if (children) { const child = find(children); if (child) return child }
     }
   }
   return find(projectFlowDocument(project, surfaceId).content.blocks)
+}
+/** PM and Markdown coalesce adjacent equal text runs. That projection change alone is not an edit to the formal block. */
+function sameFlowBlock(previous: DocumentBlock, block: DocumentBlock): boolean {
+  if (equalComponentValue(previous, block)) return true
+  if (previous.id !== block.id || previous.type !== block.type) return false
+  const slots = new Map(documentTextSlots(previous).map(slot => [slot.key, slot.content]))
+  const nextSlots = documentTextSlots(block)
+  if (slots.size !== nextSlots.length) return false
+  for (const slot of nextSlots) {
+    const before = slots.get(slot.key)
+    if (!before || !equalComponentValue(before, slot.content) && !equalComponentValue(normalizeDocumentText(before), normalizeDocumentText(slot.content))) return false
+  }
+  // Compare all remaining attributes and structure against the original slot values.
+  let retainedSlots: DocumentBlock = block.type === 'list' ? { ...block, items: block.items.map(item => ({ ...item, content: slots.get(`item:${item.id}`)! })) }
+    : block.type === 'table' ? { ...block,
+      columns: block.columns.map(column => ({ ...column, header: slots.get(`column:${column.id}`)! })),
+      rows: block.rows.map(row => ({ ...row, cells: Object.fromEntries(Object.keys(row.cells).map(column => [column, slots.get(`cell:${JSON.stringify([row.id, column])}`)!])) })),
+      ...(block.caption ? { caption: slots.get('caption')! } : {}),
+    } : { ...block, ...Object.fromEntries(slots) }
+  const children = documentBlockChildren(previous), nextChildren = documentBlockChildren(block)
+  if (children || nextChildren) {
+    if (!children || !nextChildren || children.length !== nextChildren.length || !children.every((child, index) => sameFlowBlock(child, nextChildren[index]))) return false
+    retainedSlots = { ...retainedSlots, blocks: children } as DocumentBlock
+  }
+  return equalComponentValue(previous, retainedSlots)
 }
 function blockInstance(project: CourseProjectV10, block: DocumentBlock): ComponentInstance {
   const previous = project.instances[block.id]
@@ -96,10 +151,12 @@ function blockInstance(project: CourseProjectV10, block: DocumentBlock): Compone
   const definitionId = (builtin: string) => key === builtin ? previous.definitionId : builtin
   if (block.type === 'course-instance') {
     if (!previous) throw new Error(`正文引用的正式实例已不存在：${block.id}`)
+    if (block.blocks !== undefined && !isFlowReadingGroup(project, block.id)) throw new Error('此对象不是可连续编辑的原生阅读组，原对象与输入已保留')
     return previous
   }
-  if(previous && same(projectFlowBlock(project,block.id),block))return previous
-  if (previous && projectFlowBlock(project, block.id).type === 'course-instance') throw new Error('专业对象的内容请在组件属性中修改；正文源码仅保留该对象的正式引用和阅读顺序')
+  const priorBlock = previous ? projectFlowBlock(project, block.id) : undefined
+  if (priorBlock && sameFlowBlock(priorBlock, block)) return previous
+  if (priorBlock?.type === 'course-instance') throw new Error('专业对象的内容请在组件属性中修改；正文源码仅保留该对象的正式引用和阅读顺序')
   if (block.type === 'paragraph') {
     const text = key === TEXT_DEFINITION.id ? textComponentDataSchema.parse(previous.data) : createTextComponentData()
     const { align: _align, lineSpacing: _lineSpacing, ...appearance } = text.appearance
@@ -139,16 +196,47 @@ function blockInstance(project: CourseProjectV10, block: DocumentBlock): Compone
     ...(block.type === 'section' ? { childIds: block.blocks.map(child => child.id) } : {}) }
 }
 /** Convert one edit projection into canonical instance edits while retaining unrelated floating/behavior roots. */
-export function flowDocumentEdits(project: CourseProjectV10, surfaceId: string, blocks: DocumentBlock[], readingBaseline=project, rangeProjection?: readonly DocumentRangeProjection[]): ComponentEdit[] {
+export function flowDocumentEdits(project: CourseProjectV10, surfaceId: string, blocks: DocumentBlock[], readingBaseline=project, rangeProjection?: readonly DocumentRangeProjection[], changedBlockIds?: readonly string[]): ComponentEdit[] {
+  // The layout editor supplies this hint only for text/mark steps. Check the
+  // structural carrier identities too; source/structural edits keep reconciliation.
+  if (changedBlockIds?.length) {
+    const indexed = new Map<string, DocumentBlock>()
+    const matches = (items: readonly DocumentBlock[], ids: readonly string[]): boolean => items.length === ids.length && items.every((block, index) => {
+      if (block.id !== ids[index]) return false
+      indexed.set(block.id, block)
+      const instance = readingBaseline.instances[block.id]
+      const section = instance && componentDefinitionBuiltinKey(readingBaseline.definitions[instance.definitionId]) === DOCUMENT_BLOCK_DEFINITION.id
+        && (instance.data as Record<string, JsonValue>).type === 'section'
+      const children = documentBlockChildren(block)
+      if (block.type === 'section') return Boolean(section && matches(block.blocks, instance.childIds ?? []))
+      if (block.type === 'course-instance' && children) return isFlowReadingGroup(readingBaseline, block.id)
+        && matches(children, (instance.childIds ?? []).filter(id => readingBaseline.definitions[readingBaseline.instances[id]?.definitionId]?.role !== 'behavior'))
+      return !section && !isFlowReadingGroup(readingBaseline, block.id)
+    })
+    if (matches(blocks, flowBodyIds(readingBaseline, surfaceId)) && changedBlockIds.every(id => indexed.has(id) && project.instances[id])) {
+      const local: ComponentEdit[] = []
+      for (const id of new Set(changedBlockIds)) {
+        const block = documentBlockSchema.parse(indexed.get(id)!)
+        if (block.type === 'section' || block.type === 'course-instance') return flowDocumentEdits(project, surfaceId, blocks, readingBaseline, rangeProjection)
+        const instance = blockInstance(project, block)
+        if (!same(project.instances[id].data, instance.data)) local.push(...componentDataEdits(project, { surfaceId, instanceId: id }, {
+          kind: 'replace', data: instance.data as JsonValue,
+          ...(rangeProjection?.some(field => field.blockId === id) ? { rangeProjection: projectDataTextRanges(instance.data) } : {}),
+        }))
+      }
+      return local
+    }
+  }
   const parsed = documentContentSchema.parse({ blocks }).blocks
   const surface = flowSurface(project, surfaceId), edits: ComponentEdit[] = [], desired = new Map<string, ComponentInstance>(), retained = new Set<string>()
   const retain = (id: string) => { retained.add(id); for (const child of project.instances[id]?.childIds ?? []) retain(child) }
   const visit = (items: DocumentBlock[]) => { for (const block of items) {
     desired.set(block.id, blockInstance(project, block))
-    if (block.type === 'course-instance') retain(block.id)
+    if (block.type === 'course-instance' && block.blocks === undefined) retain(block.id)
     const previous = project.instances[block.id]
     if (previous) for (const child of previous.childIds ?? []) if (project.definitions[project.instances[child]?.definitionId]?.role === 'behavior' || allDocumentTextSlots(desired.get(block.id)!.data).some(slot => inlineComponentIds(slot.content).includes(child))) retain(child)
-    if (block.type === 'section') visit(block.blocks)
+    const children = documentBlockChildren(block)
+    if (children) visit(children)
   } }
   visit(parsed)
   for(const definition of [TEXT_DEFINITION,DOCUMENT_BLOCK_DEFINITION,FORMULA_DEFINITION,IMAGE_DEFINITION,VIDEO_DEFINITION,AUDIO_DEFINITION,CHART_DEFINITION,TABLE_DEFINITION]) {
@@ -192,9 +280,10 @@ export function flowDocumentEdits(project: CourseProjectV10, surfaceId: string, 
           const before = rootOrder.slice(0, position).reverse().find(id => fixed(id) && siblings.includes(id))
           insertionIndex = after ? siblings.indexOf(after) : before ? siblings.indexOf(before) + 1 : siblings.length
         }
-        edits.push({ type: 'instance.insert', container, index: insertionIndex, instances: [{ ...instance, ...(block.type === 'section' ? { childIds: [] } : {}) }], rootIds: [block.id] })
+        edits.push({ type: 'instance.insert', container, index: insertionIndex, instances: [{ ...instance, ...(documentBlockChildren(block) ? { childIds: [] } : {}) }], rootIds: [block.id] })
         place(block.id, parent, insertionIndex)
-        if (block.type === 'section') { currentChildren.set(block.id, []); ordered(block.blocks, { kind: 'instance', instanceId: block.id }) }
+        const children = documentBlockChildren(block)
+        if (children) { currentChildren.set(block.id, []); ordered(children, { kind: 'instance', instanceId: block.id }) }
         continue
       }
       if (previous.definitionId !== instance.definitionId) {
@@ -208,7 +297,8 @@ export function flowDocumentEdits(project: CourseProjectV10, surfaceId: string, 
       if (container.kind === 'surface' ? !siblings.includes(block.id) : siblings[index] !== block.id) {
         edits.push({ type: 'instance.move', instanceId: block.id, container, index: insertionIndex, ...(instance.frame ? { frame: instance.frame } : {}) }); place(block.id, parent, insertionIndex)
       }
-      if (block.type === 'section') ordered(block.blocks, { kind: 'instance', instanceId: block.id })
+      const children = documentBlockChildren(block)
+      if (children) ordered(children, { kind: 'instance', instanceId: block.id })
     }
   }
   ordered(parsed, { kind: 'surface', surfaceId })

@@ -6,12 +6,13 @@ import { documentDigest } from '../../core/documents/documentDigest'
 import { flowDocumentRecoverySchema, normalizedFlowRecoveryPath } from '../../shared/flowDocumentRecovery'
 import { authoringDraftRecoverySchema, authoringDraftWriteSchema, authoringRecoveryRecordSchema,
   type AuthoringDraftRecovery, type AuthoringDraftWrite, type AuthoringRecoveryClaim } from '../../shared/workbench/desktop'
-import type { DocumentSnapshot } from '../../shared/workbench/document'
+import type { DocumentKind, DocumentSnapshot } from '../../shared/workbench/document'
 import type { WorkspaceMutationAction } from './WorkspaceFiles'
 import { relocatedDocumentPath } from './DocumentFileCoordinator'
 import { readLegacyFlowDocumentInputs } from '../flowDocumentRecovery'
 
-type Owner = Pick<DocumentSnapshot, 'documentId' | 'epoch' | 'model' | 'binding'>
+type Owner = Pick<DocumentSnapshot, 'documentId' | 'epoch' | 'binding'> & { model:
+  { kind: Exclude<DocumentKind, 'course-v10'> } | { kind: 'course-v10'; project: { id: string } } }
 const bindingSchema = z.union([z.object({ kind: z.literal('file'), path: z.string(), version: z.string().nullable(), bindingVersion: z.number() }),
   z.object({ kind: z.literal('untitled'), suggestedName: z.string() })])
 const storedRecordSchema = authoringRecoveryRecordSchema.extend({ ownerEpoch: z.string(), active: z.boolean().default(false) })

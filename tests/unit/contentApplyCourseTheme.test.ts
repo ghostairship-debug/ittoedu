@@ -1,3 +1,4 @@
+import { componentSurfaces } from '../../src/shared/contracts/component-platform/project'
 // @vitest-environment node
 import { expect, it, vi } from 'vitest'
 import { createBlankCourseProjectV10 } from '../../src/core/course/createCourseProjectV10'
@@ -21,7 +22,7 @@ it('measures with the current course theme without copying it into source CSS an
   })
   const service = new ContentApplyService({ measure, compilation: { compile: vi.fn() }, resourceUrls: () => ({ 'theme-asset-0': 'data:existing' }),
     session: { project: () => project, resources: () => ({ assets: { [assetId]: new Uint8Array([1, 2, 3]) }, components: {} }), dispatch: vi.fn() } })
-  const plan = await service.plan({ intent: 'insert', target: { kind: 'container', container: { kind: 'surface', surfaceId: project.surfaces[0]!.id } },
+  const plan = await service.plan({ intent: 'insert', target: { kind: 'container', container: { kind: 'surface', surfaceId: componentSurfaces(project)[0]!.id } },
     source: { kind: 'html', html: '<main class="panel">Theme</main>', themeCss: sourceCss } })
   const measured = measure.mock.calls[0]![0]
   expect(measured.courseThemeCss).toContain('@layer guoling-theme')
@@ -53,7 +54,7 @@ it.each(['unavailable', 'program'] as const)('keeps a raw %s source usable witho
     return sourceProgramAssembly(request.viewport, { html: request.html }, 'script')
   })
   const service = new ContentApplyService({ measure, compilation: { compile: vi.fn() }, session: { project: () => project, dispatch: vi.fn() } })
-  const plan = await service.plan({ intent: 'redo', target: { kind: 'container', container: { kind: 'surface', surfaceId: project.surfaces[0]!.id } },
+  const plan = await service.plan({ intent: 'redo', target: { kind: 'container', container: { kind: 'surface', surfaceId: componentSurfaces(project)[0]!.id } },
     source: { kind: 'html', html: '<main class="panel">Retained source</main><script>console.log("retained")</script>' } })
   expect(plan.command.expected.some(value => ['theme', 'designTokens'].includes(value.path[0]!))).toBe(false)
   if (kind === 'unavailable') {
@@ -71,7 +72,7 @@ it('declares a bound remote theme image only to the restricted measurement resou
   project.assets.paper = { id: 'paper', path: 'assets/paper.png', mimeType: 'image/png', remote: { url: 'https://example.test/paper.png' } }
   const measure = vi.fn(async (request: HtmlDesignMeasurementRequest) => sourceProgramAssembly(request.viewport, { html: request.html }, 'script'))
   const service = new ContentApplyService({ measure, compilation: { compile: vi.fn() }, session: { project: () => project, dispatch: vi.fn() } })
-  await service.plan({ intent: 'insert', target: { kind: 'container', container: { kind: 'surface', surfaceId: project.surfaces[0]!.id } },
+  await service.plan({ intent: 'insert', target: { kind: 'container', container: { kind: 'surface', surfaceId: componentSurfaces(project)[0]!.id } },
     source: { kind: 'html', html: '<main class="panel">Remote theme</main>' } })
   const measured = measure.mock.calls[0]![0]
   expect(Object.values(measured.resourceUrls ?? {})).toContain('https://example.test/paper.png')

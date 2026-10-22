@@ -1,3 +1,4 @@
+import { testContainerInstance } from '../helpers/glxWorkFixture'
 // @vitest-environment node
 import { afterEach, expect, it } from 'vitest'
 import { useEditorStore } from '../../src/renderer/store/editorStore'
@@ -19,7 +20,7 @@ it('retains each newly inserted Slide and Flow text identity after its authorita
     expect(store().courseView.selectedInstanceIds).toEqual([id])
     expect(after.revision).toBe(before.revision + 1); expect(after.undoDepth).toBe(before.undoDepth + 1)
     if (after.model.kind !== 'course-v10') throw new Error('Expected V10')
-    expect(after.model.project.surfaces[0].childIds).toContain(id)
+    expect(testContainerInstance(after.model.project, 0).childIds).toContain(id)
     const instance = after.model.project.instances[id], definition = after.model.project.definitions[instance.definitionId]
     expect(definition.implementation).toMatchObject({ kind: 'builtin', key: 'guoling.text' })
     if (kind === 'flow') expect(instance.flowPlacement).toBeUndefined()

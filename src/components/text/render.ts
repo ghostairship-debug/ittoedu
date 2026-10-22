@@ -34,7 +34,7 @@ export function textAppearanceStyles(appearance: TextAppearance, sizing: TextSiz
     borderRadius: `${appearance.cornerRadius}px`, overflow: sizing.overflow === 'clip' ? 'hidden' : 'visible',
   }
   const content: Record<string, string> = {
-    minWidth: '0', flexShrink: '0', width: '100%', fontFamily: appearance.fontFamily, fontSize: `${appearance.fontSize}px`,
+    minWidth: '0', flexShrink: '0', width: '100%', fontFamily: appearance.fontFamily, fontSize: `var(--guoling-text-font-size, ${appearance.fontSize}px)`,
     color: appearance.color, textAlign: appearance.align,
     // The native professional algorithm uses 1.22 * fontSize plus a px line gap, not a multiplier gap.
     lineHeight: appearance.lineSpacing === undefined ? String(appearance.lineHeight) : `calc(1.22em + ${appearance.lineSpacing}px)`,
@@ -77,6 +77,16 @@ export function renderFormulaComponent(dom: Document, data: FormulaComponentData
 /** Measure in the same document as the actual renderer, with its loaded fonts. No layout writer lives here. */
 export function measureTextComponent(element: HTMLElement, size: TextComponentSize, sizing: TextSizing): TextLayoutResult {
   const probe = element.cloneNode(true) as HTMLElement
+  // Measurement leaves the authored container. Freeze resolved fonts first so
+  // inherited responsive CSS and container units keep the current presentation.
+  const originalFonts = [element, ...element.querySelectorAll<HTMLElement>('[style]')]
+  const probeFonts = [probe, ...probe.querySelectorAll<HTMLElement>('[style]')]
+  originalFonts.forEach((node, index) => {
+    if (node.style.fontSize) {
+      const resolved = node.ownerDocument.defaultView?.getComputedStyle(node).fontSize
+      if (resolved) probeFonts[index]!.style.fontSize = resolved
+    }
+  })
   Object.assign(probe.style, { position: 'absolute', visibility: 'hidden', pointerEvents: 'none', left: '0', top: '0',
     width: `${size.width}px`, height: 'auto', minHeight: '0', maxHeight: 'none', overflow: 'visible' })
   const content = probe.querySelector<HTMLElement>('[data-text-component-content]')
@@ -114,7 +124,10 @@ export function applyTextComponentLayout(element: HTMLElement, result: TextLayou
   element.style.height = `${result.height}px`
   if (result.scale !== 1) {
     for (const node of [element, ...element.querySelectorAll<HTMLElement>('[style]')]) {
-      if (node.style.fontSize) node.style.fontSize = `${Number.parseFloat(node.style.fontSize) * result.scale}px`
+      if (node.style.fontSize) {
+        const resolved = node.ownerDocument.defaultView?.getComputedStyle(node).fontSize ?? node.style.fontSize
+        node.style.fontSize = `${Number.parseFloat(resolved) * result.scale}px`
+      }
     }
   }
 }

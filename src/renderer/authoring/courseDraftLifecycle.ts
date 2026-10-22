@@ -1,6 +1,6 @@
 import type { CourseV10DocumentBridge } from '../documents/CourseV10DocumentBridge'
 import type { AdvancedDraftRecovery } from '../../shared/workbench/desktop'
-import type { AuthoringDraftRecovery, AuthoringRecoveryClaim, DocumentHostAPI, PropertyDraftRecovery } from '../../shared/workbench/desktop'
+import type { AuthoringDraftRecovery, AuthoringDraftWrite, AuthoringRecoveryClaim, DocumentHostAPI, PropertyDraftRecovery } from '../../shared/workbench/desktop'
 import type { DocumentSnapshot } from '../../shared/workbench/document'
 import { equalComponentValue } from '../../core/drivers/courseV10Operations'
 export type { AdvancedDraftRecovery } from '../../shared/workbench/desktop'
@@ -68,13 +68,13 @@ export function courseDraftLifecycle(bridge: CourseV10DocumentBridge) {
       return { ready: !issues.length, issues }
     },
     preserve(documentId: string): AdvancedDraftRecovery[] {
-      const target = bridge.captureTarget(documentId)
+      const target = bridge.captureOwnedTarget(documentId)
       return [...value.providers.values()].flatMap(provider => provider.preserve(documentId))
         .concat([...value.pending.values()].flat().filter(record => record.documentId === documentId))
         .map(record => ({ ...record, documentId, epoch: target.epoch, projectId: target.project.id }))
     },
     restore(documentId: string, records: readonly AdvancedDraftRecovery[]): { restored: number; adopted: AdvancedDraftRecovery[]; issues: AdvancedDraftIssue[] } {
-      const target = bridge.captureTarget(documentId), issues: AdvancedDraftIssue[] = []
+      const target = bridge.captureOwnedTarget(documentId), issues: AdvancedDraftIssue[] = []
       const adopted: AdvancedDraftRecovery[] = [], candidates = new Map<string, Array<{ saved: AdvancedDraftRecovery; record: AdvancedDraftRecovery }>>()
       for (const saved of records) {
         if (saved.projectId !== target.project.id) { issues.push({ documentId, epoch: target.epoch, message: '恢复稿属于其他工程，已保留原记录。' }); continue }
@@ -148,6 +148,8 @@ export function createCourseInputLifecycle(bridge: CourseV10DocumentBridge, port
   const restored = new Map<string, Promise<void>>()
   const unadopted = new Map<string, AuthoringRecoveryClaim[]>()
   const suspended = new Map<string, string>()
+  const persisted = new Map<string, AuthoringDraftWrite>()
+  const pendingWrites = new Map<string, Promise<void>>()
   let writes = Promise.resolve()
   const ids = () => bridge.read().documents.map(snapshot => snapshot.documentId)
   const assertEpoch = (documentId: string, epoch: string) => {
@@ -159,8 +161,19 @@ export function createCourseInputLifecycle(bridge: CourseV10DocumentBridge, port
     if (!api) throw new Error('输入恢复服务不可用，已保留原稿')
     const retainedRecords = unadopted.get(JSON.stringify([documentId, epoch]))
     // This owner controls only these two slices. Empty input must not erase Flow or Source conflicts.
-    await api.writeAuthoringDrafts(documentId, { advanced: records.advanced, properties: records.properties,
-      ...(retainedRecords?.length ? { retainedRecords } : {}) }, epoch)
+    const key = JSON.stringify([documentId, epoch])
+    const input: AuthoringDraftWrite = structuredClone({ advanced: records.advanced, properties: records.properties,
+      ...(retainedRecords?.length ? { retainedRecords } : {}) })
+    // Prepare and background recovery share the same writer. Compare after the
+    // previous ACK, so clearing input cannot overtake its pending nonempty write.
+    const pending = (pendingWrites.get(key) ?? Promise.resolve()).catch(() => undefined).then(async () => {
+      if (api === host && equalComponentValue(persisted.get(key), input)) return
+      await api.writeAuthoringDrafts(documentId, input, epoch)
+      if (api === host) persisted.set(key, input)
+    })
+    pendingWrites.set(key, pending)
+    try { await pending }
+    finally { if (pendingWrites.get(key) === pending) pendingWrites.delete(key) }
   }
   const restore = (documentId: string): Promise<void> => {
     const { snapshot } = ports.capture(documentId)
@@ -170,7 +183,7 @@ export function createCourseInputLifecycle(bridge: CourseV10DocumentBridge, port
     if (!api) return Promise.reject(new Error('输入恢复服务不可用，已保留原稿'))
     const pending = api.readAuthoringDrafts(documentId).then(async records => {
       assertEpoch(documentId, snapshot.epoch)
-      if (!records) return
+      if (!records) { persisted.set(key, { advanced: [], properties: [] }); return }
       const adopted = ports.restore(documentId, snapshot.epoch, records)
       assertEpoch(documentId, snapshot.epoch)
       const claims = (records.recoveryRecords ?? []).filter(record =>
@@ -192,7 +205,7 @@ export function createCourseInputLifecycle(bridge: CourseV10DocumentBridge, port
   }
   return {
     connect(api: DocumentHostAPI, adapter?: CourseInputRecoveryAdapter) {
-      if (api !== host) { restored.clear(); unadopted.clear(); suspended.clear() }
+      if (api !== host) { restored.clear(); unadopted.clear(); suspended.clear(); persisted.clear() }
       host = api; recovery = adapter
     },
     restore,
@@ -212,7 +225,7 @@ export function createCourseInputLifecycle(bridge: CourseV10DocumentBridge, port
           const captured = ports.capture(documentId)
           await persist(documentId, captured.records, captured.snapshot.epoch)
           if (recovery && !await recovery.preserveFlow([documentId])) return false
-          await bridge.drain([documentId])
+          await bridge.flushInput([documentId])
           const current = assertEpoch(documentId, captured.snapshot.epoch)
           if (!equalComponentValue(captured.records, current.records) || current.flowDraft !== captured.flowDraft)
             throw new Error('保全期间又有新输入，原稿仍保留；请完成本次输入后再关闭')

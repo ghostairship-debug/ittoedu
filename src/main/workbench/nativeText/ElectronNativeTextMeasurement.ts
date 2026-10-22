@@ -21,7 +21,18 @@ export function createElectronNativeTextMeasurement(options: ElectronNativeTextM
   const timeoutMs = options.timeoutMs ?? 30_000
   if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1) throw new Error('Invalid measurement timeout')
   let window: BrowserWindow | null = null, loading: Promise<void> | undefined, disposed = false
-  let queue: Promise<unknown> = Promise.resolve()
+  type WaitingMeasurement = { start(): Promise<NativeTextMeasurementResult>; resolve(result: NativeTextMeasurementResult): void; reject(error: unknown): void; stopWaiting(): void }
+  const waiting: WaitingMeasurement[] = []
+  let measuring = false, rejectActive: ((error: unknown) => void) | undefined
+  const next = () => {
+    if (measuring || disposed) return
+    const job = waiting.shift()
+    if (!job) return
+    job.stopWaiting(); measuring = true; rejectActive = job.reject
+    void job.start().then(job.resolve, job.reject).finally(() => {
+      measuring = false; rejectActive = undefined; next()
+    })
+  }
   const rendererRoot = options.rendererFile ? path.dirname(path.resolve(options.rendererFile)) : undefined
   const destroy = () => { const current = window; window = null; loading = undefined; if (current && !current.isDestroyed()) current.destroy() }
   const create = () => {
@@ -57,7 +68,7 @@ export function createElectronNativeTextMeasurement(options: ElectronNativeTextM
     const spec = structuredClone(request)
     spec.node = textNodeSchema.parse(spec.node)
     if (spec.width !== spec.node.width || !Number.isFinite(spec.width) || spec.width <= 0 || !['width', 'height'].includes(spec.axis)) return Promise.reject(new Error('Invalid native text measurement spec'))
-    const task = queue.then(async () => {
+    const start = async () => {
       if (disposed) throw new Error('文字测量宿主已关闭')
       callOptions.signal?.throwIfAborted()
       await app.whenReady()
@@ -87,9 +98,27 @@ export function createElectronNativeTextMeasurement(options: ElectronNativeTextM
           finish(undefined, result)
         })().catch(error => finish(error instanceof Error ? error : new Error(String(error))))
       })
+    }
+    return new Promise<NativeTextMeasurementResult>((resolve, reject) => {
+      if (disposed) { reject(new Error('文字测量宿主已关闭')); return }
+      const signal = callOptions.signal
+      const aborted = () => {
+        const index = waiting.indexOf(job)
+        if (index < 0) return
+        waiting.splice(index, 1); job.stopWaiting()
+        reject(signal?.reason ?? new Error('文字测量已取消'))
+      }
+      const job: WaitingMeasurement = { start, resolve, reject,
+        stopWaiting() { signal?.removeEventListener('abort', aborted) } }
+      waiting.push(job); signal?.addEventListener('abort', aborted, { once: true })
+      if (signal?.aborted) aborted()
+      next()
     })
-    queue = task.catch(() => undefined)
-    return task
   }
-  return { measure, dispose() { disposed = true; destroy() } }
+  return { measure, dispose() {
+    disposed = true
+    const error = new Error('文字测量宿主已关闭')
+    for (const job of waiting.splice(0)) { job.stopWaiting(); job.reject(error) }
+    rejectActive?.(error); destroy()
+  } }
 }

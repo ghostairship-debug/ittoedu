@@ -1,4 +1,6 @@
 // @vitest-environment node
+import { componentSurfaces } from '../../src/shared/contracts/component-platform/project'
+import { testContainerInstance } from '../helpers/glxWorkFixture'
 import { expect, it } from 'vitest'
 import { createBlankCourseProjectV10 } from '@/core/course/createCourseProjectV10'
 import { DocumentSession } from '@/core/documents/DocumentSession'
@@ -112,7 +114,7 @@ it('returns the committed Source fact rather than absorbing a later human edit i
   const initial = project(), implementation = { kind: 'source' as const, language: 'javascript' as const,
     source: 'export default { mount() { return { dispose() {} }; } };' }
   initial.instances.item = { id: 'item', definitionId: WEB_DEFINITION.id, data: { html: '<p>Preserve</p>' }, frame, implementationOverride: implementation }
-  initial.surfaces[0].childIds = ['item']
+  testContainerInstance(initial, 0).childIds = ['item']
   const f = await fixture(initial), entry = f.files().find(file => file.binding?.kind === 'instance-source' && !file.authorSource?.dependencyId)!
   await f.execute('project.read', { path: entry.path })
   const ownSource = implementation.source.replace('dispose() {}', 'dispose() { /* own */ }')
@@ -140,7 +142,7 @@ it('returns inserted object paths, including descendants, and introduces their A
   const reply = await f.execute('project.apply', { path: page.path, intent: 'insert', content: '<section>parent</section>' })
   const result = data(reply), inserted = new Set(result.insertedIds)
   expect(result.commit).toBe('committed')
-  const rootId = f.snapshot().model.project.surfaces[0].childIds[0]
+  const rootId = componentSurfaces(f.snapshot().model.project)[0].childIds[0]
   const relevant = f.files().filter(file => file.target?.kind === 'instance' && inserted.has(file.target.instanceId))
   expect(result.files?.map(file => file.path)).toEqual(relevant.map(file => file.path))
   const child = f.files().find(file => file.target?.kind === 'instance' && file.target.instanceId !== rootId && file.kind === 'html')!
@@ -157,7 +159,7 @@ it('returns current definition and instance paths after title and role changes w
   initial.definitions.other = { ...initial.definitions.changed, id: 'other' }
   initial.instances.changed = { id: 'changed', definitionId: 'changed', data: { value: 'old' }, frame }
   initial.instances.other = { id: 'other', definitionId: 'other', data: { value: 'neighbor' }, frame }
-  initial.surfaces[0].childIds = ['changed', 'other']
+  testContainerInstance(initial, 0).childIds = ['changed', 'other']
   const f = await fixture(initial), definition = f.files().find(file => file.binding?.kind === 'definition' && file.binding.definitionId === 'changed')!
   await f.execute('project.list', {})
   const result = data(await f.execute('project.apply', { path: definition.path, content: JSON.stringify({ title: 'Renamed', role: 'behavior' }) }))
@@ -173,7 +175,7 @@ it('returns the new content path when redo keeps an instance identity but change
   const initial = project()
   initial.definitions.old = { id: 'old', title: 'Old', role: 'content', implementation: { kind: 'source', language: 'javascript', source: 'export default { mount() {} }' } }
   initial.instances.selected = { id: 'selected', definitionId: 'old', data: { value: 'old' }, frame }
-  initial.surfaces[0].childIds = ['selected']
+  testContainerInstance(initial, 0).childIds = ['selected']
   const f = await fixture(initial), old = f.files().find(file => file.target?.kind === 'instance' && file.kind === 'data')!
   await f.execute('project.list', {}); f.source(objects('<button>redo</button>'))
   // The source port supplies object drafts; this fixture exercises receipt and Session semantics, not HTML admission.
@@ -190,7 +192,7 @@ it('keeps authoring separate from business data and introduces descendant paths 
   initial.definitions.parent = { id: 'parent', title: 'Parent', role: 'content', implementation: { kind: 'source', language: 'javascript', source: 'export default { mount() {} }' } }
   initial.instances.parent = { id: 'parent', definitionId: 'parent', data: { business: 'preserve' }, authoring: authoring('Before'), frame, childIds: ['child'] }
   initial.instances.child = { id: 'child', definitionId: WEB_DEFINITION.id, data: { html: '<p>child</p>' }, frame }
-  initial.surfaces[0].childIds = ['parent']
+  testContainerInstance(initial, 0).childIds = ['parent']
   const f = await fixture(initial), definition = f.files().find(file => file.binding?.kind === 'definition' && file.binding.definitionId === 'parent')!
   await f.execute('project.list', {})
   const renamed = data(await f.execute('project.apply', { path: definition.path, content: JSON.stringify({ title: 'Renamed Parent', role: 'content' }) }))
@@ -209,7 +211,7 @@ it('does not refresh unread human content when a definition rename introduces a 
   const initial = project()
   initial.definitions.custom = { ...WEB_DEFINITION, id: 'custom', title: 'Before' }
   initial.instances.item = { id: 'item', definitionId: 'custom', data: { html: '<p>observed</p>' }, frame }
-  initial.surfaces[0].childIds = ['item']
+  testContainerInstance(initial, 0).childIds = ['item']
   const f = await fixture(initial), definition = f.files().find(file => file.binding?.kind === 'definition' && file.binding.definitionId === 'custom')!
   await f.execute('project.list', {})
   await f.human([{ type: 'data.set', instanceId: 'item', path: ['html'], value: '<p>human</p>' }])
@@ -226,7 +228,7 @@ it('does not refresh unread human content when a definition rename introduces a 
 it('reports a same-name path collision without rebinding the old observed object', async () => {
   const initial = project()
   for (const id of ['first', 'second']) initial.instances[id] = { id, definitionId: WEB_DEFINITION.id, data: { html: `<p>${id}</p>` }, frame }
-  initial.surfaces[0].childIds = ['first', 'second']
+  testContainerInstance(initial, 0).childIds = ['first', 'second']
   const f = await fixture(initial), first = f.files().find(file => file.target?.kind === 'instance' && file.target.instanceId === 'first' && file.kind === 'html')!
   const second = f.files().find(file => file.target?.kind === 'instance' && file.target.instanceId === 'second' && file.kind === 'html')!
   await f.execute('project.list', {}); f.source(objects('<p>inserted</p>'))
@@ -266,7 +268,7 @@ it('preserves committed receipts after read failure and supplies local repair wi
 it('selects only current authorized scope and refuses another epoch', async () => {
   const initial = project()
   for (const id of ['selected', 'neighbor']) initial.instances[id] = { id, definitionId: WEB_DEFINITION.id, data: { html: `<p>${id}</p>` }, frame }
-  initial.surfaces[0].childIds = ['selected', 'neighbor']
+  testContainerInstance(initial, 0).childIds = ['selected', 'neighbor']
   const f = await fixture(initial), before = f.snapshot(), original = f.files().find(file => file.kind === 'structure')!
   const result: ContentApplyResult = { commit: 'committed', usability: 'usable', delivery: 'not_requested', diagnostics: [], insertedIds: ['selected', 'neighbor'],
     input: { intent: 'insert', target: original.target!, source: objects('<p>selected</p>') } }

@@ -1,4 +1,6 @@
 // @vitest-environment node
+import { componentSurfaces } from '../../src/shared/contracts/component-platform/project'
+import { setRootContainers, testContainerInstance } from '../helpers/glxWorkFixture'
 import { expect, it } from 'vitest'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -29,11 +31,11 @@ async function harness(writable: ToolTarget[] = [{ kind: 'document' }], setup?: 
   const registry = new DocumentRegistry({ drivers: [driver], createId: () => `doc-${++id}`, bindingKey: binding => binding.path,
     persistence: { async append() {}, async save() { throw new Error('unused') } } })
   const project = createBlankCourseProjectV10('制作目标', () => `fixture-${++id}`)
-  project.global.overlay = []; project.instances = {}; project.definitions = {}
+  project.global.overlay = []; project.instances = { ...project.instances }; project.definitions = { ...project.definitions }
   project.background = { color: '#eeeeee' }
-  project.surfaces = [{ id: 'slide', kind: 'slide', title: '演示页', childIds: [], designSize: { width: 1280, height: 720 },
+  setRootContainers(project, [{ id: 'slide', kind: 'slide', title: '演示页', childIds: [], designSize: { width: 1280, height: 720 },
     background: { color: '#ffffff' }, presentation: { states: [{ id: 'default', title: 'Default', overrides: {} },
-      { id: 'other', title: 'Other', overrides: {} }] } }, { id: 'flow', kind: 'flow', title: '讲义', childIds: [] }]
+      { id: 'other', title: 'Other', overrides: {} }] } }, { id: 'flow', kind: 'flow', title: '讲义', childIds: [] }])
   const resources: DocumentResources = { assets: {}, components: {} }
   setup?.(project, resources)
   const session = await registry.create({ kind: 'course-v10', project, resources }, 'producer.h5lesson')
@@ -58,7 +60,7 @@ function textFixture(project: CourseProjectV10) {
   const data = createTextComponentData('白色标题'); data.appearance.color = '#FFFFFF'
   project.instances.title = { id: 'title', definitionId: TEXT_DEFINITION.id, data: JSON.parse(JSON.stringify(data)),
     frame: { width: 400, height: 70, transform: [1, 0, 0, 1, 600, 500] } }
-  project.surfaces[0].childIds = ['title']
+  testContainerInstance(project, 0).childIds = ['title']
 }
 async function refresh(f: Awaited<ReturnType<typeof harness>>, handle: string) {
   const result = await f.call(`read-${handle}`, 'read', { target: handle })
@@ -80,14 +82,14 @@ it('discovers current V10 surfaces, reads their backgrounds and commits a named-
   if (read.kind !== 'read') throw new Error('Expected read')
   expect(JSON.parse((read.data as { text: string }).text)).toMatchObject({ background: { color: '#ffffff' }, presentation: { states: [{ title: 'Default' }, { title: 'Other' }] } })
   applied(await f.call('state-background', 'presentation.update', { target: slide, action: 'background', state: 'Default', background: { color: '#123456' } }))
-  expect(f.current().surfaces[0].presentation!.states[0].background).toEqual({ color: '#123456' })
-  expect(f.current().surfaces[0].background).toEqual({ color: '#ffffff' })
-  expect(f.current().surfaces[0].presentation!.states[1].background).toBeUndefined()
+  expect(componentSurfaces(f.current())[0].presentation!.states[0].background).toEqual({ color: '#123456' })
+  expect(componentSurfaces(f.current())[0].background).toEqual({ color: '#ffffff' })
+  expect(componentSurfaces(f.current())[0].presentation!.states[1].background).toBeUndefined()
   expect(f.session.read().undoDepth).toBe(1)
   const before = f.session.read()
   expect((await f.session.execute({ documentId: before.documentId, epoch: before.epoch, baseRevision: before.revision,
     operationId: 'undo-background', actor: 'human', mutation: { type: 'undo' } })).status).toBe('applied')
-  expect(f.current().surfaces[0].presentation!.states[0].background).toBeUndefined()
+  expect(componentSurfaces(f.current())[0].presentation!.states[0].background).toBeUndefined()
 })
 
 it('keeps surface and read-only handles inside frozen grants and separates whole-course background edits', async () => {
@@ -101,9 +103,9 @@ it('keeps surface and read-only handles inside frozen grants and separates whole
     .toMatchObject({ kind: 'error', code: 'not-authorized' })
   expect(f.session.read().undoDepth).toBe(0)
   applied(await f.call('surface-background', 'surface.configure', { target: slide, settings: { background: { color: '#abcdef' } } }))
-  expect(f.current().surfaces[0].background).toEqual({ color: '#abcdef' })
+  expect(componentSurfaces(f.current())[0].background).toEqual({ color: '#abcdef' })
   expect(f.current().background).toEqual({ color: '#eeeeee' })
-  expect(f.current().surfaces[1].background).toBeUndefined()
+  expect(componentSurfaces(f.current())[1].background).toBeUndefined()
 })
 
 it('keeps exact named-state grants from changing the base page, sibling state or course settings', async () => {
@@ -132,7 +134,7 @@ it('reuses acknowledged insertion handles but refuses a handle after a human rem
   expect(next).not.toBe(owner)
   applied(await insert('third', next, '第三次'))
   expect(f.session.read().undoDepth).toBe(3)
-  const first = f.current().surfaces[0].childIds[0]
+  const first = componentSurfaces(f.current())[0].childIds[0]
   expect((await f.human([{ type: 'instance.remove', instanceId: first }])).status).toBe('applied')
   expect(await insert('deleted', next, '删除后不能续插')).toMatchObject({ kind: 'error', code: 'target-conflict' })
   expect(f.session.read().undoDepth).toBe(4)
@@ -177,7 +179,7 @@ it('reports proved professional text risks without rejecting or repeating the ed
     'unknown-color', 'custom-style', 'custom-source'] as const) {
     const f = await harness([{ kind: 'document' }], (project, resources) => {
       textFixture(project)
-      const surface = project.surfaces[0], title = project.instances.title
+      const surface = componentSurfaces(project)[0], title = project.instances.title
       const data = title.data as unknown as ReturnType<typeof createTextComponentData>
       if (mode === 'pale') project.background = { color: '#fefefe' }
       if (mode === 'dark') project.background = { color: '#000000' }
@@ -186,7 +188,7 @@ it('reports proved professional text risks without rejecting or repeating the ed
         project.assets.background = { id: 'background', path: 'assets/background.svg', mimeType: 'image/svg+xml', kind: 'image' }
         resources.assets.background = new TextEncoder().encode('<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="720"><rect width="1280" height="720" fill="black"/></svg>')
       }
-      if (mode === 'named-state-dark') surface.presentation!.states[0].background = { mode: 'own', color: '#000000' }
+      if (mode === 'named-state-dark') testContainerInstance(project, 0).container.presentation!.states[0].background = { mode: 'own', color: '#000000' }
       if (mode === 'opaque-text') { data.appearance.backgroundOpacity = 1; data.appearance.backgroundColor = '#000000' }
       if (mode === 'inline-color') data.content.inlines = [{ type: 'text', text: '黑色标题', style: { color: '#000000' } }]
       if (mode === 'inline-font') {
@@ -197,14 +199,14 @@ it('reports proved professional text risks without rejecting or repeating the ed
         const overflow = createTextComponentData('很高的正文\n'.repeat(30))
         project.instances.overflow = { id: 'overflow', definitionId: TEXT_DEFINITION.id, data: JSON.parse(JSON.stringify(overflow)),
           frame: { width: 400, height: 1, transform: [1, 0, 0, 1, 600, 0] } }
-        surface.childIds.unshift('overflow')
+        testContainerInstance(project, 0).childIds.unshift('overflow')
       }
       if (mode === 'overflow-group') {
         project.definitions.group = { id: 'group', role: 'content', implementation: { kind: 'builtin', key: 'guoling.group' } }
         project.instances.group = { id: 'group', definitionId: 'group', data: {}, childIds: ['outside-child'],
           frame: { width: 10, height: 10, transform: [1, 0, 0, 1, 0, 0] } }
         project.instances['outside-child'] = { ...structuredClone(title), id: 'outside-child' }
-        surface.childIds.unshift('group')
+        testContainerInstance(project, 0).childIds.unshift('group')
       }
       if (mode === 'unknown-color') data.appearance.color = 'var(--text-color)'
       if (mode === 'custom-style') title.style = { filter: 'invert(1)' }
@@ -214,7 +216,7 @@ it('reports proved professional text risks without rejecting or repeating the ed
         const shape = defaultShapeData(); shape.style.fillColor = '#000000'
         project.instances.card = { id: 'card', definitionId: SHAPE_DEFINITION.id, data: shape,
           frame: { width: 500, height: 100, transform: [1, 0, 0, 1, mode === 'black-card-overlap' ? 580 : 0, mode === 'black-card-overlap' ? 480 : 0] } }
-        surface.childIds.unshift('card')
+        testContainerInstance(project, 0).childIds.unshift('card')
       }
     })
     const target = await f.issue({ ...textTarget, ...(mode === 'named-state-dark' ? { stateId: 'default' } : {}) })

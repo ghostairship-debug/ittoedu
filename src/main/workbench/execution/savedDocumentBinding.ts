@@ -16,10 +16,14 @@ export function matchesSavedDocument(binding: SavedCourseIdentity, snapshot: Doc
     && snapshot.binding.kind === 'file' && pathKey(binding.path) === pathKey(snapshot.binding.path)
     && binding.projectId === snapshot.model.project.id
 }
+/** The rebind observer needs file/project identity, never a cloned document body or resources. */
+export type ReboundDocumentIdentity = Pick<DocumentSnapshot, 'binding'> & {
+  model: { kind: DocumentSnapshot['model']['kind']; project?: { id: string } }
+}
 /** A formal rename changes location, never the revision/epoch proved by the last save. */
-export function reboundSavedDocumentBinding(snapshot: DocumentSnapshot, binding: SavedCourseIdentity): SavedCourseIdentity | undefined {
+export function reboundSavedDocumentBinding(snapshot: ReboundDocumentIdentity, binding: SavedCourseIdentity): SavedCourseIdentity | undefined {
   if (snapshot.binding.kind !== 'file' || snapshot.model.kind !== binding.kind
-    || snapshot.model.project.id !== binding.projectId) return
+    || snapshot.model.project?.id !== binding.projectId) return
   return { ...binding, path: snapshot.binding.path }
 }
 /** Only host-recorded bindings are consulted; documentPaths alone and model text confer no identity. */

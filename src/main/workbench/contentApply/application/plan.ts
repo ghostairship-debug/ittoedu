@@ -1,3 +1,5 @@
+import { isNativeFlowLayoutGroup, isNativeFlowContainerStyle, isNativeFlowItemStyle, componentFlowStylePolicy } from '../../../../shared/flowNativeLayout'
+import { componentSurface } from '../../../../shared/contracts/component-platform/project'
 import { captureComponentOperation, equalComponentValue, presentationComponentEdits } from '../../../../core/drivers/courseV10Operations'
 import { componentDataEdits } from '../../../../core/course/componentDataEdits'
 import { frameCorners, multiplyMatrices, translateFrame } from '../../../../core/components/geometry'
@@ -43,10 +45,16 @@ function bounds(frame: ComponentFrame) {
 const boxText = (box: ReturnType<typeof bounds>) => `(${box.left},${box.top})–(${box.right},${box.bottom})`
 const intersects = (a: ReturnType<typeof bounds>, b: ReturnType<typeof bounds>) => a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top
 
+/** Only the addressed container owns layout; an ordinary group keeps its local free frames. */
+function layoutContainer(project: CourseProjectV10, container: ComponentContainer) {
+  return container.kind === 'surface' ? componentSurface(project, container.surfaceId)
+    : container.kind === 'instance' ? componentSurface(project, container.instanceId) : undefined
+}
+
 /** Explicit composition stays where authored, including intentional overlap. */
 function placeInRegion(project: CourseProjectV10, container: ComponentContainer, drafts: ContentObjectDraft[], region: ComponentFrame,
   diagnostics: ContentApplyDiagnostic[], checkNeighbors: boolean): ContentObjectDraft[] {
-  const surface = container.kind === 'surface' ? project.surfaces.find(value => value.id === container.surfaceId) : undefined
+  const surface = layoutContainer(project, container)
   const size = surface?.designSize ?? (container.kind === 'instance' ? project.instances[container.instanceId]?.frame : undefined)
   const occupied = checkNeighbors ? containerChildIds(project, container).flatMap(id => {
     const frame = project.instances[id]?.frame
@@ -83,7 +91,7 @@ function flowBodyDraft(draft: ContentObjectDraft, definitions: Readonly<Record<s
 
 /** Only new roots move. Lack of a vacant place is a local diagnostic, never a page rearrangement. */
 function placeNewRoots(project: CourseProjectV10, container: ComponentContainer, drafts: ContentObjectDraft[], diagnostics: ContentApplyDiagnostic[], definitions: Readonly<Record<string, ComponentDefinition>>): ContentObjectDraft[] {
-  const surface = container.kind === 'surface' ? project.surfaces.find(value => value.id === container.surfaceId) : undefined
+  const surface = layoutContainer(project, container)
   if (surface?.kind === 'flow') return drafts.map(draft => flowBodyDraft(draft, definitions))
   const size = surface?.designSize ?? (container.kind === 'instance' ? project.instances[container.instanceId]?.frame : undefined)
   const occupied = containerChildIds(project, container).flatMap(id => project.instances[id]?.frame ? [bounds(project.instances[id]!.frame!)] : [])
@@ -144,7 +152,7 @@ export function planContentApply(input: PlanContentApplyInput): ContentApplyPlan
       if (request.intent === 'redo') children.forEach(instanceId => edits.push({ type: 'instance.remove', instanceId }))
     }
     const drafts = input.drafts ?? (request.source.kind === 'objects' ? request.source.objects : undefined)
-    if (!drafts || !drafts.length && !(request.target.kind === 'container' && request.target.container.kind === 'surface'
+    if (!drafts || !drafts.length && !(request.target.kind === 'container' && layoutContainer(project, request.target.container)
       && (input.preserveLayout || edits.some(edit => edit.type === 'surface.background.set')))) throw new Error('插入或重做没有可应用对象')
     if (request.source.kind === 'objects') for (const definition of request.source.definitions ?? []) {
       const existing = project.definitions[definition.id]
@@ -152,11 +160,16 @@ export function planContentApply(input: PlanContentApplyInput): ContentApplyPlan
       if (!existing) edits.push({ type: 'definition.set', definition })
     }
     const instances: ComponentInstance[] = []
-    const allocate = (draft: ContentObjectDraft): string => {
+    const allocate = (draft: ContentObjectDraft, parentLayout = nativeParent): string => {
       const id = input.createId()
-      const children = draft.children?.map(allocate)
-      const style = draft.style ? Object.fromEntries(Object.entries(draft.style).filter(([name]) => !isOuterGeometryStyle(name)).map(([name, value]) => [cssStyleName(name), value])) : undefined
+      const native = (flow || nativeParent) && isNativeFlowLayoutGroup(draft, definitions[draft.definitionId])
+      const children = draft.children?.map(child => allocate(child, native))
+      const style = draft.style ? Object.fromEntries(Object.entries(draft.style).filter(([name]) => !isOuterGeometryStyle(name)
+        || native && isNativeFlowContainerStyle(name) || (native || parentLayout) && isNativeFlowItemStyle(name)
+        || draft.viewportPinned && name === 'width' && draft.style![name] === '100%').map(([name, value]) => [cssStyleName(name), value])) : undefined
       instances.push({ id, definitionId: draft.definitionId, data: structuredClone(draft.data),
+        ...(draft.name !== undefined ? { name: draft.name } : {}), ...(draft.flowLayout ? { flowLayout: structuredClone(draft.flowLayout) } : {}),
+        ...(draft.viewportPinned !== undefined ? { viewportPinned: draft.viewportPinned } : {}),
         ...(draft.authoring ? { authoring: structuredClone(draft.authoring) } : {}),
         ...(style ? { style: structuredClone(style) } : {}), ...(draft.frame ? { frame: structuredClone(draft.frame) } : {}),
         ...(draft.implementationOverride ? { implementationOverride: structuredClone(draft.implementationOverride) } : {}),
@@ -164,12 +177,14 @@ export function planContentApply(input: PlanContentApplyInput): ContentApplyPlan
       insertedIds.push(id)
       return id
     }
-    const flow = container.kind === 'surface' && project.surfaces.find(surface => surface.id === container.surfaceId)?.kind === 'flow'
+    const flow = layoutContainer(project, container)?.kind === 'flow'
+    const parent = container.kind === 'instance' ? project.instances[container.instanceId] : undefined
+    const nativeParent = Boolean(parent && isNativeFlowLayoutGroup(parent, project.definitions[parent.definitionId]))
     const definitions = { ...project.definitions, ...(request.source.kind === 'objects'
       ? Object.fromEntries((request.source.definitions ?? []).map(definition => [definition.id, definition])) : {}) }
     for (const edit of edits) if (edit.type === 'definition.set') definitions[edit.definition.id] = edit.definition
     const region = contentPlacementRegion(request)
-    const placed = flow ? (region ? drafts.map(draft => draft.frame ? draft : { ...draft, frame: { ...region } }) : drafts)
+    const placed = nativeParent ? drafts : flow ? (region ? drafts.map(draft => draft.frame ? draft : { ...draft, frame: { ...region } }) : drafts)
       .map(draft => flowBodyDraft(draft, definitions))
       : region ? placeInRegion(project, container, drafts, region, diagnostics, request.intent === 'insert')
         : request.intent === 'insert' && !input.preserveLayout ? placeNewRoots(project, container, drafts, diagnostics, definitions) : drafts
@@ -201,21 +216,20 @@ export function planContentApply(input: PlanContentApplyInput): ContentApplyPlan
         { type: 'style.set', instanceId: target.id, path: [], value: Object.fromEntries(Object.entries(root.style ?? {})
           .filter(([name]) => !isOuterGeometryStyle(name)).map(([name, value]) => [cssStyleName(name), structuredClone(value)])) },
         { type: 'implementation.set', instanceId: target.id, implementation: root.implementationOverride ?? null })
-      const childIds = (root.children ?? []).map(allocate)
+      const childIds = (root.children ?? []).map(child => allocate(child, !target.frame && isNativeFlowLayoutGroup(root, definitions[root.definitionId])))
       if (childIds.length) edits.push({ type: 'instance.insert', container: { kind: 'instance', instanceId: target.id }, index: 0, instances, rootIds: childIds })
       insertedIds.unshift(target.id)
       // No frame edit: redo grants new internal content, not a move or resize of the selected object.
-    } else if (placed.length) edits.push({ type: 'instance.insert', container, index, instances, rootIds: placed.map(allocate) })
+    } else if (placed.length) edits.push({ type: 'instance.insert', container, index, instances, rootIds: placed.map(draft => allocate(draft)) })
   } else if (request.intent === 'style') {
     if (request.source.kind !== 'style') throw new Error('样式意图需要明确的样式字段')
-    const style: JsonObject = {}
-    for (const [name, value] of Object.entries(request.source.style)) {
-      if (isOuterGeometryStyle(name)) diagnostics.push({ level: 'info', code: 'frame-style-preserved', message: `外层 ${name} 由正式 frame 持有，样式修改未改变它。` })
-      else if (value !== null && typeof value !== 'string' && typeof value !== 'number') diagnostics.push({ level: 'warning', code: 'unsupported-css-value', message: `${name} 不是当前 CSS consumer 支持的标量样式值，已保留其余样式。`, repairable: true })
-      else style[cssStyleName(name)] = value
-    }
+    const style = request.source.style
     for (const instanceId of contentTargetIds(project, request)) {
-      const next = applyComponentStylePatch(project.instances[instanceId]?.style, style)
+      const instance = project.instances[instanceId]!
+      const next = applyComponentStylePatch(instance.style, style, (name, reason) => diagnostics.push(reason === 'geometry'
+        ? { level: 'info', code: 'frame-style-preserved', instanceId, message: `外层 ${name} 由正式 frame 持有，样式修改未改变它。` }
+        : { level: 'warning', code: 'unsupported-css-value', instanceId, message: `${name} 不是当前 CSS consumer 支持的标量样式值，已保留其余样式。`, repairable: true }),
+      componentFlowStylePolicy(project, instance, style))
       if (!equalComponentValue(project.instances[instanceId]?.style ?? {}, next)) edits.push({ type: 'style.set', instanceId, path: [], value: next })
     }
   } else if (request.source.kind === 'data') {

@@ -4,6 +4,65 @@ import type { ToolResult } from '../../shared/workbench/tools'
 export const MODEL_DELIVERY_BYTES = 24_000
 const utf8 = new TextEncoder()
 export const modelJsonBytes = (value: unknown): number => utf8.encode(JSON.stringify(value) ?? 'null').byteLength
+
+/** Count only far enough to decide a delivery boundary; never encode a discarded large body. */
+export function modelJsonFits(value: unknown, maxBytes: number): boolean {
+  let used = 0
+  const stack = new Set<object>()
+  const add = (count: number) => { used += count; return used <= maxBytes }
+  const text = (value: string) => {
+    if (!add(2)) return false
+    for (let index = 0; index < value.length; index++) {
+      const code = value.charCodeAt(index)
+      if (code === 34 || code === 92 || code === 8 || code === 9 || code === 10 || code === 12 || code === 13) { if (!add(2)) return false }
+      else if (code < 32) { if (!add(6)) return false }
+      else if (code < 128) { if (!add(1)) return false }
+      else if (code < 2048) { if (!add(2)) return false }
+      else if (code >= 0xD800 && code <= 0xDFFF) {
+        const next = value.charCodeAt(index + 1)
+        if (code <= 0xDBFF && next >= 0xDC00 && next <= 0xDFFF) { index++; if (!add(4)) return false }
+        else if (!add(6)) return false
+      } else if (!add(3)) return false
+    }
+    return true
+  }
+  const visit = (input: unknown, key: string, array = false, preparedValue = false): boolean => {
+    let item = input
+    if (!preparedValue && item && typeof item === 'object' && typeof (item as { toJSON?: unknown }).toJSON === 'function')
+      item = (item as { toJSON(key: string): unknown }).toJSON(key)
+    if (item instanceof Number || item instanceof String || item instanceof Boolean) item = item.valueOf()
+    if (item === null) return add(4)
+    if (typeof item === 'string') return text(item)
+    if (typeof item === 'number') return add(Number.isFinite(item) ? String(item).length : 4)
+    if (typeof item === 'boolean') return add(item ? 4 : 5)
+    if (typeof item === 'bigint') throw new TypeError('Do not know how to serialize a BigInt')
+    if (!item || typeof item !== 'object') return array || key === '' ? add(4) : true
+    if (stack.has(item)) throw new TypeError('Converting circular structure to JSON')
+    stack.add(item)
+    try {
+      if (!add(2)) return false
+      if (Array.isArray(item)) {
+        for (let index = 0; index < item.length; index++) {
+          if (index && !add(1) || !visit(item[index], String(index), true)) return false
+        }
+      } else {
+        let count = 0
+        for (const name of Object.keys(item)) {
+          const child = (item as Record<string, unknown>)[name]
+          if (child === undefined || typeof child === 'function' || typeof child === 'symbol') continue
+          // A toJSON returning undefined omits an object property, as stringify does.
+          const prepared = child && typeof child === 'object' && typeof (child as { toJSON?: unknown }).toJSON === 'function'
+            ? (child as { toJSON(key: string): unknown }).toJSON(name) : child
+          if (prepared === undefined || typeof prepared === 'function' || typeof prepared === 'symbol') continue
+          if (count++ && !add(1) || !text(name) || !add(1) || !visit(prepared, name, false, true)) return false
+        }
+      }
+      return true
+    } finally { stack.delete(item) }
+  }
+  if (value === undefined || typeof value === 'function' || typeof value === 'symbol') return maxBytes >= 4
+  return visit(value, '')
+}
 export type ModelValuePath = (string | number)[]
 export interface ModelValueOmission { path: ModelValuePath; type: string; total?: number; nextOffset?: number }
 export interface ModelValuePage {
@@ -18,14 +77,18 @@ export interface ModelValuePage {
 
 /** Largest exact UTF-16 range whose JSON encoding fits; never bisects a surrogate pair. */
 export function modelTextEnd(text: string, offset: number, end: number, maxBytes: number): number {
-  let low = offset, high = end
-  while (low < high) {
-    const middle = low + Math.ceil((high - low) / 2)
-    if (modelJsonBytes(text.slice(offset, middle)) <= maxBytes) low = middle
-    else high = middle - 1
+  let used = 2, index = offset
+  while (index < end) {
+    const code = text.charCodeAt(index), next = text.charCodeAt(index + 1)
+    const pair = code >= 0xD800 && code <= 0xDBFF && next >= 0xDC00 && next <= 0xDFFF
+    const width = pair ? 2 : 1
+    if (index + width > end) break
+    const bytes = pair ? 4 : code === 34 || code === 92 || code === 8 || code === 9 || code === 10 || code === 12 || code === 13 ? 2
+      : code < 32 || code >= 0xD800 && code <= 0xDFFF ? 6 : code < 128 ? 1 : code < 2048 ? 2 : 3
+    if (used + bytes > maxBytes) break
+    used += bytes; index += width
   }
-  if (low < text.length && low > offset && /[\uD800-\uDBFF]/.test(text[low - 1]!) && /[\uDC00-\uDFFF]/.test(text[low]!)) low--
-  return low
+  return index
 }
 
 /**
@@ -40,14 +103,14 @@ export function boundedModelValue(value: unknown, options: { maxBytes?: number; 
   const total = typeof value === 'string' || Array.isArray(value) ? value.length : keys?.length
   const offset = options.offset ?? 0
   const requestedEnd = total === undefined ? undefined : Math.min(total, offset + (options.limit ?? total))
-  const selected = typeof value === 'string' || Array.isArray(value) ? value.slice(offset, requestedEnd)
+  const selected = offset === 0 && requestedEnd === total ? value : typeof value === 'string' || Array.isArray(value) ? value.slice(offset, requestedEnd)
     : keys ? Object.fromEntries(keys.slice(offset, requestedEnd).map(key => [key, (value as Record<string, unknown>)[key]])) : value
   const range = ranged && total !== undefined ? { offset, total } : {}
   const full: ModelValuePage = { value: selected, complete: requestedEnd === undefined || requestedEnd === total, path, ...range,
     ...(requestedEnd !== undefined && requestedEnd < total! ? { nextOffset: requestedEnd } : {}) }
-  if (modelJsonBytes(full) <= maxBytes) return full
+  if (modelJsonFits(full, maxBytes)) return full
 
-  // The fixed metadata reserve is included in the final encoded-size check below.
+  // Reserve metadata within the available budget; the final encoded-size check remains exact.
   const make = (budget: number): ModelValuePage => {
     const omitted: ModelValueOmission[] = []
     const omit = (item: unknown, at: ModelValuePath, nextOffset?: number) => {
@@ -56,23 +119,26 @@ export function boundedModelValue(value: unknown, options: { maxBytes?: number; 
         ...(nextOffset !== undefined ? { nextOffset } : {}) })
     }
     const visit = (item: unknown, at: ModelValuePath, bytes: number, depth: number): unknown => {
-      if (modelJsonBytes(item) <= bytes) return item
+      if (modelJsonFits(item, bytes)) return item
       if (typeof item === 'string') {
-        const end = modelTextEnd(item, 0, item.length, Math.max(2, bytes - 180))
+        const end = modelTextEnd(item, 0, item.length, depth === 0 ? bytes : Math.max(2, bytes - 180))
         omit(item, at, end); return item.slice(0, end)
       }
       if (!item || typeof item !== 'object' || depth >= 16 || bytes < 320 || omitted.length >= 24) { omit(item, at); return null }
       const array = Array.isArray(item), result: unknown[] | Record<string, unknown> = array ? [] : {}
       // Short scalar facts survive even when an earlier content property is huge.
       // This is structural ordering, not a blacklist of author/user field names.
-      const names = array ? item.map((_, index) => index) : Object.keys(item).sort((left, right) => {
-        if (!options.prioritizeScalars) return 0
-        const small = (key: string) => {
+      const keys = array ? undefined : Object.keys(item)
+      const ordered = !keys || !options.prioritizeScalars ? keys : (() => {
+        const short: string[] = [], long: string[] = []
+        for (const key of keys) {
           const child = (item as Record<string, unknown>)[key]
-          return child === null || typeof child !== 'object' && (typeof child !== 'string' || modelJsonBytes(child) <= 512) ? 0 : 1
+          ;(child === null || typeof child !== 'object' && (typeof child !== 'string' || modelJsonFits(child, 512)) ? short : long).push(key)
         }
-        return small(left) - small(right)
-      })
+        return [...short, ...long]
+      })()
+      const names: Iterable<string | number> = array ? item.keys() : ordered!
+      const count = array ? item.length : ordered!.length
       let used = 2, taken = 0
       for (const key of names) {
         const keyBytes = array ? 0 : modelJsonBytes(String(key)) + 1
@@ -86,7 +152,7 @@ export function boundedModelValue(value: unknown, options: { maxBytes?: number; 
       }
       // A reordered public receipt is addressed by field path. Its object-key
       // cursor must not pretend the original insertion order was reordered too.
-      if (taken < names.length) omit(item, at, !array && options.prioritizeScalars ? undefined : taken + (at.length === path.length ? offset : 0))
+      if (taken < count) omit(item, at, !array && options.prioritizeScalars ? undefined : taken + (at.length === path.length ? offset : 0))
       return result
     }
     const preview = visit(selected, path, budget, 0)
@@ -95,7 +161,7 @@ export function boundedModelValue(value: unknown, options: { maxBytes?: number; 
     return { value: preview, complete: false, path, ...range,
       ...(rootOmission?.nextOffset !== undefined ? { nextOffset: rootOmission.nextOffset } : requestedEnd !== undefined && requestedEnd < total! ? { nextOffset: requestedEnd } : {}), omitted }
   }
-  let budget = Math.max(128, maxBytes - 1800), page = make(budget)
+  let budget = Math.max(128, maxBytes - Math.min(1800, Math.floor(maxBytes / 2))), page = make(budget)
   while (modelJsonBytes(page) > maxBytes && budget > 128) { budget = Math.max(128, Math.floor(budget / 2)); page = make(budget) }
   if (modelJsonBytes(page) > maxBytes) return { value: null, complete: false, path: [], omitted: [{ path: [], type: 'source' }] }
   return page
@@ -104,7 +170,7 @@ export function boundedModelValue(value: unknown, options: { maxBytes?: number; 
 export interface ModelDeliverySource { sourceId?: string; tool?: string; input?: Record<string, unknown> }
 /** Last public boundary for direct tools, MCP and historical results. Raw records are never mutated. */
 export function boundedToolResult(name: string, result: ToolResult, source?: ModelDeliverySource): ToolResult {
-  if (modelJsonBytes(result) <= MODEL_DELIVERY_BYTES) return result
+  if (modelJsonFits(result, MODEL_DELIVERY_BYTES)) return result
   const page = boundedModelValue(result, { maxBytes: MODEL_DELIVERY_BYTES - 1500, prioritizeScalars: true })
   const { value: preview, ...delivery } = page
   const record = result.kind === 'read' && result.data && typeof result.data === 'object' ? result.data as Record<string, unknown> : undefined

@@ -144,8 +144,8 @@
           "flowLayout": {
             "additionalProperties": false,
             "properties": {
-              "paperBackgroundColor": {
-                "type": "string"
+              "edgeToEdge": {
+                "type": "boolean"
               },
               "readingWidth": {
                 "$ref": "#/$defs/__schema3",

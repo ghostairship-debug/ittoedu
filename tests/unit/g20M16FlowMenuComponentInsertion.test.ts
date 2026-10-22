@@ -1,4 +1,5 @@
 import { act, cleanup, renderHook } from '@testing-library/react'
+import { createTestProjectFromLegacy } from '../helpers/glxWorkFixture'
 import { TextEncoder as NodeTextEncoder } from 'node:util'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { createV10StoreHost, deferred } from '../helpers/courseV10StoreHost'
@@ -19,12 +20,12 @@ afterEach(() => { cleanup(); for (const action of dispose.splice(0)) action(); v
 
 it('inserts an API 5 library example into the captured nested Flow slot with private resources and one History entry after a late choice', async () => {
   const text = (id: string) => ({ id, definitionId: TEXT_DEFINITION.id, data: JSON.parse(JSON.stringify(createTextData(id))) })
-  const project: CourseProjectV10 = { schemaVersion: 10, id: 'original-flow', revision: 0, title: '讲义',
+  const project: CourseProjectV10 = createTestProjectFromLegacy({ schemaVersion: 10, id: 'original-flow', revision: 0, title: '讲义',
     definitions: { [TEXT_DEFINITION.id]: TEXT_DEFINITION, [DOCUMENT_BLOCK_DEFINITION.id]: DOCUMENT_BLOCK_DEFINITION },
     instances: { before: text('before'), after: text('after'), section: { id: 'section', definitionId: DOCUMENT_BLOCK_DEFINITION.id,
       data: documentBlockData({ id: 'section', type: 'section', title: { inlines: [] }, collapsedByDefault: false, blocks: [] }), childIds: ['before', 'after'] } },
     surfaces: [{ id: 'flow', kind: 'flow', title: '正文', childIds: ['section'] }], global: { underlay: [], overlay: [] },
-    assets: { logo: { id: 'logo', path: 'assets/logo.svg', mimeType: 'image/svg+xml' } } }
+    assets: { logo: { id: 'logo', path: 'assets/logo.svg', mimeType: 'image/svg+xml' } } })
   const resources = { assets: { logo: new TextEncoder().encode('<svg>original</svg>') },
     components: { files: { 'main.js': new TextEncoder().encode('export default 99') } } }
   const h = await createV10StoreHost(project, resources)
@@ -37,7 +38,7 @@ it('inserts an API 5 library example into the captured nested Flow slot with pri
   const target = captureFlowMenuTarget(h.kernel)
   const command = { kind: 'component' as const, destination: 'document' as const, label: '组件' }
   const options = resolveFlowMenuInsertionOptions(target, command, { width: 420, height: 240 })
-  const entry: ComponentLibraryEntry = { schemaVersion: 1, id: 'com.example.menu-flow', title: '视觉卡片',
+  const entry: ComponentLibraryEntry = { schemaVersion: 2, id: 'com.example.menu-flow', title: '视觉卡片',
     definitions: { visual: { id: 'visual', role: 'content', implementation: { kind: 'source', language: 'javascript',
       workspace: { ownerId: 'files', entry: 'main.js' }, resourceBindings: { logo: 'logo' } } } },
     example: { rootIds: ['visual'], instances: { visual: { id: 'visual', definitionId: 'visual',
@@ -50,7 +51,7 @@ it('inserts an API 5 library example into the captured nested Flow slot with pri
     } } } }
   const catalog: AvailableComponentCatalogPackage = { packageId: entry.id, version: '1.0.0', name: entry.title, description: '当前组件',
     sourceId: 'built-in', sourceLabel: '内置', sourceTrust: 'built-in', subject: [], schoolStage: [], tags: [], packagePath: 'card.h5component',
-    thumbnailPath: 'card.png', sha256: '0'.repeat(64), componentSchemaVersion: 1, runtimeApiVersion: 5, renderMode: 'dom', supportedScopes: ['scene'],
+    thumbnailPath: 'card.png', sha256: '0'.repeat(64), componentSchemaVersion: 2, runtimeApiVersion: 5, renderMode: 'dom', supportedScopes: ['scene'],
     quality: 'experimental', maintainer: 'fixture', verifiedCases: [] }
   const choosing = deferred(), read = vi.fn(async () => { await choosing.promise; return { bytes: exportComponentLibraryArchive(entry), sha256: catalog.sha256 } })
   const ports: ComponentLibraryPorts = { kernel: h.kernel, desktopAvailable: () => false,
@@ -83,7 +84,7 @@ it('inserts an API 5 library example into the captured nested Flow slot with pri
   expect(inserted?.ok).toBe(true)
   const id = inserted!.layerItemIds![0], model = h.model(), instance = model.project.instances[id]
   expect(model.project.instances.section.childIds).toEqual(['before', id, 'after'])
-  expect(model.project.surfaces[0].childIds).toEqual(['section'])
+  expect(model.project.instances[model.project.rootIds[0]].childIds).toEqual(['section'])
   expect(instance.data).toEqual(entry.example.instances.visual.data)
   expect(instance.flowLayout).toEqual(entry.example.instances.visual.flowLayout)
   expect(instance.flowPlacement).toBeUndefined()

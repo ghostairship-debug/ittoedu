@@ -1,3 +1,4 @@
+import { createTestProjectFromLegacy } from '../helpers/glxWorkFixture'
 import { expect, it } from 'vitest'
 import { componentRuleEdits, interactionBehavior } from '../../src/renderer/interactions/componentInteractionAuthoring'
 import type { ComponentDefinition, CourseProjectV10 } from '../../src/shared/contracts/component-platform/project'
@@ -8,7 +9,7 @@ it('reuses the first behavior of the selected target through alias and source pr
     { kind: 'source' as const, language: 'javascript' as const, source: 'export default {}' }]) {
     const definition: ComponentDefinition = { id: 'library-rebound-definition', role: 'behavior', implementation,
       professionalBuiltinKey: 'guoling.interactions' }
-    const project: CourseProjectV10 = { schemaVersion: 10, id: 'fixture', title: 'Fixture', revision: 0,
+    const project: CourseProjectV10 = createTestProjectFromLegacy({ schemaVersion: 10, id: 'fixture', title: 'Fixture', revision: 0,
       definitions: { [definition.id]: definition, 'guoling.interactions': { id: 'guoling.interactions', role: 'behavior',
         implementation: { kind: 'builtin', key: 'unrelated.program' } } },
       instances: {
@@ -19,7 +20,7 @@ it('reuses the first behavior of the selected target through alias and source pr
       },
       surfaces: [{ id: 'selected-page', kind: 'slide', title: 'Selected', childIds: ['selected', 'later', 'unrelated'] },
         { id: 'other-page', kind: 'slide', title: 'Other', childIds: ['other'] }],
-      assets: {}, global: { underlay: [], overlay: [] } }
+      assets: {}, global: { underlay: [], overlay: [] } })
     const before = structuredClone(project)
     expect(interactionBehavior(project, target)).toBe(project.instances.selected)
     expect(componentRuleEdits(project, target, [])).toEqual([{ type: 'data.set', instanceId: 'selected', path: ['rules'], value: [] }])

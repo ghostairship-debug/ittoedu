@@ -1,4 +1,5 @@
 // @vitest-environment node
+import { componentSurfaces } from '../../src/shared/contracts/component-platform/project'
 import { afterEach, expect, it } from 'vitest'
 import { createHash, randomUUID } from 'node:crypto'
 import { readFileSync, writeFileSync } from 'node:fs'
@@ -126,7 +127,7 @@ it.each([false, true])('reopens a V10 file and applies its prior ready image wit
     if (turns === (frozenInitially ? 5 : 6)) {
       try {
         await expect(gateway.readImageResource(resumedRunId, reopenedDocumentId, oldResource)).rejects.toThrow()
-        const location = (model as Extract<typeof model, { kind: 'course-v10' }>).project.surfaces.find(value => value.kind === 'slide')!
+        const location = componentSurfaces((model as Extract<typeof model, { kind: 'course-v10' }>).project).find(value => value.kind === 'slide')!
         const owner = await gateway.issueTarget(resumedRunId, reopenedDocumentId, { kind: 'course-surface', surfaceId: location.id })
         yield done(request, [{ name: 'media.insert', input: { target: owner, resource: newResource } }]); return
       } catch (error) { providerError = error instanceof Error ? error.message : String(error); throw error }

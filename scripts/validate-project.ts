@@ -3,7 +3,8 @@ import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { unzipSync, strFromU8 } from 'fflate'
 import { CourseV10Driver } from '../src/core/drivers/CourseV10Driver'
-import { courseProjectV10Schema } from '../src/shared/contracts/component-platform/schema'
+import { courseProjectV11Schema, legacyCourseProjectV10Schema } from '../src/shared/contracts/component-platform/schema'
+import { componentSurfaces } from '../src/shared/contracts/component-platform/project'
 
 export const COURSE_PROJECT_VALIDATION_REPORT_VERSION = 2 as const
 export type CourseProjectValidationStatus = 'valid' | 'invalid' | 'unreadable'
@@ -13,7 +14,7 @@ export interface CourseProjectValidationReport {
   input: { filename: string }
   schema: { valid: boolean; schemaVersion: number | null; issues: Array<{ path: Array<string | number>; code: string; message: string }> }
   project: null | { id: string; title: string; revision: number; surfaceCount: number; instanceCount: number; assetCount: number; componentPackageCount: number }
-  protocols: { project: 10; publishedCourse: 3; component: 5 }
+  protocols: { project: 11; publishedCourse: 4; component: 5 }
   summary: { error: number; warning: number; info: number; total: number; canOpen: boolean }
   fatal: null | { code: string; title: string; message: string }
 }
@@ -32,7 +33,7 @@ export function validateCourseProjectArchiveBytes(bytes: Uint8Array, filename: s
   const report: CourseProjectValidationReport = {
     reportVersion: 2, status: 'unreadable', input: { filename },
     schema: { valid: false, schemaVersion: null, issues: [] }, project: null,
-    protocols: { project: 10, publishedCourse: 3, component: 5 },
+    protocols: { project: 11, publishedCourse: 4, component: 5 },
     summary: { error: 1, warning: 0, info: 0, total: 1, canOpen: false }, fatal: null,
   }
   let raw: unknown
@@ -45,12 +46,12 @@ export function validateCourseProjectArchiveBytes(bytes: Uint8Array, filename: s
     return report
   }
   if (raw && typeof raw === 'object' && 'schemaVersion' in raw && typeof raw.schemaVersion === 'number') report.schema.schemaVersion = raw.schemaVersion
-  if (report.schema.schemaVersion !== 10) {
+  if (report.schema.schemaVersion !== 10 && report.schema.schemaVersion !== 11) {
     report.status = 'invalid'
-    report.fatal = { code: 'unsupported-project-version', title: '工程版本不受支持', message: '此入口仅支持独立 Project V10；旧工程原件未改变。' }
+    report.fatal = { code: 'unsupported-project-version', title: '工程版本不受支持', message: '此入口支持 Project 11 及现行 V10 的单次读入转换；旧工程原件未改变。' }
     return report
   }
-  const parsed = courseProjectV10Schema.safeParse(raw)
+  const parsed = report.schema.schemaVersion === 10 ? legacyCourseProjectV10Schema.safeParse(raw) : courseProjectV11Schema.safeParse(raw)
   if (!parsed.success) {
     report.status = 'invalid'
     report.schema.issues = parsed.error.issues.map(issue => ({
@@ -66,7 +67,7 @@ export function validateCourseProjectArchiveBytes(bytes: Uint8Array, filename: s
     driver.validate(model)
     if (model.kind !== 'course-v10') throw new Error('工程类型不正确')
     report.project = { id: model.project.id, title: model.project.title, revision: model.project.revision,
-      surfaceCount: model.project.surfaces.length, instanceCount: Object.keys(model.project.instances).length,
+      surfaceCount: componentSurfaces(model.project).length, instanceCount: Object.keys(model.project.instances).length,
       assetCount: Object.keys(model.project.assets).length, componentPackageCount: Object.keys(model.resources.components).length }
     report.status = 'valid'
     report.summary = { error: 0, warning: 0, info: 0, total: 0, canOpen: true }

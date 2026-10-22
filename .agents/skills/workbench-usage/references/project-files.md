@@ -9,10 +9,13 @@
 | 文件视图 | 内容与作用 |
 |---|---|
 | `pages` | 页面目录与顺序；新增页面的目标 |
+| `roots` | 作品根与入口的当前目录；包含完整程序根 |
+| `entry.html` | 当前完整 HTML 程序入口；与 roots 下相应对象指向同一正式实例 |
 | `theme.css` | 整课主题样式 |
 | `pages/01-导入.json` | 页面结构、表面类型与人工位置；可向该页插入内容或明确重做 |
 | 页面对应的 `.html` | 软件能提供 HTML 投影时的当前布局内容 |
 | 页面目录里的 `.data.json`、`.style.json` | 单个对象的正式专业数据与样式 |
+| 已列出的 `.container.json` | 该实例的 Slide、Flow 或 Spatial 容器配置及真实子对象；容器可嵌套 |
 | 页面对应的 `.body.html`、`.body.md` | Flow 连续正文；保留专业语义、浮层和人工位置 |
 | 页面对应的 `.spatial.json` | Spatial 镜头、停靠点、路径和对象引用 |
 | `components/` 中的 `.definition.json`、`.view.ts/js` 或 `.source/…` | 共享定义及其源码；源码修改作用于未独立实现的实例 |
@@ -22,6 +25,8 @@
 | 已列出的素材路径 | 工程内图片、声音和其他资源 |
 
 上表路径只是形状示例，名称和序号由软件从当前工程生成，不手工登记或推算。
+
+完整 HTML 程序作品可在同一工程使用 `project.apply {path:"entry.html",intent:"program.set",content:"完整 HTML"}`，或以 `from` 提交已授权来源及其相对资源闭包。软件建立或更新真实 Source 根和作品入口，按实际运行视口显示；已有内容根保留，仅全新未动过的工厂空白页可被替换。已有程序沿 `entry.html`、返回的 `.content.html`、`.data.json` 或源码路径继续修改，不创建第二份作品。三类容器仍可独立作为根或嵌入其他实例，进入容器编辑不会重建作品。
 
 长文本分页规则不同：`file.read` 将回执 `nextCursor` 传给 `cursor`；`project.read` 将回执 `nextOffset` 传给 `offset`，可设 `limit`。工程续页读取固定来源；省略offset新读当前稿，`refresh:true`可在指定offset局部刷新当前稿，按回执basis/revision/currentRevision区分。`project.read {path,query:"字面内容"}`直接搜索当前未保存文件，返回命中附近、行列、offset和版本；此时limit为命中数。`full:true`请求完整来源，超过实际交付容量仍返回 `complete:false/nextOffset`，可续读全部，不表示文件受大小限制或模型已读完整内容。不要混用游标和偏移。写结果只给最小提交/目标/版本事实，已提交 Source 正文不默认回显；`complete:true`才表示所附短入口全文实际交付，元数据不升级未读人工值。内置大结果按 context/programmatic 原引用续读；外部 MCP 大结果可用回执的 `operation.read {ticket,path,offset,limit}` 读取同连接当前授权范围的冻结原值，不重放原调用。
 

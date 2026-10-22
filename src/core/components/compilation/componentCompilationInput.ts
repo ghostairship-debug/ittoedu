@@ -57,3 +57,51 @@ export function componentCompilationInput(
   const rootDefinitionId = Object.values(project.definitions).find(definition => definition.implementation === implementation)?.id
   return { ...source, dependencies, ...(rootDefinitionId ? { rootDefinitionId } : {}) }
 }
+
+/** A World owns this reader for its immutable author/resource inputs. It checks
+ * only the source owners actually named by the input before decoding files.
+ * The general componentCompilationInput entry point remains a fresh snapshot. */
+export function createComponentCompilationInputReader() {
+  type Entry = { input: ComponentCompilationInput; implementation: string; source?: string; rootDefinitionId?: string;
+    rootDefinitions?: WeakRef<CourseProjectV10['definitions']>; owners: Array<{ id: string; definition: CourseProjectV10['definitions'][string] | undefined;
+      version?: string; implementation: string; source?: string;
+      files: Readonly<Record<string, Uint8Array>> | undefined; entries: Array<[string, Uint8Array]> }> }
+  const cached = new WeakMap<SourceImplementation, Entry>()
+  const definitionAt = (project: CourseProjectV10, id: string) => Object.hasOwn(project.definitions, id) ? project.definitions[id] : undefined
+  const ownerFiles = (implementation: ComponentImplementation | undefined, resources: DocumentResources | undefined) =>
+    implementation?.kind === 'source' && implementation.workspace ? resources?.components[implementation.workspace.ownerId] : undefined
+  const sameFiles = (owner: Entry['owners'][number], files: Readonly<Record<string, Uint8Array>> | undefined) =>
+    owner.files === files && owner.entries.length === Object.keys(files ?? {}).length
+      && owner.entries.every(([name, bytes]) => files?.[name] === bytes)
+  const metadataFor = (value: ComponentImplementation | undefined) => value?.kind === 'source'
+    ? JSON.stringify([value.kind, value.language, value.workspace, value.dependencies, value.moduleBindings, value.resourceBindings])
+    : JSON.stringify(value) ?? ''
+  return (project: CourseProjectV10, implementation: SourceImplementation, resources?: DocumentResources): ComponentCompilationInput => {
+    // Source text is already a string; keep it out of the repeatedly serialized
+    // metadata, while observing edits to maps or the declared workspace.
+    const metadata = metadataFor(implementation)
+    const previous = cached.get(implementation)
+    if (previous?.implementation === metadata && previous.source === implementation.source
+      && (previous.rootDefinitionId ? definitionAt(project, previous.rootDefinitionId)?.implementation === implementation : previous.rootDefinitions?.deref() === project.definitions)
+      && previous.owners.every(owner => {
+        const definition = owner.id === '' ? undefined : definitionAt(project, owner.id)
+        const value = owner.id === '' ? implementation : definition?.implementation
+        return definition === owner.definition && definition?.version === owner.version
+          && metadataFor(value) === owner.implementation && (value?.kind === 'source' ? value.source : undefined) === owner.source
+          && sameFiles(owner, ownerFiles(value, resources))
+      })) return previous.input
+    const input = componentCompilationInput(project, implementation, resources)
+    const ids = new Set(['', ...Object.keys(input.dependencies ?? {}), ...Object.values(input.moduleBindings ?? {})])
+    for (const dependency of Object.values(input.dependencies ?? {})) for (const id of Object.values(dependency.moduleBindings ?? {})) ids.add(id)
+    const owners = [...ids].map(id => {
+      const definition = id === '' ? undefined : definitionAt(project, id)
+      const value = id === '' ? implementation : definition?.implementation
+      const files = ownerFiles(value, resources)
+      return { id, definition, version: definition?.version, implementation: metadataFor(value), source: value?.kind === 'source' ? value.source : undefined,
+        files, entries: Object.entries(files ?? {}) }
+    })
+    cached.set(implementation, { input, implementation: metadata, source: implementation.source,
+      rootDefinitionId: input.rootDefinitionId, rootDefinitions: input.rootDefinitionId ? undefined : new WeakRef(project.definitions), owners })
+    return input
+  }
+}

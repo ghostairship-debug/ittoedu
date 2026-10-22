@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "semanticVersion": "2a4c0a05fa39a7d498cfd92ad416985652b1925a3f62ece2e01aed710f85b5a8",
+  "semanticVersion": "fcd1d86f7978fc31dd55917ee686f73675c02cadbcb62a892ef38f8cc4179f9a",
   "entries": [
     {
       "id": "artifact.save",
@@ -16,7 +16,9 @@
         "flow:instance",
         "spatial:surface",
         "spatial:global",
-        "spatial:instance"
+        "spatial:instance",
+        "program:global",
+        "program:instance"
       ],
       "carriers": [
         "component"
@@ -37,7 +39,9 @@
         "flow:instance",
         "spatial:surface",
         "spatial:global",
-        "spatial:instance"
+        "spatial:instance",
+        "program:global",
+        "program:instance"
       ],
       "carriers": [
         "component"
@@ -58,7 +62,9 @@
         "flow:instance",
         "spatial:surface",
         "spatial:global",
-        "spatial:instance"
+        "spatial:instance",
+        "program:global",
+        "program:instance"
       ],
       "carriers": [
         "component"
@@ -79,7 +85,9 @@
         "flow:instance",
         "spatial:surface",
         "spatial:global",
-        "spatial:instance"
+        "spatial:instance",
+        "program:global",
+        "program:instance"
       ],
       "carriers": [
         "component"
@@ -100,7 +108,9 @@
         "flow:instance",
         "spatial:surface",
         "spatial:global",
-        "spatial:instance"
+        "spatial:instance",
+        "program:global",
+        "program:instance"
       ],
       "carriers": [
         "component"
@@ -121,7 +131,9 @@
         "flow:instance",
         "spatial:surface",
         "spatial:global",
-        "spatial:instance"
+        "spatial:instance",
+        "program:global",
+        "program:instance"
       ],
       "carriers": [
         "component"
@@ -142,7 +154,9 @@
         "flow:instance",
         "spatial:surface",
         "spatial:global",
-        "spatial:instance"
+        "spatial:instance",
+        "program:global",
+        "program:instance"
       ],
       "carriers": [
         "component"
@@ -163,7 +177,9 @@
         "flow:instance",
         "spatial:surface",
         "spatial:global",
-        "spatial:instance"
+        "spatial:instance",
+        "program:global",
+        "program:instance"
       ],
       "carriers": [
         "component"
@@ -184,14 +200,16 @@
         "flow:instance",
         "spatial:surface",
         "spatial:global",
-        "spatial:instance"
+        "spatial:instance",
+        "program:global",
+        "program:instance"
       ],
       "carriers": [
         "component"
       ],
-      "summary": "统一组件源码运行接口、生命周期和实际宿主端口；作者数据使用 Project V10。",
+      "summary": "统一组件源码运行接口、生命周期和实际宿主端口；作者数据使用 Project V11。",
       "dependencies": [
-        "course-project-v10"
+        "course-project-v11"
       ]
     },
     {
@@ -208,7 +226,9 @@
         "flow:instance",
         "spatial:surface",
         "spatial:global",
-        "spatial:instance"
+        "spatial:instance",
+        "program:global",
+        "program:instance"
       ],
       "carriers": [
         "component"
@@ -234,7 +254,9 @@
         "flow:instance",
         "spatial:surface",
         "spatial:global",
-        "spatial:instance"
+        "spatial:instance",
+        "program:global",
+        "program:instance"
       ],
       "carriers": [
         "component"
@@ -242,10 +264,10 @@
       "summary": "运行内置 Python 计算，无需安装 WSL；已包含 NumPy、pandas、Matplotlib 和自动中文绘图字体。sources 点名本任务获授权的文件路径或材料来源，由软件冻结字节与版本，输入文件位于 /job/input。当前目录与成果目录均为 /job/output，/job/work 为同目录别名；GUOLING_INPUT_DIR、GUOLING_OUTPUT_DIR 也提供位置。可用 outputNames 点名成果，省略时软件发现实际产物；坏辅助文件逐项诊断，ready 仅表示列出的成果可用，未保存到用户文件。只执行 Python 源码，无宿主文件、网络、OS 子进程、动态 pip 安装或未预装的原生扩展；缺库时明确报告。"
     },
     {
-      "id": "course-project-v10",
+      "id": "course-project-v11",
       "kind": "protocol",
-      "label": "course-project-v10",
-      "path": "schemas/course-project-v10.json",
+      "label": "course-project-v11",
+      "path": "schemas/course-project-v11.json",
       "scopes": [
         "slide:surface",
         "slide:global",
@@ -255,12 +277,14 @@
         "flow:instance",
         "spatial:surface",
         "spatial:global",
-        "spatial:instance"
+        "spatial:instance",
+        "program:global",
+        "program:instance"
       ],
       "carriers": [
         "component"
       ],
-      "summary": "正式 Project V10 作者数据结构；修改通过当前工程工具和文档事务提交。"
+      "summary": "正式 Project V11 作者数据结构；rootIds/entry 和实例容器共同表达作品，修改通过当前工程工具和文档事务提交。"
     },
     {
       "id": "course.configure",
@@ -276,7 +300,9 @@
         "flow:instance",
         "spatial:surface",
         "spatial:global",
-        "spatial:instance"
+        "spatial:instance",
+        "program:global",
+        "program:instance"
       ],
       "carriers": [
         "component"
@@ -297,7 +323,9 @@
         "flow:instance",
         "spatial:surface",
         "spatial:global",
-        "spatial:instance"
+        "spatial:instance",
+        "program:global",
+        "program:instance"
       ],
       "carriers": [
         "component"
@@ -318,7 +346,9 @@
         "flow:instance",
         "spatial:surface",
         "spatial:global",
-        "spatial:instance"
+        "spatial:instance",
+        "program:global",
+        "program:instance"
       ],
       "carriers": [
         "component"
@@ -339,7 +369,9 @@
         "flow:instance",
         "spatial:surface",
         "spatial:global",
-        "spatial:instance"
+        "spatial:instance",
+        "program:global",
+        "program:instance"
       ],
       "carriers": [
         "component"
@@ -360,7 +392,9 @@
         "flow:instance",
         "spatial:surface",
         "spatial:global",
-        "spatial:instance"
+        "spatial:instance",
+        "program:global",
+        "program:instance"
       ],
       "carriers": [
         "component"
@@ -381,7 +415,9 @@
         "flow:instance",
         "spatial:surface",
         "spatial:global",
-        "spatial:instance"
+        "spatial:instance",
+        "program:global",
+        "program:instance"
       ],
       "carriers": [
         "component"
@@ -402,7 +438,9 @@
         "flow:instance",
         "spatial:surface",
         "spatial:global",
-        "spatial:instance"
+        "spatial:instance",
+        "program:global",
+        "program:instance"
       ],
       "carriers": [
         "component"
@@ -423,7 +461,9 @@
         "flow:instance",
         "spatial:surface",
         "spatial:global",
-        "spatial:instance"
+        "spatial:instance",
+        "program:global",
+        "program:instance"
       ],
       "carriers": [
         "component"
@@ -444,7 +484,9 @@
         "flow:instance",
         "spatial:surface",
         "spatial:global",
-        "spatial:instance"
+        "spatial:instance",
+        "program:global",
+        "program:instance"
       ],
       "carriers": [
         "component"
@@ -465,7 +507,9 @@
         "flow:instance",
         "spatial:surface",
         "spatial:global",
-        "spatial:instance"
+        "spatial:instance",
+        "program:global",
+        "program:instance"
       ],
       "carriers": [
         "component"
@@ -486,7 +530,9 @@
         "flow:instance",
         "spatial:surface",
         "spatial:global",
-        "spatial:instance"
+        "spatial:instance",
+        "program:global",
+        "program:instance"
       ],
       "carriers": [
         "component"
@@ -507,7 +553,9 @@
         "flow:instance",
         "spatial:surface",
         "spatial:global",
-        "spatial:instance"
+        "spatial:instance",
+        "program:global",
+        "program:instance"
       ],
       "carriers": [
         "component"
@@ -528,7 +576,9 @@
         "flow:instance",
         "spatial:surface",
         "spatial:global",
-        "spatial:instance"
+        "spatial:instance",
+        "program:global",
+        "program:instance"
       ],
       "carriers": [
         "component"
@@ -549,7 +599,9 @@
         "flow:instance",
         "spatial:surface",
         "spatial:global",
-        "spatial:instance"
+        "spatial:instance",
+        "program:global",
+        "program:instance"
       ],
       "carriers": [
         "component"
@@ -570,7 +622,9 @@
         "flow:instance",
         "spatial:surface",
         "spatial:global",
-        "spatial:instance"
+        "spatial:instance",
+        "program:global",
+        "program:instance"
       ],
       "carriers": [
         "component"
@@ -591,7 +645,9 @@
         "flow:instance",
         "spatial:surface",
         "spatial:global",
-        "spatial:instance"
+        "spatial:instance",
+        "program:global",
+        "program:instance"
       ],
       "carriers": [
         "component"
@@ -612,7 +668,9 @@
         "flow:instance",
         "spatial:surface",
         "spatial:global",
-        "spatial:instance"
+        "spatial:instance",
+        "program:global",
+        "program:instance"
       ],
       "carriers": [
         "component"
@@ -633,7 +691,9 @@
         "flow:instance",
         "spatial:surface",
         "spatial:global",
-        "spatial:instance"
+        "spatial:instance",
+        "program:global",
+        "program:instance"
       ],
       "carriers": [
         "component"
@@ -654,7 +714,9 @@
         "flow:instance",
         "spatial:surface",
         "spatial:global",
-        "spatial:instance"
+        "spatial:instance",
+        "program:global",
+        "program:instance"
       ],
       "carriers": [
         "component"
@@ -675,7 +737,9 @@
         "flow:instance",
         "spatial:surface",
         "spatial:global",
-        "spatial:instance"
+        "spatial:instance",
+        "program:global",
+        "program:instance"
       ],
       "carriers": [
         "component"
@@ -696,7 +760,9 @@
         "flow:instance",
         "spatial:surface",
         "spatial:global",
-        "spatial:instance"
+        "spatial:instance",
+        "program:global",
+        "program:instance"
       ],
       "carriers": [
         "component"
@@ -717,7 +783,9 @@
         "flow:instance",
         "spatial:surface",
         "spatial:global",
-        "spatial:instance"
+        "spatial:instance",
+        "program:global",
+        "program:instance"
       ],
       "carriers": [
         "component"
@@ -738,7 +806,9 @@
         "flow:instance",
         "spatial:surface",
         "spatial:global",
-        "spatial:instance"
+        "spatial:instance",
+        "program:global",
+        "program:instance"
       ],
       "carriers": [
         "component"
@@ -759,7 +829,9 @@
         "flow:instance",
         "spatial:surface",
         "spatial:global",
-        "spatial:instance"
+        "spatial:instance",
+        "program:global",
+        "program:instance"
       ],
       "carriers": [
         "component"
@@ -780,7 +852,9 @@
         "flow:instance",
         "spatial:surface",
         "spatial:global",
-        "spatial:instance"
+        "spatial:instance",
+        "program:global",
+        "program:instance"
       ],
       "carriers": [
         "component"
@@ -801,7 +875,9 @@
         "flow:instance",
         "spatial:surface",
         "spatial:global",
-        "spatial:instance"
+        "spatial:instance",
+        "program:global",
+        "program:instance"
       ],
       "carriers": [
         "component"
@@ -822,7 +898,9 @@
         "flow:instance",
         "spatial:surface",
         "spatial:global",
-        "spatial:instance"
+        "spatial:instance",
+        "program:global",
+        "program:instance"
       ],
       "carriers": [
         "component"
@@ -843,7 +921,9 @@
         "flow:instance",
         "spatial:surface",
         "spatial:global",
-        "spatial:instance"
+        "spatial:instance",
+        "program:global",
+        "program:instance"
       ],
       "carriers": [
         "component"
@@ -864,7 +944,9 @@
         "flow:instance",
         "spatial:surface",
         "spatial:global",
-        "spatial:instance"
+        "spatial:instance",
+        "program:global",
+        "program:instance"
       ],
       "carriers": [
         "component"
@@ -885,7 +967,9 @@
         "flow:instance",
         "spatial:surface",
         "spatial:global",
-        "spatial:instance"
+        "spatial:instance",
+        "program:global",
+        "program:instance"
       ],
       "carriers": [
         "component"
@@ -906,7 +990,9 @@
         "flow:instance",
         "spatial:surface",
         "spatial:global",
-        "spatial:instance"
+        "spatial:instance",
+        "program:global",
+        "program:instance"
       ],
       "carriers": [
         "component"
@@ -927,7 +1013,9 @@
         "flow:instance",
         "spatial:surface",
         "spatial:global",
-        "spatial:instance"
+        "spatial:instance",
+        "program:global",
+        "program:instance"
       ],
       "carriers": [
         "component"
@@ -948,7 +1036,9 @@
         "flow:instance",
         "spatial:surface",
         "spatial:global",
-        "spatial:instance"
+        "spatial:instance",
+        "program:global",
+        "program:instance"
       ],
       "carriers": [
         "component"
@@ -969,7 +1059,9 @@
         "flow:instance",
         "spatial:surface",
         "spatial:global",
-        "spatial:instance"
+        "spatial:instance",
+        "program:global",
+        "program:instance"
       ],
       "carriers": [
         "component"
@@ -990,7 +1082,9 @@
         "flow:instance",
         "spatial:surface",
         "spatial:global",
-        "spatial:instance"
+        "spatial:instance",
+        "program:global",
+        "program:instance"
       ],
       "carriers": [
         "component"
@@ -1011,7 +1105,9 @@
         "flow:instance",
         "spatial:surface",
         "spatial:global",
-        "spatial:instance"
+        "spatial:instance",
+        "program:global",
+        "program:instance"
       ],
       "carriers": [
         "component"
@@ -1032,7 +1128,9 @@
         "flow:instance",
         "spatial:surface",
         "spatial:global",
-        "spatial:instance"
+        "spatial:instance",
+        "program:global",
+        "program:instance"
       ],
       "carriers": [
         "component"
@@ -1053,7 +1151,9 @@
         "flow:instance",
         "spatial:surface",
         "spatial:global",
-        "spatial:instance"
+        "spatial:instance",
+        "program:global",
+        "program:instance"
       ],
       "carriers": [
         "component"
@@ -1074,7 +1174,9 @@
         "flow:instance",
         "spatial:surface",
         "spatial:global",
-        "spatial:instance"
+        "spatial:instance",
+        "program:global",
+        "program:instance"
       ],
       "carriers": [
         "component"
@@ -1095,7 +1197,9 @@
         "flow:instance",
         "spatial:surface",
         "spatial:global",
-        "spatial:instance"
+        "spatial:instance",
+        "program:global",
+        "program:instance"
       ],
       "carriers": [
         "component"
@@ -1116,7 +1220,9 @@
         "flow:instance",
         "spatial:surface",
         "spatial:global",
-        "spatial:instance"
+        "spatial:instance",
+        "program:global",
+        "program:instance"
       ],
       "carriers": [
         "component"
@@ -1137,7 +1243,9 @@
         "flow:instance",
         "spatial:surface",
         "spatial:global",
-        "spatial:instance"
+        "spatial:instance",
+        "program:global",
+        "program:instance"
       ],
       "carriers": [
         "component"
@@ -1158,7 +1266,9 @@
         "flow:instance",
         "spatial:surface",
         "spatial:global",
-        "spatial:instance"
+        "spatial:instance",
+        "program:global",
+        "program:instance"
       ],
       "carriers": [
         "component"
@@ -1179,7 +1289,9 @@
         "flow:instance",
         "spatial:surface",
         "spatial:global",
-        "spatial:instance"
+        "spatial:instance",
+        "program:global",
+        "program:instance"
       ],
       "carriers": [
         "component"
@@ -1200,7 +1312,9 @@
         "flow:instance",
         "spatial:surface",
         "spatial:global",
-        "spatial:instance"
+        "spatial:instance",
+        "program:global",
+        "program:instance"
       ],
       "carriers": [
         "component"
@@ -1221,7 +1335,9 @@
         "flow:instance",
         "spatial:surface",
         "spatial:global",
-        "spatial:instance"
+        "spatial:instance",
+        "program:global",
+        "program:instance"
       ],
       "carriers": [
         "component"
@@ -1242,7 +1358,9 @@
         "flow:instance",
         "spatial:surface",
         "spatial:global",
-        "spatial:instance"
+        "spatial:instance",
+        "program:global",
+        "program:instance"
       ],
       "carriers": [
         "component"
@@ -1263,7 +1381,9 @@
         "flow:instance",
         "spatial:surface",
         "spatial:global",
-        "spatial:instance"
+        "spatial:instance",
+        "program:global",
+        "program:instance"
       ],
       "carriers": [
         "component"
@@ -1284,7 +1404,9 @@
         "flow:instance",
         "spatial:surface",
         "spatial:global",
-        "spatial:instance"
+        "spatial:instance",
+        "program:global",
+        "program:instance"
       ],
       "carriers": [
         "component"
@@ -1305,7 +1427,9 @@
         "flow:instance",
         "spatial:surface",
         "spatial:global",
-        "spatial:instance"
+        "spatial:instance",
+        "program:global",
+        "program:instance"
       ],
       "carriers": [
         "component"
@@ -1326,7 +1450,9 @@
         "flow:instance",
         "spatial:surface",
         "spatial:global",
-        "spatial:instance"
+        "spatial:instance",
+        "program:global",
+        "program:instance"
       ],
       "carriers": [
         "component"
@@ -1347,7 +1473,9 @@
         "flow:instance",
         "spatial:surface",
         "spatial:global",
-        "spatial:instance"
+        "spatial:instance",
+        "program:global",
+        "program:instance"
       ],
       "carriers": [
         "component"
@@ -1368,7 +1496,9 @@
         "flow:instance",
         "spatial:surface",
         "spatial:global",
-        "spatial:instance"
+        "spatial:instance",
+        "program:global",
+        "program:instance"
       ],
       "carriers": [
         "component"
@@ -1389,7 +1519,9 @@
         "flow:instance",
         "spatial:surface",
         "spatial:global",
-        "spatial:instance"
+        "spatial:instance",
+        "program:global",
+        "program:instance"
       ],
       "carriers": [
         "component"
@@ -1410,7 +1542,9 @@
         "flow:instance",
         "spatial:surface",
         "spatial:global",
-        "spatial:instance"
+        "spatial:instance",
+        "program:global",
+        "program:instance"
       ],
       "carriers": [
         "component"
@@ -1431,7 +1565,9 @@
         "flow:instance",
         "spatial:surface",
         "spatial:global",
-        "spatial:instance"
+        "spatial:instance",
+        "program:global",
+        "program:instance"
       ],
       "carriers": [
         "component"
@@ -1452,7 +1588,9 @@
         "flow:instance",
         "spatial:surface",
         "spatial:global",
-        "spatial:instance"
+        "spatial:instance",
+        "program:global",
+        "program:instance"
       ],
       "carriers": [
         "component"
@@ -1473,7 +1611,9 @@
         "flow:instance",
         "spatial:surface",
         "spatial:global",
-        "spatial:instance"
+        "spatial:instance",
+        "program:global",
+        "program:instance"
       ],
       "carriers": [
         "component"
@@ -1494,7 +1634,9 @@
         "flow:instance",
         "spatial:surface",
         "spatial:global",
-        "spatial:instance"
+        "spatial:instance",
+        "program:global",
+        "program:instance"
       ],
       "carriers": [
         "component"
@@ -1515,7 +1657,9 @@
         "flow:instance",
         "spatial:surface",
         "spatial:global",
-        "spatial:instance"
+        "spatial:instance",
+        "program:global",
+        "program:instance"
       ],
       "carriers": [
         "component"
@@ -1536,7 +1680,9 @@
         "flow:instance",
         "spatial:surface",
         "spatial:global",
-        "spatial:instance"
+        "spatial:instance",
+        "program:global",
+        "program:instance"
       ],
       "carriers": [
         "component"
@@ -1557,7 +1703,9 @@
         "flow:instance",
         "spatial:surface",
         "spatial:global",
-        "spatial:instance"
+        "spatial:instance",
+        "program:global",
+        "program:instance"
       ],
       "carriers": [
         "component"
@@ -1578,7 +1726,9 @@
         "flow:instance",
         "spatial:surface",
         "spatial:global",
-        "spatial:instance"
+        "spatial:instance",
+        "program:global",
+        "program:instance"
       ],
       "carriers": [
         "component"
@@ -1599,7 +1749,9 @@
         "flow:instance",
         "spatial:surface",
         "spatial:global",
-        "spatial:instance"
+        "spatial:instance",
+        "program:global",
+        "program:instance"
       ],
       "carriers": [
         "component"
@@ -1620,7 +1772,9 @@
         "flow:instance",
         "spatial:surface",
         "spatial:global",
-        "spatial:instance"
+        "spatial:instance",
+        "program:global",
+        "program:instance"
       ],
       "carriers": [
         "component"
@@ -1641,7 +1795,9 @@
         "flow:instance",
         "spatial:surface",
         "spatial:global",
-        "spatial:instance"
+        "spatial:instance",
+        "program:global",
+        "program:instance"
       ],
       "carriers": [
         "component"
@@ -1662,7 +1818,9 @@
         "flow:instance",
         "spatial:surface",
         "spatial:global",
-        "spatial:instance"
+        "spatial:instance",
+        "program:global",
+        "program:instance"
       ],
       "carriers": [
         "component"
@@ -1683,7 +1841,9 @@
         "flow:instance",
         "spatial:surface",
         "spatial:global",
-        "spatial:instance"
+        "spatial:instance",
+        "program:global",
+        "program:instance"
       ],
       "carriers": [
         "component"
@@ -1704,7 +1864,9 @@
         "flow:instance",
         "spatial:surface",
         "spatial:global",
-        "spatial:instance"
+        "spatial:instance",
+        "program:global",
+        "program:instance"
       ],
       "carriers": [
         "component"
@@ -1725,7 +1887,9 @@
         "flow:instance",
         "spatial:surface",
         "spatial:global",
-        "spatial:instance"
+        "spatial:instance",
+        "program:global",
+        "program:instance"
       ],
       "carriers": [
         "component"
@@ -1746,7 +1910,9 @@
         "flow:instance",
         "spatial:surface",
         "spatial:global",
-        "spatial:instance"
+        "spatial:instance",
+        "program:global",
+        "program:instance"
       ],
       "carriers": [
         "component"
@@ -1767,7 +1933,9 @@
         "flow:instance",
         "spatial:surface",
         "spatial:global",
-        "spatial:instance"
+        "spatial:instance",
+        "program:global",
+        "program:instance"
       ],
       "carriers": [
         "component"
@@ -1788,7 +1956,9 @@
         "flow:instance",
         "spatial:surface",
         "spatial:global",
-        "spatial:instance"
+        "spatial:instance",
+        "program:global",
+        "program:instance"
       ],
       "carriers": [
         "component"
@@ -1809,12 +1979,14 @@
         "flow:instance",
         "spatial:surface",
         "spatial:global",
-        "spatial:instance"
+        "spatial:instance",
+        "program:global",
+        "program:instance"
       ],
       "carriers": [
         "component"
       ],
-      "summary": "修改实际工程路径并交由唯一正式事务提交，可撤销、进恢复稿，不自动存盘。已有目标直接使用已知路径；content/from/edits三选一，edits的old须在当前已读源文唯一命中，全部成功才提交。普通content保原对象frame/顺序与邻居；style改结构外观或HTML内CSS。insert向页面结构路径添加普通HTML/CSS/SVG，redo明确重做所选范围；可用region给局部视口及父坐标transform，正式frame持有采用结果。operations成批准备同一工程已有路径并一次提交；pages+surface.add支持pages数组及各页首稿，软件分配身份。source/from可直接用计算或子任务成果来源，软件收齐同组依赖与资源。源码/依赖可直接完整读取后修改；实例源码只改实例，共享定义作用全部引用，主Source可用enhance追加普通JS/TS业务模块，具体API按引用读取。project.json仅改课件设置，theme.css改主题，body修改连续正文，spatial.json改空间旅程。失败给具体操作/目标/期望形状及局部修复入口，原输入保留；staleSnapshot需读当前稿，unknown先查原操作。成功files保路径/frame/viewport与提交版本；正文不默认回显，短软件入口有content时以complete标识实际全文交付，纯目录不代替正文。普通图文可与同目录iframe/srcdoc局部活动沿from同组采用；正式Next沿对象click动作，局部stage声明见按需布局示例。 project省略时使用本任务当前课件；明确file.create/file.open后接续该课件。显式project可参考或修改另一课，不改变当前课件。"
+      "summary": "修改实际工程路径并交由唯一正式事务提交，可撤销、进恢复稿，不自动存盘。完整程序作品用 path:\"entry.html\",intent:\"program.set\",content 或 from 建立或更新真实 Source 根入口，使用运行视口，保留已有作品根；不要求页表面。后续可沿 entry.html 或返回的 roots 对象文件修改同一实例。已有目标直接使用已知路径；content/from/edits三选一，edits的old须在当前已读源文唯一命中，全部成功才提交。普通content保原对象frame/顺序与邻居；style改结构外观或HTML内CSS。insert向页面或容器结构路径添加普通HTML/CSS/SVG，也接受既有对象草稿JSON {kind:\"objects\",objects:[{definitionId,name?,data,style?,frame?,flowLayout?,viewportPinned?,implementationOverride?,children?}]}：definitionId沿工程已有定义，子实例身份由软件分配；无frame原生guoling.group可用style.display:grid/flex及普通CSS模板/gap，直接子项可用尺寸、margin、gridArea、alignSelf，文字随列宽自然增高；已有素材assetId直接复用。一次插入后沿返回的原生对象路径增量修改。redo明确重做所选范围；可用region给局部视口及父坐标transform，正式frame持有采用结果。operations成批准备同一工程已有路径并一次提交；pages+surface.add支持pages数组及各页首稿，软件分配身份。source/from可直接用计算或子任务成果来源，软件收齐同组依赖与资源。源码/依赖可直接完整读取后修改；实例源码只改实例，共享定义作用全部引用，主Source可用enhance追加普通JS/TS业务模块，具体API按引用读取。project.json仅改作品设置，theme.css改主题，body修改连续正文，spatial.json改空间旅程，container.json修改该实例的容器结构；Flow layout.edgeToEdge:true配widthMode:fluid可由作品原生组自定全宽背景和阅读边距。失败给具体操作/目标/期望形状及局部修复入口，原输入保留；staleSnapshot需读当前稿，unknown先查原操作。成功files保路径/frame/viewport与提交版本；正文不默认回显，短软件入口有content时以complete标识实际全文交付，纯目录不代替正文。普通图文可与同目录iframe/srcdoc局部活动沿from同组采用；正式Next沿对象click动作，局部stage声明见按需布局示例。 project省略时使用本任务当前课件；明确file.create/file.open后接续该课件。显式project可参考或修改另一课，不改变当前课件。"
     },
     {
       "id": "project.list",
@@ -1830,7 +2002,9 @@
         "flow:instance",
         "spatial:surface",
         "spatial:global",
-        "spatial:instance"
+        "spatial:instance",
+        "program:global",
+        "program:instance"
       ],
       "carriers": [
         "component"
@@ -1851,7 +2025,9 @@
         "flow:instance",
         "spatial:surface",
         "spatial:global",
-        "spatial:instance"
+        "spatial:instance",
+        "program:global",
+        "program:instance"
       ],
       "carriers": [
         "component"
@@ -1859,10 +2035,10 @@
       "summary": "直接读取已知工程虚拟路径的当前正式内容及人工修改；无需先project.list。query按字面查找当前未保存正文，返回命中附近/行列/offset/版本；limit是命中数。普通读取limit是字符数，full:true请求完整来源，超过本轮容量仍complete:false/nextOffset固定版本分页。nextOffset续读固定来源，省略offset新读当前稿；refresh:true可在给定offset局部读取当前稿，亦可明确重新绑定已改名/重排后的当前自然路径。返回basis/revision/currentRevision区分固定来源与当前稿。frame/viewport是正式外框及内部尺寸，内容续改保外框。共享API按references路径读一次；完整Source/依赖仍可直接按实际路径读取。 project省略时使用本任务当前课件；明确file.create/file.open后接续该课件。显式project可参考或修改另一课，不改变当前课件。"
     },
     {
-      "id": "published-course-v3",
+      "id": "published-course-v4",
       "kind": "protocol",
-      "label": "published-course-v3",
-      "path": "schemas/published-course-v3.json",
+      "label": "published-course-v4",
+      "path": "schemas/published-course-v4.json",
       "scopes": [
         "slide:surface",
         "slide:global",
@@ -1872,12 +2048,14 @@
         "flow:instance",
         "spatial:surface",
         "spatial:global",
-        "spatial:instance"
+        "spatial:instance",
+        "program:global",
+        "program:instance"
       ],
       "carriers": [
         "component"
       ],
-      "summary": "Published V3 播放数据结构；由正式工程生成，包含实际运行资源。"
+      "summary": "Published V4 播放数据结构；由正式工程生成，包含程序根、嵌套容器与实际运行资源。"
     },
     {
       "id": "read",
@@ -1893,7 +2071,9 @@
         "flow:instance",
         "spatial:surface",
         "spatial:global",
-        "spatial:instance"
+        "spatial:instance",
+        "program:global",
+        "program:instance"
       ],
       "carriers": [
         "component"
@@ -1914,7 +2094,9 @@
         "flow:instance",
         "spatial:surface",
         "spatial:global",
-        "spatial:instance"
+        "spatial:instance",
+        "program:global",
+        "program:instance"
       ],
       "carriers": [
         "component"
@@ -1936,7 +2118,9 @@
         "flow:instance",
         "spatial:surface",
         "spatial:global",
-        "spatial:instance"
+        "spatial:instance",
+        "program:global",
+        "program:instance"
       ],
       "carriers": [
         "component"
@@ -1958,7 +2142,9 @@
         "flow:instance",
         "spatial:surface",
         "spatial:global",
-        "spatial:instance"
+        "spatial:instance",
+        "program:global",
+        "program:instance"
       ],
       "carriers": [
         "component"
@@ -1980,7 +2166,9 @@
         "flow:instance",
         "spatial:surface",
         "spatial:global",
-        "spatial:instance"
+        "spatial:instance",
+        "program:global",
+        "program:instance"
       ],
       "carriers": [
         "component"
@@ -2002,7 +2190,9 @@
         "flow:instance",
         "spatial:surface",
         "spatial:global",
-        "spatial:instance"
+        "spatial:instance",
+        "program:global",
+        "program:instance"
       ],
       "carriers": [
         "component"
@@ -2024,7 +2214,9 @@
         "flow:instance",
         "spatial:surface",
         "spatial:global",
-        "spatial:instance"
+        "spatial:instance",
+        "program:global",
+        "program:instance"
       ],
       "carriers": [
         "component"
@@ -2046,7 +2238,9 @@
         "flow:instance",
         "spatial:surface",
         "spatial:global",
-        "spatial:instance"
+        "spatial:instance",
+        "program:global",
+        "program:instance"
       ],
       "carriers": [
         "component"
@@ -2068,7 +2262,9 @@
         "flow:instance",
         "spatial:surface",
         "spatial:global",
-        "spatial:instance"
+        "spatial:instance",
+        "program:global",
+        "program:instance"
       ],
       "carriers": [
         "component"
@@ -2090,7 +2286,9 @@
         "flow:instance",
         "spatial:surface",
         "spatial:global",
-        "spatial:instance"
+        "spatial:instance",
+        "program:global",
+        "program:instance"
       ],
       "carriers": [
         "component"
@@ -2112,7 +2310,9 @@
         "flow:instance",
         "spatial:surface",
         "spatial:global",
-        "spatial:instance"
+        "spatial:instance",
+        "program:global",
+        "program:instance"
       ],
       "carriers": [
         "component"
@@ -2134,7 +2334,9 @@
         "flow:instance",
         "spatial:surface",
         "spatial:global",
-        "spatial:instance"
+        "spatial:instance",
+        "program:global",
+        "program:instance"
       ],
       "carriers": [
         "component"
@@ -2156,7 +2358,9 @@
         "flow:instance",
         "spatial:surface",
         "spatial:global",
-        "spatial:instance"
+        "spatial:instance",
+        "program:global",
+        "program:instance"
       ],
       "carriers": [
         "component"
@@ -2178,7 +2382,9 @@
         "flow:instance",
         "spatial:surface",
         "spatial:global",
-        "spatial:instance"
+        "spatial:instance",
+        "program:global",
+        "program:instance"
       ],
       "carriers": [
         "component"
@@ -2200,13 +2406,15 @@
         "flow:instance",
         "spatial:surface",
         "spatial:global",
-        "spatial:instance"
+        "spatial:instance",
+        "program:global",
+        "program:instance"
       ],
       "carriers": [
         "component"
       ],
       "summary": "从材料到正式对象",
-      "keywords": "# 从材料到正式对象\r ## 普通内容直接装配\r ## 专业表格与图表数据\r ## 图示、图片与局部程序\r"
+      "keywords": "# 从材料到正式对象 ## 普通内容直接装配 ## 专业表格与图表数据 ## 图示、图片与局部程序"
     },
     {
       "id": "reference:orchestrate-courseware/script-assemble-html",
@@ -2222,7 +2430,9 @@
         "flow:instance",
         "spatial:surface",
         "spatial:global",
-        "spatial:instance"
+        "spatial:instance",
+        "program:global",
+        "program:instance"
       ],
       "carriers": [
         "component"
@@ -2244,7 +2454,9 @@
         "flow:instance",
         "spatial:surface",
         "spatial:global",
-        "spatial:instance"
+        "spatial:instance",
+        "program:global",
+        "program:instance"
       ],
       "carriers": [
         "component"
@@ -2266,7 +2478,9 @@
         "flow:instance",
         "spatial:surface",
         "spatial:global",
-        "spatial:instance"
+        "spatial:instance",
+        "program:global",
+        "program:instance"
       ],
       "carriers": [
         "component"
@@ -2288,7 +2502,9 @@
         "flow:instance",
         "spatial:surface",
         "spatial:global",
-        "spatial:instance"
+        "spatial:instance",
+        "program:global",
+        "program:instance"
       ],
       "carriers": [
         "component"
@@ -2310,7 +2526,9 @@
         "flow:instance",
         "spatial:surface",
         "spatial:global",
-        "spatial:instance"
+        "spatial:instance",
+        "program:global",
+        "program:instance"
       ],
       "carriers": [
         "component"
@@ -2332,7 +2550,9 @@
         "flow:instance",
         "spatial:surface",
         "spatial:global",
-        "spatial:instance"
+        "spatial:instance",
+        "program:global",
+        "program:instance"
       ],
       "carriers": [
         "component"
@@ -2354,7 +2574,9 @@
         "flow:instance",
         "spatial:surface",
         "spatial:global",
-        "spatial:instance"
+        "spatial:instance",
+        "program:global",
+        "program:instance"
       ],
       "carriers": [
         "component"
@@ -2376,7 +2598,9 @@
         "flow:instance",
         "spatial:surface",
         "spatial:global",
-        "spatial:instance"
+        "spatial:instance",
+        "program:global",
+        "program:instance"
       ],
       "carriers": [
         "component"
@@ -2398,7 +2622,9 @@
         "flow:instance",
         "spatial:surface",
         "spatial:global",
-        "spatial:instance"
+        "spatial:instance",
+        "program:global",
+        "program:instance"
       ],
       "carriers": [
         "component"
@@ -2420,7 +2646,9 @@
         "flow:instance",
         "spatial:surface",
         "spatial:global",
-        "spatial:instance"
+        "spatial:instance",
+        "program:global",
+        "program:instance"
       ],
       "carriers": [
         "component"
@@ -2442,13 +2670,15 @@
         "flow:instance",
         "spatial:surface",
         "spatial:global",
-        "spatial:instance"
+        "spatial:instance",
+        "program:global",
+        "program:instance"
       ],
       "carriers": [
         "component"
       ],
       "summary": "在工程里创作",
-      "keywords": "# 在工程里创作\r"
+      "keywords": "# 在工程里创作"
     },
     {
       "id": "reference:workbench-usage/resources-and-artifacts",
@@ -2464,7 +2694,9 @@
         "flow:instance",
         "spatial:surface",
         "spatial:global",
-        "spatial:instance"
+        "spatial:instance",
+        "program:global",
+        "program:instance"
       ],
       "carriers": [
         "component"
@@ -2486,7 +2718,9 @@
         "flow:instance",
         "spatial:surface",
         "spatial:global",
-        "spatial:instance"
+        "spatial:instance",
+        "program:global",
+        "program:instance"
       ],
       "carriers": [
         "component"
@@ -2508,7 +2742,9 @@
         "flow:instance",
         "spatial:surface",
         "spatial:global",
-        "spatial:instance"
+        "spatial:instance",
+        "program:global",
+        "program:instance"
       ],
       "carriers": [
         "component"
@@ -2530,7 +2766,9 @@
         "flow:instance",
         "spatial:surface",
         "spatial:global",
-        "spatial:instance"
+        "spatial:instance",
+        "program:global",
+        "program:instance"
       ],
       "carriers": [
         "component"
@@ -2552,7 +2790,9 @@
         "flow:instance",
         "spatial:surface",
         "spatial:global",
-        "spatial:instance"
+        "spatial:instance",
+        "program:global",
+        "program:instance"
       ],
       "carriers": [
         "component"
@@ -2574,7 +2814,9 @@
         "flow:instance",
         "spatial:surface",
         "spatial:global",
-        "spatial:instance"
+        "spatial:instance",
+        "program:global",
+        "program:instance"
       ],
       "carriers": [
         "component"
@@ -2596,7 +2838,9 @@
         "flow:instance",
         "spatial:surface",
         "spatial:global",
-        "spatial:instance"
+        "spatial:instance",
+        "program:global",
+        "program:instance"
       ],
       "carriers": [
         "component"
@@ -2618,7 +2862,9 @@
         "flow:instance",
         "spatial:surface",
         "spatial:global",
-        "spatial:instance"
+        "spatial:instance",
+        "program:global",
+        "program:instance"
       ],
       "carriers": [
         "component"
@@ -2640,7 +2886,9 @@
         "flow:instance",
         "spatial:surface",
         "spatial:global",
-        "spatial:instance"
+        "spatial:instance",
+        "program:global",
+        "program:instance"
       ],
       "carriers": [
         "component"
@@ -2662,7 +2910,9 @@
         "flow:instance",
         "spatial:surface",
         "spatial:global",
-        "spatial:instance"
+        "spatial:instance",
+        "program:global",
+        "program:instance"
       ],
       "carriers": [
         "component"
@@ -2684,7 +2934,9 @@
         "flow:instance",
         "spatial:surface",
         "spatial:global",
-        "spatial:instance"
+        "spatial:instance",
+        "program:global",
+        "program:instance"
       ],
       "carriers": [
         "component"
@@ -2705,7 +2957,9 @@
         "flow:instance",
         "spatial:surface",
         "spatial:global",
-        "spatial:instance"
+        "spatial:instance",
+        "program:global",
+        "program:instance"
       ],
       "carriers": [
         "component"
@@ -2726,7 +2980,9 @@
         "flow:instance",
         "spatial:surface",
         "spatial:global",
-        "spatial:instance"
+        "spatial:instance",
+        "program:global",
+        "program:instance"
       ],
       "carriers": [
         "component"
@@ -2747,7 +3003,9 @@
         "flow:instance",
         "spatial:surface",
         "spatial:global",
-        "spatial:instance"
+        "spatial:instance",
+        "program:global",
+        "program:instance"
       ],
       "carriers": [
         "component"
@@ -2768,7 +3026,9 @@
         "flow:instance",
         "spatial:surface",
         "spatial:global",
-        "spatial:instance"
+        "spatial:instance",
+        "program:global",
+        "program:instance"
       ],
       "carriers": [
         "component"
@@ -2789,7 +3049,9 @@
         "flow:instance",
         "spatial:surface",
         "spatial:global",
-        "spatial:instance"
+        "spatial:instance",
+        "program:global",
+        "program:instance"
       ],
       "carriers": [
         "component"
@@ -2810,7 +3072,9 @@
         "flow:instance",
         "spatial:surface",
         "spatial:global",
-        "spatial:instance"
+        "spatial:instance",
+        "program:global",
+        "program:instance"
       ],
       "carriers": [
         "component"
@@ -2831,7 +3095,9 @@
         "flow:instance",
         "spatial:surface",
         "spatial:global",
-        "spatial:instance"
+        "spatial:instance",
+        "program:global",
+        "program:instance"
       ],
       "carriers": [
         "component"
@@ -2852,7 +3118,9 @@
         "flow:instance",
         "spatial:surface",
         "spatial:global",
-        "spatial:instance"
+        "spatial:instance",
+        "program:global",
+        "program:instance"
       ],
       "carriers": [
         "component"
@@ -2873,12 +3141,14 @@
         "flow:instance",
         "spatial:surface",
         "spatial:global",
-        "spatial:instance"
+        "spatial:instance",
+        "program:global",
+        "program:instance"
       ],
       "carriers": [
         "component"
       ],
-      "summary": "替换已授权文字字段或精确范围；保留范围外文字及富文本格式。Project V10 使用宿主捕获的组件文字字段句柄，展示状态仍固定在原目标。对象样式使用 object.update；纯文本文档保持纯文本。"
+      "summary": "替换已授权文字字段或精确范围；保留范围外文字及富文本格式。Project V11 使用宿主捕获的组件文字字段句柄，展示状态仍固定在原目标。对象样式使用 object.update；纯文本文档保持纯文本。"
     },
     {
       "id": "view.click",
@@ -2894,7 +3164,9 @@
         "flow:instance",
         "spatial:surface",
         "spatial:global",
-        "spatial:instance"
+        "spatial:instance",
+        "program:global",
+        "program:instance"
       ],
       "carriers": [
         "component"
@@ -2915,7 +3187,9 @@
         "flow:instance",
         "spatial:surface",
         "spatial:global",
-        "spatial:instance"
+        "spatial:instance",
+        "program:global",
+        "program:instance"
       ],
       "carriers": [
         "component"
@@ -2936,7 +3210,9 @@
         "flow:instance",
         "spatial:surface",
         "spatial:global",
-        "spatial:instance"
+        "spatial:instance",
+        "program:global",
+        "program:instance"
       ],
       "carriers": [
         "component"
@@ -2957,7 +3233,9 @@
         "flow:instance",
         "spatial:surface",
         "spatial:global",
-        "spatial:instance"
+        "spatial:instance",
+        "program:global",
+        "program:instance"
       ],
       "carriers": [
         "component"
@@ -2978,7 +3256,9 @@
         "flow:instance",
         "spatial:surface",
         "spatial:global",
-        "spatial:instance"
+        "spatial:instance",
+        "program:global",
+        "program:instance"
       ],
       "carriers": [
         "component"
@@ -2992,8 +3272,8 @@
     "protocols/component-api5.json",
     "query-core.mjs",
     "query.mjs",
-    "schemas/course-project-v10.json",
-    "schemas/published-course-v3.json",
+    "schemas/course-project-v11.json",
+    "schemas/published-course-v4.json",
     "skills/build-courseware-project/SKILL.md",
     "skills/build-courseware-project/references/build-method.md",
     "skills/build-courseware-project/references/current-capabilities.md",

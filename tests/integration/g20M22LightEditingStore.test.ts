@@ -1,4 +1,6 @@
 // @vitest-environment node
+import { componentSurfaces } from '../../src/shared/contracts/component-platform/project'
+import { testContainerInstance, appendRootContainers } from '../helpers/glxWorkFixture'
 import { afterEach, expect, it } from 'vitest'
 import { createBlankCourseProjectV10 } from '../../src/core/course/createCourseProjectV10'
 import { createTextComponentData, TEXT_DEFINITION } from '../../src/components/text'
@@ -10,11 +12,11 @@ const store = () => useEditorStore.getState()
 afterEach(() => store().courseBridge.dispose())
 async function fixture() {
   const host = await createCourseDocumentHost(); await store().connectCourseDocuments(host.api)
-  const project = createBlankCourseProjectV10('轻编辑'), page = project.surfaces[0]
+  const project = createBlankCourseProjectV10('轻编辑'), page = componentSurfaces(project)[0]
   project.definitions[TEXT_DEFINITION.id] = TEXT_DEFINITION
   for (const id of ['text', 'neighbor']) project.instances[id] = { id, definitionId: TEXT_DEFINITION.id, data: JSON.parse(JSON.stringify(createTextComponentData(id))), frame: { width: 200, height: 80, transform: [1, 0, 0, 1, id === 'text' ? 40 : 340, 60] } }
-  page.childIds = ['text', 'neighbor']; page.presentation = { initialStateId: 'base', states: [{ id: 'base', title: '初始', overrides: {} }, { id: 'named', title: '展开', overrides: {} }] }
-  project.surfaces.push({ ...structuredClone(page), id: 'other-page', childIds: [] })
+  testContainerInstance(project, 0).childIds = ['text', 'neighbor']; testContainerInstance(project, 0).container.presentation = { initialStateId: 'base', states: [{ id: 'base', title: '初始', overrides: {} }, { id: 'named', title: '展开', overrides: {} }] }
+  appendRootContainers(project, { ...structuredClone(componentSurfaces(project)[0]), id: 'other-page', childIds: [] })
   await store().createCourseDocumentFrom(project); store().selectNode('text')
   const documentId = store().courseView.activeDocumentId!, session = host.registry.get(documentId)
   const controls: { choose?: () => Promise<void> } = {}
@@ -38,7 +40,7 @@ it('commits actual object, empty-page background and audio actions once each, pr
   expect(f.port.captureObject()).toBeNull()
   const page = f.port.capturePage()!, background = f.port.viewPage(page).commands.find(value => value.id === 'slide.background.dbeafe')!
   await f.port.runPage(page, background)
-  expect(store().courseView.project!.surfaces[0].background?.color).toBe('#dbeafe')
+  expect(componentSurfaces(store().courseView.project!)[0].background?.color).toBe('#dbeafe')
   expect(f.session.read().undoDepth).toBe(before.undoDepth + 2)
   await f.port.placeAudio(f.port.capturePage()!)
   const saved = f.session.read(); if (saved.model.kind !== 'course-v10') throw new Error('Expected V10')
@@ -82,7 +84,8 @@ it('rejects stale object menus after selection, page, document, epoch or pending
   expect(store().courseView.project!.instances.text.style?.opacity).toBe(.5)
   expect(store().courseView.project!.instances.neighbor.data).toMatchObject({ appearance: { color: '#abcdef' } })
   const stale = f.port.captureObject()!, staleCommand = f.port.viewObject(stale).commands.find(value => value.id === 'slide.opacity.75')!
-  await store().closeCourseDocument(f.documentId); await f.host.api.restore(f.documentId); await store().activateCourseDocument(f.documentId); store().selectNode('text')
+  const restoreCrash = f.host.captureCrashRecovery(f.documentId)
+  await store().closeCourseDocument(f.documentId); await restoreCrash(); await store().activateCourseDocument(f.documentId); store().selectNode('text')
   const restored = f.host.registry.get(f.documentId).read()
   await expect(f.port.runObject(stale, staleCommand)).rejects.toThrow('选择或文档已改变')
   expect(f.host.registry.get(f.documentId).read().revision).toBe(restored.revision)
@@ -97,7 +100,7 @@ it('rejects late audio selections after switching page/document or restoring an 
       else if (change === 'state') store().courseBridge.selectPresentationState(f.documentId, 'named')
       else if (change === 'page') store().courseBridge.selectSurface(f.documentId, 'other-page')
       else if (change === 'document') await store().createCourseDocument('slide')
-      else { await store().closeCourseDocument(f.documentId); await f.host.api.restore(f.documentId); await store().activateCourseDocument(f.documentId) }
+      else { const restoreCrash = f.host.captureCrashRecovery(f.documentId); await store().closeCourseDocument(f.documentId); await restoreCrash(); await store().activateCourseDocument(f.documentId) }
     }
     await expect(f.port.placeAudio(target)).rejects.toThrow('选择或文档已改变')
     const current = f.host.registry.get(f.documentId).read()

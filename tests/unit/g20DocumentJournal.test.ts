@@ -7,6 +7,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createDocumentJournal, readDocumentFileVersion } from '../../src/main/workbench/documentJournal'
+import { journalIdentity } from '../../src/main/workbench/JournalBindingIndex'
 import { markdownReferences, readDocumentMarkdownResources } from '../../src/main/workbench/documentSourceResources'
 import { DocumentSession } from '../../src/core/documents/DocumentSession'
 import { createMarkdownDriver } from '../../src/core/drivers/MarkdownDriver'
@@ -36,6 +37,14 @@ function state(documentId = 'document-a', sequence = 0): DurableDocumentState {
     binding: { kind: 'untitled', suggestedName: '未命名.md' }, model: model(), past: [], future: [], operations: [], stoppedRuns: [] }
 }
 const journalFile = (directory: string, id: string) => path.join(directory, `${createHash('sha256').update(id).digest('hex')}.journal`)
+async function waitForBindingIndex(filename: string, sequence: number) {
+  await expect.poll(async () => {
+    try {
+      const envelope = JSON.parse(await fs.readFile(`${filename}.binding.json`, 'utf8')), entry = JSON.parse(envelope.body)
+      return { version: envelope.version, sequence: entry.sequence, fresh: entry.identity === await journalIdentity(filename) }
+    } catch { return null }
+  }).toEqual({ version: 2, sequence, fresh: true })
+}
 
 /** Save refuses a revision that was never appended to this document's recovery journal. */
 async function remember(journal: ReturnType<typeof createDocumentJournal>, documentId: string, revision: number, source = '正文') {
@@ -58,7 +67,7 @@ describe('G20 durable document journal', () => {
     expect(await journal.recover(current.documentId)).toEqual(current)
     const restored = await DocumentSession.restore(current, 'new-epoch', createMarkdownDriver(), journal)
     expect(restored.read().model).toEqual(current.model)
-    expect(await journal.recover(current.documentId)).toMatchObject({ schemaVersion: 2, disposition: 'active', sequence: 1, epoch: 'new-epoch' })
+    expect(await journal.recover(current.documentId)).toMatchObject({ schemaVersion: 3, disposition: 'active', sequence: 1, epoch: 'new-epoch' })
   })
 
   it.each(['closed', 'discarded'] as const)('keeps %s records out of recovery and binding reservations after restart', async disposition => {
@@ -76,6 +85,7 @@ describe('G20 durable document journal', () => {
     const firstSize = encoded.readUInt32BE(8), lastOffset = 48 + firstSize + 8
     const terminal = deserialize(encoded.subarray(lastOffset + 48, lastOffset + 48 + encoded.readUInt32BE(lastOffset + 8))) as DurableDocumentState
     expect(terminal.schemaVersion).not.toBe(1)
+    await waitForBindingIndex(filename, 1)
     expect(JSON.parse(await fs.readFile(`${filename}.binding.json`, 'utf8')).version).toBe(2)
     await expect(restarted.append({ ...current, sequence: 2 })).rejects.toMatchObject({ code: 'journal-sequence-conflict' })
   })
@@ -200,7 +210,15 @@ describe('G20 durable document journal', () => {
     const input = { documentId: 'doc', revision: 1, model: draft, bytes: bytes(source),
       binding: { kind: 'file' as const, path: filename, version: null, bindingVersion: 1 } }
     await remember(journal, 'doc', 1, source)
-    vi.spyOn(fs, 'rename').mockRejectedValueOnce(new Error('injected package publish failure'))
+    const rename = fs.rename.bind(fs)
+    let failPackage = true
+    vi.spyOn(fs, 'rename').mockImplementation(async (from, to) => {
+      if (String(to) === path.join(root, 'packages/demo') && failPackage) {
+        failPackage = false
+        throw new Error('injected package publish failure')
+      }
+      return rename(from, to)
+    })
     await expect(journal.save(input)).rejects.toThrow('injected package publish failure')
     await expect(fs.access(filename)).rejects.toMatchObject({ code: 'ENOENT' })
     await expect(fs.access(path.join(root, 'packages/demo'))).rejects.toMatchObject({ code: 'ENOENT' })
@@ -224,7 +242,14 @@ describe('G20 durable document journal', () => {
 
     const next = model('![new](assets/new.bin)')
     next.resources.assets['assets/new.bin'] = bytes('complete new resource')
-    vi.spyOn(fs, 'rename').mockRejectedValueOnce(new Error('injected replacement failure'))
+    let failReplacement = true
+    vi.spyOn(fs, 'rename').mockImplementation(async (from, to) => {
+      if (String(to) === filename && failReplacement) {
+        failReplacement = false
+        throw Object.assign(new Error('injected replacement failure'), { code: 'EACCES' })
+      }
+      return rename(from, to)
+    })
     await expect(journal.save({ ...input, binding, model: next, bytes: bytes('![new](assets/new.bin)') })).rejects.toThrow('injected replacement failure')
     expect(await fs.readFile(filename, 'utf8')).toBe(source)
     expect(await fs.readFile(path.join(root, 'assets/new.bin'), 'utf8')).toBe('complete new resource')
@@ -379,6 +404,7 @@ it('indexes bindings without reopening unrelated journal payloads and invalidate
   await journal.append(a)
   const b = { ...state('b'), binding: { kind: 'file' as const, path: path.join(root, 'b.md'), version: null, bindingVersion: 1 } }
   await journal.append(b)
+  await Promise.all([waitForBindingIndex(journalFile(directory, a.documentId), a.sequence), waitForBindingIndex(journalFile(directory, b.documentId), b.sequence)])
   const open = vi.spyOn(fs, 'open')
   const restarted = createDocumentJournal({ directory })
   expect((await restarted.listBindings()).map(entry => entry.documentId).sort()).toEqual(['b', 'large-a'])
@@ -417,6 +443,7 @@ it('does not reload an unrelated clean journal merely because an acknowledged sa
   const current = { ...state('clean', 1), model: model('clean'), binding, savedRevision: 1 }
   await journal.append(current)
   await journal.save({ documentId: current.documentId, revision: 1, model: current.model, binding, bytes: bytes('clean') })
+  await waitForBindingIndex(journalFile(directory, current.documentId), current.sequence)
   const open = vi.spyOn(fs, 'open')
   expect((await createDocumentJournal({ directory }).listBindings())[0]).toMatchObject({ documentId: 'clean', savedRevision: 1, binding })
   expect(open.mock.calls.some(call => String(call[0]).endsWith('.journal'))).toBe(false)

@@ -1,3 +1,4 @@
+import { createTestProjectFromLegacy } from '../helpers/glxWorkFixture'
 import { useEffect, useSyncExternalStore } from 'react'
 import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/react'
 import { expect, it, vi } from 'vitest'
@@ -32,9 +33,9 @@ import { FlowWorkspace } from '../../src/renderer/ui/FlowWorkspace'
 
 it('opens a real registered Flow chart title and commits through the shared draft, Session history and normal save', async () => {
   const data = createChartData(), resources = { assets: {}, components: {} }
-  const project: CourseProjectV10 = { schemaVersion: 10, id: 'flow-professional', revision: 0, title: '讲义图表', definitions: { [CHART_DEFINITION.id]: CHART_DEFINITION },
+  const project: CourseProjectV10 = createTestProjectFromLegacy({ schemaVersion: 10, id: 'flow-professional', revision: 0, title: '讲义图表', definitions: { [CHART_DEFINITION.id]: CHART_DEFINITION },
     instances: { chart: { id: 'chart', definitionId: CHART_DEFINITION.id, data: JSON.parse(JSON.stringify(data)), frame: { width: 600, height: 400, transform: [1, 0, 0, 1, 0, 0] } } },
-    surfaces: [{ id: 'flow', kind: 'flow', title: '讲义', childIds: ['chart'] }], global: { underlay: [], overlay: [] }, assets: {} }
+    surfaces: [{ id: 'flow', kind: 'flow', title: '讲义', childIds: ['chart'] }], global: { underlay: [], overlay: [] }, assets: {} })
   const directory = await mkdtemp(path.join(tmpdir(), 'guoling-flow-professional-'))
   const host = new DocumentHostService(path.join(directory, 'recovery')), created = await host.internalAPI.create({ kind: 'course-v10', project, resources }, '图表.h5lesson')
   const unavailable = async (): Promise<never> => { throw new Error('No dialogs') }

@@ -16,7 +16,16 @@ import { explorerContextCommands, explorerNewCommands, type ExplorerCommandPorts
 type Entry = Extract<WorkspaceListItem, { status: 'accessible' }>
 type Dialog = 'create-markdown' | 'create-course' | 'create-text' | 'create-html' | 'mkdir' | 'rename' | 'copy' | 'move' | 'trash'
 type Row = { entry: Entry; parentId: string }
+type DirectoryLoad = { dirty: boolean; task: Promise<WorkspaceListItem[]> }
 const message = (error: unknown) => error instanceof Error ? error.message : String(error)
+function sameEntries(left: readonly WorkspaceListItem[] | undefined, right: readonly WorkspaceListItem[]): boolean {
+  return Boolean(left && left.length === right.length && left.every((entry, index) => {
+    const next = right[index]!
+    return entry.status === next.status && entry.name === next.name && (entry.status === 'accessible'
+      ? next.status === 'accessible' && entry.entryId === next.entryId && entry.kind === next.kind
+      : next.status === 'blocked' && entry.reason === next.reason)
+  }))
+}
 function icon(name: string) { return /\.(md|markdown)$/i.test(name) ? <FileText size={16} /> : isNativeProjectFilename(name) ? <Presentation size={16} /> : /\.html?$/i.test(name) ? <FileCode2 size={16} /> : <File size={16} /> }
 export function WorkspaceFilesTree({ directory, files, operation, refreshVersion = 0, onFile, onDirectory, onScope, onSaveDirectoryChange, onImportHtml, onImportFlow }: {
   directory: string; files: WorkspaceFilesAPI; operation?(request: LessonDesktopRequest): Promise<LessonDesktopResult>; refreshVersion?: number
@@ -42,8 +51,9 @@ export function WorkspaceFilesTree({ directory, files, operation, refreshVersion
   const active = useRef<RegisteredWorkspaceRoot | undefined>(undefined), epoch = useRef(0), lock = useRef(false)
   const scopeTicket = useRef(0)
   const saveDirectoryListener = useRef(onSaveDirectoryChange); saveDirectoryListener.current = onSaveDirectoryChange
-  const loadTickets = useRef(new Map<string, number>())
+  const directoryLoads = useRef(new Map<string, DirectoryLoad>())
   const pagesRef = useRef(pages); pagesRef.current = pages
+  const expandedRef = useRef(expanded); expandedRef.current = expanded
   const buttons = useRef(new Map<string, HTMLButtonElement>())
   const createMenu = useRef<HTMLDetailsElement>(null)
   // The pane clips its content, so the create options open at a fixed window position.
@@ -55,38 +65,100 @@ export function WorkspaceFilesTree({ directory, files, operation, refreshVersion
   if (root) flatten(root.rootEntryId)
   const selected = rows.filter(row => selection.has(row.entry.entryId)), single = selected.length === 1 ? selected[0].entry : undefined
   const targetDirectory = parentId ?? root?.rootEntryId
-  const load = useCallback(async (id: string, current: RegisteredWorkspaceRoot, generation = epoch.current): Promise<WorkspaceListItem[]> => {
-    const ticket = (loadTickets.current.get(id) ?? 0) + 1
-    loadTickets.current.set(id, ticket)
-    const entries: WorkspaceListItem[] = []; let cursor: string | undefined
-    do { const page = await files({ type: 'list', workspaceId: current.workspaceId, directoryEntryId: id, limit: 200, ...(cursor ? { cursor } : {}) }); entries.push(...page.entries); cursor = page.nextCursor } while (cursor)
-    if (generation !== epoch.current || ticket !== loadTickets.current.get(id)) return entries
-    setPages(value => generation !== epoch.current || ticket !== loadTickets.current.get(id) || JSON.stringify(value[id]) === JSON.stringify(entries)
-      ? value : { ...value, [id]: entries }); pagesRef.current = { ...pagesRef.current, [id]: entries }; return entries
+  const load = useCallback((id: string, current: RegisteredWorkspaceRoot, generation = epoch.current, refresh = false): Promise<WorkspaceListItem[]> => {
+    const key = `${current.workspaceId}:${id}`
+    const pending = directoryLoads.current.get(key)
+    if (pending) { if (refresh) pending.dirty = true; return pending.task }
+    const flight: DirectoryLoad = { dirty: false, task: undefined! }
+    flight.task = (async () => {
+      for (;;) {
+        flight.dirty = false
+        const entries: WorkspaceListItem[] = []; let cursor: string | undefined
+        try {
+          do {
+            const page = await files({ type: 'list', workspaceId: current.workspaceId, directoryEntryId: id, limit: 200, ...(cursor ? { cursor } : {}) })
+            entries.push(...page.entries); cursor = page.nextCursor
+          } while (cursor && generation === epoch.current)
+        } catch (reason) {
+          // A real directory change invalidates the remaining page addresses.
+          // Restart that directory only, rather than merging two snapshots.
+          if (cursor && /目录内容已变化/.test(message(reason)) && generation === epoch.current) continue
+          throw reason
+        }
+        if (generation !== epoch.current) return entries
+        if (flight.dirty) continue
+        if (!sameEntries(pagesRef.current[id], entries)) {
+          pagesRef.current = { ...pagesRef.current, [id]: entries }
+          setPages(value => generation !== epoch.current || sameEntries(value[id], entries) ? value : { ...value, [id]: entries })
+        }
+        return entries
+      }
+    })().finally(() => { if (directoryLoads.current.get(key) === flight) directoryLoads.current.delete(key) })
+    directoryLoads.current.set(key, flight)
+    return flight.task
   }, [files])
   useEffect(() => {
     const generation = ++epoch.current
-    loadTickets.current.clear()
+    directoryLoads.current.clear()
+    const watchId = crypto.randomUUID()
+    let watched: RegisteredWorkspaceRoot | undefined
+    const releaseWatch = (current: RegisteredWorkspaceRoot) => { void files({ type: 'unwatch', workspaceId: current.workspaceId, watchId }).catch(() => {}) }
     active.current = undefined; saveDirectoryListener.current?.(null); setRoot(undefined); setPages({}); setExpanded(new Set()); setSelection(new Set()); setDialog(undefined); setClipboard(undefined); setError(''); setResults(undefined); setBusy(false)
+    pagesRef.current = {}; expandedRef.current = new Set()
     void files({ type: 'root', directory }).then(async current => {
       if (generation !== epoch.current) return
       active.current = current; setRoot(current); setParentId(current.rootEntryId)
       saveDirectoryListener.current?.({ workspaceId: current.workspaceId, directoryEntryId: current.rootEntryId })
       await load(current.rootEntryId, current, generation)
-      try { await files({ type: 'watch', workspaceId: current.workspaceId }) } catch { if (generation === epoch.current) setNotice('自动监视不可用，可使用刷新恢复文件列表') }
+      if (generation !== epoch.current) return
+      try {
+        watched = current
+        await files({ type: 'watch', workspaceId: current.workspaceId, watchId })
+        if (generation !== epoch.current) releaseWatch(current)
+      } catch { if (generation === epoch.current) setNotice('自动监视不可用，可使用刷新恢复文件列表') }
     }).catch(reason => { if (generation === epoch.current) setError(message(reason)) })
-    return () => { epoch.current++; active.current = undefined; saveDirectoryListener.current?.(null) }
+    return () => { epoch.current++; active.current = undefined; if (watched) releaseWatch(watched); saveDirectoryListener.current?.(null) }
   }, [directory, files, load])
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (changedPaths?: readonly string[]) => {
     const current = active.current
     if (!current) return
-    await load(current.rootEntryId, current)
-    await Promise.all([...expanded].map(id => load(id, current).catch(() => { setExpanded(value => { const next = new Set(value); next.delete(id); return next }) })))
-  }, [expanded, load])
+    const generation = epoch.current
+    const windows = /^[A-Za-z]:[\\/]/.test(current.resolvedPath) || current.resolvedPath.startsWith('\\\\')
+    const key = (value: string) => windows ? value.toLowerCase() : value
+    const changed = changedPaths && new Set(changedPaths.map(value => key(value.replace(/\\/g, '/'))))
+    const parents = changed && new Set([...changed].map(value => value.split('/').slice(0, -1).join('/')))
+    const completed = new Set<string>()
+    for (;;) {
+      if (generation !== epoch.current) return
+      const directories = new Map<string, number>()
+      const visit = (id: string, relative: string, depth: number, movedAncestor = false) => {
+        const moved = movedAncestor || Boolean(relative && changed?.has(key(relative)))
+        if ((id === current.rootEntryId || expandedRef.current.has(id)) && (!changed || parents?.has(key(relative)) || moved)) directories.set(id, depth)
+        for (const entry of pagesRef.current[id] ?? []) if (entry.status === 'accessible' && entry.kind === 'directory') {
+          visit(entry.entryId, relative ? `${relative}/${entry.name}` : entry.name, depth + 1, moved)
+        }
+      }
+      visit(current.rootEntryId, '', 0)
+      const pending = [...directories].filter(([id]) => !completed.has(id))
+      if (!pending.length) return
+      const depth = Math.min(...pending.map(([, value]) => value))
+      // Rebuild paths after each parent layer. An external rename may report
+      // only its new name, while the same entry handle remains expanded.
+      await Promise.all(pending.filter(([, value]) => value === depth).map(async ([id]) => {
+        try { await load(id, current, generation, true) }
+        catch (reason) {
+          if (generation !== epoch.current) return
+          if (id === current.rootEntryId) throw reason
+          setExpanded(value => { const next = new Set(value); next.delete(id); return next })
+        }
+        completed.add(id)
+      }))
+    }
+  }, [load])
   const refreshRef = useRef(refresh); refreshRef.current = refresh
   useEffect(() => { void refresh().catch(reason => setError(message(reason))) }, [refreshVersion, refresh])
   const subscribe = window.desktopAPI?.onWorkspaceFilesChanged ?? files.subscribe
-  useEffect(() => subscribe?.(event => { if (event.workspaceId === active.current?.workspaceId) void refreshRef.current().catch(reason => setError(message(reason))) }), [subscribe])
+  useEffect(() => subscribe?.(event => { if (event.workspaceId === active.current?.workspaceId) void refreshRef.current(event.changedPaths).catch(reason => setError(message(reason))) }), [subscribe])
   // Compatibility for read-only test/embedded ports without a push subscription; desktop uses the watcher.
   useEffect(() => { if (subscribe) return; const timer = setInterval(() => { void refreshRef.current().catch(() => {}) }, 2500); return () => clearInterval(timer) }, [subscribe])
   const close = () => { setDialog(undefined); setRetry(undefined); setMenu(undefined); setError('') }
@@ -368,7 +440,11 @@ export function WorkspaceFilesTree({ directory, files, operation, refreshVersion
   }
   const renderEntries = (id: string): React.ReactNode => <ul role="group" className="lesson-directory-tree">{(pages[id] ?? []).map(entry => entry.status === 'blocked' ? <li className="workspace-tree-blocked" key={`blocked:${entry.name}`}><File size={16} aria-hidden="true" /><span title={`${entry.name}（无法访问）`}>{entry.name}（无法访问）</span></li> : <li role="treeitem" aria-selected={selection.has(entry.entryId)} aria-expanded={entry.kind === 'directory' ? expanded.has(entry.entryId) : undefined} key={entry.entryId} data-kind={entry.kind} data-open={expanded.has(entry.entryId)}>
     <div className="workspace-tree-row" data-drop={dropTarget === entry.entryId} {...(entry.kind === 'directory' ? droppable(entry.entryId) : {})}>
-      {entry.kind === 'directory' && <button type="button" className="workspace-tree-toggle" aria-label={`${expanded.has(entry.entryId) ? '折叠' : '展开'} ${entry.name}`} onClick={() => { setExpanded(value => { const next = new Set(value); if (next.has(entry.entryId)) next.delete(entry.entryId); else next.add(entry.entryId); return next }) }}><ChevronRight size={14} /></button>}
+      {entry.kind === 'directory' && <button type="button" className="workspace-tree-toggle" aria-label={`${expanded.has(entry.entryId) ? '折叠' : '展开'} ${entry.name}`} onClick={() => {
+        const opening = !expanded.has(entry.entryId)
+        setExpanded(value => { const next = new Set(value); if (opening) next.add(entry.entryId); else next.delete(entry.entryId); return next })
+        if (opening && active.current) void load(entry.entryId, active.current).catch(reason => setError(message(reason)))
+      }}><ChevronRight size={14} /></button>}
       <button type="button" className="lesson-tree-row" data-entry-id={entry.entryId} aria-pressed={selection.has(entry.entryId)} ref={element => { if (element) buttons.current.set(entry.entryId, element); else buttons.current.delete(entry.entryId) }} draggable={!busy} onDragStart={event => { writeWorkspaceEntryDrag(event.dataTransfer, root!.workspaceId, selection.has(entry.entryId) ? selected.map(row => row.entry) : [entry]) }} onClick={event => choose({ entry, parentId: id }, event)} onDoubleClick={() => { void open(entry).catch(reason => setError(message(reason))) }} onContextMenu={event => { event.preventDefault(); if (!selection.has(entry.entryId)) choose({ entry, parentId: id }); setMenu({ x: event.clientX, y: event.clientY, directoryEntryId: entry.kind === 'directory' ? entry.entryId : id, htmlImport: entry.kind === 'directory' ? 'pick' : /\.html?$/i.test(entry.name) ? 'selected' : null, ...(entry.kind === 'file' && /\.html?$/i.test(entry.name) ? { sourceEntryId: entry.entryId } : {}) }) }}>
         {entry.kind === 'directory' ? expanded.has(entry.entryId) ? <FolderOpen size={16} /> : <Folder size={16} /> : icon(entry.name)}<span title={entry.name}>{entry.name}</span>
       </button>

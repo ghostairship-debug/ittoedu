@@ -1,5 +1,5 @@
 import grapesjs, { type Component, type ComponentDefinition, type Editor } from 'grapesjs'
-import { inspectHtmlSource, flattenHtmlSourceNodes, type HtmlSourceNode } from '../../../shared/html/htmlSourceStructure'
+import { inspectHtmlSource, flattenHtmlSourceNodes, type HtmlSourceNode, type HtmlSourceStructure } from '../../../shared/html/htmlSourceStructure'
 import type { HtmlSourceEditCommand, HtmlSourceEditLeafCommand } from '../../../shared/html/sourceEditCommands'
 
 type Ports = { commit(command: HtmlSourceEditCommand): Promise<void>; select(key: string): void }
@@ -11,6 +11,7 @@ export function createHtmlGrapesProjection(container: HTMLElement, ports: Ports)
   const nodeByKey = new Map<string, HtmlSourceNode>()
   const before = new Map<Component, { parent: Component | undefined; index: number; style: Record<string, unknown> }>()
   const pendingStyles = new Map<Component, Record<string, string | null>>()
+  let projectedSource: string | undefined, projectedUrl: string | undefined, projectedCss: string | undefined
   const editor: Editor = grapesjs.init({ container, height: '280px', width: '100%',
     storageManager: false, panels: { defaults: [] }, fromElement: false,
     selectorManager: { componentFirst: true }, avoidInlineStyle: false,
@@ -68,13 +69,13 @@ export function createHtmlGrapesProjection(container: HTMLElement, ports: Ports)
     if (!dragging && !options.partial) void flush()
   })
 
-  const project = (source: string, previewUrl?: string) => {
+  const project = (source: string, previewUrl?: string, analyzed?: HtmlSourceStructure) => {
+    if (source === projectedSource && previewUrl === projectedUrl) return
     replay = true
     try {
-      modelByKey.clear(); nodeByKey.clear(); pendingStyles.clear()
-      const structure = inspectHtmlSource(source)
+      const previousNodes = new Map(nodeByKey)
+      const structure = analyzed ?? inspectHtmlSource(source)
       const nodes = flattenHtmlSourceNodes(structure.roots)
-      for (const node of nodes) nodeByKey.set(node.key, node)
       const body = nodes.find(node => node.name === 'body')!
       const attributes = (node: HtmlSourceNode) => Object.fromEntries(Object.entries(node.attributes).flatMap(([name, value]) => {
         // Program behaviour belongs to the sandbox preview, never GJS's workbench frame.
@@ -93,7 +94,33 @@ export function createHtmlGrapesProjection(container: HTMLElement, ports: Ports)
         removable: false, copyable: false, editable: false, draggable: Boolean(node.address),
         droppable: Boolean(node.contentSpan),
       })
-      editor.setComponents(body.children.filter(projected).map(definition))
+      const children = body.children.filter(projected)
+      const sameShape = (model: Component, node: HtmlSourceNode): boolean => {
+        const previous = previousNodes.get(model.get('cwSourceKey'))
+        const descendants = node.children.filter(projected), existing = model.components().models
+        return previous?.kind === node.kind && previous.name === node.name && existing.length === descendants.length
+          && descendants.every((child, index) => sameShape(existing[index]!, child))
+      }
+      const existing = editor.getWrapper()!.components().models
+      const incrementally = projectedSource !== undefined && existing.length === children.length
+        && children.every((node, index) => sameShape(existing[index]!, node))
+      if (incrementally) {
+        const update = (model: Component, node: HtmlSourceNode) => {
+          model.set({ cwSourceKey: node.key, cwSourceAddress: node.address })
+          if (node.kind === 'text') model.set('content', (node.value ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;'))
+          else {
+            model.setAttributes(attributes(node))
+            const element = document.createElement(node.name)
+            element.setAttribute('style', node.attributes.style ?? '')
+            const style = (element as HTMLElement).style
+            model.setStyle(Object.fromEntries([...style].map(name => [name, style.getPropertyValue(name)])))
+            node.children.filter(projected).forEach((child, index) => update(model.components().at(index), child))
+          }
+        }
+        children.forEach((node, index) => update(existing[index]!, node))
+      } else editor.setComponents(children.map(definition))
+      modelByKey.clear(); nodeByKey.clear(); pendingStyles.clear()
+      for (const node of nodes) nodeByKey.set(node.key, node)
       editor.getWrapper()!.set({ cwSourceKey: body.key, cwSourceAddress: body.address ?? { kind: 'document', from: 0, to: source.length } })
       const gather = (model: Component) => {
         const key = model.get('cwSourceKey')
@@ -102,14 +129,21 @@ export function createHtmlGrapesProjection(container: HTMLElement, ports: Ports)
       }
       gather(editor.getWrapper()!)
       // CSS is a read-only view here. Explicit style inputs use component inline styles.
-      editor.setStyle(nodes.filter(node => node.name === 'style' && node.contentSpan)
-        .map(node => source.slice(node.contentSpan!.from, node.contentSpan!.to)).join('\n'))
+      const css = nodes.filter(node => node.name === 'style' && node.contentSpan)
+        .map(node => source.slice(node.contentSpan!.from, node.contentSpan!.to)).join('\n')
+      if (css !== projectedCss) { editor.setStyle(css); projectedCss = css }
       snapshot()
       editor.UndoManager.removeAll()
+      projectedSource = source; projectedUrl = previewUrl
     } finally { replay = false }
   }
   return { editor, project,
-    select(key: string) { const model = modelByKey.get(key); if (model) editor.select(model) },
+    select(key: string) {
+      const model = modelByKey.get(key)
+      replay = true
+      try { if (model) editor.select(model); else editor.select(undefined) }
+      finally { replay = false }
+    },
     style(key: string, patch: Record<string, string | null>) {
       const model = modelByKey.get(key)
       if (!model) return false

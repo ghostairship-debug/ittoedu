@@ -1,10 +1,12 @@
+import { componentSurfaces, componentContainers } from '../shared/contracts/component-platform/project'
 import { captureCourseDocumentReference, workbenchSelection } from './workbench/SelectionContextController'
 import { CourseAdvancedChrome, CourseEditorFrame, useCourseEditorChrome } from './documents/CourseEditorChromeContext'
 import { CourseLightToolbar } from './documents/CourseLightToolbar'
 import { openCoursePageProperties } from './composition/properties/openCoursePageProperties'
 import { HtmlImportDialog, type HtmlImportDestination } from './documents/HtmlImportDialog'
 import { planFlowImport } from './project/flowImportTransaction'
-import { createBlankCourseProjectV10 } from '../core/course/createCourseProjectV10'
+import { createBlankCourseProjectV10, createBlankProgramProject } from '../core/course/createCourseProjectV10'
+import { loadBuiltinComponentSource } from '../core/components/source/builtinSources'
 import { applyComponentOperation, captureComponentOperation } from '../core/drivers/courseV10Operations'
 import { elementCards } from './workbench/elementCards/elementCardController'
 import { CourseEditorActionsContext, type CourseEditorActions } from './documents/CourseEditorActionsContext'
@@ -27,7 +29,7 @@ import { insertComponentDefinitionAtTarget, insertComponentPackagesAtTarget } fr
 import { selectCurrentCatalogPackages } from './components/componentLibraryModel'
 import { useCourseDelivery } from './app/useCourseDelivery'
 import { courseDeliverySnapshot } from './app/courseDeliverySnapshot'
-import { resolveCourseProjectDeliveryFindingRoute } from './diagnostics/projectHealthNavigation'
+import { resolveCourseProjectDeliveryFindingRoute, selectCourseProjectDiagnosticRoute } from './diagnostics/projectHealthNavigation'
 import { CoursePreviewNotices } from './app/CoursePreviewNotices'
 import { useCourseProjectLifecycle } from './app/useCourseProjectLifecycle'
 import { useFlowDocumentRecovery } from './app/useFlowDocumentRecovery'
@@ -73,13 +75,15 @@ import { EditorPanelLayout } from './ui/EditorPanelLayout'
 import { createMaterialCitationRequest } from './authoring/tools/materialCitationRequest'
 import { insertMaterialCitation } from './authoring/tools/materialCitationTool'
 import { buildDocumentExport } from './workbench/delivery/DocumentExportRenderer'
+import { buildFrozenDelivery } from './workbench/delivery/frozenDeliveryRenderer'
 import type { ProductivityContext } from './authoring/productivity'
 import { BundledFontBoundary } from './app/BundledFontBoundary'
 import { confirmPptxLosses } from './project/confirmPptxLosses'
-import { createCourseFromPptx, pptxCourseStem } from './project/pptxCourseCreation'
+import { pptxCourseStem } from './project/pptxCourseCreation'
+import { preparePptxCourseOffThread } from './project/pptxImportClient'
 import { CourseV10RuntimeView } from './components/CourseV10RuntimeView'
 import type { DocumentSnapshot } from '../shared/workbench/document'
-import { resolveComponentPresentation } from '../shared/contracts/component-platform'
+import type { CourseProjectV10 } from '../shared/contracts/component-platform'
 import { projectWithBackgroundPreview } from './authoring/backgroundPreview'
 import { projectWithSlideContentDraft } from './store/slices/slideAuthoringSlice'
 
@@ -122,9 +126,10 @@ function CourseWorkspaces(props: ComponentProps<typeof Workspace>) {
   return <>{view.views.map(document => {
     const active = document.documentId === view.activeDocumentId
     const epoch = view.documents.find(snapshot => snapshot.documentId === document.documentId)?.epoch
-    const effective = projectWithSlideContentDraft(resolveComponentPresentation(document.model.project, document.surfaceId, document.activeStateId), contentDraft, { documentId: document.documentId, epoch,
-      surfaceId: document.surfaceId, activeStateId: document.activeStateId })
-    const renderProject = projectWithBackgroundPreview(effective, preview, document.documentId, document.surfaceId, document.activeStateId, epoch)
+    const renderProject = (effectiveProject: CourseProjectV10) => projectWithBackgroundPreview(
+      projectWithSlideContentDraft(effectiveProject, contentDraft, { documentId: document.documentId, epoch,
+        surfaceId: document.surfaceId, activeStateId: document.activeStateId }),
+      preview, document.documentId, document.surfaceId, document.activeStateId, epoch)
     return <div key={document.documentId} hidden={!active} style={active ? { display: 'flex', flex: 1, minHeight: 0 } : undefined}>
       <CourseV10RuntimeView active={active} documentId={document.documentId} model={document.model} surfaceId={document.surfaceId}
         activeStateId={document.activeStateId}
@@ -209,7 +214,7 @@ export default function App() {
   const [projectHealthOpen, setProjectHealthOpen] = useState(false)
   const [materialsOpen, setMaterialsOpen] = useState(false)
   const [designTool, setDesignTool] = useState<{ kind: 'recipe' | 'productivity' | 'pptx'; context: ProductivityContext } | null>(null)
-  const hasFlowSurface = useEditorStore(state => Boolean(state.courseView.project?.surfaces.some(surface => surface.kind === 'flow')))
+  const hasFlowSurface = useEditorStore(state => Boolean((state.courseView.project == null ? undefined : componentContainers(state.courseView.project).some(surface => surface.kind === 'flow'))))
   const openDesignTool = (kind: 'recipe' | 'productivity' | 'pptx') => {
     const documentId = useEditorStore.getState().courseView.activeDocumentId
     if (!documentId) { setError('请先打开一份 果铃工程'); return }
@@ -247,15 +252,15 @@ export default function App() {
   })
   const selectedNodeIds = useEditorStore(selectSelectedNodeIds)
   const editingScope = useEditorStore(selectEditingScope)
-  const insertSurface = activeCourseDocument?.surfaces.find(surface => surface.id === courseConnection.surfaceId)?.kind ?? null
-  const spatialInsertScope = useEditorStore(state => state.courseView.project?.surfaces.find(surface => surface.id === state.courseView.surfaceId)?.kind === 'spatial'
+  const insertSurface = (activeCourseDocument == null ? undefined : componentContainers(activeCourseDocument).find(surface => surface.id === courseConnection.surfaceId)?.kind) ?? null
+  const spatialInsertScope = useEditorStore(state => (state.courseView.project == null ? undefined : componentContainers(state.courseView.project).find(surface => surface.id === state.courseView.surfaceId)?.kind) === 'spatial'
     ? state.readSpatialView(state.courseView.surfaceId ?? '', state.courseView.activeDocumentId ?? '').scope : null)
   const activeTab = useEditorStore(state => state.activeTab)
   const editingItemCount = editingScope === 'global'
     ? (activeCourseDocument?.global.underlay.length ?? 0) + (activeCourseDocument?.global.overlay.length ?? 0)
-    : activeCourseDocument?.surfaces.find(surface => surface.id === courseConnection.surfaceId)?.childIds.length ?? 0
-  const activeScene = activeCourseDocument?.surfaces.find(surface => surface.id === courseConnection.surfaceId)
-  const slideSceneCount = activeCourseDocument?.surfaces.filter(surface => surface.kind === 'slide').length ?? 0
+    : (activeCourseDocument == null ? undefined : componentContainers(activeCourseDocument).find(surface => surface.id === courseConnection.surfaceId)?.childIds.length) ?? 0
+  const activeScene = (activeCourseDocument == null ? undefined : componentContainers(activeCourseDocument).find(surface => surface.id === courseConnection.surfaceId))
+  const slideSceneCount = (activeCourseDocument == null ? undefined : componentSurfaces(activeCourseDocument).filter(surface => surface.kind === 'slide').length) ?? 0
   const errorMessage = useEditorStore((state) => state.errorMessage)
   const statusMessage = useEditorStore((state) => state.statusMessage)
   const courseProjectHealthDiagnostics = useMemo(
@@ -405,7 +410,6 @@ export default function App() {
         if (!await flowRecovery.flush()) return false
       }
       if (!(await lessonShell.current?.preserveAll(mode, ids) ?? true)) return false
-      await useEditorStore.getState().courseBridge.drain(ids)
       return true
     },
     prepareBeforeClose: (mode, ids) => prepareCourseClose(ids, mode),
@@ -444,10 +448,10 @@ export default function App() {
   // The work area's "从 PPT 新建 果铃工程": a new untitled H5 presentation holding the PPT's pages (M21).
   const newProjectFromPptx = async ({ name, bytes }: { name: string; bytes: Uint8Array }) => {
     const title = pptxCourseStem(name)
-    const course = await createCourseFromPptx(bytes, title)
+    const course = await preparePptxCourseOffThread(bytes, name)
     if (!await confirmPptxLosses(name, course.issues)) return false
     const issues = course.issues.length
-    const created = await courseProjectLifecycle.newProjectFrom(async () => course, { origin: 'lesson' })
+    const created = await courseProjectLifecycle.newProjectFrom(async () => ({ project: course.model.project, resources: course.model.resources }), { origin: 'lesson' })
     if (created) setStatus(issues ? `已从 PPT 新建 果铃工程「${title}」；${issues} 项内容未保留或已简化` : `已从 PPT 新建 果铃工程「${title}」`)
     return created
   }
@@ -472,7 +476,7 @@ export default function App() {
       } else {
         const project = createBlankCourseProjectV10(imported.name.replace(/\.[^.]+$/, ''))
         const planned = planFlowImport(project, imported)
-        planned.edits.push({ type: 'surface.remove', surfaceId: project.surfaces[0].id })
+        planned.edits.push({ type: 'surface.remove', surfaceId: componentSurfaces(project)[0].id })
         const next = applyComponentOperation(project, captureComponentOperation(project, planned.edits))
         const created = await courseProjectLifecycle.newProjectFrom(async () => ({ project: next,
           resources: { assets: Object.fromEntries(imported.assets.map(entry => [entry.asset.id, entry.bytes])), components: {} } }), { origin: 'lesson' })
@@ -500,10 +504,15 @@ export default function App() {
       }
       const project = snapshot.model.project
       const activeLocationId = selectActiveCourseLocationId(useEditorStore.getState())
-      const destinations: HtmlImportDestination[] = project.surfaces.flatMap<HtmlImportDestination>(surface => {
+      const rootContainers = componentSurfaces(project)
+      const activeContainer = componentContainers(project).find(value => value.id === activeLocationId)
+      const importContainers = activeContainer && !rootContainers.some(value => value.id === activeContainer.id)
+        ? [activeContainer, ...rootContainers] : rootContainers
+      const destinations: HtmlImportDestination[] = importContainers.flatMap<HtmlImportDestination>(surface => {
         if (surface.kind === 'slide') return [{ locationId: surface.id, surfaceType: 'slide', label: surface.title }]
         if (surface.kind !== 'flow') return []
-        const bodyIds = (ids: readonly string[]): string[] => ids.flatMap(id => [id, ...bodyIds(project.instances[id]?.childIds ?? [])])
+        const bodyIds = (ids: readonly string[]): string[] => ids.flatMap(id => project.instances[id]?.container
+          ? [] : [id, ...bodyIds(project.instances[id]?.childIds ?? [])])
         const anchors = bodyIds(flowBodyIds(project, surface.id)).flatMap(id => {
           const instance = project.instances[id], definition = instance && project.definitions[instance.definitionId]
           const data = instance?.data
@@ -542,7 +551,7 @@ export default function App() {
       }
       const api = desktopApi().htmlImport
       if (!api) throw new Error('HTML 导入服务不可用')
-      const surface = snapshot.model.project.surfaces.find(surface => surface.id === target.locationId)
+      const surface = componentContainers(snapshot.model.project).find(surface => surface.id === target.locationId)
       const workspace = (document.querySelector<HTMLElement>('.flow-workspace__scroll') ?? document.querySelector<HTMLElement>('.editor-center'))?.getBoundingClientRect()
       const viewport = surface?.kind === 'flow' && workspace && workspace.height > 0
         ? { width: Math.ceil(surface.flow?.layout.readingWidth ?? workspace.width), height: Math.ceil(workspace.height) } : undefined
@@ -601,12 +610,11 @@ export default function App() {
       if (!project) return
       const route = resolveCourseProjectDeliveryFindingRoute(project, item)
       if (!route.available) { state.setStatus(route.reason); return }
-      if (route.surfaceId) state.courseKernel.selectSurface(route.surfaceId)
-      state.setEditingScope(route.scope)
-      state.courseKernel.selectInstances(route.instanceId ? [route.instanceId] : [], route.surfaceId)
+      selectCourseProjectDiagnosticRoute(state.courseKernel, route, state.setEditingScope)
       state.setActiveTab(route.tab)
     },
     compileComponent: input => desktopApi().compileComponent(input),
+    buildOutput: buildFrozenDelivery,
     captureAuthoringObservation: rect => desktopApi().captureAuthoringObservation!(rect),
     exportHtml: (input) => desktopApi().exportHtml(input),
     exportWebPackage: (input) => desktopApi().exportWebPackage(input),
@@ -616,12 +624,13 @@ export default function App() {
     documentTrigger: activeCourseDocument,
     sidecarTrigger: sidecarFiles,
     componentPackagesTrigger: courseConnection.views,
+    liveDocuments: courseConnection.documents,
   })
 
   const captureInsertionPlacement = (target: CapturedCourseTarget): CourseInsertionOptions => {
     const current = useEditorStore.getState()
     if (selectEditingScope(current) !== 'global') {
-      if (target.project.surfaces.find(surface => surface.id === target.surfaceId)?.kind !== 'spatial') return {}
+      if (componentContainers(target.project).find(surface => surface.id === target.surfaceId)?.kind !== 'spatial') return {}
       const camera = current.readSpatialView(target.surfaceId ?? '', target.documentId).camera
       return { center: { x: camera.x, y: camera.y } }
     }
@@ -709,7 +718,7 @@ export default function App() {
       } else result = await commitFlowMenu(courseKernel, target, command, { assetId: payload?.assetId })
       const confirmed = await drainCourseDocument(target.documentId)
       const current = courseKernel.readView()
-      if (current.activeDocumentId === target.documentId && current.surfaceId === target.surfaceId && result.instanceIds[0]) {
+      if (current.activeDocumentId === target.documentId && current.surfaceId === target.surfaceId && result.surfaceId && result.instanceIds[0]) {
         requestFlowBlockSelection({ documentId: target.documentId, surfaceId: result.surfaceId, blockId: result.instanceIds[0] })
         if (command.kind === 'heading' || command.kind === 'text-box') requestFlowBlockFocus({ documentId: target.documentId,
           surfaceId: result.surfaceId, blockId: result.instanceIds[0], revision: confirmed.revision })
@@ -722,7 +731,7 @@ export default function App() {
     isReadOnly: () => activeWorkspaceKind.current !== 'course' || courseDelivery.previewOpen || useEditorStore.getState().canvasMode === 'run',
     captureDeleteSnapshot(target) {
       const state = useEditorStore.getState(), view = state.courseView
-      const kind = view.project?.surfaces.find(surface => surface.id === view.surfaceId)?.kind
+      const kind = (view.project == null ? undefined : componentContainers(view.project).find(surface => surface.id === view.surfaceId)?.kind)
       const contentEditable = target instanceof HTMLElement && target.isContentEditable
       const draft = state.slideContentEdit
       const draftImplementation = draft && view.project?.definitions[draft.definitionId]?.implementation
@@ -846,7 +855,7 @@ export default function App() {
       drain: id => drainCourseDocument(id), open: surfaceId => {
         const current = useEditorStore.getState()
         current.setEditingScope('scene')
-        if (current.courseView.project?.surfaces.find(surface => surface.id === surfaceId)?.kind === 'spatial') current.setSpatialGraphSelection(null, surfaceId)
+        if ((current.courseView.project == null ? undefined : componentContainers(current.courseView.project).find(surface => surface.id === surfaceId)?.kind) === 'spatial') current.setSpatialGraphSelection(null, surfaceId)
         current.setActiveTab('properties'); proEditorRailController.open('properties')
       },
     }).catch(error => setError(readableError(error, '打开页面属性失败。'))) } : undefined}
@@ -881,6 +890,10 @@ export default function App() {
         onNew={courseProjectLifecycle.newProject}
         onNewSpatial={courseProjectLifecycle.newSpatialProject}
         onNewFlow={courseProjectLifecycle.newFlowProject}
+        onNewProgram={() => { void courseProjectLifecycle.newProjectFrom(async () => {
+          await loadBuiltinComponentSource('guoling.html-program')
+          return { project: createBlankProgramProject(), resources: { components: {}, assets: {} } }
+        }) }}
         onOpen={courseProjectLifecycle.openProject}
         recentProjects={courseProjectLifecycle.recentProjects}
         onOpenRecent={courseProjectLifecycle.openRecentProject}
@@ -945,7 +958,7 @@ export default function App() {
               <button key={entry.id} type="button" className="secondary-button" onClick={() => {
                 const pending = pendingFlowComponent
                 setPendingFlowComponent(null)
-                insertFlowMenu(pending.command, { packageId: entry.id }, pending.capture, entry)
+                insertFlowMenu(pending.command, { packageId: entry.definitionId }, pending.capture)
               }}>{entry.title}</button>)}
             {selectCurrentCatalogPackages(componentLibrary.componentCatalog.packages.filter(entry => entry.sourceTrust === 'built-in' && !componentLibrary.installedEntries.some(installed => installed.id === entry.packageId)))
               .map(entry => <button key={entry.packageId} type="button" className="secondary-button" onClick={() => {
@@ -1021,10 +1034,13 @@ export default function App() {
           ? (() => {
               const current = activeCourseDocument?.definitions[componentLibrary.replacementRequest!.packageId]
               const next = componentLibrary.replacementRequest!.packageData
-              return `组件：${next.title} (${next.id})\n当前版本：${current?.version ?? '未知'}\n新版本：${Object.values(next.definitions)[0]?.version ?? '未指定'}\n文件：${componentLibrary.replacementRequest!.sourceFileName}\n\n确认后，场景与全局层中的全部实例会切换到该包并保留当前属性；此操作可以撤销。请只替换为已审阅的可信代码。`
+              return `组件：${next.title} (${next.id})\n当前版本：${current?.version ?? '未知'}\n新版本：${Object.values(next.definitions)[0]?.version ?? '未指定'}\n文件：${componentLibrary.replacementRequest!.sourceFileName}\n\n${componentLibrary.replacementRequest!.sourceReview.summary}\n\n确认后，全部实例会切换到该包并保留当前属性与私有覆盖；此操作可以撤销。`
             })()
           : ''}
-        confirmLabel="确认替换"
+        details={componentLibrary.replacementRequest && <details className="modal__details"><summary>查看来源与更新差异</summary>
+          <pre style={{ whiteSpace: 'pre-wrap', maxHeight: '40vh', overflow: 'auto' }}>{componentLibrary.replacementRequest.sourceReview.sourceDiff}</pre></details>}
+        confirmLabel={componentLibrary.replacementRequest?.sourceReview.localSourceModified ? '替换本地共享源码' : '确认替换'}
+        cancelLabel="保留当前版本"
         onCancel={componentLibrary.cancelReplacement}
         onConfirm={componentLibrary.confirmReplacement}
       />
@@ -1034,10 +1050,13 @@ export default function App() {
         message={componentLibrary.catalogUpdateRequest
           ? (() => {
               const entry = componentLibrary.catalogUpdateRequest!.entries[0]!
-              return `组件：${entry.name} v${entry.version}\n来源：${entry.sourceLabel}\nSHA-256：${entry.sha256}\n质量：${entry.quality}\n发布阻断：${entry.releaseBlockers?.join('、') || '无'}\n\n更新会改变工程锁定的组件代码和全部实例，必须明确审阅。读取时仍会重新校验哈希。`
+              return `组件：${entry.name} v${entry.version}\n来源：${entry.sourceLabel}\n质量：${entry.quality}\n\n${componentLibrary.catalogUpdateRequest!.sourceReview.summary}\n\n更新会改变工程锁定的共享组件代码，实例属性与私有覆盖会保留。`
             })()
           : ''}
-        confirmLabel="确认更新"
+        details={componentLibrary.catalogUpdateRequest && <details className="modal__details"><summary>查看来源与更新差异</summary>
+          <pre style={{ whiteSpace: 'pre-wrap', maxHeight: '40vh', overflow: 'auto' }}>{componentLibrary.catalogUpdateRequest.sourceReview.sourceDiff}</pre></details>}
+        confirmLabel={componentLibrary.catalogUpdateRequest?.sourceReview.localSourceModified ? '更新并替换本地源码' : '确认更新'}
+        cancelLabel="保留当前版本"
         onCancel={componentLibrary.cancelCatalogUpdate}
         onConfirm={componentLibrary.confirmCatalogUpdate}
       />

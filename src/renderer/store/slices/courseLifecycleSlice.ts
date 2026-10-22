@@ -1,3 +1,5 @@
+import { componentContainerBuiltinKey } from '../../../shared/contracts/component-platform/project'
+import { normalizeWorkProject } from '../../../shared/contracts/component-platform/workProjectMigration'
 import type { CourseProjectV10 } from '../../../shared/contracts/component-platform/project'
 import { createTeacherControllerFrame } from '../../../components/teacher-controller/data'
 import type { DocumentResources } from '../../../shared/workbench/document'
@@ -32,15 +34,18 @@ export type CourseLifecyclePorts = {
 
 export function createCourseProjectContent(surface: 'slide' | 'flow' | 'spatial', canvas?: SlideCanvasSize): CourseProjectPersistenceSnapshot {
   const project = createBlankCourseProjectV10()
-  const page = project.surfaces[0]
+  const root = project.instances[project.rootIds[0]]
+  const page = root.container!
+  root.definitionId = componentContainerBuiltinKey(surface)
+  project.definitions = { [root.definitionId]: { id: root.definitionId, role: 'mixed', title: surface === 'flow' ? '流式容器' : surface === 'spatial' ? '空间容器' : '幻灯片容器', implementation: { kind: 'builtin', key: root.definitionId } } }
+  root.name = surface === 'flow' ? '讲义' : surface === 'spatial' ? '空间' : root.name
   page.kind = surface
-  page.title = surface === 'flow' ? '讲义' : surface === 'spatial' ? '空间' : page.title
   if (surface === 'slide') {
     page.designSize = canvas ?? page.designSize
     for (const id of project.global.overlay) if (project.instances[id].definitionId === 'guoling.navigation') project.instances[id].frame = createTeacherControllerFrame(page.designSize)
   } else if (surface === 'flow') {
     const width = page.designSize?.width ?? 1280
-    page.flow = { layout: { widthMode: 'reading', readingWidth: width, wideContentWidth: width, paperBackgroundColor: '#ffffff' } }
+    page.flow = { layout: { widthMode: 'reading', readingWidth: width, wideContentWidth: width } }
   }
   else page.spatial = { home: { x: 0, y: 0, zoom: 1 }, frames: [] }
   return { project, resources: { assets: {}, components: {} } }
@@ -80,10 +85,7 @@ export function createCourseLifecycleSlice(kernel: EditorStoreKernel, lifecycle:
       void (path ? lifecycle.bridge.open(path) : lifecycle.bridge.create({ kind: 'course-v10', project, resources })).catch(report)
     },
     loadProject(project: unknown, path: string | null, resources: DocumentResources = { assets: {}, components: {} }) {
-      if (!project || typeof project !== 'object' || !('schemaVersion' in project) || project.schemaVersion !== 10) {
-        throw new Error('请使用 Course Project V10 工程；旧工程原件仍保留')
-      }
-      const model = { kind: 'course-v10' as const, project: project as CourseProjectV10, resources }
+      const model = { kind: 'course-v10' as const, project: normalizeWorkProject(project), resources }
       new CourseV10Driver().validate(model)
       void (path ? lifecycle.bridge.open(path) : lifecycle.bridge.create(model)).catch(report)
     },

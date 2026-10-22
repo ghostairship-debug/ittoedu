@@ -73,6 +73,9 @@
               {
                 "additionalProperties": false,
                 "properties": {
+                  "containerId": {
+                    "$ref": "#/$defs/__schema17"
+                  },
                   "stateId": {
                     "$ref": "#/$defs/__schema17"
                   },
@@ -106,6 +109,9 @@
               {
                 "additionalProperties": false,
                 "properties": {
+                  "containerId": {
+                    "$ref": "#/$defs/__schema17"
+                  },
                   "locationId": {
                     "$ref": "#/$defs/__schema17"
                   },
@@ -149,13 +155,33 @@
               {
                 "additionalProperties": false,
                 "properties": {
+                  "containerId": {
+                    "$ref": "#/$defs/__schema17"
+                  },
                   "transition": {
                     "$ref": "#/$defs/__schema18"
                   },
                   "type": {
                     "enum": [
                       "step.next",
-                      "step.previous",
+                      "step.previous"
+                    ],
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "type"
+                ],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "transition": {
+                    "$ref": "#/$defs/__schema18"
+                  },
+                  "type": {
+                    "enum": [
                       "scene.next",
                       "scene.previous",
                       "scene.replay",

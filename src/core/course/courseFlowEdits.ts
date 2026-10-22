@@ -1,3 +1,4 @@
+import { componentContainerForInstance, componentSurface } from '../../shared/contracts/component-platform/project'
 import type { ComponentContainer, ComponentFlowAuthoring, ComponentFlowBodyLayout, ComponentFlowPlacement, CourseProjectV10 } from '../../shared/contracts/component-platform/project'
 import type { ComponentFrame } from '../../shared/contracts/component-platform/frame'
 import type { ComponentEdit } from '../../shared/contracts/component-platform/operations'
@@ -11,7 +12,7 @@ export type FlowPlacementInput =
   | { kind: 'overlay'; surfaceId: string; placement: ComponentFlowPlacement; frame?: ComponentFrame; index?: number; origin?: 'authoring' | 'quickbar' }
 
 function requireFlow(project: CourseProjectV10, surfaceId: string) {
-  const surface = project.surfaces.find(value => value.id === surfaceId)
+  const surface = componentSurface(project, surfaceId)
   if (surface?.kind !== 'flow') throw new Error('当前表面不是讲义')
   return surface
 }
@@ -25,7 +26,7 @@ function requireEditable(project: CourseProjectV10, id: string) {
 /** Flow settings preserve the existing reading mode and widths when only one field changes. */
 export function flowSettingsEdits(project: CourseProjectV10, surfaceId: string, patch: Partial<ComponentFlowAuthoring['layout']>): ComponentEdit[] {
   const surface = requireFlow(project, surfaceId)
-  const layout = surface.flow?.layout ?? { widthMode: 'reading' as const, readingWidth: 860, wideContentWidth: 1100, paperBackgroundColor: '#ffffff' }
+  const layout = surface.flow?.layout ?? { widthMode: 'reading' as const, readingWidth: 860, wideContentWidth: 1100 }
   const flow = { ...surface.flow, layout: { ...layout, ...patch } }
   return equalComponentValue(surface.flow, flow) ? [] : [{ type: 'flow.set', surfaceId, flow }]
 }
@@ -47,23 +48,25 @@ export function flowPlacementEdits(project: CourseProjectV10, instanceId: string
     const placement = prepareCourseFlowPlacement(project, input.placement, references)
     // Explicit frames are in the destination surface; retained frames use their old parent.
     // Keep the two established UI defaults while making their preparation a Flow responsibility.
+    const destination = project.instances[input.surfaceId]
+    const destinationMatrix = composeMatrices(componentParentMatrix(project, input.surfaceId), destination.frame?.transform ?? IDENTITY_MATRIX)
     const frame = input.frame ?? (instance.frame
-      ? reparentFrame(instance.frame, componentParentMatrix(project, instanceId), IDENTITY_MATRIX) as ComponentFrame
+      ? reparentFrame(instance.frame, componentParentMatrix(project, instanceId), destinationMatrix) as ComponentFrame
       : input.origin === 'quickbar'
         ? { width: 400, height: 240, transform: [1, 0, 0, 1, 72, 72] as ComponentFrame['transform'] }
         : { width: 240, height: 120, transform: [1, 0, 0, 1, 80, 80] as ComponentFrame['transform'] })
     if (!equalComponentValue(frame, instance.frame)) edits.push({ type: 'frame.set', instanceId, frame })
     if (!equalComponentValue(instance.flowPlacement, placement)) edits.push({ type: 'instance.flowPlacement.set', instanceId, flowPlacement: placement })
-    if (owner?.kind !== 'surface' || owner.surfaceId !== input.surfaceId || input.index !== undefined) {
-      const container: ComponentContainer = { kind: 'surface', surfaceId: input.surfaceId }
+    if (owner?.kind !== 'instance' || owner.instanceId !== input.surfaceId || input.index !== undefined) {
+      const container: ComponentContainer = { kind: 'instance', instanceId: input.surfaceId }
       edits.push({ type: 'instance.move', instanceId, container, index: input.index ?? containerChildIds(project, container).length,
         frame })
     }
   } else {
     if (instance.flowPlacement) edits.push({ type: 'instance.flowPlacement.set', instanceId, flowPlacement: null })
-    if (input.parentId !== undefined || input.index !== undefined) {
-      const container: ComponentContainer = input.parentId ? { kind: 'instance', instanceId: input.parentId } : { kind: 'surface', surfaceId: input.surfaceId }
-      const parent = input.parentId ? requireEditable(project, input.parentId) : null
+    if (input.parentId !== undefined || input.index !== undefined || componentContainerForInstance(project,instanceId)?.id !== input.surfaceId) {
+      const container: ComponentContainer = { kind: 'instance', instanceId: input.parentId || input.surfaceId }
+      const parent = input.parentId ? requireEditable(project, input.parentId) : project.instances[input.surfaceId]
       const parentMatrix = parent ? composeMatrices(componentParentMatrix(project, parent.id), parent.frame?.transform ?? IDENTITY_MATRIX) : IDENTITY_MATRIX
       const siblings = containerChildIds(project, container).filter(id => id !== instanceId)
       const reading = flowReadingMembers(project, container).filter(id => id !== instanceId)

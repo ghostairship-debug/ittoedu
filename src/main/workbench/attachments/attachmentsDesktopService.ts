@@ -2,6 +2,7 @@ import { app, dialog, type BrowserWindow } from 'electron'
 import { randomUUID } from 'node:crypto'
 import path from 'node:path'
 import { AttachmentError, AttachmentService } from './AttachmentService'
+import type { AttachmentExtractionInput, PdfPageSinkOptions, StreamingAttachmentExtractor } from '../../../shared/workbench/attachments'
 import { createSandboxedAttachmentExtractor } from './SandboxedAttachmentExtraction'
 import { attachmentsDesktopRequestSchema } from '../../../shared/workbench/attachmentsDesktop'
 import type { AttachmentIntakeFile, AttachmentReadProgress } from '../../../shared/workbench/attachmentsDesktop'
@@ -13,6 +14,7 @@ import { resolveRendererEntryUrl } from '../../rendererEntry'
 
 export class AttachmentsDesktopService {
   readonly attachments: AttachmentService
+  private readonly extractor: StreamingAttachmentExtractor
   private readonly grants = new Map<string, { path: string; kind: 'file' | 'workspace'; owner: number }>()
   private readonly extractions = new Map<string, { controller: AbortController; owner: number }>()
   private readonly cancelled = new Set<string>()
@@ -20,13 +22,17 @@ export class AttachmentsDesktopService {
   private readonly windows = new Set<number>()
   constructor(directory: string) {
     const dev = app.isPackaged || !process.env.VITE_DEV_SERVER_URL ? undefined : resolveRendererEntryUrl()
+    this.extractor = createSandboxedAttachmentExtractor({ preloadPath: path.resolve(__dirname, '../../../preload/attachmentExtraction.js'),
+      ...(dev ? { rendererURL: new URL('attachment-extraction.html', dev.endsWith('/') ? dev : `${dev}/`).href } : { rendererFile: path.resolve(__dirname, '../../../../dist-renderer/attachment-extraction.html') }),
+    })
     this.attachments = new AttachmentService({ directory, resolveAuthorizedPath: async id => {
       const grant = this.grants.get(id)
       if (!grant) throw new AttachmentError('path-not-authorized', '附件文件读取授权已失效')
       return { path: grant.path, kind: grant.kind }
-    }, extractor: createSandboxedAttachmentExtractor({ preloadPath: path.resolve(__dirname, '../../../preload/attachmentExtraction.js'),
-      ...(dev ? { rendererURL: new URL('attachment-extraction.html', dev.endsWith('/') ? dev : `${dev}/`).href } : { rendererFile: path.resolve(__dirname, '../../../../dist-renderer/attachment-extraction.html') }),
-    }) })
+    }, extractor: this.extractor })
+  }
+  streamPdfPages(input: AttachmentExtractionInput, options: PdfPageSinkOptions) {
+    return this.extractor.streamPdfPages(input, options)
   }
   private retainWindow(window: BrowserWindow): void {
     const owner = window.webContents.id
@@ -94,6 +100,7 @@ export class AttachmentsDesktopService {
       case 'receive': return this.controlled(input.requestId ?? randomUUID(), window, signal => this.attachments.receiveBytes({ name: input.name, bytes: input.bytes, source: { kind: input.source }, ...(input.mediaType ? { declaredMediaType: input.mediaType } : {}) }, { signal }))
       case 'snapshot': return this.attachments.readSnapshot(input.attachmentId)
       case 'representation': return this.attachments.readRepresentation(input.attachmentId, input.representationId)
+      case 'thumbnail': return this.attachments.readThumbnail(input.attachmentId, input.representationId)
       case 'cancel': {
         const key = `${window.webContents.id}:${input.requestId}`
         const running = this.extractions.get(key)

@@ -1,3 +1,4 @@
+import { componentContainers } from '../../shared/contracts/component-platform/project'
 import {
   ArrowLeft,
   ChevronDown,
@@ -26,7 +27,6 @@ import './workbenchChrome.css'
 import type { SingleHtmlExportMode } from '../export/course/coursePackagePreflight'
 import {
   selectActiveCourseProjectDocument,
-  selectActiveSceneId,
   selectCanRedoActiveSurface,
   selectCanUndoActiveSurface,
   selectHasUnsavedCourseChanges,
@@ -40,6 +40,7 @@ interface TopToolbarProps {
   onNew(): void
   onNewSpatial?(): void
   onNewFlow?(): void
+  onNewProgram?(): void
   onOpen(): void
   recentProjects: RecentProjectEntry[]
   onOpenRecent(path: string): void
@@ -96,6 +97,7 @@ export function TopToolbar({
   onNew,
   onNewSpatial,
   onNewFlow,
+  onNewProgram,
   onOpen,
   recentProjects,
   onOpenRecent,
@@ -121,14 +123,14 @@ export function TopToolbar({
   const dirty = useEditorStore(selectHasUnsavedCourseChanges)
   const canUndo = useEditorStore(selectCanUndoActiveSurface)
   const canRedo = useEditorStore(selectCanRedoActiveSurface)
-  const activeSceneId = useEditorStore(selectActiveSceneId)
+  const activeRootId = useEditorStore((state) => state.courseView.rootInstanceId)
   const undo = useEditorStore((state) => state.undo)
   const redo = useEditorStore((state) => state.redo)
   const renameProject = useEditorStore((state) => state.renameProject)
   const courseDocument = useEditorStore(selectActiveCourseProjectDocument)
-  const surfaces = courseDocument?.surfaces ?? []
+  const rootIds = courseDocument?.rootIds ?? []
   const projectTitle = courseDocument?.title ?? ''
-  const hasFlowSurface = Boolean(courseDocument?.surfaces.some((surface) => surface.kind === 'flow'))
+  const hasFlowSurface = Boolean((courseDocument == null ? undefined : componentContainers(courseDocument).some((surface) => surface.kind === 'flow')))
   const [editingTitle, setEditingTitle] = useState(false)
   const [titleDraft, setTitleDraft] = useState(projectTitle)
   useEffect(() => setTitleDraft(projectTitle), [projectTitle])
@@ -138,9 +140,7 @@ export function TopToolbar({
     else setTitleDraft(projectTitle)
     setEditingTitle(false)
   }
-  const sceneIndex = surfaces.findIndex(
-    (surface) => surface.id === activeSceneId,
-  )
+  const sceneIndex = activeRootId ? rootIds.indexOf(activeRootId) : -1
 
   return (
     <header className={`toolbar${commonTools ? ' toolbar--shared-tools' : ''}`} data-testid="top-toolbar">
@@ -159,7 +159,7 @@ export function TopToolbar({
           <ToolButton label="新建" title="新建 果铃工程（Ctrl+N）" disabled={busy} onClick={onNew}>
             <FilePlus2 size={18} />
           </ToolButton>
-          {onNewSpatial || onNewFlow ? (
+          {onNewSpatial || onNewFlow || onNewProgram ? (
             <details ref={newMenuRef} className="new-project-menu">
               <summary className="tool-button" title="更多新建选项" aria-label="更多新建选项">
                 <ChevronDown size={14} />
@@ -193,6 +193,10 @@ export function TopToolbar({
                     空白流式布局
                   </button>
                 ) : null}
+                {onNewProgram ? <button type="button" role="menuitem" data-testid="new-program-project" disabled={busy}
+                  onClick={event => { event.currentTarget.closest('details')?.removeAttribute('open'); onNewProgram() }}>
+                  空白 Web 程序
+                </button> : null}
               </div>
             </details>
           ) : null}
@@ -304,7 +308,7 @@ export function TopToolbar({
           </button>
         )}
         <span className="toolbar__scene-index">
-          场景 {sceneIndex + 1} / {surfaces.length}
+          场景 {sceneIndex + 1} / {rootIds.length}
         </span>
       </div>
 

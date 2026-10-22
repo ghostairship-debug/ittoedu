@@ -1,3 +1,5 @@
+import { testContainerInstance } from '../helpers/glxWorkFixture'
+import { componentSurfaces } from '../../src/shared/contracts/component-platform/project'
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, expect, it } from 'vitest'
 import { ElementsTab } from '../../src/renderer/ui/ElementsTab'
@@ -23,7 +25,7 @@ it('opens one Slide chart picker, cancels without writes, filters types, then co
   expect(screen.queryByTestId('add-chart')).not.toBeInTheDocument()
   await act(async () => { fireEvent.click(screen.getByTestId('add-chart-line')); await store().courseBridge.drain() })
   const project = store().courseView.project!, id = store().courseView.selectedInstanceId!
-  expect(project.surfaces[0].childIds).toContain(id)
+  expect(testContainerInstance(project, 0).childIds).toContain(id)
   expect(chartDataSchema.parse(project.instances[id].data).chartType).toBe('line')
   expect(store().courseView.snapshot!.undoDepth).toBe(initial.undoDepth + 1)
 })
@@ -34,11 +36,11 @@ it('inserts the picker choice into the real Flow body and undoes the one operati
   render(<ElementsTab onAddImage={() => {}} />)
   fireEvent.click(screen.getByTestId('add-chart'))
   await act(async () => { fireEvent.click(screen.getByTestId('add-chart-bar')); await store().courseBridge.drain() })
-  const project = store().courseView.project!, surface = project.surfaces[0], id = store().courseView.selectedInstanceId!
+  const project = store().courseView.project!, surface = componentSurfaces(project)[0], id = store().courseView.selectedInstanceId!
   expect(surface.kind).toBe('flow'); expect(surface.childIds).toContain(id)
   expect(chartDataSchema.parse(project.instances[id].data).chartType).toBe('bar')
   expect(project.instances[id].flowPlacement).toBeUndefined()
   expect(store().courseView.snapshot!.undoDepth).toBe(original.undoDepth + 1)
   await act(async () => { await store().courseBridge.undo(store().courseView.activeDocumentId!) })
-  expect(store().courseView.project!.surfaces).toEqual(original.model.kind === 'course-v10' ? original.model.project.surfaces : [])
+  expect(componentSurfaces(store().courseView.project!)).toEqual(original.model.kind === 'course-v10' ? componentSurfaces(original.model.project) : [])
 })

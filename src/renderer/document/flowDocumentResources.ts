@@ -1,3 +1,4 @@
+import { componentContainers } from '../../shared/contracts/component-platform/project'
 import type { DocumentRangeProjection } from '../../shared/document/textInteraction'
 import type { ComponentEdit, CourseProjectV10 } from '../../shared/contracts/component-platform'
 import type { DocumentBlock } from '../../shared/document/content'
@@ -85,7 +86,7 @@ export function createFlowDocumentResourcePort(input: {
       if (resources.components.length) throw new Error('当前正文组件需要正式 V10 实例及源码，不能只粘贴旧组件包引用')
       const plan = roots.length ? prepareCourseObjectPaste({ ...source, roots }, {
         capturedTarget: destination, container: { kind: 'surface', surfaceId: target.surfaceId! },
-        index: destination.editingProject.surfaces.find(surface => surface.id === target.surfaceId)!.childIds.length,
+        index: componentContainers(destination.editingProject).find(surface => surface.id === target.surfaceId)!.childIds.length,
         identity: identity ?? 'copy',
       }) : { edits: [], idMap: new Map<string, string>(), assetIds: new Map<string, string>(), rootIds: [], readPaths: [] }
       const assetIds = Object.fromEntries(plan.assetIds)
@@ -109,13 +110,13 @@ export function projectFlowPreparedResources(target: CapturedCourseTarget, value
 }
 
 /** One formal operation contains every resource edit and the complete body projection. */
-export function prepareFlowDocumentResourceTransaction(target: CapturedCourseTarget, surfaceId: string, blocks: DocumentBlock[], values: readonly unknown[], rangeProjection?: readonly DocumentRangeProjection[]): {
+export function prepareFlowDocumentResourceTransaction(target: CapturedCourseTarget, surfaceId: string, blocks: DocumentBlock[], values: readonly unknown[], rangeProjection?: readonly DocumentRangeProjection[], changedBlockIds?: readonly string[]): {
   target: CapturedCourseTarget; edits: ComponentEdit[]; readPaths: string[][]; prepared: readonly FlowPreparedDocumentResources[]
 } {
   const batches = preparedBatches(values), captured = batches[0]?.target ?? target
   if (!sameOwner(captured, target) || captured.surfaceId !== surfaceId) throw new Error('正文资源目标已变化，请回到原稿后继续')
   const project = batches.length ? preparedProject(captured, batches) : captured.editingProject
-  const edits = [...batches.flatMap(batch => [...batch.edits]), ...flowDocumentEdits(project, surfaceId, blocks, captured.editingProject, rangeProjection)]
+  const edits = [...batches.flatMap(batch => [...batch.edits]), ...flowDocumentEdits(project, surfaceId, blocks, captured.editingProject, rangeProjection, changedBlockIds)]
   // Resource copy batches are canonical already. Flow has no persisted named states;
   // the final capture must not reinterpret a complete clone as a presentation edit.
   return { target: batches.length ? { ...captured, activeStateId: null, editingProject: captured.project } : captured, edits, readPaths: batches.flatMap(batch => batch.readPaths ?? []), prepared: batches }

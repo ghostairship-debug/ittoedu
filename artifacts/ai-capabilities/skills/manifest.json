@@ -17,7 +17,7 @@
         "skills/orchestrate-courseware/references/web-composition-examples.md",
         "skills/orchestrate-courseware/scripts/assemble-html.mjs"
       ],
-      "version": "3842e8e063224c65f0d09df635957ddf7b16a25bb70fd55afbb87261d0d0dd54"
+      "version": "0be847095f30f2210effbedd06ed72e1f602e0d32f791aa2bb0a1d528f4d9265"
     },
     {
       "description": "将已有第三方或外来 HTML 保真导入可编辑课件；适用于 HTML 转课件，不承担新课创作与已有工程续改。",
@@ -78,7 +78,7 @@
         "skills/workbench-usage/references/selection-and-editing.md",
         "skills/workbench-usage/references/sources-and-continuation.md"
       ],
-      "version": "fb99436bdebe8c160bebeee060a147cdebdb207b0b34399576657dbafdea80c6"
+      "version": "f433191f7971b1e0e3b77e107cd37966f8edc1a397d34862c1454f8312ecafb7"
     }
   ]
 }

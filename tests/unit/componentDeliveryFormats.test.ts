@@ -1,3 +1,4 @@
+import { setRootContainers, appendRootContainers } from '../helpers/glxWorkFixture'
 import { afterEach, expect, it, vi } from 'vitest'
 import { strFromU8, unzipSync } from 'fflate'
 import { createBlankCourseProjectV10 } from '../../src/core/course/createCourseProjectV10'
@@ -16,6 +17,7 @@ import { act, fireEvent, render, renderHook, waitFor } from '@testing-library/re
 import { CourseExportSettingsDialog } from '../../src/renderer/app/CourseExportSettingsDialog'
 import { useCourseDelivery, type CourseDeliveryPorts } from '../../src/renderer/app/useCourseDelivery'
 
+vi.mock('../../src/renderer/export/loadCompiledPlayerBundle', () => ({ loadCompiledPlayerBundle: () => 'var CompiledCoursePlayer={};' }))
 vi.mock('../../src/renderer/export/loadPlayerBundle', () => ({ loadPlayerBundle: () => 'var CoursewarePlayer={};' }))
 const compile: ComponentCompilePort = async () => { throw new Error('No custom source in this sample') }
 afterEach(() => { registerBundledFontEmbedSource(null); registerBundledFontEmbedPreparer(null) })
@@ -25,10 +27,10 @@ function sample() {
   project.global.overlay = []; project.instances = {}; project.definitions = {
     text: { id: 'text', role: 'content', implementation: { kind: 'builtin', key: 'guoling.text' } },
   }
-  project.surfaces = ['a', 'b', 'c'].map(id => ({ id, title: id, kind: 'slide' as const, childIds: [id], designSize: { width: 1000, height: 700 } }))
+  setRootContainers(project, ['a', 'b', 'c'].map(id => ({ id, title: id, kind: 'slide' as const, childIds: ['text-' + id], designSize: { width: 1000, height: 700 } })))
   for (const id of ['a', 'b', 'c']) {
     const data = createTextComponentData(`page-${id}`); data.appearance.fontFamily = 'Noto Sans SC'
-    project.instances[id] = { id, definitionId: 'text', data: JSON.parse(JSON.stringify(data)), frame: { width: 300, height: 80, transform: [1, 0, 0, 1, 20, 20] } }
+    project.instances['text-' + id] = { id: 'text-' + id, definitionId: 'text', data: JSON.parse(JSON.stringify(data)), frame: { width: 300, height: 80, transform: [1, 0, 0, 1, 20, 20] } }
   }
   const snapshot: DocumentSnapshot = { documentId: 'delivery', epoch: 'epoch', revision: project.revision, model: { kind: 'course-v10', project, resources: { assets: {}, components: {} } },
     binding: { kind: 'untitled', suggestedName: '格式输出.h5lesson' }, dirty: false, saving: false, recoverable: true, undoDepth: 0, redoDepth: 0 }
@@ -75,20 +77,20 @@ it('carries an imported Web fragment CSS font declaration into the actual HTML a
   project.definitions = { web: { id: 'web', role: 'content', implementation: { kind: 'builtin', key: 'guoling.web' } } }
   project.instances = { web: { id: 'web', definitionId: 'web', data: { html: '<p>串联电路</p>' },
     style: { 'font-family': '"Noto Sans SC", sans-serif' }, frame: { width: 1280, height: 23, transform: [1, 0, 0, 1, 0, 0] } } }
-  project.surfaces = [{ id: 'page', title: '导入正文', kind: 'slide', childIds: ['web'], designSize: { width: 1280, height: 720 } }]
+  setRootContainers(project, [{ id: 'page', title: '导入正文', kind: 'slide', childIds: ['web'], designSize: { width: 1280, height: 720 } }])
   const output = await buildComponentDelivery(courseDeliverySnapshot(snapshot)!, 'single-html', { compile })
   expect(output.artifacts[0]!.html).toContain('data:font/woff2;base64,')
   expect(output.artifacts[0]!.html).toContain('SIL OPEN FONT LICENSE')
   expect(output.report.items.filter(item => item.code === 'bundled-font-unavailable')).toEqual([])
   const singleDocument = new DOMParser().parseFromString(output.artifacts[0]!.html!, 'text/html')
   expect(singleDocument.getElementById('course-fonts')!.textContent).toContain('data:font/woff2;base64,')
-  expect(output.artifacts[0]!.html).toContain('fontFaceCss:document.getElementById("course-fonts")')
+  expect(output.artifacts[0]!.html).toContain('fontFaceCss:(document.getElementById("course-fonts")||{}).textContent||""')
   const packageOutput = await buildComponentDelivery(courseDeliverySnapshot(snapshot)!, 'web-package', { compile })
   const files = unzipSync(packageOutput.artifacts[0]!.bytes!), html = strFromU8(files['index.html']!)
   const packageDocument = new DOMParser().parseFromString(html, 'text/html'), transport = packageDocument.getElementById('course-fonts')!
   expect(transport.getAttribute('media')).toBe('not all')
   expect(transport.textContent).toContain('data:font/woff2;base64,')
-  expect(html).toContain('fontFaceCss:document.getElementById("course-fonts")')
+  expect(html).toContain('fontFaceCss:(document.getElementById("course-fonts")||{}).textContent||""')
   expect(Object.keys(files).some(name => name.startsWith('fonts/') && name.endsWith('.woff2'))).toBe(true)
   expect([...packageDocument.querySelectorAll('style:not(#course-fonts)')].some(style => style.textContent!.includes('fonts/'))).toBe(true)
   expect(strFromU8(files['THIRD_PARTY_NOTICES.md']!)).toContain('SIL OPEN FONT LICENSE')
@@ -115,7 +117,7 @@ it('carries public ordered page choices through a captured Main request into act
 it('prints only selected Spatial cameras in captured order with requested paper', async () => {
   const { snapshot } = sample()
   if (snapshot.model.kind !== 'course-v10') throw new Error('course')
-  snapshot.model.project.surfaces.push({ id: 'space', kind: 'spatial', title: '空间', childIds: [], spatial: { home: { x: 0, y: 0, zoom: 1 }, frames: [
+  appendRootContainers(snapshot.model.project, { id: 'space', kind: 'spatial', title: '空间', childIds: [], spatial: { home: { x: 0, y: 0, zoom: 1 }, frames: [
     { id: 'first', pose: { x: 0, y: 0, zoom: 1 } }, { id: 'second', pose: { x: 0, y: 0, zoom: 1 } },
   ] } })
   const calls: string[] = []

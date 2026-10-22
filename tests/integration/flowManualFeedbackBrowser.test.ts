@@ -1,4 +1,5 @@
 // @vitest-environment node
+import { componentSurfaces } from '../../src/shared/contracts/component-platform/project'
 import path from 'node:path'
 import fs from 'node:fs/promises'
 import { afterAll, beforeAll, expect, it } from 'vitest'
@@ -58,7 +59,7 @@ it('Flow teacher body drag shares rendered selection preview and one saved undoa
     expect(committed.operations).toHaveLength(1)
     const saved = await page.evaluate(() => Reflect.get(window, 'flow').save())
     expect(saved.project.instances[teacherId].frame).toEqual(committed.project.instances[teacherId].frame)
-    expect(saved.project.surfaces[0]).toEqual(before.project.surfaces[0])
+    expect(componentSurfaces(saved.project)[0]).toEqual(componentSurfaces(before.project)[0])
     await page.evaluate(() => Reflect.get(window, 'flow').undo())
     await expect.poll(async () => (await rectangles(page)).project.instances[teacherId].frame).toEqual(before.project.instances[teacherId].frame)
     await page.evaluate(() => Reflect.get(window, 'flow').redo())
@@ -105,7 +106,7 @@ it('readonly acceptance archive keeps its saved 900 reading width and missing de
   const bytes = await fs.readFile(path.resolve('output/audit-real-machine-20261011/workspace/acceptance-saved-as.glx'))
   const model = new CourseV10Driver().load(bytes)
   if (model.kind !== 'course-v10') throw new Error('Expected V10 archive')
-  const flow = model.project.surfaces.find(surface => surface.id === 'acceptance-flow')!
+  const flow = componentSurfaces(model.project).find(surface => surface.id === 'acceptance-flow')!
   expect(flow.flow!.layout).toMatchObject({ widthMode: 'reading', readingWidth: 900, wideContentWidth: 1100 })
   expect(flow.designSize).toBeUndefined()
 })

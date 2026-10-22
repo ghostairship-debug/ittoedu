@@ -1,6 +1,7 @@
+import { setRootContainers, testContainerInstance } from '../helpers/glxWorkFixture'
 import { expect, it, vi } from 'vitest'
 import { createElement } from 'react'
-import { act, fireEvent, render, renderHook } from '@testing-library/react'
+import { act, fireEvent, render, renderHook, waitFor } from '@testing-library/react'
 import { createBlankCourseProjectV10 } from '../../src/core/course/createCourseProjectV10'
 import { applyComponentOperation, captureComponentOperation } from '../../src/core/drivers/courseV10Operations'
 import { TEXT_DEFINITION } from '../../src/components/text/adapters'
@@ -25,6 +26,7 @@ vi.mock('../../src/renderer/workbench/NativeSelectionContext', () => ({ NativeSe
 vi.mock('../../src/renderer/project/assetManager', async importOriginal => ({
   ...await importOriginal<Record<string, unknown>>(), readImageDimensions: async () => ({ width: 480, height: 240 }),
 }))
+import { PlaybackViewSession } from '../../src/player/playbackViewSession'
 import { FlowWorkspace } from '../../src/renderer/ui/FlowWorkspace'
 
 function lesson() {
@@ -36,7 +38,7 @@ function lesson() {
     float: { ...text('float'), flowPlacement: { space: 'paper', plane: 'overlay' }, frame: { width: 100, height: 40, transform: [1, 0, 0, 1, 50, 140] } },
     behavior: { id: 'behavior', definitionId: 'behavior', data: {} },
     section: { id: 'section', definitionId: DOCUMENT_BLOCK_DEFINITION.id, data: documentBlockData({ id: 'section', type: 'section', title: { inlines: [] }, collapsedByDefault: false, blocks: [] }), childIds: ['c', 'd'] } }
-  project.surfaces = [{ id: 'flow', kind: 'flow', title: '讲义', childIds: ['a', 'float', 'behavior', 'b', 'section'] }]
+  setRootContainers(project, [{ id: 'flow', kind: 'flow', title: '讲义', childIds: ['a', 'float', 'behavior', 'b', 'section'] }])
   project.global = { underlay: [], overlay: [] }
   return project
 }
@@ -62,7 +64,7 @@ it('moves a nested body object without a prior frame to the overlay with its sup
   const next = applyComponentOperation(original, captureComponentOperation(original, edits))
   expect(next.instances.c).toEqual({ ...original.instances.c, frame, flowPlacement: { space: 'paper', plane: 'overlay' } })
   expect(next.instances.section.childIds).toEqual(['d'])
-  expect(next.surfaces[0].childIds).toEqual([...original.surfaces[0].childIds, 'c'])
+  expect(testContainerInstance(next, 0).childIds).toEqual([...testContainerInstance(original, 0).childIds, 'c'])
   expect(next.instances.d).toEqual(original.instances.d)
 })
 
@@ -112,16 +114,22 @@ it('uses the shared paragraph factory and retains the professional table adapter
   expect(project.instances.section.childIds!.slice(1, 3)).toEqual([paragraph.instanceIds[0], table.instanceIds[0]])
 })
 
-it('uses the actual Flow floating toolbar without turning a fixed drag into paragraph anchoring and resets the current scroll', async () => {
+it.each(['root', 'nested'] as const)('uses the actual Flow floating toolbar without turning a fixed drag into paragraph anchoring and resets the current scroll (%s)', async scope => {
   const project = lesson(), resources = { assets: {}, components: {} }
+  if (scope === 'nested') {
+    const flow = project.instances.flow
+    setRootContainers(project, [{ id: 'outer', kind: 'slide', title: '外层页面', childIds: ['flow'] }])
+    project.instances.flow = flow
+  }
   const target = { project, editingProject: project, resources, documentId: 'flow-u14', epoch: 'epoch', surfaceId: 'flow', instanceId: 'float', instanceIds: ['float'], activeStateId: null }
   const capture = vi.fn((edits: unknown) => ({ edits })), editCaptured = vi.fn(async () => {})
   const bridge = { captureTarget: () => target, capture, editCaptured, read: () => ({ activation: 1 }) }
   let observation: { reset(): void } | undefined
   probe.state = { courseBridge: bridge, courseKernel: bridge, flowDocumentDrafts: {}, setFlowDocumentDraft: () => {}, setFlowContextSelection: () => {}, flowEditingInstance: null, slideContentEdit: null }
   probe.runtime = { resources, selectedInstanceIds: ['float'], selectInstances: () => {}, onElement: () => {}, onTargetElement: () => {}, world: { beforeProjectionMutation: () => {}, afterProjectionMutation: () => {} }, renderInstance: () => null,
-    navigation: { changed: () => {} }, registerObservation: (_id: string, binding: { reset(): void }) => { observation = binding; return () => {} } }
+    navigation: { changed: () => {}, editorPort: () => ({ read: () => ({ scenes: [] }), subscribe: () => () => {} }) }, registerObservation: (_id: string, binding: { reset(): void }) => { observation = binding; return () => {} } }
   vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} })
+  const scale = vi.spyOn(PlaybackViewSession.prototype, 'fitScale').mockReturnValue(1)
   const rect = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
     return this.dataset.testid === 'flow-paper' ? new DOMRect(80, -600, 800, 1200) : new DOMRect(0, 0, 800, 600)
   })
@@ -148,7 +156,46 @@ it('uses the actual Flow floating toolbar without turning a fixed drag into para
     const scroller = ui.getByTestId('flow-workspace-scroll'); scroller.scrollTop = 700; scroller.scrollLeft = 20
     act(() => observation!.reset())
     expect(scroller.scrollTop).toBe(0); expect(scroller.scrollLeft).toBe(0)
-  } finally { ui?.unmount(); rect.mockRestore(); vi.unstubAllGlobals() }
+  } finally { ui?.unmount(); rect.mockRestore(); scale.mockRestore(); vi.unstubAllGlobals() }
+})
+
+it('retains the dragged paragraph anchor through the actual nested Flow toolbar and formal reprojection', async () => {
+  let project = lesson()
+  const flow = project.instances.flow
+  setRootContainers(project, [{ id: 'outer', kind: 'slide', title: '外层页面', childIds: ['flow'] }]); project.instances.flow = flow
+  project.instances.float.frame!.transform[5] = 999
+  project.instances.float.flowPlacement = { space: 'paper', plane: 'overlay', paragraphAnchor: { blockId: 'a', offsetY: 40, xRatio: 50 / 800 } }
+  const resources = { assets: {}, components: {} }
+  const target = () => ({ project, editingProject: project, resources, documentId: 'flow-anchor', epoch: 'epoch', surfaceId: 'flow', instanceId: 'float', instanceIds: ['float'], activeStateId: null })
+  const capture = vi.fn((edits: Parameters<typeof captureComponentOperation>[1]) => captureComponentOperation(project, edits))
+  const bridge = { captureTarget: target, capture, editCaptured: async (operation: Parameters<typeof applyComponentOperation>[1]) => { project = applyComponentOperation(project, operation) }, read: () => ({ activation: 1 }) }
+  probe.state = { courseBridge: bridge, courseKernel: bridge, flowDocumentDrafts: {}, setFlowDocumentDraft: () => {}, setFlowContextSelection: () => {}, flowEditingInstance: null, slideContentEdit: null }
+  probe.runtime = { resources, selectedInstanceIds: ['float'], selectInstances: () => {}, onElement: () => {}, onTargetElement: () => {}, world: { beforeProjectionMutation: () => {}, afterProjectionMutation: () => {} }, renderInstance: () => null,
+    navigation: { changed: () => {}, editorPort: () => ({ read: () => ({ scenes: [] }), subscribe: () => () => {} }) }, registerObservation: () => () => {} }
+  vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} })
+  const scale = vi.spyOn(PlaybackViewSession.prototype, 'fitScale').mockReturnValue(1)
+  const rect = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+    return this.dataset.testid === 'flow-paper' ? new DOMRect(80, -600, 800, 1200)
+      : this.dataset.flowBlockId === 'a' ? new DOMRect(116, -500, 728, 30) : new DOMRect(0, 0, 800, 600)
+  })
+  const rects = vi.spyOn(HTMLElement.prototype, 'getClientRects').mockImplementation(function (this: HTMLElement) { return [this.getBoundingClientRect()] as unknown as DOMRectList })
+  let ui: ReturnType<typeof render> | undefined
+  try {
+    const workspace = () => createElement(FlowWorkspace, { documentId: 'flow-anchor', project, surfaceId: 'flow', onSelectImageAsset: async () => null })
+    ui = render(workspace())
+    const overlay = () => ui!.container.querySelector<HTMLElement>('[data-flow-overlay-id="float"]')!
+    await waitFor(() => expect(overlay().style.transform).toBe('matrix(1,0,0,1,50,140)'))
+    const move = ui.getByRole('button', { name: '移动' }); move.setPointerCapture = () => {}
+    fireEvent.pointerDown(move, { pointerId: 1, clientX: 100, clientY: 100 })
+    fireEvent.pointerMove(move, { pointerId: 1, clientX: 130, clientY: 150 })
+    await act(async () => fireEvent.pointerUp(move, { pointerId: 1, clientX: 130, clientY: 150 }))
+    expect(project.instances.float.frame!.transform).toEqual([1, 0, 0, 1, 80, 190])
+    expect(project.instances.float.flowPlacement!.paragraphAnchor).toEqual({ blockId: 'a', offsetY: 90, xRatio: 80 / 800 })
+    ui.rerender(workspace())
+    await waitFor(() => expect(overlay().style.transform).toBe('matrix(1,0,0,1,80,190)'))
+    expect(project.instances.flow.childIds).toContain('float')
+    expect(project.rootIds).toEqual(['outer'])
+  } finally { ui?.unmount(); rect.mockRestore(); rects.mockRestore(); scale.mockRestore(); vi.unstubAllGlobals() }
 })
 
 it('passes a chapter-start workspace media drop through the normal importer and formal insertion owner', async () => {
@@ -167,6 +214,6 @@ it('passes a chapter-start workspace media drop through the normal importer and 
     const inserted = project.instances.section.childIds![0]
     expect(flowDocumentBlock(project, 'flow', inserted)).toMatchObject({ type: 'media', mediaKind: 'image' })
     expect(project.instances.section.childIds!.slice(1)).toEqual(['c', 'd'])
-    expect(project.surfaces[0].childIds).toEqual(['a', 'float', 'behavior', 'b', 'section'])
+    expect(testContainerInstance(project, 0).childIds).toEqual(['a', 'float', 'behavior', 'b', 'section'])
   } finally { hook.unmount() }
 })

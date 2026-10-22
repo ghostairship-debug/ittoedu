@@ -1,3 +1,5 @@
+import { setRootContainers, testContainerInstance } from '../helpers/glxWorkFixture'
+import { type ComponentSurface } from '../../src/shared/contracts/component-platform/project'
 import { expect, test, type Page } from '@playwright/test'
 import { build } from 'esbuild'
 import { promises as fs } from 'node:fs'
@@ -86,7 +88,7 @@ test('fixed design creation survives a human drag, local AI edits, cold reopen a
   const officeBundle = await bundle('export {buildComponentPptx} from "./src/renderer/export/componentPlatform/pptx"', 'W3Office')
   const measurement = await browser.newPage({ viewport: { width: 1280, height: 720 } })
   const host = new DocumentHostService(join(directory, 'recovery')), project = createBlankCourseProjectV10('固定视口连续编辑')
-  project.surfaces[0]!.designSize = { width: 1280, height: 720 }
+  testContainerInstance(project, 0).container.designSize = { width: 1280, height: 720 }
   const initial = await host.internalAPI.create({ kind: 'course-v10', project, resources: { assets: {}, components: {} } }, 'work.h5lesson')
   const compilation = new InMemoryComponentCompilation(createEsbuildComponentCompiler()), events: DocumentEvent[] = []
   const off = host.subscribeEvents(event => events.push(event))
@@ -118,7 +120,7 @@ test('fixed design creation survives a human drag, local AI edits, cold reopen a
     + '<h1>实验原理</h1><p style="line-height:normal">这段说明应能独立选择、修改和自由摆放。</p></div><figure><img src="diagram.svg" alt="实验装置示意图">'
     + '<figcaption>更换图片后保留题注和人工位置。</figcaption></figure></section></body></html>'
   try {
-    await apply({ intent: 'insert', target: { kind: 'container', container: { kind: 'surface', surfaceId: project.surfaces[0]!.id } },
+    await apply({ intent: 'insert', target: { kind: 'container', container: { kind: 'surface', surfaceId: project.rootIds[0]! } },
       source: { kind: 'html', html, siblingFiles: new Map([['diagram.svg', new TextEncoder().encode(svg)]]) } })
     let current = await host.internalAPI.read(initial.documentId), model = course(current)
     const textIds = Object.values(model.project.instances).filter(instance => model.project.definitions[instance.definitionId]?.implementation.kind === 'builtin'
@@ -143,7 +145,7 @@ test('fixed design creation survives a human drag, local AI edits, cold reopen a
     await editor.evaluate(({ id, surfaceId }) => {
       const store = (window as any).W3Editor.useEditorStore.getState()
       store.courseBridge.selectInstances(store.courseView.activeDocumentId, [id], surfaceId)
-    }, { id: paragraphId, surfaceId: project.surfaces[0]!.id })
+    }, { id: paragraphId, surfaceId: project.rootIds[0]! })
     const box = await locator.boundingBox()
     if (!box) throw new Error('Text box missing')
     await editor.mouse.move(box.x + box.width / 2, box.y + box.height / 2); await editor.mouse.down()
@@ -154,7 +156,7 @@ test('fixed design creation survives a human drag, local AI edits, cold reopen a
     await editor.evaluate(({ id, surfaceId }) => {
       const store = (window as any).W3Editor.useEditorStore.getState()
       store.courseBridge.selectInstances(store.courseView.activeDocumentId, [id], surfaceId)
-    }, { id: image.id, surfaceId: project.surfaces[0]!.id })
+    }, { id: image.id, surfaceId: project.rootIds[0]! })
     const handle = editor.locator('[data-testid="slide-layer-selection-overlay"] [data-handle="se"]').first()
     await expect(handle).toBeVisible()
     const imageBox = await editor.locator(`[data-component-instance="${image.id}"]`).first().boundingBox()
@@ -184,7 +186,7 @@ test('fixed design creation survives a human drag, local AI edits, cold reopen a
     expect(model.project.instances[image.id]!.frame).toEqual(preservedImageFrame)
     const color = '#dc2626'
     const captionBefore = structuredClone(model.project.instances[captionId]!), captionTarget = { kind: 'course-instance' as const,
-      surfaceId: project.surfaces[0]!.id, instanceId: captionId }
+      surfaceId: project.rootIds[0]!, instanceId: captionId }
     await host.tools.beginRun({ runId: 'w3-caption', actor: 'agent', documents: [{ documentId: initial.documentId, writable: [captionTarget] }] })
     const captionHandle = await host.tools.issueTarget('w3-caption', initial.documentId, captionTarget)
     const appearanceResult = await host.tools.execute('w3-caption', 'appearance', { name: 'object.update', input: { target: captionHandle,
@@ -199,7 +201,7 @@ test('fixed design creation survives a human drag, local AI edits, cold reopen a
     await apply({ intent: 'canonical', edits: [{ type: 'asset.add', asset: replacement.meta, bytes: replacement.bytes },
       { type: 'data.set', instanceId: image.id, path: [], value: replaceImageSource(beforeImageData, replacement.meta.id) as any }] })
     // A declared local program is a separate framed object; ordinary text/image objects stay native.
-    const local = await apply({ intent: 'insert', target: { kind: 'container', container: { kind: 'surface', surfaceId: project.surfaces[0]!.id } },
+    const local = await apply({ intent: 'insert', target: { kind: 'container', container: { kind: 'surface', surfaceId: project.rootIds[0]! } },
       viewport: { width: 280, height: 160 }, source: { kind: 'html', html: '<!doctype html><style>body{margin:0;font:20px Arial}button{font:inherit}</style><button id="switch">开关</button><button id="reset">复位</button><output id="state">关闭</output><script>let on=false;const state=document.getElementById("state");document.getElementById("switch").onclick=()=>{on=!on;state.textContent=on?"开启":"关闭"};document.getElementById("reset").onclick=()=>{on=false;state.textContent="关闭"}</script>' } })
     const localId = local.insertedIds[0]!
     current = await host.internalAPI.read(initial.documentId); model = course(current)
@@ -252,7 +254,7 @@ test('fixed design creation survives a human drag, local AI edits, cold reopen a
       .toEqual({ complete: true, width: 120, height: 80 })
     // The existing static producer uses an actual player capture. It deliberately omits interaction.
     const screenshot = await output.screenshot({ path: join(directory, 'author-initial.png') })
-    const print = await buildComponentPrintHtml(model.project, { surfaceId: project.surfaces[0]!.id,
+    const print = await buildComponentPrintHtml(model.project, { surfaceId: project.rootIds[0]!,
       captureSurface: async () => [{ dataUrl: 'data:image/png;base64,' + screenshot.toString('base64'), width: 1280, height: 720 }] })
     expect(print.diagnostics).toEqual([expect.objectContaining({ code: 'actual-static-surface' })])
     const printed = await browser.newPage()
@@ -307,9 +309,9 @@ test('fixed design creation survives a human drag, local AI edits, cold reopen a
 test('Flow HTML keeps the authored reading width and natural height in narrow hosts', async ({ browser }, info) => {
   const { TEXT_DEFINITION } = await import('../../src/components/text/adapters')
   const { createTextComponentData } = await import('../../src/components/text/data')
-  const project = createBlankCourseProjectV10('固定逻辑阅读宽度'), surface = project.surfaces[0]!
-  surface.kind = 'flow'; delete surface.designSize
-  surface.flow = { layout: { widthMode: 'reading', readingWidth: 860, wideContentWidth: 1100, paperBackgroundColor: '#fff' } }
+  const project = createBlankCourseProjectV10('固定逻辑阅读宽度')
+  const surface: ComponentSurface = { id: project.rootIds[0]!, title: testContainerInstance(project, 0).name ?? '第 1 页', kind: 'flow', childIds: [],
+    flow: { layout: { widthMode: 'reading', readingWidth: 860, wideContentWidth: 1100 } } }
   project.global = { underlay: [], overlay: [] }; project.instances = {}; project.definitions = { [TEXT_DEFINITION.id]: TEXT_DEFINITION }
   const data = createTextComponentData('固定阅读宽度下的长正文，窄窗口只能滚动，不改文字排版。'.repeat(100))
   data.appearance.fontFamily = 'Arial'; data.appearance.lineHeight = 'normal'
@@ -317,6 +319,7 @@ test('Flow HTML keeps the authored reading width and natural height in narrow ho
   project.instances.float = { id: 'float', definitionId: TEXT_DEFINITION.id, data: createTextComponentData('自由文本框') as any,
     frame: { width: 180, height: 40, transform: [1, 0, 0, 1, 560, 40] }, flowPlacement: { space: 'paper', plane: 'overlay' } }
   surface.childIds = ['body', 'float']
+  setRootContainers(project, [surface])
   const directory = info.outputPath('flow-main'); await fs.mkdir(directory, { recursive: true })
   const host = new DocumentHostService(join(directory, 'recovery')), events: DocumentEvent[] = []
   const initial = await host.internalAPI.create({ kind: 'course-v10', project, resources: { assets: {}, components: {} } }, 'flow.h5lesson')

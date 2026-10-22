@@ -8,7 +8,7 @@ import { ComponentRuntimeHost } from '../../src/player/components/runtime/Compon
 import { CourseV10RuntimeView, type CourseV10RuntimePorts } from '../../src/renderer/components/CourseV10RuntimeView'
 import { TEXT_DEFINITION } from '../../src/components/text/adapters'
 import { createTextComponentData } from '../../src/components/text/data'
-import type { ComponentRuntimeContext, CourseProjectV10 } from '../../src/shared/contracts/component-platform'
+import type { ComponentRuntimeContext, CourseProjectV10, ComponentSurface } from '../../src/shared/contracts/component-platform'
 import { createBlankCourseProjectV10 } from '../../src/core/course/createCourseProjectV10'
 import { ComponentNavigationOwner } from '../../src/renderer/components/ComponentNavigationOwner'
 import { createTeacherControllerHudGeometry, isGlobalTeacherController, projectTeacherControllerInstances, teacherControllerReferenceSize } from '../../src/shared/teacherControllerViewportGeometry'
@@ -21,6 +21,8 @@ import { prepareCourseTeacherControllerEdits } from '../../src/core/course/cours
 import { buildCourseGlobalPropertiesOwner } from '../../src/renderer/ui/properties/CourseGlobalPropertiesContextBuilder'
 import { buildPublishedCourseV3 } from '../../src/core/publish/componentPlatform/buildPublishedCourseV3'
 import { mountPublishedCourseV3 } from '../../src/player/componentPlatform/publishedPlayer'
+import { componentSurface, createComponentContainerInstance, componentContainerBuiltinKey } from '../../src/shared/contracts/component-platform'
+import { migrateCourseProjectV10 } from '../../src/shared/contracts/component-platform/workProjectMigration'
 import type { DocumentModel } from '../../src/shared/workbench/document'
 
 const flowProbe = vi.hoisted(() => ({ state: {} as Record<string, any> }))
@@ -30,15 +32,27 @@ vi.mock('../../src/renderer/workbench/NativeSelectionContext', () => ({ NativeSe
 
 afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
 
-const project = (): CourseProjectV10 => ({ schemaVersion: 10, id: 'commit', revision: 0, title: '提交后运行',
+const project = (): CourseProjectV10 => migrateCourseProjectV10({ schemaVersion: 10, id: 'commit', revision: 0, title: '提交后运行',
   definitions: { [TEXT_DEFINITION.id]: TEXT_DEFINITION },
   instances: { text: { id: 'text', definitionId: TEXT_DEFINITION.id, data: JSON.parse(JSON.stringify(createTextComponentData('初始文字'))) } },
   surfaces: [{ id: 'page', kind: 'slide', title: '本页', childIds: ['text'], designSize: { width: 800, height: 600 } }],
   global: { underlay: [], overlay: [] }, assets: {} })
+function addContainer(project: CourseProjectV10, surface: ComponentSurface) {
+  const definitionId = componentContainerBuiltinKey(surface.kind)
+  project.definitions[definitionId] = { id: definitionId, role: 'mixed', implementation: { kind: 'builtin', key: definitionId } }
+  project.instances[surface.id] = createComponentContainerInstance(surface, definitionId)
+  project.rootIds.push(surface.id)
+}
+function replaceContainers(project: CourseProjectV10, surfaces: ComponentSurface[]) {
+  for (const id of project.rootIds) if (project.instances[id]?.container) delete project.instances[id]
+  project.rootIds = []
+  surfaces.forEach(surface => addContainer(project, surface))
+  project.entry = { rootInstanceId: project.rootIds[0]! }
+}
 const resources = { assets: {}, components: {} }
 const courseWithTeacherController = (title: string) => {
   const blank = createBlankCourseProjectV10(title)
-  return applyComponentOperation(blank, captureComponentOperation(blank, prepareCourseTeacherControllerEdits(blank, blank.surfaces[0].id, 'slide-authoring').edits))
+  return applyComponentOperation(blank, captureComponentOperation(blank, prepareCourseTeacherControllerEdits(blank, blank.rootIds[0]!, 'slide-authoring').edits))
 }
 
 it('keeps host font faces in Published realm snapshots and later theme events without scoping them into the outer course style', async () => {
@@ -169,7 +183,7 @@ it('retains the actual React runtime through StrictMode, ancestor replacement an
 it('moves the default collapsed controller by the requested screen distance in the same HUD geometry used to paint it', () => {
   const course = courseWithTeacherController('控制台拖动'), before = structuredClone(course)
   const id = [...course.global.underlay, ...course.global.overlay].find(id => isGlobalTeacherController(course, id))!
-  const navigation = new ComponentNavigationOwner({ project: () => course, surfaceId: () => course.surfaces[0].id,
+  const navigation = new ComponentNavigationOwner({ project: () => course, surfaceId: () => course.rootIds[0]!,
     select() {}, viewportBounds: () => ({ left: 0, top: 0, right: 640, bottom: 360 }) })
   const geometry = createTeacherControllerHudGeometry({ referenceSize: teacherControllerReferenceSize(course), viewportRect: { x: 0, y: 0, width: 640, height: 360 } })
   const draw = () => projectTeacherControllerInstances(course, geometry, navigation).instances[id].frame!.transform.slice(4)
@@ -205,7 +219,7 @@ it('synchronizes a late NodeView binding and a nested React root through the lat
 })
 
 it('uses the common navigation keys in the current author run and releases them when paused', async () => {
-  const course = project(); course.surfaces.push({ ...course.surfaces[0], id: 'second', title: '下一页', childIds: [] })
+  const course = project(); addContainer(course, { ...componentSurface(course, course.rootIds[0]!)!, id: 'second', title: '下一页', childIds: [] })
   const model = { kind: 'course-v10' as const, project: course, resources }
   let ports!: CourseV10RuntimePorts
   const report = vi.fn()
@@ -228,26 +242,26 @@ it('resets the current page fragment progress without changing another page', as
   const course = project()
   course.definitions.web = { id: 'web', role: 'content', implementation: { kind: 'builtin', key: 'guoling.web' } }
   course.instances = Object.fromEntries(['current', 'other'].map(id => [id, { id, definitionId: 'web', data: { html: '<p class="fragment">一</p><p class="fragment">二</p>' } }]))
-  course.surfaces = ['current', 'other'].map(id => ({ id, kind: 'slide', title: id, childIds: [id], designSize: { width: 800, height: 600 } }))
+  replaceContainers(course, ['current', 'other'].map(id => ({ id: `${id}-container`, kind: 'slide', title: id, childIds: [id], designSize: { width: 800, height: 600 } })))
   const state = new Map([[componentFragmentStateKey('current'), 0], [componentFragmentStateKey('other'), 1]])
-  const navigation = new ComponentNavigationOwner({ project: () => course, surfaceId: () => 'current', select() {},
+  const navigation = new ComponentNavigationOwner({ project: () => course, surfaceId: () => 'current-container', select() {},
     courseState: { get: <T,>(key: string) => state.get(key) as T | undefined, set: (key, value) => { state.set(key, value) } } })
   navigation.connectRuntime({ read: id => ({ status: 'ready', generation: 1, document: 'web', html: (course.instances[id].data as { html: string }).html }), prepare: async () => true })
   expect(await navigation.replayCurrentSurface()).toBe(true)
   expect(state.get(componentFragmentStateKey('current'))).toBe(2)
   expect(state.get(componentFragmentStateKey('other'))).toBe(1)
-  course.surfaces[0] = { ...course.surfaces[0], kind: 'spatial', spatial: { home: { x: 0, y: 0, zoom: 1 },
+  course.instances['current-container'].container = { ...course.instances['current-container'].container!, kind: 'spatial', spatial: { home: { x: 0, y: 0, zoom: 1 },
     frames: [{ id: 'follow', title: '当前正文', targetInstanceId: 'current', pose: { x: 0, y: 0, zoom: 1 } }] } }
   const camera = createComponentSpatialCameraPort({ x: 50, y: 60, zoom: 2 })
   let frameId: string | null = 'follow', stepIndex: number | null = 1
-  const off = navigation.registerCamera('current', camera, { frameId: () => frameId, selectFrame: value => { frameId = value },
+  const off = navigation.registerCamera('current-container', camera, { frameId: () => frameId, selectFrame: value => { frameId = value },
     stepIndex: () => stepIndex, selectStep: value => { stepIndex = value } })
   expect(await navigation.replayCurrentSurface()).toBe(true)
   expect(state.get(componentFragmentStateKey('current'))).toBe(0); expect(state.get(componentFragmentStateKey('other'))).toBe(1)
   expect(await navigation.execute({ type: 'step.next' })).toBe(true)
   expect(state.get(componentFragmentStateKey('current'))).toBe(1)
   camera.set({ x: 50, y: 60, zoom: 2 })
-  course.surfaces[0].presentation = { initialStateId: 'initial', states: [{ id: 'initial', title: '初始', overrides: {} }] }
+  course.instances['current-container'].container!.presentation = { initialStateId: 'initial', states: [{ id: 'initial', title: '初始', overrides: {} }] }
   expect(await navigation.replayCurrentSurface()).toBe(true)
   expect(camera.read()).toEqual({ x: 0, y: 0, zoom: 1 })
   expect(frameId).toBe('follow'); expect(stepIndex).toBe(0); expect(navigation.currentStateId()).toBe('initial')
@@ -266,7 +280,7 @@ it('mounts a real Flow NodeView child and retains its runtime DOM across source 
   course.definitions.group = { id: 'group', role: 'content', implementation: { kind: 'builtin', key: 'guoling.group' } }
   course.instances.group = { id: 'group', definitionId: 'group', data: {}, childIds: ['text'], frame: { width: 300, height: 120, transform: [1, 0, 0, 1, 0, 0] } }
   course.instances.text.frame = { width: 220, height: 50, transform: [1, 0, 0, 1, 0, 0] }
-  course.surfaces = [{ id: 'flow', kind: 'flow', title: '章节正文', childIds: ['group'] }]
+  replaceContainers(course, [{ id: 'flow', kind: 'flow', title: '章节正文', childIds: ['group'] }])
   const target = { documentId: 'real-flow', epoch: 'flow-epoch', project: course, editingProject: course, resources,
     surfaceId: 'flow', activeStateId: null, instanceIds: [], instanceId: null }
   const bridge = { captureTarget: () => target, read: () => ({ activation: 1 }), capture: vi.fn(), editCaptured: vi.fn(), undo: vi.fn(), redo: vi.fn() }
@@ -320,9 +334,9 @@ it('awaits real cross-surface camera commits for teacher and previous-key naviga
   // External component callbacks run outside React's event flush and without act().
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', false)
   const course = project(), pose = { x: 70, y: 80, zoom: 2 }
-  course.surfaces.push({ id: 'spatial', kind: 'spatial', title: '空间', childIds: [], designSize: { width: 800, height: 600 },
+  addContainer(course, { id: 'spatial', kind: 'spatial', title: '空间', childIds: [], designSize: { width: 800, height: 600 },
     spatial: { home: { x: 0, y: 0, zoom: 1 }, frames: [{ id: 'detail', title: '目标镜头', pose }] } })
-  course.surfaces.push({ id: 'later', kind: 'flow', title: '后页', childIds: [] })
+  addContainer(course, { id: 'later', kind: 'flow', title: '后页', childIds: [] })
   const camera = createComponentSpatialCameraPort({ x: 0, y: 0, zoom: 1 })
   let ports!: CourseV10RuntimePorts, ready!: () => void, registered = false
   const initialCommit = new Promise<void>(resolve => { ready = resolve })
@@ -381,9 +395,9 @@ it('consumes the real no-controls setting in author try-run and Published visibi
   let model: Extract<DocumentModel, { kind: 'course-v10' }> = { kind: 'course-v10', project: course, resources }
   const choose = (controls: 'canvas' | 'none') => {
     const target = { documentId: 'controls', epoch: 'controls-epoch', project: model.project, editingProject: model.project,
-      resources, surfaceId: model.project.surfaces[0].id, activeStateId: null, instanceIds: [], instanceId: null }
+      resources, surfaceId: model.project.rootIds[0]!, activeStateId: null, instanceIds: [], instanceId: null }
     const owner = buildCourseGlobalPropertiesOwner({
-      read: { project: model.project, editingGlobal: true, selectedInstanceIds: [], surface: model.project.surfaces[0] } as unknown as Parameters<typeof buildCourseGlobalPropertiesOwner>[0]['read'],
+      read: { project: model.project, editingGlobal: true, selectedInstanceIds: [], surface: componentSurface(model.project, model.project.rootIds[0]!)! } as unknown as Parameters<typeof buildCourseGlobalPropertiesOwner>[0]['read'],
       selectedContext: null, assets: {}, key: 'controls', liveTarget: () => target,
       submit: edits => { const next = driver.apply(model, captureComponentOperation(model.project, edits)); if (next.kind !== 'course-v10') throw new Error('Expected V10'); model = next },
       preview() {}, ensureTeacherController: async () => {}, editSource() {}, openAutomation() {}, report: error => { throw error },

@@ -76,7 +76,9 @@ export class DocumentFileSession {
   private removedByHistory = new Set<string>()
   private disposed = false
   private closeSuspended = false
+  private closeTask?: Promise<boolean>
   private initialized = false
+  private active = true
   private compositionWaiters: (() => void)[] = []
   private listeners = new Set<() => void>()
   private pendingAttachments = new Map<string, Uint8Array>()
@@ -84,6 +86,7 @@ export class DocumentFileSession {
   private observation?: DocumentFileObservation
   private diskSource: string | undefined
   private localSource = ''
+  private sourceChangeHints?: { source: string; changes: Array<{ from: number; to: number; inserted: number }> }
   private conflictCandidate: SourceCandidate | null = null
   private conflictDraftTail: Promise<void> = Promise.resolve()
   private sourceConflictCandidates: SourceConflictCandidate[] = []
@@ -132,13 +135,18 @@ export class DocumentFileSession {
   }
   async open() {
     const documents = this.documents
+    const changedWhileOpening = new Set<string>()
+    const stopOpening = documents.subscribe(event => changedWhileOpening.add(event.type === 'changed' ? event.snapshot.documentId
+      : event.type === 'state' || event.type === 'updated' ? event.head.documentId : event.documentId))
+    try {
     const filename = markdownRefPath(this.ref).replace(/\\/g, '/')
     // Path equality here only finds recovery candidates; the host canonicalizes writer identity.
-    const matches = (snapshot: DocumentSnapshot) => snapshot.binding.kind === 'file' && snapshot.binding.path.replace(/\\/g, '/') === filename
+    const matches = (snapshot: Pick<DocumentSnapshot, 'binding'>) => snapshot.binding.kind === 'file' && snapshot.binding.path.replace(/\\/g, '/') === filename
     const existing = this.existingDocumentId ? await documents.read(this.existingDocumentId) : (await documents.list()).find(matches)
-    const recovery = existing ? undefined : (await documents.recoverable()).find(matches)
+    const recovery = existing ? undefined : (documents.recoverySummaries ? await documents.recoverySummaries() : await documents.recoverable()).find(matches)
     const snapshot = existing ?? (recovery ? await documents.restore(recovery.documentId) : await documents.open(filename))
-    const projection = await DocumentProjection.attach(documents, snapshot.documentId, snapshot.model.kind === 'text' ? new TextDriver() : undefined)
+    const projection = await DocumentProjection.attach(documents, snapshot.documentId, snapshot.model.kind === 'text' ? new TextDriver() : undefined,
+      changedWhileOpening.has(snapshot.documentId) ? undefined : snapshot)
     if (this.disposed) { projection.dispose(); return }
     this.projection = projection
     this.stopProjection = projection.subscribe(this.project)
@@ -157,20 +165,44 @@ export class DocumentFileSession {
     }
     this.showRetainedSourceConflicts()
     if (snapshot.binding.kind === 'untitled') return
-    const observation = await documents.observeFile(snapshot.documentId)
+    // A new pristine open already observed disk and captured its resources. A
+    // recovered/dirty session still needs the true saved source for merging.
+    const current = this.committedDocument!
+    const observation = !existing && !recovery && current.binding.kind === 'file' && !current.dirty && isSourceDocumentModel(current.model)
+      ? { bindingVersion: current.binding.bindingVersion, version: current.binding.version, model: null, baseSource: current.model.source }
+      : await documents.observeFile(snapshot.documentId)
     this.diskSource = observation.baseSource ?? (snapshot.binding.kind === 'file' && observation.version === snapshot.binding.version && observation.model && isSourceDocumentModel(observation.model) ? observation.model.source : undefined)
     await this.observe(observation)
     await this.restoreConflictDrafts()
     this.poll()
+    } finally { stopOpening() }
+  }
+  setActive(active: boolean): void {
+    if (this.active === active) return
+    this.active = active
+    clearTimeout(this.watchTimer); this.watchTimer = undefined
+    if (!active || this.disposed || !this.initialized || !this.projection || this.watchTask || this.committedDocument?.binding.kind !== 'file') return
+    // Reactivation is a real freshness boundary; hidden views keep their input
+    // and are strongly checked again before normal foreground observation.
+    const generation = this.watchGeneration
+    const task = this.documents.observeFile(this.projection.documentId).then(observation => this.observe(observation, generation)).catch(error => {
+      if (generation === this.watchGeneration) this.fail(error)
+    })
+    this.watchTask = task
+    void task.finally(() => { if (this.watchTask === task) this.watchTask = undefined; this.poll() })
   }
   private poll() {
-    if (this.disposed || this.closeSuspended || this.savingAs || this.pending || this.hostSaving || this.watchTimer || this.watchTask || !this.projection || this.committedDocument?.binding.kind !== 'file') return
+    if (!this.active || this.disposed || this.closeSuspended || this.closeTask || this.savingAs || this.pending || this.hostSaving || this.watchTimer || this.watchTask || !this.projection || this.committedDocument?.binding.kind !== 'file') return
     const generation = this.watchGeneration
     this.watchTimer = setTimeout(async () => {
       this.watchTimer = undefined
       if (generation !== this.watchGeneration || this.disposed || this.savingAs || !this.projection) return
       const task = (async () => {
-        try { await this.observe(await this.documents.observeFile(this.projection!.documentId), generation) }
+        const committed = this.committedDocument
+        // An observed external version may still be waiting for composition or
+        // conflict resolution. Only the accepted binding is an omission base.
+        const knownVersion = committed?.binding.kind === 'file' ? committed.binding.version : undefined
+        try { await this.observe(await this.documents.observeFile(this.projection!.documentId, knownVersion), generation) }
         catch (error) { if (generation === this.watchGeneration && !this.savingAs) this.fail(error) }
       })()
       this.watchTask = task
@@ -191,9 +223,12 @@ export class DocumentFileSession {
     const resources = structuredClone(model.resources)
     const attachments = [...this.pendingAttachments]
     for (const [relative, bytes] of attachments) resources.assets[relative] = new Uint8Array(bytes)
-    const result = projection.edit({ type: 'markdown.replace', source, resources }, { historyGroup })
+    const hints = this.sourceChangeHints
+    const result = projection.edit({ type: 'markdown.replace', source, resources }, { historyGroup,
+      ...(hints?.source === source ? { sourceChangeHints: hints.changes } : {}) })
     return result.then(receipt => {
       if ('message' in receipt) throw new Error(receipt.message)
+      if (this.sourceChangeHints === hints) this.sourceChangeHints = undefined
       for (const [relative, bytes] of attachments) if (this.pendingAttachments.get(relative) === bytes) this.pendingAttachments.delete(relative)
       if (this.removedByHistory.size) this.removedByHistory.clear()
       this.historyConflict = false
@@ -213,8 +248,9 @@ export class DocumentFileSession {
       void this.retainedSubmission.catch(error => this.fail(error))
     } else void request.catch(error => this.fail(error))
   }
-  edit(source: string, historyGroup?: string) {
+  edit(source: string, historyGroup?: string, sourceChangeHints?: Array<{ from: number; to: number; inserted: number }>) {
     if (!this.initialized || this.disposed || this.closeSuspended || this.state.conflictHunks.length || source === this.state.source) return
+    this.sourceChangeHints = sourceChangeHints ? { source, changes: structuredClone(sourceChangeHints) } : undefined
 
     if (historyGroup) {
       if (this.group?.label !== historyGroup || Date.now() - this.lastEdit > 800) this.group = { label: historyGroup, id: crypto.randomUUID() }
@@ -303,6 +339,9 @@ export class DocumentFileSession {
   }
   /** Confirm pending human input without forcing a file save before an AI task. */
   async drain(skipHistoryTask = false): Promise<boolean> {
+    return this.confirmInput(true, skipHistoryTask)
+  }
+  private async confirmInput(readCurrent: boolean, skipHistoryTask = false): Promise<boolean> {
     if (this.disposed || this.closeSuspended) return false
     if (this.state.composing) await new Promise<void>(resolve => this.compositionWaiters.push(resolve))
     if (this.disposed || this.closeSuspended || !this.projection) return false
@@ -319,7 +358,8 @@ export class DocumentFileSession {
           try { await this.submit(source, this.group?.id) }
           catch (error) { this.deferredHistoryInput = true; throw error }
         } else if (this.pendingAttachments.size) await this.submit(this.state.source, this.group?.id)
-        await this.projection.drain()
+        if (readCurrent) await this.projection.drain()
+        else await this.projection.flushInput()
         if (!skipHistoryTask || !this.deferredHistoryInput) break
       }
       this.project()
@@ -494,7 +534,12 @@ export class DocumentFileSession {
     if (current.binding.kind !== 'file' || observation.bindingVersion !== current.binding.bindingVersion) return
     if (observation.version === current.binding.version) {
       if (observation.model && isSourceDocumentModel(observation.model)) this.diskSource = observation.model.source
-      this.observation = observation; return
+      this.observation = observation
+      if (observation.version !== null && this.state.conflict === 'deleted') {
+        this.update({ conflict: null })
+        this.project()
+      }
+      return
     }
     if (this.conflictPlan && Object.keys(this.state.conflictDrafts).length) { this.deferredObservation = observation; return }
     if (this.observation?.version === observation.version && this.state.conflict) return
@@ -607,7 +652,9 @@ export class DocumentFileSession {
       await this.conflictDraftTail
       const visible = this.projection.read().draft ?? this.projection.read().committed!.model
       if (isSourceDocumentModel(visible) && (visible.source !== this.state.source || (visible.kind === 'markdown' && this.pendingAttachments.size))) await this.submit(this.state.source)
-      await this.projection.drain()
+      // The save/close owner reads the canonical document after this input ACK.
+      // Do not return the entire source through IPC merely to confirm this view.
+      await this.projection.flushInput()
       return true
     } catch (error) { this.fail(error); return false }
   }
@@ -622,6 +669,29 @@ export class DocumentFileSession {
     } catch (error) { this.resumeAfterCloseCancelled(); this.fail(error); return false }
   }
   async preserveAndClose(): Promise<boolean> { if (!await this.preserveDraft()) return false; this.dispose(); return true }
-  async close(): Promise<boolean> { clearTimeout(this.timer); if (!await this.drain()) return false; try { if (!await this.documents.closeWithDialog(this.projection!.documentId)) return false; this.dispose(); return true } catch (error) { this.fail(error); return false } }
+  close(): Promise<boolean> {
+    if (this.closeTask) return this.closeTask
+    clearTimeout(this.timer); clearTimeout(this.watchTimer)
+    this.watchTimer = undefined
+    ++this.watchGeneration
+    const task = Promise.resolve().then(async () => {
+      if (!await this.confirmInput(false)) return false
+      try {
+        if (!await this.documents.closeWithDialog(this.projection!.documentId)) return false
+        this.dispose()
+        return true
+      } catch (error) { this.fail(error); return false }
+    }).finally(() => {
+      if (this.closeTask === task) this.closeTask = undefined
+      if (!this.disposed) {
+        this.poll(); this.schedule()
+        // An observation started before close may finish after cancellation.
+        // Its old generation cannot restart polling, so resume after it settles.
+        if (this.watchTask) void this.watchTask.finally(() => this.poll()).catch(() => undefined)
+      }
+    })
+    this.closeTask = task
+    return task
+  }
   dispose() { if (this.disposed) return; this.disposed = true; ++this.watchGeneration; clearTimeout(this.timer); clearTimeout(this.watchTimer); this.stopProjection?.(); this.projection?.dispose(); for (const resolve of this.compositionWaiters.splice(0)) resolve(); this.listeners.clear() }
 }

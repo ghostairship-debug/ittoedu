@@ -1,5 +1,6 @@
-import { parse, type DefaultTreeAdapterTypes } from 'parse5'
+import type { DefaultTreeAdapterTypes } from 'parse5'
 import type { HtmlSourceAddress } from './sourceEditCommands'
+import { parseHtmlSourceDocument } from './htmlSourceParser'
 
 export interface HtmlSourceNode {
   key: string
@@ -64,7 +65,7 @@ function styleRules(css: string, offset: number, context: string[] = []): HtmlSo
 
 /** Parse browser source locations; implicit parser wrappers remain visible but are never guessed write targets. */
 export function inspectHtmlSource(source: string): HtmlSourceStructure {
-  const document = parse(source, { sourceCodeLocationInfo: true })
+  const document = parseHtmlSourceDocument(source)
   const rules: HtmlSourceStyleRule[] = [], data: HtmlSourceData[] = []
   let implicit = 0
   const visit = (node: DefaultTreeAdapterTypes.ChildNode): HtmlSourceNode | null => {

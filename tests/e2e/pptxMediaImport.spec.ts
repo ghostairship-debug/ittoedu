@@ -1,3 +1,5 @@
+import { setRootContainers } from '../helpers/glxWorkFixture'
+import { componentSurface, componentSurfaces } from '../../src/shared/contracts/component-platform/project'
 import { expect, test } from '@playwright/test'
 import { build } from 'esbuild'
 import { readFileSync, mkdirSync, writeFileSync } from 'node:fs'
@@ -33,7 +35,7 @@ for (const kind of ['video', 'audio'] as const) test(`PPTX embedded ${kind} deco
       append: async () => {}, save: async () => { throw new Error('Archive save is exercised directly below') },
     })
   const step = planPptxImportTransaction({ documentId: session.documentId, epoch: 'epoch', project, resources, editingProject: project,
-    activeStateId: null, surfaceId: project.surfaces[0].id, instanceIds: [], instanceId: null }, draft, '内嵌媒体')
+    activeStateId: null, surfaceId: project.rootIds[0], instanceIds: [], instanceId: null }, draft, '内嵌媒体')
   const dispatch = (mutation: import('../../src/shared/workbench/document').DocumentOperation['mutation']) => session.execute({
     documentId: session.documentId, epoch: 'epoch', baseRevision: session.read().revision, operationId: crypto.randomUUID(), actor: 'human', mutation,
   })
@@ -50,8 +52,9 @@ for (const kind of ['video', 'audio'] as const) test(`PPTX embedded ${kind} deco
   const reopened = openCourseProjectV10Archive(createCourseProjectV10Archive({ project: redone.project, resources: redone.resources }))
   // Project JSON has one representation for zero, including rotated frame -0.
   expect(reopened.project).toEqual(JSON.parse(JSON.stringify(redone.project)))
-  const imported = reopened.project.surfaces.find(surface => surface.id === step.createdSurfaceId)!
-  const outputProject = { ...reopened.project, surfaces: [imported, ...reopened.project.surfaces.filter(surface => surface.id !== imported.id && surface.id !== project.surfaces[0].id)] }
+  const imported = componentSurface(reopened.project, step.createdSurfaceId!)!
+  const outputProject = structuredClone(reopened.project)
+  setRootContainers(outputProject, [imported, ...componentSurfaces(reopened.project).filter(surface => surface.id !== imported.id && surface.id !== project.rootIds[0])])
   const published = await buildPublishedCourseV3({ project: outputProject, assetBytes: reopened.resources.assets })
   expect(published.diagnostics).toEqual([])
   const html = buildComponentSingleHtml(published.payload, readFileSync(resolve('dist-player/player.iife.js'), 'utf8'))

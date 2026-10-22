@@ -18,8 +18,8 @@ interface Entry {
   stop(): void
   changes: number
   validation?: Promise<void>
-  result?: DocumentOperationResult
 }
+type TerminalEdit = { status: 'aborted' } | { status: 'finished'; receiptDigest: string }
 export class EditSessionError extends Error {
   constructor(readonly editId: string, readonly code: string, message: string) {
     super(message); this.name = 'EditSessionError'
@@ -64,6 +64,8 @@ function conflictingTargets(left: ToolTarget, right: ToolTarget, model: Document
 /** Volatile projection owner. Only the Gateway/DocumentSession can commit canonical content. */
 export class EditSessionService {
   private entries = new Map<string, Entry>()
+  /** Only late-call/duplicate-finish barriers survive; terminal entries retain no model or preview text. */
+  private terminal = new Map<string, TerminalEdit>()
   private documents = new Map<string, Set<string>>()
   private beginnings = new Map<string, { request: BeginEditSession; promise: Promise<EditSessionSnapshot> }>()
   private cancelled = new Map<string, string>()
@@ -89,6 +91,8 @@ export class EditSessionService {
   private active(entry: Entry): boolean { return entry.snapshot.status === 'active' }
   private release(entry: Entry): void {
     entry.stop()
+    this.entries.delete(entry.snapshot.editId)
+    entry.fragments.clear()
     const groups = this.documents.get(entry.snapshot.documentId)
     groups?.delete(entry.snapshot.editId)
     if (!groups?.size) this.documents.delete(entry.snapshot.documentId)
@@ -105,6 +109,7 @@ export class EditSessionService {
     if (existing) return this.active(existing) && this.sameRequest(existing.request, request)
       ? Promise.resolve(structuredClone(existing.snapshot))
       : Promise.reject(new EditSessionError(request.editId, 'edit-id-used', '编辑组编号已使用，不能重启或更换目标'))
+    if (this.terminal.has(request.editId)) return Promise.reject(new EditSessionError(request.editId, 'edit-id-used', '编辑组编号已使用，不能重启或更换目标'))
     if (this.cancelled.has(request.editId)) return Promise.reject(new EditSessionError(request.editId, 'edit-aborted', this.cancelled.get(request.editId)!))
     const pending = this.beginnings.get(request.editId)
     if (pending) return this.sameRequest(pending.request, request) ? pending.promise
@@ -147,6 +152,7 @@ export class EditSessionService {
   private changed(entry: Entry, event: DocumentEvent): void {
     if (!this.active(entry)) return
     if (event.type === 'closed') { this.abort(entry.snapshot.editId, '文档已关闭'); return }
+    if (event.type === 'state') return
     if (event.snapshot.epoch !== entry.snapshot.epoch) { this.abort(entry.snapshot.editId, '文档会话已改变'); return }
     if (event.operationId === entry.operationId) {
       const result = this.registry.get(entry.snapshot.documentId).lookupOperation(entry.operationId)
@@ -228,23 +234,26 @@ export class EditSessionService {
   }
 
   abort(editId: string, reason: string): void {
+    if (this.terminal.has(editId)) return
     const entry = this.entries.get(editId)
     if (!entry) { this.cancelled.set(editId, reason); return }
     if (!this.active(entry)) return
     entry.snapshot.status = 'aborted'; entry.snapshot.reason = reason
+    this.terminal.set(editId, { status: 'aborted' })
     this.release(entry)
     this.emit({ type: 'edit.aborted', snapshot: entry.snapshot, reason })
   }
 
   /** Receipt verification and preview removal only: no execute(), save() or second History entry. */
   finish(editId: string, operationResult: DocumentOperationResult): void {
-    const entry = this.entries.get(editId)
-    if (!entry || entry.snapshot.status === 'aborted') return
-    if (entry.snapshot.status === 'finished') {
-      if (!entry.result || documentDigest(publicOperationReceipt(operationResult)) !== documentDigest(publicOperationReceipt(entry.result)))
+    const terminal = this.terminal.get(editId)
+    if (terminal) {
+      if (terminal.status === 'finished' && terminal.receiptDigest !== documentDigest(publicOperationReceipt(operationResult)))
         throw new EditSessionError(editId, 'receipt-conflict', '编辑组收到不同的正式提交回执')
       return
     }
+    const entry = this.entries.get(editId)
+    if (!entry || entry.snapshot.status === 'aborted') return
     const session = this.registry.get(entry.snapshot.documentId)
     const actual = session.lookupOperation(entry.operationId)
     if (operationResult.documentId !== entry.snapshot.documentId || operationResult.operationId !== entry.operationId
@@ -257,8 +266,8 @@ export class EditSessionService {
     }
     // The supplied receipt may be public metadata. The canonical owner supplies
     // the full result used by preview/recovery; it never re-enters public output.
-    entry.result = structuredClone(actual)
     entry.snapshot.status = 'finished'; entry.snapshot.revision = operationResult.revision
+    this.terminal.set(editId, { status: 'finished', receiptDigest: documentDigest(publicOperationReceipt(actual)) })
     this.release(entry)
     this.emit({ type: 'edit.finished', snapshot: entry.snapshot, result: actual })
   }

@@ -1,4 +1,6 @@
 // @vitest-environment node
+import { testContainerInstance } from '../../../helpers/glxWorkFixture'
+import { componentSurfaces } from '../../../../src/shared/contracts/component-platform/project'
 import { promises as fs } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -19,9 +21,9 @@ it('executes an authorized V10 property edit without tools.load and preserves th
     project.definitions[TEXT_DEFINITION.id] = TEXT_DEFINITION
     project.instances.title = { id: 'title', definitionId: TEXT_DEFINITION.id, data: jsonValueSchema.parse(createTextComponentData('标题')),
       frame: { width: 250, height: 90, transform: [1, 0, 0, 1, 30, 40] } }
-    project.surfaces[0].childIds = ['title']
+    testContainerInstance(project, 0).childIds = ['title']
     const initial = await host.internalAPI.create({ kind: 'course-v10', project, resources: { assets: {}, components: {} } }, 'capability.h5lesson')
-    const target = { kind: 'course-instance' as const, surfaceId: project.surfaces[0].id, instanceId: 'title' }
+    const target = { kind: 'course-instance' as const, surfaceId: componentSurfaces(project)[0].id, instanceId: 'title' }
     await host.tools.beginRun({ runId: 'whole', actor: 'agent', documents: [{ documentId: initial.documentId, writable: [target] }] })
     const handle = await host.tools.issueTarget('whole', initial.documentId, target)
     expect(await host.tools.execute('whole', 'property', { name: 'object.update', input: { target: handle, properties: { label: '教师改名', opacity: .6 } } }))

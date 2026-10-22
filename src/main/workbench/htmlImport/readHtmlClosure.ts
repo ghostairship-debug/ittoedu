@@ -2,7 +2,7 @@ import { readFile, realpath, readdir } from 'node:fs/promises'
 import { dirname, isAbsolute, relative, resolve, sep } from 'node:path'
 import { extractHtmlResources } from './extractHtmlResources'
 import { validateHtmlImport } from './validateHtmlImport'
-import type { ExtractHtmlResourcesResult } from './types'
+import type { ExtractHtmlResourcesInput, ExtractHtmlResourcesResult } from './types'
 
 export interface ReadHtmlClosureInput {
   htmlPath: string
@@ -64,12 +64,14 @@ export async function captureHtmlClosure(input: {
   siblingFiles?: ReadonlyMap<string, Uint8Array>
   readRelative?(reference: string): Promise<Uint8Array | undefined>
   readRelativeDirectory?(reference: string): Promise<ReadonlyMap<string, Uint8Array>>
+  extractResources?(input: ExtractHtmlResourcesInput): Promise<ExtractHtmlResourcesResult>
 }): Promise<ReadHtmlClosureResult> {
   const files = new Map(input.siblingFiles)
   const unreadable = new Map<string, string>()
   const attempted = new Set<string>()
   const closedDirectories = new Set<string>()
-  let result = extractHtmlResources({ html: input.html, siblingFiles: files, closedDirectories })
+  const extract = input.extractResources ?? extractHtmlResources
+  let result = await extract({ html: input.html, siblingFiles: files, closedDirectories })
   for (;;) {
     const missing = result.diagnostics.filter(diagnostic => diagnostic.code === 'missing-relative-resource' && diagnostic.reference)
     let added = false
@@ -103,7 +105,7 @@ export async function captureHtmlClosure(input: {
       }
     }
     if (!added) break
-    result = extractHtmlResources({ html: input.html, siblingFiles: files, closedDirectories })
+    result = await extract({ html: input.html, siblingFiles: files, closedDirectories })
   }
   for (const [reference, message] of unreadable) result.diagnostics.push({ level: 'warning', code: 'resource-read', reference, message: `无法读取相对资源 ${reference}：${message}；原引用与其他可用内容已保留` })
   const references = new Set(result.localReferences)

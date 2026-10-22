@@ -10,40 +10,18 @@ import type { PdfPrintImage } from '../course/pdfPrintHtml'
 import { bytesToDataUrl } from '../base64'
 import { resolveCourseProjectDeliveryFindingRoute } from '../../diagnostics/projectHealthNavigation'
 import { componentDeliveryPages } from './deliveryPages'
+import { componentSurface, componentSurfaces } from '../../../shared/contracts/component-platform/project'
+import { componentStaticRootOmissions } from './presentation'
 
-export type ComponentDeliveryFormat = 'single-html' | 'web-package' | 'pptx' | 'pdf' | 'docx'
-export interface ComponentDeliveryFinding {
-  severity: 'error' | 'warning' | 'info'
-  code: string
-  message: string
-  surfaceId?: string
-  instanceId?: string
-  path?: readonly (string | number)[]
-}
-export interface ComponentDeliveryReport {
-  reportVersion: 1
-  schemaVersion: 10
-  projectId: string
-  target: ComponentDeliveryFormat
-  generatedAt: string
-  items: ComponentDeliveryFinding[]
-  summary: { error: number; warning: number; info: number; total: number; canExport: boolean }
-}
+import type { ComponentDeliveryFormat, ComponentDeliveryFinding, ComponentDeliveryReport, ComponentDeliveryArtifact, BuiltComponentDelivery } from '../../../shared/workbench/frozenDelivery'
+export type { ComponentDeliveryFormat, ComponentDeliveryFinding, ComponentDeliveryReport, ComponentDeliveryArtifact, BuiltComponentDelivery } from '../../../shared/workbench/frozenDelivery'
 export interface ComponentOutputCapture {
   captureInstance(surfaceId: string, instanceId: string): Promise<PdfPrintImage | undefined>
   captureSurface(surfaceId: string, spatialFrameId?: string): Promise<PdfPrintImage | undefined>
   /** Only the effective formal background; authored objects and global planes are absent. */
-  captureBackground?(surfaceId: string): Promise<PdfPrintImage | undefined>
+  captureBackground?(surfaceId: string, layer?: 'project' | 'surface'): Promise<PdfPrintImage | undefined>
   dispose(): void | Promise<void>
 }
-export interface ComponentDeliveryArtifact {
-  suggestedName: string
-  extension: 'html' | 'zip' | 'pptx' | 'pdf' | 'docx'
-  bytes?: Uint8Array
-  html?: string
-}
-export interface BuiltComponentDelivery { artifacts: ComponentDeliveryArtifact[]; report: ComponentDeliveryReport }
-
 function captureBytes(image: PdfPrintImage) {
   const [header, data] = image.dataUrl.split(',')
   if (!header?.includes(';base64') || !data) throw new Error('实际捕获没有返回图片字节')
@@ -69,7 +47,8 @@ export async function buildComponentDelivery(snapshot: CourseDeliverySnapshot, f
   }
   check()
   const choices = snapshot.deliveryOptions ?? {}
-  const selectedPages = componentDeliveryPages(project.surfaces, format === 'single-html' || format === 'web-package' ? undefined : choices.pageIds)
+  const surfaces = componentSurfaces(project)
+  const selectedPages = componentDeliveryPages(surfaces, format === 'single-html' || format === 'web-package' ? undefined : choices.pageIds)
   if (format === 'single-html') {
     const result = await buildComponentHtml(snapshot.snapshot, options.compile, options.singleHtmlMode, options.signal, options.onProgress)
     note(result.diagnostics)
@@ -79,6 +58,10 @@ export async function buildComponentDelivery(snapshot: CourseDeliverySnapshot, f
     note(result.diagnostics)
     artifacts.push({ suggestedName: `${project.title}-网页包.zip`, extension: 'zip', bytes: result.bytes })
   } else {
+    if (!surfaces.length && project.entry) throw new Error(`当前作品为自主管理程序入口，没有可映射的 ${format.toUpperCase()} 页面；请使用可运行 HTML/Web 包，工程内容与资源已保留。`)
+    // PPTX reports these same omissions in its direct builder, then feeds them
+    // through note below. Explicit page selections already declare their scope.
+    if (!choices.pageIds && format !== 'pptx') note(componentStaticRootOmissions(project))
     let capture: ComponentOutputCapture | undefined
     // Prepare a fresh Player only when a format consumer actually requests a captured region.
     const getCapture = async () => {
@@ -115,8 +98,8 @@ export async function buildComponentDelivery(snapshot: CourseDeliverySnapshot, f
           captureSurface: options.createCapture ? async ({ surface, page }) => {
             check(); const image = await (await getCapture())?.captureSurface(surface.id, page.spatialFrameId); check(); return image?.dataUrl
           } : undefined,
-          captureBackground: options.createCapture ? async ({ surface }) => {
-            check(); const image = await (await getCapture())?.captureBackground?.(surface.id); check(); return image?.dataUrl
+          captureBackground: options.createCapture ? async ({ surface, layer }) => {
+            check(); const image = await (await getCapture())?.captureBackground?.(surface.id, layer); check(); return image?.dataUrl
           } : undefined,
           onDiagnostic: () => check(),
         })
@@ -125,7 +108,7 @@ export async function buildComponentDelivery(snapshot: CourseDeliverySnapshot, f
         if (!result.bytes.length) throw new Error('当前课程没有可生成的 PPTX 页面；内容与资源已保留')
         artifacts.push({ suggestedName: `${project.title}.pptx`, extension: 'pptx', bytes: result.bytes })
       } else if (format === 'docx') {
-        const flows = selectedPages.map(page => project.surfaces.find(surface => surface.id === page.surfaceId)!).filter(surface => surface.kind === 'flow'), names = new Set<string>()
+        const flows = selectedPages.map(page => componentSurface(project, page.surfaceId)!).filter(surface => surface.kind === 'flow'), names = new Set<string>()
         if (!flows.length) throw new Error('当前课程没有流式讲义，无法导出 DOCX')
         for (const surface of flows) {
           check()
@@ -137,15 +120,15 @@ export async function buildComponentDelivery(snapshot: CourseDeliverySnapshot, f
         }
       } else {
         const fragments: string[] = []
-        if (!project.surfaces.length) throw new Error('当前课程没有可打印的页面')
-        const printPages = choices.pageIds ? selectedPages : project.surfaces.map(surface => ({ id: surface.id, surfaceId: surface.id, title: surface.title, spatialFrameId: undefined }))
+        if (!surfaces.length) throw new Error('当前课程没有可打印的页面')
+        const printPages = choices.pageIds ? selectedPages : surfaces.map(surface => ({ id: surface.id, surfaceId: surface.id, title: surface.title, spatialFrameId: undefined }))
         for (const page of printPages) {
-          const surface = project.surfaces.find(value => value.id === page.surfaceId)!
+          const surface = componentSurface(project, page.surfaceId)!
           check()
           const result = await buildComponentPrintHtml(project, {
             surfaceId: surface.id, resolveAsset, captureInstance, pageSize: choices.pageSize, orientation: choices.orientation, pageId: page.id,
             captureSurface: options.createCapture ? async ({ surfaceId }) => {
-              const frames = project.surfaces.find(value => value.id === surfaceId)?.spatial?.frames
+              const frames = componentSurface(project, surfaceId)?.spatial?.frames
               const ids = choices.pageIds ? [page.spatialFrameId] : frames?.length ? frames.map(frame => frame.id) : [undefined]
               const images: PdfPrintImage[] = []
               for (const id of ids) { check(); const image = await (await getCapture())?.captureSurface(surfaceId, id); check(); if (image) images.push(image) }
@@ -162,6 +145,6 @@ export async function buildComponentDelivery(snapshot: CourseDeliverySnapshot, f
   check()
   const summary = { error: 0, warning: 0, info: 0, total: items.length, canExport: artifacts.length > 0 }
   for (const item of items) summary[item.severity]++
-  return { artifacts, report: { reportVersion: 1, schemaVersion: 10, projectId: project.id, target: format,
+  return { artifacts, report: { reportVersion: 1, schemaVersion: 11, projectId: project.id, target: format,
     generatedAt: new Date().toISOString(), items, summary } }
 }

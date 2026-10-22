@@ -4,16 +4,18 @@ interface NativeTransition { ready: Promise<void>; finished: Promise<void>; upda
 type TransitionDocument = Document & { startViewTransition?: (update: () => Promise<void>) => NativeTransition }
 let sequence = 0
 const active = new WeakMap<Document, () => void>()
+const localActive = new WeakMap<HTMLElement, () => void>()
 
 /** Presentation only: the supplied navigation owner performs the single fact commit. */
 export async function presentNavigationTransition(
   root: HTMLElement, transition: ComponentNavigationTransition,
   commit: () => Promise<boolean>, signal: AbortSignal,
+  options?: { scope?: 'document' | 'container' },
 ): Promise<boolean> {
   if (signal.aborted) return false
   if (transition.effect === 'none' || transition.durationMs === 0) return commit()
   const document = root.ownerDocument as TransitionDocument
-  if (!document.startViewTransition || document.defaultView?.matchMedia('(prefers-reduced-motion: reduce)').matches) return commit()
+  if (options?.scope !== 'container' && !document.startViewTransition || document.defaultView?.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return commit()
   const direction = transition.direction ?? 'left', horizontal = direction === 'left' || direction === 'right'
   const distance = direction === 'left' || direction === 'up' ? -8 : 8
   const shift = (value: number) => `translate${horizontal ? 'X' : 'Y'}(${value}%)`
@@ -28,7 +30,36 @@ export async function presentNavigationTransition(
   const incoming: NonNullable<ComponentNavigationTransition['incoming']> = transition.incoming ?? { keyframes: preset.incoming }
   const timing = (value: typeof outgoing) => ({ duration: transition.durationMs ?? (transition.effect ? 240 : 300), easing: transition.easing ?? (transition.effect ? 'ease-out' : 'linear'), ...value.timing, fill: 'both' as const })
   // Parse submitted keyframes/easing before committing a destination.
-  for (const track of [outgoing, incoming]) new KeyframeEffect(null, track.keyframes.map(frame => ({ ...frame })), timing(track))
+  for (const track of [outgoing, incoming]) if (typeof KeyframeEffect !== 'undefined') new KeyframeEffect(null, track.keyframes.map(frame => ({ ...frame })), timing(track))
+  if (options?.scope === 'container') {
+    if (!root.animate) return commit()
+    // The current container is the only live world. Finish its outgoing track,
+    // commit once, then animate the new presentation on the same viewport.
+    // Unlike document ViewTransition, this never acquires another container's slot.
+    localActive.get(root)?.()
+    const animations: Animation[] = []
+    const abort = () => { for (const animation of animations) animation.cancel() }
+    localActive.set(root, abort)
+    signal.addEventListener('abort', abort, { once: true })
+    const play = async (track: typeof outgoing) => {
+      if (signal.aborted) return false
+      const animation = root.animate(track.keyframes.map(frame => ({ ...frame })), {
+        ...timing(track), ...(track.timing?.duration === undefined ? { duration: (transition.durationMs ?? 240) / 2 } : {}),
+      })
+      animations.push(animation)
+      return animation.finished.then(() => !signal.aborted, () => false)
+    }
+    try {
+      if (!await play(outgoing) || signal.aborted) return false
+      if (!await commit() || signal.aborted) return false
+      for (const animation of animations) animation.cancel()
+      return await play(incoming) && !signal.aborted
+    } finally {
+      signal.removeEventListener('abort', abort)
+      abort()
+      if (localActive.get(root) === abort) localActive.delete(root)
+    }
+  }
   active.get(document)?.()
   const name = `guoling-navigation-${++sequence}`, html = document.documentElement
   const previousRoot = [root.style.getPropertyValue('view-transition-name'), root.style.getPropertyPriority('view-transition-name')]

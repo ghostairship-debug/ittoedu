@@ -6,22 +6,44 @@ import { spawn } from 'node:child_process'
 
 const repository = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 export async function sourceLaunchFingerprint(root, entries) {
-  const records = []
-  const walk = async relative => {
+  return sourceLaunchFacts(root).fingerprint(entries)
+}
+function sourceLaunchFacts(root) {
+  const facts = new Map()
+  const read = relative => {
+    let pending = facts.get(relative)
+    if (!pending) { pending = scan(relative); facts.set(relative, pending) }
+    return pending
+  }
+  const scan = async relative => {
     const filename = path.join(root, relative)
     let stat
     try { stat = await fs.stat(filename, { bigint: true }) }
-    catch (error) { if (error.code === 'ENOENT') { records.push([relative, 'missing']); return }; throw error }
-    if (stat.isDirectory()) for (const name of (await fs.readdir(filename)).sort()) await walk(path.join(relative, name))
-    else records.push([relative, String(stat.size), String(stat.mtimeNs), String(stat.ctimeNs)])
+    catch (error) { if (error.code === 'ENOENT') return { present: false, records: [[relative, 'missing']] }; throw error }
+    if (stat.isDirectory()) {
+      const children = []
+      for (const name of (await fs.readdir(filename)).sort()) children.push(await read(path.join(relative, name)))
+      return { present: true, records: children.flatMap(child => child.records) }
+    }
+    return { present: true, records: [[relative, String(stat.size), String(stat.mtimeNs), String(stat.ctimeNs)]] }
   }
-  for (const entry of entries) await walk(entry)
-  return createHash('sha256').update(JSON.stringify(records)).digest('hex')
+  return {
+    async fingerprint(entries) {
+      const snapshots = await Promise.all(entries.map(entry => read(path.normalize(entry))))
+      return createHash('sha256').update(JSON.stringify(snapshots.flatMap(item => item.records))).digest('hex')
+    },
+    async present(entries) { return (await Promise.all(entries.map(entry => read(path.normalize(entry))))).every(item => item.present) },
+    invalidate(entries) {
+      const roots = entries.map(entry => path.normalize(entry))
+      for (const key of facts.keys()) if (roots.some(root => key === root || key.startsWith(root + path.sep) || root.startsWith(key + path.sep))) facts.delete(key)
+    },
+  }
 }
 export async function prepareSourceLaunch(root = repository, run = runScript) {
   const filename = path.join(root, 'output/source-launch-state.json')
   const lock = createHash('sha256').update(await fs.readFile(path.join(root, 'package-lock.json'))).digest('hex')
-  const installation = await sourceLaunchFingerprint(root, ['node_modules/.package-lock.json'])
+  const facts = sourceLaunchFacts(root)
+  const installation = await facts.fingerprint(['node_modules/.package-lock.json'])
   let previous = {}
   try { previous = JSON.parse(await fs.readFile(filename, 'utf8')) } catch (error) { if (error.code !== 'ENOENT') console.warn('启动构建索引不可读，将重新核对构建') }
   if (previous.lock && previous.lock !== lock && previous.installation === installation)
@@ -37,14 +59,18 @@ export async function prepareSourceLaunch(root = repository, run = runScript) {
   ]
   const next = { lock, installation }, rebuilt = []
   for (const group of groups) {
-    const identity = await sourceLaunchFingerprint(root, group.inputs)
-    const outputIdentity = await sourceLaunchFingerprint(root, group.outputs)
-    const present = await Promise.all(group.outputs.map(output => fs.stat(path.join(root, output)).then(() => true, () => false)))
-    if (previous[group.name]?.identity !== identity || previous[group.name]?.outputIdentity !== outputIdentity || present.includes(false)) {
+    let identity = await facts.fingerprint(group.inputs)
+    let outputIdentity = await facts.fingerprint(group.outputs)
+    if (previous[group.name]?.identity !== identity || previous[group.name]?.outputIdentity !== outputIdentity || !await facts.present(group.outputs)) {
       for (const script of group.scripts) await run(script, root)
       rebuilt.push(group.name)
+      // A build can update generated inputs as well as its outputs. Refresh this
+      // group's facts after it completes; later groups share the refreshed view.
+      facts.invalidate([...group.inputs, ...group.outputs])
+      identity = await facts.fingerprint(group.inputs)
+      outputIdentity = await facts.fingerprint(group.outputs)
     }
-    next[group.name] = { identity: await sourceLaunchFingerprint(root, group.inputs), outputIdentity: await sourceLaunchFingerprint(root, group.outputs) }
+    next[group.name] = { identity, outputIdentity }
   }
   await fs.mkdir(path.dirname(filename), { recursive: true })
   const temporary = filename + '.tmp'

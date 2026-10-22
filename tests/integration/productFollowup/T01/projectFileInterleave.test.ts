@@ -1,4 +1,6 @@
 // @vitest-environment node
+import { appendRootContainers } from '../../../helpers/glxWorkFixture'
+import { componentSurfaces } from '../../../../src/shared/contracts/component-platform/project'
 import { promises as fs } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -58,7 +60,7 @@ it('Flow literal dollars and markerless rewrite preserve opaque interaction and 
     project.definitions.web = { id: 'web', role: 'content', implementation: { kind: 'builtin', key: 'guoling.web' } }
     project.instances.paragraph = { id: 'paragraph', definitionId: TEXT_DEFINITION.id, data: textDataEdit('fixture', createTextComponentData('旧正文')).value, frame, style: { opacity: .8 } }
     project.instances.interaction = { id: 'interaction', definitionId: 'web', data: { html: '<button onclick="this.textContent=\'已点击\'">互动</button>' }, frame }
-    project.surfaces.push({ id: 'flow', kind: 'flow', title: '讲义', childIds: ['paragraph', 'interaction'] })
+    appendRootContainers(project, { id: 'flow', kind: 'flow', title: '讲义', childIds: ['paragraph', 'interaction'] })
     const initial = await host.internalAPI.create({ kind: 'course-v10', project, resources: { assets: {}, components: {} } }, 'flow.h5lesson')
     const tool = await run(host, initial, directory)
     const file = componentProjectFiles(project, course(initial).resources).find(value => value.binding?.kind === 'flow' && value.binding.format === 'markdown')!
@@ -69,7 +71,7 @@ it('Flow literal dollars and markerless rewrite preserve opaque interaction and 
     expect(applied).toMatchObject({ kind: 'read', data: { commit: 'committed' } })
     const current = await host.internalAPI.read(initial.documentId)
     const p = course(current).project
-    expect(p.surfaces.find(value => value.id === 'flow')?.childIds).toEqual(['paragraph', 'interaction'])
+    expect(componentSurfaces(p).find(value => value.id === 'flow')?.childIds).toEqual(['paragraph', 'interaction'])
     expect(p.instances.paragraph).toMatchObject({ frame, style: { opacity: .8 }, data: { content: { inlines: [{ type: 'text', text: '新正文，售价 $5，另一个售价 $10' }] } } })
     expect(p.instances.interaction).toEqual(project.instances.interaction)
     expect(current.undoDepth).toBe(1)

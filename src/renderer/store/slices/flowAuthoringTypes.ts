@@ -109,7 +109,6 @@ export type FlowAuthoringIntent = (
   | { readonly kind: 'clear-selection' }
   | { readonly kind: 'set-width-mode'; readonly widthMode: 'fluid' | 'reading' }
   | { readonly kind: 'rename-page'; readonly title: string }
-  | { readonly kind: 'set-paper-background'; readonly backgroundColor: string }
   | { readonly kind: 'set-surface-background'; readonly patch: FlowSurfaceBackgroundPatch }
   | {
       readonly kind: 'import-surface-background-asset'
@@ -140,6 +139,8 @@ export type FlowAuthoringIntent = (
 export interface FlowAuthoringReceipt {
   readonly ok: boolean
   readonly reason?: string
+  /** In-process failure capability; never serialized into document or recovery data. */
+  readonly error?: Error
   readonly historyEntry: boolean
   readonly edit?: FlowTextEditSession | null
 }

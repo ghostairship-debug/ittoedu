@@ -1,4 +1,6 @@
 // @vitest-environment node
+import { setRootContainers } from '../helpers/glxWorkFixture'
+import { componentSurfaces } from '../../src/shared/contracts/component-platform/project'
 import { expect, it } from 'vitest'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -31,12 +33,12 @@ async function harness() {
   for (const [id, text] of [['slide-old', '人工内容'], ['flow-before', '前文'], ['flow-after', '后文']]) {
     project.instances[id] = { id, definitionId: TEXT_DEFINITION.id, data: JSON.parse(JSON.stringify(createTextComponentData(text))) }
   }
-  project.surfaces = [
+  setRootContainers(project, [
     { id: 'slide', kind: 'slide', title: '演示页', childIds: ['slide-old'], designSize: { width: 1280, height: 720 },
       presentation: { states: [{ id: 'default', title: 'Default', order: ['slide-old'], overrides: {} },
         { id: 'other', title: 'Other', order: ['slide-old'], overrides: {} }] } },
     { id: 'flow', kind: 'flow', title: '讲义', childIds: ['flow-before', 'flow-after'] },
-  ]
+  ])
   const initial = await host.internalAPI.create({ kind: 'course-v10', project, resources: { assets: {}, components: {} } }, 'appearance.glx')
   await host.tools.beginRun({ runId: 'appearance', actor: 'agent', documents: [{ documentId: initial.documentId, writable: [{ kind: 'document' }] }],
     fileAccess: { permission: 'workspace', workspaceRoot: root } })
@@ -67,7 +69,7 @@ it('inserts native content, frame and initial appearance in one history entry an
     applied(await f.call('object.insert', { target, kind: 'text', text, x: 60, y: 34, width: 720, height: 58,
       appearance: { fontSize: 40, color: '#1f3a5f', bold: true, shadows: [{ x: 1, y: 2, blur: 3, color: '#445566' }] } }))
     const after = await f.read(), project = course(after).project
-    const id = project.surfaces[0].childIds[1], instance = project.instances[id]
+    const id = componentSurfaces(project)[0].childIds[1], instance = project.instances[id]
     const expected = createTextComponentData(text)
     expected.appearance = { ...expected.appearance, fontSize: 40, color: '#1f3a5f', bold: true }
     expect(after.revision).toBe(f.initial.revision + 1)
@@ -79,7 +81,7 @@ it('inserts native content, frame and initial appearance in one history entry an
     expect(await f.history('undo')).toMatchObject({ status: 'applied' })
     const undone = await f.read()
     expect(course(undone).project.instances[id]).toBeUndefined()
-    expect(course(undone).project.surfaces[0].childIds).toEqual(['slide-old'])
+    expect(componentSurfaces(course(undone).project)[0].childIds).toEqual(['slide-old'])
     expect(undone.undoDepth).toBe(0)
     expect(await f.history('redo')).toMatchObject({ status: 'applied' })
     expect(course(await f.read()).project.instances[id]).toEqual(instance)
@@ -88,7 +90,7 @@ it('inserts native content, frame and initial appearance in one history entry an
     applied(await f.call('object.insert', { target: shapeTarget, kind: 'shape', shapeType: 'rounded-rectangle',
       appearance: { fillColor: '#f7fafd', borderColor: '#d9e5f1', borderWidth: 3 } }))
     const saved = await f.read(), savedProject = course(saved).project
-    const shapeId = savedProject.surfaces[0].childIds[2], shape = savedProject.instances[shapeId]
+    const shapeId = componentSurfaces(savedProject)[0].childIds[2], shape = savedProject.instances[shapeId]
     const shapeDefault = defaultShapeData('rounded-rectangle')
     expect(shape.data).toEqual({ ...shapeDefault, style: { ...shapeDefault.style, fillColor: '#f7fafd', borderColor: '#d9e5f1', borderWidth: 3 } })
     const filename = path.join(f.root, 'saved.glx')
@@ -96,7 +98,7 @@ it('inserts native content, frame and initial appearance in one history entry an
     const cold = await new DocumentHostService(path.join(f.root, 'cold')).internalAPI.open(filename)
     expect(course(cold).project.instances[id]).toEqual(instance)
     expect(course(cold).project.instances[shapeId]).toEqual(shape)
-    expect(course(cold).project.surfaces[0].childIds).toEqual(['slide-old', id, shapeId])
+    expect(componentSurfaces(course(cold).project)[0].childIds).toEqual(['slide-old', id, shapeId])
     expect(cold.dirty).toBe(false)
   } finally { await f.cleanup() }
 })
@@ -108,9 +110,9 @@ it('matches post-insert appearance in a named Slide state, retains Flow reading 
     const input = { kind: 'text', text: '状态内容', x: 120, y: 160, width: 300, height: 80 }
     const appearance = { fontSize: 32, color: '#234567', italic: true, shadows: [{ x: 2, y: 1, blur: 0, color: '#345678' }] }
     applied(await f.call('object.insert', { ...input, target, appearance }))
-    const first = course(await f.read()).project.surfaces[0].childIds[1]
+    const first = componentSurfaces(course(await f.read()).project)[0].childIds[1]
     const legacy = applied(await f.call('object.insert', { ...input, target }))
-    const second = course(await f.read()).project.surfaces[0].childIds[2]
+    const second = componentSurfaces(course(await f.read()).project)[0].childIds[2]
     applied(await f.call('object.update', { target: legacy.affected![0], properties: { appearance } }))
     const snapshot = await f.read(), project = course(snapshot).project
     const base = createTextComponentData(input.text)
@@ -125,25 +127,25 @@ it('matches post-insert appearance in a named Slide state, retains Flow reading 
     expect(active.instances[first].style).toEqual(active.instances[second].style)
     expect(active.instances[first].frame).toEqual(active.instances[second].frame)
     expect(active.instances[first].visible).toBe(true)
-    expect(active.surfaces[0].childIds).toEqual(['slide-old', first, second])
+    expect(componentSurfaces(active)[0].childIds).toEqual(['slide-old', first, second])
     const other = resolveComponentPresentation(project, 'slide', 'other')
     expect(other.instances[first].data).toEqual(base)
     expect(other.instances[first].visible).toBe(false)
-    expect(project.surfaces[0].presentation!.states[1]).toEqual(course(f.initial).project.surfaces[0].presentation!.states[1])
+    expect(componentSurfaces(project)[0].presentation!.states[1]).toEqual(componentSurfaces(course(f.initial).project)[0].presentation!.states[1])
     expect(project.instances['slide-old']).toEqual(course(f.initial).project.instances['slide-old'])
 
     const flowTarget = await f.issue({ kind: 'course-surface', surfaceId: 'flow' })
     applied(await f.call('object.insert', { target: flowTarget, kind: 'text', text: '中间新正文', destination: 'document', index: 1,
       appearance: { fontSize: 30, bold: true } }))
     const flowSnapshot = await f.read(), flowProject = course(flowSnapshot).project
-    const flow = flowProject.surfaces[1], flowId = flow.childIds[1]
+    const flow = componentSurfaces(flowProject)[1], flowId = flow.childIds[1]
     expect(flow.childIds).toEqual(['flow-before', flowId, 'flow-after'])
     expect(flowProject.instances[flowId].data).toMatchObject({ content: { inlines: [{ type: 'text', text: '中间新正文' }] }, appearance: { fontSize: 30, bold: true } })
     expect(flowProject.instances[flowId].flowPlacement).toBeUndefined()
     expect(flowProject.instances['flow-before']).toEqual(course(f.initial).project.instances['flow-before'])
     expect(flowProject.instances['flow-after']).toEqual(course(f.initial).project.instances['flow-after'])
     for (const invalid of [{ kind: 'text', appearance: { fontSize: 0 } }, { kind: 'input', appearance: { color: '#234567' } }]) {
-      expect(await f.call('object.insert', { target: flowTarget, ...invalid })).toMatchObject({ kind: 'error' })
+      expect(await f.call('object.insert', { target: flowTarget, ...invalid }), JSON.stringify(invalid)).toMatchObject({ kind: 'error' })
       const rejected = await f.read()
       expect(rejected.revision).toBe(flowSnapshot.revision)
       expect(rejected.undoDepth).toBe(flowSnapshot.undoDepth)

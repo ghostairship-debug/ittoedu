@@ -1,4 +1,6 @@
 // @vitest-environment node
+import { componentSurfaces } from '../../src/shared/contracts/component-platform/project'
+import { testContainerInstance, appendRootContainers } from '../helpers/glxWorkFixture'
 import { promises as fs } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -38,11 +40,11 @@ it('edits observed object paths through public Gateway direct/batch, preserves i
     frame: { width: 170 + index, height: 70, transform: [1, 0, 0.2, 1, 42 + index * 200, 31] },
     ...(id === 'neighbor' ? { locked: true } : {}),
   }
-  const surfaceId = project.surfaces[0].id
-  project.surfaces[0].childIds = ['a', 'b', 'neighbor']
+  const surfaceId = componentSurfaces(project)[0].id
+  testContainerInstance(project, 0).childIds = ['a', 'b', 'neighbor']
   project.instances.body = { id: 'body', definitionId: TEXT_DEFINITION.id,
     data: JSON.parse(JSON.stringify(createTextComponentData('连续正文'))) }
-  project.surfaces.push({ id: 'flow', kind: 'flow', title: '讲义', childIds: ['body'] })
+  appendRootContainers(project, { id: 'flow', kind: 'flow', title: '讲义', childIds: ['body'] })
   const initial = await host.internalAPI.create({ kind: 'course-v10', project, resources: { assets: {}, components: {} } }, '移动.h5lesson')
   const documentId = initial.documentId
   const gateway = host.tools
@@ -137,7 +139,7 @@ it('edits observed object paths through public Gateway direct/batch, preserves i
       .toMatchObject({ status: 'applied' })
     // The directory now reuses each original path for its neighbor. This pending call must keep a/b.
     await list()
-    expect(course(await snapshot()).surfaces[0].childIds).toEqual(['b', 'a', 'neighbor'])
+    expect(componentSurfaces(course(await snapshot()))[0].childIds).toEqual(['b', 'a', 'neighbor'])
     expect(await gateway.effectTargets('path', capturedBatch)).toEqual(effects)
     expect(await gateway.preflightBatch('path', capturedBatch.input)).toBeNull()
     await apply(capturedBatch)

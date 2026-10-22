@@ -1,4 +1,5 @@
 // @vitest-environment node
+import { setRootContainers } from '../helpers/glxWorkFixture'
 import { expect, it, vi } from 'vitest'
 import { randomUUID } from 'node:crypto'
 import { promises as fs } from 'node:fs'
@@ -58,8 +59,8 @@ it('uses current AI presentation growth and the real GUI measured-frame writer, 
   try {
     const driver = new CourseV10Driver(), registry = new DocumentRegistry({ drivers: [driver], createId: randomUUID, bindingKey: binding => binding.path,
       persistence: { async append() {}, async save(input) { if (input.binding.kind !== 'file') throw Error('File required'); await fs.writeFile(input.binding.path, input.bytes); return { ...input.binding, version: `revision-${input.revision}` } } } })
-    const project = createBlankCourseProjectV10('真实文字测量'); project.global = { underlay: [], overlay: [] }; project.instances = {}; project.definitions = { [TEXT_DEFINITION.id]: TEXT_DEFINITION }
-    project.surfaces = [{ id: 'slide', kind: 'slide', title: '文字布局', childIds: ['text', 'neighbor'], designSize: { width: 800, height: 720 } }]
+    const project = createBlankCourseProjectV10('真实文字测量'); project.global = { underlay: [], overlay: [] }; project.instances = { ...project.instances }; project.definitions = { ...project.definitions,  [TEXT_DEFINITION.id]: TEXT_DEFINITION  }
+    setRootContainers(project, [{ id: 'slide', kind: 'slide', title: '文字布局', childIds: ['text', 'neighbor'], designSize: { width: 800, height: 720 } }])
     const data = createTextComponentData('原始短正文'); data.appearance.fontFamily = 'sans-serif'; data.appearance.fontSize = 24; data.appearance.padding = 0
     project.instances.text = { id: 'text', definitionId: TEXT_DEFINITION.id, data: JSON.parse(JSON.stringify(data)), frame: { width: 120, height: 90, transform: [1, 0, 0, 1, 160, 100] } }
     project.instances.neighbor = { id: 'neighbor', definitionId: TEXT_DEFINITION.id, data: JSON.parse(JSON.stringify(createTextComponentData('人工邻居'))), frame: { width: 140, height: 90, transform: [1, 0, 0, 1, 420, 100] } }

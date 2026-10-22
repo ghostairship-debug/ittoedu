@@ -36,7 +36,7 @@ export interface AssetSearchResult {
   hint?: string
 }
 const trustRank: Record<ComponentCatalogTrust, number> = { 'built-in': 3, trusted: 2, prompt: 1 }
-const usablePackages = (snapshot: ComponentLibrarySnapshot) => snapshot.packages.filter(entry => entry.componentSchemaVersion === 1 && entry.runtimeApiVersion === 5 && entry.quality !== 'deprecated')
+const usablePackages = (snapshot: ComponentLibrarySnapshot) => snapshot.packages.filter(entry => entry.componentSchemaVersion === 2 && entry.runtimeApiVersion === 5 && entry.quality !== 'deprecated')
 const newer = (left: AvailableComponentCatalogPackage, right: AvailableComponentCatalogPackage) => compareVersions(left.version, right.version) || trustRank[left.sourceTrust] - trustRank[right.sourceTrust]
 
 /** Discover the same current API 5 entries offered by the component panel. */

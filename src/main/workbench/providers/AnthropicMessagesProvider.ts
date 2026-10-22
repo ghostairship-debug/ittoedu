@@ -1,6 +1,6 @@
 import type {
   ModelAssistantMessage, ModelConnectionSnapshot, ModelEvent, ModelFailure, ModelJson,
-  ModelJsonObject, ModelNativeToolCall, ModelProvider, ModelRequest, ModelUsage, PreparedModelRequest,
+  ModelJsonObject, ModelNativeToolCall, ModelProvider, ModelRequest, ModelUsage, PreparedModelRequest, ModelPreparationOptions,
 } from '../../../shared/workbench/modelProvider'
 import { modelAcceptsImages } from '../../../shared/workbench/modelProvider'
 import { effectiveModelProtocol } from '../../../shared/workbench/modelRouting'
@@ -135,11 +135,11 @@ interface StreamBlock { value: ModelJsonObject; closed: boolean; argumentsText?:
 export class AnthropicMessagesProvider implements ModelProvider {
   readonly retrySafety = 'pure-generation' as const
   constructor(private readonly options: AnthropicMessagesProviderOptions) {}
-  prepare(input: Payload): PreparedModelRequest {
+  prepare(input: Payload, accounting?: ModelPreparationOptions): PreparedModelRequest {
     const request = structuredClone(input)
     const prepared = prepare(request)
     const serialized = JSON.stringify(prepared.body)
-    return { serialized, stream: (requestId, options) => this.streamPrepared({ ...request, requestId }, prepared, serialized, options) }
+    return { serialized, ...(accounting ? { tokens: accounting.measurePayload(prepared.body) } : {}), stream: (requestId, options) => this.streamPrepared({ ...request, requestId }, prepared, serialized, options) }
   }
   async *stream(input: ModelRequest, options: { signal?: AbortSignal } = {}): AsyncGenerator<ModelEvent> {
     let prepared: PreparedModelRequest

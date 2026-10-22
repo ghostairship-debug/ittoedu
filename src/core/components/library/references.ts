@@ -5,6 +5,7 @@ import { componentDefinitionBuiltinKey } from '../../../shared/contracts/compone
 import { componentInteractionDataSchema, remapComponentInteractionData } from '../../../shared/componentInteractionData'
 import type { LibraryIdentityMap } from './types'
 import { isWebDocumentDeclaration } from '../source/sourceDocumentDeclaration'
+import { componentBackgroundAssetIds } from '../../../shared/componentBackgroundPaint'
 
 type SourceResources = { assetIds: string[]; dynamic: boolean }
 type ResourceSyntax = { names: string[]; dynamic: boolean }
@@ -111,7 +112,11 @@ export function createComponentReferenceCapture(project: CourseProjectV10, resou
       const implementation = instance.implementationOverride ?? definition.implementation
       const dependencies = [...sourceOwners(implementation, current).definitions].flatMap(id => Object.hasOwn(current.definitions, id)
         ? sourceAssetIds(current.definitions[id].implementation) : [])
-      return [...new Set([...componentAssetIds(instance, definition), ...dependencies, ...resourceReferences(implementation, current).assetIds])]
+      const overrides = (instance.container?.presentation?.states ?? []).flatMap(state => Object.entries(state.overrides).flatMap(([id, override]) => {
+        const target = current.instances[id], targetDefinition = target && current.definitions[target.definitionId]
+        return target && targetDefinition ? componentAssetIds({ ...target, ...override, frame: target.frame }, targetDefinition) : []
+      }))
+      return [...new Set([...componentAssetIds(instance, definition), ...dependencies, ...resourceReferences(implementation, current).assetIds, ...overrides])]
     },
   }
 }
@@ -149,9 +154,26 @@ export function webAssetIds(instance: ComponentInstance, definition: ComponentDe
     ? Object.values(bindings).filter((value): value is string => typeof value === 'string') : []
 }
 
+/** The existing parameter editor treats these explicit schema formats as asset IDs. Ordinary business strings stay content. */
+function mapSchemaAssets(value: JsonValue, schema: JsonValue | undefined, resolve: (assetId: string) => string): JsonValue {
+  if (!schema || typeof schema !== 'object' || Array.isArray(schema)) return value
+  if ((schema.format === 'image' || schema.format === 'image-asset') && typeof value === 'string') return value ? resolve(value) : value
+  if (Array.isArray(value)) return value.map(item => mapSchemaAssets(item, schema.items, resolve))
+  if (!value || typeof value !== 'object' || !schema.properties || typeof schema.properties !== 'object' || Array.isArray(schema.properties)) return value
+  const properties = schema.properties
+  return Object.fromEntries(Object.entries(value).map(([name, item]) => [name, mapSchemaAssets(item, properties[name], resolve)]))
+}
+
+function schemaAssetIds(instance: ComponentInstance, definition: ComponentDefinition): string[] {
+  const ids = new Set<string>()
+  mapSchemaAssets(instance.data, definition.dataSchema, id => { ids.add(id); return id })
+  return [...ids]
+}
+
 /** The reference token stays in HTML/CSS. Only the formal binding value is an asset identity. */
 export function rebindWebAssets(instance: ComponentInstance, definition: ComponentDefinition, identities: LibraryIdentityMap): ComponentInstance {
   if (instance.authoring) instance = { ...instance, authoring: rebindAuthoringAssets(instance.authoring, identities) }
+  if (definition.dataSchema) instance = { ...instance, data: mapSchemaAssets(instance.data, definition.dataSchema, id => identities.assets.get(id) ?? id) }
   if (!isWebInstance(instance, definition)) return instance
   const data = instance.data
   if (!data || typeof data !== 'object' || Array.isArray(data)) return instance
@@ -170,8 +192,10 @@ export function sourceAssetIds(implementation: ComponentImplementation): string[
 export function componentAssetIds(instance: ComponentInstance, definition: ComponentDefinition,project?:CourseProjectV10,resources?:DocumentResources): string[] {
   if (project) return createComponentReferenceCapture(project, resources).componentAssetIds(instance, definition)
   const implementation=instance.implementationOverride ?? definition.implementation,key=componentDefinitionBuiltinKey(definition)
-  return [...new Set([...(key ? professionalAssetIds(instance.data,key):[]), ...webAssetIds(instance, definition), ...authoringAssetIds(instance.authoring),
-    ...sourceAssetIds(implementation)])]
+  return [...new Set([...(key ? professionalAssetIds(instance.data,key):[]), ...schemaAssetIds(instance, definition), ...webAssetIds(instance, definition), ...authoringAssetIds(instance.authoring),
+    ...sourceAssetIds(implementation), ...componentBackgroundAssetIds(instance.container?.background),
+    ...(instance.container?.presentation?.states ?? []).flatMap(state => [...componentBackgroundAssetIds(state.background),
+      ...Object.values(state.overrides).flatMap(override => authoringAssetIds(override.authoring))])])]
 }
 
 /** Declared native interaction fields use the professional rule parser, never string substitution. */

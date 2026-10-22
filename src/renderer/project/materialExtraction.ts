@@ -1,4 +1,4 @@
-import type { MaterialExtraction, MaterialFragment } from '../../shared/materialExtraction'
+import type { MaterialExtraction, MaterialFragment, PdfMaterialPage, PdfMaterialSummary } from '../../shared/materialExtraction'
 import { openPptxPackage, pptxRelationshipId, xmlAll, xmlChildren, xmlFirst, type PptxPackage } from './pptxPackage'
 import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 import { inspectImageTransformSource } from './imageTransform'
@@ -147,16 +147,21 @@ export function extractOfficeMaterial(bytes: Uint8Array, format: 'docx' | 'pptx'
 }
 
 /** Each PDF page is also rasterized: scanned text, equations and diagrams remain readable. */
-export async function extractPdfMaterial(bytes: Uint8Array, options: MaterialExtractionOptions = {}): Promise<MaterialExtraction> {
+export async function extractPdfMaterialPages(bytes: Uint8Array, options: MaterialExtractionOptions, consume: (page: PdfMaterialPage) => Promise<void>): Promise<PdfMaterialSummary> {
   const pdfjs = await import('pdfjs-dist')
   pdfjs.GlobalWorkerOptions.workerSrc = pdfWorkerUrl
   const loading = pdfjs.getDocument({ data: bytes.slice(), useSystemFonts: true })
-  const out = result('pdf')
+  let fragmentCount = 0
   try {
     const pdf = await loading.promise
     const range = pageRange(pdf.numPages, options)
     for (let page = range.from; page <= range.to; page++) {
       options.onProgress?.(page, pdf.numPages)
+      const out = result('pdf')
+      const emit = async () => {
+        for (const fragment of out.fragments) fragment.id = `fragment-${++fragmentCount}`
+        await consume({ page, total: pdf.numPages, material: out })
+      }
       const source = await pdf.getPage(page)
       const locator = { part: 'document.pdf', page }
       const text = (await source.getTextContent()).items.map(item => 'str' in item ? item.str + (item.hasEOL ? '\n' : ' ') : '').join('').trim()
@@ -164,7 +169,7 @@ export async function extractPdfMaterial(bytes: Uint8Array, options: MaterialExt
       if (options.images === 'auto' && text) {
         const ops = (await source.getOperatorList()).fnArray
         const visual = new Set([pdfjs.OPS.paintImageXObject, pdfjs.OPS.paintInlineImageXObject, pdfjs.OPS.paintImageMaskXObject, pdfjs.OPS.constructPath, pdfjs.OPS.shadingFill])
-        if (!ops.some(op => visual.has(op))) { source.cleanup(); continue }
+        if (!ops.some(op => visual.has(op))) { source.cleanup(); await emit(); continue }
       }
       const initial = source.getViewport({ scale: 1 })
       const viewport = source.getViewport({ scale: Math.min(2, 1600 / Math.max(initial.width, initial.height)) })
@@ -180,9 +185,18 @@ export async function extractPdfMaterial(bytes: Uint8Array, options: MaterialExt
         add(out, { kind: 'image', locator, assetId: id })
         if (!text) out.gaps.push({ locator, reason: '本页没有可提取文字；需要实际阅读保存的页面图像', resolution: { kind: 'read-page-image', assetId: id } })
       } finally { canvas.width = 0; canvas.height = 0; source.cleanup() }
+      await emit()
     }
-    return verify(out)
+    if (!fragmentCount) throw new Error('材料没有可读取内容')
+    return { streamed: true, totalPages: pdf.numPages, selectedPages: range }
   } finally { await loading.destroy() }
+}
+export async function extractPdfMaterial(bytes: Uint8Array, options: MaterialExtractionOptions = {}): Promise<MaterialExtraction> {
+  const out = result('pdf')
+  await extractPdfMaterialPages(bytes, options, async page => {
+    out.fragments.push(...page.material.fragments); out.assets.push(...page.material.assets); out.gaps.push(...page.material.gaps)
+  })
+  return verify(out)
 }
 export async function extractMaterial(bytes: Uint8Array, filename: string): Promise<MaterialExtraction> {
   if (!bytes.length) throw new Error('材料须为非空文件')

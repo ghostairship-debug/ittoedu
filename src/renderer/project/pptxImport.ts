@@ -20,8 +20,8 @@ import { nanoid } from 'nanoid'
 import type { InteractionRule } from '../../shared/contracts/interaction-v1/types'
 import type { SoundDefinition } from '../../shared/contracts/media-v1/types'
 
-export interface PptxSlideDraft { title: string; interactions?: InteractionRule[]; backgroundColor: string; items: LayerItem[]; sourcePage?: number; sharedKeys?: string[] }
-export interface PptxImportDraft { slides: PptxSlideDraft[]; sounds?: Record<string, SoundDefinition>; assets: CourseImportedAsset[]; notes: string[]; issues: PptxImportIssue[]; shared?: { key: string; items: LayerItem[] }[] }
+import type { PptxSlideDraft, PptxImportDraft } from '../../shared/workbench/pptxImport'
+export type { PptxSlideDraft, PptxImportDraft } from '../../shared/workbench/pptxImport'
 const child = (node: Element, name: string) => xmlChildren(node).find(n => n.localName === name)
 const flag = (node: Element | undefined, name: string) => ['1', 'true'].includes(node?.getAttribute(name) ?? '')
 const numeric = (node: Element | undefined, attr: string, fallback?: number): number => {
@@ -43,8 +43,12 @@ function lineStyle(line: Element | undefined, onSimplified?: () => void): ShapeN
 
 /** Stage editable content and report each omitted object or effect before any project write. */
 export async function parsePptxImport(bytes: Uint8Array, canvas: SlideCanvasSize = DEFAULT_SLIDE_CANVAS): Promise<PptxImportDraft> {
+  return parsePptxImportPackage(openPptxPackage(bytes), canvas)
+}
+
+/** The canvas reader and editable importer share one validated package per conversion. */
+export async function parsePptxImportPackage(pkg: PptxPackage, canvas: SlideCanvasSize = DEFAULT_SLIDE_CANVAS): Promise<PptxImportDraft> {
   await ensureBundledFonts()
-  const pkg = openPptxPackage(bytes)
   const main = pkg.xml('ppt/presentation.xml')
   const size = xmlFirst(main, 'sldSz')
   const width = numeric(size, 'cx'), height = numeric(size, 'cy')

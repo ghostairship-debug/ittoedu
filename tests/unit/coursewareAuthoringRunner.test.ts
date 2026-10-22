@@ -1,3 +1,5 @@
+import { testContainerInstance, setRootContainers } from '../helpers/glxWorkFixture'
+import { componentSurfaces } from '../../src/shared/contracts/component-platform/project'
 // @vitest-environment node
 
 import { execFile } from 'node:child_process'
@@ -241,17 +243,16 @@ describe('trusted courseware authoring runner', () => {
 
     const project = createBlankCourseProjectV10('可信编辑会话', () => crypto.randomUUID())
     project.id = 'project_authoring_runner'
-    const scene = project.surfaces[0]!
-    scene.id = 'surface_authoring_runner'
-    scene.title = '真实编辑'
-    scene.presentation = { states: [] }
+    setRootContainers(project, [{ ...componentSurfaces(project)[0]!, id: 'surface_authoring_runner', title: '真实编辑' }])
+    const scene = testContainerInstance(project, 'surface_authoring_runner')
+    testContainerInstance(project, 0).container!.presentation = { states: [] }
     const data = createTextData('真实编辑前标题')
     Object.assign(data.appearance, { fontSize: 52, color: '#172033', backgroundColor: '#ffffff', backgroundOpacity: 1 })
     project.definitions[TEXT_DEFINITION.id] = structuredClone(TEXT_DEFINITION)
     const node = { id: 'node_authoring_title', definitionId: TEXT_DEFINITION.id, name: '可编辑标题',
       data: JSON.parse(JSON.stringify(data)), frame: { transform: [1, 0, 0, 1, 240, 240] as [number, number, number, number, number, number], width: 800, height: 160 } }
     project.instances[node.id] = node
-    scene.childIds = [node.id]
+    testContainerInstance(project, 0).childIds = [node.id]
     project.assets.retained = { id: 'retained', path: 'assets/retained.bin', mimeType: 'application/octet-stream' }
     const resources = { assets: { retained: Uint8Array.of(0, 255, 128, 1) },
       components: { retained: { 'opaque.bin': Uint8Array.of(255, 0, 128) } } }
@@ -351,7 +352,7 @@ describe('trusted courseware authoring runner', () => {
       env: { ...process.env, COURSEWARE_E2E_BACKGROUND: '1' },
     })).rejects.toMatchObject({ code: 1 })
 
-    scene.presentation = {
+    testContainerInstance(project, 0).container!.presentation = {
       initialStateId: 'state_override',
       thumbnailStateId: 'state_override',
       states: [{ id: 'state_override', title: '状态文本覆盖',

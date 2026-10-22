@@ -7,6 +7,7 @@ import type { EditorStoreKernel } from '../store/editorStoreKernel'
 import { collectCourseComponentPackageUsage, planCourseComponentPackageReplacement } from './courseComponentPackageTransactions'
 import { captureComponentInsertionTarget, insertComponentDefinitionAtTarget, insertComponentPackagesAtTarget } from './insertComponentPackages'
 import { projectLibraryDefinition } from './componentLibraryModel'
+import type { ComponentLibraryUpdateOptions } from '../../core/components/library/updateSource'
 
 export type ComponentAuthoringPorts = EditorStoreKernel
 export interface ComponentPackageReplacementTarget { captured: CapturedCourseTarget; packageId: string }
@@ -19,9 +20,9 @@ export function captureComponentPackageReplacementTarget(kernel: EditorStoreKern
   return definition ? { captured, packageId:definition.id } : null
 }
 export async function commitComponentReplacementAtTarget(kernel: EditorStoreKernel, target: ComponentPackageReplacementTarget,
-  entry: ComponentLibraryEntry): Promise<ComponentPackageReplacementCommitResult> {
+  entry: ComponentLibraryEntry, options: ComponentLibraryUpdateOptions = {}): Promise<ComponentPackageReplacementCommitResult> {
   try {
-    const edits = planCourseComponentPackageReplacement(target.captured.project, target.packageId, entry)
+    const edits = planCourseComponentPackageReplacement(target.captured.project, target.packageId, entry, options, target.captured.resources)
     await kernel.editCaptured(kernel.capture(edits, target.captured))
     kernel.setFeedback({ statusMessage: `已替换“${entry.title}”，实例内容与位置保留`, errorMessage: null })
     return { ok: true }

@@ -8,12 +8,113 @@ import type { ConversationRecord, WorkspaceRecord } from '../../src/shared/workb
 import type { ExecutionRunRecord } from '../../src/shared/workbench/execution'
 import type { ExecutionDesktopAPI } from '../../src/shared/workbench/executionDesktop'
 import { emptyExecutionProjection, foldExecutionEvents, type ExecutionEvent } from '../../src/shared/workbench/executionEvents'
+import { ExecutionTimelineReadModel } from '../../src/shared/workbench/executionTimelineReadModel'
+import type { ExecutionTimelineEntryPage } from '../../src/shared/workbench/executionTimelineWindow'
 import type { ExecutionSettingsView } from '../../src/shared/workbench/executionSettings'
 import type { ExecutionSettingsAPI } from '../../src/shared/workbench/executionSettingsDesktop'
 import { workbenchSelection } from '../../src/renderer/workbench/SelectionContextController'
 import { executionInputMessages } from '../../src/shared/workbench/executionInputMessages'
 
 afterEach(() => { cleanup(); localStorage.clear(); vi.unstubAllGlobals() })
+
+it('windowed Assistant uses bounded page/body IPC and global pending facts without downloading raw history', async () => {
+  const original = conversation('a', '窗口会话')
+  original.messages.push({ messageId: 'user', role: 'user', text: '当前目标', createdAt: 1, attachmentIds: [] })
+  const { api, emit } = executionFixture([original])
+  let projection = foldExecutionEvents(emptyExecutionProjection('a'), Array.from({ length: 220 }, (_, index): ExecutionEvent => ({
+    conversationId: 'a', taskId: 'task', runId: 'run', eventId: `window-${index}`, itemId: `row-${index}`, time: index + 100,
+    sequence: index + 1, source: 'builtin', type: 'reasoning', update: 'snapshot', data: { text: `历史行 ${index}` },
+  })))
+  const long = '完整答复正文'.repeat(5000)
+  projection = foldExecutionEvents(projection, [
+    { ...streamEvent(221, long), time: 1000 },
+    { ...streamEvent(222, ''), time: 0, runId: 'waiting', itemId: 'question', type: 'tool', data: { toolName: 'ask_user', status: 'waiting', question: { text: '全局选择仍可用？', multiple: false, options: [{ label: '继续当前稿' }] } } },
+    { ...streamEvent(223, '', 'ended'), time: 0 },
+  ])
+  const reader = new ExecutionTimelineReadModel(projection, original.messages)
+  api.timelineWindow = vi.fn(async input => structuredClone(reader.entryPage(input)))
+  api.timelineGroup = vi.fn(async input => structuredClone(reader.groupPage(input)))
+  api.timelineBody = vi.fn(async input => structuredClone(reader.readBody(input)))
+  api.releaseTimeline = vi.fn(async () => {})
+  vi.mocked(api.conversation).mockResolvedValue({ ...original, revision: 2, messages: [...original.messages,
+    { messageId: 'ended-reply', role: 'assistant', text: '任务收尾', createdAt: 2, attachmentIds: [], runId: 'ended' }] })
+  const view = render(<ExecutionAssistant root="C:/workspace" api={api} settingsAPI={settingsFixture(false)} captureDocuments={async () => []} prepareSend={async () => true} />)
+  await screen.findByText('全局选择仍可用？')
+  await waitFor(() => expect(api.conversation).toHaveBeenCalledTimes(1))
+  expect(api.timeline).not.toHaveBeenCalled(); expect(api.events).not.toHaveBeenCalled()
+  fireEvent.click(screen.getByRole('button', { name: /继续读取内容/ }))
+  await waitFor(() => expect(api.timelineBody).toHaveBeenCalledWith(expect.objectContaining({ runId: 'run', itemId: 'answer', part: 0, maxChars: 24000 })))
+  const next = { ...streamEvent(224, '新后缀'), time: 1001 }
+  projection = foldExecutionEvents(projection, [next]); reader.update(projection)
+  act(() => emit(next))
+  await waitFor(() => expect(vi.mocked(api.timelineWindow!).mock.calls.length).toBeGreaterThan(1))
+  expect(api.timeline).not.toHaveBeenCalled(); expect(api.events).not.toHaveBeenCalled(); expect(api.conversation).toHaveBeenCalledTimes(1)
+  const consumer = vi.mocked(api.timelineWindow!).mock.calls[0]![0].consumerId
+  view.unmount(); expect(api.releaseTimeline).toHaveBeenCalledWith('a', consumer)
+})
+
+it('windowed Assistant preserves a requested older range through streaming and rejects its stale response facts', async () => {
+  const original = conversation('a', '窗口顺序')
+  original.messages.push({ messageId: 'user', role: 'user', text: '目标', createdAt: 0, attachmentIds: [] })
+  const { api, emit } = executionFixture([original])
+  let projection = foldExecutionEvents(emptyExecutionProjection('a'), Array.from({ length: 250 }, (_, index): ExecutionEvent => ({
+    ...streamEvent(index + 1, `窗口行 ${index}`), itemId: `row-${index}`,
+  })))
+  const reader = new ExecutionTimelineReadModel(projection, original.messages), old = deferred<ExecutionTimelineEntryPage>()
+  let pendingPage: ExecutionTimelineEntryPage | undefined
+  api.timelineWindow = vi.fn(async input => {
+    if (input.start !== undefined && !pendingPage) { pendingPage = structuredClone(reader.entryPage(input)); return old.promise }
+    return structuredClone(reader.entryPage(input))
+  })
+  api.timelineGroup = vi.fn(async input => structuredClone(reader.groupPage(input)))
+  api.timelineBody = vi.fn(async input => structuredClone(reader.readBody(input)))
+  render(<ExecutionAssistant root="C:/workspace" api={api} settingsAPI={settingsFixture(false)} captureDocuments={async () => []} prepareSend={async () => true} />)
+  await screen.findByText('窗口行 249')
+  fireEvent.click(screen.getByRole('button', { name: /读取更早记录/ }))
+  await waitFor(() => expect(pendingPage).toBeDefined())
+  const next = { ...streamEvent(251, '最新可见行'), itemId: 'row-250' }
+  projection = foldExecutionEvents(projection, [next]); reader.update(projection)
+  act(() => emit(next)); await screen.findByText('窗口行 50')
+  expect(screen.queryByText('最新可见行')).toBeNull()
+  await act(async () => { old.resolve(pendingPage!); await old.promise })
+  expect(screen.getByText('窗口行 50')).toBeInTheDocument()
+  expect(screen.queryByText('最新可见行')).toBeNull()
+  const latestRead = vi.mocked(api.timelineWindow!).mock.calls.at(-1)![0]
+  expect(latestRead.start).toBe(pendingPage!.start)
+  fireEvent.click(screen.getByRole('button', { name: /回到最新/ }))
+  await screen.findByText('最新可见行')
+  expect(api.timeline).not.toHaveBeenCalled(); expect(api.events).not.toHaveBeenCalled()
+})
+
+it('windowed Assistant restores the existing reading range before its first read after switching conversations', async () => {
+  const first = conversation('a', '甲会话'), second = conversation('b', '乙会话')
+  for (const record of [first, second]) record.messages.push({ messageId: `user-${record.conversationId}`, role: 'user', text: '目标', createdAt: 0, attachmentIds: [] })
+  const { api, emit } = executionFixture([first, second])
+  let a = foldExecutionEvents(emptyExecutionProjection('a'), Array.from({ length: 250 }, (_, index): ExecutionEvent => ({ ...streamEvent(index + 1, `甲历史 ${index}`), itemId: `row-${index}` })))
+  const b = foldExecutionEvents(emptyExecutionProjection('b'), [{ ...streamEvent(1, '乙当前内容'), conversationId: 'b' }])
+  const readers = new Map([['a', new ExecutionTimelineReadModel(a, first.messages)], ['b', new ExecutionTimelineReadModel(b, second.messages)]])
+  api.timelineWindow = vi.fn(async input => structuredClone(readers.get(input.conversationId)!.entryPage(input)))
+  api.timelineGroup = vi.fn(async input => structuredClone(readers.get(input.conversationId)!.groupPage(input)))
+  api.timelineBody = vi.fn(async input => structuredClone(readers.get(input.conversationId)!.readBody(input)))
+  render(<ExecutionAssistant root="C:/workspace" api={api} settingsAPI={settingsFixture(false)} captureDocuments={async () => []} prepareSend={async () => true} />)
+  await screen.findByText('甲历史 249')
+  fireEvent.click(screen.getByRole('button', { name: /读取更早记录/ })); await screen.findByText('甲历史 50')
+  const previous = vi.mocked(api.timelineWindow!).mock.calls.at(-1)![0]
+  fireEvent.click(screen.getByRole('button', { name: '乙会话' })); await screen.findByText('乙当前内容')
+  const calls = vi.mocked(api.timelineWindow!).mock.calls.length
+  fireEvent.click(screen.getByRole('button', { name: '甲会话' })); await screen.findByText('甲历史 50')
+  const resumed = vi.mocked(api.timelineWindow!).mock.calls.slice(calls).find(([input]) => input.conversationId === 'a')![0]
+  expect(resumed.start).toBe(previous.start)
+  expect(resumed.anchorKey).toBeDefined()
+  expect(screen.queryByText('甲历史 249')).toBeNull()
+  const next = { ...streamEvent(251, '甲新的尾部'), itemId: 'row-250' }
+  a = foldExecutionEvents(a, [next]); readers.get('a')!.update(a); act(() => emit(next))
+  await waitFor(async () => {
+    const last = vi.mocked(api.timelineWindow!).mock.results.at(-1)!
+    expect((await last.value).cursor).toBe(251)
+  })
+  expect(screen.getByText('甲历史 50')).toBeInTheDocument(); expect(screen.queryByText('甲新的尾部')).toBeNull()
+})
 
 const workspace: WorkspaceRecord = { workspaceId: 'workspace', rootPath: 'C:/workspace', managed: false, authorization: 'user-selected', revision: 1, createdAt: 1, updatedAt: 1 }
 const conversation = (id: string, title: string, inputDraft = ''): ConversationRecord => ({
@@ -83,6 +184,15 @@ function deferred<T>() {
   const promise = new Promise<T>(done => { resolve = done })
   return { promise, resolve }
 }
+it('releases the actual timeline consumer when the mounted Assistant closes', async () => {
+  const { api } = executionFixture([conversation('a', '原会话')])
+  api.releaseTimeline = vi.fn(async () => {})
+  const view = render(<ExecutionAssistant root="C:/workspace" api={api} settingsAPI={settingsFixture(true)} captureDocuments={async () => []} prepareSend={async () => true} />)
+  await waitFor(() => expect(api.timeline).toHaveBeenCalledWith('a', expect.any(String)))
+  const consumer = vi.mocked(api.timeline).mock.calls[0]![1]!
+  view.unmount()
+  expect(api.releaseTimeline).toHaveBeenCalledWith('a', consumer)
+})
 
 it('does not pin or save a late current-document capture into a different conversation', async () => {
   const { api, state } = executionFixture([conversation('a', '原会话', '原稿'), conversation('b', '新会话', '另一稿')])

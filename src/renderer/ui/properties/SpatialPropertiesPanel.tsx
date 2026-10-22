@@ -160,6 +160,7 @@ function SpatialPageProperties({ context }: { context: SpatialPropertiesContext 
           value: view.backgroundMode,
           onChange: (backgroundMode) => commands.updateBackground({ backgroundMode }),
         }}
+        onTransparent={() => commands.updateBackground({ backgroundMode: 'own', backgroundColor: 'transparent', backgroundAssetId: null })}
         onColorChange={(backgroundColor) => commands.updateBackground({ backgroundColor })}
         onPreviewColorChange={commands.previewBackground ? (backgroundColor) => commands.previewBackground!({ backgroundColor }) : undefined}
         onAssetChange={(backgroundAssetId) => commands.updateBackground({ backgroundAssetId })}

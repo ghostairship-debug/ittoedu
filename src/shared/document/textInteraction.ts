@@ -1,3 +1,4 @@
+import { componentContainers } from '../contracts/component-platform/project'
 import { documentTextContentSchema, documentTextLength, normalizeDocumentText, sliceDocumentText, type DocumentContent, documentTextSlots, walkDocument, type FlowInline, type FlowTextContent } from './content'
 import { planTextRunRemap, type TextRunEdit } from '../textRuns'
 
@@ -123,7 +124,7 @@ export function documentComponentDataVersions(project: import('../contracts/comp
   const instance = project.instances[instanceId]
   if (!instance) return []
   const versions = [replacement && !replacement.stateId ? replacement.data : instance.data]
-  for (const surface of project.surfaces) for (const state of surface.presentation?.states ?? []) {
+  for (const surface of componentContainers(project)) for (const state of surface.presentation?.states ?? []) {
     const data = replacement?.stateId === state.id && replacement.surfaceId === surface.id ? replacement.data : state.overrides[instanceId]?.data
     if (data !== undefined) versions.push(data)
   }

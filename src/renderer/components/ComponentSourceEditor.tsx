@@ -6,6 +6,7 @@ import { CourseComponentApplyError } from '../documents/CourseV10DocumentBridge'
 import type { ComponentSourceEditTarget } from '../../core/components/source/sourceAuthoringEdits'
 import { componentAuthorSourceDependencyPaths, componentAuthorSourceEdits, componentAuthorSourceModules, prepareComponentAuthorSource, resolveComponentAuthorSourceDependencyPaths, type ComponentAuthorSource } from '../../core/components/source/componentAuthorSource'
 import { notifyCourseDrafts, registerCourseDraftProvider, type AdvancedDraftIssue, type AdvancedDraftRecovery } from '../authoring/courseDraftLifecycle'
+import { hasBuiltinComponentSource, loadBuiltinComponentSource } from '../../core/components/source/builtinSources'
 
 type SourceImplementation = Extract<ComponentImplementation, { kind: 'source' }>
 type SourceFile = { bytes: Uint8Array; text: string | null }
@@ -146,6 +147,12 @@ async function applySourceDraft(bridge: CourseV10DocumentBridge, draft: SourceDr
     // Keep single-flight ownership even when validation or a no-op finishes synchronously.
     await Promise.resolve()
     try {
+      // Restoring a local override can expose its default builtin again. Prepare
+      // that source before accepting the operation, rather than failing its UI rebaseline afterwards.
+      if (restore) {
+        const fallback = session.target.project.definitions[session.target.project.instances[session.instanceId]?.definitionId ?? '']?.implementation
+        if (fallback?.kind === 'builtin') await loadBuiltinComponentSource(fallback.key)
+      }
       const edits: ComponentEdit[] = restore ? [{ type: 'implementation.set', instanceId: session.instanceId, implementation: null }]
         : componentSourceSessionEdits(session, draft.value)
       const result = edits.length ? await bridge.editCaptured(bridge.capture(edits, session.target)) : null
@@ -155,6 +162,15 @@ async function applySourceDraft(bridge: CourseV10DocumentBridge, draft: SourceDr
         const original = target.project.instances[session.instanceId]
         const effective = session.scope.kind === 'definition' ? target.project.definitions[session.scope.definition.id]?.implementation
           : original?.implementationOverride ?? target.project.definitions[original?.definitionId ?? '']?.implementation
+        if (effective?.kind === 'builtin' && !hasBuiltinComponentSource(effective.key)) {
+          // The operation is already durable. Source display readiness must not
+          // turn its accepted input into a failure or submit it a second time.
+          resetDraft(draft, draft.value)
+          draft.dependencyId = undefined
+          draft.message = restore ? '已恢复默认实现，正在加载当前源码。'
+            : result?.status === 'applied' ? '修改已应用，正在加载当前源码。' : '源码未改变，正在加载当前显示。'
+          return true
+        }
         const prepared = prepareComponentAuthorSource(target.project, effective)
         const modules = prepared ? componentAuthorSourceModules(target.project, target.resources, prepared) : []
         draft.moduleReplacements = new Map(edits.flatMap(edit => edit.type === 'definition.set' && edit.sourceOriginId
@@ -256,7 +272,23 @@ export function ComponentSourceEditor({ instance, implementation, bridge, report
   const currentModel = view.views.find(item => item.documentId === owner)?.model ?? view.documents.find(item => item.documentId === owner)?.model
   const model = currentModel?.kind === 'course-v10' ? currentModel : undefined
   const resources = model?.resources
-  const prepared = useMemo(() => model && prepareComponentAuthorSource(model.project, implementation), [model?.project, implementation])
+  const builtinKey = implementation?.kind === 'builtin' ? implementation.key : null
+  const [sourceLoad, setSourceLoad] = useState<{ key: string; status: 'loading' | 'ready' | 'unavailable' | 'failed'; message?: string } | null>(null)
+  const [sourceRetry, retrySource] = useState(0)
+  useEffect(() => {
+    if (!builtinKey || hasBuiltinComponentSource(builtinKey)) return
+    let active = true
+    setSourceLoad({ key: builtinKey, status: 'loading' })
+    void loadBuiltinComponentSource(builtinKey).then(source => {
+      if (active) setSourceLoad({ key: builtinKey, status: source ? 'ready' : 'unavailable' })
+    }, error => {
+      if (active) setSourceLoad({ key: builtinKey, status: 'failed', message: error instanceof Error ? error.message : String(error) })
+    })
+    return () => { active = false }
+  }, [builtinKey, sourceRetry])
+  const builtinReady = !builtinKey || hasBuiltinComponentSource(builtinKey)
+  const prepared = useMemo(() => model && builtinReady ? prepareComponentAuthorSource(model.project, implementation) : undefined,
+    [model?.project, implementation, builtinReady, sourceLoad])
   const rootValue = useMemo(() => readSource(prepared?.implementation, resources ?? { assets: {}, components: {} }), [prepared, resources])
   const liveModules = useMemo(() => prepared && model
     ? componentAuthorSourceModules(model.project, model.resources, prepared) : [], [prepared, model?.project, resources])
@@ -283,6 +315,11 @@ export function ComponentSourceEditor({ instance, implementation, bridge, report
     const notify = () => refresh(version => version + 1)
     draft.listeners.add(notify); return () => { draft.listeners.delete(notify) }
   }, [draft])
+  useEffect(() => {
+    // Subscribe the mounted control before the existing provider adopts pending
+    // recovery input, including a source prepared while this panel was closed.
+    if (builtinReady) sourceLifecycle(bridge, cache!)
+  }, [bridge, cache, builtinKey, builtinReady])
   const active = useRef({ key, initial }); active.current = { key, initial }
   useEffect(() => {
     if (draft.session || draft.busy || draft.composing || draft.key !== key) return
@@ -325,6 +362,7 @@ export function ComponentSourceEditor({ instance, implementation, bridge, report
       const original = target.project.instances[instance.id]
       const effective = scope === 'definition' ? target.project.definitions[instance.definitionId]?.implementation
         : original?.implementationOverride ?? target.project.definitions[original?.definitionId ?? '']?.implementation
+      if (effective?.kind === 'builtin') await loadBuiltinComponentSource(effective.key)
       const prepared = prepareComponentAuthorSource(target.project, effective)
       const available = prepared ? componentAuthorSourceModules(target.project, target.resources, prepared) : []
       const nextId = draft.moduleReplacements?.get(dependencyId ?? '') ?? dependencyId
@@ -343,6 +381,13 @@ export function ComponentSourceEditor({ instance, implementation, bridge, report
       const previous = draft.session
       if (draft.rejectedOperationId) await bridge.releaseRejectedSourceOperation(previous.target.documentId, previous.target.epoch, draft.rejectedOperationId)
       const definitionId = previous.scope.kind === 'definition' ? previous.scope.definition.id : undefined
+      const current = bridge.read().documents.find(snapshot => snapshot.documentId === previous.target.documentId)?.model
+      if (current?.kind === 'course-v10') {
+        const instance = current.project.instances[previous.instanceId]
+        const effective = previous.scope.kind === 'definition' ? current.project.definitions[definitionId ?? '']?.implementation
+          : instance?.implementationOverride ?? current.project.definitions[instance?.definitionId ?? '']?.implementation
+        if (effective?.kind === 'builtin') await loadBuiltinComponentSource(effective.key)
+      }
       let next = captureComponentSourceSession(bridge, previous.target.documentId, previous.instanceId,
         previous.scope.kind, definitionId, true, previous.dependencyId)
       if (previous.dependencyId && previous.dependencyPaths?.length) {
@@ -372,7 +417,9 @@ export function ComponentSourceEditor({ instance, implementation, bridge, report
   }}><summary>{scope === 'definition' ? '共享定义源码' : '组件实现源码'}</summary>
     {stale && <p role="status">草稿属于“{draft.name}”；应用只修改原文档与原{draft.session?.scope.kind === 'definition' ? '共享定义' : '对象'}。</p>}
     {locked && <p role="status">源码对象已锁定，当前为只读。</p>}
-    {unavailable && !draft.session && <p role="status">此内置实现的完整源码尚未提供：{implementation?.kind === 'builtin' ? implementation.key : instance?.definitionId}。</p>}
+    {unavailable && !draft.session && (builtinKey && sourceLoad?.key === builtinKey && sourceLoad.status === 'failed'
+      ? <p role="status">源码加载未完成：{sourceLoad.message}<button type="button" onClick={() => retrySource(value => value + 1)}>重试加载</button></p>
+      : <p role="status">{builtinKey && (sourceLoad?.key !== builtinKey || sourceLoad.status !== 'unavailable') ? `正在加载 ${builtinKey} 的完整源码…` : `此内置实现的完整源码尚未提供：${builtinKey ?? instance?.definitionId}。`}</p>)}
     <label>源码模块<select aria-label="组件源码模块" value={draft.dependencyId ?? ''} disabled={draft.busy || draft.composing || stale || !modules.length}
       onChange={event => void selectModule(event.target.value || undefined)}>
       {modules.map(module => <option key={module.id ?? ''} value={module.id ?? ''}>{module.id ? `完整依赖：${module.title}（${module.id}）` : '作者入口'}</option>)}

@@ -1,3 +1,4 @@
+import { componentContainers } from '../../shared/contracts/component-platform/project'
 import {
   DndContext,
   KeyboardSensor,
@@ -52,6 +53,7 @@ import {
 import { containerChildIds, owningContainer, type ComponentFlowPlacement } from '../../shared/contracts/component-platform/project'
 import { componentIsLocked } from '../composition/crossSurfaceCommands'
 import { componentDefinitionPresentation } from './properties/componentDefinitionPresentation'
+import { flowBodyIds } from '../componentPlatform/surfaces/flow/documentProjection'
 import {
   selectEditingScope,
   useEditorStore,
@@ -314,20 +316,21 @@ export function NodesTab() {
   const updateNode = useEditorStore(state => state.updateNode)
   const reorderNodes = useEditorStore(state => state.reorderNodes)
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }), useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }))
-  const project=view.editingProject, surface=project?.surfaces.find(value=>value.id===view.surfaceId)
+  const project=view.editingProject, surface=(project == null ? undefined : componentContainers(project).find(value=>value.id===view.surfaceId))
   if(!project || !surface) return <div className="nodes-tree" data-testid="nodes-tab"><div className="empty-state">当前没有可编辑页面</div></div>
   const flowPage=surface.kind==='flow'&&scope!=='global'
   const flowOverlays=(plane:'overlay'|'underlay')=>surface.childIds.filter(id=>project.instances[id]?.flowPlacement?.plane===plane)
+  const flowBody=flowPage?flowBodyIds(project,surface.id):[]
   const groups = [
     {id:'global-overlay',label:'全局 Overlay',ids:project.global.overlay},
     ...(scope==='global'?[]:flowPage?[
       {id:'surface-overlay',label:'正文上方',ids:flowOverlays('overlay')},
-      {id:'flow-body',label:'正文',ids:[]},
+      {id:'flow-body',label:'正文',ids:flowBody},
       {id:'surface-underlay',label:'正文下方',ids:flowOverlays('underlay')},
     ]:[{id:'surface',label:surface.title,ids:surface.childIds}]),
     {id:'global-underlay',label:'全局 Underlay',ids:project.global.underlay},
   ]
-  const allIds=groups.flatMap(group=>group.ids)
+  const allIds=groups.filter(group=>group.id!=='flow-body').flatMap(group=>group.ids)
   const sortableIds=allIds.flatMap(function collect(id:string):string[]{ return [id,...(project.instances[id]?.childIds??[]).flatMap(collect)] })
   const updatePlacement=(id:string,plane:'underlay'|'overlay')=>{
     const state=useEditorStore.getState(),target=state.courseKernel.captureTarget(),item=target.project.instances[id]
@@ -357,7 +360,7 @@ export function NodesTab() {
     const node={id,name:item.name??presentation.title,type:presentation.iconType,
       typeLabel:`${presentation.title} · ${presentation.category}`,visible:item.visible!==false,locked:item.locked===true}
     return <div key={id} style={depth?{paddingLeft:depth*16}:undefined}>
-      <SortableNode node={node} dragDisabled={componentIsLocked(project,id)} selected={view.selectedInstanceIds.includes(id)} sourceLabel={depth?'编组内对象':item.flowPlacement?.space==='viewport'?'钉在视口':item.flowPlacement?'跟随稿纸':undefined}
+      <SortableNode node={node} dragDisabled={componentIsLocked(project,id)} selected={view.interactionSelection?.kind!=='author-field'&&view.selectedInstanceIds.includes(id)} sourceLabel={depth?'编组内对象':item.flowPlacement?.space==='viewport'?'钉在视口':item.flowPlacement?'跟随稿纸':undefined}
         {...(flowPage&&item.flowPlacement?{bodyPlane:item.flowPlacement.plane,onMoveAcrossBody:()=>updatePlacement(id,item.flowPlacement!.plane==='overlay'?'underlay':'overlay')}:{})}
         onSelect={additive=>{selectNode(id,additive);if(additive)setActiveTab('layers')}}
         onDelete={()=>deleteNode(id)} onDuplicate={()=>duplicateNode(id)} onRename={name=>updateNode(id,{name})}
@@ -365,12 +368,39 @@ export function NodesTab() {
       {item.childIds?.slice().reverse().map(child=>renderItem(child,depth+1))}
     </div>
   }
+  const selectBody=(id:string,additive:boolean)=>{
+    selectNode(id,additive)
+    if(additive)setActiveTab('layers')
+    const root=[...document.querySelectorAll<HTMLElement>('[data-flow-project-id]')].find(element=>element.dataset.flowProjectId===project.id&&element.dataset.flowSurfaceId===surface.id)
+    const target=root&&[...root.querySelectorAll<HTMLElement>('[data-flow-block-id],[data-component-instance]')].find(element=>element.dataset.flowBlockId===id||element.dataset.componentInstance===id)
+    target?.scrollIntoView?.({block:'nearest',inline:'nearest'})
+  }
+  // Reading order is not z-order: these entries locate content without a free-layer drag handle.
+  const renderBodyItem=(id:string,depth=0):ReactNode=>{
+    const item=project.instances[id]
+    if(!item||project.definitions[item.definitionId]?.role==='behavior')return null
+    const presentation=componentDefinitionPresentation(project.definitions[item.definitionId])
+    const Icon=presentation.iconType in nodeIcon?nodeIcon[presentation.iconType as keyof typeof nodeIcon]:Box
+    const name=item.name??presentation.title
+    return <div key={id} role="none">
+      <button type="button" role="treeitem" className={'node-item node-item--flow-content'+(view.interactionSelection?.kind!=='author-field'&&view.selectedInstanceIds.includes(id)?' node-item--selected':'')}
+        aria-label={name} aria-level={depth+1} aria-selected={view.interactionSelection?.kind!=='author-field'&&view.selectedInstanceIds.includes(id)}
+        data-testid={`flow-content-item-${id}`} style={{paddingLeft:8+depth*16,width:'100%',textAlign:'left',gridTemplateColumns:'20px minmax(0,1fr) auto auto'}}
+        onClick={event=>selectBody(id,event.shiftKey||event.ctrlKey||event.metaKey)}>
+        <Icon size={15} aria-hidden="true"/><span className="node-name">{name}</span>
+        {item.visible===false&&<EyeOff size={13} aria-label="已隐藏"/>}{componentIsLocked(project,id)&&<Lock size={13} aria-label="已锁定"/>}
+      </button>
+      {!item.container&&item.childIds?.length?<div role="group">{item.childIds.map(child=>renderBodyItem(child,depth+1))}</div>:null}
+    </div>
+  }
   return <div className="nodes-tree" data-testid="nodes-tab">
     <div className="tree-root" onClick={()=>selectNode(null)}><ChevronDown size={14}/><Layers3 size={15}/><span>{scope==='global'?'全局元素':surface.title}</span>
       {view.selectedInstanceIds.length>0&&<span className="tree-selection-count">已选 {view.selectedInstanceIds.length}</span>}</div>
     {!allIds.length&&!flowPage?<div className="empty-state">当前还没有对象<br/>从“元素”面板加入内容</div>:<DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
       <SortableContext items={sortableIds} strategy={verticalListSortingStrategy}>
-        <div className="nodes-list">{groups.filter(group=>group.ids.length||group.id==='flow-body').map(group=>group.id==='flow-body'?<FlowBodyBoundaryRow key={group.id}/>:<section key={group.id} className="nodes-layer-group" data-testid={`nodes-layer-group-${group.id}`}>
+        <div className="nodes-list">{groups.filter(group=>group.ids.length||group.id==='flow-body').map(group=>group.id==='flow-body'?<section key={group.id} className="nodes-layer-group" data-testid="nodes-layer-group-flow-body">
+          <FlowBodyBoundaryRow/><div role="tree" aria-label="Flow 正文内容">{group.ids.map(id=>renderBodyItem(id))}</div>
+        </section>:<section key={group.id} className="nodes-layer-group" data-testid={`nodes-layer-group-${group.id}`}>
           <h3 className="nodes-layer-group__title">{group.label}</h3>{group.ids.slice().reverse().map(id=>renderItem(id))}
         </section>)}</div>
       </SortableContext>

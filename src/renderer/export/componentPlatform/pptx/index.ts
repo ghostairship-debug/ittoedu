@@ -1,16 +1,17 @@
 import type PptxGenJS from 'pptxgenjs'
+import { unzipSync, zipSync } from 'fflate'
 import { APP_COMPANY, APP_NAME } from '../../../../shared/constants'
 import { courseProjectV10Schema, publishedCourseV3Schema, type ComponentInstance, type ComponentSurface } from '../../../../shared/contracts/component-platform'
 import { IDENTITY_MATRIX, multiplyMatrices, type AffineMatrix } from '../../../../core/components/geometry'
 import { imageDataSchema } from '../../../../components/image/data'
-import { applyPptxShapeExtensions, type PptxShapeExtensions } from '../../pptxShapeGeometry'
-import { pptxColor, pptxRotation, pptxTransparency, type PptxDrawingTarget } from '../../pptxShared'
-import { resolveComponentBackground, isComponentVisibleAtSurface, componentDefinitionBuiltinKey } from '../../../../shared/contracts/component-platform/project'
-import { componentOutputPresentation } from '../presentation'
+import { applyPptxShapeExtensionsToParts, type PptxShapeExtensions } from '../../pptxShapeGeometry'
+import { pptxColor, pptxColorAlpha, pptxRotation, pptxTransparency, type PptxDrawingTarget } from '../../pptxShared'
+import { resolveComponentBackground, resolveComponentSurfaceBackground, isComponentVisibleAtSurface, componentDefinitionBuiltinKey } from '../../../../shared/contracts/component-platform/project'
+import { componentOutputPresentation, componentOutputSurface, componentOutputSurfaces, componentStaticRootOmissions } from '../presentation'
 import { drawContainerStyle, drawImage, drawProfessional, instanceOpacity } from './drawings'
 import { officeFrame } from './frame'
 import { collectComponentAssetCredits, courseCreditLine } from '../../course/courseCredits'
-import { applyPptxEditableGroups, type PptxEditableGroup, type PptxGroupChild, type PptxSlideGroups } from './groups'
+import { applyPptxEditableGroupsToParts, type PptxEditableGroup, type PptxGroupChild, type PptxSlideGroups } from './groups'
 import type { BuildComponentPptxOptions, ComponentPptxDiagnostic, ComponentPptxInput, ComponentPptxPage, ComponentPptxResult } from './types'
 import { componentDeliveryPages } from '../deliveryPages'
 import { resolvePrintPageSize } from '../../flowPageBox'
@@ -19,14 +20,16 @@ export type * from './types'
 
 /** Builds a real PPTX from the current author model or its P0 projection. */
 export async function buildComponentPptx(input: ComponentPptxInput, options: BuildComponentPptxOptions = {}): Promise<ComponentPptxResult> {
-  const model = input.schemaVersion === 10 ? courseProjectV10Schema.parse(input) : publishedCourseV3Schema.parse(input)
+  const model = input.schemaVersion === 11 ? courseProjectV10Schema.parse(input) : publishedCourseV3Schema.parse(input)
   const diagnostics: ComponentPptxDiagnostic[] = [], pages: ComponentPptxPage[] = []
   const report = (diagnostic: ComponentPptxDiagnostic) => { diagnostics.push(diagnostic); options.onDiagnostic?.(diagnostic) }
   const { default: PptxGenJS } = await import('pptxgenjs')
   const pptx = new PptxGenJS()
-  const selected = componentDeliveryPages(model.surfaces, options.pageIds)
-  const firstSlidePage = selected.find(page => model.surfaces.find(surface => surface.id === page.surfaceId)?.kind === 'slide')
-  const nativeSize = model.surfaces.find(surface => surface.id === firstSlidePage?.surfaceId)?.designSize ?? { width: 1280, height: 720 }
+  const selected = componentDeliveryPages(componentOutputSurfaces(model), options.pageIds)
+  if (!selected.length && model.entry) throw new Error('当前作品为自主管理程序入口，没有可映射的 PPTX 页面；请使用可运行 HTML/Web 包，工程内容与资源已保留。')
+  if (!options.pageIds) componentStaticRootOmissions(model).forEach(report)
+  const firstSlidePage = selected.find(page => componentOutputSurface(model, page.surfaceId)?.kind === 'slide')
+  const nativeSize = firstSlidePage ? componentOutputSurface(model, firstSlidePage.surfaceId)?.designSize ?? { width: 1280, height: 720 } : { width: 1280, height: 720 }
   const paper = resolvePrintPageSize(options.pageSize ?? 'surface-native', options.orientation ?? 'auto', nativeSize)
   const outputSize = { width: paper.widthPx, height: paper.heightPx }
   pptx.defineLayout({ name: 'COMPONENT_CANVAS', width: outputSize.width / 96, height: outputSize.height / 96 })
@@ -58,6 +61,29 @@ export async function buildComponentPptx(input: ComponentPptxInput, options: Bui
     // Native groups retain local coordinates, but capability diagnostics must
     // see the effective author transform rather than the group's reset basis.
     const visualMatrix = instance.frame ? multiplyMatrices(visualParent, instance.frame.transform) : visualParent
+    if (instance.container) {
+      try {
+        if (!instance.frame) throw new Error('局部容器缺少可导出的正式自由 frame；未按外层页面重新排版内部内容')
+        const capture = await options.captureInstance?.({ input, surface, instance })
+        if (!capture?.startsWith('data:image/')) throw new Error('局部容器需要包含内部对象的实际视口捕获；未用空壳或占位代替')
+        if (isShearedOutputMatrix(matrix)) {
+          const picture = await affineOutputPicture(capture, instance.frame, matrix), box = picture.bounds
+          slide.addImage({ data: picture.dataUrl, x: box.x / 96, y: box.y / 96, w: box.width / 96, h: box.height / 96,
+            objectName: instance.id, transparency: pptxTransparency(inheritedOpacity) })
+        } else {
+          const frame = officeFrame(instance.frame, matrix)
+          slide.addImage({ data: capture, x: frame.x / 96, y: frame.y / 96, w: frame.width / 96, h: frame.height / 96,
+            rotate: pptxRotation(frame.rotation), flipV: frame.flipY, objectName: instance.id,
+            transparency: pptxTransparency(inheritedOpacity) })
+        }
+        children.push(instance.id)
+        warn(surface, instance, '局部容器按实际初态视口输出为静态图片；内部对象、镜头和编辑能力保留在工程。', 'container-static-capture')
+      } catch (error) {
+        report({ severity: 'error', code: 'container-capture-failed', surfaceId: surface.id, instanceId: id,
+          message: error instanceof Error ? error.message : String(error) })
+      }
+      return
+    }
     if (implementation.kind === 'builtin' && ['guoling.table', 'guoling.chart'].includes(implementation.key)) {
       const rotation = pptxRotation(Math.atan2(visualMatrix[1], visualMatrix[0]) * 180 / Math.PI)
       if (Math.min(rotation, 360 - rotation) > 0.001) warn(surface, instance,
@@ -113,7 +139,7 @@ export async function buildComponentPptx(input: ComponentPptxInput, options: Bui
           if (implementation.key === 'guoling.group') done = true
           else if (implementation.key === 'guoling.image') {
             const data = imageDataSchema.parse(instance.data)
-            const url = await options.resolveAsset?.(data.assetId, input) ?? (input.schemaVersion === 3 ? input.assets[data.assetId]?.url : undefined)
+            const url = await options.resolveAsset?.(data.assetId, input) ?? (input.schemaVersion === 4 ? input.assets[data.assetId]?.url : undefined)
             if (!url) throw new Error(`图片资源 ${data.assetId} 未提供可导出的字节`)
             await drawImage(target, instance, frame, url); done = true
             if (/^data:image\/gif;/i.test(url)) report({ severity: 'info', code: 'gif-static-frame', surfaceId: surface.id,
@@ -145,9 +171,9 @@ export async function buildComponentPptx(input: ComponentPptxInput, options: Bui
     for (const child of instance.childIds ?? []) await visit(slide, surface, child, childParent, drawingChildren, instanceOpacity(instance), visualMatrix)
   }
   for (const selectedPage of selected) {
-    const authorSurface = model.surfaces.find(surface => surface.id === selectedPage.surfaceId)!
+    const authorSurface = componentOutputSurface(model, selectedPage.surfaceId)!
     current = componentOutputPresentation(model, authorSurface.id)
-    const surface = current.surfaces.find(value => value.id === authorSurface.id)!
+    const surface = componentOutputSurface(current, authorSurface.id)!
     if (surface.kind === 'flow') {
       report({ severity: 'warning', code: 'flow-pptx-unsupported', surfaceId: surface.id, message: '阅读流不映射为 PPTX 页面，请使用文档输出。' }); continue
     }
@@ -168,29 +194,41 @@ export async function buildComponentPptx(input: ComponentPptxInput, options: Bui
     if (size.width !== outputSize.width || size.height !== outputSize.height) report({ severity: 'info', code: 'page-contain', surfaceId: surface.id,
       message: options.pageSize && options.pageSize !== 'surface-native' ? 'PPTX 使用所选纸型，此页按 contain 保留比例适配。' : 'PPTX 使用首个所选演示页规格，此页按 contain 保留比例适配。' })
     const slide = pptx.addSlide()
-    const background = resolveComponentBackground(current, surface)
-    slide.background = { color: pptxColor(background.color, 'FFFFFF') }
+    const base = resolveComponentBackground(current)
+    slide.background = { color: 'FFFFFF' } // Static paper is the medium's fallback.
+    const children: PptxGroupChild[] = []
+    const drawBackground = async (background: typeof base | undefined, layer: 'project' | 'surface') => {
+      if (!background) return
+      const alpha = pptxColorAlpha(background.color)
+      if (!background.paint && alpha > 0) slide.addShape('rect', {
+        x: contain[4] / 96, y: contain[5] / 96, w: size.width * scale / 96, h: size.height * scale / 96,
+        line: { transparency: 100 }, fill: { color: pptxColor(background.color, 'FFFFFF'), transparency: pptxTransparency(alpha) },
+        objectName: surface.id + ':' + layer + '-color',
+      })
     if (background.paint) {
       try {
-        const image = await options.captureBackground?.({ input, surface })
+        const image = await options.captureBackground?.({ input, surface, layer })
         if (!image?.startsWith('data:image/')) throw new Error('复杂背景缺少独立的实际背景捕获；正文继续保留原生输出。')
         slide.addImage({ data: image, x: contain[4] / 96, y: contain[5] / 96,
-          w: size.width * scale / 96, h: size.height * scale / 96, objectName: `${surface.id}:background` })
+          w: size.width * scale / 96, h: size.height * scale / 96, objectName: layer === 'surface' ? `${surface.id}:background` : `${surface.id}:project-background` })
         report({ severity: 'warning', code: 'background-static-capture', surfaceId: surface.id,
           message: '复杂 CSS 背景已单独捕获为静态背景图；正文继续逐对象原生输出，背景声明和资源保留在工程。' })
       } catch (error) { report({ severity: 'error', code: 'background-capture-missing', surfaceId: surface.id, message: error instanceof Error ? error.message : String(error) }) }
     } else if (background.assetId) {
       try {
-        const url = await options.resolveAsset?.(background.assetId, input) ?? (input.schemaVersion === 3 ? input.assets[background.assetId]?.url : undefined)
+        const url = await options.resolveAsset?.(background.assetId, input) ?? (input.schemaVersion === 4 ? input.assets[background.assetId]?.url : undefined)
         if (!url) throw new Error(`背景资源 ${background.assetId} 缺少实际字节`)
         const x = contain[4] / 96, y = contain[5] / 96, w = size.width * scale / 96, h = size.height * scale / 96
         slide.addImage({ data: url, x, y, w, h, ...(background.fit === 'fill' ? {} : {
           sizing: { type: background.fit === 'contain' ? 'contain' as const : 'cover' as const, w, h },
-        }), objectName: `${surface.id}:background` })
+        }), objectName: layer === 'surface' ? `${surface.id}:background` : `${surface.id}:project-background` })
       } catch (error) { report({ severity: 'error', code: 'background-asset-missing', surfaceId: surface.id, message: error instanceof Error ? error.message : String(error) }) }
     }
-    const children: PptxGroupChild[] = []
-    for (const id of [...current.global.underlay, ...surface.childIds, ...current.global.overlay]) await visit(slide, surface, id, contain, children)
+    }
+    await drawBackground(base, 'project')
+    for (const id of current.global.underlay) await visit(slide, surface, id, contain, children)
+    await drawBackground(resolveComponentSurfaceBackground(current, surface), 'surface')
+    for (const id of [...surface.childIds, ...current.global.overlay]) await visit(slide, surface, id, contain, children)
     const groups = children.filter((child): child is PptxEditableGroup => typeof child !== 'string')
     if (groups.length) slideGroups.set(pages.length + 1, groups)
     pages.push({ id: surface.id, surfaceId: surface.id, title: surface.title })
@@ -205,7 +243,17 @@ export async function buildComponentPptx(input: ComponentPptxInput, options: Bui
     slide.addText(credits.map(credit => ({ text: courseCreditLine(credit), options: { bullet: true, breakLine: true } })),
       { x: 0.5, y: 1.0, w: width, h: outputSize.height / 96 - 1.4, fontSize: 12, valign: 'top', fontFace: 'Microsoft YaHei' })
   }
-  const output = await pptx.write({ outputType: 'arraybuffer', compression: true })
-  return { bytes: applyPptxShapeExtensions(applyPptxEditableGroups(new Uint8Array(output as ArrayBuffer), slideGroups), extensions), slideCount: pages.length + Number(credits.length > 0), pages,
+  // PptxGenJS owns native construction. Keep its intermediate package stored
+  // when editable-group/shape passes still need the XML; compress only once.
+  const needsParts = slideGroups.size > 0 || extensions.size > 0
+  const output = new Uint8Array(await pptx.write({ outputType: 'arraybuffer', compression: !needsParts }) as ArrayBuffer)
+  let bytes = output
+  if (needsParts) {
+    const files = unzipSync(output)
+    applyPptxEditableGroupsToParts(files, slideGroups)
+    applyPptxShapeExtensionsToParts(files, extensions)
+    bytes = zipSync(files)
+  }
+  return { bytes, slideCount: pages.length + Number(credits.length > 0), pages,
     status: diagnostics.some(d => d.severity !== 'info') ? 'partial' : 'complete', diagnostics }
 }

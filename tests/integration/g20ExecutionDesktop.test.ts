@@ -1,4 +1,6 @@
 // @vitest-environment node
+import { componentSurfaces } from '../../src/shared/contracts/component-platform/project'
+import { testContainerInstance, setRootContainers } from '../helpers/glxWorkFixture'
 import { modelToolWireName } from '../../src/main/workbench/providers/OpenAIChatProvider'
 import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto'
 import { promises as fs } from 'node:fs'
@@ -62,6 +64,43 @@ async function fixture(fetch?: typeof globalThis.fetch) {
   const service = new ExecutionDesktopService({ directory: path.join(root, 'desktop'), documents, settings, authorizeWorkspaceRoot, fetch })
   return { root, workspace, filename, documents, document, settings, authorizeWorkspaceRoot, service }
 }
+it('retains only live timeline consumers and closes a stale sender without releasing an active run', async () => {
+  const { service } = await fixture()
+  const client = { id: 'window:1', isCurrent: () => true }
+  const loaded = (service.events as unknown as { loaded: Map<string, unknown> }).loaded
+  await service.operate({ type: 'timeline', conversationId: 'conversation', consumerId: 'first' }, client)
+  await service.operate({ type: 'timeline', conversationId: 'conversation', consumerId: 'second' }, client)
+  service.events.retain('conversation', 'run:actual')
+  await service.operate({ type: 'release-timeline', conversationId: 'conversation', consumerId: 'first' }, client)
+  expect(loaded.has('conversation')).toBe(true)
+  await service.releaseTimelineClient(client.id)
+  expect(loaded.has('conversation')).toBe(true)
+  await service.events.release('conversation', 'run:actual')
+  expect(loaded.has('conversation')).toBe(false)
+  await service.shutdown()
+})
+it('does not register or revive a timeline lease after its renderer generation closes', async () => {
+  const { service } = await fixture()
+  let current = true, entered!: () => void, resume!: () => void
+  const arrived = new Promise<void>(resolve => { entered = resolve })
+  const blocked = new Promise<void>(resolve => { resume = resolve })
+  const snapshot = service.events.snapshot.bind(service.events)
+  vi.spyOn(service.events, 'snapshot').mockImplementation(async conversationId => { entered(); await blocked; return snapshot(conversationId) })
+  const client = { id: 'window:old', isCurrent: () => current }
+  const result = service.operate({ type: 'timeline', conversationId: 'conversation', consumerId: 'old-view' }, client)
+  const rejected = expect(result).rejects.toThrow()
+  await arrived
+  current = false
+  await service.releaseTimelineClient(client.id)
+  resume(); await rejected
+  const consumers = (service.events as unknown as { consumers: Map<string, unknown> }).consumers
+  const loaded = (service.events as unknown as { loaded: Map<string, unknown> }).loaded
+  expect(consumers.size).toBe(0)
+  expect(loaded.size).toBe(0)
+  await expect(service.operate({ type: 'timeline', conversationId: 'conversation', consumerId: 'late' }, client)).rejects.toThrow()
+  expect(consumers.size).toBe(0)
+  await service.shutdown()
+})
 function reference(document: DocumentSnapshot, writable: Array<{ kind: 'document' } | { kind: 'markdown-range'; from: number; to: number }> = [{ kind: 'document' }]) {
   return { documentId: document.documentId, epoch: document.epoch, revision: document.revision, writable }
 }
@@ -716,12 +755,12 @@ it('NI01 completes a real Flow card aggregate, follows its current receipt and u
     return new Response(`data: ${JSON.stringify(chunk)}\n\ndata: [DONE]\n\n`, { status: 200, headers: { 'Content-Type': 'text/event-stream' } })
   }
   const h = await fixture(transport); await configureConversation(h.settings, 'http://127.0.0.1:1/v1')
-  const project = createBlankCourseProjectV10('Flow card'), surfaceId = project.surfaces[0].id
-  project.surfaces[0].kind = 'flow'
+  const project = createBlankCourseProjectV10('Flow card'), surfaceId = componentSurfaces(project)[0].id
+  setRootContainers(project, [{ ...componentSurfaces(project)[0], kind: 'flow' }])
   project.definitions['guoling.text'] = { id: 'guoling.text', role: 'mixed', title: '正文', implementation: { kind: 'builtin', key: 'guoling.text' } }
   for (const [id, text] of [['a', '前甲后'], ['b', '前乙后'], ['c', '未选正文']]) {
     project.instances[id] = { id, definitionId: 'guoling.text', data: JSON.parse(JSON.stringify(createTextComponentData(text))), frame: { width: 400, height: 80, transform: [1, 0, 0, 1, 20, 40] } }
-    project.surfaces[0].childIds.push(id)
+    testContainerInstance(project, 0).childIds.push(id)
   }
   const document = await h.documents.internalAPI.create({ kind: 'course-v10', project, resources: { assets: {}, components: {} } }, 'flow.h5lesson')
   const session = h.documents.registry.get(document.documentId), initial = session.read()
@@ -770,7 +809,7 @@ it('NI01 completes a real Flow card aggregate, follows its current receipt and u
   expect(plainDocumentText(textComponentDataSchema.parse(after.model.project.instances.b.data).content)).toBe('前新乙后')
   expect(after.model.project.instances.a.frame?.width).toBe(999)
   expect(after.model.project.instances.c.data).toEqual(project.instances.c.data)
-  expect(after.model.project.surfaces[0].childIds[0]).toBe('prefix')
+  expect(componentSurfaces(after.model.project)[0].childIds[0]).toBe('prefix')
   expect(calls).toBe(2)
   await h.service.shutdown()
 })

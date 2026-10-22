@@ -11,6 +11,7 @@ import { HtmlDocumentEditor } from '../../src/renderer/documentFiles/html/HtmlDo
 import type { PlainTextDocumentEditorHandle } from '../../src/renderer/documentFiles/PlainTextDocumentEditor'
 import { WorkspaceFilesTree } from '../../src/renderer/lessonWorkspace/view/WorkspaceFilesTree'
 import type { WorkspaceFilesAPI, WorkspaceFilesRequest } from '../../src/shared/workbench/workspaceFiles'
+import { EditorView } from '@codemirror/view'
 
 const native = vi.hoisted(() => ({ showSaveDialog: vi.fn() }))
 vi.mock('electron', () => ({ app: { getPath: () => '/tmp' }, dialog: { showSaveDialog: native.showSaveDialog } }))
@@ -26,6 +27,7 @@ it('starts HTML in an isolated preview and keeps its iframe when switching to so
     binding: { kind: 'file', path: '/lesson/page.html', version: 'v1', bindingVersion: 1 } } as DocumentSnapshot
   const mounted = render(createElement(HtmlDocumentEditor, { tabId: 'tab', committed, source: '<p>hello</p>', onDraft: vi.fn(), onUndo: vi.fn(), onRedo: vi.fn() }))
   const frame = await screen.findByTitle('HTML 预览')
+  expect(mounted.container.querySelector('.cm-editor')).toBeNull()
   expect(frame.getAttribute('sandbox')).toBe('allow-scripts allow-same-origin')
   expect(frame.getAttribute('src')).toBe(`courseware-preview://${'a'.repeat(32)}.${'a'.repeat(32)}.app/${'a'.repeat(64)}/file/page.html`)
   expect((frame.closest('.html-document-editor__preview') as HTMLElement | null)?.hidden).toBe(false)
@@ -34,7 +36,45 @@ it('starts HTML in an isolated preview and keeps its iframe when switching to so
   expect(screen.getByRole('textbox', { name: '纯文本编辑' })).toBeTruthy()
   fireEvent.click(screen.getByRole('button', { name: '预览' }))
   expect(screen.getByTitle('HTML 预览')).toBe(frame)
+  expect(mounted.container.querySelector('.cm-editor')).toBeNull()
   mounted.unmount(); cleanup()
+})
+
+it('keeps source input through view changes and mounts the latest canonical source only on demand', async () => {
+  const original = '<p>original</p>', draft = '<p>source draft</p>', updated = '<p>visual edit</p>'
+  const committed = (source: string, revision = 1) => ({ documentId: 'doc', epoch: 'epoch', revision,
+    model: { kind: 'text', source, resources: { assets: {}, components: {} } },
+    binding: { kind: 'file', path: '/lesson/page.html', version: 'v1', bindingVersion: 1 } }) as DocumentSnapshot
+  const workspaceFiles = vi.fn(async (request: { type: string }) => request.type === 'html-preview.open'
+    ? { leaseId: 'lease', documentId: 'doc', epoch: 'epoch', revision: 1, bindingVersion: 1, loadId: 'load', url: 'courseware-preview://source-demand.app/page.html' }
+    : { released: true })
+  Object.defineProperty(window, 'desktopAPI', { configurable: true, value: { workspaceFiles } })
+  const ref = createRef<PlainTextDocumentEditorHandle>(), onDraft = vi.fn()
+  const props = { ref, tabId: 'tab', committed: committed(original), source: original, onDraft, onUndo: vi.fn(), onRedo: vi.fn() }
+  const mounted = render(createElement(HtmlDocumentEditor, props))
+  await screen.findByTitle('HTML 预览')
+  expect(mounted.container.querySelector('.cm-editor')).toBeNull()
+  fireEvent.click(screen.getByRole('button', { name: '源码' }))
+  const source = screen.getByRole('textbox', { name: '纯文本编辑' })
+  const editor = EditorView.findFromDOM(source)!
+  act(() => editor.dispatch({ changes: { from: 0, to: editor.state.doc.length, insert: draft } }))
+  expect(onDraft).toHaveBeenLastCalledWith(draft)
+  fireEvent.compositionStart(source)
+  fireEvent.click(screen.getByRole('button', { name: '预览' }))
+  expect(screen.getByRole('textbox', { name: '纯文本编辑' })).toBe(source)
+  expect(ref.current!.flush().ready).toBe(false)
+  fireEvent.compositionEnd(source)
+  await act(async () => {})
+  fireEvent.click(screen.getByRole('button', { name: '预览' }))
+  expect(onDraft).toHaveBeenLastCalledWith(draft)
+  expect(mounted.container.querySelector('.cm-editor')).toBeNull()
+  mounted.rerender(createElement(HtmlDocumentEditor, { ...props, source: draft }))
+  expect(ref.current!.flush()).toMatchObject({ ready: true, source: draft })
+  mounted.rerender(createElement(HtmlDocumentEditor, { ...props, source: updated, committed: committed(updated, 2) }))
+  expect(mounted.container.querySelector('.cm-editor')).toBeNull()
+  fireEvent.click(screen.getByRole('button', { name: '源码' }))
+  expect(EditorView.findFromDOM(screen.getByRole('textbox', { name: '纯文本编辑' }))!.state.doc.toString()).toBe(updated)
+  expect(ref.current!.flush()).toMatchObject({ ready: true, source: updated })
 })
 
 it('reloads a changed HTML source with a fresh lease while keeping the view and releasing the latest lease on close', async () => {

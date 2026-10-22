@@ -34,9 +34,11 @@
 import notoSansScLicense from '../../../vendor/fonts/noto-sans-sc/LICENSE?raw'
 import stixTwoMathLicense from '../../../vendor/fonts/stix-two-math/LICENSE?raw'
 import type {
+  BundledFontFace,
   BundledFontFamily,
   BundledFontManifest,
 } from '../../shared/fonts/bundledFontManifest'
+import { unicodeRangeIntersects, type BundledFontCharacterUse } from './bundledFontSelection'
 import {
   registerBundledFontEmbedPreparer,
   registerBundledFontEmbedSource,
@@ -95,55 +97,64 @@ export function installFetchBundledFontEmbedSource(
   const licenseTexts = options.licenseTexts ?? VENDORED_LICENSE_TEXTS
   const fetchResource = options.fetchResource
     ?? ((url: string) => globalThis.fetch(url))
-  const loaded = new Map<string, EmbeddableBundledFont>()
-  let pending: Promise<void> | null = null
+  const loaded = new Map<string, Uint8Array>()
+  const pending = new Map<string, Promise<Uint8Array>>()
+  const selectedFaces = (family: BundledFontFamily, use?: BundledFontCharacterUse) => use
+    ? family.faces.filter(face => unicodeRangeIntersects(face.unicodeRange, use)) : family.faces
+
+  const loadFace = (face: BundledFontFace): Promise<Uint8Array> => {
+    const bytes = loaded.get(face.url)
+    if (bytes) return Promise.resolve(bytes)
+    const current = pending.get(face.url)
+    if (current) return current
+    const operation = fetchBytes(fetchResource, face.url).then(bytes => {
+      loaded.set(face.url, bytes)
+      return bytes
+    }).finally(() => { pending.delete(face.url) })
+    pending.set(face.url, operation)
+    return operation
+  }
 
   /**
-   * All faces of one family or none of them.
+   * All faces required by this payload for one family, or none of them.
    *
    * A partially embedded family is the worst outcome available: the export
    * looks self-contained but silently falls back for whichever code points its
    * missing slices covered. Failing the family as a whole keeps the failure
    * mode the one we already document — a machine-dependent lesson.
    */
-  async function loadFamily(family: BundledFontFamily): Promise<void> {
-    if (loaded.has(family.family)) return
+  async function loadFamily(family: BundledFontFamily, use?: BundledFontCharacterUse): Promise<void> {
     const licenseText = licenseTexts[family.license.noticePath]
     if (licenseText === undefined) {
       throw new Error(`内置字体缺少许可正文：${family.license.noticePath}`)
     }
-    const faces = await Promise.all(family.faces.map(async (face) => {
-      const { url, ...descriptor } = face
-      return { ...descriptor, bytes: await fetchBytes(fetchResource, url) }
-    }))
-    const { faces: _descriptors, ...rest } = family
-    loaded.set(family.family, { ...rest, licenseText, faces })
+    await Promise.all(selectedFaces(family, use).map(loadFace))
   }
 
-  async function loadAllFamilies(): Promise<void> {
-    const results = await Promise.allSettled(manifest.families.map(loadFamily))
+  registerBundledFontEmbedPreparer(async request => {
+    const families = request ? manifest.families.filter(family => request.families.includes(family.family)) : manifest.families
+    const results = await Promise.allSettled(families.map(family => loadFamily(family, request?.characterUse)))
     results.forEach((result, index) => {
       if (result.status === 'rejected') {
         // Never throw: an export must not fail over typography.
         console.warn(
-          `内置字体字节读取失败，导出不会嵌入 ${manifest.families[index]?.family ?? '未知字体'}`,
+          `内置字体字节读取失败，导出不会嵌入 ${families[index]?.family ?? '未知字体'}`,
           result.reason,
         )
       }
     })
-  }
-
-  registerBundledFontEmbedPreparer(() => {
-    // One in-flight load per session, shared by concurrent exports. A load that
-    // left a family behind is not memoized, so the next export retries it
-    // instead of inheriting a transient failure for the rest of the session.
-    pending ??= loadAllFamilies().finally(() => {
-      if (loaded.size !== manifest.families.length) pending = null
-    })
-    return pending
   })
 
-  registerBundledFontEmbedSource((families) => families
-    .map((family) => loaded.get(family))
+  registerBundledFontEmbedSource((families, use) => families
+    .map((name): EmbeddableBundledFont | undefined => {
+      const family = manifest.families.find(value => value.family === name)
+      if (!family) return undefined
+      const licenseText = licenseTexts[family.license.noticePath]
+      const required = selectedFaces(family, use)
+      // A previous smaller payload must not make a later one appear covered.
+      if (licenseText === undefined || required.some(face => !loaded.has(face.url))) return undefined
+      const { faces: _descriptors, ...rest } = family
+      return { ...rest, licenseText, faces: required.map(({ url, ...face }) => ({ ...face, bytes: loaded.get(url)! })) }
+    })
     .filter((font): font is EmbeddableBundledFont => font !== undefined))
 }

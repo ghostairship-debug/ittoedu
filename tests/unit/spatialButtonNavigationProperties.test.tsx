@@ -1,3 +1,4 @@
+import { testContainerInstance } from '../helpers/glxWorkFixture'
 import { afterEach, expect, it, vi } from 'vitest'
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import fs from 'node:fs/promises'
@@ -79,7 +80,7 @@ it('replaces a legacy page jump in place, preserves other actions/rules, and lea
   expect(() => componentClickNavigationEdits(authoring(), null)).toThrow('带条件'); expect(project).toEqual(before)
 })
 it('actual global properties in a Slide named state keeps the project rule owner and respects a locked hotspot', async () => {
-  const project = buttonNavigationProject('slide'); project.surfaces[0].presentation = { states: [{ id: 'state', title: 'Named', overrides: {} }] }
+  const project = buttonNavigationProject('slide'); testContainerInstance(project, 0).container.presentation = { states: [{ id: 'state', title: 'Named', overrides: {} }] }
   const h = await mainHost(project)
   act(() => { useEditorStore.getState().courseBridge.selectPresentationState(h.first.documentId, 'state', 'A'); useEditorStore.getState().selectNode('global-button') })
   render(<PropertiesTab onReplaceImage={() => {}} />)
@@ -88,7 +89,7 @@ it('actual global properties in a Slide named state keeps the project rule owner
   await chooseJump(h.read)
   const saved = await h.read(); if (saved.model.kind !== 'course-v10') throw new Error('Expected V10')
   expect(rules(saved.model.project, { kind: 'project' })[0].trigger).toEqual({ type: 'node.click', nodeId: 'global-button' })
-  expect(saved.model.project.surfaces[0].presentation!.states[0].overrides).toEqual({})
+  expect(testContainerInstance(saved.model.project, 0).container.presentation!.states[0].overrides).toEqual({})
   await act(async () => useEditorStore.getState().courseKernel.editCaptured(useEditorStore.getState().courseKernel.capture([
     { type: 'instance.patch', instanceId: 'global-button', patch: { locked: true } },
   ], useEditorStore.getState().courseKernel.captureTarget())))

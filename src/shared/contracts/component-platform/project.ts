@@ -32,7 +32,12 @@ export interface ComponentDefinition {
   professionalBuiltinKey?: string
   version?: string
   title?: string
-  library?:{packageId:string;version?:string}
+  library?: { packageId: string; version?: string; baseline?: {
+    implementation: ComponentImplementation
+    dataSchema?: JsonObject
+    /** UTF-8 origin material for source differences, never a runtime source owner. */
+    sourceFiles?: Record<string, string>
+  } }
 }
 
 /** Authoring identity only. Runtime always resolves the effective implementation. */
@@ -77,6 +82,8 @@ export interface ComponentInstance<Data = JsonValue> {
   frame?: ComponentFrame
   /** The sole ownership and ordering relation; parent indexes are derived. */
   childIds?: string[]
+  /** Container authoring belongs to this same instance; surfaces are derived views. */
+  container?: ComponentContainerAuthoring
   attachments?: BehaviorAttachment[]
   implementationOverride?: ComponentImplementation
 }
@@ -112,7 +119,7 @@ export interface ComponentFlowPlacement {
   paragraphAnchor?: { blockId: string; offsetY: number; xRatio: number }
 }
 export interface ComponentFlowAuthoring {
-  layout: { toc?: 'auto' | 'hidden'; widthMode?: 'fluid' | 'reading'; readingWidth: number; wideContentWidth: number; paperBackgroundColor?: string }
+  layout: { toc?: 'auto' | 'hidden'; widthMode?: 'fluid' | 'reading'; edgeToEdge?: boolean; readingWidth: number; wideContentWidth: number }
 }
 export interface ComponentPresentationState {
   id: string
@@ -146,6 +153,21 @@ export interface ComponentSurface {
   presentation?: ComponentPresentation
 }
 
+export interface ComponentContainerAuthoring {
+  kind: ComponentSurface['kind']
+  designSize?: ComponentSurface['designSize']
+  spatial?: ComponentSpatialAuthoring
+  background?: ComponentBackground
+  flow?: ComponentFlowAuthoring
+  /** Slide scene states; Flow navigates headings and Spatial navigates camera stops. */
+  presentation?: ComponentPresentation
+}
+
+export interface WorkEntry { rootInstanceId: string }
+export type ComponentContainerPatch = { kind?: ComponentContainerAuthoring['kind'] } & {
+  [K in Exclude<keyof ComponentContainerAuthoring, 'kind'>]?: ComponentContainerAuthoring[K] | null
+}
+
 /** Pose x/y are the viewport center in world coordinates; rotation is degrees. */
 export interface ComponentSpatialPose { x: number; y: number; zoom: number; rotation?: number }
 export interface ComponentSpatialAuthoring {
@@ -174,8 +196,8 @@ export interface ComponentAsset {
   source?: AssetSource
 }
 
-export interface CourseProjectV10 {
-  schemaVersion: 10
+export interface CourseProjectV11 {
+  schemaVersion: 11
   id: string
   revision: number
   title: string
@@ -187,33 +209,88 @@ export interface CourseProjectV10 {
   logic?: CourseProjectLogic
   definitions: Record<string, ComponentDefinition>
   instances: Record<string, ComponentInstance>
-  surfaces: ComponentSurface[]
+  rootIds: string[]
+  entry?: WorkEntry
   global: { underlay: string[]; overlay: string[] }
   assets: Record<string, ComponentAsset>
 }
 
+/** Existing internal module names remain stable while the formal wire format is Project 11. */
+export type CourseProjectV10 = CourseProjectV11
+
+/** Accepted only by the one-time V10 read boundary, never a writable Session model. */
+export interface LegacyCourseProjectV10 extends Omit<CourseProjectV11, 'schemaVersion' | 'rootIds' | 'entry'> {
+  schemaVersion: 10
+  surfaces: ComponentSurface[]
+}
+
+export function componentContainerBuiltinKey(kind: ComponentContainerAuthoring['kind']): string {
+  return `guoling.container.${kind}`
+}
+
+export type ComponentContainerReadModel = Pick<CourseProjectV11, 'instances' | 'definitions'>
+export type ComponentRootReadModel = ComponentContainerReadModel & Pick<CourseProjectV11, 'rootIds'>
+
+/** A read-only snapshot view. Nested configuration is borrowed, never copied or edited here. */
+export function componentSurface(project: ComponentContainerReadModel, instanceId: string): Readonly<ComponentSurface> | undefined {
+  const instance = project.instances[instanceId]
+  if (!instance?.container) return undefined
+  return { ...instance.container, id: instance.id,
+    title: instance.name ?? project.definitions[instance.definitionId]?.title ?? instance.id,
+    childIds: instance.childIds ?? [] }
+}
+
+/** The work-level directory contains root containers only, never nested containers. */
+export function componentSurfaces(project: ComponentRootReadModel): readonly Readonly<ComponentSurface>[] {
+  return project.rootIds.flatMap(id => { const surface = componentSurface(project, id); return surface ? [surface] : [] })
+}
+
+/** Reference/resource/state traversal includes every owned container, including nested ones. */
+export function componentContainers(project: ComponentContainerReadModel): readonly Readonly<ComponentSurface>[] {
+  return Object.keys(project.instances).flatMap(id => { const surface = componentSurface(project, id); return surface ? [surface] : [] })
+}
+
+export function createComponentContainerInstance(surface: ComponentSurface, definitionId: string, instanceId = surface.id): ComponentInstance {
+  const { id: _id, title, childIds, ...container } = surface
+  return { id: instanceId, definitionId, name: title, data: {}, childIds: [...childIds], container: structuredClone(container) }
+}
+
 export type ComponentContainer =
+  | { kind: 'project' }
   | { kind: 'instance'; instanceId: string }
   | { kind: 'surface'; surfaceId: string }
   | { kind: 'global'; plane: 'underlay' | 'overlay' }
 
 export function containerChildIds(project: CourseProjectV10, container: ComponentContainer): string[] {
+  if (container.kind === 'project') return project.rootIds
   if (container.kind === 'global') return project.global[container.plane]
   if (container.kind === 'surface') {
-    const surface = project.surfaces.find(value => value.id === container.surfaceId)
-    if (!surface) throw new Error(`表面已不存在：${container.surfaceId}`)
-    return surface.childIds
+    const instance = project.instances[container.surfaceId]
+    if (!instance?.container || !instance.childIds) throw new Error(`容器已不存在：${container.surfaceId}`)
+    return instance.childIds
   }
   const instance = project.instances[container.instanceId]
-  if (!instance?.childIds) throw new Error(`容器已不存在：${container.instanceId}`)
-  return instance.childIds
+  if (!instance) throw new Error(`容器已不存在：${container.instanceId}`)
+  return instance.childIds ?? []
 }
 
-export function owningContainer(project: CourseProjectV10, instanceId: string): ComponentContainer | null {
+export function owningContainer(project: Pick<CourseProjectV11, 'rootIds' | 'global' | 'instances'>, instanceId: string): ComponentContainer | null {
+  if (project.rootIds.includes(instanceId)) return { kind: 'project' }
   for (const plane of ['underlay', 'overlay'] as const) if (project.global[plane].includes(instanceId)) return { kind: 'global', plane }
-  for (const surface of project.surfaces) if (surface.childIds.includes(instanceId)) return { kind: 'surface', surfaceId: surface.id }
   for (const instance of Object.values(project.instances)) if (instance.childIds?.includes(instanceId)) return { kind: 'instance', instanceId: instance.id }
   return null
+}
+
+/** The nearest owning layout/state scope, derived from the one author tree. */
+export function componentContainerForInstance(project: ComponentRootReadModel & Pick<CourseProjectV11, 'global'>,
+  instanceId: string): Readonly<ComponentSurface> | undefined {
+  let owner = owningContainer(project, instanceId)
+  while (owner?.kind === 'instance') {
+    const container = componentSurface(project, owner.instanceId)
+    if (container) return container
+    owner = owningContainer(project, owner.instanceId)
+  }
+  return owner?.kind === 'surface' ? componentSurface(project, owner.surfaceId) : undefined
 }
 
 /** An object's editing lock includes its containing groups. */
@@ -229,26 +306,50 @@ export function isComponentVisibleAtSurface(instance: Pick<ComponentInstance, 'v
   return !scope || scope.mode === 'all' || (scope.mode === 'include' ? scope.surfaceIds.includes(surfaceId) : !scope.surfaceIds.includes(surfaceId))
 }
 
+/** Authored background ancestry, back to front. Static media can composite it without inventing author facts. */
+export function componentBackgroundChain(project: Pick<CourseProjectV10, 'background'> & Partial<Pick<CourseProjectV10, 'instances'>>,
+  surface?: Pick<ComponentSurface, 'background'> & Partial<Pick<ComponentSurface, 'id'>>): ComponentBackground[] {
+  const ancestors: ComponentBackground[] = []
+  let parentId = surface?.id
+  while (parentId && project.instances) {
+    const parent = Object.values(project.instances).find(instance => instance.childIds?.includes(parentId!))
+    if (!parent) break
+    if (parent.container?.background?.mode === 'own') ancestors.unshift(parent.container.background)
+    parentId = parent.id
+  }
+  return [project.background ?? { color: '#ffffff' }, ...ancestors,
+    ...(surface?.background?.mode === 'own' ? [surface.background] : [])]
+}
+
 /** One effective paint rule for editors, Player and output. */
-export function resolveComponentBackground(project: Pick<CourseProjectV10, 'background'>, surface?: Pick<ComponentSurface, 'background'>, state?: Pick<ComponentPresentationState, 'background'>): ResolvedComponentBackground {
-  const base = project.background
-  const selected = surface?.background?.mode === 'own' ? surface.background : base
-  const result: ResolvedComponentBackground = selected?.paint ? { color: '#ffffff', assetId: null, fit: 'cover', paint: selected.paint }
-    : { color: selected?.color ?? '#ffffff', assetId: selected?.assetId ?? null, fit: selected?.fit ?? 'cover' as const }
+export function resolveComponentBackground(project: Pick<CourseProjectV10, 'background'> & Partial<Pick<CourseProjectV10, 'instances'>>, surface?: Pick<ComponentSurface, 'background'> & Partial<Pick<ComponentSurface, 'id'>>, state?: Pick<ComponentPresentationState, 'background'>): ResolvedComponentBackground {
+  const selected = componentBackgroundChain(project, surface).at(-1)!
+  const result: ResolvedComponentBackground = selected?.paint ? { color: 'transparent', assetId: null, fit: 'cover', paint: selected.paint }
+    : { color: selected.color ?? 'transparent', assetId: selected?.assetId ?? null, fit: selected?.fit ?? 'cover' as const }
   const override = state?.background
   if (!override || override.mode === 'inherit') return result
-  if (override.paint) return { color: '#ffffff', assetId: null, fit: 'cover', paint: override.paint }
+  if (override.paint) return { color: 'transparent', assetId: null, fit: 'cover', paint: override.paint }
   const replacesPaint = override.paint === null || ['color', 'assetId', 'fit'].some(key => Reflect.get(override, key) !== undefined)
   if (result.paint && !replacesPaint) return result
-  const inherited = result.paint ? { color: '#ffffff', assetId: null, fit: 'cover' as const } : result
+  const inherited = result.paint ? { color: 'transparent', assetId: null, fit: 'cover' as const } : result
   return { color: override.color ?? inherited.color, assetId: override.assetId === undefined ? inherited.assetId : override.assetId,
     fit: override.fit ?? inherited.fit }
 }
 
+/** The Surface owns only explicit paint. Inheritance is visible through this layer, never repainted. */
+export function resolveComponentSurfaceBackground(project: Parameters<typeof resolveComponentBackground>[0],
+  surface: ComponentSurface, state?: Pick<ComponentPresentationState, 'background'>): ResolvedComponentBackground | undefined {
+  const override = state?.background
+  const stateOwnsPaint = override && override.mode !== 'inherit'
+    && (override.mode === 'own' || ['color', 'assetId', 'fit', 'paint'].some(key => Reflect.get(override, key) !== undefined))
+  return stateOwnsPaint ? resolveComponentBackground(project, surface, state)
+    : surface.background?.mode === 'own' ? resolveComponentBackground(project, surface) : undefined
+}
+
 /** A disposable render/edit projection. It never becomes an authoring write source. */
 export function resolveComponentPresentation(project: CourseProjectV10, surfaceId: string | null, stateId: string | null): CourseProjectV10 {
-  const surface = project.surfaces.find(value => value.id === surfaceId)
-  const state = surface?.presentation?.states.find(value => value.id === stateId)
+  const surface = surfaceId ? componentSurface(project, surfaceId) : undefined
+  const state = surface?.kind === 'slide' ? surface.presentation?.states.find(value => value.id === stateId) : undefined
   if (!surface || !state) return project
   const instances = { ...project.instances }
   for (const [id, override] of Object.entries(state.overrides)) if (instances[id]) {
@@ -259,11 +360,14 @@ export function resolveComponentPresentation(project: CourseProjectV10, surfaceI
     instances[id] = instance
   }
   const order = state.order?.filter(id => surface.childIds.includes(id))
-  const background = state.background && resolveComponentBackground(project, surface, state)
+  const background = resolveComponentSurfaceBackground(project, surface, state)
   const projectedSurface = { ...surface,
     ...(order ? { childIds: [...order, ...surface.childIds.filter(id => !order.includes(id))] } : {}),
     ...(background ? { background: background.paint ? { mode: 'own' as const, paint: background.paint }
       : { mode: 'own' as const, ...background } } : {}),
   }
-  return { ...project, instances, surfaces: project.surfaces.map(value => value.id === surfaceId ? projectedSurface : value) }
+  const { id: _id, title: _title, childIds, ...container } = projectedSurface
+  const containerInstance = instances[surface.id]
+  instances[surface.id] = { ...containerInstance, childIds, container }
+  return { ...project, instances }
 }

@@ -1,3 +1,4 @@
+import { componentContainers, componentSurface, componentSurfaces } from '../../shared/contracts/component-platform/project'
 import { nanoid } from 'nanoid'
 import type { CourseProjectV10, ComponentInstance, JsonObject, JsonValue } from '../../shared/contracts/component-platform/project'
 import type { ComponentLibraryEntry } from '../../shared/contracts/component-platform/library'
@@ -104,7 +105,7 @@ export const SORT_COMPONENT_ID = 'com.ittoedu.teaching.sort-order'
 export function createSortComponentPackage(data: JsonObject = { mode:'sort', items:[{id:'a',text:'第一步'},{id:'b',text:'第二步'},{id:'c',text:'第三步'}], correctOrder:['a','b','c'],success:'全部正确！',failure:'还需要调整，再试一次。' }): ComponentLibraryEntry {
   const id = data.mode === 'sort' ? SORT_COMPONENT_ID : `com.ittoedu.teaching.${data.mode}`
   const title=data.mode==='sort'?'拖拽排序':data.mode==='classify'?'拖拽分类':data.mode==='match'?'拖拽匹配':data.mode==='choice'?'选择与反馈':data.mode==='variable'?'连续变量联动':data.mode==='background'?'图形与动态背景':'逐步揭示'
-  return {schemaVersion:1,id,title,
+  return {schemaVersion:2,id,title,
     definitions:{[id]:{id,role:'content',version:'1.0.0',title:'可编辑互动与背景',implementation:{kind:'source',language:'javascript',source:runtimeSource},dataSchema:{type:'object',properties:{mode:{title:'机制类型',type:'string'},items:{title:'项目',type:'array'},steps:{title:'步骤',type:'array'},options:{title:'选项',type:'array'},selectionMode:{title:'单选 / 多选',type:'string',enum:['single','multiple']},correct:{title:'单选正确序号（从 0 开始）',type:'number'},correctIndices:{title:'多选正确序号（从 0 开始）',type:'array',items:{type:'number'}},initialStep:{title:'初始显示步数',type:'number'},correctOrder:{title:'正确顺序',type:'array'},groups:{title:'分类 / 匹配目标',type:'array'},success:{title:'正确反馈',type:'string'},failure:{title:'错误反馈',type:'string'},variableLabel:{title:'变量名称',type:'string'},resultLabel:{title:'结果名称',type:'string'},unit:{title:'变量单位',type:'string'},resultUnit:{title:'结果单位',type:'string'},min:{title:'最小值',type:'number'},max:{title:'最大值',type:'number'},step:{title:'调整步长',type:'number'},value:{title:'初始值',type:'number'},multiplier:{title:'固定倍数',type:'number'},stateKey:{title:'共享状态名称',type:'string'},eventName:{title:'联动事件名称',type:'string'},dynamic:{title:'动态背景',type:'boolean'},colorStart:{title:'起始颜色',type:'string'},colorEnd:{title:'结束颜色',type:'string'},pattern:{title:'纹理',type:'string',enum:['gradient','grid','dots']},intensity:{title:'背景强度',type:'number',minimum:0,maximum:1}}}}},
     example:{rootIds:['example'],instances:{example:{id:'example',definitionId:id,name:'教学互动',data,frame:{width:1120,height:480,transform:[1,0,0,1,80,180]}}}},assets:{},resources:{assets:{},components:{}}}
 }
@@ -113,7 +114,7 @@ export type RecipePlanResult = {ok:true;createdLocationId:string;edits:Component
 const lines=(value:string)=>value.split(/\r?\n/).map(line=>line.trim()).filter(Boolean)
 export function planCourseRecipeEdits(project:CourseProjectV10,input:CourseRecipeIntent,options:{createId?:()=>string}={}):RecipePlanResult {
   try {
-    const origin=project.surfaces.find(surface=>surface.id===input.surfaceId)
+    const origin=input.surfaceId ? componentSurface(project,input.surfaceId) : undefined
     if(!origin)throw new Error('配方的原页面已不存在。')
     const catalog=RECIPE_CATALOG.find(entry=>entry.id===input.recipeId)
     if(!catalog)throw new Error('未知配方。')
@@ -133,8 +134,8 @@ export function planCourseRecipeEdits(project:CourseProjectV10,input:CourseRecip
       const scope=slots.scope
       if(!['current','all','include','exclude'].includes(scope))throw new Error('请选择有效的背景适用范围。')
       const surfaceIds=scope==='current'?[origin.id]:lines(slots.pages).map(title=>{
-        const identity=project.surfaces.find(surface=>surface.id===title)
-        const matches=identity?[identity]:project.surfaces.filter(surface=>surface.title===title)
+        const identity=componentContainers(project).find(surface=>surface.id===title)
+        const matches=identity?[identity]:componentSurfaces(project).filter(surface=>surface.title===title)
         if(matches.length!==1)throw new Error(`页面标题“${title}”${matches.length?'重复，请先明确页面名称':'不存在'}。`)
         return matches[0].id
       })
@@ -200,9 +201,10 @@ export function planCourseRecipeEdits(project:CourseProjectV10,input:CourseRecip
       } else if (!['classify','match'].includes(slots.mode) || groups.length < 2 || items.some(item => !groups.includes(item.group))) throw new Error('请填写至少两个目标组，每个项目归属一个组。')
       interactive = { mode: slots.mode, items, groups, correctOrder, success: slots.success, failure: slots.failure }
     }
-    const edits:ComponentEdit[]=[{type:'surface.insert',index:project.surfaces.indexOf(origin)+1,surface:{id:surfaceId,kind:'slide',title:slots.title,childIds:[],designSize:size,background:{mode:'own',color:'#ffffff'}}}]
+    const originIndex=componentSurfaces(project).findIndex(surface=>surface.id===origin.id)
+    const edits:ComponentEdit[]=[{type:'surface.insert',index:originIndex<0?componentSurfaces(project).length:originIndex+1,surface:{id:surfaceId,kind:'slide',title:slots.title,childIds:[],designSize:size,background:{mode:'own',color:'#ffffff'}}}]
     const afterSurface=applyComponentOperation(project,captureComponentOperation(project,edits))
-    const textEntry:ComponentLibraryEntry={schemaVersion:1,id:`recipe:${input.recipeId}`,title:slots.title,definitions:{[TEXT_DEFINITION.id]:TEXT_DEFINITION},example:{instances:Object.fromEntries(instances.map(instance=>[instance.id,instance])),rootIds:instances.map(instance=>instance.id)},assets:{},resources:{assets:{},components:{}}}
+    const textEntry:ComponentLibraryEntry={schemaVersion:2,id:`recipe:${input.recipeId}`,title:slots.title,definitions:{[TEXT_DEFINITION.id]:TEXT_DEFINITION},example:{instances:Object.fromEntries(instances.map(instance=>[instance.id,instance])),rootIds:instances.map(instance=>instance.id)},assets:{},resources:{assets:{},components:{}}}
     edits.push(...prepareComponentLibraryInsertion(afterSurface,textEntry,{container:{kind:'surface',surfaceId},index:0,createId:kind=>id(kind)}).command.edits)
     if(interactive){const working=applyComponentOperation(project,captureComponentOperation(project,edits)),entry=createSortComponentPackage(interactive),sample=entry.example.instances.example;sample.frame={width:1120*sx,height:480*sy,transform:[1,0,0,1,80*sx,180*sy]};edits.push(...prepareComponentLibraryInsertion(working,entry,{container:{kind:'surface',surfaceId},index:instances.length,createId:()=>id('recipe')}).command.edits)}
     return {ok:true,createdLocationId:surfaceId,edits}

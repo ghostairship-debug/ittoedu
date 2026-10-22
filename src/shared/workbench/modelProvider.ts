@@ -73,6 +73,8 @@ export interface ModelFinishDetails {
 /** One frozen, credential-free wire payload, shared by budgeting and its actual transport. */
 export interface PreparedModelRequest {
   readonly serialized: string
+  /** Host estimate of this exact prepared JSON body; never a provider/wire field. */
+  readonly tokens?: number
   stream(requestId: string, options?: { signal?: AbortSignal }): AsyncIterable<ModelEvent>
 }
 /** Fixed transport categories only; excludes exception text, URLs and response bytes. */
@@ -113,11 +115,13 @@ export type ModelEvent = { requestId: string; sequence: number } & (
       finishReason: string; finishDetails?: ModelFinishDetails; usage?: ModelUsage; nativeResponse: ModelJsonObject }
   | { type: 'response.failed'; failure: ModelFailure }
 )
+/** Optional host accounting on the already constructed adapter JSON body. */
+export interface ModelPreparationOptions { measurePayload(body: unknown): number }
 export interface ModelProvider {
   /** Explicit adapter fact: absence does not authorize automatic replay of an unknown provider. */
   readonly retrySafety?: 'pure-generation' | 'server-side-effects'
   /** Optional request-scoped preparation; never a cache across changing messages, tools or selections. */
-  prepare?(request: Omit<ModelRequest, 'requestId'>): PreparedModelRequest
+  prepare?(request: Omit<ModelRequest, 'requestId'>, options?: ModelPreparationOptions): PreparedModelRequest
   /** Exactly one request, no implicit retry, provider fallback, tool execution or document mutation. */
   stream(request: ModelRequest, options?: { signal?: AbortSignal }): AsyncIterable<ModelEvent>
 }

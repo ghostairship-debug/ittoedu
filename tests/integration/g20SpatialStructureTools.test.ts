@@ -1,4 +1,6 @@
 // @vitest-environment node
+import { componentSurfaces } from '../../src/shared/contracts/component-platform/project'
+import { setRootContainers, appendRootContainers, testContainerInstance } from '../helpers/glxWorkFixture'
 import { promises as fs } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -21,16 +23,16 @@ const driver = new CourseV10Driver(), roots: string[] = []
 afterEach(async () => { for (const root of roots.splice(0)) await fs.rm(root, { recursive: true, force: true }) })
 async function harness(empty = false) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'g20-spatial-')); roots.push(root)
-  const project = createBlankCourseProjectV10('Spatial'), surfaceId = project.surfaces[0].id
-  project.surfaces[0] = { id: surfaceId, kind: 'spatial', title: 'World', childIds: [], designSize: { width: 1280, height: 720 }, spatial: { home: { x: 0, y: 0, zoom: 1 }, frames: [{ id: 'first', title: 'First', pose: { x: 0, y: 0, zoom: 1 } }] } }
-  project.surfaces.push({ id: 'other', kind: 'spatial', title: 'Other world', childIds: ['foreign'], spatial: { home: { x: 100, y: 100, zoom: 1 }, frames: [] } })
+  const project = createBlankCourseProjectV10('Spatial'), surfaceId = componentSurfaces(project)[0].id
+  setRootContainers(project, [{ id: surfaceId, kind: 'spatial', title: 'World', childIds: [], designSize: { width: 1280, height: 720 }, spatial: { home: { x: 0, y: 0, zoom: 1 }, frames: [{ id: 'first', title: 'First', pose: { x: 0, y: 0, zoom: 1 } }] } }, ...componentSurfaces(project).slice(1)])
+  appendRootContainers(project, { id: 'other', kind: 'spatial', title: 'Other world', childIds: ['foreign'], spatial: { home: { x: 100, y: 100, zoom: 1 }, frames: [] } })
   project.definitions.shape = { id: 'shape', role: 'content', implementation: { kind: 'builtin', key: 'guoling.shape' } }
   for (const [id, x, y] of [['a', 100, 50], ['b', 400, 150], ['foreign', 100, 50], ['hud', -9000, -9000]] as const) {
     project.instances[id] = { id, definitionId: 'shape', data: defaultShapeData(), frame: { width: 100, height: 80, transform: [1, 0, 0, 1, x, y] } }
-    if (id === 'a' || id === 'b') project.surfaces[0].childIds.push(id)
+    if (id === 'a' || id === 'b') testContainerInstance(project, 0).childIds.push(id)
   }
   project.global.overlay.push('hud')
-  if (empty) { project.surfaces[0].childIds = []; delete project.instances.a; delete project.instances.b }
+  if (empty) { testContainerInstance(project, 0).childIds = []; delete project.instances.a; delete project.instances.b }
   const bytes = new TextEncoder().encode('<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"/>')
   project.assets.original = { id: 'original', path: 'assets/original.svg', mimeType: 'image/svg+xml', byteLength: bytes.length }
   const model = { kind: 'course-v10' as const, project, resources: { assets: { original: bytes }, components: {} } }, filename = path.join(root, 'spatial.glx')
@@ -45,7 +47,7 @@ async function harness(empty = false) {
   const projected = componentProjectFiles(current().project, current().resources)
   const objectPath = (id: string) => projected.find(file => file.kind === 'data' && file.target?.kind === 'instance' && file.target.instanceId === id)!.path
   return { model, host, session, surfaceId, sourcePath, files, objectPath, current, invoke,
-    spatial: () => current().project.surfaces[0].spatial!,
+    spatial: () => componentSurfaces(current().project)[0].spatial!,
     read: async (runId = 'r', selector?: string) => { const result = await invoke('project.read', { path: sourcePath, ...(selector ? { project: selector } : {}) }, runId); expect(result.kind).toBe('read'); if (result.kind !== 'read') throw new Error(JSON.stringify(result)); return JSON.parse((result.data as { content: string }).content) },
     apply: (value: unknown, runId = 'r', selector?: string) => invoke('project.apply', { path: sourcePath, content: JSON.stringify(value), ...(selector ? { project: selector } : {}) }, runId),
     reopen: async () => { await host.internalAPI.save(session.documentId); return (await new DocumentHostService(path.join(root, 'reopen')).open(filename)).model },
@@ -71,9 +73,9 @@ it('edits camera/path/relation source through observed refs in one History, reta
   const updated = f.current(); expect(await f.reopen()).toEqual(updated)
   const fresh = await f.read(); committed(await f.apply({ ...fresh, stops: [fresh.stops[0]], paths: [], relations: [] }))
   expect(f.spatial().frames.map(frame => frame.id)).toEqual(['first']); expect(f.spatial().paths).toEqual([]); expect(f.session.read().undoDepth).toBe(3)
-  await f.undo(); expect(f.current().project.surfaces).toEqual(updated.project.surfaces)
-  expect(f.current().resources).toEqual(before.model.resources); expect(f.current().project.surfaces[1]).toEqual(f.model.project.surfaces[1])
-  await f.undo(); await f.undo(); expect(f.current().project.surfaces).toEqual(f.model.project.surfaces)
+  await f.undo(); expect(componentSurfaces(f.current().project)).toEqual(componentSurfaces(updated.project))
+  expect(f.current().resources).toEqual(before.model.resources); expect(componentSurfaces(f.current().project)[1]).toEqual(componentSurfaces(f.model.project)[1])
+  await f.undo(); await f.undo(); expect(componentSurfaces(f.current().project)).toEqual(componentSurfaces(f.model.project))
 })
 
 it('captures the original fitted view transiently and persists only selected camera/home with unchanged other frames, while empty worlds are a no-op', async () => {
@@ -84,9 +86,9 @@ it('captures the original fitted view transiently and persists only selected cam
   f.host.setSpatialViewportPreparer(async request => ({ ...request, revision: f.session.read().revision, pose: fit, viewport, source: 'spatial-view-state' }))
   expect(f.current()).toEqual(before); expect(f.session.read().undoDepth).toBe(depth)
   const observed = await f.read(); committed(await f.apply({ ...observed, home: 'currentViewport', stops: [{ ...observed.stops[0], pose: 'currentViewport' }, observed.stops[1]] }))
-  expect(f.spatial().home).toEqual(fit); expect(f.spatial().frames[0].pose).toEqual(fit); expect(f.spatial().frames[1]).toEqual(before.project.surfaces[0].spatial!.frames[1])
+  expect(f.spatial().home).toEqual(fit); expect(f.spatial().frames[0].pose).toEqual(fit); expect(f.spatial().frames[1]).toEqual(componentSurfaces(before.project)[0].spatial!.frames[1])
   expect(f.current().project.instances.hud).toEqual(f.model.project.instances.hud); expect(await f.reopen()).toEqual(f.current())
-  await f.undo(); expect(f.current().project.surfaces).toEqual(before.project.surfaces)
+  await f.undo(); expect(componentSurfaces(f.current().project)).toEqual(componentSurfaces(before.project))
   const empty = await harness(true), initial = empty.session.read(), emptyFit = fitSpatialComponentWorld(empty.current().project, empty.surfaceId, viewport)
   expect(emptyFit).toEqual(empty.spatial().home)
   empty.host.setSpatialViewportPreparer(async request => ({ ...request, revision: empty.session.read().revision, pose: emptyFit, viewport, source: 'spatial-view-state' }))

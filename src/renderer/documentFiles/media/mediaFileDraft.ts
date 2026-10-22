@@ -24,6 +24,7 @@ export class MediaFileDraft {
   rebind(binding: FileArtifactBinding) {
     if (binding.fileVersion !== this.state.base.binding.fileVersion) return
     if (binding.path === this.state.base.binding.path && binding.bindingVersion === this.state.base.binding.bindingVersion) return
+    this.releasePreview(this.state.base.binding)
     this.update({ base: { ...this.state.base, binding }, preview: { ...this.state.preview, binding } })
   }
   /** Operations are recorded synchronously; a pending preview is not a pending input. */
@@ -38,7 +39,13 @@ export class MediaFileDraft {
     if (!operations.length) { this.update({ preview: this.state.base, previewReady: true }); return }
     try {
       const preview = await this.port.preview(this.state.base.binding, operations)
-      if (generation === this.generation) this.update({ preview, busy: null, previewReady: true })
+      if (generation === this.generation) {
+        const current = this.state.base.binding
+        // A trusted workspace relocation can finish while pixels are being
+        // prepared. Keep its current binding without replaying the operation.
+        this.update({ preview: preview.binding.fileVersion === current.fileVersion ? { ...preview, binding: current } : preview,
+          busy: null, previewReady: true })
+      }
     } catch (error) {
       if (generation === this.generation) this.update({ busy: null, error: error instanceof Error ? error.message : String(error), previewReady: false })
     }
@@ -81,5 +88,6 @@ export class MediaFileDraft {
       return null
     }
   }
-  dispose() { this.disposed = true; ++this.generation; this.listeners.clear() }
+  private releasePreview(binding: FileArtifactBinding) { void Promise.resolve(this.port.release?.(binding)).catch(() => {}) }
+  dispose() { this.releasePreview(this.state.base.binding); this.disposed = true; ++this.generation; this.listeners.clear() }
 }

@@ -1,3 +1,5 @@
+import { componentSurfaces } from '../../src/shared/contracts/component-platform/project'
+import { testContainerInstance, appendRootContainers } from '../helpers/glxWorkFixture'
 import { afterEach, expect, it, vi } from 'vitest'
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { createBlankCourseProjectV10 } from '../../src/core/course/createCourseProjectV10'
@@ -18,11 +20,11 @@ import { ComponentMotionProperties, type ComponentMotionPropertiesContext } from
 
 afterEach(() => { cleanup(); vi.restoreAllMocks() })
 function fixture() {
-  const project = createBlankCourseProjectV10('动效属性'), surfaceId = project.surfaces[0]!.id
+  const project = createBlankCourseProjectV10('动效属性'), surfaceId = componentSurfaces(project)[0]!.id
   project.definitions.text = { ...TEXT_DEFINITION, id: 'text' }
   project.instances.text = { id: 'text', definitionId: 'text', data: JSON.parse(JSON.stringify(createTextData('点击内容'))),
     frame: { width: 240, height: 80, transform: [1, 0, 0, 1, 20, 40] } }
-  project.surfaces[0]!.childIds.push('text')
+  testContainerInstance(project, 0).childIds.push('text')
   return { project, surfaceId, instanceId: 'text', activeStateId: null }
 }
 function apply(project: CourseProjectV10, edits: Parameters<typeof captureComponentOperation>[1]) {
@@ -62,7 +64,7 @@ it('retains explicit exit triggers, conditions, sibling actions and completion r
 })
 it('keeps state entrance rules in their authored scope and leaves advanced entrance programs to the rule editor', () => {
   const base = fixture()
-  base.project.surfaces[0]!.presentation = { states: [{ id: 'state', title: '状态', overrides: {} }] }
+  testContainerInstance(base.project, 0).container!.presentation = { states: [{ id: 'state', title: '状态', overrides: {} }] }
   const target = { ...base, activeStateId: 'state' }
   const project = apply(target.project, componentEntranceMotionEdits(target, DEFAULT_COMPONENT_MOTION, true))
   expect(componentMotionPropertiesView({ ...target, project }).entrance).not.toBeNull()
@@ -97,7 +99,7 @@ it('runs an enabled entrance from real World activation through the existing hos
 })
 it.each([null, 'state'])('connects PropertiesTab in %s scope to canonical edits, host preview, undo and archive reload', async activeStateId => {
   const target = { ...fixture(), activeStateId }
-  if (activeStateId) target.project.surfaces[0]!.presentation = { states: [{ id: activeStateId, title: '当前状态', overrides: {} }] }
+  if (activeStateId) testContainerInstance(target.project, 0).container!.presentation = { states: [{ id: activeStateId, title: '当前状态', overrides: {} }] }
   const host = await createV10StoreHost(target.project), previews = vi.fn(), stop = onComponentMotionPreview(previews)
   await useEditorStore.getState().connectCourseDocuments(host.api)
   if (activeStateId) useEditorStore.getState().courseBridge.selectPresentationState(host.first.documentId, activeStateId, target.surfaceId)
@@ -134,8 +136,8 @@ it.each([null, 'state'])('connects PropertiesTab in %s scope to canonical edits,
 })
 it('keeps surface-owned programs on their actual page while project-owned motion stays global', () => {
   const target = fixture(), a = target.surfaceId
-  target.project.surfaces.push({ id: 'b', kind: 'slide', title: 'B', childIds: [] })
-  target.project.surfaces[0]!.childIds = []
+  appendRootContainers(target.project, { id: 'b', kind: 'slide', title: 'B', childIds: [] })
+  testContainerInstance(target.project, 0).childIds = []
   target.project.global.overlay = ['text']
   const rule: InteractionRule = { id: 'b-enter', enabled: true, trigger: { type: 'node.activated', nodeId: 'text' }, conditions: [],
     actions: [{ id: 'b-enter-step', start: 'after-previous', delayMs: 0, action: { type: 'node.enter', nodeId: 'text', effect: 'fade', durationMs: 900, easing: 'linear' } }] }

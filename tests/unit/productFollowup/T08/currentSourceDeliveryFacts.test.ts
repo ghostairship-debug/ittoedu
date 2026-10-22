@@ -1,3 +1,4 @@
+import { testContainerInstance } from '../../../helpers/glxWorkFixture'
 // @vitest-environment node
 import { expect, it } from 'vitest'
 import { createBlankCourseProjectV10 } from '../../../../src/core/course/createCourseProjectV10'
@@ -9,7 +10,7 @@ function author(html: string, resourceSources?: Array<{ url: string; usage: 'ima
   const project = createBlankCourseProjectV10('当前源文资源事实')
   project.definitions.web = { id: 'web', role: 'content', implementation: { kind: 'builtin', key: 'guoling.web' } }
   project.instances.web = { id: 'web', definitionId: 'web', data: { html, ...(resourceSources ? { resourceSources } : {}) } }
-  project.surfaces[0].childIds = ['web']
+  testContainerInstance(project, 0).childIds = ['web']
   return project
 }
 

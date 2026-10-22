@@ -11,6 +11,8 @@ export interface ObjectContextMenuRequest {
   y: number
   /** The objects the menu is for; a menu opens only when they are the current selection. */
   itemIds: readonly string[]
+  /** Frozen exact field identity, when this menu belongs to an author field. */
+  selectionIdentity?: string
   /** Actions for the exact spot under the pointer (e.g. a Runtime's text), listed first. */
   extra?: readonly MenuCommand[]
 }
@@ -29,4 +31,16 @@ export const OBJECT_EDIT_EVENT = 'course-object-edit'
 /** Returns true when the workspace opened an editor for the object. */
 export function requestObjectEdit(root: Element, itemId: string): boolean {
   return !root.dispatchEvent(new CustomEvent<{ itemId: string }>(OBJECT_EDIT_EVENT, { detail: { itemId }, cancelable: true }))
+}
+
+/** A current field action is resolved by its active document owner, never by owning instance fallback. */
+export const AUTHOR_FIELD_ACTION_EVENT = 'course-author-field-action'
+export interface AuthorFieldActionRequest {
+  documentId: string
+  epoch: string
+  selectionIdentity: string
+  action: 'edit' | 'replace-image'
+}
+export function requestAuthorFieldAction(request: AuthorFieldActionRequest): boolean {
+  return !window.dispatchEvent(new CustomEvent<AuthorFieldActionRequest>(AUTHOR_FIELD_ACTION_EVENT, { detail: request, cancelable: true }))
 }

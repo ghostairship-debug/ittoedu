@@ -1,3 +1,5 @@
+import { testContainerInstance } from '../helpers/glxWorkFixture'
+import { componentSurfaces } from '../../src/shared/contracts/component-platform/project'
 // @vitest-environment node
 import { expect, it } from 'vitest'
 import { DocumentSession } from '../../src/core/documents/DocumentSession'
@@ -111,11 +113,11 @@ it('reverts the exact Markdown fragments in one History operation while preservi
 })
 
 it('reverts separate Flow rich-text fragments as one canonical batch and keeps a human frame edit', async () => {
-  const project = createBlankCourseProjectV10('Flow fragments'), surfaceId = project.surfaces[0].id
+  const project = createBlankCourseProjectV10('Flow fragments'), surfaceId = componentSurfaces(project)[0].id
   project.definitions['guoling.text'] = { id: 'guoling.text', role: 'mixed', title: '正文', implementation: { kind: 'builtin', key: 'guoling.text' } }
   for (const [id, text] of [['a', '前甲后'], ['b', '前乙后']]) {
     project.instances[id] = { id, definitionId: 'guoling.text', data: JSON.parse(JSON.stringify(createTextComponentData(text))), frame: { width: 400, height: 80, transform: [1, 0, 0, 1, 20, 40] } }
-    project.surfaces[0].childIds.push(id)
+    testContainerInstance(project, 0).childIds.push(id)
   }
   const driver = new CourseV10Driver(), registry = new DocumentRegistry({ drivers: [driver], createId: () => crypto.randomUUID(), bindingKey: binding => binding.path,
     persistence: { async append() {}, async save() { throw new Error('No saves') } } })
@@ -146,10 +148,10 @@ it('reverts separate Flow rich-text fragments as one canonical batch and keeps a
 })
 
 it('follows only the acknowledged table cell through its string-to-rich carrier upgrade', async () => {
-  const project = createBlankCourseProjectV10('Table carrier'), surfaceId = project.surfaces[0].id
+  const project = createBlankCourseProjectV10('Table carrier'), surfaceId = componentSurfaces(project)[0].id
   project.definitions['guoling.table'] = { id: 'guoling.table', role: 'mixed', title: '表格', implementation: { kind: 'builtin', key: 'guoling.table' } }
   const data = createTableData({ rows: 1, columns: 1 }); data.rows[0].cells[0].text = '前OLD后'
-  project.instances.a = { id: 'a', definitionId: 'guoling.table', data: JSON.parse(JSON.stringify(data)) }; project.surfaces[0].childIds.push('a')
+  project.instances.a = { id: 'a', definitionId: 'guoling.table', data: JSON.parse(JSON.stringify(data)) }; testContainerInstance(project, 0).childIds.push('a')
   const driver = new CourseV10Driver(), registry = new DocumentRegistry({ drivers: [driver], createId: () => crypto.randomUUID(), bindingKey: binding => binding.path,
     persistence: { async append() {}, async save() { throw new Error('No saves') } } })
   const session = await registry.create({ kind: 'course-v10', project, resources: { assets: {}, components: {} } }, 'table.h5lesson')

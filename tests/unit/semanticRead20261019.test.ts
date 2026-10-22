@@ -1,3 +1,5 @@
+import { testContainerInstance } from '../helpers/glxWorkFixture'
+import { componentSurfaces } from '../../src/shared/contracts/component-platform/project'
 // @vitest-environment node
 import { randomUUID } from 'node:crypto'
 import { expect, it } from 'vitest'
@@ -23,8 +25,8 @@ async function fixture(services?: HostToolServices) {
     implementationOverride: { kind: 'source', language: 'javascript', source } }
   project.instances.business = { id: 'business', definitionId: 'business', data: { marker: '实际业务数据', values: [1, 2] },
     implementationOverride: { kind: 'source', language: 'javascript', source } }
-  project.surfaces[0].childIds = ['text', 'business']
-  project.surfaces[0].presentation = { states: [{ id: 'second', title: '第二幕', overrides: { business: { data: { hiddenDetail: source } } } }] }
+  testContainerInstance(project, 0).childIds = ['text', 'business']
+  testContainerInstance(project, 0).container.presentation = { states: [{ id: 'second', title: '第二幕', overrides: { business: { data: { hiddenDetail: source } } } }] }
   const resources = { assets: {}, components: {} }, driver = new CourseV10Driver()
   const registry = new DocumentRegistry({ drivers: [driver], createId: randomUUID, bindingKey: binding => binding.path,
     persistence: { async append() {}, async save() { throw new Error('No save requested') } } })
@@ -34,7 +36,7 @@ async function fixture(services?: HostToolServices) {
     async apply() { throw new Error('No content apply requested') },
   } })
   await gateway.beginRun({ runId: 'semantic', actor: 'agent', documents: [{ documentId: session.documentId, writable: [{ kind: 'document' }] }] })
-  const target = await gateway.issueTarget('semantic', session.documentId, { kind: 'course-instance', surfaceId: project.surfaces[0].id, instanceId: 'text' })
+  const target = await gateway.issueTarget('semantic', session.documentId, { kind: 'course-instance', surfaceId: componentSurfaces(project)[0].id, instanceId: 'text' })
   const call = (name: string, input: unknown) => gateway.execute('semantic', randomUUID(), { name, input })
   return { project, resources, session, gateway, target, call, source }
 }
@@ -57,7 +59,7 @@ it('reads exact body once by default, preserving explicit full objects and Sourc
     expect(full.implementationOverride.source).toBe(h.source)
     const file = componentProjectFiles(h.project, h.resources).find(file => file.binding?.kind === 'instance-source' && file.binding.instanceId === 'text' && !file.authorSource?.dependencyId)!
     expect(await h.call('project.read', { path: file.path })).toMatchObject({ kind: 'read', data: { content: file.content } })
-    const address = { kind: 'course-instance' as const, surfaceId: h.project.surfaces[0].id, instanceId: 'text' }
+    const address = { kind: 'course-instance' as const, surfaceId: componentSurfaces(h.project)[0].id, instanceId: 'text' }
     expect(readTarget(before.model, address)).toEqual(h.project.instances.text)
     expect(targetFootprint(h.session.read().model, address)).toBe(targetFootprint(before.model, address))
     expect(h.session.read()).toEqual(before)
@@ -67,9 +69,9 @@ it('reads exact body once by default, preserving explicit full objects and Sourc
 it('keeps real non-text data and surface structure without attaching project directories or state Source', async () => {
   const h = await fixture()
   try {
-    const business = await h.gateway.issueTarget('semantic', h.session.documentId, { kind: 'course-instance', surfaceId: h.project.surfaces[0].id, instanceId: 'business' })
+    const business = await h.gateway.issueTarget('semantic', h.session.documentId, { kind: 'course-instance', surfaceId: componentSurfaces(h.project)[0].id, instanceId: 'business' })
     expect(JSON.parse(readData(await h.call('read', { target: business })).text)).toEqual({ id: 'business', definitionId: 'business', data: h.project.instances.business.data })
-    const surface = await h.gateway.issueTarget('semantic', h.session.documentId, { kind: 'course-surface', surfaceId: h.project.surfaces[0].id })
+    const surface = await h.gateway.issueTarget('semantic', h.session.documentId, { kind: 'course-surface', surfaceId: componentSurfaces(h.project)[0].id })
     const result = readData(await h.call('read', { target: surface }))
     expect(result.authoring).toBeUndefined()
     expect(JSON.parse(result.text)).toMatchObject({ childIds: ['text', 'business'], presentation: { states: [{ id: 'second', title: '第二幕' }] } })

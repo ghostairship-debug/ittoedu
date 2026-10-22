@@ -1,3 +1,4 @@
+import { createTestProjectFromLegacy } from '../helpers/glxWorkFixture'
 import { createRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import { flushSync } from 'react-dom'
@@ -109,7 +110,7 @@ describe('Main native text editing', () => {
       { type: 'math', formulaId: 'force', latex: 'F', accessibleText: '浮力' },
       { type: 'text', text: '观察', style: { italic: true } },
     ] })
-    const project: CourseProjectV10 = { schemaVersion: 10, id: 'native-edit', title: '文字编辑', revision: 0,
+    const project: CourseProjectV10 = createTestProjectFromLegacy({ schemaVersion: 10, id: 'native-edit', title: '文字编辑', revision: 0,
       definitions: { [TEXT_DEFINITION.id]: TEXT_DEFINITION },
       instances: {
         text: { id: 'text', definitionId: TEXT_DEFINITION.id, data: json(original),
@@ -118,7 +119,7 @@ describe('Main native text editing', () => {
         neighbor: { id: 'neighbor', definitionId: TEXT_DEFINITION.id, data: json(createTextComponentData('邻居')),
           frame: { width: 100, height: 40, transform: [1, 0, 0, 1, 400, 50] } },
       }, surfaces: [{ id: 'slide', kind: 'slide', title: '演示', childIds: ['text', 'neighbor'] }],
-      global: { underlay: [], overlay: [] }, assets: {} }
+      global: { underlay: [], overlay: [] }, assets: {} })
     const before = structuredClone(project)
     const target: CapturedCourseTarget = { documentId: 'doc', epoch: 'epoch', project, editingProject: project,
       resources: { assets: {}, components: {} }, surfaceId: 'slide', activeStateId: null,

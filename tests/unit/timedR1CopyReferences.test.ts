@@ -1,3 +1,5 @@
+import { createTestProjectFromLegacy, testContainerInstance } from '../helpers/glxWorkFixture'
+import { componentSurfaces } from '../../src/shared/contracts/component-platform/project'
 import { expect, it } from 'vitest'
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
@@ -12,12 +14,14 @@ import type { CapturedCourseTarget } from '../../src/renderer/documents/CourseV1
 import type { ComponentRuntimeContext } from '../../src/shared/contracts/component-platform/runtime'
 import type { InteractionTrigger } from '../../src/shared/interactionTypes'
 import type { DocumentResources } from '../../src/shared/workbench/document'
+import { createTextComponentData } from '../../src/components/text/data'
 
 const emptyResources = (): DocumentResources => ({ assets: {}, components: {} })
-const blank = (id: string, page: string): CourseProjectV10 => ({ schemaVersion: 10, id, revision: 0, title: id, definitions: {}, instances: {}, assets: {},
-  surfaces: [{ id: page, kind: 'slide', title: page, childIds: [] }], global: { underlay: [], overlay: [] } })
+const textData = (text: string) => JSON.parse(JSON.stringify(createTextComponentData(text)))
+const blank = (id: string, page: string): CourseProjectV10 => (createTestProjectFromLegacy({ schemaVersion: 10, id, revision: 0, title: id, definitions: {}, instances: {}, assets: {},
+  surfaces: [{ id: page, kind: 'slide', title: page, childIds: [] }], global: { underlay: [], overlay: [] } }))
 const capture = (project: CourseProjectV10, resources = emptyResources()): CapturedCourseTarget => ({ documentId: project.id, epoch: 'epoch',
-  project, editingProject: project, resources, activeStateId: null, surfaceId: project.surfaces[0].id, instanceIds: [], instanceId: null })
+  project, editingProject: project, resources, activeStateId: null, surfaceId: testContainerInstance(project, 0).id, instanceIds: [], instanceId: null })
 const rules = () => ({ rules: [{ id: 'rule', enabled: true, trigger: { type: 'node.click', nodeId: 'button' }, conditions: [],
   actions: [{ id: 'action', start: 'after-previous', delayMs: 0, action: { type: 'course-state.set', key: 'answer', value: 'button' } }] }] })
 
@@ -44,27 +48,27 @@ it('remaps professional aliases and source metadata for clipboard and page copie
     source.definitions.content = { id: 'content', role: 'content', implementation: { kind: 'builtin', key: 'guoling.text' } }
     source.definitions.alias = { id: 'alias', role: 'behavior', professionalBuiltinKey: 'guoling.interactions', implementation: sourceImplementation
       ? { kind: 'source', language: 'javascript', source: 'export default {}' } : { kind: 'builtin', key: 'guoling.interactions' } }
-    source.instances.button = { id: 'button', definitionId: 'content', data: { title: 'button', text: 'source-page' } }
+    source.instances.button = { id: 'button', definitionId: 'content', data: textData('source-page') }
     source.instances.behavior = { id: 'behavior', definitionId: 'alias', data: rules(),
       attachments: [{ instanceId: 'behavior', target: { kind: 'surface', surfaceId: 'source-page' } }] }
-    source.surfaces[0].childIds = ['button', 'behavior']
-    source.instances.decoration = { id: 'decoration', definitionId: 'content', data: { title: '共享装饰' }, visibility: { mode: 'include', surfaceIds: ['source-page'] } }
+    testContainerInstance(source, 0).childIds = ['button', 'behavior']
+    source.instances.decoration = { id: 'decoration', definitionId: 'content', data: textData('共享装饰'), visibility: { mode: 'include', surfaceIds: ['source-page'] } }
     source.global.overlay = ['decoration']
-    source.surfaces[0].presentation = { states: [{ id: 'answer-state', title: '答案', overrides: { behavior: { data: rules() } } }] }
+    testContainerInstance(source, 0).container.presentation = { states: [{ id: 'answer-state', title: '答案', overrides: { behavior: { data: rules() } } }] }
     const original = structuredClone(source)
     const plan = prepareCourseObjectPaste({ documentId: source.id, project: source, roots: ['button', 'behavior'], resources: emptyResources() },
       { capturedTarget: capture(destination), container: { kind: 'surface', surfaceId: 'target-page' }, index: 0 })
     const copied = applyComponentOperation(destination, captureComponentOperation(destination, plan.edits))
     const behavior = copied.instances[plan.idMap.get('behavior')!]
-    expect(behavior.attachments).toEqual([{ instanceId: behavior.id, target: { kind: 'surface', surfaceId: 'target-page' } }])
+    expect(behavior.attachments).toEqual([{ instanceId: behavior.id, target: { kind: 'instance', instanceId: 'target-page' } }])
     expect(copied.instances[plan.idMap.get('button')!].data).toEqual(source.instances.button.data)
     expect((behavior.data as JsonObject).rules).not.toEqual((source.instances.behavior.data as JsonObject).rules)
     await proveEvents(behavior, plan.idMap.get('button')!, 'target-page')
     let serial = 0
     const pagePlan = duplicateSurfaceEdits(source, 'source-page', () => `copy-${++serial}`)
     const pages = applyComponentOperation(source, captureComponentOperation(source, pagePlan.edits))
-    const page = pages.surfaces.find(value => value.id === pagePlan.surfaceId)!, [buttonId, behaviorId] = page.childIds
-    expect(pages.surfaces.map(value => value.id)).toEqual(['source-page', page.id])
+    const page = componentSurfaces(pages).find(value => value.id === pagePlan.surfaceId)!, [buttonId, behaviorId] = page.childIds
+    expect(componentSurfaces(pages).map(value => value.id)).toEqual(['source-page', page.id])
     expect(pages.global.overlay).toEqual(['decoration'])
     expect(pages.instances.decoration.visibility?.surfaceIds).toEqual(['source-page', page.id])
     expect(pages.instances[buttonId].data).toEqual(source.instances.button.data)
@@ -78,13 +82,14 @@ it('remaps professional aliases and source metadata for clipboard and page copie
 
 it('maps the actual source and target surfaces for cross-document visibility while preserving unrelated scope and Flow anchors', () => {
   const source = blank('source', 'source-page'), destination = blank('target', 'target-page')
-  source.surfaces[0].kind = destination.surfaces[0].kind = 'flow'
+  testContainerInstance(source, 0).container.kind = testContainerInstance(destination, 0).container.kind = 'flow'
   source.definitions.content = { id: 'content', role: 'content', implementation: { kind: 'builtin', key: 'guoling.text' } }
-  source.instances.body = { id: 'body', definitionId: 'content', data: { text: 'source-page' } }
-  source.instances.overlay = { id: 'overlay', definitionId: 'content', data: { title: 'body' }, frame: { width: 80, height: 30, transform: [1, 0, 0, 1, 20, 40] },
+  source.instances.body = { id: 'body', definitionId: 'content', data: textData('source-page') }
+  const overlayData = textData('body')
+  source.instances.overlay = { id: 'overlay', definitionId: 'content', data: overlayData, frame: { width: 80, height: 30, transform: [1, 0, 0, 1, 20, 40] },
     visibility: { mode: 'include', surfaceIds: ['source-page', 'external-page'] },
     flowPlacement: { space: 'paper', plane: 'overlay', paragraphAnchor: { blockId: 'body', xRatio: .25, offsetY: 10 } } }
-  source.surfaces[0].childIds = ['body', 'overlay']
+  testContainerInstance(source, 0).childIds = ['body', 'overlay']
   const plan = prepareCourseObjectPaste({ documentId: source.id, project: source, roots: ['body', 'overlay'], resources: emptyResources() },
     { capturedTarget: capture(destination), container: { kind: 'surface', surfaceId: 'target-page' }, index: 0 })
   const copied = applyComponentOperation(destination, captureComponentOperation(destination, plan.edits)), overlay = copied.instances[plan.idMap.get('overlay')!]
@@ -94,7 +99,7 @@ it('maps the actual source and target surfaces for cross-document visibility whi
   expect(overlay.visibility).toEqual({ mode: 'include', surfaceIds: ['target-page', 'external-page'] })
   expect(overlay.flowPlacement?.paragraphAnchor?.blockId).toBe(plan.idMap.get('body'))
   expect(overlay.frame).toEqual(source.instances.overlay.frame)
-  expect(overlay.data).toEqual({ title: 'body' })
+  expect(overlay.data).toEqual(overlayData)
   const sameDocument = prepareCourseObjectPaste({ documentId: source.id, project: source, roots: ['overlay'], resources: emptyResources() },
     { capturedTarget: capture(source), container: { kind: 'surface', surfaceId: 'source-page' }, index: 2 })
   const inserted = sameDocument.edits.find(edit => edit.type === 'instance.insert')!
@@ -110,16 +115,17 @@ it('keeps cross-document missing assets unresolved instead of binding destinatio
   destination.definitions.image = { id: 'image', role: 'content', title: '目标工程共享定义', implementation: { kind: 'builtin', key: 'guoling.text' } }
   const ids = ['missing-photo', 'declared-no-bytes', 'source-image', '']
   ids.forEach((assetId, index) => { const id = `picture-${index}`; source.instances[id] = { id, definitionId: 'image',
-    data: { ...(entry.example.instances.example.data as JsonObject), assetId, originalAssetId: '', title: assetId } }; source.surfaces[0].childIds.push(id) })
+    data: { ...(entry.example.instances.example.data as JsonObject), assetId, originalAssetId: '', title: assetId } }; testContainerInstance(source, 0).childIds.push(id) })
   for (const id of ids.filter(Boolean)) {
     destination.assets[id] = { id, path: `assets/target-${id}.png`, mimeType: 'image/png' }
     targetResources.assets[id] = new Uint8Array([1])
   }
   for (const id of ['declared-no-bytes', 'source-image']) source.assets[id] = { id, path: `assets/${id}.png`, mimeType: 'image/png' }
   resources.assets['source-image'] = new Uint8Array([9])
-  const before = structuredClone(destination), plan = prepareCourseObjectPaste({ documentId: source.id, project: source, roots: source.surfaces[0].childIds, resources },
+  const before = structuredClone(destination), plan = prepareCourseObjectPaste({ documentId: source.id, project: source, roots: testContainerInstance(source, 0).childIds, resources },
     { capturedTarget: capture(destination, targetResources), container: { kind: 'surface', surfaceId: 'target-page' }, index: 0 })
-  expect(plan.diagnostics.map(value => value.message).sort()).toEqual(['保留了待修复的素材引用：declared-no-bytes', '保留了待修复的素材引用：missing-photo'])
+  expect(plan.diagnostics.map(value => value.message).sort()).toEqual(['保留了待修复的素材引用：declared-no-bytes', '保留了待修复的素材引用：missing-photo',
+    '此源码的动态资源访问无法闭合，已保留当前可访问资源范围。'])
   expect(plan.assetIds.has('')).toBe(false)
   const driver = new CourseV10Driver(), model = driver.apply({ kind: 'course-v10', project: destination, resources: targetResources }, captureComponentOperation(destination, plan.edits))
   if (model.kind !== 'course-v10') throw new Error('Expected course')

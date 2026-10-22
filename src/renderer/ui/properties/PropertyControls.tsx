@@ -1,4 +1,5 @@
 import { Check, ChevronDown } from 'lucide-react'
+import { isCourseComponentInputFailure, type CourseComponentInputFailure } from '../../documents/CourseV10DocumentBridge'
 import {
   createContext,
   Fragment,
@@ -29,8 +30,17 @@ export interface PropertyDraftRecovery {
   readonly baseline?: string
   readonly composing: boolean
 }
+interface PropertyCommitFailure {
+  readonly error: CourseComponentInputFailure
+  readonly value: string
+  readonly bindingKey: string
+  readonly label: string
+  readonly kind: 'text' | 'number'
+}
+
 export interface PropertyDraftResume {
   readonly pending?: Promise<boolean>
+  commitFailure?(): PropertyCommitFailure | undefined
   flush(): boolean | Promise<boolean>
   readDraft(): PropertyDraftRecovery | null
 }
@@ -38,10 +48,11 @@ interface PropertyDraftPort {
   hasDirty(): boolean
   readDraft(): PropertyDraftRecovery
   inFlight?(): Promise<boolean> | undefined
+  commitFailure?(): PropertyCommitFailure | undefined
   restoreDraft?(draft: PropertyDraftRecovery, resume?: PropertyDraftResume): void | boolean
 }
 type PropertyDraftEntry = { flush: PropertyDraftFlush; read: () => PropertyDraftRecovery | null; dirty: () => boolean;
-  pending?: () => Promise<boolean> | undefined; restore?: (draft: PropertyDraftRecovery) => void | boolean; mounted?: boolean }
+  pending?: () => Promise<boolean> | undefined; commitFailure?: () => PropertyCommitFailure | undefined; restore?: (draft: PropertyDraftRecovery) => void | boolean; mounted?: boolean }
 const pendingPropertyDrafts = new Set<PropertyDraftEntry>()
 const propertyDraftListeners = new Set<() => void>()
 const suspendedPropertyDocuments = new Set<string>()
@@ -138,13 +149,14 @@ export function usePropertyDraftFlush(flush: PropertyDraftFlush, port?: Property
       read: () => current.current.port?.readDraft() ?? { bindingKey: current.current.binding, label: '', kind: 'text', raw: '', composing: false },
       dirty: () => current.current.port?.hasDirty() ?? false,
       pending: () => current.current.port?.inFlight?.(),
+      commitFailure: () => current.current.port?.commitFailure?.(),
       restore: record => current.current.port?.restoreDraft?.(record), mounted: true }
     const target = entry.read()
     if (target && current.current.port?.restoreDraft) {
       for (const saved of [...pendingPropertyDrafts]) {
         const record = saved.read()
         if (saved.mounted === false && saved.dirty() && record && sameDraftTarget(record, target)) {
-          const restored = current.current.port.restoreDraft({ ...record, bindingKey: target.bindingKey }, { flush: saved.flush, readDraft: saved.read, pending: saved.pending?.() })
+          const restored = current.current.port.restoreDraft({ ...record, bindingKey: target.bindingKey }, { flush: saved.flush, readDraft: saved.read, pending: saved.pending?.(), commitFailure: saved.commitFailure })
           if (restored === false) continue
           pendingPropertyDrafts.delete(saved)
           break
@@ -241,6 +253,8 @@ function BufferedPropertyInput({
   const [draft, setDraft] = useState(currentValue)
   const [commitError, setCommitError] = useState('')
   const resumeRequired = useRef(false)
+  const mounted = useRef(true)
+  useLayoutEffect(() => { mounted.current = true; return () => { mounted.current = false } }, [])
   const [, setSessionEpoch] = useState(0)
   type Phase = 'idle' | 'editing' | 'composing' | 'blur-pending'
   const currentRef = useRef({
@@ -263,6 +277,8 @@ function BufferedPropertyInput({
     staleNotified: boolean
     onCommit: (value: string) => void | Promise<void>
     pending?: Promise<boolean>
+    failure?: PropertyCommitFailure
+    failureEdited?: boolean
   }>({
     phase: 'idle',
     bindingKey: currentBindingKey,
@@ -273,7 +289,7 @@ function BufferedPropertyInput({
   })
   const stale = sessionRef.current.phase !== 'idle' && (
     sessionRef.current.bindingKey !== currentBindingKey
-    || (currentValue !== sessionRef.current.baseline && currentValue !== sessionRef.current.draft)
+    || (currentValue !== sessionRef.current.baseline && currentValue !== sessionRef.current.draft && currentValue !== sessionRef.current.failure?.value)
   )
 
   useLayoutEffect(() => {
@@ -293,7 +309,7 @@ function BufferedPropertyInput({
 
   const sessionIsStale = () => sessionRef.current.phase !== 'idle' && (
     sessionRef.current.bindingKey !== currentRef.current.bindingKey
-    || (currentRef.current.value !== sessionRef.current.baseline && currentRef.current.value !== sessionRef.current.draft)
+    || (currentRef.current.value !== sessionRef.current.baseline && currentRef.current.value !== sessionRef.current.draft && currentRef.current.value !== sessionRef.current.failure?.value)
   )
   const rejectStale = () => {
     const session = sessionRef.current
@@ -314,6 +330,8 @@ function BufferedPropertyInput({
     session.staleNotified = false
     session.onCommit = current.onCommit
     session.pending = undefined
+    session.failure = undefined
+    session.failureEdited = false
     setCommitError('')
     resumeRequired.current = false
     setDraft(current.value)
@@ -331,13 +349,16 @@ function BufferedPropertyInput({
     session.onCommit = current.onCommit
     setDraft(current.value)
   }
-  const commit = (candidate = sessionRef.current.draft): boolean | Promise<boolean> => {
+  const commit = (candidate = sessionRef.current.draft, explicit = false): boolean | Promise<boolean> => {
     const session = sessionRef.current
     if (propertyDraftSuspended(session.bindingKey)) return false
     if (session.pending) return session.pending
+    // A save/navigation flush preserves failed input; only a field action resolves its operation.
+    if (session.failure && !explicit) return false
+    if (session.failure && (session.failure.bindingKey !== currentRef.current.bindingKey || session.failure.bindingKey !== session.bindingKey || session.failure.label !== label || session.failure.kind !== type)) { setCommitError('属性草稿对应的字段已经改变，请返回原字段后处理。'); return false }
     if (resumeRequired.current) { setCommitError('恢复的输入法草稿尚未完成，请继续编辑后再应用。'); return false }
     if (rejectStale()) return false
-    if (candidate === session.baseline) {
+    if (candidate === session.baseline && !session.failure) {
       session.phase = 'idle'
       setCommitError('')
       return true
@@ -369,23 +390,43 @@ function BufferedPropertyInput({
     setDraft(next)
     setCommitError('')
     const finish = () => {
+      session.failure = undefined
+      session.failureEdited = false
       session.baseline = next
       if (session.draft === next && session.phase !== 'composing' && session.phase !== 'blur-pending') session.phase = 'idle'
       setSessionEpoch(epoch => epoch + 1)
       return session.phase === 'idle'
     }
     const fail = (error: unknown) => {
+      if (isCourseComponentInputFailure(error)) { session.failure = { error, value: next, bindingKey: session.bindingKey, label, kind: type }; session.failureEdited = false }
       setCommitError(error instanceof Error ? error.message : String(error))
       return false
     }
-    if (!changed) return finish()
+    if (!changed && !session.failure) return finish()
     try {
-      const result = callback(next)
+      const failure = session.failure
+      if (failure) session.failureEdited = false
+      const result = failure ? failure.error.resolveInput('retry').then(outcome => {
+        if (outcome === 'pending') { setCommitError(failure.error.message); return false }
+        if (session.failure !== failure) return false
+        if (!mounted.current || session.bindingKey !== currentRef.current.bindingKey || propertyDraftSuspended(session.bindingKey)) return false
+        if (outcome === 'applied') {
+          // The old operation has now been confirmed. A newer raw value is separate input.
+          session.failure = undefined
+          session.baseline = failure.value
+          if (session.draft !== next || next !== failure.value) { setCommitError(''); setSessionEpoch(epoch => epoch + 1); return false }
+          return true
+        }
+        if (session.draft !== next || rejectStale()) return false
+        session.failure = undefined
+        if (next === session.baseline) return true
+        return Promise.resolve(currentRef.current.onCommit(next)).then(() => true)
+      }) : callback(next)
       if (!result) return finish()
-      const pending = Promise.resolve(result).then(() => {
+      const pending = Promise.resolve(result).then(applied => {
         if (session.pending !== pending) return true
         session.pending = undefined
-        return finish()
+        return applied === false ? false : finish()
       }, error => {
         if (session.pending !== pending) return false
         session.pending = undefined
@@ -395,6 +436,25 @@ function BufferedPropertyInput({
       return pending
     } catch (error) { return fail(error) }
   }
+  const cancel = () => {
+    const session = sessionRef.current
+    if (session.pending) return
+    const failure = session.failure
+    if (!failure) { rebaseCurrent(); return }
+    if (failure.bindingKey !== currentRef.current.bindingKey || failure.bindingKey !== session.bindingKey || failure.label !== label || failure.kind !== type) { setCommitError('属性草稿对应的字段已经改变，请返回原字段后处理。'); return }
+    const raw = session.draft
+    const pending = failure.error.resolveInput('cancel').then(outcome => {
+      if (outcome === 'pending') { setCommitError(failure.error.message); return false }
+      if (session.failure !== failure) return false
+      if (!mounted.current || session.bindingKey !== currentRef.current.bindingKey || propertyDraftSuspended(session.bindingKey)) return false
+      session.failure = undefined
+      if (session.draft !== raw) { setCommitError(''); return false }
+      rebaseCurrent()
+      return true
+    }, error => { setCommitError(error instanceof Error ? error.message : String(error)); return false })
+      .then(result => { if (session.pending === pending) session.pending = undefined; return result })
+    session.pending = pending
+  }
   usePropertyDraftFlush(() => {
     const session = sessionRef.current
     if (session.pending) return session.pending
@@ -402,11 +462,13 @@ function BufferedPropertyInput({
     if (session.phase === 'composing' || session.phase === 'blur-pending' || rejectStale()) return false
     return commit()
   }, {
-    hasDirty: () => resumeRequired.current || Boolean(sessionRef.current.pending) || sessionRef.current.draft !== sessionRef.current.baseline
+    hasDirty: () => resumeRequired.current || Boolean(sessionRef.current.pending) || Boolean(sessionRef.current.failure) || sessionRef.current.draft !== sessionRef.current.baseline
       || sessionRef.current.phase === 'composing' || sessionRef.current.phase === 'blur-pending',
+    inFlight: () => sessionRef.current.pending,
+    commitFailure: () => sessionRef.current.failure,
     readDraft: () => ({ bindingKey: sessionRef.current.bindingKey, label, kind: type, raw: sessionRef.current.draft,
       baseline: sessionRef.current.baseline, composing: resumeRequired.current || sessionRef.current.phase === 'composing' || sessionRef.current.phase === 'blur-pending' }),
-    restoreDraft: record => {
+    restoreDraft: (record, resume) => {
       sessionRef.current.phase = 'editing'
       sessionRef.current.bindingKey = record.bindingKey
       sessionRef.current.baseline = record.baseline ?? currentValue
@@ -414,6 +476,27 @@ function BufferedPropertyInput({
       resumeRequired.current = record.composing
       if (record.composing) setCommitError('恢复的输入法草稿尚未完成，请继续编辑后再应用。')
       setDraft(record.raw)
+      // Runtime capabilities never cross epochs or fields; persisted recovery remains raw input only.
+      const sameSession = resume?.readDraft()?.bindingKey === currentBindingKey
+      const adoptFailure = () => {
+        const failure = sameSession ? resume?.commitFailure?.() : undefined
+        sessionRef.current.failure = failure?.bindingKey === currentBindingKey && failure.label === label && failure.kind === type ? failure : undefined
+        if (sessionRef.current.failure) setCommitError(sessionRef.current.failure.error.message)
+      }
+      adoptFailure()
+      if (sameSession && resume?.pending) {
+        const pending = resume.pending.then(result => {
+          if (sessionRef.current.pending !== pending) return result
+          sessionRef.current.pending = undefined
+          adoptFailure()
+          const previous = resume.readDraft()
+          if (previous?.baseline !== undefined) sessionRef.current.baseline = previous.baseline
+          if (result && sessionRef.current.draft === sessionRef.current.baseline) sessionRef.current.phase = 'idle'
+          setSessionEpoch(epoch => epoch + 1)
+          return sessionRef.current.phase === 'idle' && !sessionRef.current.failure
+        })
+        sessionRef.current.pending = pending
+      }
     },
   })
   return (
@@ -443,6 +526,7 @@ function BufferedPropertyInput({
           if (sessionRef.current.phase === 'idle') beginSession()
           const nextDraft = event.target.value
           const session = sessionRef.current
+          if (session.failure) session.failureEdited = true
           session.draft = nextDraft
           setDraft(nextDraft)
         }}
@@ -463,11 +547,12 @@ function BufferedPropertyInput({
           const session = sessionRef.current
           const next = event.currentTarget.value
           const shouldCommit = session.phase === 'blur-pending'
+          if (session.failure && next !== session.draft) session.failureEdited = true
           session.phase = 'editing'
           session.draft = next
           setDraft(next)
           setSessionEpoch(epoch => epoch + 1)
-          if (shouldCommit) commit(next)
+          if (shouldCommit) commit(next, Boolean(session.failureEdited))
         }}
         onBlur={() => {
           const session = sessionRef.current
@@ -476,7 +561,7 @@ function BufferedPropertyInput({
             session.phase = 'blur-pending'
             return
           }
-          commit()
+          commit(undefined, Boolean(session.failureEdited))
         }}
         onKeyDown={(event) => {
           const session = sessionRef.current
@@ -492,24 +577,17 @@ function BufferedPropertyInput({
             if (session.phase === 'idle') beginSession()
             const next = Math.min(max ?? Infinity, Math.max(min ?? -Infinity,
               Number(session.draft) + (event.key === 'ArrowUp' ? 1 : -1) * (step ?? 1)))
+            if (session.failure) session.failureEdited = true
             session.draft = String(Number(next.toPrecision(15)))
             setDraft(session.draft)
           }
           if (event.key === 'Enter') {
-            commit()
+            commit(undefined, true)
             event.currentTarget.blur()
           }
           if (event.key === 'Escape') {
-            if (rejectStale()) rebaseCurrent()
-            else {
-              session.phase = 'idle'
-              session.draft = session.baseline
-              session.staleNotified = false
-              session.pending = undefined
-              setCommitError('')
-              resumeRequired.current = false
-              setDraft(session.baseline)
-            }
+            event.preventDefault()
+            cancel()
             event.currentTarget.blur()
           }
         }}
@@ -1158,6 +1236,8 @@ export function FontFamilyPicker({ value, placeholder, onCommit }: {
   const [commitError, setCommitError] = useState('')
   const [, setInputEpoch] = useState(0)
   const resumeRequired = useRef(false)
+  const mounted = useRef(true)
+  useLayoutEffect(() => { mounted.current = true; return () => { mounted.current = false } }, [])
   type Phase = 'idle' | 'editing' | 'composing' | 'blur-pending'
   const inputRef = useRef<HTMLInputElement>(null)
   const currentRef = useRef({
@@ -1180,6 +1260,8 @@ export function FontFamilyPicker({ value, placeholder, onCommit }: {
     staleNotified: boolean
     onCommit: (value: string) => void | Promise<void>
     pending?: Promise<boolean>
+    failure?: PropertyCommitFailure
+    failureEdited?: boolean
   }>({
     phase: 'idle',
     bindingKey: currentBindingKey,
@@ -1189,7 +1271,7 @@ export function FontFamilyPicker({ value, placeholder, onCommit }: {
     onCommit,
   })
   const stale = sessionRef.current.phase !== 'idle' && (sessionRef.current.bindingKey !== currentBindingKey
-    || (value !== sessionRef.current.baseline && value !== sessionRef.current.draft))
+    || (value !== sessionRef.current.baseline && value !== sessionRef.current.draft && value !== sessionRef.current.failure?.value))
 
   useLayoutEffect(() => {
     const session = sessionRef.current
@@ -1212,7 +1294,7 @@ export function FontFamilyPicker({ value, placeholder, onCommit }: {
     const session = sessionRef.current
     const current = currentRef.current
     return session.phase !== 'idle' && (session.bindingKey !== current.bindingKey
-      || (current.value !== session.baseline && current.value !== session.draft))
+      || (current.value !== session.baseline && current.value !== session.draft && current.value !== session.failure?.value))
   }
 
   const rejectStale = (): boolean => {
@@ -1249,6 +1331,9 @@ export function FontFamilyPicker({ value, placeholder, onCommit }: {
     session.draft = current.value
     session.staleNotified = false
     session.onCommit = current.onCommit
+    session.failure = undefined
+    session.failureEdited = false
+    session.pending = undefined
     setDraft(current.value)
     resumeRequired.current = false
     setCommitError('')
@@ -1277,9 +1362,12 @@ export function FontFamilyPicker({ value, placeholder, onCommit }: {
     ))
     : availableFonts
 
-  const commit = (candidate = sessionRef.current.draft, endSession = false) => {
+  const commit = (candidate = sessionRef.current.draft, explicit = false): boolean | Promise<boolean> => {
     if (propertyDraftSuspended(sessionRef.current.bindingKey)) return false
     if (sessionRef.current.pending) return sessionRef.current.pending
+    if (sessionRef.current.failure && !explicit) return false
+    const ownedFailure = sessionRef.current.failure
+    if (ownedFailure && (ownedFailure.bindingKey !== currentRef.current.bindingKey || ownedFailure.bindingKey !== sessionRef.current.bindingKey || ownedFailure.label !== '字体' || ownedFailure.kind !== 'text')) { setCommitError('字体草稿对应的字段已经改变，请返回原字段后处理。'); return false }
     if (resumeRequired.current) { setCommitError('恢复的输入法草稿尚未完成，请继续编辑后再应用。'); return false }
     if (rejectStale()) return false
     const next = candidate.trim()
@@ -1292,33 +1380,93 @@ export function FontFamilyPicker({ value, placeholder, onCommit }: {
     session.draft = next
     const changed = next !== session.baseline
     const finish = () => {
-      session.baseline = next; session.staleNotified = false; setCommitError('')
+      session.failure = undefined; session.failureEdited = false; session.baseline = next; session.staleNotified = false; setCommitError('')
       if (session.draft === next && session.phase !== 'composing' && session.phase !== 'blur-pending') session.phase = 'idle'
       setInputEpoch(epoch => epoch + 1); return session.phase === 'idle'
     }
-    const fail = (error: unknown) => { setCommitError(error instanceof Error ? error.message : String(error)); return false }
+    const fail = (error: unknown) => {
+      if (isCourseComponentInputFailure(error)) { session.failure = { error, value: next, bindingKey: session.bindingKey, label: '字体', kind: 'text' }; session.failureEdited = false }
+      setCommitError(error instanceof Error ? error.message : String(error)); return false
+    }
     try {
-      const result = changed ? session.onCommit(next) : undefined
+      const failure = session.failure
+      if (failure) session.failureEdited = false
+      const result = failure ? failure.error.resolveInput('retry').then(outcome => {
+        if (outcome === 'pending') { setCommitError(failure.error.message); return false }
+        if (session.failure !== failure) return false
+        if (!mounted.current || session.bindingKey !== currentRef.current.bindingKey || propertyDraftSuspended(session.bindingKey)) return false
+        if (outcome === 'applied') {
+          session.failure = undefined
+          session.baseline = failure.value
+          if (session.draft !== next || next !== failure.value) { setCommitError(''); setInputEpoch(epoch => epoch + 1); return false }
+          return true
+        }
+        if (session.draft !== next || rejectStale()) return false
+        session.failure = undefined
+        if (next === session.baseline) return true
+        return Promise.resolve(currentRef.current.onCommit(next)).then(() => true)
+      }) : changed ? session.onCommit(next) : undefined
       if (!result) return finish()
-      const pending = Promise.resolve(result).then(() => { session.pending = undefined; return finish() }, error => { session.pending = undefined; return fail(error) })
+      const pending = Promise.resolve(result).then(applied => { if (session.pending !== pending) return true; session.pending = undefined; return applied === false ? false : finish() }, error => { if (session.pending !== pending) return false; session.pending = undefined; return fail(error) })
       session.pending = pending; return pending
     } catch (error) { return fail(error) }
   }
 
+  const cancel = () => {
+    const session = sessionRef.current
+    if (session.pending) return
+    const failure = session.failure
+    if (!failure) { rebaseCurrent(); return }
+    if (failure.bindingKey !== currentRef.current.bindingKey || failure.bindingKey !== session.bindingKey || failure.label !== '字体' || failure.kind !== 'text') { setCommitError('字体草稿对应的字段已经改变，请返回原字段后处理。'); return }
+    const raw = session.draft
+    const pending = failure.error.resolveInput('cancel').then(outcome => {
+      if (outcome === 'pending') { setCommitError(failure.error.message); return false }
+      if (session.failure !== failure) return false
+      if (!mounted.current || session.bindingKey !== currentRef.current.bindingKey || propertyDraftSuspended(session.bindingKey)) return false
+      session.failure = undefined
+      if (session.draft !== raw) { setCommitError(''); return false }
+      rebaseCurrent()
+      return true
+    }, error => { setCommitError(error instanceof Error ? error.message : String(error)); return false })
+      .then(result => { if (session.pending === pending) session.pending = undefined; return result })
+    session.pending = pending
+  }
   usePropertyDraftFlush(() => {
     const session = sessionRef.current
     if (session.pending) return session.pending
     if (session.phase === 'composing' || session.phase === 'blur-pending') return false
     return session.phase === 'idle' ? true : commit()
   }, {
-    hasDirty: () => resumeRequired.current || Boolean(sessionRef.current.pending) || sessionRef.current.draft !== sessionRef.current.baseline
+    hasDirty: () => resumeRequired.current || Boolean(sessionRef.current.pending) || Boolean(sessionRef.current.failure) || sessionRef.current.draft !== sessionRef.current.baseline
       || sessionRef.current.phase === 'composing' || sessionRef.current.phase === 'blur-pending',
+    inFlight: () => sessionRef.current.pending,
+    commitFailure: () => sessionRef.current.failure,
     readDraft: () => ({ bindingKey: sessionRef.current.bindingKey, label: '字体', kind: 'text', raw: sessionRef.current.draft,
       baseline: sessionRef.current.baseline, composing: resumeRequired.current || sessionRef.current.phase === 'composing' || sessionRef.current.phase === 'blur-pending' }),
-    restoreDraft: record => {
+    restoreDraft: (record, resume) => {
       sessionRef.current.phase = 'editing'; sessionRef.current.bindingKey = record.bindingKey
       sessionRef.current.baseline = record.baseline ?? value; sessionRef.current.draft = record.raw
       resumeRequired.current = record.composing; setDraft(record.raw)
+      const sameSession = resume?.readDraft()?.bindingKey === currentBindingKey
+      const adoptFailure = () => {
+        const failure = sameSession ? resume?.commitFailure?.() : undefined
+        sessionRef.current.failure = failure?.bindingKey === currentBindingKey && failure.label === '字体' && failure.kind === 'text' ? failure : undefined
+        if (sessionRef.current.failure) setCommitError(sessionRef.current.failure.error.message)
+      }
+      adoptFailure()
+      if (sameSession && resume?.pending) {
+        const pending = resume.pending.then(result => {
+          if (sessionRef.current.pending !== pending) return result
+          sessionRef.current.pending = undefined
+          adoptFailure()
+          const previous = resume.readDraft()
+          if (previous?.baseline !== undefined) sessionRef.current.baseline = previous.baseline
+          if (result && sessionRef.current.draft === sessionRef.current.baseline) sessionRef.current.phase = 'idle'
+          setInputEpoch(epoch => epoch + 1)
+          return sessionRef.current.phase === 'idle' && !sessionRef.current.failure
+        })
+        sessionRef.current.pending = pending
+      }
     },
   })
 
@@ -1359,7 +1507,7 @@ export function FontFamilyPicker({ value, placeholder, onCommit }: {
           sessionRef.current.phase = 'blur-pending'
           return
         }
-        commit(sessionRef.current.draft, true)
+        commit(sessionRef.current.draft, Boolean(sessionRef.current.failureEdited))
       }}
     >
       <label htmlFor="text-font-family">字体</label>
@@ -1380,7 +1528,7 @@ export function FontFamilyPicker({ value, placeholder, onCommit }: {
               : undefined
           }
           value={draft}
-          aria-invalid={stale || undefined}
+          aria-invalid={stale || Boolean(commitError) || undefined}
           title={stale ? '字体草稿对应的编辑目标已经改变，请按 Esc 放弃草稿后重试。' : undefined}
           placeholder={placeholder}
           spellCheck={false}
@@ -1395,6 +1543,7 @@ export function FontFamilyPicker({ value, placeholder, onCommit }: {
             resumeRequired.current = false
             if (sessionRef.current.phase === 'idle') beginSession()
             const next = event.target.value
+            if (sessionRef.current.failure) sessionRef.current.failureEdited = true
             sessionRef.current.draft = next
             setDraft(next)
             setQueryDirty(true)
@@ -1410,17 +1559,20 @@ export function FontFamilyPicker({ value, placeholder, onCommit }: {
           }}
           onCompositionEnd={(event) => {
             if (rejectStale()) {
-              rebaseCurrent()
+              sessionRef.current.phase = 'editing'
+              sessionRef.current.draft = event.currentTarget.value
+              setDraft(event.currentTarget.value)
               return
             }
             const session = sessionRef.current
             const next = event.currentTarget.value
             const shouldCommit = session.phase === 'blur-pending'
+            if (session.failure && next !== session.draft) session.failureEdited = true
             session.phase = 'editing'
             session.draft = next
             setDraft(next)
             setInputEpoch(epoch => epoch + 1)
-            if (shouldCommit) commit(next, true)
+            if (shouldCommit) commit(next, Boolean(session.failureEdited))
           }}
           onKeyDown={(event) => {
             if (
@@ -1450,16 +1602,7 @@ export function FontFamilyPicker({ value, placeholder, onCommit }: {
               }
             } else if (event.key === 'Escape') {
               event.preventDefault()
-              if (rejectStale()) rebaseCurrent()
-              else {
-                const session = sessionRef.current
-                session.draft = session.baseline
-                session.staleNotified = false
-                session.phase = 'idle'
-                setDraft(session.baseline)
-                resumeRequired.current = false
-                setCommitError('')
-              }
+              cancel()
               setOpen(false)
               setQueryDirty(false)
               event.currentTarget.blur()

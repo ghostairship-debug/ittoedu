@@ -1,3 +1,4 @@
+import { testContainerInstance } from '../helpers/glxWorkFixture'
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/react'
 import { afterEach, expect, it, vi } from 'vitest'
@@ -33,7 +34,7 @@ it('commits the real rich field with Ctrl/Meta Enter, blocks IME and preserves t
     project.definitions[TEXT_DEFINITION.id] = TEXT_DEFINITION
     project.instances.text = { id: 'text', definitionId: TEXT_DEFINITION.id, data: JSON.parse(JSON.stringify(createTextComponentData('原文'))),
       frame: { transform: [1, 0, 0, 1, 20, 20], width: 300, height: 80 } }
-    project.surfaces[0]!.childIds.push('text')
+    testContainerInstance(project, 0).childIds.push('text')
     const snapshot = await host.internalAPI.create({ kind: 'course-v10', project, resources: { assets: {}, components: {} } }, 'shortcut.h5lesson')
     const unavailable = async (): Promise<never> => { throw new Error('Outside shortcut fixture') }
     const api: DocumentHostAPI = { ...host.internalAPI, bootstrapCourse: async () => snapshot, subscribe: host.subscribeEvents.bind(host),

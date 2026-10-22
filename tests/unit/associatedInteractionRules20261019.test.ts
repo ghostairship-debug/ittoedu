@@ -1,4 +1,6 @@
 // @vitest-environment node
+import { componentSurfaces } from '../../src/shared/contracts/component-platform/project'
+import { testContainerInstance } from '../helpers/glxWorkFixture'
 import { expect, it } from 'vitest'
 import { createBlankCourseProjectV10 } from '../../src/core/course/createCourseProjectV10'
 import { duplicateSurfaceEdits } from '../../src/core/course/courseSurfaceStructure'
@@ -15,12 +17,12 @@ import type { InteractionRule } from '../../src/shared/interactionTypes'
 const resources = { assets: {}, components: {} }
 const data = (rules: readonly InteractionRule[]) => JSON.parse(JSON.stringify({ rules })) as JsonValue
 function fixture() {
-  const project = createBlankCourseProjectV10('Associated rules'), surfaceId = project.surfaces[0].id
+  const project = createBlankCourseProjectV10('Associated rules'), surfaceId = componentSurfaces(project)[0].id
   project.definitions.card = { id: 'card', role: 'content', implementation: { kind: 'source', language: 'javascript', source: 'export default {}' } }
   project.definitions[INTERACTIONS_DEFINITION.id] = INTERACTIONS_DEFINITION
   project.instances.card = { id: 'card', definitionId: 'card', data: { prose: 'card is authored text' } }
   project.instances.global = { id: 'global', definitionId: 'card', data: { prose: 'shared background' }, visibility: { mode: 'include', surfaceIds: [surfaceId] } }
-  project.surfaces[0].childIds = ['card']
+  testContainerInstance(project, 0).childIds = ['card']
   const click: InteractionRule = { id: 'click', enabled: true, trigger: { type: 'node.click', nodeId: 'card' }, conditions: [],
     actions: [{ id: 'jump', start: 'after-previous', delayMs: 0, action: { type: 'scene.go', sceneId: surfaceId } }] }
   const shared: InteractionRule = { id: 'shared-event', enabled: true, trigger: { type: 'scene.enter' }, conditions: [],
@@ -69,7 +71,7 @@ it('duplicates a page and its project-owned rule family in one History step, wit
   if (snapshot.model.kind !== 'course-v10') throw new Error('Expected course')
   const next = snapshot.model.project, copiedId = plan.ids.get('card')!
   expect(snapshot.undoDepth).toBe(1)
-  expect(next.surfaces[1].childIds).toEqual([copiedId])
+  expect(componentSurfaces(next)[1].childIds).toEqual([copiedId])
   const copiedClick = interactionRules(next.instances['project-click']).find(rule => rule.trigger.type === 'node.click' && rule.trigger.nodeId === copiedId)!
   expect(copiedClick.actions[0].action).toEqual({ type: 'scene.go', sceneId: plan.surfaceId })
   expect(interactionRules(next.instances['project-completed'])[1].trigger).toEqual({ type: 'animation.completed', actionId: copiedClick.actions[0].id })
@@ -102,14 +104,14 @@ it('copies owned event seeds and their state-only project completion chains thro
     actions: [{ id: id + '-step', start: 'after-previous', delayMs: 0, action: { type: 'scene.next' } }] })
   project.instances.event = { id: 'event', definitionId: INTERACTIONS_DEFINITION.id, data: data([event('base-event-step')]),
     attachments: [{ instanceId: 'event', target: { kind: 'surface', surfaceId } }] }
-  project.surfaces[0].childIds.push('event')
-  project.surfaces[0].presentation = { states: [{ id: 'answer', title: 'Answer', overrides: { event: { data: data([event('state-event-step')]) } } }] }
+  testContainerInstance(project, 0).childIds.push('event')
+  testContainerInstance(project, 0).container.presentation = { states: [{ id: 'answer', title: 'Answer', overrides: { event: { data: data([event('state-event-step')]) } } }] }
   const originalFollowers = [follower('base-follower', 'base-event-step'), follower('state-follower', 'state-event-step')]
   project.instances.followers = { id: 'followers', definitionId: INTERACTIONS_DEFINITION.id, data: data(originalFollowers), attachments: [{ instanceId: 'followers', target: { kind: 'project' } }] }
   project.global.underlay.push('followers')
   const page = duplicateSurfaceEdits(project, surfaceId)
   const next = applyComponentOperation(project, captureComponentOperation(project, page.edits, page.readPaths))
-  const copied = next.surfaces.find(surface => surface.id === page.surfaceId)!, state = copied.presentation!.states[0]
+  const copied = componentSurfaces(next).find(surface => surface.id === page.surfaceId)!, state = copied.presentation!.states[0]
   const effective = resolveComponentPresentation(next, copied.id, state.id)
   const stateEvent = interactionRules(effective.instances[page.ids.get('event')!])[0]
   const followed = interactionRules(effective.instances.followers).filter(rule => !originalFollowers.some(original => original.id === rule.id))
@@ -119,9 +121,9 @@ it('copies owned event seeds and their state-only project completion chains thro
   const extracted = extractComponentLibraryEntry(project, resources, { id: 'page-entry', title: 'Page', surfaceIds: [surfaceId], kind: 'page' }).entry
   expect(interactionRules(extracted.example.instances['project-click']).map(rule => rule.id)).toEqual(['click'])
   expect(interactionRules(extracted.example.instances.followers).map(rule => rule.id)).toEqual(['base-follower'])
-  const destination = createBlankCourseProjectV10('Destination'), destinationId = destination.surfaces[0].id
+  const destination = createBlankCourseProjectV10('Destination'), destinationId = componentSurfaces(destination)[0].id
   const insertion = prepareComponentLibraryInsertion(destination, extracted, { container: { kind: 'surface', surfaceId: destinationId }, index: 0 })
-  const inserted = applyComponentOperation(destination, insertion.command), insertedPage = inserted.surfaces[1]
+  const inserted = applyComponentOperation(destination, insertion.command), insertedPage = componentSurfaces(inserted)[1]
   const insertedState = resolveComponentPresentation(inserted, insertedPage.id, insertedPage.presentation!.states[0].id)
   const insertedEvent = interactionRules(insertedState.instances[insertion.identities.instances.get('event')!])[0]
   const insertedFollowers = interactionRules(insertedState.instances[insertion.identities.instances.get('followers')!])
@@ -134,10 +136,10 @@ it('inserts an object library project program into the actual project owner', ()
   const { project } = fixture()
   const entry = extractComponentLibraryEntry(project, resources, { id: 'objects', title: 'Card', rootIds: ['card'] }).entry
   const destination = createBlankCourseProjectV10('Destination')
-  const insertion = prepareComponentLibraryInsertion(destination, entry, { container: { kind: 'surface', surfaceId: destination.surfaces[0].id }, index: 0 })
+  const insertion = prepareComponentLibraryInsertion(destination, entry, { container: { kind: 'surface', surfaceId: componentSurfaces(destination)[0].id }, index: 0 })
   const inserted = applyComponentOperation(destination, insertion.command)
   expect(owningContainer(inserted, insertion.identities.instances.get('project-click')!)).toEqual({ kind: 'global', plane: 'underlay' })
-  expect(owningContainer(inserted, insertion.identities.instances.get('card')!)).toEqual({ kind: 'surface', surfaceId: destination.surfaces[0].id })
+  expect(owningContainer(inserted, insertion.identities.instances.get('card')!)).toEqual({ kind: 'surface', surfaceId: componentSurfaces(destination)[0].id })
 })
 
 it('keeps an object-owned click program attached to its copied object', () => {

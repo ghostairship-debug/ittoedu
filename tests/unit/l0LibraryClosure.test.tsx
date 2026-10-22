@@ -15,12 +15,14 @@ import type { EditorStoreKernel } from '../../src/renderer/store/editorStoreKern
 import type { DocumentModel } from '../../src/shared/workbench/document'
 
 afterEach(cleanup)
-const blank = (id: string): CourseProjectV10 => ({ schemaVersion: 10, id, revision: 0, title: id,
-  definitions: {}, instances: {}, assets: {}, surfaces: [{ id: 'page', kind: 'slide', title: 'Page', childIds: [] }],
+const blank = (id: string): CourseProjectV10 => ({ schemaVersion: 11, id, revision: 0, title: id,
+  definitions: { slide: { id: 'slide', role: 'content', implementation: { kind: 'builtin', key: 'guoling.container.slide' } } },
+  instances: { page: { id: 'page', definitionId: 'slide', name: 'Page', data: {}, childIds: [], container: { kind: 'slide' } } },
+  assets: {}, rootIds: ['page'], entry: { rootInstanceId: 'page' },
   global: { underlay: [], overlay: [] } })
 const catalogEntry: AvailableComponentCatalogPackage = { packageId: 'library-card', version: '1.0.0', name: '卡片',
   description: '含图像', subject: [], schoolStage: [], tags: [], packagePath: 'card.h5component', thumbnailPath: '',
-  sha256: '', componentSchemaVersion: 1, runtimeApiVersion: 5, renderMode: 'dom', supportedScopes: ['scene'],
+  sha256: '', componentSchemaVersion: 2, runtimeApiVersion: 5, renderMode: 'dom', supportedScopes: ['scene'],
   quality: 'candidate', maintainer: '', verifiedCases: [], sourceId: 'personal', sourceLabel: '我的资产库', sourceTrust: 'trusted' }
 
 it('shares declared references across rebound Web definitions and effective source overrides without requiring bytes', () => {
@@ -39,7 +41,7 @@ it('preserves missing-byte metadata in library archives, maps unresolved referen
   const original = blank('original')
   original.definitions.web = { id: 'web', role: 'content', implementation: { kind: 'builtin', key: 'guoling.web' } }
   original.instances.web = { id: 'web', definitionId: 'web', data: { html: '<img src="cw-resource:photo">', resourceBindings: { 'cw-resource:photo': 'photo' } } }
-  original.surfaces[0].childIds = ['web']
+  original.instances.page.childIds = ['web']
   original.assets.photo = { id: 'photo', path: 'assets/photo.png', filename: '原图.png', mimeType: 'image/png' }
   const extracted = extractComponentLibraryEntry(original, { assets: {}, components: {} }, { id: 'library-card', title: '卡片', rootIds: ['web'] })
   expect(extracted.diagnostics).toEqual([{ code: 'missing-asset', message: '保留了待修复的素材引用：photo' }])
@@ -64,7 +66,7 @@ it('keeps a deferred picker insertion on captured document A after browsing B an
   const source = blank('source')
   source.definitions.card = { id: 'card', role: 'content', implementation: { kind: 'builtin', key: 'fixture' } }
   source.instances.card = { id: 'card', definitionId: 'card', data: { assetId: 'picture' } }
-  source.surfaces[0].childIds = ['card']; source.assets.picture = { id: 'picture', path: 'assets/picture.png' }
+  source.instances.page.childIds = ['card']; source.assets.picture = { id: 'picture', path: 'assets/picture.png' }
   const entry = extractComponentLibraryEntry(source, { assets: { picture: new Uint8Array([1]) }, components: {} }, { id: catalogEntry.packageId, title: '卡片', rootIds: ['card'] }).entry
   const projectA = blank('A'), projectB = blank('B'), driver = new CourseV10Driver()
   const models: Record<string, DocumentModel> = { A: { kind: 'course-v10', project: projectA, resources: { assets: {}, components: {} } }, B: { kind: 'course-v10', project: projectB, resources: { assets: {}, components: {} } } }

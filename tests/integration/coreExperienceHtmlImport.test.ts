@@ -1,4 +1,6 @@
 // @vitest-environment node
+import { componentSurfaces } from '../../src/shared/contracts/component-platform/project'
+import { testContainerInstance } from '../helpers/glxWorkFixture'
 import { promises as fs } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -143,7 +145,7 @@ it('imports current opened HTML and recursive dependencies through public creati
   const before = await manual.drain()
   if (before.model.kind !== 'course-v10') throw new Error('Expected V10')
   const result = await new HtmlImportDesktopService({ documents: f.host, chooseSource: async () => f.sourcePath }).import({
-    documentId: before.documentId, epoch: before.epoch, revision: before.revision, surfaceId: before.model.project.surfaces[0]!.id, source: { kind: 'choose' },
+    documentId: before.documentId, epoch: before.epoch, revision: before.revision, surfaceId: componentSurfaces(before.model.project)[0]!.id, source: { kind: 'choose' },
   })
   expect(result?.receipt.status).toBe('applied')
   const after = await manual.drain()
@@ -183,7 +185,7 @@ it('applies current opened JS and JSON plus module and CSS dependencies through 
   expect(textFiles['entry.js']).toContain('data.message'); expect(textFiles['helper.js']).toContain('session helper')
   expect(textFiles['data.json']).toBe('{"message":"session JSON"}')
   expect(textFiles['theme.css']).toContain('nested.css'); expect(textFiles['nested.css']).toBe('.source{color:rgb(3,4,5)}')
-  const sourceInstanceId = snapshot.model.project.surfaces[0]!.childIds[0]!
+  const sourceInstanceId = componentSurfaces(snapshot.model.project)[0]!.childIds[0]!
   const dataFile = componentProjectFiles(snapshot.model.project, snapshot.model.resources).find(file => file.kind === 'data'
     && file.target?.kind === 'instance' && file.target.instanceId === sourceInstanceId)!
   await f.host.tools.execute('import', 'data-read', { name: 'project.read', input: { project, path: dataFile.path } })
@@ -207,8 +209,8 @@ it('creates independent host pages from current unsaved HTML, saves/reopens and 
   const value = (result as { data: { path: string } }).data
   const reopened = await new DocumentHostService(path.join(f.root, 'reopened')).open(value.path)
   if (reopened.model.kind !== 'course-v10') throw new Error('Expected current course format')
-  expect(reopened.model.project.surfaces.map(page => page.title)).toEqual(['当前未落盘第一课', '第二课'])
-  const contents = reopened.model.project.surfaces.map(page => page.childIds.map(id => reopened.model.kind === 'course-v10' ? (reopened.model.project.instances[id]!.data as { html: string }).html : '').join(''))
+  expect(componentSurfaces(reopened.model.project).map(page => page.title)).toEqual(['当前未落盘第一课', '第二课'])
+  const contents = componentSurfaces(reopened.model.project).map(page => page.childIds.map(id => reopened.model.kind === 'course-v10' ? (reopened.model.project.instances[id]!.data as { html: string }).html : '').join(''))
   expect(contents[0]).toContain('当前未落盘第一课'); expect(contents[0]).not.toContain('第二课')
   expect(contents[1]).toContain('第二课'); expect(contents[1]).not.toContain('当前未落盘第一课')
   expect(await fs.readFile(f.sourcePath, 'utf8')).toContain('旧第一课')
@@ -217,13 +219,13 @@ it('creates independent host pages from current unsaved HTML, saves/reopens and 
   const manualBefore = await manual.drain()
   if (manualBefore.model.kind !== 'course-v10') throw new Error('Expected current course format')
   const imported = await new HtmlImportDesktopService({ documents: f.host, chooseSource: async () => null }).import({
-    documentId: manual.documentId, epoch: manualBefore.epoch, revision: manualBefore.revision, surfaceId: manualBefore.model.project.surfaces[0]!.id,
+    documentId: manual.documentId, epoch: manualBefore.epoch, revision: manualBefore.revision, surfaceId: componentSurfaces(manualBefore.model.project)[0]!.id,
     source: { kind: 'file', path: f.sourcePath },
   })
   expect(imported?.receipt.status).toBe('applied')
   const manualAfter = await manual.drain()
   if (manualAfter.model.kind !== 'course-v10') throw new Error('Expected current course format')
-  const manualHtml = (manualAfter.model.project.instances[manualAfter.model.project.surfaces[0]!.childIds[0]!]!.data as { html: string }).html
+  const manualHtml = (manualAfter.model.project.instances[componentSurfaces(manualAfter.model.project)[0]!.childIds[0]!]!.data as { html: string }).html
   expect(manualHtml).toContain('当前未落盘第一课'); expect(manualHtml).not.toContain('旧第一课')
 })
 
@@ -234,8 +236,8 @@ it('retains one coupled program and accepts ordinary content into its explicitly
   const value = (result as { data: { path: string } }).data
   const reopened = await f.host.open(value.path)
   if (reopened.model.kind !== 'course-v10') throw new Error('Expected current course format')
-  expect(reopened.model.project.surfaces).toHaveLength(1)
-  const content = reopened.model.project.surfaces[0]!.childIds.map(id => reopened.model.kind === 'course-v10' ? (reopened.model.project.instances[id]!.data as { html: string }).html : '').join('')
+  expect(componentSurfaces(reopened.model.project)).toHaveLength(1)
+  const content = componentSurfaces(reopened.model.project)[0]!.childIds.map(id => reopened.model.kind === 'course-v10' ? (reopened.model.project.instances[id]!.data as { html: string }).html : '').join('')
   expect(content.match(/window.shared=\{count:0\}/g)).toHaveLength(1)
   const blank = await f.host.registry.create({ kind: 'course-v10', project: createBlankCourseProjectV10(), resources: { assets: {}, components: {} } }, 'blank.h5lesson')
   await f.host.tools.attachRunDocument('import', blank.documentId, true)
@@ -246,7 +248,7 @@ it('retains one coupled program and accepts ordinary content into its explicitly
   // direct bound AI content uses the same apply service and empty surface owner.
   const snapshot = await blank.drain()
   const applied = await f.host.tools.applyComponentContent('import', 'blank-content', snapshot as any, {
-    intent: 'content', target: { kind: 'container', container: { kind: 'surface', surfaceId: snapshot.model.kind === 'course-v10' ? snapshot.model.project.surfaces[0]!.id : '' } },
+    intent: 'content', target: { kind: 'container', container: { kind: 'surface', surfaceId: snapshot.model.kind === 'course-v10' ? componentSurfaces(snapshot.model.project)[0]!.id : '' } },
     source: { kind: 'html', html: '<p>无需模型补身份的第一段</p>' },
   })
   expect(file).toBeTruthy(); expect(applied.commit).toBe('committed'); expect(applied.insertedIds.length).toBeGreaterThan(0)
@@ -261,7 +263,7 @@ it('passes CSS from siblings into the existing source owner/compiler/cache witho
   await fs.writeFile(path.join(f.root, 'pixel.png'), pixel)
   const project = createBlankCourseProjectV10(), ownerId = 'source-owner'
   project.definitions.custom = { id: 'custom', role: 'content', implementation: { kind: 'source', language: 'javascript', workspace: { ownerId, entry: 'main.js' } } }
-  project.instances.custom = { id: 'custom', definitionId: 'custom', data: {} }; project.surfaces[0]!.childIds.push('custom')
+  project.instances.custom = { id: 'custom', definitionId: 'custom', data: {} }; testContainerInstance(project, 0).childIds.push('custom')
   const resources = { assets: {}, components: { [ownerId]: { 'main.js': new TextEncoder().encode('import "./styles/main.css";export default {}'), 'styles/main.css': new TextEncoder().encode('.sample{color:red}') } } }
   const file = componentProjectFiles(project, resources).find(file => file.sourceFile?.path === 'styles/main.css')!
   const input = await readComponentProjectFileInput({ from: cssPath, fileAccess: { permission: 'workspace', workspaceRoot: f.root } })
@@ -297,7 +299,7 @@ it('adopts HTML author records into the single H5 consumer with image override r
   expect(result).toMatchObject({ kind: 'read', data: { saved: true } })
   const reopened = await new DocumentHostService(path.join(f.root, 'authored-reopened')).open((result as { data: { path: string } }).data.path)
   if (reopened.model.kind !== 'course-v10') throw new Error('Expected current course format')
-  const instance = reopened.model.project.instances[reopened.model.project.surfaces[0]!.childIds[0]!]!
+  const instance = reopened.model.project.instances[componentSurfaces(reopened.model.project)[0]!.childIds[0]!]!
   const data = instance.data as { html: string; resourceBindings: Record<string, string> }
   const imported = instance.authoring!.records!
   expect(data.html).not.toContain('cw-html-authoring-consumer'); expect(data.html).not.toContain('cw-html-authoring-records')
@@ -343,7 +345,7 @@ it('runs saved nested iframe/srcdoc modules, CSS and images through the real nat
   const compilation = new InMemoryComponentCompilation(createEsbuildComponentCompiler())
   const published = await buildPublishedCourseV3({ project: reopened.model.project, assetBytes: reopened.model.resources.assets }, { compilation })
   expect(published.diagnostics).toEqual([])
-  const instance = published.payload.instances[published.payload.surfaces[0]!.childIds[0]!]!
+  const instance = published.payload.instances[componentSurfaces(published.payload)[0]!.childIds[0]!]!
   const resources = Object.fromEntries(Object.entries(reopened.model.resources.assets).map(([id, bytes]) => [id,
     `data:${reopened.model.kind === 'course-v10' ? reopened.model.project.assets[id]!.mimeType : ''};base64,${Buffer.from(bytes).toString('base64')}`]))
   const projected = resolveWebResourceBindings(instance, id => resources[id])

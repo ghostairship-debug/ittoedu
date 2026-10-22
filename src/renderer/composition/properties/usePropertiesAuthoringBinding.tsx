@@ -1,3 +1,4 @@
+import { componentSurfaces, componentContainers, componentIsLocked } from '../../../shared/contracts/component-platform/project'
 import { useRef } from 'react'
 import { backgroundImportHandler } from '../../ui/properties/SharedBackgroundProperties'
 import type { ComponentEdit } from '../../../shared/contracts/component-platform/operations'
@@ -11,7 +12,7 @@ import { parseTableData, tableCellContent } from '../../../components/table/data
 import type { TableEdit } from '../../../components/table/edit'
 import { createChartPropertiesCommands } from '../../ui/properties/chartPropertiesCommands'
 import type { AssetMeta } from '../../../shared/contracts/media-v1'
-import { useEditorStore, selectEditingScope } from '../../store/editorStore'
+import { useEditorStore } from '../../store/editorStore'
 import { projectWithSlideContentDraft } from '../../store/slices/slideAuthoringSlice'
 import { selectPropertiesAuthoringReadModel } from './PropertiesAuthoringReadModel'
 import { componentPropertiesEdits, propertiesEffectiveBackground, propertiesFeedbackTargets, propertiesText } from '../../ui/properties/componentProperties'
@@ -30,9 +31,11 @@ import { inspectComponentInputRules, configureComponentInputRules } from '../../
 import { chartDataSchema } from '../../../components/chart/data'
 import { useCourseEditorActions } from '../../documents/CourseEditorActionsContext'
 import { componentClickNavigationEdits, componentClickNavigationView } from '../../../shared/componentInteractionData'
-import { componentNavigationScene } from '../../interactions/componentInteractionAuthoring'
+import { componentWorkNavigationScenes } from '../../interactions/componentInteractionAuthoring'
 import { componentEntranceMotionEdits, componentExitMotionEdits, componentMotionPropertiesView } from '../../../shared/componentMotionAuthoring'
 import { previewComponentMotion } from '../../interactions/componentMotionPreview'
+import { interactionSelectionIdentity } from '../../documents/interactionSelection'
+import { requestAuthorFieldAction } from '../../editing/commands/objectContextMenu'
 
 const json = (value: unknown): JsonValue => JSON.parse(JSON.stringify(value)) as JsonValue
 const STALE = '属性草稿对应的编辑目标已经改变，请按 Esc 放弃草稿后重试。'
@@ -65,14 +68,19 @@ export function usePropertiesAuthoringBinding({ onReplaceImage }: { readonly onR
   const textSession = useRef<TextPropertySession | null>(null)
   const cellSession = useRef<{ key: string; cellId: string; baseline: string; baselineContent: ReturnType<typeof tableCellContent>;
     group: string; composing: boolean; sharedDraft: boolean } | null>(null)
-  const key = JSON.stringify([read.documentId, read.epoch, read.surface?.id, read.activeStateId, read.selectedInstanceIds, read.editingGlobal])
+  const key = JSON.stringify([read.documentId, read.epoch, read.rootInstanceId, read.surface?.id, read.activeStateId, read.selectedInstanceIds, read.editingGlobal,
+    interactionSelectionIdentity(read.selectedField)])
   const feedback = (value: { kind: 'error' | 'status'; message: string }) => kernel.setFeedback(value.kind === 'error'
     ? { errorMessage: value.message, statusMessage: null } : { errorMessage: null, statusMessage: value.message })
   const report = (error: unknown) => feedback({ kind: 'error', message: error instanceof Error ? error.message : String(error) })
+  const requireLiveSelection = (): void => {
+    const current = selectPropertiesAuthoringReadModel(useEditorStore.getState())
+    if (JSON.stringify([current.documentId, current.epoch, current.rootInstanceId, current.surface?.id, current.activeStateId, current.selectedInstanceIds, current.editingGlobal,
+      interactionSelectionIdentity(current.selectedField)]) !== key) throw new Error(STALE)
+  }
   const liveTarget = (): CapturedCourseTarget => {
-    const current = kernel.readView()
-    if (JSON.stringify([current.activeDocumentId, current.snapshot?.epoch, current.surfaceId, current.activeStateId, current.selectedInstanceIds, selectEditingScope(useEditorStore.getState()) === 'global']) !== key) throw new Error(STALE)
-    return kernel.captureTarget(read.documentId ?? undefined)
+    requireLiveSelection()
+    return { ...kernel.captureTarget(read.documentId ?? undefined), surfaceId: read.surface?.id ?? null, activeStateId: read.activeStateId }
   }
   const sharedDraftFor = (target: CapturedCourseTarget) => {
     const draft = useEditorStore.getState().slideContentEdit
@@ -143,6 +151,26 @@ export function usePropertiesAuthoringBinding({ onReplaceImage }: { readonly onR
     if (!instance) throw new Error('所选组件已不存在。')
     return submit(componentPropertiesEdits(instance, target.project.definitions[instance.definitionId], value), target)
   })
+  if (read.selectedField) {
+    const selected = read.selectedField
+    const instance = read.project?.instances[selected.instanceId]
+    const disabledReason = read.error ?? (instance && read.project && componentIsLocked(read.project, instance.id) ? '所选内容已锁定，请先选择整体解锁。' : null)
+    return { kind: 'author-field', draftBindingKey: key, fieldKind: selected.field.kind,
+      label: selected.field.kind === 'image' ? '所选内部图片' : '所选内部文字',
+      ownerName: instance?.name ?? (instance ? read.project?.definitions[instance.definitionId]?.title : undefined) ?? '包含它的组件',
+      disabledReason,
+      commands: {
+        edit: () => run(() => {
+          requireLiveSelection()
+          if (disabledReason) throw new Error(disabledReason)
+          if (!read.documentId || !read.epoch || !requestAuthorFieldAction({ documentId: read.documentId, epoch: read.epoch,
+            selectionIdentity: interactionSelectionIdentity(selected), action: selected.field.kind === 'image' ? 'replace-image' : 'edit' }))
+            throw new Error('当前画面无法定位所选内部内容，请回到作品中重新选择。')
+        }),
+        selectOwner: () => run(() => { requireLiveSelection(); useEditorStore.getState().selectNode(selected.instanceId) }),
+      },
+    }
+  }
   const assets: Record<string, AssetMeta> = Object.fromEntries(Object.values(read.project?.assets ?? {}).map(asset => [asset.id, {
     ...asset, filename: asset.filename ?? asset.path.split(/[\\/]/u).at(-1) ?? asset.id,
     mimeType: asset.mimeType ?? 'application/octet-stream', byteLength: asset.byteLength ?? read.resources.assets[asset.id]?.byteLength ?? 0,
@@ -328,7 +356,7 @@ export function usePropertiesAuthoringBinding({ onReplaceImage }: { readonly onR
     kind: 'slide-native', draftBindingKey: key, view: node, target: { layerItemId: selected.id },
     disabledReason: read.error, contentEditingEnabled: true, spatialMode: read.surface?.kind === 'spatial',
     frameEditingEnabled: Boolean(selected.frame), flowOrSpatial: read.surface?.kind !== 'slide', editingScopeGlobal: read.selectedIsGlobal,
-    notices: { surfaceBaseEditing: false, sceneOwner: read.surface?.kind === 'slide' && !read.selectedIsGlobal,
+    notices: { surfaceBaseEditing: false, sceneOwner: Boolean(read.surface) && !read.selectedIsGlobal,
       presentationStateName: read.surface?.presentation?.states.find(state => state.id === read.activeStateId)?.title ?? null,
       stateOverrideApplied: Boolean(read.activeStateId && read.surface?.presentation?.states.find(state => state.id === read.activeStateId)?.overrides[selected.id]) },
     videoDiagnostics: [],
@@ -343,10 +371,10 @@ export function usePropertiesAuthoringBinding({ onReplaceImage }: { readonly onR
       onOpenSource: () => run(() => { liveTarget(); useEditorStore.getState().setActiveTab('developer') }),
     } : null,
     interaction: null, globalInteraction: null,
-    clickNavigation: read.project && read.surface ? {
-      ...componentClickNavigationView({ project: read.baseProject ?? read.project, surfaceId: read.surface.id,
+    clickNavigation: read.project && (read.surface || read.rootInstanceId) ? {
+      ...componentClickNavigationView({ project: read.baseProject ?? read.project, surfaceId: read.surface?.id ?? null,
         instanceId: selected.id, activeStateId: read.activeStateId }),
-      surfaceId: read.surface.id, scenes: read.project.surfaces.map(componentNavigationScene),
+      surfaceId: read.surface?.id ?? read.rootInstanceId!, scenes: componentWorkNavigationScenes(read.project),
       onChange: action => commit(() => { const target = liveTarget(); return submit(componentClickNavigationEdits(target, action), target) }),
       onOpenProfessional: openAutomation,
     } : null,
@@ -363,7 +391,7 @@ export function usePropertiesAuthoringBinding({ onReplaceImage }: { readonly onR
       replaceImage: () => run(() => { liveTarget(); onReplaceImage() }),
       transformImage: actions?.transformImage ? async operations => { liveTarget(); await actions.transformImage!(operations) } : undefined,
       clearPresentationOverride: () => run(() => {
-        const target = liveTarget(), surface = target.project.surfaces.find(value => value.id === target.surfaceId)
+        const target = liveTarget(), surface = componentContainers(target.project).find(value => value.id === target.surfaceId)
         if (!surface?.presentation || !target.activeStateId || !target.instanceId) return
         submit(coursePresentationEdits(target.project, { kind: 'course-surface', surfaceId: surface.id }, {
           action: 'clear-object-overrides', state: target.activeStateId, objects: [target.instanceId] }), target)
@@ -396,7 +424,7 @@ export function usePropertiesAuthoringBinding({ onReplaceImage }: { readonly onR
   if (read.selectedInstanceIds.length) return { kind: 'stale-target', reason: read.error ?? '所选组件已不存在。' }
   const surface = read.surface
   if (!surface || !read.project) return { kind: 'stale-target', reason: read.error ?? '当前没有打开的课件。' }
-  const baseSurface = read.baseProject?.surfaces.find(value => value.id === surface.id) ?? surface
+  const baseSurface = (read.baseProject == null ? undefined : componentContainers(read.baseProject).find(value => value.id === surface.id)) ?? surface
   const background = baseSurface.background
   const activeState = baseSurface.presentation?.states.find(value => value.id === read.activeStateId) ?? null
   const backgroundFields = { backgroundMode: background?.mode ?? 'inherit' as const, backgroundColor: background?.color, backgroundAssetId: background?.assetId }
@@ -414,7 +442,7 @@ export function usePropertiesAuthoringBinding({ onReplaceImage }: { readonly onR
       ...surfaceSettingsEdits(target.project, surface.id, { background: { mode: 'own', assetId: id } })], target)
   })
   const changeStateBackground = (value: { backgroundColor?: string; backgroundAssetId?: string | null }, inherit?: 'color' | 'assetId') => run(() => {
-    const target = liveTarget(), current = target.project.surfaces.find(value => value.id === surface.id)
+    const target = liveTarget(), current = componentContainers(target.project).find(value => value.id === surface.id)
     if (!current?.presentation || !target.activeStateId) throw new Error('请先选择展示状态。')
     submit(coursePresentationEdits(target.project, { kind: 'course-surface', surfaceId: surface.id }, {
       action: 'background', state: target.activeStateId,
@@ -433,7 +461,7 @@ export function usePropertiesAuthoringBinding({ onReplaceImage }: { readonly onR
       stateName: activeState?.title ?? null,
       canvas: { effective: surface.designSize ?? { width: 1280, height: 720 }, inherited: !surface.designSize,
         ...(surface.kind === 'slide' ? { scope: { currentSurfaceId: surface.id,
-          pages: read.project.surfaces.filter(value => value.kind === 'slide').map(value => ({ id: value.id, label: value.title })) } } : {}) } }, runtime: null,
+          pages: componentSurfaces(read.project).filter(value => value.kind === 'slide').map(value => ({ id: value.id, label: value.title })) } } : {}) } }, runtime: null,
     commands: { updateName: title => run(() => { const target = liveTarget(); submit(surfaceSettingsEdits(target.project, surface.id, { title }), target) }),
       resizeCanvas: (designSize, options = {}) => run(() => {
         const captured = liveTarget(), target = { ...captured, activeStateId: null, editingProject: captured.project }

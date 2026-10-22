@@ -1,4 +1,5 @@
 // @vitest-environment node
+import { testContainerInstance } from '../helpers/glxWorkFixture'
 import { describe, expect, it } from 'vitest'
 import { JSDOM, VirtualConsole } from 'jsdom'
 import { browserCompatibilityTarget } from '../../src/shared/browser/browserCompatibility'
@@ -21,7 +22,7 @@ describe('offline Chrome 113 compatibility boundary', () => {
     const project = createBlankCourseProjectV10('Browser target')
     project.definitions.web = { id: 'web', role: 'content', implementation: { kind: 'builtin', key: 'guoling.html-program' } }
     project.instances.web = { id: 'web', definitionId: 'web', data: { html } }
-    project.surfaces[0]!.childIds.push('web')
+    testContainerInstance(project, 0).childIds.push('web')
     const published = await buildPublishedCourseV3({ project, assetBytes: {} }, { compilation: { compile } })
     expect(published.diagnostics).toEqual([])
     expect((project.instances.web.data as { html: string }).html).toBe(html)
@@ -51,7 +52,7 @@ describe('offline Chrome 113 compatibility boundary', () => {
   })
 
   it('shows bundle parse failures and synchronous entry/JSON failures instead of a blank page', async () => {
-    const artifact = { title: 'Compatibility', format: 'compiled-course-v1' } as CompiledCoursePlayback
+    const artifact = { title: 'Compatibility', format: 'compiled-course-v2' } as CompiledCoursePlayback
     for (const [bundle, mutate, expected] of [
       ['const =;', false, /Unexpected token/],
       ['var CoursewareCompiledPlayer={mountCompiledCourse:function(){throw new Error("entry failed")}};', false, /entry failed/],

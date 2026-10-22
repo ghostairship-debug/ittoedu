@@ -1,3 +1,4 @@
+import { createTestProjectFromLegacy } from '../helpers/glxWorkFixture'
 import { act, cleanup, fireEvent, render, within } from '@testing-library/react'
 import { expect, it, vi } from 'vitest'
 import { TextSelection } from 'prosemirror-state'
@@ -16,9 +17,9 @@ it('edits an ordinary plain cell with the real rich editor, promotes marks and s
   const table = createTableData({ rows: 1, columns: 2 })
   table.rows[0].cells[0].text = '普通单元格'
   table.rows[0].cells[1].text = '保留邻格'
-  const project: CourseProjectV10 = { schemaVersion: 10, id: 'table-rich-edit', revision: 0, title: '表格',
+  const project: CourseProjectV10 = createTestProjectFromLegacy({ schemaVersion: 10, id: 'table-rich-edit', revision: 0, title: '表格',
     definitions: { [TABLE_DEFINITION.id]: TABLE_DEFINITION }, instances: { table: { id: 'table', definitionId: TABLE_DEFINITION.id, data: JSON.parse(JSON.stringify(table)), frame: { width: 640, height: 160, transform: [1, 0, 0, 1, 0, 0] } } },
-    surfaces: [{ id: 'flow', kind: 'flow', title: '表格', childIds: ['table'] }], global: { underlay: [], overlay: [] }, assets: {} }
+    surfaces: [{ id: 'flow', kind: 'flow', title: '表格', childIds: ['table'] }], global: { underlay: [], overlay: [] }, assets: {} })
   const driver = new CourseV10Driver(), session = await DocumentSession.create({ documentId: 'doc', epoch: 'epoch', model: { kind: 'course-v10', project, resources: { assets: {}, components: {} } }, binding: { kind: 'untitled', suggestedName: 'table.h5lesson' } }, driver, { async append() {}, async save() { throw new Error('uses real Driver below') } })
   const factory = vi.spyOn(sessions, 'createLayoutEditor')
   const onEdit = vi.fn(async (edit: ComponentEdit) => {

@@ -1,5 +1,6 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react'
 import type { DocumentContextSelection } from '../../shared/document/ports'
+import type { DocumentSnapshot } from '../../shared/workbench/document'
 import { capturePlainTextSelection, workbenchSelection } from '../workbench/SelectionContextController'
 import { TextAiButton } from '../workbench/elementCards/ElementTextCards'
 import { prepareDocumentTextEdit } from '../document/documentSelectionCommands'
@@ -13,16 +14,19 @@ import { applyEditorChanges, editorText, reconcileEditorText, sourceOffset, edit
 export interface PlainTextDocumentEditorHandle {
   flush(): { ready: boolean; source: string }
   clearSelection(): void
+  revealRange(target: { revision: number; from: number; to: number }): boolean
 }
 export interface PlainTextDocumentEditorProps {
   documentId?: string
   documentEpoch?: string
+  snapshot?: DocumentSnapshot
   active?: boolean
   source: string
   revision: number
   onDraft(source: string): void
   onUndo(): void
   onRedo(): void
+  onSelectionRange?(range: { revision: number; from: number; to: number } | null): void
 }
 
 /** Plain text only: wrapping source view, no Markdown parsing or formatting toolbar. */
@@ -36,7 +40,14 @@ export const PlainTextDocumentEditor = forwardRef<PlainTextDocumentEditorHandle,
   const draft = useRef(props.source)
   const syncing = useRef(false)
   const composing = useRef(false)
-  useImperativeHandle(ref, () => ({ flush: () => ({ ready: !composing.current, source: draft.current }), clearSelection: () => {
+  useImperativeHandle(ref, () => ({ flush: () => ({ ready: !composing.current, source: draft.current }), revealRange: target => {
+    const current = view.current
+    if (!current || composing.current || target.revision !== latest.current.revision || draft.current !== latest.current.source
+      || target.from < 0 || target.to < target.from || target.to > draft.current.length) return false
+    current.dispatch({ selection: { anchor: editorOffset(draft.current, target.from), head: editorOffset(draft.current, target.to) }, scrollIntoView: true })
+    current.focus()
+    return true
+  }, clearSelection: () => {
     const editor = view.current; if (editor) editor.dispatch({ selection: { anchor: editor.state.selection.main.head } })
   } }), [])
   useEffect(() => {
@@ -63,10 +74,12 @@ export const PlainTextDocumentEditor = forwardRef<PlainTextDocumentEditorHandle,
         if (!update.selectionSet && !update.docChanged) return
         const current = update.state.selection.main, source = draft.current
         const from = sourceOffset(source, current.from), to = sourceOffset(source, current.to)
+        latest.current.onSelectionRange?.({ revision: latest.current.revision, from, to })
         const target: DocumentContextSelection | null = from === to ? null : { mode: 'source', revision: String(latest.current.revision), source, selection: null, ranges: [{ from, to, before: source.slice(from, to) }], label: '所选文字' }
         setSelection(target)
         const id = latest.current.documentId
-        if (id && latest.current.active !== false) void workbenchSelection.observe(id, latest.current.revision, snapshot => target ? capturePlainTextSelection(snapshot, target) : null, () => latest.current.active !== false && view.current === update.view)
+        if (id && latest.current.active !== false) workbenchSelection.observeSnapshot(id, latest.current.revision, latest.current.snapshot,
+          snapshot => target ? capturePlainTextSelection(snapshot, target) : null, () => latest.current.active !== false && view.current === update.view)
       }),
     ] }) })
     view.current = editor

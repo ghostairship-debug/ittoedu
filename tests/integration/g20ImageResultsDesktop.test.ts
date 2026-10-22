@@ -1,4 +1,5 @@
 // @vitest-environment node
+import { componentSurfaces } from '../../src/shared/contracts/component-platform/project'
 import { promises as fs } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -68,7 +69,7 @@ it('S14 results enforce conversation/job/resource ownership and retain real stop
 it('S14 explicit apply uses a fresh grant with one atomic History and idempotent receipt; edit keeps original and freezes current model', async () => {
   const h = await fixture()
   if (h.model.kind !== 'course-v10') throw new Error('fixture')
-  const surface = h.model.project.surfaces[0]
+  const surface = componentSurfaces(h.model.project)[0]
   const frame = { x: 812, y: 356, width: 360, height: 270 }
   const input = { type: 'apply' as const, ...h.owner, actionId: crypto.randomUUID(), resourceId: h.resourceId,
     frame,
@@ -114,7 +115,7 @@ it('S14 explicit apply uses a fresh grant with one atomic History and idempotent
 it('S14 releases deleted-conversation image cache after durable deletion while shared results and document History survive', async () => {
   const h = await fixture()
   if (h.model.kind !== 'course-v10') throw new Error('fixture')
-  const surface = h.model.project.surfaces[0]
+  const surface = componentSurfaces(h.model.project)[0]
   expect(await h.service.operate({ type: 'apply', ...h.owner, actionId: crypto.randomUUID(), resourceId: h.resourceId,
     frame: { x: 720, y: 330, width: 320, height: 240 },
     target: { documentId: h.snapshot.documentId, epoch: h.snapshot.epoch, revision: h.snapshot.revision,

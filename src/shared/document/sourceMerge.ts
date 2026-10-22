@@ -1,4 +1,55 @@
 export interface SourceEdit { from: number; to: number; text: string }
+export interface SourceRangeChange { from: number; to: number; inserted: number }
+
+/** Compose known replacements in their actual execution order. Unchanged source
+ * stays an interval in the original string; no character diff or source copy is
+ * retained. The real final string supplies replacement text and proves every
+ * preserved interval. A caller without complete facts keeps its normal fallback. */
+export function sourceEditsFromChanges(base: string, next: string, changes: readonly SourceRangeChange[]): SourceEdit[] | undefined {
+  type Piece = { from: number; to: number } | { inserted: number }
+  const length = (piece: Piece) => 'inserted' in piece ? piece.inserted : piece.to - piece.from
+  let pieces: Piece[] = base.length ? [{ from: 0, to: base.length }] : []
+  let currentLength = base.length
+  const slice = (from: number, to: number): Piece[] => {
+    const selected: Piece[] = []
+    let offset = 0
+    for (const piece of pieces) {
+      const size = length(piece), start = Math.max(from, offset), end = Math.min(to, offset + size)
+      if (start < end) selected.push('inserted' in piece ? { inserted: end - start }
+        : { from: piece.from + start - offset, to: piece.from + end - offset })
+      offset += size
+      if (offset >= to) break
+    }
+    return selected
+  }
+  for (const change of changes) {
+    if (![change.from, change.to, change.inserted].every(Number.isSafeInteger)
+      || change.from < 0 || change.to < change.from || change.to > currentLength || change.inserted < 0) return
+    pieces = [...slice(0, change.from), ...(change.inserted ? [{ inserted: change.inserted }] : []), ...slice(change.to, currentLength)]
+    currentLength += change.inserted - (change.to - change.from)
+    if (!Number.isSafeInteger(currentLength)) return
+  }
+  if (currentLength !== next.length) return
+  const edits: SourceEdit[] = []
+  let baseEnd = 0, nextEnd = 0, offset = 0
+  const replacement = (to: number, nextTo: number) => {
+    const text = next.slice(nextEnd, nextTo)
+    if (text !== base.slice(baseEnd, to)) edits.push({ from: baseEnd, to, text })
+  }
+  for (const piece of pieces) {
+    if ('inserted' in piece) { offset += piece.inserted; continue }
+    const size = length(piece)
+    if (piece.from < baseEnd || base.slice(piece.from, piece.to) !== next.slice(offset, offset + size)) return
+    replacement(piece.from, offset)
+    baseEnd = piece.to
+    offset += size
+    nextEnd = offset
+  }
+  replacement(base.length, next.length)
+  // Every output character was either checked against an unchanged original
+  // interval or taken from next, and the complete output length was checked.
+  return edits
+}
 export interface DocumentConflictHunk {
   id: string
   from: number

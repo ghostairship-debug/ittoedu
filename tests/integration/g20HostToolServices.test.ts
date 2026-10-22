@@ -1,4 +1,5 @@
 // @vitest-environment node
+import { componentSurfaces } from '../../src/shared/contracts/component-platform/project'
 import { createServer, type Server, type ServerResponse } from 'node:http'
 import { promises as fs } from 'node:fs'
 import os from 'node:os'
@@ -82,7 +83,7 @@ it('uses one catalog for real HTTP image generation/edit, decoded run-bound reso
   expect(bodies[1].images[0].image_url).toBe(`data:image/png;base64,${original.toString('base64')}`)
   expect(Buffer.from((await gateway.readImageResource('run', session.documentId, generated.resources[0].resource)).bytes)).toEqual(original)
   expect(data(await gateway.execute('run', 'status', { name: 'image.status', input: { job: result.job } })).resources[0].resource).toBe(result.resources[0].resource)
-  const owner = await gateway.issueTarget('run', session.documentId, { kind: 'course-surface', surfaceId: baseline.project.surfaces[0].id })
+  const owner = await gateway.issueTarget('run', session.documentId, { kind: 'course-surface', surfaceId: componentSurfaces(baseline.project)[0].id })
   const applied = await gateway.execute('run', 'insert', { name: 'media.insert', input: { target: owner, resource: result.resources[0].resource } })
   expect(applied).toMatchObject({ kind: 'document-operation', result: { status: 'applied' } })
   const after = session.read(); expect(after.undoDepth).toBe(1); expect(await driver.load(await driver.serialize(after.model))).toEqual(after.model)
@@ -105,7 +106,7 @@ it('prepares one image after acknowledged professional inserts while preserving 
   gateway = f.gateway
   const baseline = fixture(), session = await f.registry.create(baseline, 'stale-owner-image.h5lesson')
   await begin(gateway, session.documentId)
-  const ownerTarget = { kind: 'course-surface' as const, surfaceId: baseline.project.surfaces[0].id }
+  const ownerTarget = { kind: 'course-surface' as const, surfaceId: componentSurfaces(baseline.project)[0].id }
   const owner = await gateway.issueTarget('run', session.documentId, ownerTarget)
   const first = await gateway.execute('run', 'native-first', { name: 'object.insert', input: { target: owner, kind: 'text', text: '先写文字', x: 600, y: 500, width: 250, height: 70 } })
   expect(first).toMatchObject({ kind: 'document-operation', result: { status: 'applied' } })

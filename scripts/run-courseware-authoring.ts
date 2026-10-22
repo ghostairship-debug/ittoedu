@@ -17,7 +17,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 import { strFromU8, strToU8, Unzip, UnzipInflate, unzipSync, zipSync } from 'fflate'
 import { createTimezoneStableZipMtime } from '../src/shared/archiveTimestamp'
 import { openCourseProjectV10Archive } from '../src/core/drivers/codecs/courseProjectV10Archive'
-import { componentDefinitionBuiltinKey, isComponentVisibleAtSurface } from '../src/shared/contracts/component-platform/project'
+import { componentDefinitionBuiltinKey, componentSurface, componentSurfaces, isComponentVisibleAtSurface } from '../src/shared/contracts/component-platform/project'
 import { textComponentDataSchema } from '../src/components/text/data'
 import { frameCorners, multiplyMatrices, IDENTITY_MATRIX, type AffineMatrix } from '../src/core/components/geometry'
 
@@ -107,7 +107,7 @@ interface EntityReceipt {
 interface AuthoringReceipt {
   schemaVersion: 1
   receiptType: 'editor-authoring-session-v1'
-  protocols: { courseProject: 10; publishedCourse: 3; componentApi: 5 }
+  protocols: { courseProject: 11; publishedCourse: 4; componentApi: 5 }
   caseId: string
   runnerSha256: string
   inputs: {
@@ -157,7 +157,7 @@ const usage = [
   'Usage: npm run --silent run-courseware-authoring -- --case-dir <dir> [options]',
   '  --editor-root <dir>    editor checkout (default current directory)',
   '  --inventory <path>     case-relative inventory path',
-  '  --project <path>       case-relative Project V10 .glx or .h5lesson path',
+  '  --project <path>       case-relative Project 11 .glx or .h5lesson path (V10 read adaptation supported)',
   '  --report <path>        case-relative receipt path',
   '  --delivery-html <path> case-relative delivered HTML to byte-compare with a fresh UI export',
   '  --delivery-web-package <path> case-relative delivered web-package ZIP',
@@ -496,7 +496,7 @@ function asRecord(value: unknown): Record<string, unknown> | null {
 function projectFromArchive(bytes: Uint8Array): AuthoringProjectProjection {
   const { project } = openCourseProjectV10Archive(bytes)
   const scenes: ProjectScene[] = []
-  for (const surface of project.surfaces) {
+  for (const surface of componentSurfaces(project)) {
     if (surface.kind !== 'slide') continue
     const nodes: ProjectNode[] = []
     const visit = (ids: readonly string[], parent: AffineMatrix, parentVisible: boolean) => {
@@ -526,8 +526,8 @@ function projectFromArchive(bytes: Uint8Array): AuthoringProjectProjection {
       })) })),
     } : undefined })
   }
-  if (!scenes.length) throw new Error('Project V10 has no Slide surfaces')
-  return { schemaVersion: 10, scenes }
+  if (!scenes.length) throw new Error('This professional Slide-authoring case requires a Slide container')
+  return { schemaVersion: project.schemaVersion, scenes }
 }
 
 function resourceFingerprint(bytes: Uint8Array): string {
@@ -573,8 +573,8 @@ export function withInitialState(
   const projectBytes = archive['project.json']
   if (!projectBytes) throw new Error('Project archive has no project.json')
   const { project } = openCourseProjectV10Archive(bytes)
-  const surface = project.surfaces.find(candidate => candidate.kind === 'slide' && candidate.id === sceneId)
-  const presentation = surface?.presentation
+  const surface = componentSurface(project, sceneId)
+  const presentation = surface?.kind === 'slide' ? project.instances[sceneId].container?.presentation : undefined
   if (!presentation?.states.some(candidate => candidate.id === stateId)) {
     throw new Error(`observation state is absent from Project: ${sceneId}/${stateId}`)
   }
@@ -1080,7 +1080,7 @@ async function execute(options: Options): Promise<AuthoringReceipt> {
           binding: entity.binding,
           carrier: 'component-surface-text',
           status: 'unsupported',
-          errors: ['only Project V10 professional text instances are supported by editor-authoring-session-v1'],
+          errors: ['only current component-work professional text instances are supported by editor-authoring-session-v1'],
         })
         continue
       }
@@ -1096,7 +1096,7 @@ async function execute(options: Options): Promise<AuthoringReceipt> {
         const scene = project.scenes[sceneIndex]
         const node = scene?.nodes.find((candidate) => candidate.id === target.nodeId)
         if (sceneIndex < 0 || !node || node.type !== 'text' || typeof node.text !== 'string') {
-          throw new Error('professional text binding is absent from the current Project V10')
+          throw new Error('professional text binding is absent from the current component work')
         }
         const probe = `${node.text} [probe-${sha256(target.binding).slice(0, 8)}]`
         const observedStateId = observationStateId(scene, node)
@@ -1170,7 +1170,7 @@ async function execute(options: Options): Promise<AuthoringReceipt> {
         if (outputHash === beforeSaveHash) throw new Error('Editor save did not change the temporary Project bytes')
         const savedBytes = await readFile(probeProject)
         const savedNode = projectFromArchive(savedBytes).scenes.find(value => value.id === target.sceneId)?.nodes.find(value => value.id === target.nodeId)
-        if (savedNode?.text !== probe) throw new Error('Editor save did not persist the bound Project V10 content')
+        if (savedNode?.text !== probe) throw new Error('Editor save did not persist the bound component-work content')
         if (resourceFingerprint(savedBytes) !== inputResources) throw new Error('Editor authoring changed unrelated original resource bytes')
         receipt.resourcesPreserved = true
         receipt.saved = true
@@ -1237,7 +1237,7 @@ async function execute(options: Options): Promise<AuthoringReceipt> {
     schemaVersion: 1,
     receiptType: 'editor-authoring-session-v1',
     caseId,
-    protocols: { courseProject: 10, publishedCourse: 3, componentApi: 5 },
+    protocols: { courseProject: 11, publishedCourse: 4, componentApi: 5 },
     runnerSha256,
     inputs: actualHashes,
     editorBuild,

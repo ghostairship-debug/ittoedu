@@ -3,9 +3,10 @@ import { componentBackgroundPaintStyles } from '../../shared/componentBackground
 
 /** A background paints below the host's existing content and has no author identity. */
 export function ComponentBackgroundPaint({ background, resolveAsset }: {
-  background: ComponentBackground
+  background: ComponentBackground | null | undefined
   resolveAsset(id: string): string | undefined
 }) {
+  if (!background) return null
   return <div data-component-background-paint="" aria-hidden="true"
     style={{ position: 'absolute', inset: 0, pointerEvents: 'none', overflow: 'hidden', zIndex: -1 }}>
     {componentBackgroundPaintStyles(background, resolveAsset).map((style, index) => <div key={index}

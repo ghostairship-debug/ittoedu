@@ -1,3 +1,4 @@
+import { testContainerInstance } from '../helpers/glxWorkFixture'
 // @vitest-environment node
 import { expect, it } from 'vitest'
 import { createBlankCourseProjectV10 } from '../../src/core/course/createCourseProjectV10'
@@ -16,7 +17,7 @@ function fixture() {
   const project = createBlankCourseProjectV10('内部编辑')
   project.definitions[WEB_DEFINITION.id] = WEB_DEFINITION
   project.instances.web = { id: 'web', definitionId: WEB_DEFINITION.id, data: { html: '<div id="root"></div>' } }
-  project.surfaces[0].childIds = ['web']
+  testContainerInstance(project, 0).childIds = ['web']
   return project
 }
 it('saves a first internal text edit with its local binding and reopens the same author value', () => {

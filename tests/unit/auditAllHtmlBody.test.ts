@@ -1,3 +1,5 @@
+import { componentSurfaces } from '../../src/shared/contracts/component-platform/project'
+import { createTestProjectFromLegacy, testContainerInstance } from '../helpers/glxWorkFixture'
 import { describe, expect, it } from 'vitest'
 import { parseFlowHtml, alignFlowBlocks, blockHtml } from '../../src/shared/document/html'
 import { applyComponentOperation, captureComponentOperation } from '../../src/core/drivers/courseV10Operations'
@@ -18,8 +20,8 @@ import { TABLE_DEFINITION } from '../../src/components/table/adapters'
 import { flowInlineStyleDefaults } from '../../src/renderer/ui/flow/flowInlineStyleDefaults'
 
 const text = (content: FlowTextContent) => content.inlines.map(inline => inline.type === 'text' ? inline.text : inline.type === 'math' ? inline.latex : inline.accessibleText).join('')
-const project = (): CourseProjectV10 => ({ schemaVersion: 10, id: 'html', revision: 0, title: 'HTML', definitions: {}, instances: {},
-  surfaces: [{ id: 'flow', kind: 'flow', title: 'Flow', childIds: [] }], global: { underlay: [], overlay: [] }, assets: {} })
+const project = (): CourseProjectV10 => (createTestProjectFromLegacy({ schemaVersion: 10, id: 'html', revision: 0, title: 'HTML', definitions: {}, instances: {},
+  surfaces: [{ id: 'flow', kind: 'flow', title: 'Flow', childIds: [] }], global: { underlay: [], overlay: [] }, assets: {} }))
 const parsed = (html: string, assets: CourseProjectV10['assets'] = {}) => parseFlowHtml(html, { assets })
 function apply(p: CourseProjectV10, html: string, instanceByPath?: (path: string) => string) {
   const result = parseFlowHtml(html, { assets: p.assets, instanceByPath })
@@ -69,33 +71,33 @@ describe('R34–R36 HTML body counterexamples', () => {
   it('CA344 starts a new recoverable original only when the source changes', () => {
     const p = project(); p.definitions[IMAGE_DEFINITION.id] = IMAGE_DEFINITION
     p.assets.a = { id: 'a', path: 'assets/a.png', kind: 'image' }; p.assets.b = { id: 'b', path: 'assets/b.png', kind: 'image' }
-    p.instances.image = { id: 'image', definitionId: IMAGE_DEFINITION.id, data: createImageData('a') as any }; p.surfaces[0].childIds = ['image']
+    p.instances.image = { id: 'image', definitionId: IMAGE_DEFINITION.id, data: createImageData('a') as any }; testContainerInstance(p, 0).childIds = ['image']
     const next = apply(p, '<img src="assets/b.png">')
     expect(restoreImageOriginal(imageDataSchema.parse(next.instances.image.data)).assetId).toBe('b')
   })
   it('CA357 changes paragraph to heading in place, retaining identity and click rules', () => {
     const p = project(); p.definitions[TEXT_DEFINITION.id] = TEXT_DEFINITION
     p.instances.body = { id: 'body', definitionId: TEXT_DEFINITION.id, data: createTextComponentData('原文') as any, frame: { width: 220, height: 80, transform: [1, 0, 0, 1, 8, 9] } }
-    p.surfaces[0].childIds = ['body']
+    testContainerInstance(p, 0).childIds = ['body']
     const target = { kind: 'surface' as const, surfaceId: 'flow' }
     const withRule = applyComponentOperation(p, captureComponentOperation(p, componentRuleEdits(p, target, [{ id: 'rule', enabled: true, trigger: { type: 'node.click', nodeId: 'body' }, conditions: [], actions: [{ id: 'action', start: 'after-previous', delayMs: 0, action: { type: 'location.go', locationId: 'flow' } }] }])))
     const next = apply(withRule, '<h2>原文</h2>')
-    expect(next.surfaces[0].childIds[0]).toBe('body'); expect(next.instances.body.frame).toEqual(p.instances.body.frame)
+    expect(componentSurfaces(next)[0].childIds[0]).toBe('body'); expect(next.instances.body.frame).toEqual(p.instances.body.frame)
     expect(interactionRules(interactionBehavior(next, target))).toEqual(interactionRules(interactionBehavior(withRule, target)))
     expect(projectFlowDocument(next, 'flow').content.blocks[0].type).toBe('heading')
   })
   it('CA365 submits framed opaque objects across a section parent with their frame', () => {
     const p = project(); p.definitions.custom = { id: 'custom', title: 'Object', role: 'content', implementation: { kind: 'source', language: 'javascript', source: 'export default ()=>{}' } }
-    p.instances.object = { id: 'object', definitionId: 'custom', data: {}, frame: { width: 220, height: 140, transform: [1, 0, 0, 1, 0, 0] } }; p.surfaces[0].childIds = ['object']
+    p.instances.object = { id: 'object', definitionId: 'custom', data: {}, frame: { width: 220, height: 140, transform: [1, 0, 0, 1, 0, 0] } }; testContainerInstance(p, 0).childIds = ['object']
     const next = apply(p, '<details open><summary>节</summary><guoling-instance path="object"></guoling-instance></details>', path => path)
-    expect(next.instances[next.surfaces[0].childIds[0]].childIds).toEqual(['object']); expect(next.instances.object.frame).toEqual(p.instances.object.frame)
+    expect(next.instances[componentSurfaces(next)[0].childIds[0]].childIds).toEqual(['object']); expect(next.instances.object.frame).toEqual(p.instances.object.frame)
     const again = apply(next, '<guoling-instance path="object"></guoling-instance>', path => path)
-    expect(again.surfaces[0].childIds).toEqual(['object'])
+    expect(componentSurfaces(again)[0].childIds).toEqual(['object'])
   })
   it('CA378 maintains chart height in the existing formal frame', () => {
     const block: DocumentBlock = { id: 'chart', type: 'chart', chart: createChartData(), height: 600 }
     const next = apply(project(), blockHtml(block, { assets: {}, packageName: () => '' }))
-    const id = next.surfaces[0].childIds[0]
+    const id = componentSurfaces(next)[0].childIds[0]
     expect(next.instances[id].frame?.height).toBe(600)
     expect(projectFlowDocument(next, 'flow').content.blocks[0]).toMatchObject({ type: 'chart', height: 600 })
   })
@@ -125,7 +127,7 @@ describe('R34–R36 HTML body counterexamples', () => {
   it('CA335 deleting observed alignment and gap clears only those presentation fields', () => {
     const p = project(); p.definitions[TEXT_DEFINITION.id] = TEXT_DEFINITION
     const data = createTextComponentData('保留正文'); data.appearance.align = 'center'; data.appearance.lineSpacing = 20; data.appearance.fontSize = 37
-    p.instances.body = { id: 'body', definitionId: TEXT_DEFINITION.id, data: data as any }; p.surfaces[0].childIds = ['body']
+    p.instances.body = { id: 'body', definitionId: TEXT_DEFINITION.id, data: data as any }; testContainerInstance(p, 0).childIds = ['body']
     const next = apply(p, '<p>保留正文</p>')
     expect(textComponentDataSchema.parse(next.instances.body.data).appearance).toMatchObject({ align: 'left', fontSize: 37 })
     expect(textComponentDataSchema.parse(next.instances.body.data).appearance.lineSpacing).toBeUndefined()
@@ -138,18 +140,18 @@ describe('R34–R36 HTML body counterexamples', () => {
   it('CA290 preserves text defaults through actual PM paragraph splitting and canonical creation', () => {
     const p = project(); p.definitions[TEXT_DEFINITION.id] = TEXT_DEFINITION
     const data = createTextComponentData('ABCD'); data.appearance.fontSize = 37; data.appearance.color = '#123456'; data.appearance.bold = true
-    p.instances.body = { id: 'body', definitionId: TEXT_DEFINITION.id, data: data as any }; p.surfaces[0].childIds = ['body']
+    p.instances.body = { id: 'body', definitionId: TEXT_DEFINITION.id, data: data as any }; testContainerInstance(p, 0).childIds = ['body']
     const doc = toEditorDocument(projectFlowDocument(p, 'flow').content)
     let state = EditorState.create({ doc, selection: TextSelection.create(doc, 3) })
     expect(splitBlock(state, transaction => { state = state.apply(transaction) })).toBe(true)
     const split = fromEditorDocument(renewEditorIdentities(state.doc, () => 'right'))
     const next = applyComponentOperation(p, captureComponentOperation(p, flowDocumentEdits(p, 'flow', split.blocks)))
-    expect(next.surfaces[0].childIds).toEqual(['body', 'right'])
+    expect(componentSurfaces(next)[0].childIds).toEqual(['body', 'right'])
     expect(textComponentDataSchema.parse(next.instances.right.data).appearance).toMatchObject({ fontSize: 37, color: '#123456', bold: true })
   })
   it('CA313 commits a default three-row table without a synthetic editable header', () => {
     const p = project(); p.definitions[TABLE_DEFINITION.id] = TABLE_DEFINITION
-    p.instances.table = { id: 'table', definitionId: TABLE_DEFINITION.id, data: createTableData({ rows: 3, columns: 3 }) as any }; p.surfaces[0].childIds = ['table']
+    p.instances.table = { id: 'table', definitionId: TABLE_DEFINITION.id, data: createTableData({ rows: 3, columns: 3 }) as any }; testContainerInstance(p, 0).childIds = ['table']
     const body = projectFlowDocument(p, 'flow').content, doc = toEditorDocument(body)
     let rows = 0; doc.descendants(node => { if (node.type.name === 'table_row') rows++ })
     expect(rows).toBe(3)

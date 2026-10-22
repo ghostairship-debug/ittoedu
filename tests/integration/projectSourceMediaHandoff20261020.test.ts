@@ -1,4 +1,5 @@
 // @vitest-environment node
+import { setRootContainers, testContainerInstance } from '../helpers/glxWorkFixture'
 import { promises as fs } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -41,8 +42,8 @@ function seed() {
   project.definitions = {}; project.instances = {}; project.global = { underlay: [], overlay: [] }
   for (const definition of [WEB_DEFINITION, HTML_PROGRAM_DEFINITION, IMAGE_DEFINITION])
     project.definitions[definition.id] = structuredClone(definition)
-  project.surfaces = [{ id: 'original-page', kind: 'slide', title: '原内容', childIds: [], designSize: { width: 800, height: 600 } },
-    { id: 'copy-page', kind: 'slide', title: '源码副本', childIds: [], designSize: { width: 800, height: 600 } }]
+  setRootContainers(project, [{ id: 'original-page', kind: 'slide', title: '原内容', childIds: [], designSize: { width: 800, height: 600 } },
+    { id: 'copy-page', kind: 'slide', title: '源码副本', childIds: [], designSize: { width: 800, height: 600 } }])
   const assets = { 'audio-a': wavFixture(),
     'photo-a': encode('<svg xmlns="http://www.w3.org/2000/svg" width="30" height="20"><rect width="30" height="20" fill="red"/></svg>'),
     'photo-b': encode('<svg xmlns="http://www.w3.org/2000/svg" width="30" height="20"><rect width="30" height="20" fill="blue"/></svg>') }
@@ -124,7 +125,7 @@ it('reads an audio alias as a canonical source, edits the same program, and copi
   const html = `<!doctype html><html><head><title>Original program</title></head><body><p>Original line</p><audio controls src="cw-resource:voice"></audio><img id="picture" src="cw-resource:photo"><button id="play">Play</button><script>${script}</script>${wrapper}</body></html>`
   model.project.instances.program = { id: 'program', definitionId: HTML_PROGRAM_DEFINITION.id,
     data: { html, resourceBindings: { 'cw-resource:voice': 'audio-a', 'cw-resource:photo': 'photo-a', 'cw-resource:record-photo': 'photo-b' } }, frame: frame() }
-  model.project.surfaces[0]!.childIds = ['program']
+  testContainerInstance(model.project, 0).childIds = ['program']
   const f = await fixture(model), originalFile = instanceFile(await f.files(), 'program')
   const source = await f.read(originalFile)
   expect(source).toContain('<audio controls src="cw-resource:audio-a"></audio>')
@@ -178,7 +179,7 @@ it('normalizes each composed instance with its own effective resource bindings, 
     css: '#right{background-image:url("cw-resource:shared")}', resourceBindings: { 'cw-resource:shared': 'photo-a' } },
     authoring: { resourceBindings: { 'cw-resource:shared': 'photo-b' } } }
   model.project.instances.native = { id: 'native', definitionId: IMAGE_DEFINITION.id, data: createImageData('photo-b', 'Professional picture'), frame: frame(640) }
-  model.project.surfaces[0]!.childIds = ['group']
+  testContainerInstance(model.project, 0).childIds = ['group']
   const f = await fixture(model), files = await f.files()
   const group = instanceFile(files, 'group'), page = files.find(file => file.kind === 'page' && file.target?.kind === 'container' && file.target.container.kind === 'surface' && file.target.container.surfaceId === 'original-page')!
   for (const file of [group, page]) {
@@ -219,7 +220,7 @@ it('keeps unknown aliases and relative paths intact and diagnoses their ingestio
   model.project.instances.unknown = { id: 'unknown', definitionId: WEB_DEFINITION.id, data: { html }, frame: frame() }
   model.project.instances.other = { id: 'other', definitionId: WEB_DEFINITION.id,
     data: { html: '<img src="cw-resource:foreign">', resourceBindings: { 'cw-resource:foreign': 'photo-b' } }, frame: frame(320) }
-  model.project.surfaces[0]!.childIds = ['unknown', 'other']
+  testContainerInstance(model.project, 0).childIds = ['unknown', 'other']
   const f = await fixture(model), source = await f.read(instanceFile(await f.files(), 'unknown'))
   expect(source).toBe(html)
   expect((await f.snapshot()).revision).toBe(f.initial.revision)
@@ -246,7 +247,7 @@ it('keeps canonical project-source identity through alias collisions while exter
     model.project.instances[id] = { id, definitionId: WEB_DEFINITION.id, frame: frame(index * 320),
       data: { html, resourceBindings: { 'cw-resource:photo': 'photo-b', 'cw-resource:photo-b': 'photo-a' } } }
   }
-  model.project.surfaces[0]!.childIds = ['project-source', 'raw-source']
+  testContainerInstance(model.project, 0).childIds = ['project-source', 'raw-source']
   const f = await fixture(model), files = await f.files()
   const canonicalFile = instanceFile(files, 'project-source')
   expect(await f.read(canonicalFile)).toContain('src="cw-resource:photo-b"')

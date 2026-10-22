@@ -1,4 +1,5 @@
 // @vitest-environment node
+import { createTestProjectFromLegacy } from '../helpers/glxWorkFixture'
 import { describe, expect, it } from 'vitest'
 import { webModuleCompilationInput } from '../../src/components/web/moduleGraph'
 import { compileHtmlModules } from '../../src/main/workbench/contentApply/compilation/compileHtmlModules'
@@ -10,7 +11,7 @@ import { projectWebModuleUrls } from '../../src/components/web/resources'
 import type { CourseProjectV10 } from '../../src/shared/contracts/component-platform'
 const bytes = (source: string) => new TextEncoder().encode(source)
 const identityTransform = async (source: string) => ({ code: source, warnings: [] })
-const project = (): CourseProjectV10 => ({ schemaVersion: 10, id: 'modules', revision: 0, title: 'Modules', definitions: {}, instances: {}, surfaces: [], global: { underlay: [], overlay: [] }, assets: {} })
+const project = (): CourseProjectV10 => (createTestProjectFromLegacy({ schemaVersion: 10, id: 'modules', revision: 0, title: 'Modules', definitions: {}, instances: {}, surfaces: [], global: { underlay: [], overlay: [] }, assets: {} }))
 describe('R39/R41/R42/R87 native source counterexamples', () => {
   it('CA038 closes newly edited CSS imports through the current supplied modules', async () => {
     const result = await compileHtmlModules({ entry: 'main.js', files: { 'main.js': 'import "./theme.css";', 'theme.css': '@import "./nested.css";body{color:red}', 'nested.css': 'body{background:url(cw-resource:image)}' } }, identityTransform)

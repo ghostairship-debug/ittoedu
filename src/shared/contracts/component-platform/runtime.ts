@@ -110,7 +110,7 @@ export interface ComponentAuthorSpotInput {
   kind: 'text' | 'image'
   /** Current computed CSS for the local text tools; never persisted as author data. */
   textStyle?: Partial<Record<'font-family' | 'font-size' | 'color' | 'fill' | 'font-weight' | 'font-style'
-    | 'text-decoration-line' | 'background-color' | 'text-align' | 'line-height', string>>
+    | 'text-decoration-line' | 'background-color' | 'text-align' | 'line-height' | 'letter-spacing' | 'word-spacing' | 'text-transform' | 'width' | 'transform' | 'transform-origin', string>>
   authorKey?: string
   scope?: ComponentAuthorScope
   binding?: ComponentAuthorBinding
@@ -138,7 +138,7 @@ export interface ComponentAuthorPreviewCallbacks {
 
 /** Host-derived layout, not author metadata. Only Flow owns the natural height of a reading block. */
 export type ComponentLayoutInput =
-  | { mode: 'free-frame' | 'flow-viewport'; inlineSize: number; blockSize: number }
+  | { mode: 'free-frame' | 'flow-viewport' | 'program-viewport'; inlineSize: number; blockSize: number }
   | { mode: 'flow-content'; inlineSize: number }
 
 export interface ComponentLayoutSizeReport {

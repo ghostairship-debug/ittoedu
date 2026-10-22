@@ -1,3 +1,5 @@
+import { createTestProjectFromLegacy } from '../helpers/glxWorkFixture'
+import { testContainerInstance } from '../helpers/glxWorkFixture'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { parse } from '@babel/parser'
 import { collectComponentProjectHealth } from '../../src/core/components/componentProjectHealth'
@@ -19,8 +21,8 @@ vi.mock('@babel/parser', async importOriginal => {
 
 const source = (text: string): ComponentImplementation => ({ kind: 'source', language: 'javascript', source: text })
 const fixture = (): { project: CourseProjectV10; resources: DocumentResources } => ({
-  project: { schemaVersion: 10, id: 'health', revision: 0, title: '当前引用', definitions: {}, instances: {},
-    surfaces: [{ id: 'slide', kind: 'slide', title: '当前页', childIds: [] }], global: { underlay: [], overlay: [] }, assets: {} },
+  project: createTestProjectFromLegacy({ schemaVersion: 10, id: 'health', revision: 0, title: '当前引用', definitions: {}, instances: {},
+    surfaces: [{ id: 'slide', kind: 'slide', title: '当前页', childIds: [] }], global: { underlay: [], overlay: [] }, assets: {} }),
   resources: { assets: {}, components: {} },
 })
 
@@ -36,7 +38,7 @@ describe('current component project health', () => {
     project.definitions.helper = { id: 'helper', role: 'content', implementation: source('import "missing-import"') }
     project.definitions.builtin = { id: 'builtin', role: 'content', implementation: { kind: 'builtin', key: 'guoling.text' } }
     project.instances.a = { id: 'a', definitionId: 'entry', data: {} }
-    project.surfaces[0].childIds = ['a']
+    testContainerInstance(project, 0).childIds = ['a']
     const missing = collectComponentProjectHealth(project, resources).filter(value => value.code === 'source-dependency-missing')
     expect(missing).toHaveLength(2)
     expect(missing).toEqual(expect.arrayContaining([
@@ -52,7 +54,7 @@ describe('current component project health', () => {
       workspace: { ownerId: 'files', entry: 'entry.js' }, moduleBindings: { './live': 'missing-first', './unused': 'missing-unused' } }
     project.definitions.entry = { id: 'entry', role: 'content', implementation }
     for (const id of ['a', 'b', 'c']) project.instances[id] = { id, definitionId: 'entry', data: {} }
-    project.surfaces[0].childIds = ['a', 'b', 'c']
+    testContainerInstance(project, 0).childIds = ['a', 'b', 'c']
     resources.components.files = { 'entry.js': new TextEncoder().encode('import "./live"') }
     const findings = collectComponentProjectHealth(project, resources).filter(value => value.code === 'source-dependency-missing')
     expect(findings).toHaveLength(3)
@@ -82,7 +84,7 @@ describe('current component project health', () => {
       ...createVideoData('missing-video'), poster: { mode: 'image', time: 0, assetId: 'missing-poster' },
     } }
     project.instances.free = { id: 'free', definitionId: 'free', data: { assetId: 'arbitrary-json', originalAssetId: 'arbitrary-json' } }
-    project.surfaces[0].childIds = Object.keys(project.instances)
+    testContainerInstance(project, 0).childIds = Object.keys(project.instances).filter(id => !project.instances[id].container)
     const findings = collectComponentProjectHealth(project, resources).filter(value => value.code.endsWith('-asset-reference-missing'))
     expect(findings.map(value => value.path)).toEqual([
       ['instances', 'image', 'data', 'assetId'], ['instances', 'customImage', 'data', 'assetId'],
@@ -101,7 +103,7 @@ describe('current component project health', () => {
         source: entryText, moduleBindings: { './binding': `missing-${id}` } } }
       project.instances[id] = { id, definitionId: id, data: {} }
     }
-    project.surfaces[0].childIds = ['a', 'b']
+    testContainerInstance(project, 0).childIds = ['a', 'b']
     const findings = collectComponentProjectHealth(project, resources).filter(value => value.code === 'source-dependency-missing')
     expect(findings).toEqual([
       expect.objectContaining({ message: expect.stringContaining('missing-a'), target: expect.objectContaining({ instanceId: 'a' }) }),
@@ -120,7 +122,7 @@ describe('current component project health', () => {
         source: unfinished, moduleBindings: { './binding': `missing-${id}` } } }
       project.instances[id] = { id, definitionId: id, data: {} }
     }
-    project.surfaces[0].childIds = ['a', 'b']
+    testContainerInstance(project, 0).childIds = ['a', 'b']
     const findings = collectComponentProjectHealth(project, resources).filter(value => value.code === 'source-dependency-missing')
     expect(findings.map(value => value.message)).toEqual([
       expect.stringContaining('missing-a'), expect.stringContaining('missing-b'),

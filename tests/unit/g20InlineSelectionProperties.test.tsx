@@ -1,3 +1,4 @@
+import { appendRootContainers } from '../helpers/glxWorkFixture'
 import { CourseEditorChromeContext } from '../../src/renderer/documents/CourseEditorChromeContext'
 import { selectActiveCourseLocationId, selectSelectedNodeId, selectSelectedNodeIds, useEditorStore } from '../../src/renderer/store/editorStore'
 import { NativeSelectionContext, stepFontSize } from '../../src/renderer/workbench/NativeSelectionContext'
@@ -138,7 +139,7 @@ it('M21 quick bar edits a selected object and a legal multi-selection through ex
 it('edits the same global teacher-controller from Slide and Flow and places its bar over the visible footprint', async () => {
   const host = await createCourseDocumentHost(); await store().connectCourseDocuments(host.api)
   const project = structuredClone(store().courseView.project!)
-  project.surfaces.push({ id: 'flow', kind: 'flow', title: '讲义', childIds: [] })
+  appendRootContainers(project, { id: 'flow', kind: 'flow', title: '讲义', childIds: [] })
   await store().createCourseDocumentFrom(project)
   const documentId = store().courseView.activeDocumentId!, controllerId = project.global.overlay[0]
   Object.defineProperty(window, 'desktopAPI', { configurable: true, value: { documents: host.api } })

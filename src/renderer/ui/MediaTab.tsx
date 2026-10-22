@@ -1,3 +1,4 @@
+import { componentContainers } from '../../shared/contracts/component-platform/project'
 import {
   ImageIcon,
   Music2,
@@ -451,7 +452,7 @@ export function MediaTab({
   const addImageNode = (asset: AssetMeta, _bytes: Uint8Array) => {
     try {
       const target = captureCourseInsertionTarget(kernel), owner = target.instanceId ? owningContainer(target.project, target.instanceId) : null
-      const camera = target.project.surfaces.find(surface => surface.id === target.surfaceId)?.kind === 'spatial' && editingScope !== 'global'
+      const camera = componentContainers(target.project).find(surface => surface.id === target.surfaceId)?.kind === 'spatial' && editingScope !== 'global'
         ? useEditorStore.getState().readSpatialView(target.surfaceId ?? '', target.documentId).camera : null
       run(insertCourseLibraryAsset(kernel, asset.id,
         editingScope === 'global' ? { container: owner?.kind === 'global' ? owner : { kind: 'global', plane: 'overlay' } }
@@ -459,7 +460,7 @@ export function MediaTab({
     } catch (error) { mediaAuthoringError(kernel, error) }
   }
   const addVideoNode = addImageNode
-  const flowSession = editingScope !== 'global' && view.project?.surfaces.find(surface => surface.id === view.surfaceId)?.kind === 'flow'
+  const flowSession = editingScope !== 'global' && (view.project == null ? undefined : componentContainers(view.project).find(surface => surface.id === view.surfaceId)?.kind) === 'flow'
   const flowInsertPort = flowSession ? onFlowInsert : undefined
   const spatialPlacementDisabled = false
   const spatialPlacementDisabledReason = undefined

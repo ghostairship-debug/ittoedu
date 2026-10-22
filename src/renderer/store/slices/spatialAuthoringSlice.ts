@@ -1,3 +1,4 @@
+import { componentContainers, componentSurface } from '../../../shared/contracts/component-platform/project'
 import type { ComponentContainer, ComponentDefinition, ComponentEdit, ComponentSpatialAuthoring, ComponentSpatialPose, JsonValue } from '../../../shared/contracts/component-platform'
 import { createTextData, createFormulaData, TEXT_DEFINITION, FORMULA_DEFINITION } from '../../../components/text'
 import { defaultShapeData, SHAPE_DEFINITION, shapeDataSchema } from '../../../components/shape'
@@ -39,7 +40,8 @@ export function createSpatialAuthoringSlice(kernel: EditorStoreKernel, ports: {
   const target = (captured?: CapturedCourseTarget) => captured ?? kernel.captureTarget()
   const surfaceId = (id?: string) => id ?? kernel.readView().surfaceId ?? ''
   const read = (id = surfaceId(), documentId = kernel.readView().activeDocumentId ?? ''): SpatialSurfaceViewState => {
-    return ports.read().spatialViewStates[documentId]?.[id] ?? initialSpatialSurfaceView(kernel.readView().views.find(view => view.documentId === documentId)?.model.project.surfaces.find(surface => surface.id === id)?.spatial?.home)
+    const project = kernel.readView().views.find(view => view.documentId === documentId)?.model.project
+    return ports.read().spatialViewStates[documentId]?.[id] ?? initialSpatialSurfaceView(project ? componentSurface(project, id)?.spatial?.home : undefined)
   }
   const patchView = (id: string, patch: Partial<SpatialSurfaceViewState>, documentId = kernel.readView().activeDocumentId ?? '') => {
     const old = ports.read().spatialViewStates
@@ -51,7 +53,7 @@ export function createSpatialAuthoringSlice(kernel: EditorStoreKernel, ports: {
     kernel.setFeedback({ errorMessage: error instanceof Error ? error.message : String(error), statusMessage: null }); throw error
   })
   const insert = async (definition: ComponentDefinition, data: unknown, width: number, height: number, x?: number, y?: number) => {
-    const frozen = target(), surface = frozen.project.surfaces.find(value => value.id === frozen.surfaceId && value.kind === 'spatial')
+    const frozen = target(), surface = componentContainers(frozen.project).find(value => value.id === frozen.surfaceId && value.kind === 'spatial')
     if (!surface) throw new Error('请先选择一个空间页面')
     const view = read(surface.id, frozen.documentId), global = view.scope === 'global'
     const container: ComponentContainer = global ? { kind: 'global', plane: 'overlay' } : { kind: 'surface', surfaceId: surface.id }
@@ -97,7 +99,7 @@ export function createSpatialAuthoringSlice(kernel: EditorStoreKernel, ports: {
       const view = ports.read().spatialViewStates[input.documentId]?.[input.surfaceId]
       if (frozen.epoch !== input.epoch) throw new Error('原空间文档身份已变化，请重新观察。')
       if (visible.activeDocumentId !== input.documentId || visible.surfaceId !== input.surfaceId
-        || !frozen.project.surfaces.some(surface => surface.id === input.surfaceId && surface.kind === 'spatial') || !view?.viewport)
+        || !componentContainers(frozen.project).some(surface => surface.id === input.surfaceId && surface.kind === 'spatial') || !view?.viewport)
         throw new Error('当前空间视口尚未运行，请打开原空间视口后重试。')
       return { ...input, revision: frozen.project.revision, pose: structuredClone(view.camera),
         viewport: { ...view.viewport }, source: 'spatial-view-state' }
@@ -128,7 +130,7 @@ export function createSpatialAuthoringSlice(kernel: EditorStoreKernel, ports: {
       patchView(id, { graphSelection: selection }); if (selection) { kernel.selectInstances([], id); ports.openPropertiesTab?.() }
     },
     activateSpatialCameraFrame(id: string, frameId: string | null) {
-      const frozen = target(), surface = frozen.project.surfaces.find(surface => surface.id === id && surface.kind === 'spatial'), spatial = surface?.spatial
+      const frozen = target(), surface = componentContainers(frozen.project).find(surface => surface.id === id && surface.kind === 'spatial'), spatial = surface?.spatial
       const frame = frameId === null ? undefined : spatial?.frames.find(value => value.id === frameId)
       if (frameId && !frame) throw new Error('镜头已不存在')
       kernel.selectSurface(id, frozen.documentId)
@@ -172,7 +174,7 @@ export function createSpatialAuthoringSlice(kernel: EditorStoreKernel, ports: {
     },
     fitSpatialSessionToWorldContent(viewport?: { width: number; height: number }, id = surfaceId(), scope: 'visible' | 'all' = 'visible') {
       const project = kernel.readEditingDocument(), view = read(id)
-      const size = view.viewport ?? viewport ?? project.surfaces.find(surface => surface.id === id)?.designSize ?? { width: 1280, height: 720 }
+      const size = view.viewport ?? viewport ?? componentContainers(project).find(surface => surface.id === id)?.designSize ?? { width: 1280, height: 720 }
       patchView(id, { camera: fitSpatialComponentWorld(project, id, size, { scope, zoom: view.camera.zoom }) })
     },
     addSpatialPath(id: string, input: Omit<NonNullable<ComponentSpatialAuthoring['paths']>[number], 'id' | 'frameIds'> & { frameIds?: string[] }, captured?: CapturedCourseTarget) {
@@ -185,7 +187,7 @@ export function createSpatialAuthoringSlice(kernel: EditorStoreKernel, ports: {
     },
     deleteSpatialPath(id: string, pathId: string, captured?: CapturedCourseTarget) {
       const frozen = target(captured)
-      const wasDefault = frozen.project.surfaces.find(surface => surface.id === id)?.spatial?.defaultPathId === pathId
+      const wasDefault = componentContainers(frozen.project).find(surface => surface.id === id)?.spatial?.defaultPathId === pathId
       return apply([deleteSpatialGraphItemEdit(frozen.project, id, 'paths', pathId)], frozen,
         wasDefault ? '已删除路径，默认播放路线已回到按镜头顺序' : '已删除路径').then(result => {
         const view = read(id, frozen.documentId)

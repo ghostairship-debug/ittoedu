@@ -1,3 +1,5 @@
+import { testContainerInstance } from '../helpers/glxWorkFixture'
+import { componentSurfaces } from '../../src/shared/contracts/component-platform/project'
 import {describe,expect,it} from 'vitest'
 import {createBlankCourseProjectV10} from '@/core/course/createCourseProjectV10'
 import {applyComponentOperation,captureComponentOperation} from '@/core/drivers/courseV10Operations'
@@ -9,9 +11,9 @@ function fixture(){
  const project=createBlankCourseProjectV10('Nested author target mapping')
  project.definitions[WEB_DEFINITION.id]=WEB_DEFINITION
  project.instances.primary={id:'primary',definitionId:WEB_DEFINITION.id,data:{html:'<iframe srcdoc="<h2 id=&quot;title&quot;>Original</h2>"></iframe>'},frame:{width:640,height:360,transform:[1,0,0,1,0,0]}}
- project.surfaces[0]!.childIds=['primary']
+ testContainerInstance(project, 0).childIds=['primary']
  const model:DocumentModel={kind:'course-v10',project,resources:{assets:{},components:{}}}
- const target:CourseInstanceTarget={kind:'course-instance',surfaceId:project.surfaces[0]!.id,instanceId:'primary',stateId:null,
+ const target:CourseInstanceTarget={kind:'course-instance',surfaceId:componentSurfaces(project)[0]!.id,instanceId:'primary',stateId:null,
   authorField:{kind:'text',authorKey:'dom-title',scope:{'document:path':'pending:0:frame-key'},
    binding:{kind:'dom',path:[{tag:'body',index:1},{tag:'h2',index:0,attributes:{id:'title'}}],textIndex:0,baseline:'Original'},
    bindingStatus:'bound',fieldScope:'authoring',dataPath:['records','dom-title','overrides','text'],initialValue:'Original'}}

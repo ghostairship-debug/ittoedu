@@ -1,3 +1,4 @@
+import { createTestProjectFromLegacy, testContainerInstance } from '../helpers/glxWorkFixture'
 // @vitest-environment node
 import { afterEach, expect, it } from 'vitest'
 import { mkdtemp, rm } from 'node:fs/promises'
@@ -17,16 +18,16 @@ import { captureFlowPreparedDocumentResources,createFlowDocumentResourcePort, pr
 
 const cleanup: (() => Promise<void>)[] = []
 afterEach(async () => { for (const dispose of cleanup.splice(0).reverse()) await dispose() })
-const source: CourseProjectV10 = { schemaVersion:10,id:'source',revision:0,title:'Source',
+const source: CourseProjectV10 = createTestProjectFromLegacy({ schemaVersion:10,id:'source',revision:0,title:'Source',
   definitions:{[IMAGE_DEFINITION.id]:IMAGE_DEFINITION,code:{id:'code',role:'content',implementation:{kind:'source',language:'javascript',workspace:{ownerId:'files',entry:'main.js'},resourceBindings:{logo:'logo'}}}},
   instances:{image:{id:'image',definitionId:IMAGE_DEFINITION.id,data:JSON.parse(JSON.stringify(createImageData('logo')))},custom:{id:'custom',definitionId:'code',data:{}}},
   surfaces:[{id:'flow',kind:'flow',title:'正文',childIds:['image','custom']}],global:{underlay:[],overlay:[]},
-  assets:{logo:{id:'logo',path:'assets/logo.svg',filename:'logo.svg',mimeType:'image/svg+xml'}} }
+  assets:{logo:{id:'logo',path:'assets/logo.svg',filename:'logo.svg',mimeType:'image/svg+xml'}} })
 const sourceResources = { assets:{logo:new TextEncoder().encode('<svg>source</svg>')},components:{files:{'main.js':new TextEncoder().encode("import './part.js'; export default 1"),'part.js':new TextEncoder().encode('export const value = 2')}} }
-const original: CourseProjectV10 = {schemaVersion:10,id:'target',revision:0,title:'Target',
+const original: CourseProjectV10 = createTestProjectFromLegacy({schemaVersion:10,id:'target',revision:0,title:'Target',
   definitions:{[TEXT_DEFINITION.id]:TEXT_DEFINITION},instances:{body:{id:'body',definitionId:TEXT_DEFINITION.id,data:JSON.parse(JSON.stringify(createTextComponentData('原正文')))}},
   surfaces:[{id:'flow',kind:'flow',title:'正文',childIds:['body']}],global:{underlay:[],overlay:[]},
-  assets:{logo:{id:'logo',path:'assets/logo.svg',filename:'logo.svg',mimeType:'image/svg+xml'}}}
+  assets:{logo:{id:'logo',path:'assets/logo.svg',filename:'logo.svg',mimeType:'image/svg+xml'}}})
 const targetResources = {assets:{logo:new TextEncoder().encode('<svg>target</svg>')},components:{files:{'main.js':new TextEncoder().encode('export default 99')}}}
 const copiedSource = () => readCourseDocumentClipboardContext(JSON.parse(JSON.stringify(createCourseDocumentClipboardContext({documentId:'source-doc',project:source,resources:sourceResources,roots:['image','custom']}))))
 async function harness(initial=original) {
@@ -52,7 +53,7 @@ it('commits copied body, instances, colliding assets and private relative files 
   const snapshot = await h.service.internalAPI.read(h.a.documentId)
   if (snapshot.model.kind !== 'course-v10') throw new Error('Expected V10')
   const model = snapshot.model, image = model.project.instances[pasted.document.content.blocks[0].id], custom = model.project.instances[pasted.document.content.blocks[1].id]
-  expect(image.id).not.toBe('image'); expect(custom.id).not.toBe('custom'); expect(model.project.surfaces[0].childIds).toEqual(blocks.map(block=>block.id))
+  expect(image.id).not.toBe('image'); expect(custom.id).not.toBe('custom'); expect(testContainerInstance(model.project, 0).childIds).toEqual(blocks.map(block=>block.id))
   expect(model.resources.assets.logo).toEqual(targetResources.assets.logo)
   expect((image.data as {assetId:string}).assetId).not.toBe('logo')
   expect(model.resources.assets[(image.data as {assetId:string}).assetId]).toEqual(sourceResources.assets.logo)
@@ -74,7 +75,7 @@ it('commits copied body, instances, colliding assets and private relative files 
 it('commits prepared copied roots before an existing float without looking up a new owner in the baseline',async()=>{
   const initial=structuredClone(original)
   initial.instances.float={id:'float',definitionId:TEXT_DEFINITION.id,data:JSON.parse(JSON.stringify(createTextComponentData('浮层'))),flowPlacement:{space:'paper',plane:'overlay'},frame:{width:200,height:70,transform:[1,.2,.3,1,17,29]}}
-  initial.surfaces[0].childIds.push('float')
+  testContainerInstance(initial, 0).childIds.push('float')
   const h=await harness(initial),target=h.bridge.captureTarget()
   const port=createFlowDocumentResourcePort({target,source:copiedSource()})
   const pasted=await prepareDocumentClipboard(projectFlowDocument(source,'flow'),projectFlowDocument(initial,'flow').resources,port)
@@ -83,7 +84,7 @@ it('commits prepared copied roots before an existing float without looking up a 
   await h.bridge.editCaptured(h.bridge.capture(planned.edits,planned.target));releaseFlowPreparedResources(planned.prepared)
   const snapshot=await h.service.internalAPI.read(h.a.documentId)
   if(snapshot.model.kind!=='course-v10')throw new Error('Expected V10')
-  expect(snapshot.model.project.surfaces[0].childIds).toEqual([...blocks.map(block=>block.id),'float'])
+  expect(testContainerInstance(snapshot.model.project, 0).childIds).toEqual([...blocks.map(block=>block.id),'float'])
   expect(snapshot.model.project.instances.float).toEqual(initial.instances.float);expect(snapshot.undoDepth).toBe(1)
 })
 it('retains rejected preparations for further input and a second paste without overwriting a staged private definition',async()=>{

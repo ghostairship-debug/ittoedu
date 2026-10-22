@@ -1,3 +1,5 @@
+import { testContainerInstance, setRootContainers } from '../helpers/glxWorkFixture'
+import { componentSurfaces } from '../../src/shared/contracts/component-platform/project'
 import { createBlankCourseProjectV10 } from '../../src/core/course/createCourseProjectV10'
 import { TEXT_DEFINITION } from '../../src/components/text/adapters'
 import { createTextComponentData } from '../../src/components/text/data'
@@ -32,8 +34,8 @@ it('M04 freezes a multi-range reference independently of the next manual selecti
   current.revision++; await expect(controller.request(selected, '迟到请求')).rejects.toThrow('已改变')
   expect(sent).toHaveBeenCalledTimes(1)
   const course = createBlankCourseProjectV10('Flow selection')
-  const flow = course.surfaces[0]
-  flow.kind = 'flow'
+  setRootContainers(course, [{ ...componentSurfaces(course)[0], kind: 'flow' }])
+  const flow = testContainerInstance(course, 0)
   flow.childIds = ['body']
   course.definitions[TEXT_DEFINITION.id] = TEXT_DEFINITION
   course.instances.body = { id: 'body', definitionId: TEXT_DEFINITION.id,

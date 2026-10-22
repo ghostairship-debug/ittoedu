@@ -2,7 +2,22 @@ import { z } from 'zod'
 import { ownRecordSchema } from '../ownRecordSchema'
 import { flowDocumentRecoverySchema } from '../flowDocumentRecovery'
 import { componentOperationBatchSchema, courseProjectV10Schema, jsonValueSchema } from '../contracts/component-platform/schema'
-import type { DocumentEvent, DocumentModel, DocumentOperation, DocumentOperationResult, DocumentSnapshot } from './document'
+import type { DocumentBinding, DocumentDispatchOptions, DocumentHostEvent, DocumentKind, DocumentModel, DocumentOperation, DocumentOperationResult, DocumentSnapshot } from './document'
+export type { DocumentDispatchOptions } from './document'
+
+/** Recovery discovery is metadata. The model and its History are read only by restore. */
+export interface DocumentRecoverySummary {
+  documentId: string
+  epoch: string
+  revision: number
+  binding: DocumentBinding
+  kind: DocumentKind
+  name: string
+  dirty: boolean
+  recoverable: boolean
+  rawInputOnly?: boolean
+  recoveryUnavailable?: string
+}
 
 export interface DocumentFileObservation {
   bindingVersion: number
@@ -67,6 +82,7 @@ const operation = z.object({
   historyGroup: id.optional(),
   mutation: z.discriminatedUnion('type', [z.object({ type: z.literal('command'), command, amendHistory: z.object({ expectedTopOperationId: id }).strict().optional() }).strict(), z.object({ type: z.literal('undo'), expectedTopOperationId: id.optional() }).strict(), z.object({ type: z.literal('redo') }).strict()]),
 }).strict()
+const sourceChangeHints = z.array(z.object({ from: z.number().int().nonnegative(), to: z.number().int().nonnegative(), inserted: z.number().int().nonnegative() }).strict()).optional().catch(undefined)
 
 export const saveDirectoryContextSchema = z.object({ workspaceId: z.string().min(1).max(256), directoryEntryId: z.string().min(1).max(256) }).strict()
 export type SaveDirectoryContext = z.infer<typeof saveDirectoryContextSchema>
@@ -83,15 +99,16 @@ export const documentHostRequestSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('write-authoring-drafts'), documentId: id, epoch: id.optional(), drafts: authoringDraftWriteSchema }).strict(),
   z.object({ type: z.literal('claim-authoring-drafts'), documentId: id, epoch: id, records: z.array(authoringRecoveryClaimSchema) }).strict(),
   z.object({ type: z.literal('clear-authoring-drafts'), documentId: id }).strict(),
-  z.object({ type: z.literal('dispatch'), operation }).strict(),
+  z.object({ type: z.literal('dispatch'), operation, sourceChangeHints }).strict(),
   z.object({ type: z.literal('lookup'), documentId: id, operationId: id }).strict(),
   z.object({ type: z.literal('save'), documentId: id, path: z.string().min(1).max(32767).optional() }).strict(),
   z.object({ type: z.literal('save-dialog'), documentId: id, saveAs: z.boolean().optional(), suggestedDirectory: saveDirectoryContextSchema.optional() }).strict(),
-  z.object({ type: z.literal('observe-file'), documentId: id }).strict(),
+  z.object({ type: z.literal('observe-file'), documentId: id, knownVersion: z.string().nullable().optional() }).strict(),
   z.object({ type: z.literal('reconcile-file'), documentId: id, epoch: id, baseRevision: z.number().int().nonnegative(), bindingVersion: z.number().int().positive(), version: z.string().nullable(), choice: z.enum(['disk', 'local']), source: z.string().optional() }).strict(),
   z.object({ type: z.literal('close'), documentId: id, discardDirty: z.boolean().optional(), expected: z.object({ epoch: id, revision: z.number().int().nonnegative() }).strict().optional() }).strict(),
   z.object({ type: z.literal('close-dialog'), documentId: id, suggestedDirectory: saveDirectoryContextSchema.optional(), discardOnly: z.boolean().optional() }).strict(),
   z.object({ type: z.literal('recoverable') }).strict(),
+  z.object({ type: z.literal('recovery-summaries') }).strict(),
   z.object({ type: z.literal('restore'), documentId: id, mode: z.enum(['original', 'unbound', 'saved']).optional() }).strict(),
   z.object({ type: z.literal('discard-recovery'), documentId: id }).strict(),
 ])
@@ -109,16 +126,17 @@ export interface DocumentHostAPI {
   writeAuthoringDrafts(documentId: string, drafts: AuthoringDraftWrite, epoch?: string): Promise<void>
   claimAuthoringDrafts?(documentId: string, epoch: string, records: AuthoringRecoveryClaim[]): Promise<void>
   clearAuthoringDrafts(documentId: string): Promise<void>
-  dispatch(operation: DocumentOperation): Promise<DocumentOperationResult>
+  dispatch(operation: DocumentOperation, options?: DocumentDispatchOptions): Promise<DocumentOperationResult>
   lookup(documentId: string, operationId: string): Promise<DocumentOperationResult | null>
   save(documentId: string, path?: string): Promise<DocumentSnapshot>
   saveWithDialog(documentId: string, saveAs?: boolean, suggestedDirectory?: SaveDirectoryContext): Promise<DocumentSnapshot | null>
-  observeFile(documentId: string): Promise<DocumentFileObservation>
+  observeFile(documentId: string, knownVersion?: string | null): Promise<DocumentFileObservation>
   reconcileFile(input: ReconcileDocumentFile): Promise<DocumentSnapshot>
   close(documentId: string, discardDirty?: boolean): Promise<void>
   closeWithDialog(documentId: string, suggestedDirectory?: SaveDirectoryContext, discardOnly?: boolean): Promise<boolean>
   recoverable(): Promise<DocumentSnapshot[]>
+  recoverySummaries?(): Promise<DocumentRecoverySummary[]>
   restore(documentId: string, mode?: 'original' | 'unbound' | 'saved'): Promise<DocumentSnapshot>
   discardRecovery(documentId: string): Promise<void>
-  subscribe(listener: (event: DocumentEvent) => void): () => void
+  subscribe(listener: (event: DocumentHostEvent) => void): () => void
 }

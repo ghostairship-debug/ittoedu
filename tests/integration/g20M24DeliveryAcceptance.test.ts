@@ -1,4 +1,6 @@
 // @vitest-environment node
+import { componentSurfaces } from '../../src/shared/contracts/component-platform/project'
+import { testContainerInstance } from '../helpers/glxWorkFixture'
 // Exercises the Main delivery service and actual renderer export producer through the build port.
 // Electron IPC/preload routing and the approval UI are outside this test and remain Electron-only checks.
 import { createHash, randomUUID } from 'node:crypto'
@@ -85,10 +87,10 @@ function frozenDocuments(request: ModelRequest): Array<{
 
 function interactionProject() {
   const project = createBlankCourseProjectV10('交付验收互动课')
-  project.global.overlay = []; project.instances = {}
-  project.definitions = { [TEXT_DEFINITION.id]: structuredClone(TEXT_DEFINITION) }
-  const surface = project.surfaces[0]
-  surface.childIds = ['m24-export-trigger', 'm24-export-answer']
+  project.global.overlay = []; project.instances = { ...project.instances }
+  project.definitions = { ...project.definitions,  [TEXT_DEFINITION.id]: structuredClone(TEXT_DEFINITION)  }
+  const surface = componentSurfaces(project)[0]
+  testContainerInstance(project, 0).childIds = ['m24-export-trigger', 'm24-export-answer']
   for (const [id, text, y] of [['m24-export-trigger', '点击查看答案', 100], ['m24-export-answer', '交互已执行', 220]] as const) {
     project.instances[id] = { id, definitionId: TEXT_DEFINITION.id,
       data: JSON.parse(JSON.stringify(createTextComponentData(text))),
@@ -104,11 +106,11 @@ function interactionProject() {
 
 function managedRemoteProject(url: string) {
   const project = createBlankCourseProjectV10('远程依赖离线拒绝')
-  project.global.overlay = []; project.instances = {}; project.definitions = { [WEB_DEFINITION.id]: structuredClone(WEB_DEFINITION) }
+  project.global.overlay = []; project.instances = { ...project.instances }; project.definitions = { ...project.definitions,  [WEB_DEFINITION.id]: structuredClone(WEB_DEFINITION)  }
   project.instances['m24-remote-html'] = { id: 'm24-remote-html', definitionId: WEB_DEFINITION.id,
     data: { html: `<!doctype html><html><body><img alt="远程图" src="${url}"></body></html>` },
     frame: { width: 640, height: 360, transform: [1, 0, 0, 1, 40, 40] } }
-  project.surfaces[0].childIds = ['m24-remote-html']
+  testContainerInstance(project, 0).childIds = ['m24-remote-html']
   return project
 }
 

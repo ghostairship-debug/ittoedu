@@ -1,3 +1,4 @@
+import { setRootContainers } from '../helpers/glxWorkFixture'
 import { expect, it, vi } from 'vitest'
 import { ElementCardController } from '../../src/renderer/workbench/elementCards/elementCardController'
 import { captureSelection, captureFlowSelection, workbenchSelection } from '../../src/renderer/workbench/SelectionContextController'
@@ -57,7 +58,7 @@ it.each(['same same END', 'prefix same END'])('sends the original card baseline 
 
 it('captures a visible Flow range across two text instances through the production preparation and card send', async () => {
   const project = createBlankCourseProjectV10('continuous Flow')
-  project.surfaces[0] = { id: 'flow', kind: 'flow', title: '正文', childIds: ['first', 'second'] }
+  setRootContainers(project, [{ id: 'flow', kind: 'flow', title: '正文', childIds: ['first', 'second'] }])
   project.definitions[TEXT_DEFINITION.id] = structuredClone(TEXT_DEFINITION)
   for (const [id, source] of [['first', 'LEFT alpha'], ['second', 'bravo RIGHT']] as const) {
     project.instances[id] = { id, definitionId: TEXT_DEFINITION.id,

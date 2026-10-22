@@ -6,6 +6,7 @@ import { assertAuthorRecordBinding, prepareWebAuthoringRecordEdits } from '../..
 import { encodeAuthorSourceText, readAuthorSourceText } from './sourceAuthorText'
 import { equalComponentValue } from '../../drivers/courseV10Operations'
 import { locateHtmlAuthorRecordSource } from '../../../shared/html/htmlSourceLocator'
+import { imageDataSchema, replaceImageSource } from '../../../components/image/data'
 
 function usesRecordOwner(project: CourseProjectV10, spot: ComponentAuthorField & { instanceId: string }): boolean {
   if (!spot.authorKey || !spot.binding) return false
@@ -235,6 +236,17 @@ export function authorSpotImageEdits(project: CourseProjectV10, spot: ComponentA
     edits.push(...authorSpotEdits(project, spot, token, resources), bindings && typeof bindings === 'object' && !Array.isArray(bindings)
       ? { type: 'authoring.set', instanceId: spot.instanceId, path: ['resourceBindings', token], value: imported.meta.id }
       : { type: 'authoring.set', instanceId: spot.instanceId, path: ['resourceBindings'], value: { [token]: imported.meta.id } })
-  } else edits.push(...authorSpotEdits(project, spot, imported.meta.id, resources))
+  } else {
+    const replacementEdits = authorSpotEdits(project, spot, imported.meta.id, resources)
+    const instance = project.instances[spot.instanceId]
+    const implementation = instance.implementationOverride ?? project.definitions[instance.definitionId]?.implementation
+    if (spot.kind === 'image' && !region && spot.fieldScope !== 'authoring'
+      && spot.dataPath?.length === 1 && spot.dataPath[0] === 'assetId'
+      && implementation?.kind === 'builtin' && implementation.key === 'guoling.image') {
+      const replacement = replaceImageSource(imageDataSchema.parse(instance.data), imported.meta.id)
+      replacementEdits.push({ type: 'data.set', instanceId: instance.id, path: ['originalAssetId'], value: replacement.originalAssetId })
+    }
+    edits.push(...replacementEdits)
+  }
   return edits
 }

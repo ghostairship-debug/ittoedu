@@ -1,3 +1,5 @@
+import { componentSurfaces } from '../../src/shared/contracts/component-platform/project'
+import { testContainerInstance } from '../helpers/glxWorkFixture'
 import { act, cleanup, fireEvent, render } from '@testing-library/react'
 import { afterEach, expect, it, vi } from 'vitest'
 import { useRef, useState } from 'react'
@@ -27,10 +29,10 @@ it('CA097 textarea UTF16 selection reads scalar run styles after an emoji',()=>{
   input.focus();input.setSelectionRange(2,3);fireEvent.select(input);expect(ui.getByRole('button',{name:'加粗'})).toHaveAttribute('aria-pressed','true')
 })
 it.each([{width:600,height:120},{width:900,height:240}])('CA169 Tab append uses the actual table frame $width x $height and CA202 preserves rich content',async dimensions=>{
-  const project=createBlankCourseProjectV10(),surface=project.surfaces[0],data=createTableData({rows:3,columns:3}),last=data.rows[2].cells[2]
+  const project=createBlankCourseProjectV10(),surface=componentSurfaces(project)[0],data=createTableData({rows:3,columns:3}),last=data.rows[2].cells[2]
   const rich:FlowTextContent={inlines:[{type:'text',text:'变量',style:{bold:true}},{type:'math',formulaId:'m',latex:'x^2',accessibleText:'x平方'},{type:'text',text:'链接',link:{href:'https://example.com'}}]}
   data.rows[2].cells[2]={id:last.id,columnId:last.columnId,content:rich}
-  project.definitions[TABLE_DEFINITION.id]=TABLE_DEFINITION;project.instances.table={id:'table',definitionId:TABLE_DEFINITION.id,data:JSON.parse(JSON.stringify(data)) as JsonValue,frame:{...dimensions,transform:[1,0,0,1,0,0]}};surface.childIds=['table']
+  project.definitions[TABLE_DEFINITION.id]=TABLE_DEFINITION;project.instances.table={id:'table',definitionId:TABLE_DEFINITION.id,data:JSON.parse(JSON.stringify(data)) as JsonValue,frame:{...dimensions,transform:[1,0,0,1,0,0]}};testContainerInstance(project, 0).childIds=['table']
   const target={documentId:'doc',epoch:'epoch',project,editingProject:project,resources:{assets:{},components:{}},surfaceId:surface.id,activeStateId:null,instanceIds:['table'],instanceId:'table'} as CapturedCourseTarget
   let owner:ReturnType<typeof useSlideNativeTextEditor>|undefined
   const report=vi.fn()

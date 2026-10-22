@@ -1,3 +1,4 @@
+import { componentContainers, componentSurface, owningContainer } from '../../../shared/contracts/component-platform/project'
 import { resolveComponentBackground, type ComponentDefinition, type ComponentInstance, type ComponentPresentationState, type ComponentSurface, type CourseProjectV10, type JsonValue } from '../../../shared/contracts/component-platform/project'
 import type { ComponentEdit } from '../../../shared/contracts/component-platform/operations'
 import type { ComponentFrame } from '../../../shared/contracts/component-platform/frame'
@@ -15,15 +16,26 @@ import { switchShapeType } from '../../../components/shape/authoring'
 import type { PropertiesItemBase, PropertiesItemView, PropertiesPatch } from './SlideNativePropertiesPanel'
 import { componentDefinitionPresentation } from './componentDefinitionPresentation'
 import { stepFontSize } from '../../../shared/fontSizeStep'
+import { isNativeFlowLayoutGroup } from '../../../shared/flowNativeLayout'
 
 const json = (value: unknown): JsonValue => JSON.parse(JSON.stringify(value)) as JsonValue
 
 export function propertiesEffectiveBackground(project: CourseProjectV10, surface?: ComponentSurface, state?: ComponentPresentationState) {
   const paint = resolveComponentBackground(project, surface, state)
+  let owner = surface
+  if (surface && surface.background?.mode !== 'own') {
+    owner = undefined
+    let parent = owningContainer(project, surface.id)
+    while (parent?.kind === 'instance') {
+      const candidate = componentSurface(project, parent.instanceId)
+      if (candidate?.background?.mode === 'own') { owner = candidate; break }
+      parent = owningContainer(project, parent.instanceId)
+    }
+  }
   const sourceOwner = state?.background && state.background.mode !== 'inherit'
     && ['color', 'assetId', 'fit', 'paint'].some(field => Reflect.get(state.background!, field) !== undefined) ? 'slide-state' as const
-    : surface?.background?.mode === 'own' ? surface.kind === 'slide' ? 'slide-surface' as const
-      : surface.kind === 'flow' ? 'flow-surface' as const : 'spatial-surface' as const : 'course' as const
+    : owner?.background?.mode === 'own' ? owner.kind === 'slide' ? 'slide-surface' as const
+      : owner.kind === 'flow' ? 'flow-surface' as const : 'spatial-surface' as const : 'course' as const
   return { ...paint, sourceOwner }
 }
 
@@ -32,7 +44,7 @@ export function propertiesFeedbackTargets(project: CourseProjectV10, surfaceId: 
   const ids = new Set<string>()
   const visit = (id: string) => { ids.add(id); for (const child of project.instances[id]?.childIds ?? []) visit(child) }
   for (const id of [...project.global.underlay, ...project.global.overlay,
-    ...(project.surfaces.find(surface => surface.id === surfaceId)?.childIds ?? [])]) visit(id)
+    ...(componentContainers(project).find(surface => surface.id === surfaceId)?.childIds ?? [])]) visit(id)
   return Object.values(project.instances).filter(instance => ids.has(instance.id) && instance.id !== selectedId
     && project.definitions[instance.definitionId]?.role !== 'behavior'
     && (!instance.visibility || instance.visibility.mode === 'all' || (instance.visibility.mode === 'include'
@@ -110,7 +122,14 @@ export function componentPropertiesView(instance: ComponentInstance, definition?
   if (key === 'guoling.chart') return { ...base, type: 'chart', ...chartDataSchema.parse(instance.data) }
   if (key === 'guoling.video') return { ...base, type: 'video', ...videoDataSchema.parse(instance.data) }
   if (key === 'guoling.input') return { ...base, type: 'input', ...inputAuthoringContent(instance) }
-  if (instance.childIds) return { ...base, type: 'composition' }
+  if (instance.childIds) {
+    const spacing = (field: 'gap' | 'padding') => {
+      const value = instance.style?.[field]
+      return typeof value === 'string' || typeof value === 'number' ? value : ''
+    }
+    return { ...base, type: 'composition', ...(isNativeFlowLayoutGroup(instance, definition)
+      ? { layoutStyle: { gap: spacing('gap'), padding: spacing('padding') } } : {}) }
+  }
   return { ...base, type: 'external-component', component: { packageId: instance.definitionId, version: definition?.version ?? '1' },
     props: instance.data && typeof instance.data === 'object' && !Array.isArray(instance.data) ? structuredClone(instance.data) : {} }
 }
@@ -204,6 +223,18 @@ export function componentPropertiesEdits(instance: ComponentInstance, definition
     edits.push(switchShapeType({ ...instance, data: shapeDataSchema.parse(instance.data) }, content.shapeType as typeof view.shapeType))
     const { shapeType: _shapeType, ...rest } = content
     edits.push(...leafEdits(instance.id, rest))
+  } else if (view.type === 'composition') {
+    if (content.layoutStyle) {
+      if (!view.layoutStyle) throw new Error('此组合未使用原生自动排版。')
+      const layoutStyle = content.layoutStyle as Partial<NonNullable<typeof view.layoutStyle>>
+      for (const field of ['gap', 'padding'] as const) {
+        const value = layoutStyle[field]
+        if (value === undefined) continue
+        if (typeof value !== 'string' && typeof value !== 'number' || typeof value === 'number' && (!Number.isFinite(value) || value < 0))
+          throw new Error('请输入有效的非负间距。')
+        edits.push({ type: 'style.set', instanceId: instance.id, path: [field], value })
+      }
+    }
   } else if (view.type === 'external-component') {
     if (content.props) edits.push(...leafEdits(instance.id, content.props))
   } else if (view.type === 'input') {

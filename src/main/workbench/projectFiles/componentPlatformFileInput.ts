@@ -70,6 +70,8 @@ export async function readComponentProjectFileInput(input: {
 export async function prepareComponentProjectFileSource(input: ComponentProjectFileInput, file: ComponentProjectFile,
   _intent: ContentApplyIntent, resources?: { readImage(source: string): Promise<HostImageInput | null> }): Promise<ContentApplySource> {
   const extension = path.extname(input.filename).toLowerCase()
+  if (extension === '.json' && file.kind === 'structure' && input.text !== undefined && ['insert', 'redo'].includes(_intent))
+    return componentFileContentSource(file, input.text, input)
   const cssSource = file.binding?.kind === 'theme' && extension === '.css'
   const projectReferences = new Map<string, { bytes: Uint8Array; mediaType: string }>()
   const canonicalReferences = Object.values(input.assetContext?.assets ?? {}).map(asset => [`cw-resource:${asset.id}`, asset.id])

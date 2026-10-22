@@ -1,3 +1,5 @@
+import { componentSurfaces } from '../../src/shared/contracts/component-platform/project'
+import { testContainerInstance } from '../helpers/glxWorkFixture'
 import { expect, it } from 'vitest'
 import { createBlankCourseProjectV10 } from '../../src/core/course/createCourseProjectV10'
 import { componentDataEdits, componentTableDataEdits } from '../../src/core/course/componentDataEdits'
@@ -19,12 +21,12 @@ const apply = (project: CourseProjectV10, edits: ComponentEdit[]) => applyCompon
 const course = (model: DocumentModel) => { if (model.kind !== 'course-v10') throw new Error('V10 required'); return model.project }
 function managedInput(global = false) {
   let project = createBlankCourseProjectV10('专业答案联动')
-  const surfaceId = project.surfaces[0].id
+  const surfaceId = componentSurfaces(project)[0].id
   project.definitions[INPUT_DEFINITION.id] = INPUT_DEFINITION
   project.instances.input = { id: 'input', definitionId: INPUT_DEFINITION.id, data: json(createInputData()),
     frame: { width: 240, height: 50, transform: [1, 0, 0, 1, 30, 40] } }
   if (global) project.global.overlay.push('input')
-  else project.surfaces[0].childIds.push('input')
+  else testContainerInstance(project, 0).childIds.push('input')
   project = apply(project, componentInputRuleEdits({ project, surfaceId, instanceId: 'input' }, { mode: 'apply', config: {
     answerType: 'text', answers: ['原答案'],
     correct: [{ type: 'node.enter', nodeId: 'input', effect: 'none', durationMs: 0, easing: 'linear' }],
@@ -35,7 +37,7 @@ function managedInput(global = false) {
 
 it.each(['properties', 'data-file', 'component-data', 'developer', 'state', 'global'] as const)('edits managed answers through %s with one undo', async entry => {
     const fixture = managedInput(entry === 'global'), project = fixture.project, surfaceId = entry === 'global' ? null : fixture.surfaceId
-    if (entry === 'state') project.surfaces[0].presentation = { states: [{ id: 'answer-state', title: '答案状态', overrides: {} }] }
+    if (entry === 'state') testContainerInstance(project, 0).container!.presentation = { states: [{ id: 'answer-state', title: '答案状态', overrides: {} }] }
     const stateId = entry === 'state' ? 'answer-state' : null
     const target = { surfaceId, instanceId: 'input', stateId }
     const before = project.instances.input, next = { ...before, data: json({ ...inputDataSchema.parse(before.data), acceptedAnswers: ['新答案'] }) }
@@ -59,18 +61,18 @@ it.each(['properties', 'data-file', 'component-data', 'developer', 'state', 'glo
     const undone = await session.execute({ documentId: entry, epoch: entry, baseRevision: session.read().revision, operationId: `${entry}-undo`, actor: 'human', mutation: { type: 'undo' } })
     expect(undone.status, entry).toBe('applied')
     expect(course(session.read().model).instances, entry).toEqual(project.instances)
-    expect(course(session.read().model).surfaces, entry).toEqual(project.surfaces)
+    expect(componentSurfaces(course(session.read().model)), entry).toEqual(componentSurfaces(project))
 })
 
 it('preserves rich table cells and unknown custom data, while chart type changes use their professional conversion', () => {
-  let project = createBlankCourseProjectV10('专业内容保全'), surfaceId = project.surfaces[0].id
+  let project = createBlankCourseProjectV10('专业内容保全'), surfaceId = componentSurfaces(project)[0].id
   const table = createTableData({ rows: 2, columns: 2 }), cell = table.rows[0].cells[0]
   const rich = { inlines: [{ type: 'text' as const, text: '保留强调', style: { bold: true } }] }
   delete cell.text; cell.content = rich
   for (const [id, key, data] of [['table', 'guoling.table', json(table)], ['chart', 'guoling.chart', json(createChartData())],
     ['custom', 'user.custom', { nested: { arbitrary: ['keep', 3] }, flag: true }]] as const) {
     project.definitions[id] = { id, role: 'content', implementation: { kind: 'builtin', key } }
-    project.instances[id] = { id, definitionId: id, data: json(data) }; project.surfaces[0].childIds.push(id)
+    project.instances[id] = { id, definitionId: id, data: json(data) }; testContainerInstance(project, 0).childIds.push(id)
   }
   project = apply(project, componentTableDataEdits(project, { surfaceId, instanceId: 'table' }, { kind: 'row-height', rowId: table.rows[0].id, height: 75 }))
   expect(tableCellContent((project.instances.table.data as unknown as typeof table).rows[0].cells[0])).toEqual(rich)

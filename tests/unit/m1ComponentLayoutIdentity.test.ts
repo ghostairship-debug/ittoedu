@@ -36,6 +36,25 @@ it('keeps explicit documents and customized source outside builtin fragment norm
   expect(isMeasuredWebFragmentBox({ ...instance, definitionId: 'guoling.web' }, 'fragment', undefined, changedDefinition)).toBe(false)
 })
 
+it('uses the effective bounded program and formal frame before inferring Web CSS in Flow', () => {
+  const html = '<!doctype html><html><body><h1>Local program</h1><button>Apply</button></body></html>'
+  const framed: ComponentInstance = { ...instance, data: { html },
+    frame: { width: 640, height: 360, transform: [1, 0, 0, 1, 0, 0] } }
+  const input = (value: ComponentInstance, declared = definition, fixedViewport?: boolean) => componentLayoutInput(value, {
+    project: { instances: { [value.id]: value }, definitions: { [declared.id]: declared } },
+    kind: 'flow', inlineSize: 480, definition: declared,
+  }, fixedViewport)
+  const expected = { mode: 'flow-viewport', inlineSize: 640, blockSize: 360 }
+  expect(input({ ...framed, implementationOverride: { kind: 'builtin', key: 'guoling.html-program' } }, definition, false)).toEqual(expected)
+  expect(input(framed, { ...definition, implementation: { kind: 'builtin', key: 'guoling.html-program' } }, false)).toEqual(expected)
+  expect(input({ ...framed, implementationOverride: { kind: 'source', language: 'javascript', source: 'export default {}' } }, definition, false)).toEqual(expected)
+  expect(input({ ...framed, definitionId: 'guoling.web', implementationOverride: { kind: 'source', language: 'javascript', source: 'export default {}' } }, { ...definition, id: 'guoling.web' }, false)).toEqual(expected)
+  // A Web reading block may have a measured frame without authoring a viewport.
+  expect(input(framed, definition, false)).toEqual({ mode: 'flow-content', inlineSize: 480 })
+  expect(input({ ...framed, frame: undefined, implementationOverride: { kind: 'builtin', key: 'guoling.html-program' } }, definition, false))
+    .toEqual({ mode: 'flow-content', inlineSize: 480 })
+})
+
 
 it('keeps inline and behavior children in natural Flow while preserving real free child geometry', () => {
   const text: ComponentDefinition = { id: 'text', role: 'content', implementation: { kind: 'builtin', key: 'guoling.text' } }

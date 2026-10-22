@@ -63,6 +63,7 @@ export interface SharedBackgroundProps {
   readonly mode?: SharedBackgroundModeControl
   /** Present only for Named state. */
   readonly inherit?: SharedBackgroundInheritControl
+  readonly onTransparent?: () => void
   readonly onColorChange: (color: string) => void
   readonly onPreviewColorChange?: (color: string | null) => void
   readonly onAssetChange: (assetId: string | null) => void
@@ -86,6 +87,7 @@ export function SharedBackgroundProperties({
   effective,
   mode,
   inherit,
+  onTransparent,
   onColorChange,
   onPreviewColorChange,
   onAssetChange,
@@ -196,6 +198,7 @@ export function SharedBackgroundProperties({
           />
         </div>
       )}
+      {onTransparent && <button type="button" className="secondary-button" data-testid={testId + '-transparent'} onClick={onTransparent}>透明背景（不绘制）</button>}
       {isInheritMode && (
         <p className="property-hint" role="status" data-testid={`${testId}-dormant-hint`}>
           当前继承上级背景；下面的颜色/图片暂不生效，可先设置好，切回“本级自有背景”后立即应用。

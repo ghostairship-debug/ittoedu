@@ -78,6 +78,14 @@ interface ReplayRecord {
   result: Promise<WorkspaceOperationResult>
 }
 
+interface DirectoryListing {
+  workspaceId: string
+  resolvedPath: string
+  version: string
+  sequence: number
+  children: Dirent[]
+}
+
 type WorkspaceDestination = NonNullable<WorkspaceMutationAction['target']>
 type TreeSnapshot = Array<{ relative: string; kind: WorkspaceEntryKind; size?: number; hash?: string;
   identity?: string; mtimeNs: string; ctimeNs: string }>
@@ -141,6 +149,9 @@ export class WorkspaceFiles {
   private readonly entriesByPath = new Map<string, string>()
   private readonly entriesByIdentity = new Map<string, Set<string>>()
   private readonly replay = new Map<string, ReplayRecord>()
+  private readonly directoryListings = new Map<string, DirectoryListing>()
+  private readonly directoryListingFlights = new Map<string, { workspaceId: string; resolvedPath: string; invalidated: boolean; task: Promise<DirectoryListing> }>()
+  private listingSequence = 0
   private readonly createId: () => string
   private readonly renamePath: (source: string, target: string) => Promise<void>
   private readonly removePath: (target: string) => Promise<void>
@@ -201,10 +212,54 @@ export class WorkspaceFiles {
     } catch { return false }
   }
 
-  watch(workspaceId: string, changed: () => void): () => void {
-    const watcher = watch(this.registeredRoot(workspaceId).resolvedPath, { recursive: true, persistent: false }, changed)
-    watcher.on('error', changed)
+  watch(workspaceId: string, changed: (changedPaths?: readonly string[]) => void): () => void {
+    const root = this.registeredRoot(workspaceId).resolvedPath
+    const watcher = watch(root, { recursive: true, persistent: false }, (_event, filename) => {
+      if (!filename) { this.invalidateDirectoryListings(workspaceId); changed(); return }
+      const relative = path.relative(root, path.resolve(root, String(filename)))
+      if (!relative || relative === '..' || relative.startsWith('..' + path.sep) || path.isAbsolute(relative)) {
+        this.invalidateDirectoryListings(workspaceId); changed(); return
+      }
+      this.invalidateDirectoryListings(workspaceId, path.dirname(path.resolve(root, relative)))
+      changed([relative.split(path.sep).join('/')])
+    })
+    watcher.on('error', () => { this.invalidateDirectoryListings(workspaceId); changed() })
     return () => watcher.close()
+  }
+
+  /** Derived directory data ends with its final UI watch consumer; root authorization remains intact. */
+  releaseDirectoryListings(workspaceId: string): void { this.invalidateDirectoryListings(workspaceId) }
+
+  private invalidateDirectoryListings(workspaceId: string, directory?: string, subtree = false): void {
+    const matches = (listing: Pick<DirectoryListing, 'workspaceId' | 'resolvedPath'>) => listing.workspaceId === workspaceId
+      && (!directory || (subtree ? this.isSameOrDescendant(listing.resolvedPath, directory) : this.pathKey(listing.resolvedPath) === this.pathKey(directory)))
+    for (const [key, listing] of this.directoryListings) if (matches(listing)) this.directoryListings.delete(key)
+    // A watch may arrive while readdir is pending. That result can finish its
+    // current read, but must not be installed as the next refresh's cache.
+    for (const flight of this.directoryListingFlights.values()) if (matches(flight)) flight.invalidated = true
+  }
+
+  private async directoryListing(workspaceId: string, directory: string): Promise<DirectoryListing> {
+    const stat = await fs.lstat(directory, { bigint: true })
+    const version = `${this.fileIdentity(stat)}:${stat.mtimeNs}:${stat.ctimeNs}`
+    const key = workspaceId + ':' + this.pathKey(directory)
+    const cached = this.directoryListings.get(key)
+    if (cached?.version === version) return cached
+    const pending = this.directoryListingFlights.get(key)
+    if (pending) {
+      const listing = await pending.task
+      return listing.version === version && !pending.invalidated ? listing : this.directoryListing(workspaceId, directory)
+    }
+    const flight = { workspaceId, resolvedPath: directory, invalidated: false, task: undefined! as Promise<DirectoryListing> }
+    flight.task = fs.readdir(directory, { withFileTypes: true }).then(children => {
+      const listing: DirectoryListing = { workspaceId, resolvedPath: directory, version, sequence: ++this.listingSequence,
+        children: children.filter(child => !ATOMIC_DOCUMENT_TEMPORARY_NAME.test(child.name))
+          .sort((left, right) => left.name.localeCompare(right.name, undefined, { numeric: true, sensitivity: 'base' })) }
+      if (!flight.invalidated) this.directoryListings.set(key, listing)
+      return listing
+    }).finally(() => { if (this.directoryListingFlights.get(key) === flight) this.directoryListingFlights.delete(key) })
+    this.directoryListingFlights.set(key, flight)
+    return flight.task
   }
 
   async resolveEntry(workspaceId: string, entryId: string): Promise<ResolvedWorkspaceEntry> {
@@ -231,16 +286,17 @@ export class WorkspaceFiles {
     if (directory.kind !== 'directory') throw new WorkspaceFilesError('not-directory', '只能列出目录内容')
     const limit = input.limit ?? 50
     if (!Number.isInteger(limit) || limit < 1 || limit > 200) throw new WorkspaceFilesError('invalid-page-size', 'limit 必须在 1 到 200 之间')
-    const offset = input.cursor === undefined ? 0 : Number(input.cursor)
+    const listing = await this.directoryListing(input.workspaceId, directory.resolvedPath)
+    const cursor = input.cursor?.match(/^(\d+):(\d+)$/)
+    if (input.cursor !== undefined && !cursor) throw new WorkspaceFilesError('invalid-cursor', '分页 cursor 无效')
+    const offset = cursor ? Number(cursor[2]) : 0
     if (!Number.isSafeInteger(offset) || offset < 0) throw new WorkspaceFilesError('invalid-cursor', '分页 cursor 无效')
-    const children = (await fs.readdir(directory.resolvedPath, { withFileTypes: true }))
-      .filter(child => !ATOMIC_DOCUMENT_TEMPORARY_NAME.test(child.name))
-      .sort((left, right) => left.name.localeCompare(right.name, undefined, { numeric: true, sensitivity: 'base' }))
-    const page = children.slice(offset, offset + limit)
+    if (cursor && Number(cursor[1]) !== listing.sequence) throw new WorkspaceFilesError('stale-directory-cursor', '目录内容已变化，请重新读取列表')
+    const page = listing.children.slice(offset, offset + limit)
     const entries: WorkspaceListItem[] = []
     for (const child of page) entries.push(await this.listItem(input.workspaceId, directory.resolvedPath, child))
     const next = offset + page.length
-    return { entries, ...(next < children.length ? { nextCursor: String(next) } : {}) }
+    return { entries, ...(next < listing.children.length ? { nextCursor: `${listing.sequence}:${next}` } : {}) }
   }
 
   createFile(input: { operationId: string; workspaceId: string; targetDirectoryId: string; name: string;
@@ -694,7 +750,7 @@ export class WorkspaceFiles {
       this.assertContained(workspaceId, resolved)
       const stat = await fs.lstat(candidate, { bigint: true })
       const kind = this.kindOf(stat)
-      const entry = await this.issueEntry(workspaceId, resolved, kind, stat)
+      const entry = await this.issueEntry(workspaceId, resolved, kind, stat, resolved)
       return { status: 'accessible', entryId: entry.entryId, name: child.name, kind }
     } catch (error) {
       if (error instanceof WorkspaceFilesError && error.code === 'outside-workspace') return { status: 'blocked', name: child.name, reason: 'outside-workspace' }
@@ -760,8 +816,8 @@ export class WorkspaceFiles {
     return entry
   }
 
-  private async issueEntry(workspaceId: string, candidate: string, knownKind?: WorkspaceEntryKind, knownStat?: Stats | BigIntStats): Promise<EntryRecord> {
-    const resolvedPath = await fs.realpath(candidate)
+  private async issueEntry(workspaceId: string, candidate: string, knownKind?: WorkspaceEntryKind, knownStat?: Stats | BigIntStats, knownResolvedPath?: string): Promise<EntryRecord> {
+    const resolvedPath = knownResolvedPath ?? await fs.realpath(candidate)
     this.assertContained(workspaceId, resolvedPath)
     const key = this.entryPathKey(workspaceId, resolvedPath)
     const stat = knownStat ?? await fs.lstat(candidate, { bigint: true })
@@ -859,6 +915,8 @@ export class WorkspaceFiles {
 
   private moveRememberedTree(workspaceId: string, source: string, target: string,
     copiedIdentities?: Map<string, string | undefined>, targetWorkspaceId = workspaceId): void {
+    this.invalidateDirectoryListings(workspaceId, source, true)
+    this.invalidateDirectoryListings(targetWorkspaceId, target, true)
     const records = this.rememberedTree(workspaceId, source)
     for (const entry of records) {
       const relative = path.relative(source, entry.resolvedPath)
@@ -869,6 +927,7 @@ export class WorkspaceFiles {
   }
 
   private forgetTree(workspaceId: string, root: string): void {
+    this.invalidateDirectoryListings(workspaceId, root, true)
     for (const entry of [...this.entries.values()]) if (entry.workspaceId === workspaceId && this.isSameOrDescendant(entry.resolvedPath, root)) {
       this.entries.delete(entry.entryId)
       this.entriesByPath.delete(this.entryPathKey(workspaceId, entry.resolvedPath))

@@ -2,7 +2,7 @@ import { NodeSelection, type EditorState } from 'prosemirror-state'
 import type { ResolvedPos } from 'prosemirror-model'
 import { fromEditorDocument } from './documentAdapter'
 import { changeDocumentTable, type DocumentTableCell, type DocumentTableCommand, type DocumentTableSelection } from './documentTableCommands'
-import { documentContentSchema, type DocumentContent } from '../../shared/document/content'
+import { documentBlockChildren, documentContentSchema, type DocumentContent } from '../../shared/document/content'
 import type { FlowTableBlock } from '../../shared/courseProjectTypes'
 import { changeFlowTableStructure } from '../../core/tools/flowTableContentOperations'
 
@@ -100,7 +100,8 @@ export function changeDocumentTableFromEditorState(
       const selection: DocumentTableSelection = { anchor: cell(target.anchor), head: cell(target.head) }
       return changeDocumentTable(table, selection, command, createId)
     }
-    return block.type === 'section' ? { ...block, blocks: change(block.blocks) } : block
+    const children = documentBlockChildren(block)
+    return children ? { ...block, blocks: change(children) } : block
   })
   const result = { blocks: change(content.blocks) }
   if (!found) throw new Error('表格选区已失效')

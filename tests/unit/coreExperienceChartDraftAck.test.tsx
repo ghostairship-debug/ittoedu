@@ -1,3 +1,4 @@
+import { testContainerInstance } from '../helpers/glxWorkFixture'
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { expect, it } from 'vitest'
@@ -29,7 +30,7 @@ it('keeps professional chart input dirty while its real submit is pending and pr
     project.definitions[CHART_DEFINITION.id] = CHART_DEFINITION
     project.instances.chart = { id: 'chart', definitionId: CHART_DEFINITION.id, data: JSON.parse(JSON.stringify(createChartData())),
       frame: { transform: [1, 0, 0, 1, 20, 20], width: 600, height: 400 } }
-    project.surfaces[0]!.childIds.push('chart')
+    testContainerInstance(project, 0).childIds.push('chart')
     const snapshot = await host.internalAPI.create({ kind: 'course-v10', project, resources: { assets: {}, components: {} } }, 'chart.h5lesson')
     documentId = snapshot.documentId
     let resolveAck!: (result: DocumentOperationResult) => void, operationId = ''

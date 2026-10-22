@@ -1,3 +1,5 @@
+import { componentSurfaces } from '../../src/shared/contracts/component-platform/project'
+import { appendRootContainers } from '../helpers/glxWorkFixture'
 import { expect, it, vi } from 'vitest'
 import { ComponentNavigationOwner } from '../../src/renderer/components/ComponentNavigationOwner'
 import { createBlankCourseProjectV10 } from '../../src/core/course/createCourseProjectV10'
@@ -10,7 +12,7 @@ import { applyComponentOperation, captureComponentOperation } from '../../src/co
 it('R03 separates two ordinary control views while sharing guarded course facts and preserving author frames', async () => {
   const project = createBlankCourseProjectV10()
   expect(project.global.overlay).toEqual([])
-  project.surfaces.push({ id: 'second', kind: 'flow', title: 'Second', childIds: [] })
+  appendRootContainers(project, { id: 'second', kind: 'flow', title: 'Second', childIds: [] })
   project.logic = { courseState: [], navigationGuards: [{ id: 'guard', effect: 'block', toSurfaceIds: ['second'], match: 'all', conditions: [], message: 'Locked' }] }
   project.definitions.controls = { id: 'controls', role: 'content', implementation: { kind: 'source', language: 'javascript', source: 'export default { mount() {} }' } }
   project.definitions[TEACHER_CONTROLLER_DEFINITION.id] = TEACHER_CONTROLLER_DEFINITION
@@ -20,7 +22,7 @@ it('R03 separates two ordinary control views while sharing guarded course facts 
   }
   project.instances.teacher = { id: 'teacher', definitionId: TEACHER_CONTROLLER_DEFINITION.id, data: JSON.parse(JSON.stringify(createTeacherControllerData())) }
   project.global.overlay.push('teacher')
-  let surfaceId = project.surfaces[0].id
+  let surfaceId = componentSurfaces(project)[0].id
   const owner = new ComponentNavigationOwner({ project: () => project, surfaceId: () => surfaceId, select: id => { surfaceId = id }, viewportBounds: () => ({ left: 0, top: 0, right: 1280, bottom: 720 }) })
   const a = owner.forInstance('a'), b = owner.forInstance('b'), changed = vi.fn(), semantic = vi.fn(), other = vi.fn()
   owner.subscribePlacement(changed); a.subscribe(semantic); b.subscribe(other)

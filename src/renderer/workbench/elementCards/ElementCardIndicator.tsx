@@ -5,6 +5,8 @@ import type { EditorStoreKernel } from '../../store/editorStoreKernel'
 import { readTarget } from '../../../core/tools/ToolTargets'
 import { captureSelection, workbenchSelection } from '../SelectionContextController'
 import type { DocumentSnapshot } from '../../../shared/workbench/document'
+import { componentSurface } from '../../../shared/contracts/component-platform/project'
+import { resolveCourseProjectDiagnosticTargetRoute, selectCourseProjectDiagnosticRoute } from '../../diagnostics/projectHealthNavigation'
 import './elementCards.css'
 
 /** How the editor finds a card's element: whether it is still there, and how to bring it into view. */
@@ -27,19 +29,50 @@ export function createComponentElementCardNavigation({ kernel, activateDocument,
       try { readTarget(model, card.target); return true } catch { return false }
     },
     jump(card) {
+      const { documentId, label, key, epoch } = card
       const target = structuredClone(card.target)
       if (target.kind !== 'course-instance') return
       void (async () => {
-        await (activateDocument ? activateDocument(card.documentId) : kernel.bridge.activate(card.documentId))
-        const snapshot = drainDocument ? await drainDocument(card.documentId) : (await kernel.bridge.drain([card.documentId]))[0]
+        await (activateDocument ? activateDocument(documentId) : kernel.bridge.activate(documentId))
+        const snapshot = drainDocument ? await drainDocument(documentId) : (await kernel.bridge.drain([documentId]))[0]
         if (!snapshot) throw new Error('原文档已关闭')
-        const selected = captureSelection(snapshot, [target], card.label)
-        kernel.selectSurface(target.surfaceId, card.documentId)
-        kernel.bridge.selectPresentationState(card.documentId, target.stateId ?? null, target.surfaceId)
-        kernel.selectInstances([target.instanceId], target.surfaceId, card.documentId)
-        workbenchSelection.setManual(card.documentId, selected)
-        elementCards.requestOpen(card.key)
+        if (epoch && snapshot.epoch !== epoch) throw new Error('这份作品已经重新打开，请重新定位当前内容。')
+        const selected = captureSelection(snapshot, [target], label)
+        if (snapshot.model.kind !== 'course-v10') throw new Error('原文档类型已改变')
+        const project = snapshot.model.project
+        const route = resolveCourseProjectDiagnosticTargetRoute(project, { projectId: project.id, kind: 'instance', instanceId: target.instanceId })
+        if (!route.available) throw new Error(route.reason)
+        const addressedRoot = project.rootIds.includes(target.surfaceId) ? target.surfaceId : undefined
+        const scopedRoute = route.scope === 'global' && addressedRoot ? { ...route, rootInstanceId: addressedRoot } : route
+        const precise = Boolean(target.authorField || target.dataPath || target.from !== undefined || target.to !== undefined)
+        // The shared route uses current ownership, while every operation stays with
+        // this card's document if the foreground tab changes during the input ACK.
+        selectCourseProjectDiagnosticRoute({ ...kernel, readView: () => {
+          const live = kernel.readView(), original = live.views.find(view => view.documentId === documentId)
+          return { ...live, activeDocumentId: documentId, rootInstanceId: original?.rootInstanceId ?? null }
+        } }, precise ? { ...scopedRoute, instanceId: undefined } : scopedRoute)
+        if (componentSurface(project, target.surfaceId)) kernel.bridge.selectPresentationState(documentId, target.stateId ?? null, target.surfaceId)
+        if (target.authorField) {
+          const value = readTarget(snapshot.model, target)
+          if (typeof value !== 'string') throw new Error('字段内容类型已改变，请重新选择')
+          kernel.bridge.selectInteraction(documentId,
+            { kind: 'author-field', instanceId: target.instanceId, field: { ...target.authorField, initialValue: value } }, target.surfaceId)
+        }
+        else if (target.dataPath && target.from === undefined && target.to === undefined && target.fieldScope !== 'flowLayout') {
+          const value = readTarget(snapshot.model, target)
+          if (typeof value === 'string') kernel.bridge.selectInteraction(documentId,
+            { kind: 'author-field', instanceId: target.instanceId, field: { kind: 'text', dataPath: target.dataPath, fieldScope: target.fieldScope ?? 'data', initialValue: value } }, target.surfaceId)
+        }
+        workbenchSelection.setManual(documentId, selected)
+        const manual = workbenchSelection.getManual(documentId), interaction = kernel.readView().interactionSelection
+        elementCards.requestOpen(key)
         requestAnimationFrame(() => {
+          if (kernel.readView().activeDocumentId !== documentId) return
+          if (target.from !== undefined || target.to !== undefined) {
+            if (workbenchSelection.getManual(documentId) !== manual || kernel.readView().interactionSelection !== interaction) return
+            try { workbenchSelection.targetView(documentId)?.select(target) }
+            catch (error) { reportError?.(error instanceof Error ? error.message : '原文字范围暂不可定位') }
+          }
           const element = [...document.querySelectorAll<HTMLElement>('[data-component-instance],[data-block-id]')]
             .find(node => node.dataset.componentInstance === target.instanceId || node.dataset.blockId === target.instanceId)
           element?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' })

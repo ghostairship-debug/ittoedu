@@ -1,3 +1,4 @@
+import { createTestProjectFromLegacy } from '../helpers/glxWorkFixture'
 import { expect, it, vi } from 'vitest'
 import { ComponentPlatformRuntime } from '../../src/player/components/ComponentPlatformRuntime'
 import type { CourseProjectV10 } from '../../src/shared/contracts/component-platform'
@@ -16,14 +17,14 @@ it('replaces same-ID image bytes in the live DOM and theme, then restores old by
   vi.stubGlobal('URL', class extends OriginalURL { static createObjectURL = create; static revokeObjectURL = revoke })
   const root = document.createElement('div'); document.body.append(root)
   const world = new ComponentPlatformRuntime('asset-replace', { mode: 'edit' })
-  const project: CourseProjectV10 = { schemaVersion: 10, revision: 0, id: 'asset-replace', title: '图片替换',
+  const project: CourseProjectV10 = createTestProjectFromLegacy({ schemaVersion: 10, revision: 0, id: 'asset-replace', title: '图片替换',
     definitions: { image: { id: 'image', role: 'content', implementation: { kind: 'builtin', key: 'guoling.image' } } },
     instances: { image: { id: 'image', definitionId: 'image', data: { assetId: 'picture', originalAssetId: 'picture' },
       frame: { width: 100, height: 100, transform: [1, 0, 0, 1, 20, 30] } },
       peer: { id: 'peer', definitionId: 'image', data: { assetId: 'peer', originalAssetId: 'peer' } } },
     surfaces: [{ id: 'page', kind: 'slide', title: '页', childIds: ['image', 'peer'] }], global: { underlay: [], overlay: [] },
     assets: { picture: { id: 'picture', path: 'assets/same.svg', mimeType: 'image/svg+xml' }, peer: { id: 'peer', path: 'assets/peer.svg', mimeType: 'image/svg+xml' } },
-    theme: { css: '.picture {background-image:url(assets/same.svg)}', assets: { 'assets/same.svg': { assetId: 'picture' } } } }
+    theme: { css: '.picture {background-image:url(assets/same.svg)}', assets: { 'assets/same.svg': { assetId: 'picture' } } } })
   const before = new TextEncoder().encode('<svg xmlns="http://www.w3.org/2000/svg"><rect fill="red"/></svg>')
   const after = new TextEncoder().encode('<svg xmlns="http://www.w3.org/2000/svg"><rect fill="blue"/></svg>')
   try {
@@ -90,10 +91,10 @@ it('updates only asset A in a live authored Web document, preserving equal-conte
   const instance = { id: 'web', definitionId: 'web', frame: { width: 320, height: 180, transform: [1, 0, 0, 1, 20, 30] as [number, number, number, number, number, number] }, data: {
     html: '<!doctype html><html><head><style>#a {background-image:url(cw-resource:a)}</style></head><body><img id="a" src="cw-resource:a"><img id="b" src="cw-resource:b"><input id="answer"><script>window.mountCount=(window.mountCount||0)+1</script></body></html>',
     css: '.css-asset {background-image:url(cw-resource:a)}', resourceBindings: { 'cw-resource:a': 'a', 'cw-resource:b': 'b' } } }
-  const project: CourseProjectV10 = { schemaVersion: 10, revision: 0, id: 'web-assets', title: 'Web替换',
+  const project: CourseProjectV10 = createTestProjectFromLegacy({ schemaVersion: 10, revision: 0, id: 'web-assets', title: 'Web替换',
     definitions: { web: { id: 'web', role: 'content', implementation: { kind: 'builtin', key: 'guoling.web' } } }, instances: { web: instance },
     surfaces: [{ id: 'page', kind: 'slide', title: '页', childIds: ['web'] }], global: { underlay: [], overlay: [] },
-    assets: { a: { id: 'a', path: 'assets/a.svg', mimeType: 'image/svg+xml' }, b: { id: 'b', path: 'assets/b.svg', mimeType: 'image/svg+xml' } } }
+    assets: { a: { id: 'a', path: 'assets/a.svg', mimeType: 'image/svg+xml' }, b: { id: 'b', path: 'assets/b.svg', mimeType: 'image/svg+xml' } } })
   const OriginalURL = globalThis.URL; let sequence = 0
   vi.stubGlobal('URL', class extends OriginalURL { static createObjectURL() { return `blob:web-${++sequence}` } static revokeObjectURL() {} })
   world = new ComponentPlatformRuntime('web-live-assets', { mode: 'edit', builtins: new Map([['guoling.web', { mount(context) {

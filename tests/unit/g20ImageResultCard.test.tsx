@@ -1,10 +1,13 @@
+import { beforeAll as prepareProgramSourceForTests } from 'vitest'
+import { loadBuiltinComponentSource } from '../../src/core/components/source/builtinSources'
+prepareProgramSourceForTests(async () => { await loadBuiltinComponentSource('guoling.html-program') })
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, expect, it, vi } from 'vitest'
 import { ImageResultCard } from '../../src/renderer/workbench/ImageResultCard'
 import type { ImageResultEvent, ImageResultView, ImageResultsDesktopAPI } from '../../src/shared/workbench/imageResultsDesktop'
 import type { DocumentHostAPI } from '../../src/shared/workbench/desktop'
 import type { DocumentSnapshot } from '../../src/shared/workbench/document'
-import { createBlankCourseProjectV10 } from '../../src/core/course/createCourseProjectV10'
+import { createBlankCourseProjectV10, createBlankProgramProject } from '../../src/core/course/createCourseProjectV10'
 import { workbenchSelection } from '../../src/renderer/workbench/SelectionContextController'
 
 afterEach(() => { cleanup(); vi.restoreAllMocks() })
@@ -37,10 +40,10 @@ it('S14 image result updates preserve edit focus and previews never start image 
   expect(screen.getByRole('button', { name: '替换选中图片' })).toBeDisabled()
 })
 
-it('lets the user inspect and change the insertion frame while replacement stays independent', async () => {
+it.each(['slide', 'program'] as const)('lets the user inspect and change the %s insertion frame while replacement stays independent', async kind => {
   const owner = { workspaceId: 'workspace', conversationId: 'conversation', runId: 'run', jobId: 'job' }
-  const model = { kind: 'course-v10' as const, project: createBlankCourseProjectV10('图片测试'), resources: { assets: {}, components: {} } }
-  const location = model.project.surfaces[0]
+  const model = { kind: 'course-v10' as const, project: kind === 'slide' ? createBlankCourseProjectV10('图片测试') : createBlankProgramProject('图片测试'), resources: { assets: {}, components: {} } }
+  const location = model.project.instances[model.project.rootIds[0]]
   const snapshot: DocumentSnapshot = { documentId: 'document', epoch: 'epoch', revision: 0, binding: { kind: 'untitled', suggestedName: '图片测试.h5lesson' },
     model, dirty: false, saving: false, recoverable: true, undoDepth: 0, redoDepth: 0 }
   const view: ImageResultView = { ...owner, source: 'builtin', applications: [], job: {
@@ -59,7 +62,7 @@ it('lets the user inspect and change the insertion frame while replacement stays
     fireEvent.change(screen.getByLabelText('应用到 果铃工程'), { target: { value: snapshot.documentId } })
     fireEvent.change(screen.getByLabelText('插入位置'), { target: { value: location.id } })
     const details = screen.getByText(/画布位置与尺寸：/).closest('details')!
-    await waitFor(() => expect(details.querySelector('summary')).toHaveTextContent('X 752 · Y 352 · 480×320'))
+    await waitFor(() => expect(details.querySelector('summary')).toHaveTextContent(kind === 'slide' ? 'X 752 · Y 352 · 480×320' : 'X 80 · Y 80 · 480×320'))
     expect(screen.getByRole('button', { name: '插入图片' })).toBeEnabled()
     fireEvent.click(details.querySelector('summary')!)
     fireEvent.change(screen.getByLabelText('X', { exact: true }), { target: { value: '730' } })
@@ -70,5 +73,7 @@ it('lets the user inspect and change the insertion frame while replacement stays
     fireEvent.change(screen.getByLabelText('高', { exact: true }), { target: { value: '280' } })
     fireEvent.click(screen.getByRole('button', { name: '插入图片' }))
     await waitFor(() => expect(api.apply).toHaveBeenCalledWith(expect.objectContaining({ frame: { x: 730, y: 355, width: 400, height: 280 } })))
+    expect(api.apply).toHaveBeenCalledWith(expect.objectContaining({ target: expect.objectContaining({ address: kind === 'slide'
+      ? { kind: 'course-surface', surfaceId: location.id } : { kind: 'course-instance', instanceId: location.id } }) }))
   } finally { unregister() }
 })

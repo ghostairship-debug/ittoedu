@@ -1,3 +1,4 @@
+import { componentContainers } from '../../../shared/contracts/component-platform/project'
 export type FlowInsertDestination = 'document' | 'paper'
 export type FlowInsertKind = DocumentBlockKind | 'formula' | 'image' | 'video' | 'audio' | 'component' | 'text-box' | 'shape'
 
@@ -43,7 +44,7 @@ import { captureCourseInsertionTarget, commitCourseInsertion, insertCourseElemen
 export type CapturedFlowMenuTarget = CapturedCourseTarget & { flowMenuPage?: Extract<FlowMenuPageCapture, { ok: true }> }
 export function captureFlowMenuTarget(kernel: EditorStoreKernel): CapturedFlowMenuTarget {
   const target = captureCourseInsertionTarget(kernel)
-  if (target.project.surfaces.find(surface => surface.id === target.surfaceId)?.kind !== 'flow') throw new Error('请先选择讲义页面')
+  if (componentContainers(target.project).find(surface => surface.id === target.surfaceId)?.kind !== 'flow') throw new Error('请先选择讲义页面')
   const page = captureFlowMenuPage()
   if (!page.ok) throw new Error(page.reason)
   if (page.documentId !== target.documentId || page.surfaceId !== target.surfaceId) throw new Error('讲义插入位置已改变，请重新选择')

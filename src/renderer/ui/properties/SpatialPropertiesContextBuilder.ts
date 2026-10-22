@@ -1,3 +1,4 @@
+import { componentContainers } from '../../../shared/contracts/component-platform/project'
 import type { ComponentEdit } from '../../../shared/contracts/component-platform/operations'
 import type { CapturedCourseTarget } from '../../documents/CourseV10DocumentBridge'
 import type { EditorStoreKernel } from '../../store/editorStoreKernel'
@@ -35,7 +36,7 @@ export function buildSpatialPropertiesOwner(input: {
     catch (error) { input.report(error); throw error }
   }
   const patchBackground: SpatialPropertiesContext['commands']['updateBackground'] = patch => run(() => {
-    const target = input.liveTarget(), current = target.project.surfaces.find(value => value.id === surface.id)?.background
+    const target = input.liveTarget(), current = componentContainers(target.project).find(value => value.id === surface.id)?.background
     input.submit([{ type: 'surface.background.set', surfaceId: surface.id, background: mergeComponentBackground(current, {
       ...(patch.backgroundMode === undefined ? {} : { mode: patch.backgroundMode }),
       ...(patch.backgroundColor === undefined ? {} : { color: patch.backgroundColor, mode: 'own' }),
@@ -67,7 +68,7 @@ export function buildSpatialPropertiesOwner(input: {
       renameCameraFrame: (frameId, title) => run(() => actions.renameSpatialCameraFrame(surface.id, frameId, title, input.liveTarget())),
       updateCameraFrameTarget: (frameId, instanceId) => run(() => actions.updateSpatialCameraFrameTarget(surface.id, frameId, instanceId, input.liveTarget())),
       reorderCameraFrame: (frameId, toIndex) => run(() => {
-        const target = input.liveTarget(), values = [...(target.project.surfaces.find(value => value.id === surface.id)?.spatial?.frames ?? [])].map(frame => frame.id)
+        const target = input.liveTarget(), values = [...(componentContainers(target.project).find(value => value.id === surface.id)?.spatial?.frames ?? [])].map(frame => frame.id)
         const from = values.indexOf(frameId)
         if (from >= 0) { values.splice(from, 1); values.splice(Math.max(0, Math.min(toIndex, values.length)), 0, frameId) }
         return actions.reorderSpatialCameraFrames(surface.id, values, target)

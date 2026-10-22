@@ -1,3 +1,4 @@
+import { testContainerInstance } from '../helpers/glxWorkFixture'
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import { afterEach, expect, it, vi } from 'vitest'
 import { SlideLightActions, SlideLightPageActions, slideLightMenuItems } from '../../src/renderer/editing/quickbar/SlideLightActions'
@@ -21,7 +22,7 @@ it('retains local nonzero line spacing when reselected and formatted again, with
   let project = createBlankCourseProjectV10('local text')
   project.definitions[WEB_DEFINITION.id] = WEB_DEFINITION
   project.instances.web = { id: 'web', definitionId: WEB_DEFINITION.id, data: { html: '<span>Text</span>' } }
-  project.surfaces[0].childIds = ['web']
+  testContainerInstance(project, 0).childIds = ['web']
   const bounds = { width: 100, height: 30, transform: [1, 0, 0, 1, 0, 0] as [number, number, number, number, number, number] }
   const spot: ComponentAuthorSpot = { kind: 'text', id: 'spot', authorKey: 'leaf', instanceId: 'web', mountGeneration: 1,
     initialValue: 'Text', bindingStatus: 'bound', binding: { kind: 'dom', path: [{ tag: 'span', index: 0 }], baseline: 'Text' },

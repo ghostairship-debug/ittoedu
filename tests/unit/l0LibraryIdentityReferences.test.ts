@@ -7,14 +7,16 @@ import type { InteractionRule, InteractionTrigger } from '../../src/shared/inter
 import { createComponentInteractionRuntime } from '../../src/renderer/interactions/componentInteractionRuntime'
 import { flowParagraphAnchoredFrame } from '../../src/shared/flowParagraphAnchors'
 
-const blank = (id: string, surfaceId: string): CourseProjectV10 => ({ schemaVersion: 10, id, revision: 0, title: id,
-  definitions: {}, instances: {}, assets: {}, surfaces: [{ id: surfaceId, kind: 'flow', title: surfaceId, childIds: [] }],
+const blank = (id: string, surfaceId: string): CourseProjectV10 => ({ schemaVersion: 11, id, revision: 0, title: id,
+  definitions: { flow: { id: 'flow', role: 'content', implementation: { kind: 'builtin', key: 'guoling.container.flow' } } },
+  instances: { [surfaceId]: { id: surfaceId, definitionId: 'flow', name: surfaceId, data: {}, childIds: [], container: { kind: 'flow' } } },
+  assets: {}, rootIds: [surfaceId], entry: { rootInstanceId: surfaceId },
   global: { underlay: [], overlay: [] } })
 function copied() {
   const source = blank('source', 'source-page')
   source.definitions.content = { id: 'content', role: 'content', implementation: { kind: 'builtin', key: 'fixture' } }
   source.definitions.interactions = { id: 'interactions', role: 'behavior', implementation: { kind: 'builtin', key: 'guoling.interactions' } }
-  source.instances = {
+  Object.assign(source.instances, {
     button: { id: 'button', definitionId: 'content', data: { title: 'button', text: 'source-page' }, visibility: { mode: 'include', surfaceIds: ['source-page'] } },
     body: { id: 'body', definitionId: 'content', data: { text: 'body' } },
     overlay: { id: 'overlay', definitionId: 'content', data: { title: 'body' }, frame: { width: 80, height: 30, transform: [1, 0, 0, 1, 20, 40] },
@@ -22,10 +24,10 @@ function copied() {
     behavior: { id: 'behavior', definitionId: 'interactions', data: { rules: [{ id: 'rule', name: 'button', enabled: true,
       trigger: { type: 'node.click', nodeId: 'button' }, conditions: [], actions: [{ id: 'action', start: 'after-previous', delayMs: 0,
         action: { type: 'course-state.set', key: 'answer', value: 'button' } }] }] } },
-  }
-  source.surfaces[0].childIds = Object.keys(source.instances)
+  })
+  source.instances['source-page'].childIds = Object.keys(source.instances).filter(id => id !== 'source-page')
   const extracted = extractComponentLibraryEntry(source, { assets: {}, components: {} },
-    { id: 'entry', title: 'button', rootIds: [...source.surfaces[0].childIds] })
+    { id: 'entry', title: 'button', rootIds: [...source.instances['source-page'].childIds!] })
   const destination = blank('destination', 'target-page')
   const insertion = prepareComponentLibraryInsertion(destination, extracted.entry,
     { container: { kind: 'surface', surfaceId: 'target-page' }, index: 0, surfaceBindings: { 'source-page': 'target-page' } })

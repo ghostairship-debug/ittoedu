@@ -1,3 +1,5 @@
+import { testContainerInstance } from '../../../helpers/glxWorkFixture'
+import { componentSurfaces } from '../../../../src/shared/contracts/component-platform/project'
 import { jsonValueSchema } from '../../../../src/shared/contracts/component-platform/schema'
 // @vitest-environment node
 import { promises as fs } from 'node:fs'
@@ -39,7 +41,7 @@ it('the public V10 asset tools save all frozen selections and retain actual cont
     save: ({ runId: _runId, ...input }) => library.save(input), delete: ({ runId: _runId, ...input }) => library.delete(input),
     import: async ({ runId, file }) => library.import((await host.agentFiles.readAuthorizedFile({ runId, workspaceRoot: workspace, permission: 'workspace' }, file)).bytes) } })
   const project = createBlankCourseProjectV10('多选素材课件')
-  const surfaceId = project.surfaces[0].id; project.surfaces[0].title = '素材演示'
+  const surfaceId = componentSurfaces(project)[0].id; testContainerInstance(project, 0).name = '素材演示'
   project.definitions[TEXT_DEFINITION.id] = TEXT_DEFINITION
   project.definitions.lesson = { id: 'lesson', title: '资料卡', role: 'content', version: '1.0.0',
     implementation: { kind: 'source', language: 'typescript', workspace: { ownerId: 'lesson-code', entry: 'main.ts' }, resourceBindings: { photo: 'photo' } } }
@@ -50,7 +52,7 @@ it('the public V10 asset tools save all frozen selections and retain actual cont
   project.instances.first = { id: 'first', definitionId: 'lesson', data: { label: '甲资料正文', assetId: 'photo' }, frame, style: { opacity: 0.8 }, implementationOverride: localOverride }
   project.instances.second = { id: 'second', definitionId: 'lesson', data: { label: '乙资料正文', assetId: 'photo' }, frame: { ...frame, transform: [1, 0, 0, 1, 280, 96] }, style: { opacity: 0.6 } }
   project.instances.neighbor = { id: 'neighbor', definitionId: TEXT_DEFINITION.id, data: textDataEdit('fixture', createTextComponentData('未选邻居')).value, frame: { ...frame, transform: [1, 0, 0, 1, 510, 43] } }
-  project.surfaces[0].childIds = ['first', 'second', 'neighbor']
+  testContainerInstance(project, 0).childIds = ['first', 'second', 'neighbor']
   project.assets.photo = { id: 'photo', path: 'assets/photo.png', mimeType: 'image/png', width: 8, height: 6 }
   const png = await sharp({ create: { width: 8, height: 6, channels: 4, background: '#1a78b0' } }).png().toBuffer()
   const resources = { assets: { photo: Uint8Array.from(png) }, components: { 'lesson-code': {
@@ -89,7 +91,7 @@ it('the public V10 asset tools save all frozen selections and retain actual cont
     const inserted = await host.internalAPI.read(initial.documentId)
     if (inserted.model.kind !== 'course-v10') throw new Error('V10 required')
     const insertedProject = inserted.model.project
-    const appended = insertedProject.surfaces[0].childIds.slice(3)
+    const appended = componentSurfaces(insertedProject)[0].childIds.slice(3)
     expect(appended).toHaveLength(2)
     expect(appended.some(id => ['first', 'second'].includes(id))).toBe(false)
     expect(appended.map(id => label(insertedProject.instances[id].data))).toEqual(['甲资料正文', '乙资料正文'])

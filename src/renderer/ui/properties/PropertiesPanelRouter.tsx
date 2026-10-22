@@ -6,9 +6,12 @@ import { MultiSelectionPropertiesPanel } from './MultiSelectionPropertiesPanel'
 import type { PropertiesContext } from './PropertiesContext'
 import { SlideNativePropertiesPanel } from './SlideNativePropertiesPanel'
 import { SpatialPropertiesPanel } from './SpatialPropertiesPanel'
+import { AuthorFieldPropertiesPanel } from './AuthorFieldPropertiesPanel'
 
 export function PropertiesPanelRouter({ context }: { context: PropertiesContext }) {
   switch (context.kind) {
+    case 'author-field':
+      return <AuthorFieldPropertiesPanel context={context} />
     case 'flow-block':
     case 'flow-component':
     case 'flow-page':

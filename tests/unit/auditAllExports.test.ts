@@ -1,3 +1,4 @@
+import { createTestProjectFromLegacy, testContainerInstance } from '../helpers/glxWorkFixture'
 import { afterEach, expect, it, vi } from 'vitest'
 import { strFromU8, unzipSync } from 'fflate'
 import { createChartData } from '../../src/components/chart/data'
@@ -31,10 +32,10 @@ function body(bytes: Uint8Array) { return parse(unzipSync(bytes)['word/document.
 function project(instances: Record<string, unknown>, kind: 'flow' | 'slide' = 'flow', sourceIds: string[] = []) {
   const keys = ['text', 'document-block', 'table', 'chart', 'image', 'shape', 'group']
   const owned = new Set(Object.values(instances).flatMap(value => (value as { childIds?: string[] }).childIds ?? []))
-  return courseProjectV10Schema.parse({ schemaVersion: 10, id: 'export-audit', revision: 0, title: '正常正文',
+  return courseProjectV10Schema.parse(createTestProjectFromLegacy({ schemaVersion: 10, id: 'export-audit', revision: 0, title: '正常正文',
     definitions: { ...Object.fromEntries(keys.map(key => [`guoling.${key}`, { id: `guoling.${key}`, role: 'content', implementation: { kind: 'builtin', key: `guoling.${key}` } }])),
       ...Object.fromEntries(sourceIds.map(id => [id, { id, role: 'content', implementation: { kind: 'source', language: 'typescript', workspace: { ownerId: id, entry: 'main.ts' } } }])) },
-    instances, surfaces: [{ id: 'page', kind, title: '健康标题', childIds: Object.keys(instances).filter(id => !owned.has(id)), ...(kind === 'slide' ? { designSize: { width: 800, height: 600 } } : {}) }], global: { underlay: [], overlay: [] }, assets: {} })
+    instances, surfaces: [{ id: 'page', kind, title: '健康标题', childIds: Object.keys(instances).filter(id => !owned.has(id)), ...(kind === 'slide' ? { designSize: { width: 800, height: 600 } } : {}) }], global: { underlay: [], overlay: [] }, assets: {} }))
 }
 function pieData() {
   const data = createChartData()
@@ -223,7 +224,7 @@ it('CA030 zero opacity emits no visible Word text and applies once to semantic P
 
 it('CA030 PPTX captured instance opacity is baked once and ancestor opacity is applied once', async () => {
   const source = project({ group: { id: 'group', definitionId: 'guoling.group', data: {}, style: { opacity: 0.5 }, frame: frame(200, 200), childIds: ['source'] }, source: { id: 'source', definitionId: 'program', data: {}, style: { opacity: 0.5 }, frame: frame(100, 100) } }, 'slide', ['program'])
-  source.surfaces[0]!.childIds = ['group']
+  testContainerInstance(source, 0).childIds = ['group']
   const result = await buildComponentPptx(source, { captureInstance: async () => bytesToDataUrl(asset.bytes, asset.mimeType) }), dom = parse(unzipSync(result.bytes)['ppt/slides/slide1.xml']!)
   expect(dom.getElementsByTagNameNS(a, 'alphaModFix')[0]!.getAttribute('amt')).toBe('50000')
 })

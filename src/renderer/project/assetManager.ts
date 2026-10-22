@@ -193,22 +193,23 @@ export async function readImageDimensions(
   }
 
   const blob = new Blob([Uint8Array.from(bytes)], { type: mimeType })
-  const url = URL.createObjectURL(blob)
+  let url: string | undefined
   let bitmap: ImageBitmap | undefined
   try {
-    const image = new Image()
-    const dimensions = await new Promise<ImageDimensions>((resolve, reject) => {
-      image.onload = () => {
-        if (image.naturalWidth > 0 && image.naturalHeight > 0) {
-          resolve({ width: image.naturalWidth, height: image.naturalHeight })
-        } else {
-          reject(new Error('图片尺寸为零'))
-        }
-      }
-      image.onerror = () => reject(new Error('浏览器无法解码图片'))
-      image.src = url
-    })
     if (mimeType === 'image/svg+xml') {
+      url = URL.createObjectURL(blob)
+      const image = new Image()
+      const dimensions = await new Promise<ImageDimensions>((resolve, reject) => {
+        image.onload = () => {
+          if (image.naturalWidth > 0 && image.naturalHeight > 0) {
+            resolve({ width: image.naturalWidth, height: image.naturalHeight })
+          } else {
+            reject(new Error('图片尺寸为零'))
+          }
+        }
+        image.onerror = () => reject(new Error('浏览器无法解码图片'))
+        image.src = url!
+      })
       // Chromium does not decode SVG Blobs with createImageBitmap. Establish
       // that this is really SVG before using its already loaded vector image;
       // mislabeled raster bytes must never use the permissive Image decoder.
@@ -236,7 +237,7 @@ export async function readImageDimensions(
     )
   } finally {
     bitmap?.close()
-    URL.revokeObjectURL(url)
+    if (url) URL.revokeObjectURL(url)
   }
 }
 

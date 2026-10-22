@@ -21,7 +21,18 @@ export function closeDocumentWithDialog(window: BrowserWindow, documents: Docume
     try { closed = await closeDocumentFlow({
       discardOnly,
       prepareRenderer: async mode => {
-        const result = await requestRendererBeforeClose(window, mode, controller.signal, undefined, [documentId])
+        let waitingDecision: Promise<boolean> | undefined
+        const result = await requestRendererBeforeClose(window, mode, controller.signal, () => {
+          if (closed || controller.signal.aborted || window.isDestroyed()) return
+          waitingDecision = dialog.showMessageBox(window, { type: 'info', title: '正在保全编辑输入',
+            message: '正在等待编辑界面完成输入保全。', detail: '可以继续等待，或取消本次关闭以继续编辑；当前输入会保留。',
+            buttons: ['继续等待', '取消关闭'], defaultId: 0, cancelId: 1, noLink: true,
+          }).then(result => {
+            if (result.response === 1) { controller.abort(); return false }
+            return !controller.signal.aborted
+          }).catch(() => { controller.abort(); return false })
+        }, [documentId])
+        if (waitingDecision && !await waitingDecision || controller.signal.aborted) return false
         if (result.suggestedDirectory) suggestedDirectory = result.suggestedDirectory
         rendererDirty = result.dirty
         return result.ready

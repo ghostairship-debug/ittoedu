@@ -1,3 +1,5 @@
+import { testContainerInstance } from '../helpers/glxWorkFixture'
+import { componentSurfaces } from '../../src/shared/contracts/component-platform/project'
 // @vitest-environment node
 import { expect, it } from 'vitest'
 import { createBlankCourseProjectV10 } from '../../src/core/course/createCourseProjectV10'
@@ -14,7 +16,7 @@ async function fixture(html = '<h1>第一处🔎</h1>\n<p>第二处🔎</p>', cu
   project.definitions[WEB_DEFINITION.id] = WEB_DEFINITION
   project.instances.a = { id: 'a', definitionId: WEB_DEFINITION.id, data: { html } }
   project.instances.b = { id: 'b', definitionId: WEB_DEFINITION.id, data: { html: '<h1>其他对象</h1>' } }
-  project.surfaces[0].childIds = ['a', 'b']
+  testContainerInstance(project, 0).childIds = ['a', 'b']
   const session = await DocumentSession.create({ documentId: 'reading', epoch: 'epoch', binding: { kind: 'untitled', suggestedName: 'read.glx' },
     model: { kind: 'course-v10', project, resources: { assets: {}, components: {} } } }, new CourseV10Driver(),
   { async append() {}, async save() { throw new Error('Read fixture must not save') } })
@@ -35,7 +37,7 @@ async function fixture(html = '<h1>第一处🔎</h1>\n<p>第二处🔎</p>', cu
   const human = async (edits: ComponentEdit[]) => { const current = snapshot(); await session.execute({ documentId: current.documentId,
     epoch: current.epoch, baseRevision: current.revision, operationId: `human-${++sequence}`, actor: 'human',
     mutation: { type: 'command', command: captureComponentOperation(current.model.project, edits) } }) }
-  return { coordinator, session, snapshot, read, human, path, surfaceId: project.surfaces[0].id }
+  return { coordinator, session, snapshot, read, human, path, surfaceId: componentSurfaces(project)[0].id }
 }
 
 it('finds current unsaved literal content and separates captured continuation from a local current refresh', async () => {

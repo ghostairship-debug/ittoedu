@@ -1,4 +1,5 @@
 // @vitest-environment node
+import { testContainerInstance } from '../helpers/glxWorkFixture'
 import { expect, it } from 'vitest'
 import { readFile, mkdir, writeFile } from 'node:fs/promises'
 import { build } from 'esbuild'
@@ -121,7 +122,7 @@ it('paints the chosen native color and locally formatted HTML text after canonic
     web.definitions[WEB_DEFINITION.id] = WEB_DEFINITION
     web.instances.web = { id: 'web', definitionId: WEB_DEFINITION.id, data: { html } }
     web.instances.web.authoring = { records: { [observed.authorKey]: { kind: 'text', binding: observed.binding, scope: observed.scope, overrides: { text: 'Changed ' } }, [observed.suffix.key]: observed.suffix.record } }
-    web.surfaces[0].childIds = ['web']
+    testContainerInstance(web, 0).childIds = ['web']
     const spot: ComponentAuthorSpot = { ...observed, initialValue: 'Changed ', id: 'spot', kind: 'text', instanceId: 'web', mountGeneration: 1,
       bindingStatus: 'bound', localBounds: { width: 30, height: 20, transform: [1, 0, 0, 1, 0, 0] },
       fieldScope: 'authoring', dataPath: ['records', observed.authorKey, 'overrides', 'text'] }
@@ -159,7 +160,7 @@ it('paints the chosen native color and locally formatted HTML text after canonic
     const svgProject = createBlankCourseProjectV10('SVG local text')
     svgProject.definitions[WEB_DEFINITION.id] = WEB_DEFINITION
     svgProject.instances.web = { id: 'web', definitionId: WEB_DEFINITION.id, data: { html: svgHtml } }
-    svgProject.surfaces[0].childIds = ['web']
+    testContainerInstance(svgProject, 0).childIds = ['web']
     const svgStart = svgHtml.indexOf('屋顶/走道'), svgSpot: ComponentAuthorSpot = { ...svgObservation, kind: 'text', id: 'svg-spot', instanceId: 'web', mountGeneration: 1,
       bindingStatus: 'bound', localBounds: spot.localBounds, sourceRegion: { kind: 'data', path: ['html'], start: svgStart, end: svgStart + '屋顶/走道'.length, encoding: 'html-text' } }
     const renamedSvg = applyComponentOperation(svgProject, captureComponentOperation(svgProject, authorSpotEdits(svgProject, svgSpot, '屋顶与走道', { assets: {}, components: {} })))

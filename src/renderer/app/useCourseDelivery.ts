@@ -1,3 +1,4 @@
+import { componentSurfaces } from '../../shared/contracts/component-platform/project'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { sameDeliveryDocument, type CourseDeliverySnapshot } from './courseDeliverySnapshot'
 import { buildComponentDelivery, type BuiltComponentDelivery, type ComponentDeliveryFinding, type ComponentDeliveryFormat, type ComponentDeliveryReport, type ComponentOutputCapture } from '../export/componentPlatform/delivery'
@@ -12,6 +13,9 @@ import { createComponentDeliveryCapture, type ComponentScreenshot } from '../exp
 import type { ExportPageOptions } from '../../shared/workbench/toolPorts'
 import { componentDeliveryPages, type ComponentDeliveryPage } from '../export/componentPlatform/deliveryPages'
 import type { StaticCourseExportFormat } from './CourseExportSettingsDialog'
+import type { FrozenDeliveryBuildInput } from '../../shared/workbench/frozenDelivery'
+import type { DocumentSnapshot } from '../../shared/workbench/document'
+import { setDeliveryImageDocuments } from '../export/componentPlatform/encodeDeliveryImage'
 
 export type { CourseDeliverySnapshot } from './courseDeliverySnapshot'
 export type { ComponentDeliveryFinding, ComponentDeliveryReport } from '../export/componentPlatform/delivery'
@@ -21,6 +25,8 @@ export interface CourseDeliveryPorts {
   captureSnapshot(): Promise<CourseDeliverySnapshot | null>
   readCanonicalSnapshot(): CourseDeliverySnapshot | null
   compileComponent: ComponentCompilePort
+  /** Desktop builds use Main's fixed-revision isolated export producer. */
+  buildOutput?(input: FrozenDeliveryBuildInput, signal: AbortSignal): Promise<BuiltComponentDelivery>
   createOutputCapture?(payload: PublishedCourseV3): Promise<ComponentOutputCapture>
   captureAuthoringObservation?: ComponentScreenshot
   runBusy<T>(operation: () => Promise<T>, fallback: string): Promise<T | undefined>
@@ -32,7 +38,7 @@ export interface CourseDeliveryPorts {
   exportPdf(input: { suggestedName: string; html: string; projectPath?: string }): Promise<{ path: string } | null>
   exportBinary(input: { suggestedName: string; extension: 'pptx' | 'json' | 'docx'; bytes: Uint8Array; projectPath?: string }): Promise<{ path: string } | null>
 }
-export interface CourseDeliveryWatch { readonly documentTrigger: unknown; readonly sidecarTrigger: unknown; readonly componentPackagesTrigger: unknown }
+export interface CourseDeliveryWatch { readonly documentTrigger: unknown; readonly sidecarTrigger: unknown; readonly componentPackagesTrigger: unknown; readonly liveDocuments?: readonly DocumentSnapshot[] }
 export interface CourseDeliveryApi {
   readonly exportProgress: 'generating' | 'saving' | 'cancelling' | null
   cancelExport(): void
@@ -63,6 +69,11 @@ export interface CourseDeliveryApi {
 interface PendingDelivery { snapshot: CourseDeliverySnapshot; format: CourseDeliveryFormat; mode: SingleHtmlExportMode; built: BuiltComponentDelivery }
 
 export function useCourseDelivery(ports: CourseDeliveryPorts, watch: CourseDeliveryWatch): CourseDeliveryApi {
+  const ownsImageCache = watch.liveDocuments !== undefined
+  useEffect(() => { if (watch.liveDocuments) setDeliveryImageDocuments(document, watch.liveDocuments) }, [watch.liveDocuments])
+  useEffect(() => {
+    if (ownsImageCache) return () => setDeliveryImageDocuments(document, [])
+  }, [ownsImageCache])
   const ref = useRef(ports); ref.current = ports
   const job = useRef<AbortController | null>(null), phase = useRef<CourseDeliveryApi['exportProgress']>(null)
   const [exportProgress, setExportProgress] = useState<CourseDeliveryApi['exportProgress']>(null)
@@ -94,7 +105,10 @@ export function useCourseDelivery(ports: CourseDeliveryPorts, watch: CourseDeliv
     return value
   }, [])
   const build = useCallback((snapshot: CourseDeliverySnapshot, format: CourseDeliveryFormat, signal: AbortSignal, mode: SingleHtmlExportMode = 'offline-portable') =>
-    buildComponentDelivery(snapshot, format, { compile: ref.current.compileComponent,
+    ref.current.buildOutput ? ref.current.buildOutput({ requestId: crypto.randomUUID(),
+      identity: { documentId: snapshot.documentId, epoch: snapshot.epoch, revision: snapshot.revision, projectId: snapshot.project.id },
+      format, singleHtmlMode: mode, ...(snapshot.deliveryOptions ? { options: snapshot.deliveryOptions } : {}) }, signal)
+    : buildComponentDelivery(snapshot, format, { compile: ref.current.compileComponent,
       createCapture: ref.current.createOutputCapture ?? (ref.current.captureAuthoringObservation
         ? payload => createComponentDeliveryCapture(payload, ref.current.captureAuthoringObservation!) : undefined), signal, singleHtmlMode: mode }), [])
   const write = useCallback(async (value: PendingDelivery, beforeSave: () => void) => {
@@ -202,7 +216,7 @@ export function useCourseDelivery(ports: CourseDeliveryPorts, watch: CourseDeliv
     previewOpen, previewFeedback, previewDiagnostics, exportPreflightReport, largeHtmlByteLength, bindPreviewHost: setPreviewHost,
     previousPreview: () => { void preview.current?.previous() }, nextPreview: () => { void preview.current?.next() },
     closePreview: () => setPreviewOpen(false), openPreview, exportCourse, cancelPreflight, continuePreflightExport,
-    exportSettingsOpen: settingsSnapshot !== null, exportSettingsPages: settingsSnapshot ? componentDeliveryPages(settingsSnapshot.project.surfaces) : [],
+    exportSettingsOpen: settingsSnapshot !== null, exportSettingsPages: settingsSnapshot ? componentDeliveryPages(componentSurfaces(settingsSnapshot.project)) : [],
     openExportSettings, closeExportSettings: () => setSettingsSnapshot(null), confirmExportSettings,
     locatePreflightItem: item => { const current = ref.current.readCanonicalSnapshot(); if (current && pending.current && sameDeliveryDocument(current, pending.current.snapshot)) ref.current.navigateFinding(item); cancelPreflight() },
     savePreflightReport, cancelLargeHtml, continueLargeHtml,

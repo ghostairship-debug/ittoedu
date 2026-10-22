@@ -38,7 +38,7 @@ it.skipIf(process.platform !== 'win32')('M10-T04 receives external watcher chang
     const root = await service.authorizeRoot(workspace)
     const changes: string[] = []
     const unsubscribe = service.subscribe(event => changes.push(event.workspaceId))
-    await service.operate({ type: 'watch', workspaceId: root.workspaceId })
+    await service.operate({ type: 'watch', workspaceId: root.workspaceId, watchId: 'm10-windows-external-observer' })
     const list = () => service.operate({ type: 'list', workspaceId: root.workspaceId, directoryEntryId: root.rootEntryId })
     const before = await list()
     const targetEntry = before.entries.find(item => item.status === 'accessible' && item.name === 'target')

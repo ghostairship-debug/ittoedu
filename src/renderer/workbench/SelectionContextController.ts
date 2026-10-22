@@ -1,4 +1,4 @@
-import type { ComponentAuthorSpot } from '../../shared/contracts/component-platform/runtime'
+import type { ComponentAuthorField } from '../../shared/contracts/component-platform/runtime'
 import { equalComponentValue } from '../../core/drivers/courseV10Operations'
 import type { SlideEditorView } from '../../core/tools/slideLayerView'
 import { useSyncExternalStore } from 'react'
@@ -37,7 +37,7 @@ export function captureCourseObjectSelection(snapshot: DocumentSnapshot, locatio
 export function captureCourseInstanceSelection(snapshot: DocumentSnapshot, surfaceId: string, instanceIds: readonly string[], label = `所选 ${instanceIds.length} 个对象`, stateId?: string | null): SelectionCapture {
   return captureSelection(snapshot, instanceIds.map(instanceId => ({ kind: 'course-instance', surfaceId, instanceId, stateId: stateId ?? null })), label)
 }
-export function captureCourseAuthorField(snapshot: DocumentSnapshot, surfaceId: string, spot: ComponentAuthorSpot, stateId?: string | null): SelectionCapture {
+export function captureCourseAuthorField(snapshot: DocumentSnapshot, surfaceId: string, spot: ComponentAuthorField & { instanceId: string }, stateId?: string | null): SelectionCapture {
   const target = courseAuthorFieldTarget(surfaceId, spot, stateId)
   if (!equalComponentValue(readTarget(snapshot.model, target), spot.initialValue)) throw new Error('所选内部字段已改变，请重新选择')
   return captureSelection(snapshot, [target], spot.kind === 'text' ? '所选内部文字' : '所选内部图片')
@@ -64,13 +64,13 @@ export function resolveSlideSelectionLayer(view: SlideEditorView | null | undefi
 }
 
 export function captureMarkdownSelection(snapshot: DocumentSnapshot, value: DocumentContextSelection): SelectionCapture {
-  if (snapshot.model.kind !== 'markdown' || snapshot.model.source !== value.source) throw new Error('正文输入尚未确认或选区已改变，请重新选择。')
+  if (typeof value.source !== 'string' || snapshot.model.kind !== 'markdown' || snapshot.model.source !== value.source) throw new Error('正文输入尚未确认或选区已改变，请重新选择。')
   if (!value.ranges?.length) throw new Error(value.message ?? '正文选区无法定位。')
   return captureSelection(snapshot, value.ranges.map(range => ({ kind: 'markdown-range', from: range.from, to: range.to })), value.label, value.source)
 }
 /** Literal source selections in TXT and HTML source mode retain UTF-16 source ranges. */
 export function capturePlainTextSelection(snapshot: DocumentSnapshot, value: DocumentContextSelection): SelectionCapture {
-  if (snapshot.model.kind !== 'text' || snapshot.model.source !== value.source || !value.ranges?.length) throw new Error('文本输入尚未确认或选区已改变，请重新选择。')
+  if (typeof value.source !== 'string' || snapshot.model.kind !== 'text' || snapshot.model.source !== value.source || !value.ranges?.length) throw new Error('文本输入尚未确认或选区已改变，请重新选择。')
   return captureSelection(snapshot, value.ranges.map(range => ({ kind: 'markdown-range', from: range.from, to: range.to })), value.label, value.source)
 }
 /** One block of a Flow document as a whole, found by its identity whatever else changed (an element AI card, M15). */
@@ -92,7 +92,9 @@ export class SelectionContextController {
   private manual = new Map<string, SelectionCapture>()
   private pinned = new Map<string, SelectionCapture>()
   private version = 0
-  private tickets = new Map<string, number>()
+  private tickets = new Map<string, object>()
+  private readonly epochs = new Map<string, string>()
+  private readonly closedListeners = new Set<(documentId: string, epoch?: string) => void>()
   private listeners = new Set<() => void>()
   private requestHandler?: (request: ContextualEditRequest) => void
   private preparers = new Map<string, { prepare(): Promise<DocumentSnapshot>; flushInput?(): Promise<void> }>()
@@ -106,12 +108,26 @@ export class SelectionContextController {
   private notify() { ++this.version; for (const listener of this.listeners) listener() }
   getManual(id: string) { return this.manual.get(id) ?? null }
   getPinned(id: string) { return this.pinned.get(id) ?? null }
+  subscribeDocumentClosed(listener: (documentId: string, epoch?: string) => void) {
+    this.closedListeners.add(listener)
+    return () => { this.closedListeners.delete(listener) }
+  }
+  /** Called only by the document lifecycle owner, never by a temporarily hidden view. */
+  closeDocument(id: string, epoch?: string) {
+    if (epoch && this.epochs.has(id) && this.epochs.get(id) !== epoch) return
+    this.manual.delete(id); this.tickets.delete(id); this.epochs.delete(id); this.removed.delete(id)
+    this.preparers.delete(id); this.clearers.delete(id); this.targetViews.delete(id)
+    // Frozen task pins retain their original authorization/session semantics.
+    for (const listener of this.closedListeners) listener(id, epoch)
+    this.notify()
+  }
   setManual(id: string, value: SelectionCapture | null, explicit = true) {
     const identity = value ? JSON.stringify(value.targets) : null
     if (!explicit && identity && this.removed.get(id) === identity) return
     if (explicit || identity && this.removed.get(id) !== identity) this.removed.delete(id)
     // Explicit user/card navigation takes precedence over a read of an earlier canvas selection.
-    this.tickets.set(id, (this.tickets.get(id) ?? 0) + 1)
+    this.tickets.set(id, {})
+    if (value) this.epochs.set(id, value.epoch)
     if (JSON.stringify(this.manual.get(id) ?? null) === JSON.stringify(value)) return
     if (value) this.manual.set(id, structuredClone(value)); else this.manual.delete(id)
     this.notify()
@@ -119,7 +135,7 @@ export class SelectionContextController {
   registerSelectionClearer(id: string, clear: (targets?: readonly ExecutionSelectionTarget[]) => void) {
     const clearers = this.clearers.get(id) ?? new Set<(targets?: readonly ExecutionSelectionTarget[]) => void>()
     this.clearers.set(id, clearers); clearers.add(clear)
-    return () => { clearers.delete(clear); if (!clearers.size) this.clearers.delete(id) }
+    return () => { clearers.delete(clear); if (!clearers.size && this.clearers.get(id) === clearers) this.clearers.delete(id) }
   }
   registerTargetView(id: string, view: { rect(target: ExecutionSelectionTarget): DOMRect | null; select(target: ExecutionSelectionTarget): boolean; root(): HTMLElement | null }) {
     this.targetViews.set(id, view)
@@ -131,7 +147,7 @@ export class SelectionContextController {
   removeSelection(id: string, targets: readonly ExecutionSelectionTarget[]) {
     const current = this.manual.get(id)
     if (!current || !current.targets.some(target => targets.some(value => JSON.stringify(value) === JSON.stringify(target)))) return
-    this.tickets.set(id, (this.tickets.get(id) ?? 0) + 1)
+    this.tickets.set(id, {})
     this.removed.set(id, JSON.stringify(current.targets))
     const remaining = current.targets.filter(target => !targets.some(value => JSON.stringify(value) === JSON.stringify(target)))
     if (remaining.length) this.manual.set(id, { ...current, targets: remaining }); else this.manual.delete(id)
@@ -139,14 +155,27 @@ export class SelectionContextController {
     this.notify()
   }
   async observe(id: string, revision: number, make: (snapshot: DocumentSnapshot) => SelectionCapture | null, active = () => true) {
-    const ticket = (this.tickets.get(id) ?? 0) + 1; this.tickets.set(id, ticket)
+    const ticket = {}; this.tickets.set(id, ticket)
     try {
       const snapshot = await this.readDocument(id)
       if (this.tickets.get(id) !== ticket || !active()) return
+      this.epochs.set(id, snapshot.epoch)
       const value = snapshot.revision === revision ? make(snapshot) : null
       if (!value) this.removed.delete(id)
       this.setManual(id, value, false)
     } catch { if (this.tickets.get(id) === ticket && active()) this.setManual(id, null) }
+  }
+  /** The current renderer projection is enough to publish UI focus; formal requests still prepare below. */
+  observeSnapshot(id: string, revision: number, snapshot: DocumentSnapshot | null | undefined,
+    make: (snapshot: DocumentSnapshot) => SelectionCapture | null, active = () => true): void {
+    this.tickets.set(id, {})
+    if (!active() || !snapshot || snapshot.documentId !== id || snapshot.revision !== revision) return
+    this.epochs.set(id, snapshot.epoch)
+    try {
+      const value = make(snapshot)
+      if (!value) this.removed.delete(id)
+      this.setManual(id, value, false)
+    } catch { this.setManual(id, null) }
   }
   register(id: string, prepare: () => Promise<DocumentSnapshot>, flushInput?: () => Promise<void>) {
     const owner = { prepare, flushInput }; this.preparers.set(id, owner)

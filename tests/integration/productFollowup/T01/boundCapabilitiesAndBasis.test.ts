@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { appendRootContainers, testContainerInstance } from '../../../helpers/glxWorkFixture'
 import { promises as fs } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -58,7 +59,7 @@ async function fixture(provider: ModelProvider, rich = true, basis = false) {
     createFormulaComponentData('kept-formula', 'x^2').formula,
   ] : [{ type: 'text', text: '简单原稿' }] })
   project.instances.body = { id: 'body', definitionId: TEXT_DEFINITION.id, data: jsonValueSchema.parse(data) }
-  project.surfaces.push({ id: 'flow', kind: 'flow', title: '讲义', childIds: ['body'] })
+  appendRootContainers(project, { id: 'flow', kind: 'flow', title: '讲义', childIds: ['body'] })
   if (basis) {
     project.definitions[TABLE_DEFINITION.id] = TABLE_DEFINITION
     project.definitions[CHART_DEFINITION.id] = CHART_DEFINITION
@@ -66,7 +67,7 @@ async function fixture(provider: ModelProvider, rich = true, basis = false) {
     const frame = { width: 300, height: 150, transform: [1, 0, 0, 1, 45, 70] as [number, number, number, number, number, number] }
     project.instances.table = { id: 'table', definitionId: TABLE_DEFINITION.id, data: jsonValueSchema.parse(table), frame }
     project.instances.chart = { id: 'chart', definitionId: CHART_DEFINITION.id, data: createChartData(), frame: { ...frame, transform: [1, 0, 0, 1, 390, 70] } }
-    project.surfaces[0].childIds = ['table', 'chart']
+    testContainerInstance(project, 0).childIds = ['table', 'chart']
   }
   const snapshot = await host.internalAPI.create({ kind: 'course-v10', project, resources: { assets: {}, components: {} } }, 'card.h5lesson')
   const engine = new ExecutionEngine({ registry: host.registry, gateway: host.tools, provider, files: host.agentFiles, edits: new EditSessionService(host.registry, host.tools), runs: new ExecutionRunStore(path.join(directory, 'runs')),

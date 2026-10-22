@@ -3,35 +3,35 @@
   "generator": "scripts/generate-contracts.ts",
   "generationCommand": "npm run generate:contracts",
   "protocols": {
-    "project": 10,
-    "publishedCourse": 3,
+    "project": 11,
+    "publishedCourse": 4,
     "componentRuntime": 5
   },
   "runtimeSourceOfTruth": "src/shared/contracts/component-platform/runtime.ts",
   "contracts": [
     {
       "name": "courseProjectV10Schema",
-      "file": "course-project-v10.schema.json",
+      "file": "course-project-v11.schema.json",
       "sourceOfTruth": "src/shared/contracts/component-platform/schema.ts",
-      "sha256": "e9f8fbb31bd27372bf4ed10bca8485a5557eb98c16598ee35c3423847b7c0221"
+      "sha256": "a6128f26de29562b9a8e34e802fe83447493612b3b98ce78d171d93cef5bf3fd"
     },
     {
       "name": "publishedCourseV3Schema",
-      "file": "published-course-v3.schema.json",
+      "file": "published-course-v4.schema.json",
       "sourceOfTruth": "src/shared/contracts/component-platform/published.ts",
-      "sha256": "863746856b125143c7fef9ba65df93b82f9bd724396970704f0d381267f8ffb0"
+      "sha256": "7913679bdb2c6cb26a3e3cc2df37282b223b4f4c8a2082d5a1cbf69bb0147413"
     },
     {
       "name": "componentDefinitionSchema",
       "file": "component-definition.schema.json",
       "sourceOfTruth": "src/shared/contracts/component-platform/schema.ts",
-      "sha256": "5b176d2bd24e3687835ed99d1fa851f73a2e0ab96b3c669f00adf6e092867c48"
+      "sha256": "2fe08355ffc781a347d45d1cedcf0b3cef56037c7bad70983ba8d8cb96fba6f0"
     },
     {
       "name": "componentCatalogSchema",
       "file": "component-catalog.schema.json",
       "sourceOfTruth": "src/shared/componentCatalog.ts",
-      "sha256": "8933af941ffa865cdd26e6b0c52397208ed37bc4551850f93c18b88c849d8241"
+      "sha256": "8ff3e5f27ab6bddb4e9734380e746cc23a867fa7f325585b13680b7e3cc3ea9f"
     }
   ]
 }

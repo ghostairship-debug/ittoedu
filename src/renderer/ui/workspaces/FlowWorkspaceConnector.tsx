@@ -1,3 +1,4 @@
+import { componentSurface } from '../../../shared/contracts/component-platform/project'
 import { selectEditingScope, useEditorStore } from '../../store/editorStore'
 import { FlowLocationWorkspace } from './FlowLocationWorkspace'
 import type { WorkspaceMediaDropHandler } from '../../lessonWorkspace/workspaceMediaDrop'
@@ -17,7 +18,7 @@ export function FlowWorkspaceConnector({ onDropWorkspaceMedia, onSelectImageAsse
     documentId:courseView.activeDocumentId ?? '',epoch:courseView.snapshot?.epoch,surfaceId:courseView.surfaceId,activeStateId:courseView.activeStateId,
   }) : currentProject
   const project = editingProject && canvasMode === 'edit' ? projectWithBackgroundPreview(editingProject,preview,courseView.activeDocumentId,courseView.surfaceId,courseView.activeStateId,courseView.snapshot?.epoch) : editingProject
-  const surface = project?.surfaces.find(value => value.id === courseView.surfaceId)
+  const surface = project ? componentSurface(project, courseView.surfaceId ?? '') : undefined
   if (!project || !courseView.activeDocumentId || surface?.kind !== 'flow') return <main className="workspace workspace--flow" role="alert"><p className="property-hint">没有活动的 Flow 编辑会话</p></main>
   return <FlowLocationWorkspace documentId={courseView.activeDocumentId} project={project} surfaceId={surface.id}
     canvasMode={canvasMode} editingScope={editingScope === 'global' ? 'global' : 'scene'}

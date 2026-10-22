@@ -1,7 +1,8 @@
 import { randomBytes, randomUUID } from 'node:crypto'
-import { documentDigest } from '../../../core/documents/documentDigest'
+import { documentOperationDigest } from '../../../core/documents/documentDigest'
 import type { HtmlSourceEditOutcome } from '../../../shared/html/sourceEditCommands'
 import { scanHtmlSource } from '../../../shared/html/htmlSourceScanner'
+import { decorateHtmlFrameAuthoring, type HtmlFrameSources } from '../../../shared/html/htmlFrameAuthoring'
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import type { DocumentSnapshot } from '../../../shared/workbench/document'
@@ -12,12 +13,13 @@ import type {
 } from '../../../shared/workbench/htmlPreview'
 import { mainPreviewNetworkPolicy, type PreviewNetworkDocumentOwner, type PreviewNetworkPolicy } from '../../previewNetworkPolicy'
 import { registerHtmlPreviewFrameEntry } from '../../security'
-import { HTML_PREVIEW_AGENT_PATH, htmlPreviewFileUrl, isContainedPath, parseHtmlPreviewProtocolUrl } from './htmlPreviewProtocol'
+import { HTML_PREVIEW_AGENT_PATH, htmlPreviewFileUrl, htmlPreviewOrigin, isContainedPath, parseHtmlPreviewProtocolUrl } from './htmlPreviewProtocol'
 import { htmlPreviewResponse } from './htmlPreviewResponse'
 import type { HtmlResourceSource } from '../htmlImport/types'
 import { BundledFontRealmResources, type BundledFontRealmFile } from './bundledFontRealmResources'
+import { projectCompiledHtmlPreviewAssets, type CompiledHtmlPreviewAsset } from './compiledHtmlPreviewAssets'
 import {
-  collectHtmlPreviewResourceSources, htmlPreviewContentType, normalizeCssPreviewMediaReferences,
+  createHtmlPreviewResourceCollector, htmlPreviewContentType, normalizeCssPreviewMediaReferences,
   normalizeHtmlPreviewMediaReferences, resolveHtmlPreviewResource,
 } from './htmlPreviewResources'
 
@@ -40,6 +42,8 @@ export interface HtmlPreviewEditContext {
   entryRealPath: string
   bindingPath: string
   snapshot: DocumentSnapshot
+  /** Source bytes actually served by this lease; never a child-supplied filesystem path. */
+  frameSources?: HtmlFrameSources
 }
 
 /** Main-only identity for a live HTML action session. It never grants document writes. */
@@ -62,10 +66,16 @@ export interface HtmlPreviewEditPort {
   resolveTarget(request: ResolveRequest, context: HtmlPreviewEditContext): Promise<{ revision: number; targets: HtmlPreviewResolvedTarget[] }>
   edit(request: EditRequest, context: HtmlPreviewEditContext): Promise<HtmlPreviewEditOutcome>
   editSource(request: SourceEditRequest, context: HtmlPreviewEditContext): Promise<HtmlSourceEditOutcome>
+  /** Drop ephemeral source locators and handles when their real realm exits. */
+  releaseLease?(leaseId: string, loadId: string): void
 }
 
 export interface HtmlPreviewServiceOptions {
   readDocument(documentId: string): Promise<DocumentSnapshot>
+  readDocumentIdentity?(documentId: string): Promise<Pick<DocumentSnapshot, 'documentId' | 'epoch' | 'revision' | 'binding'> & { kind: DocumentSnapshot['model']['kind'] }>
+  readCapturedHtmlPreviewSources?(documentId: string, source: string, rootRealPath: string): Promise<{
+    sources: HtmlResourceSource[]; dependencies: ReadonlyMap<string, string>
+  } | undefined>
   networkOwner(): PreviewNetworkDocumentOwner | null
   currentMainFrame(): HtmlPreviewMainFrame | null
   networkPolicy?: PreviewNetworkPolicy
@@ -87,6 +97,13 @@ interface ActiveLease {
   bindingPath: string
   entryName: string
   resourceSources: HtmlResourceSource[]
+  collectResources: ReturnType<typeof createHtmlPreviewResourceCollector>
+  frameSources: HtmlFrameSources
+  snapshot: DocumentSnapshot
+  snapshotRead?: { identity: string; promise: Promise<DocumentSnapshot> }
+  embeddedAssets: ReadonlyMap<string, CompiledHtmlPreviewAsset>
+  entryProjection?: { source: string; resourceUrls: readonly string[]; body: string;
+    assets: ReadonlyMap<string, CompiledHtmlPreviewAsset> }
   unregisterFrame: () => void
 }
 
@@ -154,7 +171,11 @@ export class HtmlPreviewService implements HtmlPreviewHost {
     this.editPort = options.editPort ?? null
   }
 
-  setEditPort(port: HtmlPreviewEditPort | null): void { this.editPort = port }
+  setEditPort(port: HtmlPreviewEditPort | null): void {
+    if (port !== this.editPort) for (const lease of this.leases.values())
+      this.editPort?.releaseLease?.(lease.public.leaseId, lease.public.loadId)
+    this.editPort = port
+  }
 
   private currentOwner(): { owner: PreviewNetworkDocumentOwner; frame: HtmlPreviewMainFrame } | null {
     const owner = this.options.networkOwner()
@@ -165,24 +186,52 @@ export class HtmlPreviewService implements HtmlPreviewHost {
   private async snapshotFor(lease: ActiveLease): Promise<DocumentSnapshot | null> {
     const current = this.currentOwner()
     if (!current || current.frame.webContentsId !== lease.webContentsId || !sameOwner(lease.owner, current.owner)) return null
-    let snapshot: DocumentSnapshot
-    try { snapshot = await this.options.readDocument(lease.public.documentId) } catch { return null }
-    if (snapshot.epoch !== lease.public.epoch || snapshot.model.kind !== 'text' || snapshot.binding.kind !== 'file'
-      || snapshot.binding.bindingVersion !== lease.public.bindingVersion || !/\.html?$/i.test(snapshot.binding.path)) return null
+    let reading: ActiveLease['snapshotRead']
     try {
+      const identity = await this.options.readDocumentIdentity?.(lease.public.documentId)
+      const cached = lease.snapshot
+      let snapshot: DocumentSnapshot
+      if (identity && identity.documentId === cached.documentId && identity.epoch === cached.epoch
+        && identity.revision === cached.revision && identity.kind === cached.model.kind
+        && identity.binding.kind === 'file' && cached.binding.kind === 'file'
+        && identity.binding.path === cached.binding.path && identity.binding.bindingVersion === cached.binding.bindingVersion
+        && identity.binding.version === cached.binding.version) snapshot = cached
+      else if (identity) {
+        const key = JSON.stringify([identity.documentId, identity.epoch, identity.revision, identity.kind,
+          identity.binding.kind, ...(identity.binding.kind === 'file'
+            ? [identity.binding.path, identity.binding.bindingVersion, identity.binding.version] : [identity.binding.suggestedName])])
+        reading = lease.snapshotRead
+        if (!reading || reading.identity !== key) {
+          reading = { identity: key, promise: Promise.resolve().then(() => this.options.readDocument(lease.public.documentId)) }
+          lease.snapshotRead = reading
+        }
+        snapshot = await reading.promise
+      } else snapshot = await this.options.readDocument(lease.public.documentId)
+      if (snapshot.epoch !== lease.public.epoch || snapshot.model.kind !== 'text' || snapshot.binding.kind !== 'file'
+        || snapshot.binding.bindingVersion !== lease.public.bindingVersion || !/\.html?$/i.test(snapshot.binding.path)) return null
       const root = await fs.realpath(path.dirname(snapshot.binding.path))
       const entry = await fs.realpath(snapshot.binding.path)
       if (root !== lease.rootRealPath || entry !== lease.entryRealPath) return null
       if (!(await fs.stat(entry)).isFile()) return null
+      if (this.leases.get(lease.public.leaseId) !== lease || !sameOwner(lease.owner, this.options.networkOwner())) return null
+      if (snapshot !== cached && (!reading || lease.snapshotRead === reading) && snapshot.revision >= lease.snapshot.revision) lease.snapshot = snapshot
+      return snapshot
     } catch { return null }
-    if (!this.leases.has(lease.public.leaseId) || !sameOwner(lease.owner, this.options.networkOwner())) return null
-    return snapshot
+    finally {
+      // Keep the shared read through path/owner validation too: the full clone
+      // can finish before concurrent protocol requests reach these async checks.
+      if (reading && lease.snapshotRead === reading) delete lease.snapshotRead
+    }
   }
 
   private removeLease(lease: ActiveLease): void {
     if (this.leases.get(lease.public.leaseId) !== lease) return
     this.leases.delete(lease.public.leaseId)
     this.byToken.delete(lease.token)
+    this.editPort?.releaseLease?.(lease.public.leaseId, lease.public.loadId)
+    delete lease.entryProjection
+    lease.embeddedAssets = new Map()
+    lease.frameSources = {}
     for (const [operationId, receipt] of this.editReceipts) {
       if (receipt.leaseId === lease.public.leaseId) this.editReceipts.delete(operationId)
     }
@@ -244,7 +293,9 @@ export class HtmlPreviewService implements HtmlPreviewHost {
     const stat = await fs.stat(entryRealPath)
     if (!stat.isFile() || !isContainedPath(rootRealPath, entryRealPath)) throw new Error('HTML preview entry is outside its folder')
     const entryName = path.basename(snapshot.binding.path)
-    const resourceSources = await collectHtmlPreviewResourceSources(snapshot.model.source, rootRealPath)
+    const collectResources = createHtmlPreviewResourceCollector((source, root) =>
+      this.options.readCapturedHtmlPreviewSources?.(snapshot.documentId, source, root) ?? Promise.resolve(undefined))
+    const resourceSources = await collectResources(snapshot.model.source, rootRealPath)
     const resourceUrls = [...new Set(resourceSources.map(source => source.url))]
     const ownerNow = this.currentOwner()
     const snapshotNow = await this.options.readDocument(request.documentId)
@@ -274,7 +325,7 @@ export class HtmlPreviewService implements HtmlPreviewHost {
     }
     const active: ActiveLease = { public: lease, token, tabId: request.tabId, webContentsId: current.frame.webContentsId,
       owner: current.owner, rootRealPath, entryRealPath, bindingPath: snapshot.binding.path, entryName,
-      resourceSources, unregisterFrame }
+      resourceSources, collectResources, frameSources: {}, snapshot: snapshotNow, embeddedAssets: new Map(), unregisterFrame }
     for (const old of this.leases.values()) {
       if (old.tabId === request.tabId && old.webContentsId === current.frame.webContentsId) this.removeLease(old)
     }
@@ -295,10 +346,12 @@ export class HtmlPreviewService implements HtmlPreviewHost {
   }
 
   /** Document events may arrive for ordinary edits too; only a binding change revokes access. */
-  releaseChangedBinding(snapshot: DocumentSnapshot): void {
+  releaseChangedBinding(snapshot: Pick<DocumentSnapshot, 'documentId' | 'epoch' | 'binding'>
+    & ({ model: Pick<DocumentSnapshot['model'], 'kind'> } | { kind: DocumentSnapshot['model']['kind'] })): void {
+    const kind = 'model' in snapshot ? snapshot.model.kind : snapshot.kind
     for (const lease of this.leases.values()) {
       if (lease.public.documentId !== snapshot.documentId) continue
-      if (snapshot.epoch !== lease.public.epoch || snapshot.model.kind !== 'text'
+      if (snapshot.epoch !== lease.public.epoch || kind !== 'text'
         || snapshot.binding.kind !== 'file' || snapshot.binding.bindingVersion !== lease.public.bindingVersion
         || snapshot.binding.path !== lease.bindingPath) this.removeLease(lease)
     }
@@ -320,7 +373,8 @@ export class HtmlPreviewService implements HtmlPreviewHost {
     const snapshot = await this.snapshotFor(lease)
     if (!snapshot) { this.removeLease(lease); return null }
     return { lease: lease.public, tabId: lease.tabId, rootRealPath: lease.rootRealPath,
-      entryRealPath: lease.entryRealPath, bindingPath: lease.bindingPath, snapshot }
+      entryRealPath: lease.entryRealPath, bindingPath: lease.bindingPath, snapshot,
+      frameSources: { ...lease.frameSources } }
   }
 
   /** An action session must start from the exact source revision that created its frame.
@@ -355,7 +409,7 @@ export class HtmlPreviewService implements HtmlPreviewHost {
   }
 
   async edit(request: EditRequest): Promise<HtmlPreviewEditOutcome> {
-    const digest = documentDigest(request)
+    const digest = documentOperationDigest(request)
     const previous = this.editReceipts.get(request.operationId)
     if (previous) return previous.kind === 'light' && previous.digest === digest ? previous.promise : { status: 'rejected', reason: 'conflict' }
     const promise = (async (): Promise<HtmlPreviewEditOutcome> => {
@@ -378,7 +432,7 @@ export class HtmlPreviewService implements HtmlPreviewHost {
   }
 
   async editSource(request: SourceEditRequest): Promise<HtmlSourceEditOutcome> {
-    const digest = documentDigest(request)
+    const digest = documentOperationDigest(request)
     const previous = this.editReceipts.get(request.operationId)
     if (previous) return previous.kind === 'source' && previous.digest === digest ? previous.promise : { status: 'rejected', reason: 'conflict' }
     const promise = (async (): Promise<HtmlSourceEditOutcome> => {
@@ -428,6 +482,12 @@ export class HtmlPreviewService implements HtmlPreviewHost {
     }
     const snapshot = await this.snapshotFor(lease)
     if (!snapshot) { this.removeLease(lease); return notFound(method) }
+    if (target.kind === 'asset') {
+      const asset = lease.embeddedAssets.get(target.assetId)
+      if (!asset) return notFound(method)
+      return htmlPreviewResponse(method === 'HEAD' ? null : asset.bytes,
+        { contentType: asset.contentType, method, resourceSources: lease.resourceSources })
+    }
     if (target.kind === 'agent') {
       if (!this.options.agentBundlePath) return notFound(method)
       try {
@@ -443,7 +503,7 @@ export class HtmlPreviewService implements HtmlPreviewHost {
       const source = snapshot.model.kind === 'text' ? snapshot.model.source : ''
       // The entry always comes from the canonical source. Its media grants must
       // follow that same revision when an edit adds or removes a remote asset.
-      const resourceSources = await collectHtmlPreviewResourceSources(source, lease.rootRealPath)
+      const resourceSources = await lease.collectResources(source, lease.rootRealPath)
       const resourceUrls = [...new Set(resourceSources.map(source => source.url))]
       const current = await this.snapshotFor(lease)
       if (!current || current.revision !== snapshot.revision || current.model.kind !== 'text'
@@ -452,12 +512,21 @@ export class HtmlPreviewService implements HtmlPreviewHost {
         this.policy.replacePreviewLease({ leaseId: lease.public.leaseId, connectOrigins: [], remoteAssetUrls: resourceUrls }, lease.owner)
       } catch { return notFound(method) }
       lease.resourceSources = resourceSources
-      const script = this.options.agentBundlePath
-        ? `<script src="/${lease.token}/_agent/${HTML_PREVIEW_AGENT_PATH}"></script>` : ''
-      const normalized = normalizeHtmlPreviewMediaReferences(source, resourceUrls)
-      const body = script ? injectEarlyPreviewAgent(normalized, script) : normalized
+      let projected = lease.entryProjection
+      if (!projected || projected.source !== source || projected.resourceUrls.length !== resourceUrls.length
+        || projected.resourceUrls.some((url, index) => url !== resourceUrls[index])) {
+        const script = this.options.agentBundlePath
+          ? `<script src="/${lease.token}/_agent/${HTML_PREVIEW_AGENT_PATH}"></script>` : ''
+        const assets = projectCompiledHtmlPreviewAssets(source, id =>
+          `${htmlPreviewOrigin(lease.token)}/${lease.token}/_embedded/asset-${encodeURIComponent(id)}`)
+        const normalized = normalizeHtmlPreviewMediaReferences(assets.source, resourceUrls)
+        projected = { source, resourceUrls, assets: assets.assets,
+          body: script ? injectEarlyPreviewAgent(decorateHtmlFrameAuthoring(normalized), script) : normalized }
+        lease.entryProjection = projected
+      }
+      lease.embeddedAssets = projected.assets
       if (!(await this.snapshotFor(lease))) return notFound(method)
-      return htmlPreviewResponse(body, { contentType: 'text/html; charset=utf-8', method, resourceSources: lease.resourceSources })
+      return htmlPreviewResponse(projected.body, { contentType: 'text/html; charset=utf-8', method, resourceSources: lease.resourceSources })
     }
     const filename = await resolveHtmlPreviewResource(lease.rootRealPath, target.relativePath)
     const contentType = filename && htmlPreviewContentType(filename)
@@ -470,6 +539,15 @@ export class HtmlPreviewService implements HtmlPreviewHost {
           const normalized = normalizeCssPreviewMediaReferences(original, lease.resourceSources.map(source => source.url))
           if (normalized !== original) bytes = new TextEncoder().encode(normalized)
         } catch { /* Keep unsupported CSS bytes intact; they do not gain remote access. */ }
+      }
+      if (bytes && contentType.startsWith('text/html') && this.options.agentBundlePath) {
+        try {
+          const source = new TextDecoder('utf-8', { fatal: true }).decode(bytes)
+          // Keep the original external file untouched. A later nested edit may
+          // retain these exact bytes in the entry's existing software wrapper.
+          lease.frameSources[target.relativePath] = { html: source, base: target.relativePath }
+          bytes = new TextEncoder().encode(decorateHtmlFrameAuthoring(source))
+        } catch { /* Unsupported encodings keep their original response bytes. */ }
       }
       if (!(await this.snapshotFor(lease))) return notFound(method)
       const targetNow = await resolveHtmlPreviewResource(lease.rootRealPath, target.relativePath)

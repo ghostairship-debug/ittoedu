@@ -1,5 +1,5 @@
 import { cloneDocumentResources } from '../../core/drivers/resources'
-import type { DocumentEvent, DocumentModel, DocumentSnapshot } from '../../shared/workbench/document'
+import type { DocumentEvent, DocumentHostEvent, DocumentModel, DocumentModelUpdate, DocumentSnapshot } from '../../shared/workbench/document'
 import type { DocumentFileObservation, DocumentHostRequest } from '../../shared/workbench/desktop'
 import type { ExportBuildRequest } from '../../shared/workbench/toolPorts'
 
@@ -14,7 +14,16 @@ export function uiDocumentSnapshot(snapshot: DocumentSnapshot): DocumentSnapshot
   return { ...snapshot, model: uiDocumentModel(snapshot.model) }
 }
 
-export function uiDocumentEvent(event: DocumentEvent): DocumentEvent {
+export function uiDocumentEvent(event: DocumentEvent): DocumentHostEvent {
+  if (event.type === 'changed' && event.head && event.update) {
+    const bytes = (value: Uint8Array | null) => value === null ? null : Uint8Array.from(value)
+    const model: DocumentModelUpdate = { ...event.update.model, resources: {
+      assets: Object.fromEntries(Object.entries(event.update.model.resources.assets).map(([id, value]) => [id, bytes(value)])),
+      components: Object.fromEntries(Object.entries(event.update.model.resources.components).map(([id, files]) => [id,
+        files === null ? null : Object.fromEntries(Object.entries(files).map(([name, value]) => [name, bytes(value)]))])) } }
+    return { type: 'updated', head: event.head, baseRevision: event.update.baseRevision, baseSequence: event.update.baseSequence, model,
+      ...(event.operationId ? { operationId: event.operationId } : {}), ...(event.appliedChanges ? { appliedChanges: event.appliedChanges } : {}) }
+  }
   return event.type === 'changed' ? { ...event, snapshot: uiDocumentSnapshot(event.snapshot) } : event
 }
 
@@ -43,6 +52,7 @@ export function uiDocumentResult(input: DocumentHostRequest, result: unknown): u
       return { ...observation, model: observation.model ? uiDocumentModel(observation.model) : null }
     }
     case 'reveal':
+    case 'recovery-summaries':
     case 'read-authoring-drafts':
     case 'write-authoring-drafts':
     case 'claim-authoring-drafts':

@@ -1,3 +1,4 @@
+import { createTestProjectFromLegacy } from '../helpers/glxWorkFixture'
 import { createCourseStructureSlice } from '../../src/renderer/store/slices/courseStructureSlice'
 import { createCourseLifecycleSlice } from '../../src/renderer/store/slices/courseLifecycleSlice'
 import { documentHostAPI } from '../helpers/documentHostAPI'
@@ -38,10 +39,10 @@ it('routes retained range focus to captured formal undo, keeping native text/IME
   data.crop.left = 0.25
   const frame = { width: 320, height: 180, transform: [1, 0, 0, 1, 480, 270] as [number, number, number, number, number, number] }
   const asset = (id: string) => ({ id, path: `assets/${id}.png`, filename: `${id}.png`, mimeType: 'image/png' })
-  const project: CourseProjectV10 = { schemaVersion: 10, id: 'range-image', title: '图片', revision: 12,
+  const project: CourseProjectV10 = createTestProjectFromLegacy({ schemaVersion: 10, id: 'range-image', title: '图片', revision: 12,
     definitions: { [IMAGE_DEFINITION.id]: IMAGE_DEFINITION }, instances: { image: { id: 'image', definitionId: IMAGE_DEFINITION.id, data, frame } },
     surfaces: [{ id: 'slide', kind: 'slide', title: '第一页', childIds: ['image'], designSize: { width: 1280, height: 720 } }],
-    global: { underlay: [], overlay: [] }, assets: { old: asset('old') } }
+    global: { underlay: [], overlay: [] }, assets: { old: asset('old') } })
   const service = new DocumentHostService(path.join(directory, 'recovery'))
   const initial = await service.internalAPI.create({ kind: 'course-v10', project, resources: { assets: { old: new Uint8Array([1]) }, components: {} } }, 'image.glx')
   const unavailable = async (): Promise<never> => { throw new Error('fixture has no dialogs') }

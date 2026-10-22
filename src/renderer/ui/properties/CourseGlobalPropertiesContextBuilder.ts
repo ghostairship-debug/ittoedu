@@ -1,3 +1,4 @@
+import { componentSurfaces } from '../../../shared/contracts/component-platform/project'
 import type { ComponentEdit } from '../../../shared/contracts/component-platform/operations'
 import { owningContainer } from '../../../shared/contracts/component-platform/project'
 import { mergeComponentBackground } from '../../../shared/componentBackgroundPaint'
@@ -43,13 +44,13 @@ export function buildCourseGlobalPropertiesOwner(input: {
         effective: propertiesEffectiveBackground(project), assets: input.assets },
       canvas: read.surface?.kind === 'slide' ? read.surface.designSize ?? { width: 1280, height: 720 } : null,
       ...(read.surface?.kind === 'slide' ? { canvasScope: { currentSurfaceId: read.surface.id,
-        pages: project.surfaces.filter(surface => surface.kind === 'slide').map(surface => ({ id: surface.id, label: surface.title })) } } : {}) },
+        pages: componentSurfaces(project).filter(surface => surface.kind === 'slide').map(surface => ({ id: surface.id, label: surface.title })) } } : {}) },
     layer: selected ? { nodeId: selected.id, visibleHere: scopeVisible, visibility: { mode: visibility.mode, locationIds: visibility.surfaceIds },
       scenePlane: container?.kind === 'global' ? container.plane : 'overlay', isController: controller, locationKind: read.surface?.kind,
-      locations: project.surfaces.map(surface => ({ id: surface.id, label: surface.title })) } : null,
+      locations: componentSurfaces(project).map(surface => ({ id: surface.id, label: surface.title })) } : null,
     selected: selected && native ? { view: native.view, notices: native.notices, contentEditingEnabled: true, spatialMode: native.spatialMode,
       videoDiagnostics: [], controller: controller && native.view.type === 'external-component' ? readTeacherControllerConfig(native.view.props) : null,
-      controllerComponent: controller, controllerScenes: project.surfaces.map(componentNavigationScene), component: native.component } : null,
+      controllerComponent: controller, controllerScenes: componentSurfaces(project).map(componentNavigationScene), component: native.component } : null,
     runtime: native?.runtime ?? null, interaction: null,
     commands: { patch: native?.commands.patch ?? (() => {}), preview: native?.commands.preview, replaceImage: native?.commands.replaceImage ?? (() => {}),
       clearPresentationOverride: native?.commands.clearPresentationOverride ?? (() => {}), text: native?.commands.text ?? { beginEdit() {}, commitEdit() {}, cancelEdit() {}, updateDraft() {}, toggleStyle() {} },

@@ -12,7 +12,7 @@ function report(canExport: boolean): ComponentDeliveryReport {
   return {
     reportVersion: 1,
     projectId: 'project',
-    schemaVersion: 10,
+    schemaVersion: 11,
     target: 'docx',
     generatedAt: '2026-08-11T00:00:00.000Z',
     items: [{

@@ -1,3 +1,5 @@
+import { appendRootContainers, testContainerInstance } from '../helpers/glxWorkFixture'
+import { componentSurfaces } from '../../src/shared/contracts/component-platform/project'
 // @vitest-environment node
 import { randomUUID } from 'node:crypto'
 import { expect, it } from 'vitest'
@@ -19,8 +21,8 @@ import type { CourseProjectV10 } from '../../src/shared/contracts/component-plat
 import type { DocumentResources } from '../../src/shared/workbench/document'
 
 async function harness(configure?: (project: CourseProjectV10, resources: DocumentResources) => void, sources: Record<string, string> = {}) {
-  const project = createBlankCourseProjectV10('Assembly'), surfaceId = project.surfaces[0]!.id
-  project.surfaces.push({ ...structuredClone(project.surfaces[0]!), id: 'destination', title: 'Destination', childIds: [] })
+  const project = createBlankCourseProjectV10('Assembly'), surfaceId = componentSurfaces(project)[0]!.id
+  appendRootContainers(project, { ...structuredClone(componentSurfaces(project)[0]!), id: 'destination', title: 'Destination', childIds: [] })
   project.definitions[WEB_DEFINITION.id] = WEB_DEFINITION
   project.definitions.source = { id: 'source', role: 'content', implementation: { kind: 'source', language: 'javascript',
     source: 'export default { mount() { return { update() {}, dispose() {} }; } };' } }
@@ -28,7 +30,7 @@ async function harness(configure?: (project: CourseProjectV10, resources: Docume
     frame: { width: 300, height: 100, transform: [1, 0, 0, 1, 50, 70] } }
   project.instances.code = { id: 'code', definitionId: 'source', data: {},
     frame: { width: 200, height: 100, transform: [1, 0, 0, 1, 400, 70] } }
-  project.surfaces[0]!.childIds = ['html', 'code']
+  testContainerInstance(project, 0).childIds = ['html', 'code']
   const resources: DocumentResources = { assets: {}, components: {} }
   configure?.(project, resources)
   const driver = new CourseV10Driver(), registry = new DocumentRegistry({ drivers: [driver], createId: randomUUID,
@@ -119,7 +121,7 @@ it.each(['content', 'from', 'edits'] as const)('applies style intent to existing
   expect(edited.data).toMatchObject({ html: expect.stringContaining('window.styleEdit=true') })
   expect(Object.keys(current.project.instances)).toEqual(Object.keys(h.project.instances))
   expect(current.project.instances.code).toEqual(h.project.instances.code)
-  expect(current.project.surfaces).toEqual(h.project.surfaces)
+  expect(componentSurfaces(current.project)).toEqual(componentSurfaces(h.project))
   expect(h.session.read().undoDepth).toBe(before.undoDepth + 1)
   const reopened = h.driver.load(h.driver.serialize(current))
   expect(reopened.kind === 'course-v10' && reopened.project.instances).toEqual(current.project.instances)
@@ -133,7 +135,7 @@ it.each(['content', 'from', 'edits'] as const)('applies style intent to existing
 it('returns current professional data and Source paths when a group HTML edit cannot represent its children', async () => {
   const h = await harness(project => {
     project.instances.html.childIds = ['code']
-    project.surfaces[0]!.childIds = ['html']
+    testContainerInstance(project, 0).childIds = ['html']
   }), before = h.session.read()
   const source = h.files.find(file => file.binding?.kind === 'instance-source' && file.binding.instanceId === 'code' && !file.authorSource?.dependencyId)!
   const data = h.files.find(file => file.kind === 'data' && file.target?.kind === 'instance' && file.target.instanceId === 'code')!
@@ -155,7 +157,7 @@ it('keeps a failed group HTML repair on its observed alias after same-definition
     project.instances.other = { ...structuredClone(project.instances.html), id: 'other', data: { html: '<h1>Object B</h1>' } }
     project.instances.html.data = { html: '<h1>Object A</h1>' }
     project.instances.html.childIds = ['code']
-    project.surfaces[0]!.childIds = ['html', 'other']
+    testContainerInstance(project, 0).childIds = ['html', 'other']
   })
   const other = h.files.find(file => file.kind === 'html' && file.target?.kind === 'instance' && file.target.instanceId === 'other')!
   const observed = h.session.read()
@@ -303,7 +305,7 @@ it('combines two existing files of one shared Source workspace without overwriti
     project.definitions.source.implementation = { kind: 'source', language: 'javascript', workspace: { ownerId: 'shared', entry: 'main.js' } }
     resources.components.shared = { 'main.js': encode(originalMain), 'module.js': encode('export const value = 1;') }
     project.instances.neighbor = { ...structuredClone(project.instances.code), id: 'neighbor' }
-    project.surfaces[0]!.childIds.push('neighbor')
+    testContainerInstance(project, 0).childIds.push('neighbor')
   })
   const files = h.files.filter(file => file.binding?.kind === 'instance-source' && file.binding.instanceId === 'code')
   const main = files.find(file => file.sourceFile?.path === 'main.js')!
@@ -338,7 +340,7 @@ it.each(['entry-first', 'dependency-first'])('combines an author entry and its d
     project.definitions.source.implementation = { kind: 'source', language: 'javascript', source: original, moduleBindings: { './dep': 'dep' } }
     project.definitions.dep = { id: 'dep', role: 'content', implementation: { kind: 'source', language: 'javascript', source: 'export const value = 1;' } }
     project.instances.neighbor = { ...structuredClone(project.instances.code), id: 'neighbor' }
-    project.surfaces[0]!.childIds.push('neighbor')
+    testContainerInstance(project, 0).childIds.push('neighbor')
   })
   const entry = h.files.find(file => file.binding?.kind === 'instance-source' && file.binding.instanceId === 'code' && file.authorSource && !file.authorSource.dependencyId)!
   const dependency = h.files.find(file => file.binding?.kind === 'instance-source' && file.binding.instanceId === 'code' && file.authorSource?.dependencyId === 'dep')!
@@ -379,7 +381,7 @@ it('uses observed page paths for insertion and destination after titles change, 
   expect(rules.map(rule => rule.actions[0].action)).toEqual([
     { type: 'location.go', locationId: 'destination' }, { type: 'scene.next' }, { type: 'scene.previous' },
   ])
-  expect(h.model().project.surfaces[1].title).toBe('Human title')
+  expect(componentSurfaces(h.model().project)[1].title).toBe('Human title')
   expect(h.session.read().undoDepth).toBe(before.undoDepth + 2)
 })
 
@@ -398,7 +400,7 @@ it('never rebinds an observed deleted page path to the later same-name page', as
     && file.target.container.kind === 'surface' && file.target.container.surfaceId === h.surfaceId)!.path
   expect(await h.call('object.insert', { path: page, kind: 'text', text: 'Wrong destination', click: { action: 'location-go', value: path } })).toMatchObject({ kind: 'error' })
   expect(h.session.read().revision).toBe(current.revision)
-  expect(h.model().project.surfaces[1].childIds).toEqual([])
+  expect(testContainerInstance(h.model().project, 1).childIds).toEqual([])
 })
 
 it('keeps read-only page targets read-only when addressed by path', async () => {
@@ -423,8 +425,8 @@ it('adds multiple pages and their content/from drafts in one commit and undo, pr
   expect(result, JSON.stringify(result)).toMatchObject({ kind: 'read', data: { commit: 'committed', targets: [{ title: 'Literal' }, { title: 'File' }] } })
   expect(commits).toBe(1)
   expect(h.session.read().undoDepth).toBe(before.undoDepth + 1)
-  expect(h.model().project.surfaces.slice(0, 2)).toEqual(h.project.surfaces)
-  expect(h.model().project.surfaces.slice(2).every(surface => surface.childIds.length > 0)).toBe(true)
+  expect(componentSurfaces(h.model().project).slice(0, 2)).toEqual(componentSurfaces(h.project))
+  expect(componentSurfaces(h.model().project).slice(2).every(surface => surface.childIds.length > 0)).toBe(true)
   expect(JSON.stringify(h.model().project)).toContain('Literal draft')
   expect(JSON.stringify(h.model().project)).toContain('From file')
   const current = h.session.read()
@@ -444,7 +446,7 @@ it('preserves a concurrent human edit and does not partially commit a stale new-
   const result = await h.call('project.apply', { path: 'pages', intent: 'surface.add', kind: 'spatial', title: 'Single', content: '<p>Single draft</p>' })
   expect(result, JSON.stringify(result)).toMatchObject({ kind: 'read', data: { commit: 'not_committed', receipt: { status: 'conflict' } } })
   expect(h.model().project.title).toBe('Human title during plan')
-  expect(h.model().project.surfaces).toHaveLength(2)
+  expect(componentSurfaces(h.model().project)).toHaveLength(2)
   expect(h.session.read().undoDepth).toBe(before.undoDepth + 1)
 })
 
@@ -453,8 +455,8 @@ it('adds a single page with its first draft without adopting the existing empty 
   const h = await harness(), before = h.session.read()
   const result = await h.call('project.apply', { path: 'pages', intent: 'surface.add', kind: 'spatial', title: 'New scene', content: '<p>New scene draft</p>' })
   expect(result, JSON.stringify(result)).toMatchObject({ kind: 'read', data: { commit: 'committed', targets: [{ title: 'New scene', kind: 'spatial' }] } })
-  expect(h.model().project.surfaces.slice(0, 2)).toEqual(h.project.surfaces)
-  expect(h.model().project.surfaces[2].childIds.length).toBeGreaterThan(0)
+  expect(componentSurfaces(h.model().project).slice(0, 2)).toEqual(componentSurfaces(h.project))
+  expect(testContainerInstance(h.model().project, 2).childIds.length).toBeGreaterThan(0)
   expect(h.session.read().undoDepth).toBe(before.undoDepth + 1)
 })
 
@@ -500,5 +502,5 @@ it('freezes navigation paths with the authorized batch even if a later directory
   const current = h.session.read()
   expect(await h.gateway.execute('assembly', randomUUID(), call)).toMatchObject({ kind: 'error' })
   expect(h.session.read().revision).toBe(current.revision)
-  expect(h.model().project.surfaces[0].childIds).toEqual(h.project.surfaces[0].childIds)
+  expect(testContainerInstance(h.model().project, 0).childIds).toEqual(testContainerInstance(h.project, 0).childIds)
 })

@@ -116,7 +116,7 @@ export async function generateAiCapabilityArtifacts(
   resources.set('skills/manifest.json', readableResourceJson(skills.manifest))
   const entries: CourseAgentCapabilityEntry[] = []
   const surfaces = componentSurfaceSchema.shape.kind.options
-  const allScopes = surfaces.flatMap(surface => ['surface', 'global', 'instance'].map(owner => `${surface}:${owner}`))
+  const allScopes = [...surfaces.flatMap(surface => ['surface', 'global', 'instance'].map(owner => `${surface}:${owner}`)), 'program:global', 'program:instance']
   const carriers = ['component']
   const scopeNote = '静态目录只说明已登记接口；当前运行是否可调用、文档范围、写权限、短句柄和服务配置，以宿主本轮发现与实际回执为准。'
 
@@ -138,10 +138,10 @@ export async function generateAiCapabilityArtifacts(
   }
 
   const schemaResources = [
-    { id: 'course-project-v10', path: 'schemas/course-project-v10.json', schema: courseProjectV10Schema,
-      source: 'src/shared/contracts/component-platform/schema.ts', summary: '正式 Project V10 作者数据结构；修改通过当前工程工具和文档事务提交。' },
-    { id: 'published-course-v3', path: 'schemas/published-course-v3.json', schema: publishedCourseV3Schema,
-      source: 'src/shared/contracts/component-platform/published.ts', summary: 'Published V3 播放数据结构；由正式工程生成，包含实际运行资源。' },
+    { id: 'course-project-v11', path: 'schemas/course-project-v11.json', schema: courseProjectV10Schema,
+      source: 'src/shared/contracts/component-platform/schema.ts', summary: '正式 Project V11 作者数据结构；rootIds/entry 和实例容器共同表达作品，修改通过当前工程工具和文档事务提交。' },
+    { id: 'published-course-v4', path: 'schemas/published-course-v4.json', schema: publishedCourseV3Schema,
+      source: 'src/shared/contracts/component-platform/published.ts', summary: 'Published V4 播放数据结构；由正式工程生成，包含程序根、嵌套容器与实际运行资源。' },
   ]
   for (const protocol of schemaResources) {
     // Catalogs describe submitted JSON. Canonical parsers still normalize and
@@ -168,7 +168,7 @@ export async function generateAiCapabilityArtifacts(
     note: '组件 mount/update/dispose、可选 suspend/resume 和 scope、目标、事件、状态、媒体、互动、教师控制器端口取自正式合同。__runtime.activity 按实例回放 active/visible/playing，暂时离屏保留同一 mount；暂停为程序协作，不是任意网页硬冻结。相关类型保留原源码引用路径；实际端口由当前宿主提供。',
   }))
   entries.push({ id: 'component-api5', kind: 'protocol', label: 'Component API 5', path: 'protocols/component-api5.json',
-    scopes: allScopes, carriers, summary: '统一组件源码运行接口、生命周期和实际宿主端口；作者数据使用 Project V10。', dependencies: ['course-project-v10'] })
+    scopes: allScopes, carriers, summary: '统一组件源码运行接口、生命周期和实际宿主端口；作者数据使用 Project V11。', dependencies: ['course-project-v11'] })
   resources.set('component-catalog.snapshot.json', readableResourceJson({
     version: 1, status: 'runtime-discovery', builtinSourceKeys: [...builtinComponentSourceKeys].sort(),
     tools: ['asset.search', 'asset.use', 'asset.save'],
@@ -200,8 +200,8 @@ export async function generateAiCapabilityArtifacts(
   entries.sort((a, b) => a.id.localeCompare(b.id, 'en'))
   const semanticVersion = createHash('sha256').update(canonicalJson({ version: 1, entries,
     files: Object.fromEntries([...resources].sort(([a], [b]) => a.localeCompare(b, 'en'))) })).digest('hex')
-  const protocols = { project: { version: 10, schema: 'schemas/course-project-v10.json' },
-    published: { version: 3, schema: 'schemas/published-course-v3.json' }, component: { version: 5, source: 'protocols/component-api5.json' } }
+  const protocols = { project: { version: 11, schema: 'schemas/course-project-v11.json' },
+    published: { version: 4, schema: 'schemas/published-course-v4.json' }, component: { version: 5, source: 'protocols/component-api5.json' } }
   const discovery = { version: 1, semanticVersion, query: 'query.mjs', data: 'discovery-data.json',
     usage: courseAgentCapabilityQueryHelp, scope: scopeNote,
     groups: { tools: 'query --kind tool', components: 'query --id component-catalog', skills: 'query --kind skill', references: 'query --kind reference' },

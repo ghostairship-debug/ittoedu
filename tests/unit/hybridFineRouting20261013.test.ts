@@ -1,3 +1,5 @@
+import { testContainerInstance, appendRootContainers } from '../helpers/glxWorkFixture'
+import { componentSurfaces } from '../../src/shared/contracts/component-platform/project'
 // @vitest-environment node
 import {expect,it} from 'vitest'
 import {build} from 'esbuild'
@@ -27,7 +29,7 @@ it('selects covered local programs from converter facts for every effective vers
  expect(webProgramRequiresNativeDocument({html:shell})).toBe(false)
  expect(webProgramRequiresNativeDocument({html:'<iframe srcdoc="&lt;script&gt;top.document.body.textContent=\'outer\'&lt;/script&gt;"></iframe>'})).toBe(true)
  expect(webProgramRequiresNativeDocument({html:'<iframe srcdoc="&lt;script&gt;parent.document.body.textContent=\'outer\'&lt;/script&gt;"></iframe>'})).toBe(true)
- const project=createBlankCourseProjectV10('routing versions');project.definitions.web={id:'web',role:'content',implementation:{kind:'builtin',key:'guoling.web'}};project.instances.web={id:'web',definitionId:'web',data:{html:'<p>static</p>'}};project.surfaces[0].childIds=['web'];project.surfaces[0].presentation={initialStateId:'base',states:[{id:'base',title:'base',overrides:{}},{id:'local',title:'local',overrides:{web:{data:{html:ordinary}}}},{id:'native',title:'native',overrides:{web:{data:{html:'<script>function dormant(){document.write("full parser")}</script>'}}}}]}
+ const project=createBlankCourseProjectV10('routing versions');project.definitions.web={id:'web',role:'content',implementation:{kind:'builtin',key:'guoling.web'}};project.instances.web={id:'web',definitionId:'web',data:{html:'<p>static</p>'}};testContainerInstance(project, 0).childIds=['web'];testContainerInstance(project, 0).container!.presentation={initialStateId:'base',states:[{id:'base',title:'base',overrides:{}},{id:'local',title:'local',overrides:{web:{data:{html:ordinary}}}},{id:'native',title:'native',overrides:{web:{data:{html:'<script>function dormant(){document.write("full parser")}</script>'}}}}]}
  const published=await buildPublishedCourseV3({project,assetBytes:{}},{compilation:new InMemoryComponentCompilation(createEsbuildComponentCompiler())})
  const document=new JSDOM('<!doctype html>').window.document,before=structuredClone(published.payload)
  const artifact=await compileCoursePlayback(published.payload,{document,renderBuiltin:async()=>''});expect(published.payload).toEqual(before);expect(artifact.webPrograms.web.map(value=>Boolean(value.program.nativeData))).toEqual([false,false,true]);expect(artifact.diagnostics).toEqual([])
@@ -41,7 +43,7 @@ it('selects covered local programs from converter facts for every effective vers
 
 it('runs two local Web and Source instances plus a closed module in the real compiled player with private initialization',async()=>{
  const project=createBlankCourseProjectV10('direct isolation');project.definitions.web={id:'web',role:'content',implementation:{kind:'builtin',key:'guoling.web'}};project.definitions.source={id:'source',role:'content',implementation:{kind:'source',language:'javascript',source}}
- for(const [id,kind,x,y]of [['web-a','web',0,0],['web-b','web',320,0],['source-a','source',0,210],['source-b','source',320,210],['module','web',640,0]] as const){project.instances[id]={id,definitionId:kind,data:kind==='web'?{html:ordinary}:{},frame:{width:300,height:180,transform:[1,0,0,1,x,y]}};project.surfaces[0].childIds.push(id)}
+ for(const [id,kind,x,y]of [['web-a','web',0,0],['web-b','web',320,0],['source-a','source',0,210],['source-b','source',320,210],['module','web',640,0]] as const){project.instances[id]={id,definitionId:kind,data:kind==='web'?{html:ordinary}:{},frame:{width:300,height:180,transform:[1,0,0,1,x,y]}};testContainerInstance(project, 0).childIds.push(id)}
  project.instances.module.data={html:'<button id="x">0</button><script type="module" src="./main.js"></script>',modules:{'main.js':`import {next} from './value.js';document.getElementById('x').onclick=()=>document.getElementById('x').textContent=String(next());`,'value.js':'let count=0;export function next(){return ++count}'}}
  const before=structuredClone(project),published=await buildPublishedCourseV3({project,assetBytes:{}},{compilation:new InMemoryComponentCompilation(createEsbuildComponentCompiler())});expect(project).toEqual(before)
  const document=new JSDOM('<!doctype html>').window.document,artifact=await compileCoursePlayback(published.payload,{document,renderBuiltin:async()=>{throw Error('unexpected static renderer')}});document.defaultView?.close()
@@ -66,10 +68,10 @@ it('retires pending direct Source initialization and routes programmatic DOM URL
  const pendingFactory=`await new Promise(resolve=>setTimeout(()=>resolve(),10000));export function mount(){return{update(){},dispose(){}}}`
  const pendingTimer=`export async function mount({scope}){scope.state.set('timerEntered',true);await new Promise(resolve=>setTimeout(()=>resolve(),10000));return{update(){},dispose(){}}}`
  const lateMount=`export function mount({root,scope}){root.innerHTML='<p id="late">pending</p>';scope.state.set('lateEntered',true);return new Promise(resolve=>{root.finish=()=>resolve({update(){},dispose(){root.dataset.disposals=String(Number(root.dataset.disposals||0)+1)}})})}`
- const project=createBlankCourseProjectV10('retirement and URL'),initial=project.surfaces[0].id
+ const project=createBlankCourseProjectV10('retirement and URL'),initial=componentSurfaces(project)[0].id
  project.definitions.web={id:'web',role:'content',implementation:{kind:'builtin',key:'guoling.web'}}
  project.instances.healthy={id:'healthy',definitionId:'web',data:{html:ordinary},frame:{width:300,height:180,transform:[1,0,0,1,0,0]}}
- project.surfaces[0].childIds=['healthy','url'];project.surfaces.push({id:'pending',kind:'slide',title:'pending',childIds:['factory','timer','late'],designSize:{width:1280,height:720}})
+ testContainerInstance(project, 0).childIds=['healthy','url'];appendRootContainers(project, {id:'pending',kind:'slide',title:'pending',childIds:['factory','timer','late'],designSize:{width:1280,height:720}})
  for(const [id,code]of Object.entries({url:urlSource,factory:pendingFactory,timer:pendingTimer,late:lateMount})){project.definitions[id]={id,role:'content',implementation:{kind:'source',language:'javascript',source:code}};project.instances[id]={id,definitionId:id,data:{},frame:{width:300,height:180,transform:[1,0,0,1,id==='url'?320:0,id==='late'?210:0]}}}
  const published=await buildPublishedCourseV3({project,assetBytes:{}},{compilation:new InMemoryComponentCompilation(createEsbuildComponentCompiler())}),document=new JSDOM('<!doctype html>').window.document
  const artifact=await compileCoursePlayback(published.payload,{document,renderBuiltin:async()=>''});document.defaultView?.close()

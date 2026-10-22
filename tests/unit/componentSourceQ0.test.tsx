@@ -1,3 +1,4 @@
+import { createTestProjectFromLegacy } from '../helpers/glxWorkFixture'
 // @vitest-environment node
 import { useSyncExternalStore } from 'react'
 import { afterEach, expect, it, vi } from 'vitest'
@@ -27,14 +28,14 @@ const source = "import { value } from './helper.js'; export default { value };"
 const helper = 'export const value = 42;'
 function model(id: string): CourseProjectV10 {
   const frame = { width: 180, height: 90, transform: [1, .2, -.1, 1, 23, 41] as [number, number, number, number, number, number] }
-  return { schemaVersion: 10, id, revision: 0, title: id, definitions: {
+  return createTestProjectFromLegacy({ schemaVersion: 10, id, revision: 0, title: id, definitions: {
     custom: { id: 'custom', title: '共享组件', version: 'author-version', role: 'content',
       dataSchema: { 'x-editor': { pages: [{ id: 'main', label: '内容', propertyKeys: ['label'] }], defaultPageId: 'main' } },
       implementation: { kind: 'source', language: 'javascript', workspace: { ownerId: 'shared-files', entry: 'main.js' }, resourceBindings: { image: 'picture' } } },
   }, instances: { a: { id: 'a', definitionId: 'custom', name: 'A', data: { label: 'A' }, frame },
     b: { id: 'b', definitionId: 'custom', name: 'B', data: { label: 'B' }, frame } },
   surfaces: [{ id: 'page', kind: 'slide', title: '页面', childIds: ['a', 'b'] }], global: { underlay: [], overlay: [] },
-  assets: { picture: { id: 'picture', path: 'picture.bin', mimeType: 'application/octet-stream' } } }
+  assets: { picture: { id: 'picture', path: 'picture.bin', mimeType: 'application/octet-stream' } } })
 }
 const resources = () => ({ assets: { picture: new Uint8Array([1, 2, 3]) }, components: {
   'shared-files': { 'main.js': bytes(source), 'helper.js': bytes(helper), 'opaque.bin': new Uint8Array([0, 255, 128]) },

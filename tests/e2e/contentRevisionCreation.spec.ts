@@ -270,7 +270,7 @@ test('T10 small V10 creation uses actual local compute, editable table/chart, re
     for (const load of facts.optionalLoadCatalogs) expect(load.visibleBeforeLoad).toEqual(expect.arrayContaining([
       'project.apply', 'project.save', 'text.replace', 'object.update', 'media.insert', 'document.export']))
     expect(facts.saved!.dirty).toBe(false)
-    expect(facts.saved!.project.surfaces.map((surface: import('../../src/shared/contracts/component-platform/project').ComponentSurface) => surface.kind)).toEqual(['flow'])
+    expect(facts.saved!.project.rootIds.map((id: string) => facts.saved!.project.instances[id].container?.kind)).toEqual(['flow'])
     const instances: any[] = Object.values(facts.saved!.project.instances)
     const tables = instances.filter(instance => instance.definitionId === 'guoling.table')
     const charts = instances.filter(instance => instance.definitionId === 'guoling.chart')

@@ -1,4 +1,5 @@
 // @vitest-environment node
+import { setRootContainers } from '../helpers/glxWorkFixture'
 import { expect, it } from 'vitest'
 import { createBlankCourseProjectV10 } from '../../src/core/course/createCourseProjectV10'
 import { HtmlActionService, type PublishedActionPreviewPort, type PublishedActionTarget } from '../../src/main/workbench/observation/HtmlActionService'
@@ -18,7 +19,7 @@ const png = Uint8Array.from(Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC
 
 function fixture() {
   const project = createBlankCourseProjectV10('View actions'); project.id = 'project'
-  project.surfaces = ['first', 'second'].map(id => ({ id, kind: 'slide', title: id, childIds: [] }))
+  setRootContainers(project, ['first', 'second'].map(id => ({ id, kind: 'slide', title: id, childIds: [] })))
   const snapshot: ViewObservationSnapshot = { documentId: 'doc', epoch: 'epoch', revision: 1,
     model: { kind: 'course-v10', project, resources: { assets: {}, components: {} } }, binding: { kind: 'untitled', suggestedName: 'view' },
     dirty: true, saving: false, recoverable: true, undoDepth: 0, redoDepth: 0 }

@@ -1,4 +1,7 @@
 // @vitest-environment jsdom
+import { withTestTeacherController } from '../helpers/glxWorkFixture'
+import { componentSurfaces } from '../../src/shared/contracts/component-platform/project'
+import { appendRootContainers, testContainerInstance } from '../helpers/glxWorkFixture'
 import { afterEach, expect, it, vi } from 'vitest'
 import { AudioManager } from '../../src/player/AudioManager'
 import { CourseEventBus } from '../../src/player/CourseEventBus'
@@ -92,7 +95,7 @@ it('CA273 live sound identity consumes new asset, defaults, channel and deletion
 
 it('CA112 V10 injects the current document unlock target into its existing AudioManager', async () => {
   const audio: Playback[] = []; vi.stubGlobal('Audio', class extends Playback { constructor(source: string) { super(source); this.error = new Error('gesture required'); audio.push(this) } })
-  const project = createBlankCourseProjectV10(); project.media = settings().media
+  const project = withTestTeacherController(createBlankCourseProjectV10()); project.media = settings().media
   const runtime = new ComponentPlatformRuntime('unlock', { resolveAssetUrl: id => id }), root = document.createElement('div'); document.body.append(root)
   const id = project.global.overlay[0]; runtime.bind(id, root); runtime.bindTarget(id, root); await runtime.sync(project, { assets: {}, components: {} })
   expect(runtime.audio()?.play('sound')).toBe(true); await Promise.resolve(); expect(audio[0].plays).toBe(1)
@@ -136,17 +139,17 @@ it('CA085 cold audio waits only for its original asset action and cancelled depa
   const created: Playback[] = []; vi.stubGlobal('Audio', class extends Playback { constructor(source: string) { super(source); created.push(this) } })
   let download!: () => void; vi.stubGlobal('fetch', vi.fn(() => new Promise(resolve => { download = () => resolve({ ok: true, arrayBuffer: async () => new Uint8Array([1, 2]).buffer }) })))
   const project = createBlankCourseProjectV10(); project.media = settings('narration').media; project.assets.old = { id: 'old', path: 'assets/old', mimeType: 'audio/wav' }
-  project.global = { underlay: [], overlay: [] }; project.instances = {}; project.definitions = {};
-  const surfaceId = project.surfaces[0].id; project.surfaces.push({ id: 'B', title: 'B', kind: 'slide', childIds: [] })
+  project.global = { underlay: [], overlay: [] };
+  const surfaceId = componentSurfaces(project)[0].id; appendRootContainers(project, { id: 'B', title: 'B', kind: 'slide', childIds: [] })
   project.definitions.entry = { id: 'entry', role: 'behavior', implementation: { kind: 'builtin', key: 'guoling.interactions' } }
   project.instances.entry = { id: 'entry', definitionId: 'entry', attachments: [{ instanceId: 'entry', target: { kind: 'surface', surfaceId } }], data: { rules: [{ id: 'play', name: 'play', enabled: true, trigger: { type: 'scene.enter' }, conditions: [], actions: [{ id: 'sound', start: 'after-previous', delayMs: 0, action: { type: 'audio.play', soundId: 'sound' } }] }] } }
-  project.surfaces[0].childIds.push('entry'); const { revision: _revision, ...payload } = project
+  testContainerInstance(project, 0).childIds.push('entry'); const { revision: _revision, ...payload } = project
   const root = document.createElement('div'); document.body.append(root)
-  const messages: string[] = [], player = await mountPublishedCourseV3({ ...payload, schemaVersion: 3, assets: { old: { id: 'old', mimeType: 'audio/wav', url: 'https://assets.example/audio.wav' } } }, root, { keyboardNavigation: false, report: message => messages.push(message) })
+  const messages: string[] = [], player = await mountPublishedCourseV3({ ...payload, schemaVersion: 4, assets: { old: { id: 'old', mimeType: 'audio/wav', url: 'https://assets.example/audio.wav' } } }, root, { keyboardNavigation: false, report: message => messages.push(message) })
   try { expect(messages).toEqual([]); expect(created).toHaveLength(0); expect(download).toBeTypeOf('function'); download(); await vi.waitFor(() => expect(created).toHaveLength(1)); expect(created[0].plays).toBe(1) }
   finally { await player.dispose() }
   created.length = 0
-  const departed = await mountPublishedCourseV3({ ...payload, schemaVersion: 3, assets: { old: { id: 'old', mimeType: 'audio/wav', url: 'https://assets.example/audio.wav' } } }, root, { keyboardNavigation: false })
+  const departed = await mountPublishedCourseV3({ ...payload, schemaVersion: 4, assets: { old: { id: 'old', mimeType: 'audio/wav', url: 'https://assets.example/audio.wav' } } }, root, { keyboardNavigation: false })
   try { await departed.go('B'); download(); await departed.waitForCaptureReady(); expect(created).toHaveLength(0) }
   finally { await departed.dispose() }
 })
@@ -154,16 +157,16 @@ it('CA085 cold audio waits only for its original asset action and cancelled depa
 it('CA085 native audio uses its existing instance voice after the original cold asset becomes ready', async () => {
   const plays = domMedia(); let download!: () => void
   vi.stubGlobal('fetch', vi.fn(() => new Promise(resolve => { download = () => resolve({ ok: true, arrayBuffer: async () => new Uint8Array([1, 2]).buffer }) })))
-  const project = createBlankCourseProjectV10(); project.global = { underlay: [], overlay: [] }; project.instances = {}; project.definitions = {}
-  const surfaceId = project.surfaces[0].id
+  const project = createBlankCourseProjectV10(); project.global = { underlay: [], overlay: [] };
+  const surfaceId = componentSurfaces(project)[0].id
   project.assets.asset = { id: 'asset', path: 'assets/asset', mimeType: 'audio/wav' }
   project.definitions.audio = { id: 'audio', role: 'content', implementation: { kind: 'builtin', key: 'guoling.audio' } }
   project.instances.audio = { id: 'audio', definitionId: 'audio', data: createAudioData('asset'), frame: { width: 200, height: 60, transform: [1, 0, 0, 1, 0, 0] } }
   project.definitions.entry = { id: 'entry', role: 'behavior', implementation: { kind: 'builtin', key: 'guoling.interactions' } }
   project.instances.entry = { id: 'entry', definitionId: 'entry', attachments: [{ instanceId: 'entry', target: { kind: 'surface', surfaceId } }], data: { rules: [{ id: 'play', name: 'play', enabled: true, trigger: { type: 'scene.enter' }, conditions: [], actions: [{ id: 'audio', start: 'after-previous', delayMs: 0, action: { type: 'audio.play', soundId: 'audio' } }] }] } }
-  project.surfaces[0].childIds.push('audio', 'entry'); const { revision: _revision, ...payload } = project
+  testContainerInstance(project, 0).childIds.push('audio', 'entry'); const { revision: _revision, ...payload } = project
   const root = document.createElement('div'); document.body.append(root)
-  const player = await mountPublishedCourseV3({ ...payload, schemaVersion: 3, assets: { asset: { id: 'asset', mimeType: 'audio/wav', url: 'https://assets.example/audio.wav' } } }, root, { keyboardNavigation: false })
+  const player = await mountPublishedCourseV3({ ...payload, schemaVersion: 4, assets: { asset: { id: 'asset', mimeType: 'audio/wav', url: 'https://assets.example/audio.wav' } } }, root, { keyboardNavigation: false })
   try {
     expect(plays).not.toHaveBeenCalled(); const element = player.runtime.contentElement('audio')!.querySelector('audio')!
     download(); await vi.waitFor(() => expect(plays).toHaveBeenCalledOnce())

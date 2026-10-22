@@ -1,4 +1,6 @@
 // @vitest-environment node
+import { componentSurfaces } from '../../src/shared/contracts/component-platform/project'
+import { testContainerInstance } from '../helpers/glxWorkFixture'
 import { createServer, type Server } from 'node:http'
 import { promises as fs } from 'node:fs'
 import os from 'node:os'
@@ -64,7 +66,7 @@ it('sends an authorized course image and material as independent references, the
   project.definitions[IMAGE_DEFINITION.id] = IMAGE_DEFINITION
   const frame = { width: 120, height: 90, transform: [1, 0, 0, 1, 70, 60] as [number, number, number, number, number, number] }
   project.instances.character = { id: 'character', definitionId: IMAGE_DEFINITION.id, data: createImageData(original.meta.id), frame }
-  project.surfaces[0].childIds = ['character']
+  testContainerInstance(project, 0).childIds = ['character']
   const initial = await host.internalAPI.create({ kind: 'course-v10', project,
     resources: { assets: { [original.meta.id]: original.bytes }, components: {} } }, 'references.h5lesson')
   let materialReads = 0
@@ -85,7 +87,7 @@ it('sends an authorized course image and material as independent references, the
     documents: [{ documentId: initial.documentId, writable: [{ kind: 'document' }] }],
     fileAccess: { permission: 'workspace', workspaceRoot: root } })
   const reference = await host.tools.issueTarget('story', initial.documentId,
-    { kind: 'course-instance', surfaceId: project.surfaces[0].id, instanceId: 'character' })
+    { kind: 'course-instance', surfaceId: componentSurfaces(project)[0].id, instanceId: 'character' })
   await host.tools.beginRun({ runId: 'outside', actor: 'agent', documents: [],
     fileAccess: { permission: 'workspace', workspaceRoot: path.join(root, 'other') } })
   expect(await host.tools.execute('outside', 'unauthorized-reference', {
@@ -109,7 +111,7 @@ it('sends an authorized course image and material as independent references, the
   expect((await host.internalAPI.read(initial.documentId)).model).toEqual(initial.model)
 
   const destination = await host.tools.issueTarget('story', initial.documentId,
-    { kind: 'course-surface', surfaceId: project.surfaces[0].id })
+    { kind: 'course-surface', surfaceId: componentSurfaces(project)[0].id })
   await host.tools.loadToolFamilies('story', ['media'])
   expect(await host.tools.execute('story', 'insert-next-scene', {
     name: 'media.insert', input: { target: destination, resource: ready.resources[0].resource },
@@ -118,7 +120,7 @@ it('sends an authorized course image and material as independent references, the
   if (applied.model.kind !== 'course-v10') throw new Error('Expected current course')
   expect(applied.model.project.instances.character.frame).toEqual(frame)
   expect(Buffer.from(applied.model.resources.assets[original.meta.id])).toEqual(character)
-  const insertedId = applied.model.project.surfaces[0].childIds.find(id => id !== 'character')!
+  const insertedId = componentSurfaces(applied.model.project)[0].childIds.find(id => id !== 'character')!
   const insertedAsset = imageDataSchema.parse(applied.model.project.instances[insertedId].data).assetId
   expect(Buffer.from(applied.model.resources.assets[insertedAsset])).toEqual(nextScene)
   const filename = path.join(root, 'saved.h5lesson')

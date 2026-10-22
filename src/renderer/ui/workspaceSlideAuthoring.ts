@@ -1,3 +1,4 @@
+import { componentContainers } from '../../shared/contracts/component-platform/project'
 import { frameToSpaceMatrix, invertMatrix, multiplyMatrices, transformPoint, type AffineMatrix, type GeometryPoint } from '../../core/components/geometry'
 import { isComponentVisibleAtSurface, type ComponentFrame, type ComponentEdit, type CourseProjectV10 } from '../../shared/contracts/component-platform'
 import { normalizeElbowLineAuthoring, normalizeStraightLineAuthoring, resolveNativeLinePoints } from '../../shared/nativeLineGeometry'
@@ -7,6 +8,8 @@ import { FreeTransformGesture, freeSurfaceTargets, hitFreeObject, marqueeFreeTar
   type FreeObjectTarget, type FreeResizeHandle, type FreeSnapGuide } from '../componentPlatform/surfaces/slide'
 
 export interface SlideAuthoringPointer { x: number; y: number; additive?: boolean; altKey?: boolean; shiftKey?: boolean }
+/** The original down intent survives a content ACK without repeating its screen hit. */
+export type SlideWorkspacePointerHit = { kind: 'object'; instanceId: string } | { kind: 'blank' }
 export interface SlideWorkspaceAuthoringState { project: CourseProjectV10; surfaceId: string; documentId: string; selectedInstanceIds: readonly string[]; activeStateId?: string | null; editingScope?: 'scene' | 'global' }
 export interface SlideWorkspaceAuthoringPorts {
   read(): SlideWorkspaceAuthoringState | null
@@ -59,17 +62,26 @@ export function createSlideWorkspaceAuthoringController(ports: SlideWorkspaceAut
   let marquee: { start: GeometryPoint; extend: readonly string[] } | null = null
   let output = empty()
   const cancelGesture = () => { gesture = null; marquee = null; output = empty(); return output }
-  const pointerDown = (pointer: SlideAuthoringPointer, surfaceToPointer: AffineMatrix, handle?: FreeResizeHandle | 'rotate') => {
+  const captureHit = (pointer: SlideAuthoringPointer, surfaceToPointer: AffineMatrix): SlideWorkspacePointerHit => {
+    const state = ports.read(), targets = listSlideWorkspaceHitTargets(state)
+    const at = transformPoint(invertMatrix(surfaceToPointer), point(pointer))
+    const leaf = hitFreeObject(targets, at, true, surfaceToPointer)
+    const outer = leaf && (pointer.altKey || leaf.directSelection || !leaf.ancestors.length ? leaf
+      : targets.find(value => value.instanceId === leaf.ancestors[0]) ?? leaf)
+    const selected = hitFreeObject(selectedFreeTargets(targets, state?.selectedInstanceIds ?? []), at, true, surfaceToPointer)
+    const hit = !pointer.altKey && leaf && selected && (selected.instanceId === leaf.instanceId || leaf.ancestors.includes(selected.instanceId)) ? selected : outer
+    return hit ? { kind: 'object', instanceId: hit.instanceId } : { kind: 'blank' }
+  }
+  const pointerDown = (pointer: SlideAuthoringPointer, surfaceToPointer: AffineMatrix, handle?: FreeResizeHandle | 'rotate', capturedHit?: SlideWorkspacePointerHit) => {
     const state = ports.read()
     if (!state) return cancelGesture()
     const targets = listSlideWorkspaceHitTargets(state)
     const at = transformPoint(invertMatrix(surfaceToPointer), point(pointer))
     let ids = [...state.selectedInstanceIds]
     if (!handle) {
-      const outerHit = hitFreeObject(targets, at, Boolean(pointer.altKey), surfaceToPointer)
-      const selectedHit = hitFreeObject(selectedFreeTargets(targets, ids), at, true, surfaceToPointer)
-      // An explicitly selected child stays draggable inside its containing group.
-      const hit = !pointer.altKey && outerHit && selectedHit?.ancestors.includes(outerHit.instanceId) ? selectedHit : outerHit
+      const intent = capturedHit ?? captureHit(pointer, surfaceToPointer)
+      const hit = intent.kind === 'object' ? targets.find(target => target.instanceId === intent.instanceId) : undefined
+      if (intent.kind === 'object' && !hit) { ports.report('最初选择的对象已不存在或离开当前编辑范围，未切换到其他对象。'); return cancelGesture() }
       if (!hit) {
         marquee = { start: at, extend: pointer.additive ? ids : [] }
         if (!pointer.additive) ports.select([])
@@ -81,6 +93,7 @@ export function createSlideWorkspaceAuthoringController(ports: SlideWorkspaceAut
         return output = empty()
       }
       if (!ids.includes(hit.instanceId)) { ids = [hit.instanceId]; ports.select(ids) }
+      else if (capturedHit) ports.select(ids) // This resumed intent explicitly chose objects, including an old field's owner.
     }
     const selected = selectedFreeTargets(targets, ids).filter(target =>
       [target.instanceId, ...target.ancestors].every(id => !state.project.instances[id]?.locked))
@@ -88,7 +101,7 @@ export function createSlideWorkspaceAuthoringController(ports: SlideWorkspaceAut
     gesture = { target: ports.capture(), origin: point(pointer), moved: false, edits: [], value: new FreeTransformGesture({
       mode: handle === 'rotate' ? 'rotate' : handle ? 'resize' : 'drag', handle: handle === 'rotate' ? undefined : handle,
       targets: selected, pointer: point(pointer), surfaceToPointer, snapTargets: targets,
-      designSize: state.project.surfaces.find(surface => surface.id === state.surfaceId)?.designSize,
+      designSize: componentContainers(state.project).find(surface => surface.id === state.surfaceId)?.designSize,
     }) }
     return output = empty()
   }
@@ -130,7 +143,7 @@ export function createSlideWorkspaceAuthoringController(ports: SlideWorkspaceAut
     catch (error) { ports.report(error instanceof Error ? error.message : String(error)) }
     return output
   }
-  return { pointerDown, pointerMove, pointerUp, cancelGesture,
+  return { captureHit, pointerDown, pointerMove, pointerUp, cancelGesture,
     contextTarget(pointer: GeometryPoint, surfaceToPointer: AffineMatrix) {
       const state = ports.read(), hit = hitFreeObject(listSlideWorkspaceHitTargets(state), transformPoint(invertMatrix(surfaceToPointer), pointer), false, surfaceToPointer)
       if (!hit) return null

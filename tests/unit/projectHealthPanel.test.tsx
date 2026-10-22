@@ -1,3 +1,4 @@
+import { createTestProjectFromLegacy } from '../helpers/glxWorkFixture'
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import { afterEach, expect, it, vi } from 'vitest'
 import { mkdtemp, rm } from 'node:fs/promises'
@@ -22,12 +23,12 @@ afterEach(async () => { cleanup(); for (const action of dispose.splice(0).revers
 it('collects the latest V10 project/resources only while open and locates a real nested missing-asset instance', async () => {
   const directory = await mkdtemp(path.join(tmpdir(), 'guoling-health-'))
   dispose.push(() => rm(directory, { recursive: true, force: true }))
-  const project: CourseProjectV10 = { schemaVersion: 10, id: 'health-panel', revision: 0, title: '工程检查',
+  const project: CourseProjectV10 = createTestProjectFromLegacy({ schemaVersion: 10, id: 'health-panel', revision: 0, title: '工程检查',
     definitions: { image: { ...IMAGE_DEFINITION, id: 'image' }, group: { id: 'group', role: 'content', implementation: { kind: 'builtin', key: 'guoling.group' } } },
     instances: { group: { id: 'group', definitionId: 'group', data: {}, childIds: ['picture'] },
       picture: { id: 'picture', definitionId: 'image', data: JSON.parse(JSON.stringify(createImageData('missing'))) } },
     surfaces: [{ id: 'other', kind: 'flow', title: '讲义', childIds: [] }, { id: 'slide', kind: 'slide', title: '缺图页', childIds: ['group'] }],
-    global: { underlay: [], overlay: [] }, assets: {} }
+    global: { underlay: [], overlay: [] }, assets: {} })
   const service = new DocumentHostService(path.join(directory, 'recovery'))
   await service.internalAPI.create({ kind: 'course-v10', project, resources: { assets: {}, components: {} } }, '工程检查.h5lesson')
   const unavailable = async (): Promise<never> => { throw new Error('fixture no dialog') }

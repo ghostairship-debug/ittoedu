@@ -1,4 +1,6 @@
 // @vitest-environment node
+import { componentSurfaces } from '../../src/shared/contracts/component-platform/project'
+import { testContainerInstance } from '../helpers/glxWorkFixture'
 import { mkdtemp, rm } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
@@ -21,10 +23,10 @@ async function harness() {
   let serial = 0
   const registry = new DocumentRegistry({ drivers: [driver], createId: () => `m27-${++serial}`, bindingKey: binding => binding.path,
     persistence: { async append() {}, async save() { throw new Error('unused') } } })
-  const project = createBlankCourseProjectV10('批量按钮'), surfaceId = project.surfaces[0].id
+  const project = createBlankCourseProjectV10('批量按钮'), surfaceId = componentSurfaces(project)[0].id
   project.definitions[SHAPE_DEFINITION.id] = SHAPE_DEFINITION
   project.instances.button = { id: 'button', definitionId: SHAPE_DEFINITION.id, data: defaultShapeData(), frame: { width: 160, height: 72, transform: [1, 0, 0, 1, 48, 52] } }
-  project.surfaces[0].childIds = ['button']
+  testContainerInstance(project, 0).childIds = ['button']
   const model = { kind: 'course-v10' as const, project, resources: { assets: {}, components: {} } }
   const session = await registry.create(model, 'batch.h5lesson'), gateway = new DocumentToolGateway(registry, [driver], () => String(++serial))
   await gateway.beginRun({ runId: 'batch', actor: 'agent', documents: [{ documentId: session.documentId, writable: [{ kind: 'document' }] }] })
@@ -46,7 +48,7 @@ it('atomically inserts, styles and binds observed identities with one ACK, save/
   const authored = after.model.project
   expect(authored.instances.button.style?.opacity).toBe(.45)
   expect(authored.instances.button.frame).toEqual(h.model.project.instances.button.frame)
-  const children = authored.surfaces[0].childIds
+  const children = componentSurfaces(authored)[0].childIds
   expect(children.filter(id => authored.definitions[authored.instances[id].definitionId].role !== 'behavior')).toHaveLength(2)
   expect(children.filter(id => authored.definitions[authored.instances[id].definitionId].role === 'behavior')).toHaveLength(1)
   const rules = interactionRules(interactionBehavior(authored, { kind: 'surface', surfaceId: h.surfaceId }))

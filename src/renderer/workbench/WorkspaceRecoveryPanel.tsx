@@ -1,20 +1,27 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { DocumentSnapshot } from '../../shared/workbench/document'
-import type { DocumentHostAPI } from '../../shared/workbench/desktop'
+import type { DocumentHostAPI, DocumentRecoverySummary } from '../../shared/workbench/desktop'
 import './workspaceRecoveryPanel.css'
 
-type RecoveryAPI = Pick<DocumentHostAPI, 'recoverable' | 'restore' | 'discardRecovery' | 'subscribe'>
-type RecoveryItem = { snapshot: DocumentSnapshot; restored: boolean; error: string | null }
+type RecoveryAPI = Pick<DocumentHostAPI, 'recoverable' | 'recoverySummaries' | 'restore' | 'discardRecovery' | 'subscribe'>
+type RecoveryItem = { snapshot: DocumentRecoverySummary; restored: boolean; error: string | null }
 
 export interface WorkspaceRecoveryPanelProps {
   api: RecoveryAPI
   onRestored(documentId: string): Promise<void>
 }
 
-function nameOf(snapshot: DocumentSnapshot): string {
+function nameOf(snapshot: DocumentRecoverySummary): string {
   if (snapshot.binding.kind === 'file') return snapshot.binding.path.split(/[\\/]/).pop() || snapshot.binding.path
-  if (snapshot.model.kind === 'course-v10') return `${snapshot.model.project.title}.glx`
-  return snapshot.binding.suggestedName
+  return snapshot.name || snapshot.binding.suggestedName
+}
+
+function recoverySummary(snapshot: DocumentSnapshot): DocumentRecoverySummary {
+  const name = snapshot.binding.kind === 'file' ? snapshot.binding.path.split(/[\\/]/).pop() || snapshot.binding.path
+    : snapshot.model.kind === 'course-v10' ? `${snapshot.model.project.title}.glx` : snapshot.binding.suggestedName
+  return { documentId: snapshot.documentId, epoch: snapshot.epoch, revision: snapshot.revision, binding: snapshot.binding,
+    kind: snapshot.model.kind, name, dirty: snapshot.dirty, recoverable: snapshot.recoverable,
+    ...(snapshot.rawInputOnly ? { rawInputOnly: true } : {}), ...(snapshot.recoveryUnavailable ? { recoveryUnavailable: snapshot.recoveryUnavailable } : {}) }
 }
 
 function message(error: unknown, fallback: string): string {
@@ -36,7 +43,7 @@ export function WorkspaceRecoveryPanel({ api, onRestored }: WorkspaceRecoveryPan
     const ticket = ++request.current
     const generation = operationGeneration.current
     try {
-      const recoverable = await api.recoverable()
+      const recoverable = api.recoverySummaries ? await api.recoverySummaries() : (await api.recoverable()).map(recoverySummary)
       if (ticket !== request.current || generation !== operationGeneration.current) return
       setItems(current => {
         // React may apply this updater after a restore/discard has completed.
@@ -140,7 +147,7 @@ export function WorkspaceRecoveryPanel({ api, onRestored }: WorkspaceRecoveryPan
     <ul>{items.map(item => {
       const id = item.snapshot.documentId, name = nameOf(item.snapshot)
       return <li key={id}>
-        <div><strong>{name}</strong><span>{item.snapshot.model.kind === 'course-v10' ? '果铃工程' : item.snapshot.model.kind === 'text' ? '纯文本文档' : 'Markdown 文档'} · {item.restored ? '已恢复，等待打开' : '尚未恢复'}</span>
+        <div><strong>{name}</strong><span>{item.snapshot.kind === 'course-v10' ? '果铃工程' : item.snapshot.kind === 'text' ? '纯文本文档' : 'Markdown 文档'} · {item.restored ? '已恢复，等待打开' : '尚未恢复'}</span>
           {item.snapshot.binding.kind === 'file' && <small title={item.snapshot.binding.path}>{item.snapshot.binding.path}</small>}</div>
         {item.snapshot.recoveryUnavailable && <p role="alert">{item.snapshot.recoveryUnavailable}</p>}
         {item.error && <p role="alert">{item.error}</p>}

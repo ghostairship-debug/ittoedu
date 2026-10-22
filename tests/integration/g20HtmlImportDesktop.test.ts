@@ -1,4 +1,6 @@
 // @vitest-environment node
+import { componentSurfaces } from '../../src/shared/contracts/component-platform/project'
+import { testContainerInstance, setRootContainers } from '../helpers/glxWorkFixture'
 import { promises as fs } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -18,10 +20,10 @@ async function fixture(admissionStatus: 'ready' | 'rejected' = 'ready', kind: 's
   const source = path.join(root, 'lesson.html')
   await fs.writeFile(source, '<!doctype html><html><body>Lesson</body></html>')
   const project = createBlankCourseProjectV10('HTML import')
-  project.surfaces[0]!.kind = kind
+  setRootContainers(project, [{ ...componentSurfaces(project)[0], kind }])
   project.definitions.text = { id: 'text', title: 'Text', role: 'content', implementation: { kind: 'builtin', key: 'guoling.text' } }
   project.instances.anchor = { id: 'anchor', definitionId: 'text', data: { html: '<p>Anchor</p>' } }
-  project.surfaces[0]!.childIds = ['anchor']
+  testContainerInstance(project, 0).childIds = ['anchor']
   let snapshot = { documentId: 'doc', epoch: 'epoch', revision: 0,
     model: { kind: 'course-v10' as const, project, resources: { assets: {}, components: {} } } }
   const initial = snapshot
@@ -35,7 +37,7 @@ async function fixture(admissionStatus: 'ready' | 'rejected' = 'ready', kind: 's
   }
   const documents = { registry: { get: vi.fn(() => session) }, tools: gateway, readOpenedSource: vi.fn(async () => undefined) } as unknown as DocumentHostService
   const service = new HtmlImportDesktopService({ documents, chooseSource: async () => source })
-  const input = { documentId: 'doc', epoch: 'epoch', revision: 0, surfaceId: project.surfaces[0]!.id,
+  const input = { documentId: 'doc', epoch: 'epoch', revision: 0, surfaceId: componentSurfaces(project)[0]!.id,
     source: { kind: 'file' as const, path: source } }
   return { service, input, session, documents, gateway, receipt, source, initial,
     advanceRevision: () => { snapshot = { ...snapshot, revision: 1 } },

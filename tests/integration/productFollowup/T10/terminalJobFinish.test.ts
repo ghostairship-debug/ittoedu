@@ -1,4 +1,6 @@
 // @vitest-environment node
+import { componentSurfaces } from '../../../../src/shared/contracts/component-platform/project'
+import { setRootContainers } from '../../../helpers/glxWorkFixture'
 // Settlement proof: the compute owner and its durable job receipts are real;
 // the backend execution result is controlled, not a Python/runtime acceptance.
 import { promises as fs } from 'node:fs'
@@ -172,7 +174,7 @@ async function journey(pending: boolean) {
   const project = createBlankCourseProjectV10('任务结束与失败计算')
   project.definitions[TEXT_DEFINITION.id] = TEXT_DEFINITION
   project.instances.body = { id: 'body', definitionId: TEXT_DEFINITION.id, data: textDataEdit('body', createTextComponentData('原稿')).value }
-  project.surfaces = [{ id: 'flow', title: '讲义', kind: 'flow', childIds: ['body'] }]
+  setRootContainers(project, [{ id: 'flow', title: '讲义', kind: 'flow', childIds: ['body'] }])
   const initial = await host.internalAPI.create({ kind: 'course-v10', project, resources: { assets: {}, components: {} } }, 'finish.h5lesson')
   const target = { kind: 'course-instance' as const, surfaceId: 'flow', instanceId: 'body', dataPath: ['content'] }
   const contentOutput = prepareExecutionContentOutput(initial, target)
@@ -483,7 +485,7 @@ it('reuses the generated image after a rejected insert, explicitly reads the pag
     expect(ended.tools.filter(value => value.call.name === 'file.save').at(-1)?.result)
       .toMatchObject({ kind: 'read', data: { status: 'saved', savedRevision: 1, currentRevision: 1, dirty: false } })
     if (current.model.kind !== 'course-v10') throw new Error('Expected course project')
-    expect(current.model.project.surfaces[0].childIds).toHaveLength(1)
+    expect(componentSurfaces(current.model.project)[0].childIds).toHaveLength(1)
     expect((await new DocumentHostService(path.join(directory, 'reopened')).internalAPI.open(filename)).revision).toBe(1)
   } finally {
     await engine.shutdown()
@@ -515,7 +517,7 @@ it.each(['stop', 'retry'] as const)('ends truthfully after %s with an uncorrecte
   try {
     const started = await engine.start({ conversationId: 'stalled-finish', taskId: ending, selection,
       instruction: '把图片插入课件第一页。', workspaceRoot: directory, permission: 'workspace',
-      documents: [{ documentId: initial.documentId, writable: [{ kind: 'document' }, { kind: 'course-surface', surfaceId: project.surfaces[0].id }] }] })
+      documents: [{ documentId: initial.documentId, writable: [{ kind: 'document' }, { kind: 'course-surface', surfaceId: componentSurfaces(project)[0].id }] }] })
     const ended = await engine.wait(started.runId)
     expect(requests).toBe(ending === 'retry' ? 3 : 2)
     expect(ended.status, JSON.stringify({ failure: ended.failure, tools: ended.tools })).toBe('partial')
@@ -569,7 +571,7 @@ it('queries an unknown original operation from current work and ends naturally w
     const started = await engine.start({ conversationId: 'unknown-stop', taskId: 'unknown-insert', selection,
       instruction: '插入图片并确认结果。', workspaceRoot: directory, permission: 'workspace',
       documents: [{ documentId: initial.documentId, writable: [{ kind: 'document' },
-        { kind: 'course-surface', surfaceId: project.surfaces[0]!.id }] }] })
+        { kind: 'course-surface', surfaceId: componentSurfaces(project)[0]!.id }] }] })
     const ended = await engine.wait(started.runId)
     expect(ended.status, JSON.stringify({ failure: ended.failure, tools: ended.tools })).toBe('partial')
     expect(ended.failure).toBeUndefined()

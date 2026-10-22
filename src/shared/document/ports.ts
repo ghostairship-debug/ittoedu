@@ -15,18 +15,25 @@ export type DocumentSelection = { revision: string } & (
 )
 /** Source offsets are UTF-16 indices; logical text offsets remain code points. */
 export interface DocumentSourceRange { from: number; to: number; before: string }
-/** One observation from the editor, without file ownership or persistence. */
-export interface DocumentContextSelection {
-  mode: 'layout' | 'source'
+/** Shared semantic facts; browser source offsets are supplied only when materialized. */
+interface DocumentContextSelectionBase {
   revision: string
-  source: string
   selection: DocumentSelection | null
-  ranges: DocumentSourceRange[] | null
   label: string
   message?: string
 }
+interface MaterializedDocumentContextSelection extends DocumentContextSelectionBase {
+  mode: 'layout' | 'source'
+  source: string
+  ranges: DocumentSourceRange[] | null
+}
+/** One observation from the editor, without file ownership or persistence.
+ * Layout-only consumers can work with a formal selection without building Markdown.
+ * A source-view observation always contains the exact source and its ranges. */
+export type DocumentContextSelection = MaterializedDocumentContextSelection
+  | (DocumentContextSelectionBase & { mode: 'layout'; source?: string; ranges?: DocumentSourceRange[] | null })
 /** A file target frozen for an asynchronous request; never persisted in a project. */
-export interface ContextualEditTarget extends DocumentContextSelection {
+export type ContextualEditTarget = MaterializedDocumentContextSelection & {
   ref: DocumentFileRef
   baseVersion: DocumentFileVersion
   epoch: number

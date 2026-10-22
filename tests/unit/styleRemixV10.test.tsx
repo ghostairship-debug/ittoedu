@@ -1,3 +1,5 @@
+import { componentSurfaces } from '../../src/shared/contracts/component-platform/project'
+import { appendRootContainers, testContainerInstance } from '../helpers/glxWorkFixture'
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, expect, it, vi } from 'vitest'
 import { mkdtemp, rm } from 'node:fs/promises'
@@ -40,23 +42,23 @@ async function fixture(mixedFormula = false) {
   dispose.push(() => rm(directory, { recursive: true, force: true }))
   let serial = 0
   const project = createBlankCourseProjectV10('样板改写', () => `remix-${++serial}`)
-  const surface = project.surfaces[0]!
-  surface.title = '格式化参考页'
+  const surface = componentSurfaces(project)[0]!
+  testContainerInstance(project, surface.id).name = '格式化参考页'
   project.definitions[TEXT_DEFINITION.id] = structuredClone(TEXT_DEFINITION)
   project.instances.text = { id: 'text', definitionId: TEXT_DEFINITION.id, name: '课题',
     data: JSON.parse(JSON.stringify(createTextComponentData({ inlines: [
       { type: 'text', text: '旧头' }, { type: 'text', text: '强调', style: { bold: true } },
       { type: 'text', text: '保留', style: { italic: true } }, { type: 'text', text: '旧尾' },
     ] }))), frame: { width: 300, height: 70, transform: [1, .2, .3, 1, 35, 42] } }
-  surface.childIds.push('text')
+  testContainerInstance(project, surface.id).childIds.push('text')
   if (mixedFormula) {
     project.instances.mixed = { id: 'mixed', definitionId: TEXT_DEFINITION.id, name: '混合公式',
       data: JSON.parse(JSON.stringify(createTextComponentData({ inlines: [
         { type: 'text', text: '保留公式' }, { type: 'math', formulaId: 'math-a', latex: 'x^{2}', accessibleText: 'x平方' },
       ] }))), frame: { width: 200, height: 60, transform: [1, 0, 0, 1, 400, 42] } }
-    surface.childIds.push('mixed')
+    testContainerInstance(project, surface.id).childIds.push('mixed')
   }
-  project.surfaces.push({ id: 'flow', kind: 'flow', title: '讲义不作样板', childIds: [] })
+  appendRootContainers(project, { id: 'flow', kind: 'flow', title: '讲义不作样板', childIds: [] })
   const host = new DocumentHostService(path.join(directory, 'recovery'))
   const initial = await host.internalAPI.create({ kind: 'course-v10', project, resources: { assets: {}, components: {} } }, '样板.h5lesson')
   const unavailable = async (): Promise<never> => { throw new Error('This fixture has no native dialogs') }
@@ -110,14 +112,14 @@ it('selects a V10 formatted reference, awaits its captured ACK and creates one e
   expect(onCommit.mock.calls[0]![0]).toMatchObject({ documentId: current.documentId, epoch: current.context.target.epoch })
   const snapshot = current.host.registry.get(current.documentId).read()
   if (snapshot.model.kind !== 'course-v10') throw new Error('Expected V10')
-  const next = snapshot.model.project, copySurface = next.surfaces[1]!, copy = next.instances[copySurface.childIds[0]!]!
+  const next = snapshot.model.project, copySurface = componentSurfaces(next)[1]!, copy = next.instances[copySurface.childIds[0]!]!
   expect(copy.id).not.toBe('text')
   expect(copy.frame).toEqual(before.instances.text!.frame)
   expect(textComponentDataSchema.parse(copy.data).content.inlines).toEqual([
     { type: 'text', text: '新头' }, { type: 'text', text: '强调', style: { bold: true } },
     { type: 'text', text: '保留', style: { italic: true } }, { type: 'text', text: '新尾' },
   ])
-  expect(next.surfaces[0]).toEqual(before.surfaces[0])
+  expect(componentSurfaces(next)[0]).toEqual(componentSurfaces(before)[0])
   expect(next.instances.text).toEqual(before.instances.text)
   expect(next.instances[copySurface.childIds[1]!]!.data).toEqual(before.instances.mixed!.data)
   expect(snapshot).toMatchObject({ revision: before.revision + 1, undoDepth: 1 })

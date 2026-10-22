@@ -5,6 +5,7 @@ import { createImageData } from '../../src/components/image/data'
 import { createInputData } from '../../src/components/input'
 import { createChoiceData } from '../../src/components/choice'
 import { courseProjectV10Schema } from '../../src/shared/contracts/component-platform/schema'
+import { createTestProjectFromLegacy } from '../helpers/glxWorkFixture'
 import type { ComponentInstance, CourseProjectV10, JsonValue } from '../../src/shared/contracts/component-platform/project'
 import type { DocumentResources, DocumentSnapshot } from '../../src/shared/workbench/document'
 import { courseDeliverySnapshot } from '../../src/renderer/app/courseDeliverySnapshot'
@@ -78,14 +79,14 @@ export function createComponentPlatformMixedDeliveryFixture() {
     'labels.ts': bytes('export const label = "点击切换开关";'),
     'main.ts': bytes('import { label } from "./labels"; export default { mount({root,scope}) { const button=root.ownerDocument.createElement("button"); button.textContent=label; const status=root.ownerDocument.createElement("span"); status.textContent="开关闭合"; const click=()=>{status.textContent=status.textContent==="开关闭合"?"开关断开":"开关闭合";scope.state.set("switch",status.textContent);}; button.addEventListener("click",click);root.append(button,status);return {update(){},dispose(){button.removeEventListener("click",click);button.remove();status.remove();}};} };'),
   } } }
-  const project = courseProjectV10Schema.parse({ schemaVersion: 10, id: 'component-platform-mixed-delivery', revision: 0, title: '三表面串联电路交付样本', definitions, instances,
+  const project = courseProjectV10Schema.parse(createTestProjectFromLegacy({ schemaVersion: 10, id: 'component-platform-mixed-delivery', revision: 0, title: '三表面串联电路交付样本', definitions, instances,
     surfaces: [{ id: 'mixed-slide', kind: 'slide', title: '演示与作答', childIds: ['slide-group'], designSize: { width: 1000, height: 700 } },
       { id: 'mixed-flow', kind: 'flow', title: '完整观察讲义', childIds: flow, flow: { layout: { readingWidth: 660, wideContentWidth: 900, widthMode: 'reading', paperBackgroundColor: '#ffffff' } } },
       { id: 'mixed-spatial', kind: 'spatial', title: '空间观察', childIds: spatial, designSize: { width: 1000, height: 700 }, spatial: {
         home: { x: 500, y: 350, zoom: 1 }, frames: [{ id: 'circuit-view', title: '电路', pose: { x: 500, y: 350, zoom: 1 } }, { id: 'results-view', title: '测量结果', pose: { x: 1250, y: 350, zoom: 1 } }],
       } }], global: { underlay: [], overlay: [] }, assets: { 'circuit-image': { id: 'circuit-image', path: 'assets/circuit.svg', mimeType: 'image/svg+xml', kind: 'image', width: 420, height: 250,
         remote: { url: 'https://mixed-delivery.test/circuit.svg' },
-        source: { kind: 'user-material', title: '本地测试电路示意图', url: 'https://mixed-delivery.test/credit', author: '果铃工程测试', license: { id: 'CC0' } } } } })
+        source: { kind: 'user-material', title: '本地测试电路示意图', url: 'https://mixed-delivery.test/credit', author: '果铃工程测试', license: { id: 'CC0' } } } } }))
   const snapshot: DocumentSnapshot = { documentId: 'mixed-delivery-document', epoch: 'mixed-delivery-epoch', revision: project.revision,
     binding: { kind: 'untitled', suggestedName: `${project.title}.h5lesson` }, model: { kind: 'course-v10', project, resources }, dirty: false, saving: false, recoverable: true, undoDepth: 0, redoDepth: 0 }
   return { project, resources, snapshot, delivery: courseDeliverySnapshot(snapshot)!, archive: () => createCourseProjectV10Archive({ project, resources }) }

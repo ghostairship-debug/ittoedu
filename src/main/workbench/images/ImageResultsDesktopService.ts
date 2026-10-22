@@ -10,6 +10,7 @@ import type { DocumentOperationResult } from '../../../shared/workbench/document
 import type { ModelToolCall, ToolResult } from '../../../shared/workbench/tools'
 import { documentDigest } from '../../../core/documents/documentDigest'
 import { committedFact } from '../../../core/tools/modelToolResult'
+import { componentDefinitionBuiltinKey } from '../../../shared/contracts/component-platform/project'
 
 type Request = ReturnType<typeof imageResultsRequestSchema.parse>
 type ActionRequest = Extract<Request, { type: 'apply' | 'edit' }>
@@ -231,9 +232,6 @@ export class ImageResultsDesktopService {
     try { return await work } finally { this.pending.delete(input.actionId) }
   }
   private async perform(input: ActionRequest): Promise<unknown> {
-    if (input.type === 'apply') {
-      if (input.target.address.kind !== 'course-surface' && input.frame) throw new Error('替换图片不接受插入位置与尺寸')
-    }
     const view = await this.read(input), image = await this.preview(input)
     const gateway = this.options.documents.tools, prior = await this.action(input.actionId)
     if (prior) {
@@ -264,14 +262,21 @@ export class ImageResultsDesktopService {
     const current = await this.options.documents.registry.get(documentId).drain()
     if (current.model.kind !== 'course-v10') throw new Error('图片应用需要 Project V10 课件')
     if (current.epoch !== input.target.epoch || current.revision !== input.target.revision) throw new Error('目标文档已改变，请重新选择图片应用位置')
+    const requested = input.target.address, project = current.model.project
+    const instance = requested.kind === 'course-instance' ? project.instances[requested.instanceId] : undefined
+    const programInsertion = Boolean(instance && project.rootIds.includes(instance.id) && !instance.container
+      && componentDefinitionBuiltinKey(project.definitions[instance.definitionId]) === 'guoling.html-program')
+    if (requested.kind === 'course-instance' && input.frame && !programInsertion) throw new Error('替换图片不接受插入位置与尺寸')
+    if (requested.kind === 'course-instance' && !requested.surfaceId && !programInsertion) throw new Error('图片替换需要捕获的所属容器或程序根')
+    const address = requested.kind === 'course-instance' ? { ...requested, surfaceId: requested.surfaceId ?? requested.instanceId } : requested
     await this.store(action)
-    await gateway.beginRun({ runId: action.runId, actor: 'human', documents: [{ documentId, writable: [input.target.address] }] }); this.liveRuns.add(action.runId)
+    await gateway.beginRun({ runId: action.runId, actor: 'human', documents: [{ documentId, writable: [address] }] }); this.liveRuns.add(action.runId)
     try {
       const resource = await gateway.provideImage(action.runId, documentId, { ...image, filename: `${input.resourceId}.${image.mimeType === 'image/jpeg' ? 'jpg' : image.mimeType.split('/')[1]}` })
       const latest = await this.options.documents.registry.get(documentId).drain()
       if (latest.epoch !== input.target.epoch || latest.revision !== input.target.revision) throw new Error('准备图片期间目标已改变，请重新选择')
-      const target = await gateway.issueTarget(action.runId, documentId, input.target.address)
-      action.call = input.target.address.kind === 'course-surface'
+      const target = await gateway.issueTarget(action.runId, documentId, address)
+      action.call = address.kind === 'course-surface' || programInsertion
         ? { name: 'media.insert', input: { target, resource, fit: 'contain', ...(input.frame ? { frame: {
           width: input.frame.width, height: input.frame.height, transform: [1, 0, 0, 1, input.frame.x, input.frame.y],
         } } : {}) } }

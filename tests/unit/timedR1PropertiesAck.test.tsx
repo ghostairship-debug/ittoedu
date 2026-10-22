@@ -1,3 +1,4 @@
+import { createTestProjectFromLegacy } from '../helpers/glxWorkFixture'
 import { afterEach, expect, it, vi } from 'vitest'
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { mkdtemp } from 'node:fs/promises'
@@ -13,7 +14,7 @@ import type { DocumentHostAPI } from '@/shared/workbench/desktop'
 
 const frame = { width: 384, height: 172, transform: [.8, .6, -.6, .8, 41, 67] as [number, number, number, number, number, number] }
 async function host(selected = 'custom') {
-  const project: CourseProjectV10 = { schemaVersion: 10, id: 'r1-ack', title: '属性 ACK', revision: 0,
+  const project: CourseProjectV10 = createTestProjectFromLegacy({ schemaVersion: 10, id: 'r1-ack', title: '属性 ACK', revision: 0,
     definitions: { [SHAPE_DEFINITION.id]: SHAPE_DEFINITION, custom: { id: 'custom', role: 'content',
       implementation: { kind: 'source', language: 'javascript', source: 'export default {}' },
       dataSchema: { type: 'object', properties: { title: { type: 'string', title: '专业标题' },
@@ -22,7 +23,7 @@ async function host(selected = 'custom') {
       custom: { id: 'custom', definitionId: 'custom', data: { title: '人工标题', count: 3, payload: [1] },
         frame: { width: 300, height: 100, transform: [1, 0, 0, 1, 20, 30] } } },
     surfaces: [{ id: 'slide', kind: 'slide', title: '页面', childIds: ['shape', 'custom'] }],
-    global: { underlay: [], overlay: [] }, assets: {} }
+    global: { underlay: [], overlay: [] }, assets: {} })
   const service = new DocumentHostService(await mkdtemp(join(tmpdir(), 'r1-properties-ack-')))
   const first = await service.internalAPI.create({ kind: 'course-v10', project, resources: { assets: {}, components: {} } }, 'ACK.h5lesson')
   const noDialog = async (): Promise<never> => { throw new Error('unit test has no native dialog') }

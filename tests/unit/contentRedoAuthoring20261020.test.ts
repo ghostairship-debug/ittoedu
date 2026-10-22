@@ -1,3 +1,4 @@
+import { setRootContainers } from '../helpers/glxWorkFixture'
 // @vitest-environment node
 import { expect, it, vi } from 'vitest'
 import { HTML_PROGRAM_DEFINITION } from '../../src/components/web/data'
@@ -20,7 +21,7 @@ function fixture(source: string, record: ComponentAuthorRecord) {
     original: { id: 'original', definitionId: HTML_PROGRAM_DEFINITION.id, data: { html: source },
       frame: { width: 300, height: 200, transform: [1, 0, 0, 1, 35, 45] }, authoring: { records: { current: structuredClone(record) } } },
   }
-  project.surfaces = [{ id: 'page', kind: 'slide', title: 'Current page', childIds: ['original'], designSize: { width: 800, height: 600 } }]
+  setRootContainers(project, [{ id: 'page', kind: 'slide', title: 'Current page', childIds: ['original'], designSize: { width: 800, height: 600 } }])
   project.global = { underlay: [], overlay: [] }
   project.assets = {}
   const resources: DocumentResources = { assets: {}, components: {} }

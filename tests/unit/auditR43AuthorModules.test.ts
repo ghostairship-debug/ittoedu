@@ -1,4 +1,5 @@
 // @vitest-environment node
+import { testContainerInstance } from '../helpers/glxWorkFixture'
 import { expect, it } from 'vitest'
 import { createBlankCourseProjectV10 } from '../../src/core/course/createCourseProjectV10'
 import { CourseV10Driver } from '../../src/core/drivers/CourseV10Driver'
@@ -17,7 +18,7 @@ function fixture() {
       'main.js': 'import { step } from "./helper.js"; globalThis.step = step;',
       'helper.js': 'export const step = 1;', 'unused.js': 'export const unfinished =', 'notes.js': 'export const notes = "draft";',
     } } }
-  project.surfaces[0]!.childIds.push('web')
+  testContainerInstance(project, 0).childIds.push('web')
   return project
 }
 

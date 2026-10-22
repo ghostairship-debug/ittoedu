@@ -1,3 +1,4 @@
+import { componentContainers } from '../../shared/contracts/component-platform/project'
 import { textComponentDataSchema } from '../../components/text/data'
 import { shapeDataSchema } from '../../components/shape/data'
 import { frameCorners } from '../components/geometry'
@@ -39,9 +40,12 @@ export function courseTextAdvisories(source: CourseProjectV10, target: Extract<T
   if (suppliedBackgroundColor && appearance.backgroundOpacity === 0) advisories.push({ step,
     code: 'native-text-transparent-background', message: '已设置文字背景色，但 backgroundOpacity 为 0，底色仍透明；需要可见底色时请同时设置非零不透明度。' })
 
-  const surface = project.surfaces.find(value => value.id === target.surfaceId)
+  const surface = componentContainers(project).find(value => value.id === target.surfaceId)
+  const owner = owningContainer(project, target.instanceId)
+  const directChild = owner?.kind === 'surface' ? owner.surfaceId === surface?.id
+    : owner?.kind === 'instance' && owner.instanceId === surface?.id
   // Flow, containers and custom implementations need observed pixels, not a flat-slide guess.
-  if (surface?.kind !== 'slide' || owningContainer(project, target.instanceId)?.kind !== 'surface'
+  if (surface?.kind !== 'slide' || !directChild
     || !isComponentVisibleAtSurface(instance, surface.id) || appearance.backgroundOpacity !== 0
     || content.inlines.some(inline => inline.type === 'math' || inline.style?.color !== undefined || inline.style?.fontSize !== undefined
       || inline.style?.bold !== undefined)) return advisories

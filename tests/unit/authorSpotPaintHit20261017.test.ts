@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { afterAll, beforeAll, expect, it } from 'vitest'
 import { chromium, type Browser, type Page } from 'playwright'
-import { componentAuthorPaintAtPoint } from '../../src/player/components/runtime/SandboxComponentRuntime'
+import { componentPaintStack } from '../../src/components/web/paintHit'
 
 let browser: Browser, page: Page
 beforeAll(async () => { browser = await chromium.launch({ headless: true }); page = await browser.newPage() })
@@ -10,9 +10,9 @@ afterAll(async () => { await browser?.close() })
 async function painted(html: string, x: number, y: number) {
   await page.setContent(`<style>html,body{margin:0}svg{display:block;width:400px;height:200px}</style>${html}`)
   return page.evaluate(({ source, x, y }) => {
-    const paintAt = new Function(`return (${source})`)() as (root: Element, x: number, y: number) => boolean
-    return paintAt(document.documentElement, x, y)
-  }, { source: componentAuthorPaintAtPoint.toString(), x, y })
+    const paintAt = new Function(`return (${source})`)() as (root: Element, x: number, y: number) => Element[]
+    return paintAt(document.documentElement, x, y).length > 0
+  }, { source: componentPaintStack.toString(), x, y })
 }
 
 it('lets a retained fragment empty viewport pass without treating its real text or graphics as empty', async () => {

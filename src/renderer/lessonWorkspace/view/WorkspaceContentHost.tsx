@@ -25,6 +25,7 @@ export function WorkspaceContentHost({ props, layout, editorFocus, enterEditor, 
   const [externalNotice, setExternalNotice] = useState<string | null>(null);
   const activeFileTab =
     tabs.tabs.find((tab) => tab.id === tabs.activeTab) ?? null;
+  const fileSession = tabs.activeDocumentTarget()?.getEditor()?.session;
   const chrome = useContentEditorMode(activeFileTab?.documentId ?? null, editorFocus, enterEditor, exitEditor);
   const showDocumentHeader = (activeFileTab?.kind === 'material' || activeFileTab?.kind === 'media') && !editorFocus;
   const pptx = usePptxPicker(file => {
@@ -53,7 +54,7 @@ export function WorkspaceContentHost({ props, layout, editorFocus, enterEditor, 
     <CourseEditorChromeContext.Provider value={{
       ...chrome,
       workbench: {
-        documentStatus: <WorkspaceDocumentStatus api={props.documentPort.documents} documentId={activeFileTab?.documentId} />,
+        documentStatus: <WorkspaceDocumentStatus api={props.documentPort.documents} documentId={activeFileTab?.documentId} session={fileSession} />,
       },
     }}>
     <section
@@ -67,7 +68,7 @@ export function WorkspaceContentHost({ props, layout, editorFocus, enterEditor, 
         >
           {activeFileTab?.name ?? "内容区"}
         </span>
-        <WorkspaceDocumentStatus api={props.documentPort.documents} documentId={activeFileTab?.documentId} />
+        <WorkspaceDocumentStatus api={props.documentPort.documents} documentId={activeFileTab?.documentId} session={fileSession} />
         <button type="button" title="关闭内容区（不关闭文件）" onClick={layout.toggleContentClosed}>关闭内容</button>
         {activeFileTab?.path && <button type="button" className="workbench-open-external"
           title={`在系统应用中打开 ${activeFileTab.path}`} onClick={() => { void openActiveExternal() }}>外部打开 ↗</button>}
@@ -154,6 +155,7 @@ export function WorkspaceContentHost({ props, layout, editorFocus, enterEditor, 
               ref={tabs.mediaEditorRef(tab.id)}
               snapshot={tab.mediaSnapshot}
               port={{
+                release: binding => window.desktopAPI?.releaseMediaFileDraft?.(binding),
                 preview: (binding, operations) => tabs.mediaFiles({ type: 'media-file.preview', binding, operations: [...operations] }),
                 save: (binding, operations) => tabs.mediaFiles({ type: 'media-file.save', binding, operations: [...operations] }),
                 reload: binding => tabs.mediaFiles({ type: 'media-file.reload', binding }),

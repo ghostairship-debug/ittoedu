@@ -9,6 +9,8 @@ import { useEditorStore } from '../../store/editorStore'
 import { ElementAiCard } from './ElementAiCard'
 import { elementCards, useVisibleCards, type ElementCardView } from './elementCardController'
 import './elementCards.css'
+import { readTarget } from '../../../core/tools/ToolTargets'
+import { authorFieldIdentity } from '../../documents/interactionSelection'
 
 /** What a text card starts from: the selected range, a name for it, and what the range holds now. */
 export interface TextCardStart { target: ExecutionSelectionTarget; capture: SelectionCapture;
@@ -20,7 +22,7 @@ export function textCardLabel(text: string): string {
   return flat.length > 16 ? `“${flat.slice(0, 16)}…”` : `“${flat}”`
 }
 
-const textAnchors = new Map<string, { node: HTMLElement; target: string; selectionIdentity: string; stable?: boolean }>()
+const textAnchors = new Map<string, { documentId: string; node: HTMLElement; target: string; selectionIdentity: string; stable?: boolean }>()
 const anchorChanged = 'guoling:text-card-anchor-changed'
 let rebindKey: string | null = null
 const rebindListeners = new Set<() => void>()
@@ -31,21 +33,27 @@ function setRebind(key: string | null) {
   rebindKey = key
   for (const listener of rebindListeners) listener()
 }
-function attachAnchor(key: string, node: HTMLElement | null, target?: ExecutionSelectionTarget, selectionIdentity?: string, stable = false) {
-  if (node && target && selectionIdentity) textAnchors.set(key, { node, target: JSON.stringify(target), selectionIdentity, stable })
+function attachAnchor(key: string, node: HTMLElement | null, target?: ExecutionSelectionTarget, selectionIdentity?: string, stable = false, documentId = '') {
+  if (node && target && selectionIdentity) textAnchors.set(key, { documentId, node, target: JSON.stringify(target), selectionIdentity, stable })
   else textAnchors.delete(key)
   window.dispatchEvent(new Event(anchorChanged))
 }
 function locateTarget(card: ElementCardView): { node: HTMLElement | null; rect: DOMRect | null } {
   const target = card.target, registered = workbenchSelection.targetView(card.documentId)
-  const measured = registered?.rect(target)
+  const identity = target.kind === 'course-instance' && (target.authorField ? authorFieldIdentity(target.instanceId, target.authorField)
+    : target.dataPath && target.fieldScope !== 'flowLayout' && target.from === undefined && target.to === undefined ? authorFieldIdentity(target.instanceId, { kind: 'text', dataPath: target.dataPath, fieldScope: target.fieldScope ?? 'data', initialValue: '' }) : '')
+  const fieldNode = identity ? [...document.querySelectorAll<HTMLElement>('[data-author-field-identity]')].find(value => value.dataset.authorFieldIdentity === identity) : null
+  if (fieldNode) return { node: fieldNode, rect: fieldNode.getBoundingClientRect() }
+  const measured = target.kind === 'course-instance' && target.authorField ? null : registered?.rect(target)
   if (measured) return { node: registered!.root(), rect: measured }
-  const id = target.kind === 'course-instance' ? target.instanceId : target.kind === 'course-object' ? target.itemId
+  const precise = target.kind === 'course-instance' && Boolean(target.authorField || target.dataPath || target.from !== undefined || target.to !== undefined)
+  const id = target.kind === 'course-instance' && !precise ? target.instanceId : target.kind === 'course-object' ? target.itemId
     : target.kind === 'flow-block' || target.kind === 'flow-range' ? target.blockId : null
   const node = id ? [...document.querySelectorAll<HTMLElement>('[data-component-instance],[data-layer-item-id],[data-flow-block-id],[data-block-id]')]
     .find(node => node.dataset.componentInstance === id || node.dataset.layerItemId === id || node.dataset.flowBlockId === id || node.dataset.blockId === id) ?? null : null
   if (node) return { node, rect: node.getBoundingClientRect() }
   const linked = textAnchors.get(card.key)
+  if (linked && !linked.node.isConnected) { textAnchors.delete(card.key); return { node: null, rect: null } }
   return { node: linked?.node ?? null, rect: linked?.node.isConnected ? linked.node.getBoundingClientRect() : null }
 }
 export function cardPosition(card: ElementCardView, node: HTMLElement | null, rect: DOMRect | null, width: number, height: number) {
@@ -117,7 +125,7 @@ export function TextAiButton({ documentId, selectionIdentity, start, disabledRea
           key = same?.key ?? elementCards.openText({ documentId, ...value, anchor: position })
           if (same) elementCards.revealText(key, position)
         }
-        attachAnchor(key, textAnchor ?? anchor.current, value.target, openingIdentity, Boolean(textAnchor))
+        attachAnchor(key, textAnchor ?? anchor.current, value.target, openingIdentity, Boolean(textAnchor), documentId)
       }).catch(reason => setError(reason instanceof Error ? reason.message : String(reason)))
         .finally(() => { if (requestedKey && rebindKey === requestedKey) setRebind(null) })
     }} />
@@ -157,12 +165,24 @@ function TextCardPanel({ card }: { card: ElementCardView }) {
   }, [card.key, JSON.stringify(card.target), card.textLost, pendingRebind])
   const completed = card.entries.some(entry => ['completed', 'partial'].includes(entry.state))
   const selectResult = () => {
-    try { if (workbenchSelection.targetView(card.documentId)?.select(card.target)) return } catch (error) { setSelectionError(error instanceof Error ? error.message : '结果暂不可定位，请重新选择。'); return }
+    try { if (!(card.target.kind === 'course-instance' && card.target.authorField) && workbenchSelection.targetView(card.documentId)?.select(card.target)) return } catch (error) { setSelectionError(error instanceof Error ? error.message : '结果暂不可定位，请重新选择。'); return }
     setSelectionError('')
     void workbenchSelection.prepare(card.documentId).then(snapshot => {
       if (card.epoch && snapshot.epoch !== card.epoch) throw new Error('这份作品已经重新打开，请重新定位当前内容。')
       const selected = captureSelection(snapshot, [card.target], card.label)
-      if (card.target.kind === 'course-instance') useEditorStore.getState().selectNodes([card.target.instanceId])
+      if (card.target.kind === 'course-instance') {
+        const owner = useEditorStore.getState(), target = card.target
+        if (target.authorField) {
+          const value = readTarget(snapshot.model, target)
+          if (typeof value !== 'string') throw new Error('字段内容类型已改变，请重新选择')
+          owner.courseBridge.selectInteraction(card.documentId,
+            { kind: 'author-field', instanceId: target.instanceId, field: { ...target.authorField, initialValue: value } }, target.surfaceId)
+        } else if (target.dataPath && target.from === undefined && target.to === undefined && target.fieldScope !== 'flowLayout') {
+          const value = readTarget(snapshot.model, target)
+          if (typeof value === 'string') owner.courseBridge.selectInteraction(card.documentId, { kind: 'author-field', instanceId: target.instanceId,
+            field: { kind: 'text', dataPath: target.dataPath, fieldScope: target.fieldScope ?? 'data', initialValue: value } }, target.surfaceId)
+        } else if (!target.dataPath && target.from === undefined && target.to === undefined) owner.selectNodes([target.instanceId])
+      }
       else if (card.target.kind === 'course-object') useEditorStore.getState().selectNodes([card.target.itemId])
       workbenchSelection.setManual(card.documentId, selected)
     }).catch(error => setSelectionError(error instanceof Error ? error.message : '结果暂不可定位，请重新选择。'))
@@ -186,5 +206,21 @@ function TextCardPanel({ card }: { card: ElementCardView }) {
 /** Floats visible text cards; folded unsent cards remain in their original lifetime. */
 export function ElementTextCardLayer() {
   const cards = useVisibleCards()
+  useEffect(() => {
+    const prune = () => {
+      let changed = false
+      for (const [key, anchor] of textAnchors) if (!elementCards.view(key) || !anchor.node.isConnected) {
+        textAnchors.delete(key); changed = true
+      }
+      if (changed) window.dispatchEvent(new Event(anchorChanged))
+    }
+    const close = workbenchSelection.subscribeDocumentClosed(documentId => {
+      for (const [key, anchor] of textAnchors) if (anchor.documentId === documentId) textAnchors.delete(key)
+      if (rebindKey && elementCards.view(rebindKey)?.documentId === documentId) setRebind(null)
+      window.dispatchEvent(new Event(anchorChanged))
+    })
+    const stop = elementCards.subscribe(prune)
+    return () => { stop(); close() }
+  }, [])
   return createPortal(<>{cards.map(card => <TextCardPanel key={card.key} card={card} />)}</>, document.body)
 }

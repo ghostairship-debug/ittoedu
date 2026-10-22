@@ -1,4 +1,6 @@
 // @vitest-environment node
+import { componentSurfaces } from '../../src/shared/contracts/component-platform/project'
+import { testContainerInstance } from '../helpers/glxWorkFixture'
 import { expect, it } from 'vitest'
 import { DocumentRegistry } from '../../src/core/documents/DocumentRegistry'
 import { CourseV10Driver } from '../../src/core/drivers/CourseV10Driver'
@@ -22,9 +24,9 @@ async function fixture() {
   const persistence: DocumentPersistence = { async append() {}, async save() { throw new Error('No disk write in read test') } }
   const registry = new DocumentRegistry({ persistence, drivers: [driver], createId: () => `read-frame-${++sequence}`, bindingKey: binding => binding.path })
   const gateway = new DocumentToolGateway(registry, [driver], () => String(++sequence))
-  const project = createBlankCourseProjectV10('Nested frame read'), surfaceId = project.surfaces[0].id
+  const project = createBlankCourseProjectV10('Nested frame read'), surfaceId = componentSurfaces(project)[0].id
   project.definitions[WEB_DEFINITION.id] = WEB_DEFINITION
-  project.surfaces[0].childIds = ['parent']
+  testContainerInstance(project, 0).childIds = ['parent']
   project.instances.parent = { id: 'parent', definitionId: WEB_DEFINITION.id, data: { html: '<section></section>' },
     childIds: ['nested'], frame: { width: 1200, height: 520, transform: [1, 0, 0, 1, 40, 150] } }
   const frame: ComponentFrame = { width: 580, height: 205, transform: [1, 0, 0, 1, 600, 292] }

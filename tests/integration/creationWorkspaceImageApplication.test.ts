@@ -1,4 +1,5 @@
 // @vitest-environment node
+import { componentSurfaces } from '../../src/shared/contracts/component-platform/project'
 import { promises as fs } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -61,8 +62,8 @@ it('inserts the public workspace ready resource directly through media.insert an
       .toMatchObject({ kind: 'document-operation', result: { status: 'applied' } })
     const current = await f.documents.internalAPI.read(f.project.documentId)
     if (current.model.kind !== 'course-v10') throw new Error('Expected V10')
-    expect(current.model.project.surfaces[0].childIds).toHaveLength(2)
-    for (const id of current.model.project.surfaces[0].childIds) {
+    expect(componentSurfaces(current.model.project)[0].childIds).toHaveLength(2)
+    for (const id of componentSurfaces(current.model.project)[0].childIds) {
       const instance = current.model.project.instances[id]
       expect(current.model.project.definitions[instance.definitionId].implementation).toMatchObject({ kind: 'builtin', key: 'guoling.image' })
       const assetId = (instance.data as { assetId: string }).assetId
@@ -81,7 +82,7 @@ it('rejects foreign workspace and unfinished resources before either image appli
     await f.gateway.beginRun({ runId: 'outside', actor: 'agent', documents: [{ documentId: f.project.documentId, writable: [{ kind: 'document' }] }],
       fileAccess: { permission: 'workspace', workspaceRoot: path.join(f.root, 'outside') } })
     const outside = await f.gateway.issueTarget('outside', f.project.documentId,
-      { kind: 'course-surface', surfaceId: f.project.model.kind === 'course-v10' ? f.project.model.project.surfaces[0].id : '' })
+      { kind: 'course-surface', surfaceId: f.project.model.kind === 'course-v10' ? componentSurfaces(f.project.model.project)[0].id : '' })
     expect(await f.gateway.execute('outside', 'insert', { name: 'media.insert', input: { target: outside, resource: f.ready.resources[0].resource } }))
       .toMatchObject({ kind: 'error', message: expect.stringContaining('工作空间') })
     const controller = new AbortController(); controller.abort()
@@ -96,7 +97,7 @@ it('rejects foreign workspace and unfinished resources before either image appli
     const current = await f.documents.internalAPI.read(f.project.documentId)
     expect(current.revision).toBe(f.project.revision)
     if (current.model.kind !== 'course-v10') throw new Error('Expected V10')
-    expect(current.model.project.surfaces[0].childIds).toEqual([])
+    expect(componentSurfaces(current.model.project)[0].childIds).toEqual([])
     expect(Object.keys(current.model.resources.assets)).toEqual([])
     expect(f.providerCalls()).toBe(1)
   } finally {

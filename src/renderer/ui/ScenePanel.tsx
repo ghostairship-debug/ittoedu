@@ -3,7 +3,7 @@ import { SortableContext, arrayMove, sortableKeyboardCoordinates, useSortable, v
 import { CSS } from '@dnd-kit/utilities'
 import { FileText, Globe2, GripVertical, Layers3, Plus, Trash2 } from 'lucide-react'
 import { useMemo, useState, type ReactNode } from 'react'
-import type { CourseProjectV10 } from '../../shared/contracts/component-platform/project'
+import { componentSurface, componentSurfaces, type CourseProjectV10 } from '../../shared/contracts/component-platform/project'
 import type { CapturedComponentOperation, CapturedCourseTarget } from '../documents/CourseV10DocumentBridge'
 import { useContextMenu, type MenuCommand } from '../editing/commands/CommandMenu'
 import { pageCardCommands } from '../editing/commands/pageCommands'
@@ -11,28 +11,42 @@ import type { CourseEditorLayoutResult } from '../course/courseEditorLayout'
 import { LAST_COURSE_PAGE_REASON } from '../store/slices/courseStructureSlice'
 import { flowBodyIds, projectFlowBlock } from '../componentPlatform/surfaces/flow/documentProjection'
 import { plainDocumentText } from '../../shared/document/content'
-import { selectHasDirtyCourseContentDraft, useEditorStore, type EditorState } from '../store/editorStore'
+import { selectEditingScope, selectHasDirtyCourseContentDraft, useEditorStore, type EditorState } from '../store/editorStore'
 import { AddCourseContentMenu } from './AddCourseContentMenu'
 import { ConfirmDialog } from './ConfirmDialog'
 
 /** Navigation rows derive from formal surfaces and real component/camera targets. */
 export interface CourseTreeNode {
   id: string
-  kind: 'slide-page' | 'flow-page' | 'spatial-page' | 'flow-heading' | 'flow-section' | 'spatial-camera-group' | 'spatial-camera'
+  kind: 'slide-page' | 'flow-page' | 'spatial-page' | 'flow-heading' | 'flow-section' | 'spatial-camera-group' | 'spatial-camera' | 'container' | 'program-root'
   label: string
   surfaceId: string
   instanceId?: string
   frameId?: string
+  rootInstanceId?: string
   children: CourseTreeNode[]
 }
 
 export function buildCourseTreeView(project: CourseProjectV10): { pages: CourseTreeNode[] } {
-  return { pages: project.surfaces.map(surface => {
+  return { pages: project.rootIds.flatMap<CourseTreeNode>(rootId => {
+    const surface = componentSurface(project, rootId)
+    if (!surface) {
+      const root = project.instances[rootId]
+      const containers = (ids: readonly string[]): CourseTreeNode[] => ids.flatMap(id => {
+        const instance = project.instances[id]
+        if (!instance) return []
+        const children = containers(instance.childIds ?? [])
+        return instance.container ? [{ id: 'container:' + id, kind: 'container' as const, label: instance.name ?? id,
+          surfaceId: id, instanceId: id, rootInstanceId: rootId, children }] : children
+      })
+      return root ? [{ id: rootId, kind: 'program-root' as const, label: root.name ?? project.title, surfaceId: rootId, children: containers(root.childIds ?? []) }] : []
+    }
     const children: CourseTreeNode[] = []
     if (surface.kind === 'flow') {
       const visit = (id: string) => {
         const instance = project.instances[id]
         if (!instance) return
+        if (instance.container) { children.push({ id: 'container:' + id, kind: 'container', label: instance.name ?? id, surfaceId: id, instanceId: id, rootInstanceId: rootId, children: [] }); return }
         const block = projectFlowBlock(project, id)
         if (block.type === 'heading' || block.type === 'section') children.push({ id, kind: block.type === 'heading' ? 'flow-heading' : 'flow-section',
           label: plainDocumentText(block.type === 'heading' ? block.content : block.title) || '未命名标题', surfaceId: surface.id, instanceId: id, children: [] })
@@ -42,17 +56,26 @@ export function buildCourseTreeView(project: CourseProjectV10): { pages: CourseT
     }
     if (surface.kind === 'spatial') children.push({ id: surface.id + ':cameras', kind: 'spatial-camera-group', label: '镜头', surfaceId: surface.id,
       children: (surface.spatial?.frames ?? []).map(frame => ({ id: surface.id + ':camera:' + frame.id, kind: 'spatial-camera', label: frame.title ?? '未命名镜头', surfaceId: surface.id, frameId: frame.id, children: [] })) })
-    return { id: surface.id, kind: surface.kind === 'slide' ? 'slide-page' : surface.kind === 'flow' ? 'flow-page' : 'spatial-page',
-      label: surface.title, surfaceId: surface.id, children }
+    if (surface.kind !== 'flow') {
+      const visitContainers = (ids: readonly string[]) => { for (const id of ids) {
+        const instance = project.instances[id]
+        if (!instance) continue
+        if (instance.container) children.push({ id: 'container:' + id, kind: 'container', label: instance.name ?? id, surfaceId: id, instanceId: id, rootInstanceId: rootId, children: [] })
+        else visitContainers(instance.childIds ?? [])
+      } }
+      visitContainers(surface.childIds)
+    }
+    return [{ id: surface.id, kind: surface.kind === 'slide' ? 'slide-page' as const : surface.kind === 'flow' ? 'flow-page' as const : 'spatial-page' as const,
+      label: surface.title, surfaceId: surface.id, children }]
   }) }
 }
 
-export type CourseTreeReorderPlan = { kind: 'surfaces'; surfaceIds: string[] } | { kind: 'cameras'; surfaceId: string; frameIds: string[] }
-export function planCourseTreeReorder(project: Pick<CourseProjectV10, 'surfaces'>, pages: readonly CourseTreeNode[], activeId: string, overId: string): CourseTreeReorderPlan | null {
+export type CourseTreeReorderPlan = { kind: 'surfaces' | 'roots'; surfaceIds: string[] } | { kind: 'cameras'; surfaceId: string; frameIds: string[] }
+export function planCourseTreeReorder(project: CourseProjectV10, pages: readonly CourseTreeNode[], activeId: string, overId: string): CourseTreeReorderPlan | null {
   if (!activeId || !overId || activeId === overId) return null
   const from = pages.findIndex(page => page.id === activeId), to = pages.findIndex(page => page.id === overId)
-  if (from >= 0 && to >= 0) return { kind: 'surfaces', surfaceIds: arrayMove(pages.map(page => page.surfaceId), from, to) }
-  for (const surface of project.surfaces) {
+  if (from >= 0 && to >= 0) return { kind: pages.some(page => page.kind === 'program-root') ? 'roots' : 'surfaces', surfaceIds: arrayMove(pages.map(page => page.surfaceId), from, to) }
+  for (const surface of componentSurfaces(project)) {
     const frames = surface.spatial?.frames
     if (!frames) continue
     const ids = frames.map(frame => surface.id + ':camera:' + frame.id)
@@ -63,8 +86,8 @@ export function planCourseTreeReorder(project: Pick<CourseProjectV10, 'surfaces'
 }
 
 function layoutForProject(project: CourseProjectV10, activeSurfaceId: string | null): CourseEditorLayoutResult {
-  const surface = project.surfaces.find(value => value.id === activeSurfaceId) ?? project.surfaces[0]
-  const kinds = new Set(project.surfaces.map(value => value.kind))
+  const surface = activeSurfaceId ? componentSurface(project, activeSurfaceId) ?? componentSurfaces(project)[0] : componentSurfaces(project)[0]
+  const kinds = new Set(componentSurfaces(project).map(value => value.kind))
   const action = surface?.kind === 'flow' ? 'flow-page' : surface?.kind === 'spatial' ? 'spatial-page' : 'scene'
   return { kind: kinds.size === 1 ? surface?.kind ?? 'mixed' : 'mixed', primary: { action, surfaceId: surface?.id },
     dropdown: (['slide-page', 'flow-page', 'spatial-page'] as const).filter(value => value !== (action === 'scene' ? 'slide-page' : action)), activeSurfaceId }
@@ -84,12 +107,13 @@ function CourseTreeNodeRow({ node, depth, activeSurfaceId, selectedInstanceId, a
 }) {
   const project = useEditorStore(state => state.courseView.project)
   const documentId = useEditorStore(state => state.courseView.activeDocumentId)
-  const editingScope = useEditorStore(state => state.editingScope)
+  const editingScope = useEditorStore(selectEditingScope)
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState('')
   const menu = useContextMenu()
   const isPage = node.kind.endsWith('-page')
-  const presentation = project?.surfaces.find(surface => surface.id === node.surfaceId)?.presentation
+  const isProgram = node.kind === 'program-root'
+  const presentation = project ? componentSurface(project, node.surfaceId)?.presentation : undefined
   const thumbnailStateId = presentation?.thumbnailStateId ?? presentation?.initialStateId
   const thumbnailStateName = node.kind === 'slide-page' ? presentation?.states.find(state => state.id === thumbnailStateId)?.title ?? '母版' : null
   const active = editingScope !== 'global' && activeSurfaceId === node.surfaceId
@@ -105,20 +129,32 @@ function CourseTreeNodeRow({ node, depth, activeSurfaceId, selectedInstanceId, a
     if (!title || title === node.label) return
     const state = live()
     if (!state) return
-    if (isPage) void state.renameCourseSurface(node.surfaceId, title)
+    if (isProgram || node.kind === 'container') void state.courseBridge.edit([{ type: 'instance.patch', instanceId: node.surfaceId, patch: { name: title } }])
+    else if (isPage) void state.renameCourseSurface(node.surfaceId, title)
     else if (node.frameId) void state.renameSpatialCameraFrame(node.surfaceId, node.frameId, title)
     else if (node.instanceId) void state.renameFlowHeading(node.instanceId, title)
   }
   const commands = (): MenuCommand[] => {
     if (!project) return []
+    if (isProgram) return [
+      { id: 'program.rename', label: '重命名', run: startRename },
+      { id: 'program.delete', label: '删除程序', danger: true, disabledReason: project.rootIds.length <= 1 ? '这是最后一项作品内容，不能删除' : null, run: () => onDelete(node) },
+    ]
+    if (node.kind === 'container') return [{ id: 'container.enter', label: '进入容器编辑', run: () => onActivate(node) }]
     if (isPage) {
-      const ids = project.surfaces.map(surface => surface.id), index = ids.indexOf(node.surfaceId)
+      const ids = project.rootIds, index = ids.indexOf(node.surfaceId)
       return pageCardCommands({ kind: node.kind === 'slide-page' ? 'scene' : 'page', index, count: ids.length,
         deleteBlocked: ids.length <= 1 ? LAST_COURSE_PAGE_REASON : null }, {
         addScene: () => { const state = live(); if (state) void state.addCourseContent('scene', { surfaceId: node.surfaceId }).then(result => { if (result.ok && result.activatedLocationId) state.courseBridge.selectSurface(documentId!, result.activatedLocationId) }) },
         duplicate: () => { const state = live(); if (state) void state.duplicateCourseLocation(node.surfaceId).then(result => { if (result.ok && result.activatedLocationId) state.courseBridge.selectSurface(documentId!, result.activatedLocationId) }) },
         rename: startRename, remove: () => onDelete(node),
-        move: delta => { const to = index + delta; const state = live(); if (state && to >= 0 && to < ids.length) void state.reorderCourseSurfaces(arrayMove(ids, index, to)) },
+        move: delta => {
+          const to = index + delta, state = live()
+          if (!state || to < 0 || to >= ids.length) return
+          const order = arrayMove(ids, index, to)
+          if (ids.some(id => !project.instances[id]?.container)) void state.courseBridge.edit(order.map((instanceId, index) => ({ type: 'instance.move', instanceId, container: { kind: 'project' }, index })))
+          else void state.reorderCourseSurfaces(order)
+        },
       })
     }
     if (node.frameId) return [
@@ -141,17 +177,17 @@ function CourseTreeNodeRow({ node, depth, activeSurfaceId, selectedInstanceId, a
     aria-current={active ? 'page' : undefined} data-testid={node.kind === 'flow-page' ? 'flow-page-' + node.surfaceId : node.instanceId ? 'flow-heading-' + node.instanceId : node.frameId ? 'spatial-camera-' + node.id : 'scene-item-' + node.id}
     data-heading-level={node.kind === 'flow-heading' ? 1 : node.kind === 'flow-section' ? 2 : undefined} onClick={() => onActivate(node)}
     onDoubleClick={startRename} onContextMenu={event => { const items = commands(); if (items.length) { event.preventDefault(); menu.open({ x: event.clientX, y: event.clientY }, isPage ? '页面操作' : '位置操作', items) } }}>
-    {isPage && <FileText size={14} />}{label}{thumbnailStateName && <small>缩略图 · {thumbnailStateName}</small>}</button>{menu.element}
-    {(isPage || node.frameId) && <button type="button" className="icon-button icon-button--danger" aria-label={'删除' + (isPage ? '页面' : '镜头') + '“' + node.label + '”'}
-      title={isPage && project?.surfaces.length === 1 ? LAST_COURSE_PAGE_REASON : '删除'} disabled={isPage && project?.surfaces.length === 1}
+    {(isPage || isProgram || node.kind === 'container') && <FileText size={14} />}{label}{thumbnailStateName && <small>缩略图 · {thumbnailStateName}</small>}</button>{menu.element}
+    {(isPage || isProgram || node.frameId) && <button type="button" className="icon-button icon-button--danger" aria-label={'删除' + (isProgram ? '程序' : isPage ? '页面' : '镜头') + '“' + node.label + '”'}
+      title={(isPage || isProgram) && (project?.rootIds.length ?? 0) === 1 ? isProgram ? '这是最后一项作品内容，不能删除' : LAST_COURSE_PAGE_REASON : '删除'} disabled={(isPage || isProgram) && (project?.rootIds.length ?? 0) === 1}
       onClick={event => { event.stopPropagation(); onDelete(node) }}><Trash2 size={14} /></button>}</>
-  if (isPage || node.frameId) return <SortableCourseTreeNode node={node} depth={depth} row={row} nested={nested} />
+  if (isPage || isProgram || node.frameId) return <SortableCourseTreeNode node={node} depth={depth} row={row} nested={nested} />
   return <div className="course-page-tree__node" data-kind={node.kind} style={{ marginLeft: depth * 14 }}><div className="course-page-tree__row">{row}</div>{nested}</div>
 }
 
 export function ScenePanel() {
   const view = useEditorStore(state => state.courseView)
-  const editingScope = useEditorStore(state => state.editingScope)
+  const editingScope = useEditorStore(selectEditingScope)
   const spatialViews = useEditorStore(state => state.spatialViewStates)
   const [pendingDelete, setPendingDelete] = useState<{ node: CourseTreeNode; captured: CapturedComponentOperation | CapturedCourseTarget; contentEdit: EditorState['slideContentEdit'] } | null>(null)
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }), useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }))
@@ -164,6 +200,14 @@ export function ScenePanel() {
   const activate = (node: CourseTreeNode) => {
     const state = useEditorStore.getState()
     if (state.courseView.activeDocumentId !== documentId) return
+    if (node.kind === 'container') {
+      void state.commitTextEdit().then(() => {
+        if (useEditorStore.getState().courseView.activeDocumentId !== documentId) return
+        if (node.rootInstanceId && state.courseView.rootInstanceId !== node.rootInstanceId) state.courseBridge.selectSurface(documentId, node.rootInstanceId)
+        state.courseBridge.enterContainer(documentId, node.surfaceId); state.setEditingScope('scene')
+      }).catch(error => state.setError(String(error)))
+      return
+    }
     state.courseBridge.selectSurface(documentId, node.surfaceId)
     state.setEditingScope('scene')
     if (node.frameId) state.activateSpatialCameraFrame(node.surfaceId, node.frameId)
@@ -179,7 +223,15 @@ export function ScenePanel() {
   const requestDelete = (node: CourseTreeNode) => {
     const state = useEditorStore.getState()
     if (selectHasDirtyCourseContentDraft(state)) { state.setError('请先完成当前输入，再删除页面或镜头。'); return }
-    try { setPendingDelete({ node, captured: node.frameId ? state.courseBridge.captureTarget(documentId) : state.captureCourseSurfaceDelete(node.surfaceId), contentEdit: state.slideContentEdit }) }
+    try {
+      const target = state.courseBridge.captureTarget(documentId)
+      if (node.kind === 'program-root' && target.project.rootIds.length <= 1) throw new Error('这是最后一项作品内容，不能删除')
+      const captured = node.kind === 'program-root' ? state.courseBridge.capture([
+        ...(target.project.entry?.rootInstanceId === node.surfaceId ? [{ type: 'project.entry.set' as const, entry: target.project.rootIds.find(id => id !== node.surfaceId) ? { rootInstanceId: target.project.rootIds.find(id => id !== node.surfaceId)! } : null }] : []),
+        { type: 'instance.remove', instanceId: node.surfaceId },
+      ], target) : node.frameId ? target : state.captureCourseSurfaceDelete(node.surfaceId)
+      setPendingDelete({ node, captured, contentEdit: state.slideContentEdit })
+    }
     catch (error) { state.setError(error instanceof Error ? error.message : '删除目标已改变') }
   }
   const onDragEnd = ({ active, over }: DragEndEvent) => {
@@ -188,8 +240,9 @@ export function ScenePanel() {
     if (!plan) return
     const state = useEditorStore.getState()
     if (state.courseView.activeDocumentId !== documentId) return
-    if (plan.kind === 'surfaces') void state.reorderCourseSurfaces(plan.surfaceIds)
-    else void state.reorderSpatialCameraFrames(plan.surfaceId, plan.frameIds)
+    if (plan.kind === 'roots') void state.courseBridge.edit(plan.surfaceIds.map((instanceId, index) => ({ type: 'instance.move', instanceId, container: { kind: 'project' }, index })))
+    else if (plan.kind === 'surfaces') void state.reorderCourseSurfaces(plan.surfaceIds)
+    else if (plan.kind === 'cameras') void state.reorderSpatialCameraFrames(plan.surfaceId, plan.frameIds)
   }
   const globalLayerCount = project.global.underlay.length + project.global.overlay.length
   return <aside className="panel scene-panel" aria-label="课程结构">
@@ -203,12 +256,12 @@ export function ScenePanel() {
         onAddSpatialPage={layout.dropdown.includes('spatial-page') ? () => add('spatial-page') : undefined} /></div>
     <div className="course-page-tree" data-testid="course-page-tree"><DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
       <SortableContext items={treeView.pages.map(page => page.id)} strategy={verticalListSortingStrategy}><div className="course-page-tree__list">
-        {treeView.pages.map(page => <CourseTreeNodeRow key={page.id} node={page} depth={0} activeSurfaceId={view.surfaceId} selectedInstanceId={view.selectedInstanceId}
+        {treeView.pages.map(page => <CourseTreeNodeRow key={page.id} node={page} depth={0} activeSurfaceId={view.rootInstanceId ?? view.surfaceId} selectedInstanceId={view.selectedInstanceId}
           activeCameraFrameId={activeCameraFrameId} onActivate={activate} onDelete={requestDelete} />)}
       </div></SortableContext></DndContext></div>
-    <ConfirmDialog open={Boolean(pendingDelete)} title={pendingDelete?.node.frameId ? '删除镜头？' : '删除页面？'}
+    <ConfirmDialog open={Boolean(pendingDelete)} title={pendingDelete?.node.kind === 'program-root' ? '删除程序？' : pendingDelete?.node.frameId ? '删除镜头？' : '删除页面？'}
       message={pendingDelete ? '“' + pendingDelete.node.label + '”' + (pendingDelete.node.frameId ? '镜头' : '及其中的全部对象') + '将被删除。此操作可以撤销。' : ''}
-      confirmLabel={pendingDelete?.node.frameId ? '删除镜头' : '删除页面'} danger onCancel={() => setPendingDelete(null)} onConfirm={() => {
+      confirmLabel={pendingDelete?.node.kind === 'program-root' ? '删除程序' : pendingDelete?.node.frameId ? '删除镜头' : '删除页面'} danger onCancel={() => setPendingDelete(null)} onConfirm={() => {
         const pending = pendingDelete; setPendingDelete(null)
         if (!pending) return
         const state = useEditorStore.getState()
@@ -216,7 +269,9 @@ export function ScenePanel() {
           state.setError('删除目标或当前输入已改变，请完成输入后重新确认。')
           return
         }
-        const operation = pending.node.frameId
+        const operation = pending.node.kind === 'program-root'
+          ? state.courseBridge.editCaptured(pending.captured as CapturedComponentOperation)
+          : pending.node.frameId
           ? state.deleteSpatialCameraFrame(pending.node.surfaceId, pending.node.frameId, pending.captured as CapturedCourseTarget)
           : state.deleteCourseSurface(pending.node.surfaceId, pending.captured as CapturedComponentOperation)
         void operation.catch(error => state.setError(error instanceof Error ? error.message : '删除失败，原内容已保留。'))

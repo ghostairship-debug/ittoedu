@@ -1,5 +1,6 @@
 import type { DocumentHostAPI } from '../../shared/workbench/desktop'
-import type { DocumentCommand, DocumentDriver, DocumentEvent, DocumentModel, DocumentOperation, DocumentOperationResult, DocumentSnapshot } from '../../shared/workbench/document'
+import type { DocumentCommand, DocumentDriver, DocumentHostEvent, DocumentModel, DocumentOperation, DocumentOperationResult, DocumentSnapshot } from '../../shared/workbench/document'
+import { applyDocumentModelUpdate } from '../../core/documents/documentStateEffects'
 import { MarkdownDriver } from '../../core/drivers/MarkdownDriver'
 import { TextDriver } from '../../core/drivers/TextDriver'
 import { captureComponentOperation, componentValueAt, ComponentOperationConflict, equalComponentValue } from '../../core/drivers/courseV10Operations'
@@ -31,15 +32,30 @@ interface PendingOperation {
   status: DocumentProjectionState['pending'][number]['status']
   operation?: DocumentOperation
   historyGroup?: string
+  sourceChangeHints?: Array<{ from: number; to: number; inserted: number }>
   /** An exact own event can arrive before its dispatch receipt. Do not replay it in the view. */
   appliedRevision?: number
+  /** Only a definite host refusal can be released by an input owner's explicit resolution. */
+  refusal?: Exclude<DocumentOperationResult, { revision: number }>
   settle(result: DocumentOperationResult): void
   reject(error: Error): void
 }
 
-export class DocumentExactAckUnknownError extends Error {
-  constructor(readonly operationId: string, cause: unknown) { super(cause instanceof Error ? cause.message : '精确提交回执未知') }
+export class DocumentAckUnknownError extends Error {
+  constructor(readonly operationId: string, cause: unknown) { super(cause instanceof Error ? cause.message : '文档操作回执未知') }
 }
+
+export class DocumentBlockedInputError extends Error {
+  constructor(readonly operationId: string, message: string) { super(message) }
+}
+
+export class DocumentExactAckUnknownError extends DocumentAckUnknownError {
+  constructor(operationId: string, cause: unknown) { super(operationId, cause instanceof Error ? cause : new Error('精确提交回执未知')) }
+}
+
+export type DocumentInputOperationResolution =
+  | { status: 'pending' | 'missing' | 'unsubmitted' }
+  | { status: 'settled'; result: DocumentOperationResult }
 
 const successful = (result: DocumentOperationResult): result is Extract<DocumentOperationResult, { revision: number }> =>
   result.status === 'applied' || result.status === 'unchanged'
@@ -73,12 +89,14 @@ export class DocumentProjection {
   private externalChanges = 0
   private disposed = false
   private attachment = 0
+  private refresh?: Promise<void>
+  private refreshRequested = false
 
   constructor(private readonly api: DocumentHostAPI, readonly documentId: string, private readonly driver?: DocumentDriver) {}
 
-  static async attach(api: DocumentHostAPI, documentId: string, driver?: DocumentDriver): Promise<DocumentProjection> {
+  static async attach(api: DocumentHostAPI, documentId: string, driver?: DocumentDriver, initialSnapshot?: DocumentSnapshot): Promise<DocumentProjection> {
     const projection = new DocumentProjection(api, documentId, driver)
-    await projection.reattach()
+    await projection.reattach(initialSnapshot)
     return projection
   }
 
@@ -111,19 +129,26 @@ export class DocumentProjection {
   private problem(error: DocumentProjectionError): void {
     this.update({ error, ...(error.kind === 'disconnected' || error.kind === 'closed' ? { connected: false } : {}) })
   }
-  private accept(snapshot: DocumentSnapshot, operationId?: string, attaching = false, appliedChanges?: ComponentAppliedChanges): void {
+  private accept(snapshot: DocumentSnapshot, operationId?: string, attaching = false, appliedChanges?: ComponentAppliedChanges, owned = false): void {
     if (snapshot.documentId !== this.documentId) return
     const previous = this.state.committed
     if (previous && !attaching && snapshot.epoch !== previous.epoch) return
     if (previous?.epoch === snapshot.epoch && snapshot.revision < previous.revision) return
+    if (previous?.epoch === snapshot.epoch && previous.sequence !== undefined && snapshot.sequence !== undefined && snapshot.sequence < previous.sequence) return
     if (previous && !this.ownOperations.has(operationId ?? '')
       && (snapshot.epoch !== previous.epoch || snapshot.revision > previous.revision)) this.externalChanges++
     if (previous?.epoch !== snapshot.epoch) this.observedOwnRevision = snapshot.revision
     if (this.ownOperations.has(operationId ?? '')) this.observedOwnRevision = Math.max(this.observedOwnRevision, snapshot.revision)
     const own = this.queue.find(entry => entry.operationId === operationId)
     if (own) own.appliedRevision = snapshot.revision
-    ++this.projectionVersion
-    this.update({ committed: structuredClone(snapshot) })
+    // A Session revision identifies immutable content. A read/save-state refresh
+    // must not replace unchanged resource buffers and restart their consumers.
+    const sameModel = previous?.epoch === snapshot.epoch && previous.revision === snapshot.revision
+      && previous.model.kind === snapshot.model.kind
+    const { model: _model, ...metadata } = snapshot
+    if (!sameModel) ++this.projectionVersion
+    this.update({ committed: sameModel ? { ...structuredClone(metadata), model: previous.model }
+      : owned ? snapshot : structuredClone(snapshot) })
     this.consumeChanges(operationId, snapshot.revision, appliedChanges)
     if (snapshot.model.kind === 'course-v10' && (!this.queue.length || snapshot.epoch === this.expectedEpoch)) {
       if (this.queue.length || this.composition) void this.scheduleComponentRebase()
@@ -157,13 +182,15 @@ export class DocumentProjection {
     const composition = this.composition && structuredClone(this.composition)
     if (!entries.length && !composition) { this.update({ draft: null, retainedDraftOnly: false }); return }
     const driver = this.componentDriver()
-    let draft: DocumentModel = structuredClone(snapshot.model)
+    let draft: DocumentModel = snapshot.model
+    const apply = (model: DocumentModel, command: DocumentCommand) => driver.applyValidated
+      ? driver.applyValidated(model, command) : driver.apply(structuredClone(model), command)
     let retainedDraftOnly = false
     let conflict: { entry?: PendingOperation; error: Error } | undefined
     for (const entry of entries) {
       if (entry.appliedRevision !== undefined && entry.appliedRevision <= snapshot.revision) continue
       if (entry.mutation.type !== 'command' || entry.mutation.command.type !== 'component-platform.apply') continue
-      try { draft = await driver.apply(draft, entry.mutation.command) }
+      try { draft = await apply(draft, entry.mutation.command) }
       catch (error) {
         if (!(error instanceof ComponentOperationConflict)) throw error
         conflict ??= { entry, error }
@@ -171,7 +198,7 @@ export class DocumentProjection {
         // remain untouched; this temporary batch can never be submitted or saved.
         try {
           if (draft.kind !== 'course-v10') throw error
-          draft = await driver.apply(draft, captureComponentOperation(draft.project, entry.mutation.command.edits))
+          draft = await apply(draft, captureComponentOperation(draft.project, entry.mutation.command.edits))
         } catch {
           // A deleted target or invalid relationship cannot be recreated by a projection.
           draft = this.state.draft ?? draft
@@ -183,12 +210,12 @@ export class DocumentProjection {
     if (composition && draft.kind === 'course-v10' && !equalComponentValue(composition.value, composition.initialValue)) {
       try {
         // Validate the original reads, even when IME has not emitted a final input event yet.
-        draft = await driver.apply(draft, composition.command)
+        draft = await apply(draft, composition.command)
       } catch (error) {
         conflict ??= { error: error instanceof Error ? error : new Error('正在输入的目标已不存在') }
         try {
           if (draft.kind !== 'course-v10') throw error
-          draft = await driver.apply(draft, captureComponentOperation(draft.project,
+          draft = await apply(draft, captureComponentOperation(draft.project,
             [{ type: 'data.set', instanceId: composition.instanceId, path: composition.path, value: composition.value }]))
         } catch { /* Keep the latest formal project; a deleted target survives only as retained input. */ }
       }
@@ -260,9 +287,51 @@ export class DocumentProjection {
       await this.enqueue({ type: 'command', command: composition.command }, draft)
     } else await this.scheduleComponentRebase()
   }
-  private onEvent = (event: DocumentEvent): void => {
+  private refreshCommitted(): void {
+    this.refreshRequested = true
+    if (this.refresh) return
+    const attachment = this.attachment
+    const work = (async () => {
+      do {
+        this.refreshRequested = false
+        const snapshot = await this.api.read(this.documentId)
+        if (this.disposed || attachment !== this.attachment) return
+        this.accept(snapshot, undefined, false, undefined, true)
+      } while (this.refreshRequested)
+    })().catch(error => {
+      if (!this.disposed && attachment === this.attachment) this.problem({ kind: 'disconnected', code: 'document-refresh-failed',
+        message: error instanceof Error ? error.message : '文档补全失败，输入已保留。' })
+    })
+    this.refresh = work
+    void work.finally(() => { if (this.refresh === work) this.refresh = undefined })
+  }
+
+  private onEvent = (event: DocumentHostEvent): void => {
     if (this.disposed) return
-    if (event.type === 'changed') this.accept(event.snapshot, event.operationId, false, event.appliedChanges)
+    if (event.type === 'changed') this.accept(event.snapshot, event.operationId, false, event.appliedChanges, true)
+    else if (event.type === 'state' || event.type === 'updated') {
+      const head = event.head, current = this.state.committed
+      if (head.documentId !== this.documentId || current && head.epoch !== current.epoch) return
+      if (current?.sequence !== undefined && head.sequence < current.sequence) return
+      const { kind: _kind, projectId: _projectId, ...facts } = head
+      if (event.type === 'state') {
+        if (!current || current.revision !== head.revision || current.sequence === undefined || head.sequence > current.sequence + 1) { this.refreshCommitted(); return }
+        const own = this.queue.find(entry => entry.operationId === event.operationId)
+        if (own) own.appliedRevision = head.revision
+        this.update({ committed: { ...current, ...facts } })
+      } else {
+        if (!current || current.revision !== event.baseRevision || current.sequence !== event.baseSequence) {
+          if (current && current.sequence !== undefined && head.sequence <= current.sequence) {
+            const own = this.queue.find(entry => entry.operationId === event.operationId)
+            if (own) own.appliedRevision = head.revision
+            this.consumeChanges(event.operationId, head.revision, event.appliedChanges)
+          } else this.refreshCommitted()
+          return
+        }
+        try { this.accept({ ...facts, model: applyDocumentModelUpdate(current.model, event.model) }, event.operationId, false, event.appliedChanges, true) }
+        catch { this.refreshCommitted() }
+      }
+    }
     else if (event.documentId === this.documentId && event.epoch === this.state.committed?.epoch) {
       if (this.closeSuspended) {
         for (const entry of this.queue) entry.reject(new Error('已放弃未保存输入并关闭文档'))
@@ -280,13 +349,20 @@ export class DocumentProjection {
     }
   }
 
-  async reattach(): Promise<DocumentSnapshot> {
+  /** An open caller may reuse its snapshot if it observed no same-document
+   * event between requesting that snapshot and installing this subscription. */
+  async reattach(initialSnapshot?: DocumentSnapshot): Promise<DocumentSnapshot> {
     this.disposed = false
     const attachment = ++this.attachment
     this.stopSubscription?.()
-    this.stopSubscription = this.api.subscribe(this.onEvent)
+    let observedDuringSubscribe = false
+    this.stopSubscription = this.api.subscribe(event => {
+      if ((event.type === 'changed' ? event.snapshot.documentId : event.type === 'state' || event.type === 'updated' ? event.head.documentId : event.documentId) === this.documentId) observedDuringSubscribe = true
+      this.onEvent(event)
+    })
     try {
-      const snapshot = await this.api.read(this.documentId)
+      const snapshot = initialSnapshot?.documentId === this.documentId && !observedDuringSubscribe
+        ? initialSnapshot : await this.api.read(this.documentId)
       if (attachment !== this.attachment) throw new Error('文档连接已被替换')
       this.accept(snapshot, undefined, true)
       // An unknown receipt is queried with its original ID. No new identity or blind replay.
@@ -327,11 +403,11 @@ export class DocumentProjection {
       return captureComponentOperation(model.project, frozen)
     }, options)
   }
-  edit(command: DocumentCommand, options: { historyGroup?: string } = {}): Promise<DocumentOperationResult> {
+  edit(command: DocumentCommand, options: { historyGroup?: string; sourceChangeHints?: Array<{ from: number; to: number; inserted: number }> } = {}): Promise<DocumentOperationResult> {
     const frozen = structuredClone(command)
-    return this.editPrepared(() => frozen, options)
+    return this.editPrepared(() => frozen, { ...options, ...(options.sourceChangeHints ? { sourceChangeHints: structuredClone(options.sourceChangeHints) } : {}) })
   }
-  private editPrepared(command: (model: DocumentModel) => DocumentCommand, options: { historyGroup?: string }): Promise<DocumentOperationResult> {
+  private editPrepared(command: (model: DocumentModel) => DocumentCommand, options: { historyGroup?: string; sourceChangeHints?: Array<{ from: number; to: number; inserted: number }> }): Promise<DocumentOperationResult> {
     if (this.closeSuspended) return Promise.reject(new Error('正在关闭文档，输入已保留'))
     if (this.mirroringOperationId) {
       const operationId = this.mirroringOperationId
@@ -354,12 +430,13 @@ export class DocumentProjection {
         const driver = base.kind === 'course-v10' ? this.componentDriver() : this.driver
           ?? (base.kind === 'markdown' ? new MarkdownDriver() : base.kind === 'text' ? new TextDriver() : undefined)
         if (!driver) throw new Error('当前文档格式不受支持')
-        const projected = driver.apply(structuredClone(base), frozen)
+        const projected = driver.applyValidated && !this.state.retainedDraftOnly
+          ? driver.applyValidated(base, frozen) : driver.apply(structuredClone(base), frozen)
         const enqueue = (draft: DocumentModel) => {
           const conflict = externalChanges !== this.externalChanges && base.kind !== 'course-v10'
           if (conflict) this.problem({ kind: 'conflict', code: 'external-change',
             message: '输入准备期间文档已改变；未确认输入已保留，未覆盖新版本。' })
-          void this.enqueue({ type: 'command', command: frozen }, draft, historyGroup, conflict ? baseline : undefined).then(resolve, reject)
+          void this.enqueue({ type: 'command', command: frozen }, draft, historyGroup, conflict ? baseline : undefined, options.sourceChangeHints).then(resolve, reject)
           if (base.kind === 'course-v10' && externalChanges !== this.externalChanges) void this.scheduleComponentRebase()
         }
         return projected instanceof Promise ? projected.then(enqueue) : enqueue(projected)
@@ -376,18 +453,19 @@ export class DocumentProjection {
     })
   }
 
-  private enqueue(mutation: DocumentOperation['mutation'], draft?: DocumentModel, historyGroup?: string, baseline?: DocumentSnapshot): Promise<DocumentOperationResult> {
+  private enqueue(mutation: DocumentOperation['mutation'], draft?: DocumentModel, historyGroup?: string, baseline?: DocumentSnapshot,
+    sourceChangeHints?: Array<{ from: number; to: number; inserted: number }>): Promise<DocumentOperationResult> {
     if (this.disposed) return Promise.reject(new Error('文档会话已关闭'))
     const snapshot = baseline ?? this.state.committed!
     if (!this.queue.length) { this.expectedRevision = snapshot.revision; this.expectedEpoch = snapshot.epoch }
     const operationId = crypto.randomUUID()
     this.ownOperations.add(operationId)
     const result = new Promise<DocumentOperationResult>((settle, reject) => {
-      this.queue.push({ operationId, mutation, historyGroup, status: this.state.error ? 'blocked' : 'queued', settle, reject })
+      this.queue.push({ operationId, mutation, historyGroup, ...(sourceChangeHints ? { sourceChangeHints } : {}), status: this.state.error ? 'blocked' : 'queued', settle, reject })
     })
     ++this.projectionVersion
     this.update(draft ? { draft } : {})
-    if (this.state.error) this.queue.at(-1)!.reject(new Error(this.state.error.message))
+    if (this.state.error) this.queue.at(-1)!.reject(new DocumentBlockedInputError(operationId, this.state.error.message))
     else this.start()
     return result
   }
@@ -418,7 +496,7 @@ export class DocumentProjection {
       entry.status = 'sending'
       this.update()
       try {
-        const result = await this.api.dispatch(entry.operation)
+        const result = await this.api.dispatch(entry.operation, entry.sourceChangeHints ? { sourceChangeHints: entry.sourceChangeHints } : undefined)
         if (result.operationId !== entry.operationId || result.documentId !== this.documentId) throw new Error('文档操作回执身份不匹配')
         if (successful(result)) {
           entry.appliedRevision = result.revision
@@ -438,7 +516,7 @@ export class DocumentProjection {
         const message = error instanceof Error ? error.message : '文档连接中断'
         this.problem({ kind: 'disconnected', code: 'ack-unknown', operationId: entry.operationId,
           message: `修改结果待核实，输入已保留。${message}` })
-        entry.reject(new Error(this.state.error!.message))
+        entry.reject(new DocumentAckUnknownError(entry.operationId, new Error(this.state.error!.message)))
         this.blockDependents(entry)
       }
     }
@@ -457,6 +535,7 @@ export class DocumentProjection {
     if (this.state.committed?.model.kind === 'course-v10' && (this.queue.length || this.composition)) void this.scheduleComponentRebase()
   }
   private refuse(entry: PendingOperation, result: Exclude<DocumentOperationResult, { revision: number }>): void {
+    entry.refusal = result
     if (entry.mutation.type !== 'command' && this.queue[0] === entry && this.queue.every(pending => pending.mutation.type !== 'command')) {
       // A refused History command applied nothing and has no user draft to recover.
       // Its receipt remains available to the caller, while the next drain reads the
@@ -475,14 +554,16 @@ export class DocumentProjection {
   private blockDependents(first: PendingOperation): void {
     for (const entry of this.queue) if (entry !== first && entry.status === 'queued') {
       entry.status = 'blocked'
-      entry.reject(new Error('前序输入尚未确认，后续输入已保留且未发送'))
+      entry.reject(entry.operation ? new DocumentAckUnknownError(entry.operationId, new Error('前序输入尚未确认，原操作仍待核实'))
+        : new DocumentBlockedInputError(entry.operationId, '前序输入尚未确认，后续输入已保留且未发送'))
     }
     this.update()
   }
   private blockUnsent(): void {
     for (const entry of this.queue) if (entry.status === 'queued') {
       entry.status = 'blocked'
-      entry.reject(new Error('文档基准已改变，输入已保留且未发送'))
+      entry.reject(entry.operation ? new DocumentAckUnknownError(entry.operationId, new Error('文档基准已改变，原操作仍待核实'))
+        : new DocumentBlockedInputError(entry.operationId, '文档基准已改变，输入已保留且未发送'))
     }
     this.update()
   }
@@ -577,14 +658,59 @@ export class DocumentProjection {
       if (!this.queue.length && !this.previewTail) return structuredClone(this.state.committed!)
     }
   }
+  /** Inspect only this input's original operation. Unlike reattach, this never
+   * requeues or starts other input, and a missing unknown receipt stays unknown. */
+  async queryInputResolution(operationId: string): Promise<DocumentInputOperationResolution> {
+    if (this.previewTail) await this.previewTail
+    while (this.worker) await this.worker
+    const epoch = this.state.committed?.epoch, attachment = this.attachment
+    if (this.disposed || !epoch || !this.ownOperations.has(operationId)) throw new Error('原输入操作已不可定位，请重新核实文档')
+    const entry = this.queue.find(value => value.operationId === operationId)
+    const unsubmitted = entry?.status === 'blocked' && !entry.operation
+    if (entry && entry.status !== 'unknown' && entry.status !== 'rejected' && entry.status !== 'blocked') return { status: 'pending' }
+    const assertCurrent = () => {
+      if (this.disposed || attachment !== this.attachment || this.state.committed?.epoch !== epoch
+        || entry && this.queue.find(value => value.operationId === operationId) !== entry)
+        throw new Error('核实输入期间文档会话已改变，请重新核实')
+    }
+    const receipt = unsubmitted ? undefined : entry?.status === 'rejected' ? entry.refusal : await this.api.lookup(this.documentId, operationId)
+    assertCurrent()
+    if (!receipt && entry && !unsubmitted) return { status: 'pending' }
+    if (receipt && (receipt.operationId !== operationId || receipt.documentId !== this.documentId)) throw new Error('文档操作回执身份不匹配')
+    // Record the definite outcome even if refreshing the authoritative head fails.
+    if (entry && receipt && !successful(receipt)) this.refuse(entry, receipt)
+    const snapshot = await this.api.read(this.documentId)
+    assertCurrent()
+    if (snapshot.documentId !== this.documentId || snapshot.epoch !== epoch
+      || receipt && successful(receipt) && snapshot.revision < receipt.revision)
+      throw new Error('当前权威文档尚不能核实该输入，请保留草稿后重试')
+    if (entry && receipt && successful(receipt)) entry.appliedRevision = receipt.revision
+    this.accept(snapshot, receipt && successful(receipt) && snapshot.revision === receipt.revision ? operationId : undefined)
+    if (entry && receipt && successful(receipt)) this.acknowledge(entry, receipt)
+    // Foreign blocked proposals retain their queue identities and require their own resolution.
+    const foreign = this.queue.find(value => value.operationId !== operationId)
+    this.update({ connected: true, ...(foreign ? { error: { kind: 'conflict' as const, code: 'pending-input', operationId: foreign.operationId,
+      message: '其他未确认输入仍保留，请处理后继续。' } } : receipt && successful(receipt) && this.state.error?.operationId === operationId ? { error: null } : {}) })
+    if (this.previewTail) await this.previewTail
+    return unsubmitted ? { status: 'unsubmitted' } : receipt ? { status: 'settled', result: receipt } : { status: 'missing' }
+  }
+
   /** Explicit user resolution only; never called by an incoming event or reconnect. */
   async releaseRejectedOperation(operationId: string): Promise<void> {
+    return this.releaseUnappliedInput(operationId, 'rejected')
+  }
+  /** A blocked envelope without operation was never sent to Main. */
+  async releaseUnsubmittedOperation(operationId: string): Promise<void> {
+    return this.releaseUnappliedInput(operationId, 'unsubmitted')
+  }
+  private async releaseUnappliedInput(operationId: string, outcome: 'rejected' | 'unsubmitted'): Promise<void> {
     if (this.previewTail) await this.previewTail
     while (this.worker) await this.worker
     const index = this.queue.findIndex(entry => entry.operationId === operationId)
     if (index < 0) return
     const entry = this.queue[index]!
-    if (entry.status !== 'rejected') throw new Error('请先核实待确认操作的结果')
+    if (outcome === 'rejected' ? entry.status !== 'rejected' : entry.status !== 'blocked' || Boolean(entry.operation))
+      throw new Error('请先核实待确认操作的结果')
     // The input owner retains raw source and will capture a new committed
     // baseline. Other input and unknown operations keep their existing owners.
     this.queue.splice(index, 1)

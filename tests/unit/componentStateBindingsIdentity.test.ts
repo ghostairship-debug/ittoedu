@@ -1,3 +1,5 @@
+import { componentSurfaces } from '../../src/shared/contracts/component-platform/project'
+import { testContainerInstance } from '../helpers/glxWorkFixture'
 // @vitest-environment node
 import { expect, it } from 'vitest'
 import { createBlankCourseProjectV10 } from '../../src/core/course/createCourseProjectV10'
@@ -24,7 +26,7 @@ function fixture(managed = false) {
     stateBindings: { answer, validity: valid, progress: 'shared' } }
   project.instances.input = { id: 'input', definitionId: INPUT_DEFINITION.id,
     data: createInputData({ stateKey: 'feedback', answer: { type: 'number', stateKey: answer, validityKey: valid, ruleFamilyRuleIds: [] } }) }
-  project.surfaces[0].childIds = ['program', 'input']
+  testContainerInstance(project, 0).childIds = ['program', 'input']
   project.logic = { courseState: [{ key: answer, valueType: 'number', defaultValue: 3 }, { key: valid, valueType: 'boolean', defaultValue: false },
     { key: 'shared', valueType: 'string', defaultValue: 'incoming' }, { key: 'feedback', valueType: 'string', defaultValue: '' },
     { key: 'unused', valueType: 'number', defaultValue: 99 }], navigationGuards: [] }
@@ -48,7 +50,7 @@ it('roundtrips explicit scalar aliases while retaining an undeclared alias for l
 
 it('renames explicit aliases and all input state fields in base and presentation data without rewriting source or prose', () => {
   let project = fixture()
-  project.surfaces[0].presentation = { states: [{ id: 'answer', title: '答案', overrides: { input: { data: structuredClone(project.instances.input.data), visible: false } } }] }
+  testContainerInstance(project, 0).container!.presentation = { states: [{ id: 'answer', title: '答案', overrides: { input: { data: structuredClone(project.instances.input.data), visible: false } } }] }
   const implementation = structuredClone(project.definitions.source.implementation)
   for (const [from, to] of [['score', 'mastery'], ['valid', 'isValid'], ['feedback', 'feedbackResult']] as const) {
     const declaration = { ...project.logic!.courseState.find(value => value.key === from)!, key: to } as CourseStateDeclaration
@@ -58,10 +60,10 @@ it('renames explicit aliases and all input state fields in base and presentation
     project = apply(project, planned.edits)
   }
   expect(project.instances.program.stateBindings).toEqual({ answer: 'mastery', validity: 'isValid', progress: 'shared' })
-  for (const data of [project.instances.input.data, project.surfaces[0].presentation!.states[0].overrides.input.data!]) {
+  for (const data of [project.instances.input.data, testContainerInstance(project, 0).container!.presentation!.states[0].overrides.input.data!]) {
     expect(inputDataSchema.parse(data)).toMatchObject({ stateKey: 'feedbackResult', answer: { stateKey: 'mastery', validityKey: 'isValid' } })
   }
-  expect(project.surfaces[0].presentation!.states[0].overrides.input.visible).toBe(false)
+  expect(testContainerInstance(project, 0).container!.presentation!.states[0].overrides.input.visible).toBe(false)
   expect(project.instances.program.data).toEqual({ note: 'score' })
   expect(project.definitions.source.implementation).toEqual(implementation)
 })
@@ -76,7 +78,7 @@ it('keeps referenced declarations when an alias or an input still uses them', ()
 
 it.each(['page', 'objects'] as const)('keeps shared aliases and follows managed input identities during same-course %s copy', mode => {
   for (const managed of [true, false]) {
-    const project = fixture(managed), surfaceId = project.surfaces[0].id
+    const project = fixture(managed), surfaceId = componentSurfaces(project)[0].id
     const before = structuredClone(project)
     const copy = mode === 'page' ? duplicateSurfaceEdits(project, surfaceId) : prepareCourseObjectPaste(
       { documentId: 'same-document', project, resources, roots: ['program', 'input'] },
@@ -92,7 +94,7 @@ it.each(['page', 'objects'] as const)('keeps shared aliases and follows managed 
 })
 
 it('carries a copied object alias and its declaration across courses without binding to the destination same-named state', () => {
-  const source = fixture(), destination = createBlankCourseProjectV10('目标'), surfaceId = destination.surfaces[0].id
+  const source = fixture(), destination = createBlankCourseProjectV10('目标'), surfaceId = componentSurfaces(destination)[0].id
   source.instances.program.stateBindings = { progress: 'shared' }
   destination.logic = { courseState: [{ key: 'shared', valueType: 'string', defaultValue: 'destination' }], navigationGuards: [] }
   const copy = prepareCourseObjectPaste({ documentId: 'source-document', project: source, resources, roots: ['program'] },
@@ -110,7 +112,7 @@ it('carries only explicitly referenced state declarations in a single object lib
   expect(entry.logic).toEqual({ courseState: [{ key: 'shared', valueType: 'string', defaultValue: 'incoming' }], navigationGuards: [] })
   const destination = createBlankCourseProjectV10('目标')
   destination.logic = { courseState: [{ key: 'shared', valueType: 'string', defaultValue: 'destination' }], navigationGuards: [] }
-  const insertion = prepareComponentLibraryInsertion(destination, entry, { container: { kind: 'surface', surfaceId: destination.surfaces[0].id }, index: 0,
+  const insertion = prepareComponentLibraryInsertion(destination, entry, { container: { kind: 'surface', surfaceId: componentSurfaces(destination)[0].id }, index: 0,
     rootIds: ['program'] })
   const next = apply(destination, insertion.command.edits), copy = next.instances[insertion.rootIds[0]]
   const rebound = copy.stateBindings!.progress
@@ -126,7 +128,7 @@ it('allocates library input identities before binding an earlier Source instance
     const entry = extractComponentLibraryEntry(source, resources, { id: 'state-group', title: '输入与程序', rootIds: ['program', 'input'] }).entry
     const destination = createBlankCourseProjectV10('目标')
     destination.logic = structuredClone(source.logic!)
-    const insertion = prepareComponentLibraryInsertion(destination, entry, { container: { kind: 'surface', surfaceId: destination.surfaces[0].id }, index: 0 })
+    const insertion = prepareComponentLibraryInsertion(destination, entry, { container: { kind: 'surface', surfaceId: componentSurfaces(destination)[0].id }, index: 0 })
     const next = apply(destination, insertion.command.edits)
     const program = next.instances[insertion.identities.instances.get('program')!]
     const input = inputDataSchema.parse(next.instances[insertion.identities.instances.get('input')!].data)
@@ -145,7 +147,7 @@ it('keeps a missing library alias unbound when its authored key collides with de
   source.instances.program.stateBindings = { progress: 'missing-from-source' }
   destination.logic = { courseState: [{ key: 'missing-from-source', valueType: 'number', defaultValue: 11 }], navigationGuards: [] }
   const entry = extractComponentLibraryEntry(source, resources, { id: 'missing-state', title: '保留原程序', rootIds: ['program'] }).entry
-  const insertion = prepareComponentLibraryInsertion(destination, entry, { container: { kind: 'surface', surfaceId: destination.surfaces[0].id }, index: 0 })
+  const insertion = prepareComponentLibraryInsertion(destination, entry, { container: { kind: 'surface', surfaceId: componentSurfaces(destination)[0].id }, index: 0 })
   const next = apply(destination, insertion.command.edits), instance = next.instances[insertion.rootIds[0]]
   expect(instance.stateBindings!.progress).not.toBe('missing-from-source')
   expect(next.logic).toEqual(destination.logic)

@@ -1,4 +1,5 @@
 // @vitest-environment node
+import { createTestProjectFromLegacy } from '../helpers/glxWorkFixture'
 import { useSyncExternalStore } from 'react'
 import { createRequire } from 'node:module'
 import { afterEach, expect, it, vi } from 'vitest'
@@ -47,13 +48,13 @@ it('retains unapplied source on native close and deferred composition until expl
       if (input.binding.kind !== 'file') throw new Error('Saved binding required')
       return input.binding
     } } })
-  const project: CourseProjectV10 = { schemaVersion: 10, id: 'original-project', revision: 0, title: 'Original source work',
+  const project: CourseProjectV10 = createTestProjectFromLegacy({ schemaVersion: 10, id: 'original-project', revision: 0, title: 'Original source work',
     definitions: { custom: { id: 'custom', title: 'Source', role: 'content', implementation: {
       kind: 'source', language: 'javascript', source: 'export default { value: 1 };' } } },
     instances: { source: { id: 'source', name: 'Original object', definitionId: 'custom', data: {},
       frame: { width: 160, height: 90, transform: [1, 0, 0, 1, 0, 0] } } },
     surfaces: [{ id: 'page', kind: 'slide', title: 'Page', childIds: ['source'] }],
-    global: { underlay: [], overlay: [] }, assets: {} }
+    global: { underlay: [], overlay: [] }, assets: {} })
   const session = await registry.create({ kind: 'course-v10', project, resources: { assets: {}, components: {} } }, 'original.h5lesson', true)
   const listeners = new Set<(event: DocumentEvent) => void>()
   session.subscribe(event => { for (const listener of listeners) listener(event) })

@@ -1,7 +1,8 @@
 import { publishedCourseV3Schema, type PublishedCourseV3, type PublishedImplementation } from '../../shared/contracts/component-platform/published'
 import { nanoid } from 'nanoid'
 import { spatialPlaybackPathId } from '../surfaces/spatial/componentPlatform/graph'
-import { resolveComponentPresentation, componentDefinitionBuiltinKey } from '../../shared/contracts/component-platform'
+import { componentDefinitionBuiltinKey, componentSurface } from '../../shared/contracts/component-platform'
+import { instanceWorkRootId } from '../components/runtime/containerScopes'
 import type { DocumentResources } from '../../shared/workbench/document'
 import { mountV10Model } from './ModelPlayer'
 import { prepareSandboxComponent, type ComponentBootstrapTransport } from '../../renderer/components/SandboxComponentImplementation'
@@ -18,8 +19,8 @@ import { createPlaybackNavigationContent, mountPlaybackNavigationChrome } from '
 
 /** One read-only P0 projection into R0; never saved as an author document. */
 export function publishedComponentModel(payload: PublishedCourseV3) {
-  return { kind: 'course-v10' as const, project: { schemaVersion: 10 as const, revision: 0, id: payload.id, title: payload.title,
-    definitions: payload.definitions, instances: payload.instances, surfaces: payload.surfaces, global: payload.global,
+  return { kind: 'course-v10' as const, project: { schemaVersion: 11 as const, revision: 0, id: payload.id, title: payload.title,
+    definitions: payload.definitions, instances: payload.instances, rootIds: payload.rootIds, entry: payload.entry, global: payload.global,
     background: payload.background, theme: payload.theme, designTokens: payload.designTokens, playback: payload.playback, media: payload.media, logic: payload.logic,
     assets: Object.fromEntries(Object.entries(payload.assets).map(([id, asset]) => { const { url: _url, ...metadata } = asset; return [id, { ...metadata, path: `assets/${encodeURIComponent(id)}` }] })) },
     resources: { assets: {}, components: {} } as DocumentResources }
@@ -62,10 +63,13 @@ function embeddedAssetBytes(url: string): Uint8Array {
   return bytes.subarray(0, length)
 }
 
-export async function mountPublishedCourseV3(value: unknown, root: HTMLElement, options: PublishedComponentPlayerOptions = {}) {
+export async function mountPublishedCourseV4(value: unknown, root: HTMLElement, options: PublishedComponentPlayerOptions = {}) {
   const payload = publishedCourseV3Schema.parse(value), model = publishedComponentModel(payload)
   const hostRoot = root
-  if (!options.capture) root = createPlaybackNavigationContent(hostRoot)
+  let activeRootId = (options.initialSurfaceId ? instanceWorkRootId(model.project, options.initialSurfaceId) : undefined)
+    ?? model.project.entry?.rootInstanceId ?? model.project.rootIds[0] ?? null
+  const hasPresentation = Boolean(componentSurface(model.project, activeRootId ?? ''))
+  if (!options.capture && hasPresentation) root = createPlaybackNavigationContent(hostRoot)
   model.resources.assets = { ...options.preparedAssetBytes }
   const resourceController = new AbortController(), requested = new Set<string>()
   const resourceJobs = new Set<Promise<void>>(), pendingAssets = new Set<string>(), resourceFailures = new Map<string, Error>()
@@ -78,13 +82,15 @@ export async function mountPublishedCourseV3(value: unknown, root: HTMLElement, 
     try { return [[id, new URL(asset.url, root.ownerDocument.baseURI).href]] }
     catch { return [[id, asset.url]] }
   }))
-  let surfaceId = payload.surfaces.find(surface => surface.id === options.initialSurfaceId)?.id ?? payload.surfaces[0]?.id ?? null
-  const initialSurface = payload.surfaces.find(surface => surface.id === surfaceId)
+  let surfaceId = componentSurface(model.project, activeRootId ?? '')?.id ?? null
+  const initialSurface = componentSurface(model.project, surfaceId ?? '')
   const initialFrameId = initialSurface?.kind === 'spatial' && initialSurface.spatial?.frames.some(frame => frame.id === options.initialStateId) ? options.initialStateId ?? undefined : undefined
   let stateId = options.initialStateId === undefined || initialFrameId ? initialSurface?.presentation?.initialStateId ?? null : options.initialStateId
   let player!: ReturnType<typeof mountV10Model>, stopped = false
   const spatialSessions = new Map<string, { pathId: string | null; frameId: string | null; stepIndex: number | null }>()
-  const renderModel = () => ({ ...model, project: resolveComponentPresentation(model.project, surfaceId, stateId) })
+  // ModelPlayer folds each container's committed navigation state once for both
+  // its DOM projection and the runtime; the Published author snapshot stays intact.
+  const renderModel = () => model
   const resolveAssetUrl = (id: string): string | undefined => {
     if (stopped) return undefined
     const asset = payload.assets[id]
@@ -141,7 +147,7 @@ export async function mountPublishedCourseV3(value: unknown, root: HTMLElement, 
         else if (value && typeof value === 'object') Object.values(value).forEach(collect)
       }
       for (const instance of Object.values(payload.instances)) {
-        const content = player.runtime.contentElement(instance.id)
+        const content = instance.container ? player.runtime.targetElement(instance.id) : player.runtime.contentElement(instance.id)
         if (content && (content === element || element.contains(content))) { collect(instance); collect(payload.definitions[instance.definitionId]) }
       }
     }
@@ -153,24 +159,25 @@ export async function mountPublishedCourseV3(value: unknown, root: HTMLElement, 
     if (failure) throw failure
     await waitForPublishedObservationReady(element, resourceController.signal)
   }
-  const navigation = new ComponentNavigationOwner({ project: () => model.project, surfaceId: () => surfaceId, stateId: () => stateId,
-    presentationRoot: () => hostRoot,
-    viewportBounds: () => { const rect = root.getBoundingClientRect(); return { left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom } },
+  const navigation = new ComponentNavigationOwner({ project: () => model.project, surfaceId: () => activeRootId, stateId: () => stateId,
+    presentationRoot: containerId => containerId ? player?.runtime.targetElement(containerId) ?? root : hostRoot,
+    viewportBounds: containerId => { const rect = (containerId ? player?.runtime.targetElement(containerId) ?? root : root).getBoundingClientRect(); return { left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom } },
     courseState: { get: <T,>(key: string) => player?.runtime.getState(key) as T | undefined, set: (key, value) => player?.runtime.setState(key, value) },
     restart: () => player?.runtime.resetPlayback(true, { preserveNavigation: true }), audio: () => player?.runtime.audio(), report: options.report, capture: options.capture,
     select: async (id, signal, onCommit) => {
-      if (stopped || signal?.aborted || !model.project.surfaces.some(surface => surface.id === id)) return false
-      surfaceId = id
-      stateId = model.project.surfaces.find(surface => surface.id === id)?.presentation?.initialStateId ?? null
-      onCommit?.()
+      if (stopped || signal?.aborted || !model.project.rootIds.includes(id) || !model.project.instances[id]) return false
       if (!player.revealSurface(id)) return false
+      activeRootId = id
+      surfaceId = componentSurface(model.project, id)?.id ?? null
+      stateId = componentSurface(model.project, id)?.presentation?.initialStateId ?? null
+      onCommit?.()
       await player.update(renderModel())
     },
-    selectState: async (id, _surfaceId, signal, onCommit) => { if (stopped || signal?.aborted) return false; stateId = id; onCommit?.(); await player.update(renderModel()) },
+    selectState: async (id, containerId, signal, onCommit) => { if (stopped || signal?.aborted) return false; if (containerId === surfaceId) stateId = id; onCommit?.(); await player.update(renderModel()) },
   })
   const teacherController = navigation.teacherPort()
   player = mountV10Model({ model: renderModel(), root, mode: options.capture ? 'capture' : 'play', runScopeId: `published:${payload.id}:${nanoid()}`,
-    teacherController, studentNavigation: navigation, report: options.report, initialSurfaceId: surfaceId ?? undefined,
+    teacherController, studentNavigation: navigation, report: options.report, initialSurfaceId: activeRootId ?? undefined,
     resolveAssetUrl, isAssetPending: id => pendingAssets.has(id), fontFaceCss: options.fontFaceCss,
     waitForAsset: async (id, signal) => {
       if (signal.aborted || stopped) return false
@@ -189,19 +196,19 @@ export async function mountPublishedCourseV3(value: unknown, root: HTMLElement, 
       return () => { unsubscribe?.(); unregister() }
     },
     onCamera: (id, camera) => {
-      const spatial = model.project.surfaces.find(surface => surface.id === id)?.spatial
+      const spatial = componentSurface(model.project, id)?.spatial
       const session = { pathId: spatialPlaybackPathId(spatial, options.initialSpatialPaths?.[id]), frameId: null as string | null, stepIndex: null as number | null }
       spatialSessions.set(id, session)
       const off = navigation.registerCamera(id, camera, { frameId: () => session.frameId, selectFrame: value => { session.frameId = value }, pathId: () => session.pathId,
         stepIndex: () => session.stepIndex, selectStep: value => { session.stepIndex = value },
-        viewport: () => player?.viewport(id) ?? model.project.surfaces.find(surface => surface.id === id)?.designSize ?? { width: 960, height: 640 } })
+        viewport: () => player?.viewport(id) ?? componentSurface(model.project, id)?.designSize ?? { width: 960, height: 640 } })
       return () => { off(); spatialSessions.delete(id) }
     },
     resolveSource: async (source, signal) => {
       const compiled = (source as Extract<PublishedImplementation, { kind: 'source' }>).compiled
       if (!compiled) throw new Error('此源码未附可执行ESM；原始源码已保留')
       return prepareSandboxComponent({ format: 'esm', code: compiled.code, css: compiled.css ?? '', diagnostics: [] }, signal,
-        { state: () => player.runtime.stateSnapshot(), targets: () => player.runtime.targetSnapshots('full'), teacherController,
+        { state: () => player.runtime.stateSnapshot(), targetChanges: true, targets: profile => player.runtime.targetSnapshots(profile), teacherController,
           webInstance: instance => hasWebContentData(instance.data) ? resolveWebResourceBindings(instance, id => (player.runtime.contentAssetUrl(id) ?? publishedResourceUrls[id]) ? webRuntimeResourceAddress(id) : undefined, options.report, source.resourceBindings) : instance,
           authorHtml: instance => {
             const key = componentDefinitionBuiltinKey(model.project.definitions[instance.definitionId]), data = instance.data
@@ -212,7 +219,7 @@ export async function mountPublishedCourseV3(value: unknown, root: HTMLElement, 
           connectOrigins: () => model.project.logic?.network?.connectOrigins ?? [], themeCss: () => player.runtime.themeCss(), resources: () => ({ ...publishedResourceUrls, ...player.runtime.resourceUrls() }), resourceBindings: source.resourceBindings, bootstrap: options.componentBootstrap })
     },
     resolveBuiltin: async (_key, signal, instance) => ({ ...await prepareSandboxComponent({ format: 'esm', code: webContentRealmSource(), css: '', diagnostics: [] }, signal,
-      { builtinKey: _key, state: () => player.runtime.stateSnapshot(), targets: profile => player.runtime.targetSnapshots(profile), teacherController,
+      { builtinKey: _key, state: () => player.runtime.stateSnapshot(), targetChanges: true, targets: profile => player.runtime.targetSnapshots(profile), teacherController,
         instance: instance => resolveWebResourceBindings(instance, id => (player.runtime.contentAssetUrl(id) ?? publishedResourceUrls[id]) ? webRuntimeResourceAddress(id) : undefined, options.report), htmlAuthoring: true,
         connectOrigins: () => model.project.logic?.network?.connectOrigins ?? [], themeCss: () => player.runtime.themeCss(), resources: () => ({ ...publishedResourceUrls, ...player.runtime.resourceUrls() }), bootstrap: options.componentBootstrap }), webModuleGraph: (instance.data as unknown as WebRuntimeData).moduleGraph }),
   })
@@ -223,9 +230,9 @@ export async function mountPublishedCourseV3(value: unknown, root: HTMLElement, 
   catch (error) { stopped = true; resourceController.abort(); navigation.dispose(); await player.dispose(); if (root !== hostRoot) root.remove(); throw error }
   if (surfaceId) player.revealSurface(surfaceId)
   if (!options.capture) navigation.changed()
-  const pointerChrome = options.capture ? undefined : mountPlaybackNavigationChrome(hostRoot, navigation, { content: root, playback: model.project.playback, report: options.report })
+  const pointerChrome = options.capture || !hasPresentation ? undefined : mountPlaybackNavigationChrome(hostRoot, navigation, { content: root, playback: model.project.playback, report: options.report })
   const tasks = navigation.createKeyTasks()
-  const stopKeys = options.capture || options.keyboardNavigation === false ? undefined : attachComponentPlatformNavigationKeys({ root, navigation: tasks,
+  const stopKeys = options.capture || !hasPresentation || options.keyboardNavigation === false ? undefined : attachComponentPlatformNavigationKeys({ root, navigation: tasks,
     keyboardNavigation: model.project.playback?.keyboardNavigation ?? true,
     presenter: model.project.playback?.presenter ?? { enabled: true, strategy: 'scene-navigation', additionalBindings: [] },
     onAuthoredCommand: command => player.runtime.dispatchPresenterCommand(command), onFeedback: options.onFeedback,
@@ -239,7 +246,7 @@ export async function mountPublishedCourseV3(value: unknown, root: HTMLElement, 
   }
   return { ...player, get ready() { return player.ready }, navigation, waitForCaptureReady,
     selectSpatialPath: (pathId: string | null, id = surfaceId) => {
-      const session = id && spatialSessions.get(id), surface = model.project.surfaces.find(surface => surface.id === id)
+      const session = id && spatialSessions.get(id), surface = id ? componentSurface(model.project, id) : undefined
       if (stopped || !session || pathId && !surface?.spatial?.paths?.some(path => path.id === pathId)) return false
       session.pathId = pathId; session.frameId = null; session.stepIndex = null; navigation.changed(); return true
     },
@@ -248,8 +255,9 @@ export async function mountPublishedCourseV3(value: unknown, root: HTMLElement, 
     go: (id: string, targetStateId?: string) => stopped ? Promise.resolve(false) : navigation.execute({ type: 'scene.go', sceneId: id, targetStateId }),
     revealSurface: (id: string) => {
       if (stopped || !player.revealSurface(id)) return false
-      surfaceId = id
-      stateId = model.project.surfaces.find(surface => surface.id === id)?.presentation?.initialStateId ?? null
+      activeRootId = id
+      surfaceId = componentSurface(model.project, id)?.id ?? null
+      stateId = componentSurface(model.project, id)?.presentation?.initialStateId ?? null
       void player.update(renderModel())
       navigation.changed()
       return true
@@ -257,4 +265,7 @@ export async function mountPublishedCourseV3(value: unknown, root: HTMLElement, 
     dispose, destroy: dispose,
   }
 }
+
+/** Existing internal callers share the current Published V4 reader. */
+export const mountPublishedCourseV3 = mountPublishedCourseV4
 

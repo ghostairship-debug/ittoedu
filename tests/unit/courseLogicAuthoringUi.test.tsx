@@ -1,3 +1,4 @@
+import { componentSurfaces } from '../../src/shared/contracts/component-platform/project'
 import { act, cleanup, fireEvent, render, screen, within, waitFor } from '@testing-library/react'
 import { expect, it } from 'vitest'
 import { AutomationTab } from '../../src/renderer/ui/AutomationTab'
@@ -23,7 +24,7 @@ it('discovers live course logic in Automation and commits state defaults, any-ma
     fireEvent.click(within(panel).getByRole('button', { name: '新增导航守卫' }))
     const guard = within(panel).getByTestId('navigation-guard-editor-新守卫')
     fireEvent.click(within(guard).getByLabelText('所有来源位置'))
-    fireEvent.click(within(guard).getByLabelText('来源位置 ' + project.surfaces[0].title))
+    fireEvent.click(within(guard).getByLabelText('来源位置 ' + componentSurfaces(project)[0].title))
     fireEvent.change(within(guard).getByLabelText('条件匹配方式'), { target: { value: 'any' } })
     fireEvent.change(within(guard).getByLabelText('条件 1 类型'), { target: { value: 'compare' } })
     fireEvent.change(within(guard).getByLabelText('比较方式'), { target: { value: 'gte' } })
@@ -31,7 +32,7 @@ it('discovers live course logic in Automation and commits state defaults, any-ma
     fireEvent.change(within(guard).getByLabelText('阻止提示'), { target: { value: '请先完成练习' } })
     await act(async () => { fireEvent.click(within(guard).getByRole('button', { name: '保存导航守卫 新守卫' })) })
     await waitFor(() => expect(h.model().project.logic!.navigationGuards).toHaveLength(1))
-    expect(h.model().project.logic!.navigationGuards[0]).toMatchObject({ fromSurfaceIds: [project.surfaces[0].id], toSurfaceIds: [project.surfaces[0].id],
+    expect(h.model().project.logic!.navigationGuards[0]).toMatchObject({ fromSurfaceIds: [componentSurfaces(project)[0].id], toSurfaceIds: [componentSurfaces(project)[0].id],
       match: 'any', conditions: [{ type: 'compare', key: 'mastery', operator: 'gte', value: 80 }], message: '请先完成练习' })
     expect(h.first.read().undoDepth).toBe(2)
     fireEvent.click(within(panel).getByText(/^mastery · number/))

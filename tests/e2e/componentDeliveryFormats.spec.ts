@@ -34,7 +34,7 @@ test('V10 real headless worker includes PNG/GIF images and embeds fonts for offl
     app.whenReady().then(async () => {
       const worker = new HeadlessDocumentExportWorker(${JSON.stringify(renderer)}, { compile: async () => { throw Error('No source in sample') } });
       const project = createBlankCourseProjectV10('真实格式交付');
-      project.instances = {}; project.global.overlay = []; project.definitions = {
+      project.instances = {[project.rootIds[0]]:project.instances[project.rootIds[0]]}; project.global.overlay = []; project.definitions = { ...project.definitions,
         image: {id:'image',role:'content',implementation:{kind:'builtin',key:'guoling.image'}},
         text: {id:'text',role:'content',implementation:{kind:'builtin',key:'guoling.text'}}
       };
@@ -44,7 +44,7 @@ test('V10 real headless worker includes PNG/GIF images and embeds fonts for offl
       const text = createTextComponentData('离线中文字体'); text.appearance.fontFamily = 'Noto Sans SC';
       project.instances.text = {id:'text',definitionId:'text',data:text,frame:{width:300,height:80,transform:[1,0,0,1,10,10]}};
       for (const id of ['png','gif']) project.instances[id] = {id,definitionId:'image',data:createImageData(id),frame:{width:100,height:100,transform:[1,0,0,1,id==='png'?20:160,120]}};
-      project.surfaces[0].childIds = ['text','png','gif'];
+      project.instances[project.rootIds[0]].childIds = ['text','png','gif'];
       const snapshot = {documentId:'delivery',epoch:'epoch',revision:0,binding:{kind:'untitled'},model:{kind:'course-v10',project,resources:{assets:{png:new Uint8Array(png),gif:new Uint8Array(gif)},components:{}}},dirty:false,saving:false,recoverable:true,undoDepth:0,redoDepth:0};
       const identity = {documentId:'delivery',epoch:'epoch',revision:0,projectId:project.id};
       const results = [];

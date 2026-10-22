@@ -1,4 +1,6 @@
 // @vitest-environment node
+import { testContainerInstance, setRootContainers } from '../../../helpers/glxWorkFixture'
+import { componentSurfaces } from '../../../../src/shared/contracts/component-platform/project'
 import { promises as fs } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -29,9 +31,9 @@ it('a software-bound V10 rich selection preserves unselected links marks geometr
     ] })
     const frame = { width: 330, height: 100, transform: [1, 0, 0, 1, 41, 63] as [number, number, number, number, number, number] }
     project.instances.text = { id: 'text', definitionId: TEXT_DEFINITION.id, data: textDataEdit('fixture', original).value, frame, style: { opacity: .8 } }
-    project.surfaces[0].childIds = ['text']
+    testContainerInstance(project, 0).childIds = ['text']
     const initial = await host.internalAPI.create({ kind: 'course-v10', project, resources: { assets: {}, components: {} } }, 'rich.h5lesson')
-    const target = { kind: 'course-instance' as const, surfaceId: project.surfaces[0].id, instanceId: 'text', dataPath: ['content'], from: 2, to: 4 }
+    const target = { kind: 'course-instance' as const, surfaceId: componentSurfaces(project)[0].id, instanceId: 'text', dataPath: ['content'], from: 2, to: 4 }
     const content = readEditableTargetContent(initial.model, target)
     expect(content.format).toBe('html')
     expect(content.text).toContain('https://example.org/old')
@@ -113,7 +115,7 @@ it('offline replays the first actual live rich tool input through the formal wri
     project.instances.guard = { id: 'guard', definitionId: TEXT_DEFINITION.id, data: textDataEdit('fixture', guard).value }
     project.instances.untouched = { id: 'untouched', definitionId: TEXT_DEFINITION.id, data: textDataEdit('fixture', createTextComponentData('未选正文保持原样')).value,
       frame: { width: 280, height: 90, transform: [1, 0, 0, 1, 83, 147] } }
-    project.surfaces = [{ id: 'flow', kind: 'flow', title: '讲义', childIds: ['body', 'guard', 'untouched'] }]
+    setRootContainers(project, [{ id: 'flow', kind: 'flow', title: '讲义', childIds: ['body', 'guard', 'untouched'] }])
     const initial = await host.internalAPI.create({ kind: 'course-v10', project, resources: { assets: {}, components: {} } }, 'captured.h5lesson')
     const bodyTarget = { kind: 'course-instance' as const, surfaceId: 'flow', instanceId: 'body', dataPath: ['content'], from: 0, to: documentTextLength(original.content) }
     const guardTarget = { ...bodyTarget, instanceId: 'guard', to: documentTextLength(guard.content) }
@@ -140,7 +142,7 @@ it('offline replays the first actual live rich tool input through the formal wri
     expect(body.frame).toEqual(bodyFrame)
     expect(body.style).toEqual(project.instances.body.style)
     expect(current.model.project.instances.untouched).toEqual(project.instances.untouched)
-    expect(current.model.project.surfaces).toEqual(project.surfaces)
+    expect(componentSurfaces(current.model.project)).toEqual(componentSurfaces(project))
     const filename = path.join(directory, 'saved.h5lesson')
     await host.internalAPI.save(initial.documentId, filename)
     const reopened = await new DocumentHostService(path.join(directory, 'cold-documents')).internalAPI.open(filename)
@@ -162,9 +164,9 @@ it('roundtrips the actual initial model message as rich content without escaping
     ] })
     const frame = { width: 330, height: 100, transform: [1, 0, 0, 1, 41, 63] as [number, number, number, number, number, number] }
     project.instances.text = { id: 'text', definitionId: TEXT_DEFINITION.id, data: textDataEdit('fixture', original).value, frame }
-    project.surfaces[0].childIds = ['text']
+    testContainerInstance(project, 0).childIds = ['text']
     const initial = await host.internalAPI.create({ kind: 'course-v10', project, resources: { assets: {}, components: {} } }, 'roundtrip.h5lesson')
-    const target = { kind: 'course-instance' as const, surfaceId: project.surfaces[0].id, instanceId: 'text', dataPath: ['content'], from: 2, to: 4 }
+    const target = { kind: 'course-instance' as const, surfaceId: componentSurfaces(project)[0].id, instanceId: 'text', dataPath: ['content'], from: 2, to: 4 }
     const editable = readEditableTargetContent(initial.model, target)
     expect(editable.format).toBe('html')
     const contentOutput = prepareExecutionContentOutput(initial, target)

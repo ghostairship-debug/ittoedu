@@ -1,3 +1,4 @@
+import { componentSurfaces } from '../../src/shared/contracts/component-platform/project'
 // @vitest-environment node
 import { expect, it } from 'vitest'
 import { build } from 'esbuild'
@@ -37,7 +38,7 @@ it('keeps the original supply grid, subpixel inline labels and editable frames t
     expect(assembly.diagnostics).toEqual([])
     const draft = assemblyContentDraft(assembly, {}, { definitions: {}, createFormulaId: () => crypto.randomUUID() })
     const original = createBlankCourseProjectV10('Original supply page')
-    const planned = planContentApply({ project: original, createId: () => crypto.randomUUID(), request: { intent: 'insert', target: { kind: 'container', container: { kind: 'surface', surfaceId: original.surfaces[0]!.id } }, source: { kind: 'objects', objects: [draft.draft], definitions: draft.definitions } } })
+    const planned = planContentApply({ project: original, createId: () => crypto.randomUUID(), request: { intent: 'insert', target: { kind: 'container', container: { kind: 'surface', surfaceId: componentSurfaces(original)[0]!.id } }, source: { kind: 'objects', objects: [draft.draft], definitions: draft.definitions } } })
     const project = applyComponentOperation(original, planned.command)
     const texts = Object.values(project.instances).filter(instance => instance.definitionId === 'guoling.text')
     const textOf = (value: typeof texts[number]) => (value.data as { content: { inlines: Array<{ text?: string }> } }).content.inlines.map(inline => inline.text ?? '').join('')

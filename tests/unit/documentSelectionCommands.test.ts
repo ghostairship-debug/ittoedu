@@ -21,7 +21,7 @@ it('prepares a text card and sends content-only AI for the same held source rang
       target: { kind: 'markdown-range', from: 1, to: 5 }, label: '所选源文', content: '选中文字',
       capture: { documentId: snapshot.documentId, epoch: snapshot.epoch, revision: snapshot.revision, label: '所选源文', source: target.source,
         targets: [{ kind: 'markdown-range', from: 1, to: 5 }] },
-      contentOutput: { kind: 'replace-text', documentId: snapshot.documentId, target: { kind: 'markdown-range', from: 1, to: 5 } } })
+      contentOutput: { kind: 'content', documentId: snapshot.documentId, target: { kind: 'markdown-range', from: 1, to: 5 } } })
     await requestDocumentSelection(snapshot.documentId, target, '改得更简洁', captureMarkdownSelection)
     expect(sent).toHaveBeenCalledOnce()
     expect(sent.mock.calls[0][0]).toMatchObject({ selection: { documentId: snapshot.documentId, epoch: 'epoch', revision: 3,
@@ -48,7 +48,7 @@ it('captures layout prose as one semantic selection for both the card and the or
   try {
     expect(await prepareDocumentTextEdit(snapshot.documentId, target, captureMarkdownSelection)).toMatchObject({
       target: semantic, content: '["选中文字"]', capture: { epoch: 'epoch', revision: 3, targets: [semantic] },
-      contentOutput: { kind: 'replace-text', target: semantic } })
+      contentOutput: { kind: 'content', target: semantic } })
     await requestDocumentSelection(snapshot.documentId, target, '删掉选中文字', captureMarkdownSelection)
     expect(sent.mock.calls[0][0]).toMatchObject({ selection: { epoch: 'epoch', revision: 3, targets: [semantic] }, contentOutput: { target: semantic } })
   } finally { release(); releaseRequest() }

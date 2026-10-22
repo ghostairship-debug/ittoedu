@@ -1,3 +1,4 @@
+import { componentSurfaces } from '../../src/shared/contracts/component-platform/project'
 // @vitest-environment node
 import { afterEach, expect, it } from 'vitest'
 import { promises as fs } from 'node:fs'
@@ -62,7 +63,7 @@ it('imports Word styles, headings, links, picture, list and merged table into na
   expect(projectFlowDocument(reopened.model.project, plan.surfaceId).content.blocks).toMatchObject(imported.blocks)
   expect(projectFlowDocument(reopened.model.project, plan.surfaceId).content.blocks).toHaveLength(imported.blocks.length)
   expect(reopened.model.resources.assets[imported.assets[0].asset.id]).toEqual(imported.assets[0].bytes)
-  expect(reopened.model.project.surfaces).toHaveLength(2)
+  expect(componentSurfaces(reopened.model.project)).toHaveLength(2)
 })
 it('imports relative Markdown pictures and tables, and Chinese TXT as editable paragraphs', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'flow-source-')); roots.push(root)

@@ -1,4 +1,4 @@
-import { extractOfficeMaterial, extractPdfMaterial, type MaterialExtractionOptions } from '../../project/materialExtraction'
+import { extractOfficeMaterial, extractPdfMaterial, extractPdfMaterialPages, type MaterialExtractionOptions } from '../../project/materialExtraction'
 import type { AttachmentExtractionInput, AttachmentExtractionResult } from '../../../shared/workbench/attachments'
 
 /** Parses bytes only. Office XML is never mounted as HTML; macros and PDF actions are never executed. */
@@ -13,4 +13,12 @@ export async function extractAttachmentMaterial(input: AttachmentExtractionInput
   const options: MaterialExtractionOptions = { pages: input.pages, maxPages: input.maxPages, fromPage: input.fromPage, images: input.images, onProgress, onSelectedPages: range => { selectedPages = range }, onPageCount: total => { totalPages = total }, onPageImage: image => pageImages.push(image) }
   const material = format === 'pdf' ? await extractPdfMaterial(input.bytes, options) : extractOfficeMaterial(input.bytes, format, options)
   return { material, ...(totalPages === undefined ? {} : { totalPages, selectedPages: selectedPages ?? input.pages ?? { from: 1, to: totalPages } }), pageImages }
+}
+
+export async function runAttachmentExtractionJob(input: import('../../../shared/workbench/attachments').AttachmentExtractionJobInput,
+  options: import('../../../shared/workbench/attachments').AttachmentExtractionJobOptions = {}): Promise<import('../../../shared/workbench/attachments').AttachmentExtractionJobResult> {
+  if (!input.streamPdfPages) return extractAttachmentMaterial(input, options)
+  if (!(input.bytes instanceof Uint8Array) || !input.bytes.length || input.filename.split('.').pop()?.toLowerCase() !== 'pdf') throw new Error('逐页提取须为非空 PDF')
+  if (!options.onPage) throw new Error('PDF 页面保存端口不可用')
+  return extractPdfMaterialPages(input.bytes, { pages: input.pages, maxPages: input.maxPages, fromPage: input.fromPage, images: input.images, onProgress: options.onProgress }, options.onPage)
 }

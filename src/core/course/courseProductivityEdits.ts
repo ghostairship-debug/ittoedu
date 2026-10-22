@@ -1,6 +1,7 @@
+import { componentContainers, componentContainerForInstance, componentSurface } from '../../shared/contracts/component-platform/project'
 import { documentTextContentSchema, normalizeDocumentText, type FlowInline, type FlowTextContent } from '../../shared/document/content'
 import type { CourseProjectV10, JsonValue } from '../../shared/contracts/component-platform/project'
-import { componentIsLocked, componentDefinitionBuiltinKey, owningContainer, resolveComponentPresentation } from '../../shared/contracts/component-platform/project'
+import { componentIsLocked, componentDefinitionBuiltinKey, resolveComponentPresentation } from '../../shared/contracts/component-platform/project'
 import type { ComponentEdit } from '../../shared/contracts/component-platform/operations'
 import { equalComponentValue } from '../drivers/courseV10Operations'
 import { duplicateSurfaceEdits } from './courseSurfaceStructure'
@@ -18,7 +19,7 @@ const textKeys = new Set(['text', 'title', 'label', 'name', 'placeholder', 'altT
 
 function fields(document: CourseProjectV10, target: { surfaceId: string | null }, scope: ProductivityScope) {
   const result: Field[] = [], unsupported: string[] = []
-  if (!document.surfaces.some(surface => surface.id === target.surfaceId)) throw new Error('捕获页面已不存在')
+  if (target.surfaceId && !componentSurface(document, target.surfaceId)) throw new Error('捕获页面已不存在')
   const add = (object: Record<string, unknown>, key: string, id: string, owner: string, label: string, color?: ColorProperty) => {
     const value = object[key]
     if (typeof value !== 'string') return
@@ -63,8 +64,7 @@ function fields(document: CourseProjectV10, target: { surfaceId: string | null }
   }
   const seen = new Set<string>()
   const flowText = (id:string) => {
-    let owner=owningContainer(document,id);while(owner?.kind==='instance')owner=owningContainer(document,owner.instanceId)
-    return owner?.kind==='surface' && document.surfaces.find(surface=>surface.id===owner.surfaceId)?.kind==='flow'
+    return componentContainerForInstance(document,id)?.kind==='flow'
       && componentDefinitionBuiltinKey(document.definitions[document.instances[id]!.definitionId])==='guoling.text'
   }
   const instance = (id: string, owner: string) => {
@@ -84,10 +84,16 @@ function fields(document: CourseProjectV10, target: { surfaceId: string | null }
   const background = (object: { background?: { mode?: 'inherit' | 'own'; color?: string } }, id: string, owner: string) => {
     result.push({ id: `${id}/background`, owner, target: '背景', property: 'backgroundColor', color: 'background', oldValue: object.background?.color ?? document.background?.color ?? '#ffffff', newValue: '', write(color) { object.background = { ...object.background, mode: 'own', color } } })
   }
-  if (scope === 'course') background(document, 'project', '整课')
-  for (const surface of document.surfaces) {
+  if (scope === 'course' || !target.surfaceId) background(document, 'project', '整课')
+  if (scope === 'course') document.rootIds.forEach(id => instance(id, document.instances[id]?.name ?? '作品'))
+  else if (!target.surfaceId) {
+    const root = document.entry?.rootInstanceId
+    ;(root ? [root] : document.rootIds).forEach(id => instance(id, document.instances[id]?.name ?? '作品'))
+  }
+  for (const surface of componentContainers(document)) {
     if (scope !== 'course' && surface.id !== target.surfaceId) continue
-    surface.childIds.forEach(id => instance(id, surface.title)); background(surface, surface.id, surface.title)
+    surface.childIds.forEach(id => instance(id, surface.title))
+    background(document.instances[surface.id]!.container!, surface.id, surface.title)
     if(scope==='course')for(const state of surface.presentation?.states ?? []) {
       const effective=resolveComponentPresentation(document,surface.id,state.id),owner=`${surface.title} · ${state.title}`
       for(const [id,override] of Object.entries(state.overrides)) {
@@ -141,8 +147,8 @@ export function planCourseProductivityEdits(project: CourseProjectV10, surfaceId
     if(!equalComponentValue(before.flowLayout,after.flowLayout))edits.push({type:'instance.flowLayout.set',instanceId:id,flowLayout:after.flowLayout ?? null})
   }
   if (!equalComponentValue(project.background, draft.background)) edits.push({ type: 'project.background.set', background: draft.background ?? null })
-  for (const surface of draft.surfaces) {
-    const before=project.surfaces.find(before=>before.id===surface.id)
+  for (const surface of componentContainers(draft)) {
+    const before=componentSurface(project,surface.id)
     if(!equalComponentValue(before?.background,surface.background))edits.push({type:'surface.background.set',surfaceId:surface.id,background:surface.background ?? null})
     if(!equalComponentValue(before?.presentation,surface.presentation))edits.push({type:'surface.presentation.set',surfaceId:surface.id,presentation:surface.presentation ?? null})
   }
@@ -152,7 +158,7 @@ export function planCourseProductivityEdits(project: CourseProjectV10, surfaceId
 export interface RemixSlot { id: string; instanceId: string; dataPath: string[]; label: string; original: string; replacement: string; capacity: string; issue?: string }
 export interface CourseStyleRemixPreview { projectId: string; revision: number; sourceSceneId: string; sourceLabel: string; slots: RemixSlot[]; issues: string[] }
 function referenceSurface(project: CourseProjectV10, surfaceId: string) {
-  const surface = project.surfaces.find(value => value.kind === 'slide' && value.id === surfaceId)
+  const surface = componentSurface(project,surfaceId)
   if (!surface) throw new Error('参考页不存在，请重新选择')
   return surface
 }
@@ -160,10 +166,8 @@ function referenceSurface(project: CourseProjectV10, surfaceId: string) {
 export function prepareCourseReferenceClone(project: CourseProjectV10, sourceSurfaceId: string, createId?: () => string) {
   const source = referenceSurface(project, sourceSurfaceId)
   const plan = duplicateSurfaceEdits(project, sourceSurfaceId, createId)
-  const insertion = plan.edits.find(edit => edit.type === 'surface.insert')!
-  if (insertion.type !== 'surface.insert') throw new Error('缺少复制页面')
   const instances = plan.edits.flatMap(edit => edit.type === 'instance.insert' ? edit.instances : [])
-  return { source, surface: insertion.surface, instances, ids: plan.ids, edits: plan.edits, readPaths: plan.readPaths }
+  return { source, surface: plan.surface, instances, ids: plan.ids, edits: plan.edits, readPaths: plan.readPaths }
 }
 export function replaceCourseRemixText(content: FlowTextContent, text: string): FlowTextContent {
   if (content.inlines.some(inline => inline.type !== 'text')) throw new Error('公式与文字混排请在原文选区中编辑')
@@ -229,6 +233,8 @@ export function planCourseStyleRemixEdits(project: CourseProjectV10, sourceSurfa
   if (!checked.slots.length) throw new Error('没有可替换的文字槽位')
   const clone = prepareCourseReferenceClone(project, sourceSurfaceId, createId)
   clone.surface.title = `${clone.source.title} 改写`
+  const root = clone.instances.find(instance => instance.id === clone.surface.id)
+  if (root) root.name = clone.surface.title
   for (const slot of checked.slots.filter(slot => Object.hasOwn(replacements, slot.id))) {
     const item = clone.instances.find(instance => instance.id === clone.ids.get(slot.instanceId))!
     let value: unknown = item.data

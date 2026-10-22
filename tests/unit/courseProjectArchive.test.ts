@@ -1,3 +1,4 @@
+import { componentSurfaces } from '../../src/shared/contracts/component-platform/project'
 import { isControllerFixture, createArchiveFixture } from '../fixtures/teacherController'
 import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
@@ -47,7 +48,7 @@ const DIAGRAM_BYTES = new Uint8Array([137, 80, 78, 71, 1, 2, 3])
 async function stagePptxImport(draft: Awaited<ReturnType<typeof parsePptxImport>>, title: string) {
   const project = createBlankCourseProjectV10(title)
   // This import fixture isolates professional objects from the default controller.
-  project.instances = {}; project.definitions = {}; project.global.overlay = []
+  project.global.overlay = []
   const resources = { assets: {}, components: {} }
   let rejectAppend = false
   const append = vi.fn(async () => { if (rejectAppend) throw new Error('recovery write rejected') })
@@ -55,7 +56,7 @@ async function stagePptxImport(draft: Awaited<ReturnType<typeof parsePptxImport>
     binding: { kind: 'untitled', suggestedName: `${title}.h5lesson` }, model: { kind: 'course-v10', project, resources } },
     new CourseV10Driver(), { append, save: async () => { throw new Error('Archive bytes are verified below') } })
   const step = planPptxImportTransaction({ documentId: session.documentId, epoch: 'epoch', project, resources,
-    editingProject: project, activeStateId: null, surfaceId: project.surfaces[0].id, instanceId: null, instanceIds: [] }, draft, title)
+    editingProject: project, activeStateId: null, surfaceId: componentSurfaces(project)[0].id, instanceId: null, instanceIds: [] }, draft, title)
   const execute = (mutation: DocumentOperation['mutation']) => session.execute({ documentId: session.documentId,
     epoch: 'epoch', baseRevision: session.read().revision, operationId: crypto.randomUUID(), actor: 'human', mutation })
   const read = () => {
@@ -184,7 +185,7 @@ describe('S2 restricted PPTX import atomic archive transaction', () => {
       if (!visibility || visibility.mode !== 'include') throw new Error('Imported decoration must have an explicit page scope')
       return visibility.surfaceIds.length
     })).toEqual([2, 2, 1, 1])
-    expect(applied.project.surfaces[0]).toEqual(staged.project.surfaces[0])
+    expect(componentSurfaces(applied.project)[0]).toEqual(componentSurfaces(staged.project)[0])
     expect(applied.project.global.overlay).toEqual(staged.project.global.overlay)
     expect(applied.project.revision).toBe(staged.project.revision + 1)
     courseProjectV10Schema.parse(applied.project)
@@ -278,7 +279,7 @@ describe('S2 restricted PPTX import atomic archive transaction', () => {
     expect(draft.slides).toHaveLength(2)
     expect(draft.slides.map(s => s.items.filter(i => i.kind === 'native' && i.content.nativeType === 'text').length)).toEqual([1, 1])
     const staged = await importCurrent(draft, '正常 PPTX')
-    expect(staged.read().project.surfaces).toHaveLength(3)
+    expect(componentSurfaces(staged.read().project)).toHaveLength(3)
   })
   it('imports editable text, shape and media with one revision, reversible sidecar and archive reopen', async () => {
     // Browser decoding is covered by the real-host test; this unit targets XML and atomic archive semantics.
@@ -297,7 +298,7 @@ describe('S2 restricted PPTX import atomic archive transaction', () => {
       expect(await staged.apply()).toMatchObject({ status: 'applied' })
       const applied = staged.read()
       expect(applied.project.revision).toBe(staged.project.revision + 1)
-      expect(applied.project.surfaces).toHaveLength(staged.project.surfaces.length + 1)
+      expect(componentSurfaces(applied.project)).toHaveLength(componentSurfaces(staged.project).length + 1)
       expect(Object.keys(applied.resources.assets)).toHaveLength(1)
       courseProjectV10Schema.parse(applied.project)
       reopenCurrent(applied)
@@ -384,8 +385,8 @@ describe('S2 restricted PPTX import atomic archive transaction', () => {
       expect.objectContaining({ page: 1, type: 'graphicFrame', message: expect.stringContaining('对象 2') }),
     ])
     const staged = await importCurrent(empty, '待完善页面'), reopened = reopenCurrent(staged.read())
-    expect(reopened.project.surfaces.at(-1)).toMatchObject({ kind: 'slide', title: '导入演示', childIds: [], background: { mode: 'own', color: '#f0f5ff' } })
-    expect(reopened.project.surfaces).toHaveLength(2)
+    expect(componentSurfaces(reopened.project).at(-1)).toMatchObject({ kind: 'slide', title: '导入演示', childIds: [], background: { mode: 'own', color: '#f0f5ff' } })
+    expect(componentSurfaces(reopened.project)).toHaveLength(2)
   })
 })
 

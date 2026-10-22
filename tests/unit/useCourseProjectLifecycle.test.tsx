@@ -348,4 +348,14 @@ describe('useCourseProjectLifecycle main document sessions', () => {
     expect(preserve).toHaveBeenCalledOnce()
     expect(host.durable.get(host.read().documentId)?.model).toMatchObject({ project: { title: 'pending before closing' } })
   })
+  it('prepares resulting course input once after sidecar inputs finish', async () => {
+    const host = await createCourseDocumentHost(), order: string[] = []
+    let close!: () => Promise<boolean>
+    const prepare = vi.fn(async () => { order.push('course'); return false })
+    await mount(host, { preserveBeforeClose: async () => { order.push('sidecar'); return true }, prepareBeforeClose: prepare,
+      subscribePreserveAndCloseRequest: handler => { close = handler; return () => undefined } })
+    expect(await close()).toBe(false)
+    expect(order).toEqual(['sidecar', 'course'])
+    expect(prepare).toHaveBeenCalledOnce()
+  })
 })

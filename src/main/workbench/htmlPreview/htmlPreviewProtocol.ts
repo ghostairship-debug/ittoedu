@@ -10,6 +10,7 @@ export const HTML_PREVIEW_AGENT_PATH = 'html-preview-agent.iife.js'
 export type HtmlPreviewProtocolTarget =
   | { kind: 'file'; token: string; relativePath: string; hasQuery: boolean }
   | { kind: 'agent'; token: string }
+  | { kind: 'asset'; token: string; assetId: string }
 
 function decodeSegment(raw: string): string | null {
   let value: string
@@ -28,6 +29,10 @@ export function parseHtmlPreviewProtocolUrl(rawUrl: string): HtmlPreviewProtocol
   if (!token || token !== `${match[1]}${match[2]}`) return null
   const kind = parts.shift()
   if (kind === '_agent' && parts.length === 1 && parts[0] === HTML_PREVIEW_AGENT_PATH && !match[4]) return { kind: 'agent', token }
+  if (kind === '_embedded' && parts.length === 1 && parts[0]?.startsWith('asset-') && !match[4]) {
+    try { const assetId = decodeURIComponent(parts[0].slice(6)); return assetId ? { kind: 'asset', token, assetId } : null }
+    catch { return null }
+  }
   if (kind !== 'file' || parts.length === 0) return null
   const decoded = parts.map(decodeSegment)
   if (decoded.some(part => part === null)) return null

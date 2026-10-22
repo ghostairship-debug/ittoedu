@@ -31,7 +31,7 @@ import {
 } from '../../shared/fonts/bundledFontFamilies'
 import { buildBundledFontFaceCss } from '../../shared/fonts/bundledFontFaceCss'
 import { scanHtmlSource } from '../../shared/html/htmlSourceScanner'
-import { bundledFontCharacterUse, unicodeRangeIntersects } from './bundledFontSelection'
+import { bundledFontCharacterUse, unicodeRangeIntersects, type BundledFontCharacterUse } from './bundledFontSelection'
 import type {
   BundledFontFaceDescriptor,
   BundledFontFamilyDescriptor,
@@ -54,7 +54,13 @@ export interface EmbeddableBundledFont
 /** Resolves the requested bundled families down to bytes. */
 export type BundledFontEmbedSource = (
   families: readonly string[],
+  characterUse?: BundledFontCharacterUse,
 ) => readonly EmbeddableBundledFont[]
+
+export interface BundledFontEmbeddingRequest {
+  readonly families: readonly string[]
+  readonly characterUse: BundledFontCharacterUse
+}
 
 /**
  * Brings a byte source into a state where its synchronous resolution can answer.
@@ -64,7 +70,7 @@ export type BundledFontEmbedSource = (
  * nowhere to await inside the build. This is that await, hoisted out to the
  * export command (see `prepareBundledFontEmbedding`).
  */
-export type BundledFontEmbedPreparer = () => Promise<void>
+export type BundledFontEmbedPreparer = (request?: BundledFontEmbeddingRequest) => Promise<void>
 
 const BUNDLED_FAMILY_BY_LOWERCASE = new Map(
   BUNDLED_FONT_FAMILIES.map((family) => [family.toLowerCase(), family]),
@@ -98,7 +104,8 @@ export function registerBundledFontEmbedPreparer(
 }
 
 /**
- * Warm the registered byte source, so the next synchronous export can embed.
+ * Warm the registered byte source for this captured payload, so the next
+ * synchronous export can embed. Omitted payload retains explicit full warm-up.
  *
  * Export commands await this before they build. Hosts whose source is already
  * synchronous register no preparer and get an immediately resolved promise, so
@@ -109,10 +116,13 @@ export function registerBundledFontEmbedPreparer(
  * the same policy as having no source registered at all. The preparer is
  * expected to report its own failures; this only guards against one escaping.
  */
-export async function prepareBundledFontEmbedding(): Promise<void> {
+export async function prepareBundledFontEmbedding(payload?: unknown): Promise<void> {
   if (embedPreparer === null) return
   try {
-    await embedPreparer()
+    await embedPreparer(payload === undefined ? undefined : {
+      families: collectBundledFontFamiliesInUse(payload),
+      characterUse: bundledFontCharacterUse(payload),
+    })
   } catch (error) {
     console.warn('内置字体字节准备失败，导出将不嵌入内置字体', error)
   }
@@ -245,7 +255,7 @@ export function resolveEmbeddedBundledFonts(
   const families = collectBundledFontFamiliesInUse(payload)
   if (families.length === 0 || embedSource === null) return []
   const use = bundledFontCharacterUse(payload)
-  return embedSource(families).map(font => ({ ...font, faces: font.faces.filter(face => unicodeRangeIntersects(face.unicodeRange, use)) }))
+  return embedSource(families, use).map(font => ({ ...font, faces: font.faces.filter(face => unicodeRangeIntersects(face.unicodeRange, use)) }))
 }
 
 /** A registered source that failed to supply a requested family is an actual export diagnostic. */

@@ -1,4 +1,5 @@
 // @vitest-environment node
+import { testContainerInstance } from '../../../helpers/glxWorkFixture'
 import { promises as fs } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -17,7 +18,7 @@ it('V10 text history retains one owned unchanged resource representation and pre
     const project = createBlankCourseProjectV10('Resource ownership')
     project.definitions.text = { id: 'text', role: 'content', implementation: { kind: 'builtin', key: 'text' } }
     project.instances.title = { id: 'title', definitionId: 'text', data: { text: 'Original' } }
-    project.surfaces[0].childIds.push('title')
+    testContainerInstance(project, 0).childIds.push('title')
     project.assets.raw = { id: 'raw', path: 'assets/original.bin', mimeType: 'application/octet-stream' }
     const input = new Uint8Array(128 * 1024).fill(7)
     let current = await host.internalAPI.create({ kind: 'course-v10', project, resources: { assets: { raw: input }, components: {} } }, 'lesson.h5lesson')
@@ -34,7 +35,13 @@ it('V10 text history retains one owned unchanged resource representation and pre
     for (let n = 0; n < 3; n++) current = await dispatch(host, current, `text-${n}`, [{ type: 'data.set', instanceId: 'title', path: ['text'], value: `Edit ${n}` }])
     const recovered = await createDocumentJournal({ directory: recovery }).recover(current.documentId)
     expect(recovered!.past).toHaveLength(3)
-    const allBytes = [recovered!.model, ...recovered!.past.flatMap(entry => [entry.before, entry.after])].map(model => model.resources.assets.raw)
+    const historyResources = recovered!.past.flatMap(entry => {
+      if (entry.effects) return entry.effects.flatMap(effect => effect.kind === 'replace'
+        ? [effect.before.resources, effect.after.resources] : [effect.beforeResources, effect.afterResources])
+      if (!entry.before || !entry.after) throw new Error('Legacy history must retain both resource owners')
+      return [entry.before.resources, entry.after.resources]
+    })
+    const allBytes = [recovered!.model.resources, ...historyResources].map(resources => resources.assets.raw)
     expect(allBytes.every(value => value === allBytes[0])).toBe(true)
     // Public read snapshots cannot mutate the formal state, even though the owned durable representation is shared.
     current.model.resources.assets.raw.fill(23)

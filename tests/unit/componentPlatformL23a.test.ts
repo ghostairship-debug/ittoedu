@@ -1,3 +1,4 @@
+import { createTestProjectFromLegacy } from '../helpers/glxWorkFixture'
 import { describe, expect, it } from 'vitest'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { posix, resolve } from 'node:path'
@@ -38,10 +39,10 @@ function professionalPage(): CourseProjectV10 {
       source: 'export default { mount() { throw new Error("SOURCE_MUST_NOT_BE_EXECUTED") } }' } },
   ].map(value => [value.id, value]))
   const keys = ['guoling.group', 'guoling.text', 'guoling.table', 'guoling.chart', 'guoling.shape', 'guoling.input']
-  return { schemaVersion: 10, id: 'pptx-professional', revision: 7, title: '专业输出代表页',
+  return createTestProjectFromLegacy({ schemaVersion: 10, id: 'pptx-professional', revision: 7, title: '专业输出代表页',
     definitions: Object.fromEntries(keys.map(key => [key, { id: key, role: 'content' as const, implementation: { kind: 'builtin' as const, key } }])),
     instances, surfaces: [{ id: 'page-1', title: '混合专业页', kind: 'slide', childIds: ['group'], designSize: { width: 1000, height: 700 } }],
-    global: { underlay: [], overlay: [] }, assets: {} }
+    global: { underlay: [], overlay: [] }, assets: {} })
 }
 
 function parseXml(bytes: Uint8Array) {
@@ -62,7 +63,7 @@ describe('L23a current component PPTX consumer', () => {
 
     // P0 is the same professional input, without author revision or resource paths.
     const { revision: _revision, ...withoutRevision } = project
-    const published: PublishedCourseV3 = { ...withoutRevision, schemaVersion: 3, assets: {} }
+    const published: PublishedCourseV3 = { ...withoutRevision, schemaVersion: 4, assets: {} }
     const result = await buildComponentPptx(published)
     expect(result.slideCount).toBe(1)
     expect(result.status).toBe('partial')

@@ -36,7 +36,7 @@ export type DocumentBlock = { id: string } & (
   | { type: 'section'; title: FlowTextContent; collapsedByDefault: boolean; blocks: DocumentBlock[] }
   | { type: 'component'; component: { packageId: string; version: string }; props: Record<string, unknown>; staticFallbackAssetId: string; wrap?: 'none' | 'left' | 'right' }
   /** A V10 editor projection. `id` is the formal instance identity; the host owns content and geometry. */
-  | { type: 'course-instance'; title?: string }
+  | { type: 'course-instance'; title?: string; blocks?: DocumentBlock[] }
   /**
    * A named course component (`components/<name>.html`). `project.components` owns its definition; the block
    * keeps only the name and its own instance fields, and shows a placeholder titled `title` until the name exists.
@@ -123,7 +123,7 @@ export const documentBlockSchema: z.ZodType<DocumentBlock> = z.lazy(() => z.disc
   z.object({ ...base, type: z.literal('section'), title: documentTextContentSchema, collapsedByDefault: z.boolean(), blocks: z.array(documentBlockSchema).max(100000) }).strict(),
   z.object({ ...base, type: z.literal('component'), component: z.object({ packageId: documentIdSchema, version: z.string().trim().min(1).max(100) }).strict(), props: ownRecordSchema(z.string(), ownJsonValueSchema), staticFallbackAssetId: documentIdSchema, wrap: z.enum(['none', 'left', 'right']).optional() }).strict(),
   // Match the formal V10 identity contract, without a filename or display-name restriction.
-  z.object({ id: z.string().min(1), type: z.literal('course-instance'), title: z.string().optional() }).strict(),
+  z.object({ id: z.string().min(1), type: z.literal('course-instance'), title: z.string().optional(), blocks: z.array(documentBlockSchema).max(100000).optional() }).strict(),
   z.object({ ...base, type: z.literal('course-component'),
     name: z.string().superRefine((value, ctx) => { const issue = courseComponentNameIssue(value); if (issue) ctx.addIssue({ code: 'custom', message: issue }) }),
     title: z.string().max(500).optional(), height: z.number().finite().positive().max(10_000).optional(),
@@ -160,8 +160,12 @@ export function documentVisibleTextSlots(block: DocumentBlock): DocumentVisibleT
         tableCell: { rowId: row.id, columnId: column.id, rowSpan: span.rowSpan, columnSpan: span.columnSpan } }]
     }))]
 }
+/** Children of an expanded native reading group remain formal instance children, not saved data. */
+export function documentBlockChildren(block: DocumentBlock): DocumentBlock[] | undefined {
+  return block.type === 'section' ? block.blocks : block.type === 'course-instance' ? block.blocks : undefined
+}
 export function walkDocument(blocks: readonly DocumentBlock[], visit: (block: DocumentBlock) => void): void {
-  for (const block of blocks) { visit(block); if (block.type === 'section') walkDocument(block.blocks, visit) }
+  for (const block of blocks) { visit(block); const children = documentBlockChildren(block); if (children) walkDocument(children, visit) }
 }
 export const documentContentSchema = z.object({ blocks: z.array(documentBlockSchema).max(100000) }).strict().superRefine((doc, ctx) => {
   const ids = new Set<string>()

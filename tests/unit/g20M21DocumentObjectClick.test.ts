@@ -72,3 +72,69 @@ it('publishes the current same caret on native click without a document or selec
     expect(change).not.toHaveBeenCalled()
   } finally { editor.destroy(); element.remove() }
 })
+
+
+it('refreshes the existing editor read-only state without replacing its document, selection or retained draft', () => {
+  const element = document.createElement('div'); document.body.append(element)
+  const change = vi.fn(() => false), options = {
+    document: { content, resources: emptyDocumentResources() }, revision: 'r1', presentation: 'flow' as const,
+    change, diagnostic: vi.fn(), undo: vi.fn(), redo: vi.fn(),
+    renderObject: (_block: unknown, container: HTMLElement) => { container.textContent = '图片' },
+  }
+  const editor = createLayoutEditor(element, options), view = editor.view
+  try {
+    view.dispatch(view.state.tr.insertText('未提交', 1))
+    const state = view.state, host = element.querySelector('figure')
+    const commits = change.mock.calls.length
+    expect(view.editable).toBe(true)
+    expect(view.dom.getAttribute('contenteditable')).toBe('true')
+    editor.update({ ...options, readOnly: true })
+    expect(editor.view).toBe(view)
+    expect(view.editable).toBe(false)
+    expect(view.dom.getAttribute('contenteditable')).toBe('false')
+    expect(view.state).toBe(state)
+    expect(element.querySelector('figure')).toBe(host)
+    expect(view.state.doc.textContent).toContain('未提交')
+    editor.update({ ...options, readOnly: false })
+    expect(view.editable).toBe(true)
+    expect(view.dom.getAttribute('contenteditable')).toBe('true')
+    expect(view.state).toBe(state)
+    expect(change).toHaveBeenCalledTimes(commits)
+    expect(options.undo).not.toHaveBeenCalled(); expect(options.redo).not.toHaveBeenCalled()
+  } finally { editor.destroy(); element.remove() }
+})
+
+
+it('keeps a rendered image field owner on its click and lets ordinary text reclaim the same PM caret', () => {
+  const element = document.createElement('div'); document.body.append(element)
+  let owner = 'document'
+  const selection = vi.fn(() => { owner = 'document' }), change = vi.fn()
+  let image!: HTMLImageElement
+  const editor = createLayoutEditor(element, {
+    document: { content, resources: emptyDocumentResources() }, revision: 'r1', presentation: 'flow',
+    change, diagnostic: vi.fn(), undo: vi.fn(), redo: vi.fn(), selection,
+    renderObject: (_block, host) => {
+      host.setAttribute('contenteditable', 'false') // Reflect the real Chromium object host in jsdom.
+      image = document.createElement('img'); host.append(image)
+    },
+  })
+  try {
+    editor.view.dispatch(editor.view.state.tr.setSelection(TextSelection.create(editor.view.state.doc, 2)))
+    const state = editor.view.state, caret = editor.readSelection()
+    selection.mockClear()
+    // The field's pointer owner already took selection and canceled compatible mousedown.
+    // Chromium still sends click; that event must not report the old PM text caret.
+    owner = 'image-field'
+    const click = new MouseEvent('click', { bubbles: true, cancelable: true })
+    image.dispatchEvent(click)
+    expect(selection).not.toHaveBeenCalled()
+    expect(owner).toBe('image-field')
+    expect(click.defaultPrevented).toBe(false)
+    expect(editor.view.state).toBe(state)
+    element.querySelector('[data-document-id="intro"] [data-flow-idle-rich-text]')!.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))
+    expect(selection).toHaveBeenCalledExactlyOnceWith(caret)
+    expect(owner).toBe('document')
+    expect(editor.view.state).toBe(state)
+    expect(change).not.toHaveBeenCalled()
+  } finally { editor.destroy(); element.remove() }
+})

@@ -1,3 +1,4 @@
+import { createTestProjectFromLegacy } from '../helpers/glxWorkFixture'
 // @vitest-environment node
 import path from 'node:path'
 import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises'
@@ -43,12 +44,12 @@ it('retains recursive editable HTML modules through archive, same-writer edits a
   expect(closure.modules).toHaveProperty(['scripts/shared/state.js'])
   expect(closure.modules).toHaveProperty(['scripts/cycle/b.js'])
   expect(closure.modules).toHaveProperty(['scripts/lazy.js'])
-  const model: Extract<DocumentModel, { kind: 'course-v10' }> = { kind: 'course-v10', resources: { assets: {}, components: {} }, project: {
+  const model: Extract<DocumentModel, { kind: 'course-v10' }> = { kind: 'course-v10', resources: { assets: {}, components: {} }, project: createTestProjectFromLegacy({
     schemaVersion: 10, id: 'local-modules', revision: 0, title: '本地模块', definitions: { 'guoling.html-program': HTML_PROGRAM_DEFINITION },
     instances: { program: { id: 'program', definitionId: 'guoling.html-program', data: { html: closure.html, modules: closure.modules! },
       frame: { width: 960, height: 640, transform: [1, 0, 0, 1, 30, 40] } } },
     surfaces: [{ id: 'slide', kind: 'slide', title: '本地模块', childIds: ['program'] }], global: { underlay: [], overlay: [] }, assets: {},
-  } }
+  }) }
   const driver = new CourseV10Driver(), reopened = driver.load(driver.serialize(model))
   if (reopened.kind !== 'course-v10') throw new Error('Unexpected document format')
   expect(reopened.project.instances.program!.data).toEqual(model.project.instances.program!.data)

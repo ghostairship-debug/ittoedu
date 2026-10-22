@@ -1,3 +1,4 @@
+import { componentSurface } from '../../../shared/contracts/component-platform/project'
 import { useEffect } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import { useEditorStore } from '../../store/editorStore'
@@ -8,16 +9,21 @@ import { SpatialLocationWorkspace } from './SpatialLocationWorkspace'
 import type { WorkspaceMediaDropHandler } from '../../lessonWorkspace/workspaceMediaDrop'
 import { projectWithBackgroundPreview } from '../../authoring/backgroundPreview'
 import { proEditorRailController } from '../proEditorRailController'
+import type { ImportedImageAsset } from '../../project/assetManager'
 
 /** The original workspace consumes the active document's one World and canonical writer. */
-export function SpatialWorkspaceConnector({ onDropWorkspaceMedia }: { onDropWorkspaceMedia?: WorkspaceMediaDropHandler }) {
+export function SpatialWorkspaceConnector({ onDropWorkspaceMedia, onSelectImageAsset }: { onDropWorkspaceMedia?: WorkspaceMediaDropHandler; onSelectImageAsset?(): Promise<ImportedImageAsset | null> }) {
   const runtime = useCourseV10Runtime()
   const source = useEditorStore(useShallow(state => ({
     views: state.spatialViewStates, canvasMode: state.canvasMode, activation: state.courseView.activation,
     contentEdit: state.slideContentEdit, previewBackgroundColor: state.previewBackgroundColor, courseView: state.courseView,
   })))
-  const surface = runtime.project.surfaces.find(value => value.id === runtime.surfaceId && value.kind === 'spatial')
+  const selectedSurface = componentSurface(runtime.project, runtime.surfaceId ?? '')
+  const surface = selectedSurface?.kind === 'spatial' ? selectedSurface : undefined
   const surfaceId = surface?.id
+  const nested = Boolean(surfaceId && !runtime.project.rootIds.includes(surfaceId))
+  const editorNavigation = runtime.navigation.editorPort()
+  const navigation = nested && surfaceId ? editorNavigation.forContainer?.(surfaceId) ?? editorNavigation : editorNavigation
   const view = surfaceId ? source.views[runtime.documentId]?.[surfaceId] ?? initialSpatialSurfaceView(surface?.spatial?.home) : initialSpatialSurfaceView()
   useEffect(() => { runtime.navigation.changed() }, [runtime.navigation, view.activeCameraFrameId, view.playbackPathId, view.playbackStepIndex, view.viewport, source.canvasMode, surface?.spatial?.defaultPathId])
   useEffect(() => {
@@ -40,8 +46,10 @@ export function SpatialWorkspaceConnector({ onDropWorkspaceMedia }: { onDropWork
       pathId: () => state().canvasMode === 'edit' ? state().readSpatialView(surfaceId, documentId).playbackPathId : undefined,
       stepIndex: () => state().readSpatialView(surfaceId, documentId).playbackStepIndex,
       selectStep: index => state().setSpatialPlaybackStepIndex(index, surfaceId, documentId),
-      viewport: () => state().courseView.views.find(value => value.documentId === documentId)?.model.project.surfaces.find(value => value.id === surfaceId)?.designSize
-        ?? { width: 1280, height: 720 },
+      viewport: () => {
+        const project = state().courseView.views.find(value => value.documentId === documentId)?.model.project
+        return (project && componentSurface(project, surfaceId)?.designSize) ?? { width: 1280, height: 720 }
+      },
     })
     return () => { unregister(); camera.dispose() }
   }, [runtime.documentId, surfaceId, runtime.registerCamera])
@@ -49,19 +57,21 @@ export function SpatialWorkspaceConnector({ onDropWorkspaceMedia }: { onDropWork
     const controller = new AbortController()
     if (source.canvasMode !== 'run') runtime.setPlaying(false)
     else if (runtime.world.isPlaying()) return () => controller.abort()
-    else if (surfaceId) void runtime.navigation.initializeSpatialPlayback(controller.signal).then(accepted => {
+    else if (surfaceId) void (nested
+      ? navigation.execute({ type: 'scene.go', sceneId: surfaceId }, controller.signal, undefined)
+      : runtime.navigation.initializeSpatialPlayback(controller.signal)).then(accepted => {
       if (!controller.signal.aborted && accepted) runtime.setPlaying(true)
     }).catch(error => { if (!controller.signal.aborted) useEditorStore.getState().setError(String(error)) })
     return () => controller.abort()
-  }, [runtime.documentId, surfaceId, runtime.navigation, runtime.setPlaying, source.canvasMode])
+  }, [runtime.documentId, surfaceId, runtime.navigation, runtime.setPlaying, source.canvasMode, nested, navigation])
   if (!surface) return <main className="workspace workspace--spatial" role="alert"><p className="property-hint">请先选择一个空间页面。</p></main>
   const state = () => useEditorStore.getState()
   const projection = source.canvasMode === 'edit' ? projectWithBackgroundPreview(runtime.project, source.previewBackgroundColor,
     runtime.documentId, surface.id, source.courseView.activeStateId, source.courseView.snapshot?.epoch) : runtime.project
-  const projectedSurface = projection.surfaces.find(value => value.id === surface.id)!
+  const projectedSurface = componentSurface(projection, surface.id)!
   const safe = (result: unknown) => { void Promise.resolve(result).catch(error => state().setError(error instanceof Error ? error.message : String(error))) }
   return <SpatialLocationWorkspace documentId={runtime.documentId} project={projection} surface={projectedSurface} view={view}
-    teacherController={runtime.navigation.editorPort()}
+    teacherController={navigation}
     activeStateId={source.courseView.activeStateId}
     selectionIds={runtime.selectedInstanceIds} canvasMode={source.canvasMode} renderInstance={(id, displayProjection) => runtime.renderInstance(id, displayProjection ?? projection)}
     resolveBackgroundAsset={id => runtime.world.assetUrl(id) ?? undefined}
@@ -78,7 +88,7 @@ export function SpatialWorkspaceConnector({ onDropWorkspaceMedia }: { onDropWork
     onCanvasModeChange={mode => { safe(state().commitTextEdit().then(() => state().setCanvasMode(mode))) }}
     onResetPlayback={async playing => {
       await state().commitTextEdit()
-      await runtime.resetPlayback(playing)
+      await runtime.resetPlayback(playing, nested ? surface.id : undefined)
       if (state().courseView.activeDocumentId !== runtime.documentId) runtime.setPlaying(false)
     }}
     onEditContent={id => {
@@ -93,10 +103,12 @@ export function SpatialWorkspaceConnector({ onDropWorkspaceMedia }: { onDropWork
       return draft?.target.documentId === runtime.documentId && draft.target.surfaceId === surface.id
         && draft.target.activeStateId === state().courseView.activeStateId ? draft : null
     },
-      begin: id => state().beginSlideDataEdit(id), update: (data, composing, height, width, rangeProjection) => state().updateSlideDataDraft(data, composing, height, width, rangeProjection),
+      readProject: () => state().courseBridge.read().editingProject ?? projection,
+      begin: id => state().beginSlideDataEdit(id), update: (data, composing, height, width, rangeProjection, historyGroup, layoutReady) => state().updateSlideDataDraft(data, composing, height, width, rangeProjection, historyGroup, layoutReady),
+      commitInput: () => state().commitSlideContentInput(),
       setComposing: active => state().setSlideTextEditComposing(active),
       commit: () => state().commitTextEdit(), cancel: () => state().cancelTextEdit(), undo: () => { safe(state().undo()) }, redo: () => { safe(state().redo()) }, report: message => state().setError(message) }}
     onPaste={() => { safe(state().pasteNodes()) }} onSelectAll={() => state().selectAllNodes()}
     onShowInstances={ids => { safe(state().updateNodes(ids.map(nodeId => ({ nodeId, patch: { visible: true } })))); runtime.selectInstances(ids, surface.id) }}
-    onDropWorkspaceMedia={onDropWorkspaceMedia} activation={source.activation} />
+    onSelectImageAsset={onSelectImageAsset} onDropWorkspaceMedia={onDropWorkspaceMedia} activation={source.activation} />
 }

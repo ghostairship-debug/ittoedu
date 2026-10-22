@@ -1,4 +1,5 @@
 // @vitest-environment node
+import { componentSurfaces } from '../../src/shared/contracts/component-platform/project'
 import { randomUUID } from 'node:crypto'
 import sharp from 'sharp'
 import { expect, it } from 'vitest'
@@ -68,7 +69,7 @@ it('keeps a newly created page writable through the original document handle aft
       .toMatchObject({ kind: 'document-operation', result: { status: 'applied' } })
     const current = f.session.read()
     if (current.model.kind !== 'course-v10') throw new Error('Expected V10')
-    const surface = current.model.project.surfaces.find(item => item.title === 'New image page')!
+    const surface = componentSurfaces(current.model.project).find(item => item.title === 'New image page')!
     expect(surface.childIds).toHaveLength(1)
     expect(Object.keys(current.model.resources.assets)).toHaveLength(1)
   } finally { await f.gateway.stop('author') }

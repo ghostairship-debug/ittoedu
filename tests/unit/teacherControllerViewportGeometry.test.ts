@@ -1,3 +1,4 @@
+import { createTestProjectFromLegacy, testContainerInstance } from '../helpers/glxWorkFixture'
 import { expect, it } from 'vitest'
 import type { CourseProjectV10 } from '../../src/shared/contracts/component-platform'
 import { frameCorners } from '../../src/core/components/geometry'
@@ -9,13 +10,13 @@ import { prepareCourseTeacherControllerEdits } from '../../src/core/course/cours
 import { captureComponentOperation, applyComponentOperation } from '../../src/core/drivers/courseV10Operations'
 import { createBlankCourseProjectV10 } from '../../src/core/course/createCourseProjectV10'
 
-const project = (): CourseProjectV10 => ({ schemaVersion: 10, id: 'teacher-viewport', revision: 0, title: 'Mixed',
+const project = (): CourseProjectV10 => (createTestProjectFromLegacy({ schemaVersion: 10, id: 'teacher-viewport', revision: 0, title: 'Mixed',
   definitions: { [TEACHER_CONTROLLER_DEFINITION.id]: TEACHER_CONTROLLER_DEFINITION },
   instances: { teacher: { id: 'teacher', definitionId: TEACHER_CONTROLLER_DEFINITION.id, data: JSON.parse(JSON.stringify({ ...createTeacherControllerData(), defaultCollapsed: false })),
     frame: { width: 880, height: 64, transform: [1, 0, 0, 1, 200, 638] } } },
   global: { underlay: [], overlay: ['teacher'] }, assets: {},
   surfaces: [{ id: 'slide', kind: 'slide', title: 'Slide', childIds: [], designSize: { width: 1280, height: 720 } },
-    { id: 'flow', kind: 'flow', title: 'Flow', childIds: [] }, { id: 'spatial', kind: 'spatial', title: 'Spatial', childIds: [], designSize: { width: 960, height: 640 } }] })
+    { id: 'flow', kind: 'flow', title: 'Flow', childIds: [] }, { id: 'spatial', kind: 'spatial', title: 'Spatial', childIds: [], designSize: { width: 960, height: 640 } }] }))
 const hud = (original: CourseProjectV10, viewport: { width: number; height: number }) => createTeacherControllerHudGeometry({
   referenceSize: teacherControllerReferenceSize(original), viewportRect: { x: 0, y: 0, ...viewport },
 })
@@ -26,7 +27,8 @@ it('shows the common direct HUD frame on mixed surfaces without a content parent
   expect([frame.width, frame.height]).toEqual([880, 64])
   ;[500 / 720, 0, 0, 500 / 720, 194.44444444444446, 443.05555555555554].forEach((expected, index) => expect(frame.transform[index]).toBeCloseTo(expected, 8))
   expect(display.global).toBe(original.global)
-  expect(display.surfaces).toBe(original.surfaces)
+  expect(display.rootIds).toBe(original.rootIds)
+  for (const id of original.rootIds) expect(display.instances[id]).toBe(original.instances[id])
   expect(original).toEqual(saved)
 })
 
@@ -72,8 +74,8 @@ it('clamps an existing resized affine frame by its actual HUD bounds without cha
 
 it('moves the actual default collapsed producer by screen pixels through the existing navigation offset owner', () => {
   const blank = createBlankCourseProjectV10()
-  const original = applyComponentOperation(blank, captureComponentOperation(blank, prepareCourseTeacherControllerEdits(blank, blank.surfaces[0].id, 'slide-authoring').edits)), saved = structuredClone(original), geometry = hud(original, { width: 640, height: 360 })
-  const surfaceId = original.surfaces[0].id, teacherId = original.global.overlay.find(id => isGlobalTeacherController(original, id))!
+  const original = applyComponentOperation(blank, captureComponentOperation(blank, prepareCourseTeacherControllerEdits(blank, testContainerInstance(blank, 0).id, 'slide-authoring').edits)), saved = structuredClone(original), geometry = hud(original, { width: 640, height: 360 })
+  const surfaceId = testContainerInstance(original, 0).id, teacherId = original.global.overlay.find(id => isGlobalTeacherController(original, id))!
   const navigation = new ComponentNavigationOwner({ project: () => original, surfaceId: () => surfaceId, select() {},
     viewportBounds: () => ({ left: 100, top: 50, right: 740, bottom: 410 }) })
   const show = () => projectTeacherControllerInstances(original, geometry, navigation).instances[teacherId].frame!

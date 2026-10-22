@@ -1,3 +1,4 @@
+import { componentContainers } from '../../shared/contracts/component-platform/project'
 import { Braces, Code2, CopyPlus, Play, ShieldCheck, WandSparkles } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import type { ComponentEdit, ComponentInstance, CourseProjectV10 } from '../../shared/contracts/component-platform'
@@ -14,6 +15,7 @@ import { resolveComponentPresentation } from '../../shared/contracts/component-p
 import { notifyCourseDrafts, registerCourseDraftProvider, type AdvancedDraftIssue, type AdvancedDraftRecovery } from '../authoring/courseDraftLifecycle'
 import { componentInteractionView, componentRuleEdits } from '../interactions/componentInteractionAuthoring'
 import { replaceCourseNetworkDeclaration, type CourseNetworkDeclaration } from '../course/courseLogicAuthoringCommands'
+import { loadBuiltinComponentSource } from '../../core/components/source/builtinSources'
 
 type DeveloperSection = 'runtime' | 'object' | 'rules' | 'component'
 type JsonDraftContext = { kind: 'network' } | { kind: 'object'; instanceId: string } | { kind: 'definition'; definitionId: string }
@@ -285,7 +287,7 @@ export function DeveloperTab() {
   const createRuntime = async () => {
     const target = kernel.captureTarget(documentId), id = crypto.randomUUID(), definitionId = `guoling.runtime.${id}`
     const container = scope === 'global' ? { kind: 'global' as const, plane: 'underlay' as const } : { kind: 'surface' as const, surfaceId }
-    const roots = container.kind === 'global' ? target.project.global.underlay : target.project.surfaces.find(surface => surface.id === surfaceId)?.childIds
+    const roots = container.kind === 'global' ? target.project.global.underlay : componentContainers(target.project).find(surface => surface.id === surfaceId)?.childIds
     if (!roots) throw new Error('目标页面已不存在')
     const motionTarget = target.instanceId && target.project.instances[target.instanceId]
     const targetRole = motionTarget && target.project.definitions[motionTarget.definitionId]?.role
@@ -332,10 +334,14 @@ export function DeveloperTab() {
       </div>}
       {section === 'component' && (instance && definition && implementation ? <>
         <section className="developer-card"><strong>{definition.title ?? definition.id}</strong><span>共享定义影响所有继承实例；当前实例源码保持独立。未应用的草稿保留在各自作用域。</span>
-          <button className="secondary-button" disabled={instance.locked === true} onClick={() => { try {
-            const { target, edits } = independentComponentSourceEdits(kernel.bridge, documentId, instance.id)
-            void kernel.editCaptured(kernel.capture(edits, target)).then(() => visitSourceScope('instance')).catch(error => report(errorMessage(error)))
-          } catch (error) { report(errorMessage(error)) }
+          <button className="secondary-button" disabled={instance.locked === true} onClick={() => {
+            const selectedDocument = documentId, selectedInstance = instance.id, selectedImplementation = implementation
+            void (async () => {
+              if (selectedImplementation.kind === 'builtin') await loadBuiltinComponentSource(selectedImplementation.key)
+              const { target, edits } = independentComponentSourceEdits(kernel.bridge, selectedDocument, selectedInstance)
+              await kernel.editCaptured(kernel.capture(edits, target))
+              visitSourceScope('instance')
+            })().catch(error => report(errorMessage(error)))
           }}><CopyPlus size={13} />为当前实例创建独立副本</button></section>
         <CodeDocumentEditor draftOwner={kernel.bridge} title="共享定义与编辑元数据" description="定义、数据规则和专业编辑页面随工程保存；源码文件通过上方对应作用域编辑。" readOnly={instance.locked === true} value={JSON.stringify(definition, null, 2)} bindingKey={draftKey({ kind: 'definition', definitionId: definition.id })}
           capture={() => captureJson({ kind: 'definition', definitionId: definition.id })} />

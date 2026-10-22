@@ -1,4 +1,6 @@
 // @vitest-environment node
+import { componentSurfaces } from '../../src/shared/contracts/component-platform/project'
+import { testContainerInstance } from '../helpers/glxWorkFixture'
 import { expect, it } from 'vitest'
 import { randomUUID } from 'node:crypto'
 import { DocumentRegistry } from '../../src/core/documents/DocumentRegistry'
@@ -13,7 +15,7 @@ import type { ToolResult } from '../../src/shared/workbench/tools'
 
 const driver = new CourseV10Driver()
 async function harness(localOnly = false) {
-  const project = createBlankCourseProjectV10('Layers'), surfaceId = project.surfaces[0].id
+  const project = createBlankCourseProjectV10('Layers'), surfaceId = componentSurfaces(project)[0].id
   for (const key of ['shape', 'image', 'table', 'chart']) project.definitions[key] = { id: key, role: 'content', implementation: { kind: 'builtin', key: `guoling.${key}` } }
   const frame = (x: number, y: number, width = 100, height = 60) => ({ width, height, transform: [1, 0, 0, 1, x, y] as [number, number, number, number, number, number] })
   const { defaultShapeData } = await import('../../src/components/shape/data')
@@ -24,7 +26,7 @@ async function harness(localOnly = false) {
   project.instances.picture = { id: 'picture', definitionId: 'image', data: createImageData('image'), frame: frame(50, 70) }
   project.instances.table = { id: 'table', definitionId: 'table', data: createTableData() as never, frame: frame(200, 70) }
   project.instances.chart = { id: 'chart', definitionId: 'chart', data: createChartData() as never, frame: frame(400, 70) }
-  project.surfaces[0].childIds = ['shape-a', 'shape-b', 'shape-c', 'picture', 'table', 'chart']
+  testContainerInstance(project, 0).childIds = ['shape-a', 'shape-b', 'shape-c', 'picture', 'table', 'chart']
   for (const [id, plane] of [['global-back', 'underlay'], ['global-front', 'overlay']] as const) {
     project.instances[id] = { id, definitionId: 'shape', data: defaultShapeData(), frame: frame(10, 10) }
     project.global[plane].push(id)
@@ -81,7 +83,7 @@ it('duplicates professional image/table/chart with independent identities, prese
   expect(await f.invoke('scope-escape', 'object.structure', { target: await f.object('global-front'), action: 'remove' })).toMatchObject({ kind: 'error', code: 'not-authorized' })
   await undo(f, 'undo-copies')
   expect(project(f.session.read()).instances).toEqual(project(before).instances)
-  expect(project(f.session.read()).surfaces).toEqual(project(before).surfaces)
+  expect(componentSurfaces(project(f.session.read()))).toEqual(componentSurfaces(project(before)))
   expect(f.session.read().model.resources).toEqual(before.model.resources)
 })
 
@@ -102,7 +104,7 @@ it('deletes referenced objects atomically, cleans rules, retains archive assets 
   expect(driver.load(driver.serialize(after.model))).toEqual(after.model)
   await undo(f, 'undo-delete')
   expect(project(f.session.read()).instances).toEqual(project(before).instances)
-  expect(project(f.session.read()).surfaces).toEqual(project(before).surfaces)
+  expect(componentSurfaces(project(f.session.read()))).toEqual(componentSurfaces(project(before)))
 })
 
 it('aligns and distributes unmounted objects while rejecting cross-owner moves and partial batches', async () => {

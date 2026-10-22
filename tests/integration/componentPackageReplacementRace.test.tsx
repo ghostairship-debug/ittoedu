@@ -14,6 +14,7 @@ import { useComponentLibrary, type ComponentLibraryPorts } from '../../src/rende
 import { exportComponentLibraryArchive } from '../../src/core/components/library/archive'
 import type { ComponentLibraryEntry } from '../../src/shared/contracts/component-platform/library'
 import type { CourseProjectV10 } from '../../src/shared/contracts/component-platform/project'
+import { normalizeWorkProject } from '../../src/shared/contracts/component-platform/workProjectMigration'
 import type { DocumentHostAPI } from '../../src/shared/workbench/desktop'
 import type { AvailableComponentCatalogPackage } from '../../src/shared/componentCatalog'
 import type { OpenBinaryFileResult } from '../../src/shared/ipcTypes'
@@ -22,21 +23,21 @@ const disposers: (() => Promise<unknown>)[] = []
 afterEach(async () => { cleanup(); for (const dispose of disposers.splice(0).reverse()) await dispose(); vi.unstubAllGlobals() })
 const bytes = (source: string) => new TextEncoder().encode(source)
 function project(id = 'course'): CourseProjectV10 {
-  return { schemaVersion: 10, id, revision: 0, title: id, definitions: {
+  return normalizeWorkProject({ schemaVersion: 10, id, revision: 0, title: id, definitions: {
     widget: { id: 'widget', version: '1.0.0', role: 'content', title: '共享组件', implementation: { kind: 'source', language: 'javascript', workspace: { ownerId: 'old', entry: 'main.js' } } },
   }, instances: { a: { id: 'a', definitionId: 'widget', data: { text: '用户正文', authorField: 7 }, frame: { width: 300, height: 120, transform: [1, .2, 0, 1, 21, 34] } },
     b: { id: 'b', definitionId: 'widget', data: { text: '另一实例' }, implementationOverride: { kind: 'source', language: 'javascript', source: 'export default {}' } } },
-    surfaces: [{ id: 'page', kind: 'slide', title: '页面', childIds: ['a', 'b'] }], global: { underlay: [], overlay: [] }, assets: {} }
+    surfaces: [{ id: 'page', kind: 'slide', title: '页面', childIds: ['a', 'b'] }], global: { underlay: [], overlay: [] }, assets: {} })
 }
 function entry(version = '2.0.0'): ComponentLibraryEntry {
-  return { schemaVersion: 1, id: 'widget', title: '新版组件', definitions: {
-    widget: { id: 'widget', version, role: 'content', implementation: { kind: 'source', language: 'javascript', workspace: { ownerId: 'new-source', entry: 'main.js' }, resourceBindings: { icon: 'new-asset' } } },
+  return { schemaVersion: 2, id: 'widget', title: '新版组件', definitions: {
+    widget: { id: 'widget', version, library: { packageId: 'widget', version }, role: 'content', implementation: { kind: 'source', language: 'javascript', workspace: { ownerId: 'new-source', entry: 'main.js' }, resourceBindings: { icon: 'new-asset' } } },
   }, example: { rootIds: ['sample'], instances: { sample: { id: 'sample', definitionId: 'widget', data: { text: '示例内容' } } } },
     assets: { 'new-asset': { id: 'new-asset', path: 'assets/icon.bin', mimeType: 'application/octet-stream' } },
     resources: { assets: { 'new-asset': new Uint8Array([8, 9]) }, components: { 'new-source': { 'main.js': bytes('export default { mount() { return {update(){}, dispose(){}} } }') } } } }
 }
 const catalogEntry = (): AvailableComponentCatalogPackage => ({ packageId: 'widget', version: '2.0.0', name: '新版组件', description: '', subject: [], schoolStage: [], tags: [],
-  packagePath: 'widget.h5component', thumbnailPath: '', sha256: 'a'.repeat(64), componentSchemaVersion: 1, runtimeApiVersion: 5, renderMode: 'dom', supportedScopes: ['scene', 'global'],
+  packagePath: 'widget.h5component', thumbnailPath: '', sha256: 'a'.repeat(64), componentSchemaVersion: 2, runtimeApiVersion: 5, renderMode: 'dom', supportedScopes: ['scene', 'global'],
   quality: 'experimental', maintainer: 'fixture', verifiedCases: [], sourceId: 'fixture', sourceLabel: '组件库', sourceTrust: 'built-in' })
 function deferred<T>() { let resolve!: (value: T) => void; const promise = new Promise<T>(accept => { resolve = accept }); return { promise, resolve } }
 async function fixture() {
@@ -81,11 +82,12 @@ it('keeps deferred catalog update and cancelled/manual malformed selection at ze
   const h = await fixture(), read = deferred<{ bytes: Uint8Array; sha256: string }>()
   h.ports.readCatalogPackage = () => read.promise
   act(() => h.hook.result.current.requestCatalogUpdate(h.item))
-  act(() => h.hook.result.current.confirmCatalogUpdate())
   const update = h.pending.at(-1)
   await act(async () => { await h.kernel.edit([{ type: 'definition.set', definition: { ...h.kernel.readDocument().definitions.widget, version: '3.0.0' } }]) })
   const before = await h.host.internalAPI.read(h.initial.documentId)
   await act(async () => { read.resolve({ bytes: h.file.bytes, sha256: h.item.sha256 }); await update })
+  await waitFor(() => expect(h.hook.result.current.catalogUpdateRequest).not.toBeNull())
+  await act(async () => { h.hook.result.current.confirmCatalogUpdate(); await h.pending.at(-1) })
   expect(h.errors).toHaveLength(1)
   expect(await h.host.internalAPI.read(h.initial.documentId)).toEqual(before)
   h.ports.selectComponentPackage = async () => null

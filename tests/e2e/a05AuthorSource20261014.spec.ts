@@ -1,3 +1,4 @@
+import { testContainerInstance } from '../helpers/glxWorkFixture'
 import { _electron as electron, expect, test, type ElectronApplication, type Locator, type Page } from '@playwright/test'
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
@@ -58,7 +59,7 @@ function fixture() {
     frame: { width: 540, height: 380, transform: [1, 0, 0, 1, 50, 100] } }
   project.instances.neighbor = { id: 'neighbor', name: 'A05 邻实例', definitionId: 'web', data: structuredClone(data),
     frame: { width: 540, height: 380, transform: [1, 0, 0, 1, 660, 100] } }
-  project.surfaces[0].childIds = ['primary', 'neighbor']
+  testContainerInstance(project, 0).childIds = ['primary', 'neighbor']
   return { project, resources: { assets: { scene: image }, components: {} } }
 }
 

@@ -1,3 +1,4 @@
+import { componentSurface } from '../../shared/contracts/component-platform/project'
 import type { ComponentBackground, ComponentFlowAuthoring, ComponentInstance, CourseProjectV10 } from '../../shared/contracts/component-platform/project'
 import type { ComponentEdit } from '../../shared/contracts/component-platform/operations'
 import type { ProjectPlaybackSettings } from '../../shared/contracts/playback-v1'
@@ -36,7 +37,7 @@ export interface SurfaceSettingsPatch {
 }
 
 export function surfaceSettingsEdits(project: CourseProjectV10, surfaceId: string, patch: SurfaceSettingsPatch): ComponentEdit[] {
-  const surface = project.surfaces.find(value => value.id === surfaceId)
+  const surface = componentSurface(project,surfaceId)
   if (!surface) throw new Error('页面已不存在')
   const edits: ComponentEdit[] = []
   if (patch.title !== undefined) edits.push({ type: 'surface.title.set', surfaceId, title: patch.title })

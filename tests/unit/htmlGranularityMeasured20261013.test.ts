@@ -1,3 +1,4 @@
+import { componentSurfaces } from '../../src/shared/contracts/component-platform/project'
 // @vitest-environment node
 import { assert, expect, it } from 'vitest'
 import { build } from 'esbuild'
@@ -49,9 +50,11 @@ it.each([['ledger', ledgerHtml], ['cross-paint', overlappingHtml]] as const)('ke
       const assembly = assembleMeasuredHtml(capture, { html })
       const draft = assemblyContentDraft(assembly, {}, { definitions: {}, createFormulaId: () => crypto.randomUUID() })
       const blank = createBlankCourseProjectV10('Original ' + name)
-      const planned = planContentApply({ project: blank, createId: () => crypto.randomUUID(), request: { intent: 'insert', target: { kind: 'container', container: { kind: 'surface', surfaceId: blank.surfaces[0]!.id } }, source: { kind: 'objects', objects: [draft.draft], definitions: draft.definitions } } })
+      const planned = planContentApply({ project: blank, createId: () => crypto.randomUUID(), request: { intent: 'insert', target: { kind: 'container', container: { kind: 'surface', surfaceId: componentSurfaces(blank)[0]!.id } }, source: { kind: 'objects', objects: [draft.draft], definitions: draft.definitions } } })
       const project = applyComponentOperation(blank, planned.command)
-      const instances = Object.values(project.instances)
+      const instances = Object.values(project.instances).filter(instance => !instance.container)
+      expect(project.rootIds).toEqual(blank.rootIds)
+      expect(Object.values(project.instances).filter(instance => instance.container)).toHaveLength(1)
       const texts = instances.filter(instance => instance.definitionId === 'guoling.text')
       const caseEvidence: any = { name, original, scopeReasons: capture.sourceScopes?.map(scope => ({ sourcePath: capture.elements[scope.index]!.sourcePath, reason: scope.reason })), rootKind: assembly.root.kind, instanceCount: instances.length, textCount: texts.length, assemblyDiagnostics: assembly.diagnostics, draftDiagnostics: draft.diagnostics }
       evidence.cases.push(caseEvidence)

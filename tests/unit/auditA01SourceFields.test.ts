@@ -1,4 +1,6 @@
 // @vitest-environment node
+import { componentSurfaces } from '../../src/shared/contracts/component-platform/project'
+import { testContainerInstance } from '../helpers/glxWorkFixture'
 import { afterEach, expect, it, vi } from 'vitest'
 import { createBlankCourseProjectV10 } from '../../src/core/course/createCourseProjectV10'
 import { createTextComponentData } from '../../src/components/text/data'
@@ -13,12 +15,12 @@ const source: ComponentImplementation = { kind: 'source', language: 'javascript'
 let stop = () => {}
 afterEach(() => stop())
 it.each(['definition', 'override'])('edits professional text for a Source %s without scanning opaque data or replacing its visual implementation', mode => {
-  const project = createBlankCourseProjectV10(), surface = project.surfaces[0]
+  const project = createBlankCourseProjectV10(), surface = componentSurfaces(project)[0]
   project.definitions.text = mode === 'definition' ? { ...TEXT_DEFINITION, id: 'text', professionalBuiltinKey: 'guoling.text', implementation: source } : { ...TEXT_DEFINITION, id: 'text' }
   project.definitions.opaque = { id: 'opaque', role: 'content', implementation: source }
   project.instances.text = { id: 'text', definitionId: 'text', data: JSON.parse(JSON.stringify(createTextComponentData('旧标题'))), ...(mode === 'override' ? { implementationOverride: source } : {}) }
   project.instances.opaque = { id: 'opaque', definitionId: 'opaque', data: { nested: { title: '旧标题', content: { inlines: [{ type: 'text', text: '旧标题' }] } } } }
-  surface.childIds = ['text', 'opaque']
+  testContainerInstance(project, 0).childIds = ['text', 'opaque']
   const before = structuredClone(project)
   const plan = planCourseProductivityEdits(project, surface.id, { kind: 'text', scope: 'page', find: '旧', replacement: '新' })
   expect(plan.edits).toEqual([{ type: 'data.set', instanceId: 'text', path: ['content'], value: { inlines: [{ type: 'text', text: '新标题' }] } }])
@@ -26,10 +28,10 @@ it.each(['definition', 'override'])('edits professional text for a Source %s wit
   expect(project).toEqual(before)
 })
 it('deduplicates a repeated field, preserves same text at another address and writes the chosen Source field only', async () => {
-  const project = createBlankCourseProjectV10(), surface = project.surfaces[0]
+  const project = createBlankCourseProjectV10(), surface = componentSurfaces(project)[0]
   project.definitions.source = { id: 'source', role: 'content', implementation: source }
   project.instances.source = { id: 'source', definitionId: 'source', data: { title: '同文', caption: '同文' } }
-  surface.childIds = ['source']
+  testContainerInstance(project, 0).childIds = ['source']
   const spots: ComponentAuthorSpot[] = ['title', 'title', 'caption'].map((key, index) => ({ id: `spot-${index}`, kind: 'text', instanceId: 'source', mountGeneration: 1,
     dataPath: [key], initialValue: '同文', localBounds: { width: 10, height: 10, transform: [1, 0, 0, 1, 0, 0] } }))
   const target: CapturedCourseTarget = { documentId: 'doc', epoch: 'epoch', project, editingProject: project, resources: { assets: {}, components: {} },
@@ -45,7 +47,7 @@ it('deduplicates a repeated field, preserves same text at another address and wr
   expect(project.instances.source.data).toEqual({ title: '同文', caption: '同文' })
 })
 it('keeps the explicit page-copy command for a Source presentation of Web data', () => {
-  const project = createBlankCourseProjectV10(), surface = project.surfaces[0]
+  const project = createBlankCourseProjectV10(), surface = componentSurfaces(project)[0]
   project.definitions.web = { ...WEB_DEFINITION, id: 'web', professionalBuiltinKey: 'guoling.web', implementation: source }
   project.instances.web = { id: 'web', definitionId: 'web', data: { html: '<p>页面标题</p>' } }
   const target = { documentId: 'web-doc', epoch: 'epoch', project, editingProject: project, resources: { assets: {}, components: {} },

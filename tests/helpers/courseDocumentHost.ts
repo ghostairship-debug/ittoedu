@@ -157,6 +157,19 @@ export async function createCourseDocumentHost() {
       return { projectId: snapshot.model.project.id, revision: snapshot.revision,
         documentId: snapshot.documentId, epoch: snapshot.epoch }
     },
+    captureCrashRecovery(documentId: string) {
+      const active = durable.get(documentId)
+      if (!active || active.schemaVersion === 2 && active.disposition !== 'active') throw new Error('Capture requires an active recovery record')
+      const captured = structuredClone(active)
+      return async () => {
+        // An epoch test restores the real pre-close active journal, rather than
+        // asking the formal recovery path to accept a closed terminal record.
+        const session = await registry.restore(captured)
+        observed.delete(session.documentId)
+        observe(session.documentId)
+        return session.read()
+      }
+    },
     dispose() { bridge.dispose() },
     async restart() {
       // Simulate process loss: retain only durable state and disk; never copy live History.

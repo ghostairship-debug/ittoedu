@@ -1,4 +1,6 @@
 // @vitest-environment node
+import { componentSurfaces } from '../../src/shared/contracts/component-platform/project'
+import { testContainerInstance } from '../helpers/glxWorkFixture'
 import { expect, it } from 'vitest'
 import { createBlankCourseProjectV10 } from '../../src/core/course/createCourseProjectV10'
 import { DocumentSession } from '../../src/core/documents/DocumentSession'
@@ -11,13 +13,13 @@ import { resolveComponentPresentation, type ComponentAuthoring, type JsonValue }
 it('lists, reads and applies state authoring at the same instance through Session CAS and save reload', async () => {
   const authoring = (text: string): ComponentAuthoring => ({ records: { title: { kind: 'text',
     binding: { kind: 'dom', path: [{ tag: 'p', index: 0 }], baseline: 'Original' }, overrides: { text } } } })
-  const project = createBlankCourseProjectV10('Authoring files'), surfaceId = project.surfaces[0].id
+  const project = createBlankCourseProjectV10('Authoring files'), surfaceId = componentSurfaces(project)[0].id
   project.definitions.source = { id: 'source', title: 'Source', role: 'content', implementation: {
     kind: 'source', language: 'javascript', source: 'export default { mount() {} }' } }
   project.instances.source = { id: 'source', definitionId: 'source', data: 7 }
   project.instances.neighbor = { id: 'neighbor', definitionId: 'source', data: { title: 'Neighbor business' }, authoring: authoring('Neighbor') }
-  project.surfaces[0].childIds = ['source', 'neighbor']
-  project.surfaces[0].presentation = { states: [
+  testContainerInstance(project, 0).childIds = ['source', 'neighbor']
+  testContainerInstance(project, 0).container.presentation = { states: [
     { id: 'local', title: 'Local', overrides: { source: { authoring: authoring('Local') } } },
     { id: 'sibling', title: 'Sibling', overrides: {} },
   ] }

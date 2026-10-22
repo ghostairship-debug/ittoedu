@@ -1,3 +1,4 @@
+import { componentSurfaces } from '../../src/shared/contracts/component-platform/project'
 // @vitest-environment node
 import { randomUUID } from 'node:crypto'
 import { expect, it } from 'vitest'
@@ -43,7 +44,7 @@ it('M04-T04 two same-page selected objects stay independently writable through t
   }
   const reverted = session.read()
   if (reverted.model.kind !== 'course-v10') throw new Error('fixture')
-  expect(reverted.model.project.surfaces).toEqual(fixture.model.project.surfaces)
+  expect(componentSurfaces(reverted.model.project)).toEqual(componentSurfaces(fixture.model.project))
   expect(reverted.model.project.global).toEqual(fixture.model.project.global)
   expect(reverted.undoDepth).toBe(0)
 })

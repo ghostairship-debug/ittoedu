@@ -1,4 +1,5 @@
 // @vitest-environment node
+import { componentSurfaces } from '../../src/shared/contracts/component-platform/project'
 import { expect, it } from 'vitest'
 import { createTableData, parseTableData, tableCellContent, tableContentInputSchema, toNativeTableData } from '../../src/components/table/data'
 import { createTableContentData, replaceTableContentData } from '../../src/components/table/content'
@@ -15,7 +16,8 @@ const ids = (data: ReturnType<typeof parseTableData>) => ({ columns: data.column
   rows: data.rows.map(row => row.id), cells: data.rows.map(row => row.cells.map(cell => cell.id)) })
 
 it('creates rectangular plain content through the professional insertion planner with software identities', () => {
-  const project = createBlankCourseProjectV10('普通表格'), surfaceId = project.surfaces[0]!.id
+  const project = createBlankCourseProjectV10('普通表格'), surfaceId = componentSurfaces(project)[0]!.id
+  const before = structuredClone(project)
   const input = { rows: [['项目', '数量'], ['甲 😀', '20'], ['乙', '35'], ['丙', '18']], headerRowCount: 1 }
   const prepared = prepareCourseElementEdits(project, surfaceId, null, 'table', { table: input, x: 25, y: 35, width: 520, height: 260 })
   const inserted = applyComponentOperation(project, captureComponentOperation(project, prepared.edits))
@@ -24,7 +26,7 @@ it('creates rectangular plain content through the professional insertion planner
   expect(data.headerRowCount).toBe(1)
   expect(new Set([...ids(data).columns, ...ids(data).rows, ...ids(data).cells.flat()]).size).toBe(14)
   expect(instance.frame).toEqual({ width: 520, height: 260, transform: [1, 0, 0, 1, 25, 35] })
-  expect(project.instances).toEqual({})
+  expect(project).toEqual(before)
 })
 
 it('rejects nonrectangular content and impossible headers at the same semantic adapter', () => {
@@ -110,7 +112,7 @@ it('preserves formula and inline-component atoms when appending at their text bo
 })
 
 it('uses one canonical data edit for whole-table content and preserves explicit-ID rich local editing', () => {
-  const project = createBlankCourseProjectV10('接力表格'), surfaceId = project.surfaces[0]!.id
+  const project = createBlankCourseProjectV10('接力表格'), surfaceId = componentSurfaces(project)[0]!.id
   const prepared = prepareCourseElementEdits(project, surfaceId, null, 'table', { table: { rows: [['表头', '列二'], ['正文', '2']], headerRowCount: 1 } })
   const inserted = applyComponentOperation(project, captureComponentOperation(project, prepared.edits))
   const instanceId = prepared.instanceIds[0]!, instance = inserted.instances[instanceId]!, before = parseTableData(instance.data)

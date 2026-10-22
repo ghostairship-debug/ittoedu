@@ -1,10 +1,11 @@
 // @vitest-environment jsdom
+import { createTestProjectFromLegacy } from '../helpers/glxWorkFixture'
 import { render, cleanup } from '@testing-library/react'
 import { afterEach, expect, it, vi } from 'vitest'
 import type { CourseProjectV10 } from '../../src/shared/contracts/component-platform/project'
 import { SceneThumbnail } from '../../src/renderer/ui/SceneThumbnail'
 
-const project = vi.hoisted(() => ({
+const project = vi.hoisted(() => (createTestProjectFromLegacy({
   schemaVersion: 10, id: 'thumbnail-course', revision: 0, title: '范围缩略图', assets: {},
   definitions: { decoration: { id: 'decoration', title: '本组母版装饰', role: 'content',
     implementation: { kind: 'source', language: 'javascript', source: 'export default {}' } } },
@@ -13,7 +14,7 @@ const project = vi.hoisted(() => ({
   global: { underlay: ['decoration'], overlay: [] },
   surfaces: [{ id: 'existing', title: '原页面', kind: 'slide', designSize: { width: 1280, height: 720 }, childIds: [] },
     { id: 'imported', title: '导入页', kind: 'slide', designSize: { width: 1280, height: 720 }, childIds: [] }],
-}) as CourseProjectV10)
+})) as CourseProjectV10)
 vi.mock('../../src/renderer/store/editorStore', () => ({
   useEditorStore: (select: (state: unknown) => unknown) => select({ courseView: { project, activeDocumentId: 'document',
     surfaceId: 'existing', views: [{ documentId: 'document', model: { resources: { assets: {}, components: {} } } }] } }),

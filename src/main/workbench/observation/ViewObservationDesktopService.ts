@@ -1,3 +1,4 @@
+import { componentContainers } from '../../../shared/contracts/component-platform/project'
 import { randomUUID } from 'node:crypto'
 import { BrowserWindow, session } from 'electron'
 import { installEditorProtocol } from '../../protocols'
@@ -11,6 +12,7 @@ import { htmlPreviewResponse } from '../htmlPreview/htmlPreviewResponse'
 import type { PublishedCourseV3 } from '../../../shared/contracts/component-platform/published'
 import { waitForCaptureFramePaint } from './captureFramePaint'
 import { observationSnapshotMatches } from '../../../shared/workbench/viewObservation'
+import { observationDocumentIdentityMatches, type ViewObservationDocumentIdentity } from './observationSourceIdentity'
 import type { PublishedActionPreviewPort, PublishedActionTarget } from './HtmlActionService'
 import type { PublishedActionAutomationContext } from './HtmlActionDesktopPort'
 type ObservationWorkerResult = Awaited<ReturnType<PublishedActionPreviewPort['readState']>> & { rect?: { x: number; y: number; width: number; height: number } }
@@ -21,6 +23,7 @@ export interface ViewObservationDesktopOptions {
   compilation?: Pick<InMemoryComponentCompilation, 'compile'>
   /** Interactive contexts recheck their canonical document before any input. */
   snapshot?(documentId: string): Promise<import('../../../shared/workbench/document').DocumentSnapshot>
+  currentIdentity?(documentId: string): Promise<ViewObservationDocumentIdentity>
   /** Main supplies a trusted mounted-host capture that returns null unless its identity matches. */
   liveCapture?(input: { identity: ViewObservationIdentity; signal?: AbortSignal }): Promise<ViewObservationCapture | null>
 }
@@ -38,6 +41,12 @@ interface PreparedObservationHost {
   capture(): Promise<PublishedCapture>
   read(): Promise<ObservationWorkerResult>
   select(locationId: string, stateId: string | null): Promise<ObservationWorkerResult>
+  reset(input: PublishedCaptureTarget, publication: { payload: PublishedCourseV3; diagnostics: string[] }): Promise<void>
+  close(): Promise<void>
+}
+
+export interface PublishedObservationCaptureJob {
+  capture(input: Omit<PublishedCaptureTarget, 'signal' | 'interactive'> & { published: PublishedCourseV3 }): Promise<PublishedCapture>
   close(): Promise<void>
 }
 
@@ -69,12 +78,60 @@ export class ViewObservationDesktopService implements PublishedActionPreviewPort
   capturePublished = (input: PublishedCaptureTarget & { published: PublishedCourseV3 }): Promise<PublishedCapture> =>
     this.capturePrepared(input, async () => ({ payload: input.published, diagnostics: [] }))
 
+  /** One export owns one hidden window. Each image still starts a new Player. */
+  createPublishedCaptureJob(signal?: AbortSignal): PublishedObservationCaptureJob {
+    const controller = new AbortController()
+    const abort = () => controller.abort()
+    signal?.addEventListener('abort', abort, { once: true })
+    if (signal?.aborted) abort()
+    const owner: { host?: PreparedObservationHost } = {}
+    const takeHost = (): PreparedObservationHost | undefined => {
+      const current = owner.host; owner.host = undefined
+      return current
+    }
+    let closed = false, closing: Promise<void> | undefined
+    let queue = Promise.resolve()
+    return {
+      capture: input => {
+        const work = queue.then(async () => {
+          if (closed || controller.signal.aborted) throw new Error('输出捕获已结束')
+          const { published, ...target } = input
+          const publication = { payload: published, diagnostics: [] }
+          try {
+            let current = owner.host
+            if (current) await current.reset({ ...target, signal: controller.signal }, publication)
+            else { current = await this.openPrepared({ ...target, signal: controller.signal }, async () => publication); owner.host = current }
+            if (closed || controller.signal.aborted) throw new Error('输出捕获已结束')
+            return await current.capture()
+          } catch (error) {
+            const failed = takeHost()
+            await failed?.close()
+            throw error
+          }
+        })
+        queue = work.then(() => {}, () => {})
+        return work
+      },
+      close: () => {
+        if (closing) return closing
+        closed = true; controller.abort(); signal?.removeEventListener('abort', abort)
+        closing = (async () => {
+          const current = takeHost()
+          await current?.close()
+          await queue
+          const late = takeHost()
+          await late?.close()
+        })()
+        return closing
+      },
+    }
+  }
+
   async contextForTarget(input: PublishedActionTarget & { runId: string }): Promise<PublishedActionAutomationContext> {
     if (this.stopped.has(input.runId) || input.signal?.aborted) throw new Error('课件观察已停止')
-    if (!this.options.snapshot) throw new Error('课件观察缺少当前文档读取端口')
+    if (!this.options.snapshot && !this.options.currentIdentity) throw new Error('课件观察缺少当前文档读取端口')
     if (!observationSnapshotMatches(input.snapshot, input.identity, input.identity.projectId)) throw new Error('课件观察来源与正式文档不符')
-    if (!observationSnapshotMatches(await this.options.snapshot(input.identity.documentId), input.identity, input.identity.projectId))
-      throw new Error('课件观察来源已改变，请重新观察')
+    await this.assertCurrentSource(input.identity)
     const previous = this.owned.get(input.runId)
     const sameSource = previous && previous.context.identity.documentId === input.identity.documentId
       && previous.context.identity.epoch === input.identity.epoch && previous.context.identity.revision === input.identity.revision
@@ -94,7 +151,7 @@ export class ViewObservationDesktopService implements PublishedActionPreviewPort
       if (this.stopped.has(input.runId) || input.signal?.aborted) throw new Error('课件观察已停止')
       const current = await host.read()
       if (current.locationId !== input.identity.locationId || current.stateId !== (input.identity.stateId ?? null)) {
-        const size = input.snapshot.model.project.surfaces.find(surface => surface.id === input.identity.locationId)?.designSize ?? { width: 1280, height: 720 }
+        const size = componentContainers(input.snapshot.model.project).find(surface => surface.id === input.identity.locationId)?.designSize ?? { width: 1280, height: 720 }
         host.worker.setContentSize(Math.ceil(size.width), Math.ceil(size.height))
         await host.select(input.identity.locationId, input.identity.stateId ?? null)
       }
@@ -116,9 +173,15 @@ export class ViewObservationDesktopService implements PublishedActionPreviewPort
     const frame = owned.host.worker.webContents.mainFrame
     if (frame.detached || frame.isDestroyed() || frame.processId !== context.frameProcessId || frame.frameToken !== context.frameToken)
       throw new Error('课件观察页面已重新载入，请重新观察')
-    const snapshot = await this.options.snapshot!(context.identity.documentId)
-    if (!observationSnapshotMatches(snapshot, context.identity, context.identity.projectId)) throw new Error('课件来源版本已改变，请重新观察')
+    await this.assertCurrentSource(context.identity)
     return context
+  }
+
+  private async assertCurrentSource(identity: PublishedActionAutomationContext['identity']): Promise<void> {
+    const current = this.options.currentIdentity
+      ? observationDocumentIdentityMatches(await this.options.currentIdentity(identity.documentId), identity)
+      : this.options.snapshot && observationSnapshotMatches(await this.options.snapshot(identity.documentId), identity, identity.projectId)
+    if (!current) throw new Error('课件来源版本已改变，请重新观察')
   }
 
   async readState(context: PublishedActionAutomationContext): Promise<ObservationWorkerResult> {
@@ -169,17 +232,33 @@ export class ViewObservationDesktopService implements PublishedActionPreviewPort
       binarySources.set(pathname, { bytes: content, mime })
       return { url: `courseware-editor://app${pathname}`, byteLength: content.byteLength }
     }
-    const publication = await prepare(resource), project = publication.payload
+    const publication = await prepare(resource)
+    let project = publication.payload, target = input
     const bootstrapPath = `/_observation/${token}/bootstrap/`
-    const payload = { published: project, locationId: input.locationId, stateId: input.stateId ?? null,
-      bootstrapBaseUrl: `courseware-editor://app${bootstrapPath}`, diagnostics: publication.diagnostics,
-      instanceId: input.instanceId, spatialFrameId: input.spatialFrameId, staticExport: input.staticExport, interactive: input.interactive }
-    const encoded = Buffer.from(JSON.stringify(payload), 'utf8').toString('base64')
+    const payloadPath = `/_observation/${token}/payload/${randomUUID()}`
+    const payloadUrl = `courseware-editor://app${payloadPath}`
+    const workerInput = (diagnostics: string[]) => ({ published: project, locationId: target.locationId, stateId: target.stateId ?? null,
+      bootstrapBaseUrl: `courseware-editor://app${bootstrapPath}`, diagnostics,
+      instanceId: target.instanceId, spatialFrameId: target.spatialFrameId, staticExport: target.staticExport, interactive: target.interactive })
+    let payload = workerInput(publication.diagnostics)
     const isolatedSession = session.fromPartition(`observation-${randomUUID()}`)
     const entry = new URL('observation.html', this.options.rendererEntryUrl).toString()
     const entryUrl = new URL(entry), entryOrigin = entryUrl.origin === 'null' ? `${entryUrl.protocol}//${entryUrl.host}` : entryUrl.origin
     let closed = false
     installEditorProtocol(isolatedSession, async (url, request) => {
+      if (url.hostname === 'app' && url.pathname === payloadPath) {
+        const headers = { 'Access-Control-Allow-Origin': entryOrigin, 'Access-Control-Allow-Methods': 'GET, HEAD, OPTIONS',
+          'Vary': 'Origin', 'Cache-Control': 'no-store', 'Content-Type': 'application/json; charset=utf-8', 'X-Content-Type-Options': 'nosniff' }
+        const reply = (status: number, body?: string) => new Response(body ?? null, { status, headers })
+        if (closed) return reply(410, 'Observation closed')
+        if (url.search) return reply(400, 'Invalid observation payload')
+        const origin = request.headers.get('Origin')
+        if (origin && origin !== entryOrigin) return reply(403, 'Invalid observation origin')
+        const method = request.method.toUpperCase()
+        if (method === 'OPTIONS') return reply(204)
+        if (method !== 'GET' && method !== 'HEAD') return reply(405, 'Method not allowed')
+        return reply(200, method === 'HEAD' ? undefined : JSON.stringify(payload))
+      }
       if (url.hostname === 'app' && url.pathname.startsWith(bootstrapPath)) {
         const headers = { 'Access-Control-Allow-Origin': entryOrigin, 'Access-Control-Allow-Methods': 'POST, DELETE, OPTIONS', 'Vary': 'Origin' }
         const reply = (status: number, message?: string) => new Response(message ?? null, { status, headers })
@@ -202,7 +281,10 @@ export class ViewObservationDesktopService implements PublishedActionPreviewPort
           connectOrigins: project.logic?.network?.connectOrigins ?? [] }) : reply(404, 'Missing bootstrap')
       }
       const entry = url.hostname === 'app' ? binarySources.get(url.pathname) : undefined
-      return entry ? new Response(Uint8Array.from(entry.bytes), { headers: { 'Content-Type': entry.mime, 'Cache-Control': 'no-store' } }) : undefined
+      if (!entry) return undefined
+      const body = entry.bytes.buffer instanceof ArrayBuffer
+        ? new Uint8Array(entry.bytes.buffer, entry.bytes.byteOffset, entry.bytes.byteLength) : Uint8Array.from(entry.bytes)
+      return new Response(body, { headers: { 'Content-Type': entry.mime, 'Cache-Control': 'no-store' } })
     })
     const network = new PreviewNetworkPolicy(), base = new URL(this.options.rendererEntryUrl)
     network.replaceBaseOrigins(['http:', 'https:'].includes(base.protocol) ? [base.origin] : [])
@@ -210,8 +292,9 @@ export class ViewObservationDesktopService implements PublishedActionPreviewPort
     network.activateDocument(owner)
     network.replacePreviewLease({ leaseId: token, connectOrigins: project.logic?.network?.connectOrigins ?? [], remoteAssetUrls: [] }, owner)
     configureRestrictedSession(isolatedSession, url => network.allowsRequest(url))
-    const size = project.surfaces.find(surface => surface.id === input.locationId)?.designSize ?? { width: 1280, height: 720 }
+    const size = componentContainers(project).find(surface => surface.id === input.locationId)?.designSize ?? { width: 1280, height: 720 }
     const worker = new BrowserWindow({ width: size.width, height: size.height, useContentSize: true, frame: false, show: false,
+      ...(input.interactive !== true ? { transparent: true, backgroundColor: '#00000000' } : {}),
       skipTaskbar: true, webPreferences: { session: isolatedSession, contextIsolation: true, sandbox: true,
         // Trusted OOPIF input uses the ordinary hidden-window path, as TaskHtmlPreview does.
         nodeIntegration: false, webSecurity: true, backgroundThrottling: false, offscreen: input.interactive !== true } })
@@ -249,21 +332,32 @@ export class ViewObservationDesktopService implements PublishedActionPreviewPort
       finally { clearTimeout(faultWait) }
     }
     try {
-      const initial = await withFaultWait(async () => {
-        await worker.loadURL(entry)
-        const outcome = await contents.executeJavaScript(`window.__COURSEWARE_OBSERVATION_RUN__(${JSON.stringify(encoded)})`) as ObservationWorkerResult
+      const run = async () => {
+        const outcome = await contents.executeJavaScript(`window.__COURSEWARE_OBSERVATION_RUN__(${JSON.stringify(payloadUrl)})`) as ObservationWorkerResult
         if (input.signal?.aborted || closed) throw new Error('观察已取消')
-        if (outcome.locationId !== input.locationId || !input.interactive && (outcome.stateId ?? null) !== (input.stateId ?? null))
+        if (outcome.locationId !== target.locationId || !target.interactive && (outcome.stateId ?? null) !== (target.stateId ?? null))
           throw new Error('观察宿主加载了错误页面或状态')
         await waitForCaptureFramePaint(contents.mainFrame, token)
         return outcome
+      }
+      let initial = await withFaultWait(async () => {
+        await worker.loadURL(entry)
+        return run()
       }, '观察宿主准备或截图无响应')
       const read = () => withFaultWait(() => contents.executeJavaScript('window.__COURSEWARE_OBSERVATION_READ__()') as Promise<ObservationWorkerResult>, '观察宿主读取无响应')
-      return { token, worker, initial, close, read,
+      return { token, worker, get initial() { return initial }, close, read,
+        reset: (next, publication) => withFaultWait(async () => {
+          target = next; project = publication.payload; binarySources.clear()
+          payload = workerInput(publication.diagnostics)
+          network.replacePreviewLease({ leaseId: token, connectOrigins: project.logic?.network?.connectOrigins ?? [], remoteAssetUrls: [] }, owner)
+          const size = componentContainers(project).find(surface => surface.id === target.locationId)?.designSize ?? { width: 1280, height: 720 }
+          worker.setContentSize(Math.ceil(size.width), Math.ceil(size.height))
+          initial = await run()
+        }, '观察宿主准备或截图无响应'),
         select: (locationId, stateId) => withFaultWait(() => contents.executeJavaScript(`window.__COURSEWARE_OBSERVATION_SELECT__(${JSON.stringify(locationId)},${JSON.stringify(stateId)})`) as Promise<ObservationWorkerResult>, '观察宿主切换无响应'),
         capture: () => withFaultWait(async () => {
           await waitForCaptureFramePaint(contents.mainFrame, randomUUID())
-          const current = input.interactive ? await read() : initial, rect = current.rect
+          const current = target.interactive ? await read() : initial, rect = current.rect
           const bitmap = await contents.capturePage(rect ? { x: Math.floor(rect.x), y: Math.floor(rect.y), width: Math.ceil(rect.width), height: Math.ceil(rect.height) } : undefined)
           const size = bitmap.getSize()
           if (size.width < 1 || size.height < 1 || bitmap.isEmpty()) throw new Error('观察宿主未生成真实画面')

@@ -83,7 +83,8 @@ const scope = { workspaceId: id }
 const mutation = { ...scope, operationId: id }
 export const workspaceFilesRequestSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('root'), directory: z.string().min(1).max(32767) }).strict(),
-  z.object({ type: z.literal('watch'), ...scope }).strict(),
+  z.object({ type: z.literal('watch'), ...scope, watchId: id }).strict(),
+  z.object({ type: z.literal('unwatch'), ...scope, watchId: id }).strict(),
   // `archive` is a ready-made H5 presentation (e.g. made from a PPTX); main validates it before writing.
   z.object({ type: z.literal('create-course'), ...mutation, targetDirectoryId: id, name, canvas: slideCanvasSchema.optional(),
     archive: z.instanceof(Uint8Array).optional() }).strict(),
@@ -108,11 +109,15 @@ export const workspaceFilesRequestSchema = z.discriminatedUnion('type', [
 ])
 export type WorkspaceFilesRequest = z.infer<typeof workspaceFilesRequestSchema>
 export type WorkspaceFilesResponse<T extends WorkspaceFilesRequest> = T extends { type: 'root' } ? RegisteredWorkspaceRoot
-  : T extends { type: 'watch' } ? { workspaceId: string; watching: boolean }
+  : T extends { type: 'watch' | 'unwatch' } ? { workspaceId: string; watching: boolean }
   : T extends { type: 'list' } ? WorkspaceListPage : T extends { type: 'resolve' } ? ResolvedWorkspaceEntry
   : T extends { type: 'read-media' } ? WorkspaceMediaFile : T extends { type: 'read-pptx' } ? WorkspacePptxFile
   : T extends HtmlPreviewRequest ? HtmlPreviewResponse<T> : WorkspaceOperationResult
-export interface WorkspaceFilesChange { workspaceId: string }
+export interface WorkspaceFilesChange {
+  workspaceId: string
+  /** Root-relative changed entries; absent means the watcher could not identify the affected path. */
+  changedPaths?: readonly string[]
+}
 export interface WorkspaceFilesAPI {
   subscribe?(listener: (event: WorkspaceFilesChange) => void): () => void
   <T extends WorkspaceFilesRequest>(request: T): Promise<WorkspaceFilesResponse<T>>

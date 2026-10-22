@@ -1,5 +1,8 @@
-import { documentHostAPI } from '../helpers/documentHostAPI'
 // @vitest-environment jsdom
+import { withTestTeacherController } from '../helpers/glxWorkFixture'
+import { componentSurfaces } from '../../src/shared/contracts/component-platform/project'
+import { appendRootContainers, testContainerInstance } from '../helpers/glxWorkFixture'
+import { documentHostAPI } from '../helpers/documentHostAPI'
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, expect, it, vi } from 'vitest'
@@ -26,13 +29,12 @@ let dispose: (() => Promise<void>) | undefined
 afterEach(async () => { cleanup(); await dispose?.(); dispose = undefined; store.listeners.clear() })
 
 it('selects the page from card padding while retaining child controls, menus, dragging and native keyboard navigation', async () => {
-  const project = createBlankCourseProjectV10('页面卡片交互')
-  const firstId = project.surfaces[0].id
-  project.surfaces[0].title = '第一页'
+  const project = withTestTeacherController(createBlankCourseProjectV10('页面卡片交互'))
+  const firstId = componentSurfaces(project)[0].id
+  testContainerInstance(project, 0).name = '第一页'
   project.instances[project.global.overlay[0]].visible = false
-  project.surfaces.push({ id: 'second', kind: 'slide', title: '第二页', childIds: [], designSize: { width: 1280, height: 720 },
-    presentation: { states: [{ id: 'question', title: '问题', overrides: {} }] } },
-  { id: 'space', kind: 'spatial', title: '空间页', childIds: [], spatial: { home: { x: 0, y: 0, zoom: 1 },
+  appendRootContainers(project, { id: 'second', kind: 'slide', title: '第二页', childIds: [], designSize: { width: 1280, height: 720 },
+    presentation: { states: [{ id: 'question', title: '问题', overrides: {} }] } }, { id: 'space', kind: 'spatial', title: '空间页', childIds: [], spatial: { home: { x: 0, y: 0, zoom: 1 },
     frames: [{ id: 'camera', title: '局部镜头', pose: { x: 20, y: 30, zoom: 2 } }] } })
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'guoling-a0-page-card-'))
   const host = new DocumentHostService(directory), bridge = new CourseV10DocumentBridge()

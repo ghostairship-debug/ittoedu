@@ -24,6 +24,8 @@ export const documentEditorSchema = new Schema({
       toDOM: node => ['section', { class: `document-object document-${node.attrs.data.type}`, 'data-document-id': node.attrs.id }, 0] },
     section: { group: 'block', content: 'slot block*', defining: true, attrs: blockAttrs,
       toDOM: node => ['section', { 'data-document-id': node.attrs.id }, 0] },
+    layout_group: { group: 'block', content: 'block*', defining: true, isolating: true, attrs: blockAttrs,
+      toDOM: node => ['div', { 'data-document-id': node.attrs.id, 'data-flow-reading-group': node.attrs.id }, 0] },
     formula: { group: 'block', atom: true, attrs: blockAttrs,
       toDOM: node => mathDOM(node.attrs.data, true) },
     object: { group: 'block', atom: true, attrs: blockAttrs,

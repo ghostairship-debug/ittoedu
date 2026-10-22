@@ -63,6 +63,7 @@ export const htmlPreviewTargetReportSchema = z.object({
   bindingStatus: z.enum(['bound', 'unmounted', 'unresolved', 'source-required']).optional(),
   geometry: componentAuthorGeometryObservationSchema.optional(),
   textStyle: z.record(z.string(), z.string()).optional(),
+  selection: z.object({ anchor: z.number().int().nonnegative(), focus: z.number().int().nonnegative(), word: z.boolean().optional() }).strict().optional(),
 }).strict()
 
 export const htmlPreviewRequestSchema = z.discriminatedUnion('type', [
@@ -161,6 +162,8 @@ export type HtmlPreviewResponse<T extends HtmlPreviewRequest> =
  * untrusted page output that only ever produces editor-side UI state.
  */
 export const htmlPreviewPageMessageSchema = z.discriminatedUnion('event', [
+  z.object({ event: z.literal('selection'), protocol: z.literal(1), leaseId: id, loadId: id, seq: z.number().int().nonnegative(),
+    handle: id, anchor: z.number().int().nonnegative(), focus: z.number().int().nonnegative(), word: z.boolean().optional() }).strict(),
   z.object({ event: z.literal('card-targets'), protocol: z.literal(1), leaseId: id, loadId: id,
     seq: z.number().int().nonnegative(), targets: z.array(htmlPreviewTargetReportSchema).max(HTML_PREVIEW_TARGET_MAX) }).strict(),
   z.object({

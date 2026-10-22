@@ -22,7 +22,7 @@ export const EDITOR_WRITE_ACTION_IDS = [
 
 export type EditorWriteActionId = (typeof EDITOR_WRITE_ACTION_IDS)[number]
 
-export type EditorSurfaceKind = ComponentSurface['kind'] | 'spatial-2d'
+export type EditorSurfaceKind = ComponentSurface['kind'] | 'spatial-2d' | 'program'
 
 export type EditorAuthoringScope = 'location' | 'global'
 
@@ -50,8 +50,10 @@ export interface EditorSelectionSnapshot {
   readonly revision: number
   readonly sessionGeneration: number
   readonly surfaceKind: EditorSurfaceKind
-  /** Active Slide named state. Null for base Slide, Flow, and Spatial editing. */
+  /** Active local container state, or null while editing the base. */
   readonly stateId?: string | null
+  /** Precise field/range identity, independent of its owning instance IDs. */
+  readonly preciseTargetKey?: string
   readonly scope: EditorAuthoringScope
   readonly focus: EditorFocusKind
   /** Exact Flow text caret/range. Null for non-text selections and non-Flow surfaces. */
@@ -65,7 +67,7 @@ export interface EditorActionAdapterResult {
   readonly reason: string
 }
 
-export type EditorActionAdapterKind = 'global' | 'slide' | 'flow' | 'spatial'
+export type EditorActionAdapterKind = 'global' | 'slide' | 'flow' | 'spatial' | 'program'
 
 export interface EditorActionResult extends EditorActionAdapterResult {
   readonly actionId: EditorActionId
@@ -85,6 +87,7 @@ export interface EditorActionAdapters {
   readonly slide?: EditorActionAdapter
   readonly flow?: EditorActionAdapter
   readonly spatial?: EditorActionAdapter
+  readonly program?: EditorActionAdapter
 }
 
 export type FlowDeleteRoute = 'document' | 'overlay' | 'refuse'

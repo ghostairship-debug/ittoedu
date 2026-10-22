@@ -1,7 +1,7 @@
 import { z } from 'zod'
 import type { ModelChatMessage, ModelSelection, ModelToolDefinition } from './modelProvider'
 import type { ToolTarget } from './tools'
-import type { MaterialExtraction } from '../materialExtraction'
+import type { MaterialExtraction, PdfMaterialPage, PdfMaterialSummary } from '../materialExtraction'
 
 const digest = z.string().regex(/^[a-f0-9]{64}$/)
 const nonnegative = z.number().int().nonnegative()
@@ -86,4 +86,16 @@ export interface AttachmentExtractionResult {
 }
 export interface AttachmentExtractor {
   extract(input: AttachmentExtractionInput, options?: { signal?: AbortSignal }): Promise<AttachmentExtractionResult>
+}
+
+/** Private extraction-host job protocol; existing complete extraction API stays unchanged. */
+export interface AttachmentExtractionJobInput extends AttachmentExtractionInput { streamPdfPages?: true }
+export type AttachmentExtractionJobResult = AttachmentExtractionResult | PdfMaterialSummary
+export interface AttachmentExtractionJobOptions {
+  onProgress?: (page: number, total: number) => void
+  onPage?: (page: PdfMaterialPage) => Promise<void>
+}
+export interface PdfPageSinkOptions extends AttachmentExtractionJobOptions { signal?: AbortSignal; onPage: (page: PdfMaterialPage) => Promise<void> }
+export interface StreamingAttachmentExtractor extends AttachmentExtractor {
+  streamPdfPages(input: AttachmentExtractionInput, options: PdfPageSinkOptions): Promise<PdfMaterialSummary>
 }

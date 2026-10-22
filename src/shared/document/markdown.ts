@@ -1,7 +1,7 @@
 import { retainMarkdownIdentities, type MarkdownProjection } from './markdownIdentity'
 import { Marked, Lexer, type Token, type Tokens, type TokensList, type TokenizerExtension } from 'marked'
 import { decodeHTMLStrict } from 'entities'
-import { documentInlineSchema, documentBlockSchema, documentContentSchema, documentTextSlots, documentTextStyleSchema, documentMathStyleSchema, normalizeDocumentText, type DocumentBlock, type DocumentContent, type FlowInline, type FlowTextContent } from './content'
+import { documentInlineSchema, documentBlockSchema, documentContentSchema, documentTextSlots, documentTextStyleSchema, documentMathStyleSchema, normalizeDocumentText, walkDocument, type DocumentBlock, type DocumentContent, type FlowInline, type FlowTextContent } from './content'
 import { describeDocumentMath, DocumentMathError, parseDocumentMath } from './math'
 import { documentObjectSchema, emptyDocumentResources, resourcesForBlock, validateDocumentResources, type DocumentResources } from './resources'
 import type { DocumentDiagnostic } from './ports'
@@ -13,7 +13,7 @@ export interface MarkdownOptions {
   previous?: MarkdownProjection
   createId: (kind: 'block' | 'item' | 'row' | 'column' | 'formula' | 'asset') => string
   target?: 'flow' | 'file'
-  /** Flow may retain usable blocks and a diagnostic for a local unsupported fragment. */
+  /** Retain usable blocks and show a local unsupported fragment as its original source. */
   recoverUnsupportedBlocks?: boolean
   resolveImage?: (href: string) => { assetId: string; source: DocumentResources['assets'][number]['source'] }
 }
@@ -49,7 +49,8 @@ function attributeTail(src: string): { attrs: Record<string, unknown>; length: n
 function commentJson(raw: string, kind: string): Record<string, unknown> {
   const match = new RegExp(`^<!--cw:${kind}\\s+([\\s\\S]*?)-->$`).exec(raw.trim())
   if (!match) return error('无效身份标记', raw)
-  const value: unknown = JSON.parse(match[1]!)
+  let value: unknown
+  try { value = JSON.parse(match[1]!) } catch (cause) { return error(cause instanceof Error ? cause.message : '标记 JSON 无效', raw) }
   if (!value || typeof value !== 'object' || Array.isArray(value)) return error('标记需要 JSON 对象', raw)
   return value as Record<string, unknown>
 }
@@ -132,9 +133,15 @@ export function parseDocumentMarkdown(source: string, options: MarkdownOptions):
     const extensions: TokenizerExtension[] = [
       { name: 'cwInline', level: 'inline', start: src => src.indexOf('<!--cw:inline '), tokenizer(src) {
         if (!src.startsWith('<!--cw:inline ')) return
-        const end = src.indexOf('-->'); if (end < 0) return error('行内组件标记未闭合', src)
-        const raw = src.slice(0, end + 3)
-        return { type: 'cwInline', raw, inline: documentInlineSchema.parse(commentJson(raw, 'inline')) }
+        const end = src.indexOf('-->'), lineEnd = src.indexOf('\n')
+        const raw = src.slice(0, end < 0 ? lineEnd < 0 ? src.length : lineEnd : end + 3)
+        try {
+          if (end < 0) return error('行内组件标记未闭合', raw)
+          return { type: 'cwInline', raw, inline: documentInlineSchema.parse(commentJson(raw, 'inline')) }
+        } catch (cause) {
+          if (!options.recoverUnsupportedBlocks) return error(cause instanceof Error ? cause.message : String(cause), raw)
+          return { type: 'cwInvalid', raw, message: cause instanceof Error ? cause.message : String(cause) }
+        }
       } },
       {
         name: 'cwMeta', level: 'block', start: src => src.indexOf('<!--cw:block'),
@@ -293,6 +300,7 @@ export function parseDocumentMarkdown(source: string, options: MarkdownOptions):
       return { id: attrs.id, source: src.slice(0, match.index) + src.slice(match.index + match[0].length) }
     }
     const blocks: DocumentBlock[] = []
+    const identities = new Set<string>()
     const sourceMap: MarkdownSourceMap = { blocks: [] }
     let pending: Record<string, unknown> | undefined
     let pendingStart: number | undefined
@@ -308,6 +316,7 @@ export function parseDocumentMarkdown(source: string, options: MarkdownOptions):
       const t = token as Tokens.Generic
       if (token.type === 'space' || token.type === 'def') continue
       const blockStart = pendingStart ?? location
+      const resourceCounts = { assets: resources.assets.length, components: resources.components.length }
       try {
       if (token.type === 'cwMeta') {
         if (pending) error('一个块只能有一个元数据标记', token.raw)
@@ -376,6 +385,7 @@ export function parseDocumentMarkdown(source: string, options: MarkdownOptions):
           if (t.lang === 'cw-object-v1') {
             if (Object.keys(meta).length) error('对象片段已包含完整身份，不接受额外块标记', token.raw)
             const object = documentObjectSchema.parse(JSON.parse(t.text as string))
+            validateDocumentResources([object.block], object.resources, options.target)
             mergeResources(object.resources); value = object.block
           } else value = { ...common, type: 'code', code: t.text, ...(t.lang ? { language: t.lang } : {}) }
           break
@@ -384,36 +394,58 @@ export function parseDocumentMarkdown(source: string, options: MarkdownOptions):
         default: error(`未知源文块 ${token.type}，原文已保留`, token.raw)
       }
       const block = documentBlockSchema.parse(value)
+      const mapped = { ...mapMarkdownBlock(token, block, location, lexInline), from: pendingStart ?? location }
+      const blockIdentities = new Set<string>()
+      const addIdentity = (id: string) => {
+        if (identities.has(id) || blockIdentities.has(id)) error(`重复身份：${id}`, source.slice(blockStart, cursor))
+        blockIdentities.add(id)
+      }
+      walkDocument([block], child => {
+        addIdentity(child.id)
+        if (child.type === 'formula') addIdentity(child.formulaId)
+        if (child.type === 'list') child.items.forEach(item => addIdentity(item.id))
+        if (child.type === 'table') { child.rows.forEach(row => addIdentity(row.id)); child.columns.forEach(column => addIdentity(column.id)) }
+        for (const slot of documentTextSlots(child)) for (const atom of slot.content.inlines) if (atom.type === 'math') addIdentity(atom.formulaId)
+      })
       blocks.push(block)
-      sourceMap.blocks.push({ ...mapMarkdownBlock(token, block, location, lexInline), from: pendingStart ?? location })
+      sourceMap.blocks.push(mapped)
+      blockIdentities.forEach(id => identities.add(id))
       pendingStart = undefined
       location += token.raw.length
       } catch (cause) {
         if (!options.recoverUnsupportedBlocks) throw cause
+        resources.assets.length = resourceCounts.assets; resources.components.length = resourceCounts.components
         // A local unsupported fragment must not reparse the surrounding formal object fences as HTML.
         // Keep the fragment as source; known formal objects keep their original implementation.
         let prior: DocumentBlock | undefined
-        if (token.type === 'code' && t.lang === 'cw-object-v1') {
+        if (options.target !== 'file' && token.type === 'code' && t.lang === 'cw-object-v1') {
           try {
             const id = (JSON.parse(t.text as string) as { block?: { id?: string } }).block?.id
             prior = options.previous?.document.content.blocks.find(block => block.id === id)
           } catch { /* The source fragment below remains available for repair. */ }
         }
         const block: DocumentBlock = prior ?? { id: options.createId('block'), type: 'code', language: 'markdown', code: source.slice(blockStart, cursor).replace(/\n+$/, '') }
-        if (token.type === 'code' && t.lang === 'cw-object-v1' && !prior) recoverOpaque.add(block.id)
+        if (options.target !== 'file' && token.type === 'code' && t.lang === 'cw-object-v1' && !prior) recoverOpaque.add(block.id)
         if (prior && options.previous) mergeResources(resourcesForBlock(prior, options.previous.document.resources))
         blocks.push(block)
-        sourceMap.blocks.push({ blockId: block.id, from: blockStart, to: cursor, keys: [], slots: [] })
-        const before = source.slice(0, location)
-        diagnostics.push({ message: cause instanceof Error ? cause.message : String(cause), offset: location,
-          endOffset: cursor, line: before.split('\n').length, column: location - before.lastIndexOf('\n') })
+        sourceMap.blocks.push({ blockId: block.id, from: blockStart, to: cursor, keys: [], slots: [], rawSource: true })
+        identities.add(block.id)
+        const found = cause instanceof SourceError ? source.indexOf(cause.fragment, blockStart) : -1
+        const start = cause instanceof SourceError && cause.absoluteOffset !== undefined ? cause.absoluteOffset
+          : found >= blockStart && found < cursor ? found : blockStart
+        const before = source.slice(0, start)
+        diagnostics.push({ message: cause instanceof Error ? cause.message : String(cause), offset: start,
+          endOffset: cause instanceof SourceError ? Math.min(cursor, start + Math.max(1, cause.fragment.length)) : cursor,
+          line: before.split('\n').length, column: start - before.lastIndexOf('\n') })
         pending = undefined; pendingStart = undefined
       }
     }
     if (pending) {
       if (!options.recoverUnsupportedBlocks) error('块标记后缺少内容', '<!--cw:block')
       const start = pendingStart ?? location, before = source.slice(0, start)
-      blocks.push({ id: options.createId('block'), type: 'code', language: 'markdown', code: source.slice(start) })
+      const block: DocumentBlock = { id: options.createId('block'), type: 'code', language: 'markdown', code: source.slice(start).replace(/\n+$/, '') }
+      blocks.push(block)
+      sourceMap.blocks.push({ blockId: block.id, from: start, to: source.length, keys: [], slots: [], rawSource: true })
       diagnostics.push({ message: '块标记后缺少内容，源文已保留', offset: start, endOffset: source.length,
         line: before.split('\n').length, column: start - before.lastIndexOf('\n') })
     }

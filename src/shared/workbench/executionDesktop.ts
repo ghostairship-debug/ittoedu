@@ -142,7 +142,15 @@ export const executionDesktopRequestSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('approve'), runId: id, callId: id, decision: approvalDecisionSchema }).strict(),
   z.object({ type: z.literal('events'), conversationId: id, after: index.optional(), limit: z.number().int().min(1).max(5000).optional() }).strict(),
   z.object({ type: z.literal('search-events'), conversationId: id, query: z.string().trim().min(1), after: index.optional(), limit: z.number().int().min(1).max(100).optional() }).strict(),
-  z.object({ type: z.literal('timeline'), conversationId: id }).strict(),
+  z.object({ type: z.literal('timeline'), conversationId: id, consumerId: id.optional() }).strict(),
+  z.object({ type: z.literal('timeline-window'), ...identity, consumerId: id, userHistoryRevision: index,
+    userHistoryOffset: index.optional(), includeEndedRuns: z.boolean().optional(), start: index.optional(), limit: z.number().int().min(1).max(100).optional(), anchorKey: id.optional(),
+    groups: z.record(id, z.object({ itemStart: index.optional(), itemLimit: z.number().int().min(1).max(100).optional(), fileStart: index.optional(), fileLimit: z.number().int().min(1).max(100).optional() }).strict()).optional() }).strict(),
+  z.object({ type: z.literal('timeline-group'), ...identity, consumerId: id, userHistoryRevision: index,
+    userHistoryOffset: index.optional(), key: id, itemStart: index.optional(), itemLimit: z.number().int().min(1).max(100).optional(), fileStart: index.optional(), fileLimit: z.number().int().min(1).max(100).optional() }).strict(),
+  z.object({ type: z.literal('timeline-body'), ...identity, consumerId: id, userHistoryRevision: index,
+    userHistoryOffset: index.optional(), runId: id, itemId: id, part: index, offset: index.optional(), maxChars: z.number().int().positive().optional(), complete: z.boolean().optional() }).strict(),
+  z.object({ type: z.literal('release-timeline'), conversationId: id, consumerId: id }).strict(),
   z.object({ type: z.literal('blob'), conversationId: id, ref: z.object({ id: z.string().regex(/^[a-f0-9]{64}$/), bytes: index, mime: z.literal('text/plain;charset=utf-8') }).strict() }).strict(),
   z.object({ type: z.literal('edits'), documentId: id }).strict(),
   z.object({ type: z.literal('element-change'), submissionId: id }).strict(),
@@ -222,6 +230,10 @@ export type ElementRevertResult =
   /** Some fields were changed again after the request; nothing was written. */
   | { status: 'conflict'; fields: string[] }
   | { status: 'unavailable'; message: string }
+/** Display selection of an already loaded authoritative conversation; never history content or a write authority. */
+export interface ExecutionTimelineViewInput {
+  workspaceId: string; conversationId: string; consumerId: string; userHistoryRevision: number; userHistoryOffset?: number
+}
 export interface ExecutionDesktopAPI {
   workspace(root: string | null): Promise<ExecutionWorkspace>
   conversations(workspaceId: string): Promise<ConversationRecord[]>
@@ -269,7 +281,11 @@ export interface ExecutionDesktopAPI {
   revertElement?(input: { submissionId: string; direction: 'undo' | 'redo'; force?: boolean }): Promise<ElementRevertResult>
   events(conversationId: string, after?: number, limit?: number): Promise<ExecutionEventPage>
   searchEvents(input: ExecutionEventSearchInput): Promise<ExecutionEventSearchPage>
-  timeline(conversationId: string): Promise<ExecutionProjection>
+  timeline(conversationId: string, consumerId?: string): Promise<ExecutionProjection>
+  timelineWindow?(input: ExecutionTimelineViewInput & import('./executionTimelineWindow').ExecutionTimelinePageRequest): Promise<import('./executionTimelineWindow').ExecutionTimelineEntryPage>
+  timelineGroup?(input: ExecutionTimelineViewInput & import('./executionTimelineWindow').ExecutionTimelineGroupRequest): Promise<import('./executionTimelineWindow').ExecutionTimelineGroupPage>
+  timelineBody?(input: ExecutionTimelineViewInput & import('./executionTimelineWindow').ExecutionTimelineBodyRequest): Promise<import('./executionTimelineWindow').ExecutionTimelineBodyPage>
+  releaseTimeline?(conversationId: string, consumerId: string): Promise<void>
   blob(conversationId: string, ref: ExecutionBlobRef): Promise<string>
   edits(documentId: string): Promise<EditSessionSnapshot[]>
   subscribe(listener: (event: ExecutionEvent) => void): () => void

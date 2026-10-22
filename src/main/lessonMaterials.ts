@@ -39,36 +39,69 @@ export class LessonMaterials {
     return resolved
   }
   import(target: LessonMaterialTarget, input: { title: string; original: Uint8Array; extraction: MaterialExtraction }): Promise<LessonMaterialRecord> {
-    return this.serialized(async () => {
-      const title = z.string().trim().min(1).max(300).parse(input.title)
-      if (!(input.original instanceof Uint8Array) || !input.original.length) throw new Error('原材料须为非空文件')
-      const extraction = extractionSchema.parse(input.extraction)
-      const assets = new Set(extraction.assets.map(asset => asset.id))
-      if (assets.size !== extraction.assets.length || new Set(extraction.fragments.map(f => f.id)).size !== extraction.fragments.length) throw new Error('材料片段或图片标识重复')
-      for (const f of extraction.fragments) {
-        if (f.kind === 'image' ? !f.assetId || !assets.has(f.assetId) : !f.text?.trim()) throw new Error('材料片段正文或图像缺失')
-      }
-      const directory = await this.directory(target)
-      const id = randomUUID()
+    return this.importPages(target, { title: input.title, original: input.original }, async consume => { await consume(input.extraction) })
+  }
+  /** The producer awaits each persisted page, so only metadata accumulates in this owner. */
+  async importPages(target: LessonMaterialTarget, input: { title: string; original: Uint8Array },
+    produce: (consume: (page: MaterialExtraction) => Promise<void>) => Promise<void>, signal?: AbortSignal): Promise<LessonMaterialRecord> {
+    signal?.throwIfAborted()
+    const title = z.string().trim().min(1).max(300).parse(input.title)
+    if (!(input.original instanceof Uint8Array) || !input.original.length) throw new Error('原材料须为非空文件')
+    const { directory, id, temp } = await this.serialized(async () => {
+      signal?.throwIfAborted()
+      const directory = await this.directory(target), id = randomUUID()
       const temp = path.join(directory, `.pending-${id}`)
-      const extension = extraction.format === 'image' ? assetExtension(extraction.assets[0]?.mime ?? '') : extraction.format === 'text' ? 'txt' : extraction.format
-      if (extraction.format === 'image' && (extraction.assets.length !== 1 || !['png', 'jpg', 'webp'].includes(extension))) throw new Error('图片材料须包含一份可读取的 PNG、JPEG 或 WebP 原图')
-      const sourcePath = `materials/${id}/original.${extension}`
-      const record: LessonMaterialRecord = recordSchema.parse({ version: 1, id, lessonId: target.lessonId, title, createdAt: Date.now(), sourceVersion: hash(input.original), extractionVersion: hash(JSON.stringify({ ...extraction, assets: extraction.assets.map(asset => ({ id: asset.id, mime: asset.mime, version: hash(asset.bytes) })) })), sourcePath, format: extraction.format, extractorVersion: extraction.extractorVersion, fragments: extraction.fragments, assets: extraction.assets.map((asset, index) => ({ id: asset.id, mime: asset.mime, path: `materials/${id}/assets/${index}.${assetExtension(asset.mime)}`, version: hash(asset.bytes) })), gaps: extraction.gaps })
       await fs.mkdir(path.join(temp, 'assets'), { recursive: true })
-      try {
-        await fs.writeFile(path.join(temp, path.basename(sourcePath)), input.original, { flag: 'wx' })
-        for (let index = 0; index < extraction.assets.length; index++) await fs.writeFile(path.join(temp, 'assets', `${index}.${assetExtension(extraction.assets[index].mime)}`), extraction.assets[index].bytes, { flag: 'wx' })
-        await fs.writeFile(path.join(temp, 'extraction.json'), JSON.stringify(record), { flag: 'wx' })
-        await this.validateLesson(target)
-        await fs.rename(temp, path.join(directory, id))
-      } catch (error) {
-        const actual = await fs.realpath(temp).catch(() => null)
-        if (actual === temp && path.dirname(actual) === directory) await fs.rm(temp, { recursive: true, force: true })
-        throw error
-      }
-      return record
+      return { directory, id, temp }
     })
+    const fragments: MaterialExtraction['fragments'] = [], gaps: MaterialExtraction['gaps'] = []
+    const assets: LessonMaterialRecord['assets'] = []
+    const assetIds = new Set<string>(), fragmentIds = new Set<string>()
+    let metadata: Pick<MaterialExtraction, 'version' | 'format' | 'extractorVersion'> | undefined
+    try {
+      await produce(async page => {
+        signal?.throwIfAborted()
+        const extraction = extractionSchema.parse(page)
+        if (!metadata) metadata = { version: extraction.version, format: extraction.format, extractorVersion: extraction.extractorVersion }
+        else if (metadata.format !== extraction.format || metadata.extractorVersion !== extraction.extractorVersion) throw new Error('材料提取器在导入期间发生变化')
+        for (const asset of extraction.assets) {
+          if (assetIds.has(asset.id)) throw new Error('材料片段或图片标识重复')
+          assetIds.add(asset.id)
+        }
+        for (const f of extraction.fragments) {
+          if (fragmentIds.has(f.id)) throw new Error('材料片段或图片标识重复')
+          fragmentIds.add(f.id)
+          if (f.kind === 'image' ? !f.assetId || !assetIds.has(f.assetId) : !f.text?.trim()) throw new Error('材料片段正文或图像缺失')
+        }
+        for (const asset of extraction.assets) {
+          signal?.throwIfAborted()
+          const index = assets.length, extension = assetExtension(asset.mime)
+          await fs.writeFile(path.join(temp, 'assets', `${index}.${extension}`), asset.bytes, { flag: 'wx' })
+          assets.push({ id: asset.id, mime: asset.mime, path: `materials/${id}/assets/${index}.${extension}`, version: hash(asset.bytes) })
+        }
+        fragments.push(...extraction.fragments); gaps.push(...extraction.gaps)
+        signal?.throwIfAborted()
+      })
+      signal?.throwIfAborted()
+      if (!metadata || !fragments.length) throw new Error('材料没有可读取内容')
+      const extractionMetadata = { version: 1, extractorVersion: metadata.extractorVersion, format: metadata.format, fragments, assets: assets.map(asset => ({ id: asset.id, mime: asset.mime, version: asset.version })), gaps }
+      const extension = metadata.format === 'image' ? assetExtension(assets[0]?.mime ?? '') : metadata.format === 'text' ? 'txt' : metadata.format
+      if (metadata.format === 'image' && (assets.length !== 1 || !['png', 'jpg', 'webp'].includes(extension))) throw new Error('图片材料须包含一份可读取的 PNG、JPEG 或 WebP 原图')
+      const sourcePath = `materials/${id}/original.${extension}`
+      const record: LessonMaterialRecord = recordSchema.parse({ version: 1, id, lessonId: target.lessonId, title, createdAt: Date.now(), sourceVersion: hash(input.original), extractionVersion: hash(JSON.stringify(extractionMetadata)), sourcePath, format: metadata.format, extractorVersion: metadata.extractorVersion, fragments, assets, gaps })
+      await fs.writeFile(path.join(temp, path.basename(sourcePath)), input.original, { flag: 'wx' })
+      await fs.writeFile(path.join(temp, 'extraction.json'), JSON.stringify(record), { flag: 'wx' })
+      return await this.serialized(async () => {
+        await this.validateLesson(target)
+        signal?.throwIfAborted()
+        await fs.rename(temp, path.join(directory, id))
+        return record
+      })
+    } catch (error) {
+      const actual = await fs.realpath(temp).catch(() => null)
+      if (actual === temp && path.dirname(actual) === directory) await fs.rm(temp, { recursive: true, force: true })
+      throw error
+    }
   }
   private async record(target: LessonMaterialTarget, directory: string, id: string): Promise<LessonMaterialRecord> {
     z.uuid().parse(id)

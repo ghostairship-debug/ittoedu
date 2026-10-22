@@ -1,3 +1,5 @@
+import { appendRootContainers, testContainerInstance } from '../helpers/glxWorkFixture'
+import { componentSurfaces } from '../../src/shared/contracts/component-platform/project'
 import { afterEach, expect, it } from 'vitest'
 import { waitFor } from '@testing-library/react'
 import { createBlankCourseProjectV10 } from '../../src/core/course/createCourseProjectV10'
@@ -18,13 +20,13 @@ import { ComponentNavigationOwner } from '../../src/renderer/components/Componen
 afterEach(() => { document.body.replaceChildren() })
 function fixture() {
   const project = createBlankCourseProjectV10('嵌套平台引用')
-  const surface = project.surfaces[0]
-  surface.presentation = { states: [{ id: 'answer-state', title: '答案', overrides: {} }] }
+  const surface = testContainerInstance(project, 0)
+  surface.container.presentation = { states: [{ id: 'answer-state', title: '答案', overrides: {} }] }
   project.definitions.item = { id: 'item', role: 'content', implementation: { kind: 'builtin', key: 'guoling.group' } }
   project.instances.button = { id: 'button', definitionId: 'item', name: '提交按钮', data: {} }
   project.instances.feedback = { id: 'feedback', definitionId: 'item', name: '反馈', data: {}, playbackInitialVisibility: 'hidden' }
   surface.childIds.push('button', 'feedback')
-  project.surfaces.push({ id: 'destination', kind: 'slide', title: '下一页', childIds: [],
+  appendRootContainers(project, { id: 'destination', kind: 'slide', title: '下一页', childIds: [],
     presentation: { states: [{ id: 'destination-state', title: '目标答案', overrides: {} }] } })
   project.logic = { courseState: [{ key: 'object-ref', valueType: 'string', defaultValue: '' }], navigationGuards: [] }
   const owner = { kind: 'surface' as const, surfaceId: surface.id }
@@ -147,7 +149,7 @@ it('keeps prepared references canonical through the real Session, object copy, u
   if (source.kind !== 'course-v10') throw new Error('Expected V10')
   const copy = prepareCourseObjectPaste({ documentId: 'nested', project: source.project, resources: source.resources, roots: ['button', 'feedback'] }, {
     capturedTarget: { documentId: 'nested', project: source.project, resources: source.resources, surfaceId: f.surface.id },
-    container: { kind: 'surface', surfaceId: f.surface.id }, index: source.project.surfaces[0].childIds.length, identity: 'copy',
+    container: { kind: 'surface', surfaceId: f.surface.id }, index: componentSurfaces(source.project)[0].childIds.length, identity: 'copy',
   })
   await execute(copy.edits)
   for (const direction of ['undo', 'redo'] as const) {

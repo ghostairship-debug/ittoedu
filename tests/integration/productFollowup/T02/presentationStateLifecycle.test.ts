@@ -1,4 +1,6 @@
 // @vitest-environment node
+import { testContainerInstance } from '../../../helpers/glxWorkFixture'
+import { componentSurface, componentSurfaces } from '../../../../src/shared/contracts/component-platform/project'
 import { promises as fs } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -21,9 +23,9 @@ it('public V10 presentation state actions preserve teacher content geometry back
   const host = new DocumentHostService(path.join(directory, 'documents')), runId = 'presentation-state-lifecycle'
   try {
     const project = createBlankCourseProjectV10('展示状态生命周期')
-    const surface = project.surfaces[0]
-    surface.title = '状态课演示'
-    surface.background = { mode: 'own', color: '#dfe8f1' }
+    const authored = testContainerInstance(project, 0)
+    authored.name = '状态课演示'
+    authored.container.background = { mode: 'own', color: '#dfe8f1' }
     project.definitions[TEXT_DEFINITION.id] = TEXT_DEFINITION
     project.definitions.interactive = { id: 'interactive', title: '原互动', role: 'content', implementation: { kind: 'builtin', key: 'guoling.web' } }
     project.instances.body = { id: 'body', definitionId: TEXT_DEFINITION.id, data: textDataEdit('fixture', createTextComponentData('教师已修改正文')).value,
@@ -31,12 +33,14 @@ it('public V10 presentation state actions preserve teacher content geometry back
     project.instances.button = { id: 'button', definitionId: 'interactive',
       data: { html: '<button onclick="this.textContent=\'已点击\'">原互动按钮</button>' },
       frame: { width: 180, height: 70, transform: [1, 0, 0, 1, 403, 217] } }
-    surface.childIds = ['body', 'button']
-    surface.presentation = { states: [{ id: 'teacher-state', title: '教师已设状态',
+    authored.childIds = ['body', 'button']
+    authored.container.presentation = { states: [{ id: 'teacher-state', title: '教师已设状态',
       overrides: { body: { style: { opacity: .35 }, frame: { width: 360, height: 120, transform: [1, 0, 0, 1, 71, 93] } }, button: { visible: false } },
       order: ['button', 'body'], background: { mode: 'own', color: '#ffeecc' } }], initialStateId: 'teacher-state', thumbnailStateId: 'teacher-state' }
+    const surface = componentSurfaces(project)[0]
     const initial = await host.internalAPI.create({ kind: 'course-v10', project, resources: { assets: {}, components: {} } }, 'states.h5lesson')
     await host.tools.beginRun({ runId, actor: 'agent', documents: [{ documentId: initial.documentId, writable: [{ kind: 'document' }] }] })
+    await host.tools.loadToolFamilies(runId, ['navigation'])
     let sequence = 0
     const call = (name: string, input: unknown) => host.tools.execute(runId, `state-call-${++sequence}`, { name, input })
     expect((await host.tools.describeRun(runId)).map(tool => tool.name)).toContain('presentation.update')
@@ -59,7 +63,14 @@ it('public V10 presentation state actions preserve teacher content geometry back
       // The public read renews the observed handle; the caller consumes that response
       // rather than reusing the pre-edit snapshot for the next write.
       pageHandle = data.target
-      return JSON.parse(data.text) as ComponentSurface
+      const observed = JSON.parse(data.text) as ComponentSurface
+      // Public reads expose state identities; the canonical snapshot is the full
+      // storage oracle for preservation assertions, including data and overrides.
+      const snapshot = await host.internalAPI.read(initial.documentId)
+      if (snapshot.model.kind !== 'course-v10') throw new Error('V10 required')
+      const stored = componentSurface(snapshot.model.project, observed.id)!
+      expect(stored.presentation?.states.map(state => state.id)).toEqual(observed.presentation?.states.map(state => state.id))
+      return structuredClone(stored)
     }
     const observed = await readSurface()
     const sourceState = observed.presentation!.states.find(state => state.title === '教师已设状态')!
@@ -106,10 +117,11 @@ it('public V10 presentation state actions preserve teacher content geometry back
     const current = await host.internalAPI.read(initial.documentId)
     expect(current.undoDepth).toBe(7)
     if (current.model.kind !== 'course-v10') throw new Error('V10 required')
-    expect(current.model.project.instances).toEqual(project.instances)
+    expect(current.model.project.instances).toEqual({ ...project.instances, [surface.id]: { ...project.instances[surface.id],
+      container: { ...project.instances[surface.id].container, presentation: deleted } } })
     expect(current.model.project.definitions).toEqual(project.definitions)
     expect(current.model.project.global).toEqual(project.global)
-    expect(current.model.project.surfaces[0]).toEqual({ ...surface, presentation: deleted })
+    expect(componentSurfaces(current.model.project)[0]).toEqual({ ...surface, presentation: deleted })
     const filename = path.join(directory, 'saved.h5lesson')
     await host.internalAPI.save(initial.documentId, filename)
     const reopened = await new DocumentHostService(path.join(directory, 'cold-documents')).internalAPI.open(filename)

@@ -1,5 +1,6 @@
 import type { ComponentDefinition, ComponentInstance, ComponentLayoutInput, CourseProjectV10 } from '../../shared/contracts/component-platform'
 import { allDocumentTextSlots, inlineComponentIds } from '../../shared/document/textInteraction'
+import { isNativeFlowLayoutGroup } from '../../shared/flowNativeLayout'
 
 interface MeasuredWebBoxInput {
   definitionId: string
@@ -136,15 +137,17 @@ function instanceWebUsesFixedViewport(instance: ComponentInstance, html: string,
 
 /** Software derives Surface input; the returned height is never a formal edit. */
 export function componentLayoutInput(instance: ComponentInstance, host: {
-  project: Pick<CourseProjectV10, 'instances' | 'definitions'>; kind: 'free-frame' | 'flow'; inlineSize: number; viewport?: { width: number; height: number }; definition?: ComponentDefinition
+  project: Pick<CourseProjectV10, 'instances' | 'definitions'>; kind: 'free-frame' | 'flow' | 'program'; inlineSize: number; viewport?: { width: number; height: number }; definition?: ComponentDefinition
 }, fixedViewport?: boolean): ComponentLayoutInput {
   const width = instance.frame?.width ?? host.viewport?.width ?? host.inlineSize
   const height = instance.frame?.height ?? host.viewport?.height ?? 0
+  if (host.kind === 'program') return { mode: 'program-viewport', inlineSize: host.viewport?.width ?? host.inlineSize, blockSize: host.viewport?.height ?? height }
   if (host.kind === 'free-frame') return { mode: 'free-frame', inlineSize: width, blockSize: height }
-  const declared = host.definition?.implementation
-  const key = declared?.kind === 'builtin' ? declared.key : instance.definitionId
+  if (isNativeFlowLayoutGroup(instance, host.definition)) return { mode: 'flow-content', inlineSize: host.inlineSize }
+  const implementation = instance.implementationOverride ?? host.definition?.implementation
+  const key = implementation?.kind === 'builtin' ? implementation.key : instance.definitionId
   const data = instance.data && typeof instance.data === 'object' && !Array.isArray(instance.data) ? instance.data : null
-  const web = ['guoling.web', 'guoling.html-program'].includes(key)
+  const web = implementation?.kind !== 'source' && ['guoling.web', 'guoling.html-program'].includes(key)
   // Inline slots and attached behaviors own their internal layout. Only actual
   // free child geometry turns a reading block into a local viewport assembly.
   const childGeometry = (owner: ComponentInstance): boolean => {
@@ -155,10 +158,13 @@ export function componentLayoutInput(instance: ComponentInstance, host: {
       return Boolean(child.frame || child.flowPlacement) || childGeometry(child)
     })
   }
-  const viewport = Boolean(instance.frame) && ['guoling.image', 'guoling.video', 'guoling.audio'].includes(key)
+  // A formal HTML program carries an assigned design region. Its effective
+  // implementation and frame own that viewport, before foreign CSS inference.
+  // Ordinary Web fragments keep natural Flow even when assembly measured a frame.
+  const viewport = Boolean(instance.frame) && ['guoling.image', 'guoling.video', 'guoling.audio', 'guoling.html-program'].includes(key)
     || key !== 'guoling.document-block' && childGeometry(instance)
     || (web && typeof data?.html === 'string' ? fixedViewport ?? instanceWebUsesFixedViewport(instance, data.html, typeof data.css === 'string' ? data.css : '')
-      : key !== 'guoling.document-block' && (instance.implementationOverride ?? declared)?.kind === 'source' && Boolean(instance.frame))
+      : key !== 'guoling.document-block' && implementation?.kind === 'source' && Boolean(instance.frame))
   return viewport ? { mode: 'flow-viewport', inlineSize: width, blockSize: height } : { mode: 'flow-content', inlineSize: host.inlineSize }
 }
 

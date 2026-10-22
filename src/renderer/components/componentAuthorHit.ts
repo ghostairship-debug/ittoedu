@@ -1,4 +1,7 @@
 import type { GeometryPoint } from '../../core/components/geometry'
+import { invertMatrix, transformPoint } from '../../core/components/geometry'
+import { componentClientMatrix } from '../../player/components/runtime/componentClientMatrix'
+import { componentPaintStack } from '../../components/web/paintHit'
 
 export const COMPONENT_AUTHOR_HIT = 'component-author-hit-test'
 export interface ComponentAuthorHitResult {
@@ -28,4 +31,27 @@ export function requestComponentAuthorHit(root: HTMLElement | null, point: Geome
     }
     if (!event.defaultPrevented) resolve(undefined)
   })
+}
+
+const authorChrome = '[data-slide-authoring-hit-plane],.canvas-authoring-targets,.author-field-affordances,.canvas-line-overlay,[data-handle],[data-line-handle],.teacher-controller-overlay,.selection-quick-bar,.text-edit-toolbar,[data-component-professional-editor],.text-edit-overlay,.image-safe-area-guides'
+export interface VisibleComponentAuthorHit { instanceId: string; authorKey?: string | null }
+
+/** Resolve outer paint first, then ask that same Source realm about its content.
+ * A Surface background can stop the search without becoming a selectable object.
+ */
+export async function visibleComponentAuthorHit(root: HTMLElement | null, point: GeometryPoint,
+  contentElement: (id: string) => HTMLElement | null | undefined): Promise<VisibleComponentAuthorHit | null> {
+  if (!root) return null
+  const elements = componentPaintStack(root, point.x, point.y, authorChrome), realmHits = new Map<string, ComponentAuthorHitResult | undefined>()
+  for (const element of elements) {
+    const owner = element.closest<HTMLElement>('[data-component-instance]'), id = owner?.dataset.componentInstance
+    if (!id) return null
+    const content = contentElement(id), matrix = content && componentClientMatrix(content)
+    if (!content?.contains(element)) return { instanceId: id, authorKey: null }
+    if (!realmHits.has(id)) realmHits.set(id, matrix ? await requestComponentAuthorHit(content, transformPoint(invertMatrix(matrix), point)) : undefined)
+    const hit = realmHits.get(id)
+    if (hit && !hit.painted && !hit.authorKey) continue
+    return { instanceId: id, ...(hit ? { authorKey: hit.authorKey } : {}) }
+  }
+  return null
 }

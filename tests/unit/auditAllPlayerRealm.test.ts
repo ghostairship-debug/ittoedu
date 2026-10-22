@@ -1,4 +1,6 @@
 // @vitest-environment jsdom
+import { componentSurfaces } from '../../src/shared/contracts/component-platform/project'
+import { appendRootContainers, setRootContainers, testContainerInstance } from '../helpers/glxWorkFixture'
 import { afterEach, expect, it, vi } from 'vitest'
 import { createBlankCourseProjectV10 } from '../../src/core/course/createCourseProjectV10'
 import { prepareCourseTeacherControllerEdits } from '../../src/core/course/courseElementInsertion'
@@ -21,7 +23,7 @@ afterEach(() => { vi.restoreAllMocks(); document.body.replaceChildren() })
 function root() { const node = document.createElement('div'); document.body.append(node); return node }
 function project() {
   const value = createBlankCourseProjectV10(); value.global = { underlay: [], overlay: [] }; value.instances = {}; value.definitions = {}
-  value.surfaces = [{ id: 'A', kind: 'slide', title: 'A', childIds: [] }, { id: 'B', kind: 'slide', title: 'B', childIds: [] }]; return value
+  setRootContainers(value, [{ id: 'A', kind: 'slide', title: 'A', childIds: [] }, { id: 'B', kind: 'slide', title: 'B', childIds: [] }]); return value
 }
 function scope(id = 'component') {
   const events = new Map<string, Set<(value: JsonValue) => void>>(), abort = new AbortController(), cleanups: (() => void)[] = []
@@ -34,11 +36,11 @@ const source = { kind: 'source' as const, language: 'javascript' as const, sourc
 
 it('CA043 injects student navigation into ordinary source and forced navigation only into the canonical global teacher', async () => {
   const blank = createBlankCourseProjectV10()
-  const value = applyComponentOperation(blank, captureComponentOperation(blank, prepareCourseTeacherControllerEdits(blank, blank.surfaces[0].id, 'slide-authoring').edits))
-  value.surfaces[0].id = 'A'; value.surfaces.push({ id: 'B', kind: 'slide', title: 'B', childIds: [] })
+  const value = applyComponentOperation(blank, captureComponentOperation(blank, prepareCourseTeacherControllerEdits(blank, componentSurfaces(blank)[0].id, 'slide-authoring').edits))
+  setRootContainers(value, [{ ...componentSurfaces(value)[0], id: 'A' }]); appendRootContainers(value, { id: 'B', kind: 'slide', title: 'B', childIds: [] })
   value.logic = { courseState: [], navigationGuards: [{ id: 'guard', toSurfaceIds: ['B'], effect: 'block', match: 'all', conditions: [{ type: 'compare', key: 'blocked', operator: 'eq', value: true }], message: 'blocked' }] }
   const teacherId = value.global.overlay[0]; value.instances[teacherId].implementationOverride = source
-  value.definitions.source = { id: 'source', role: 'content', implementation: source }; value.instances.ordinary = { id: 'ordinary', definitionId: 'source', data: {} }; value.surfaces[0].childIds.push('ordinary')
+  value.definitions.source = { id: 'source', role: 'content', implementation: source }; value.instances.ordinary = { id: 'ordinary', definitionId: 'source', data: {} }; testContainerInstance(value, 0).childIds.push('ordinary')
   let surface = 'A'; const navigation = new ComponentNavigationOwner({ project: () => value, surfaceId: () => surface, select: id => { surface = id }, courseState: { get: () => true as never } })
   const contexts = new Map<string, ComponentRuntimeContext>(), prepared: PreparedComponentRuntime = { implementation: { mount(context) { contexts.set(context.instance.id, context); return { update() {}, dispose() {} } } } }
   const runtime = new ComponentPlatformRuntime('ports', { teacherController: navigation.teacherPort(), studentNavigation: navigation, resolveSource: async () => prepared })
@@ -49,7 +51,7 @@ it('CA043 injects student navigation into ordinary source and forced navigation 
 
 it('CA233 an editor source override of feedback retains its document subscriptions on an inactive surface', async () => {
   const value = project(); value.definitions.feedback = { id: 'feedback', role: 'behavior', implementation: { kind: 'builtin', key: 'guoling.feedback' } }
-  value.instances.overridden = { id: 'overridden', definitionId: 'feedback', data: {}, implementationOverride: source }; value.surfaces[1].childIds.push('overridden')
+  value.instances.overridden = { id: 'overridden', definitionId: 'feedback', data: {}, implementationOverride: source }; testContainerInstance(value, 1).childIds.push('overridden')
   const mount = vi.fn(() => ({ update() {}, dispose() {} })), navigation = new ComponentNavigationOwner({ project: () => value, surfaceId: () => 'A', select() {} })
   const runtime = new ComponentPlatformRuntime('override', { mode: 'edit', teacherController: navigation.teacherPort(), studentNavigation: navigation, resolveSource: async () => ({ implementation: { mount } }) })
   try { await runtime.sync(value, { assets: {}, components: {} }); expect(mount).toHaveBeenCalledOnce() }
@@ -57,22 +59,22 @@ it('CA233 an editor source override of feedback retains its document subscriptio
 })
 
 it('CA045 publishes current target facts for B updates/deletion without updating or remounting unchanged source A', async () => {
-  let value = project(); value.definitions.source = { id: 'source', role: 'content', implementation: source }; value.definitions.group = { id: 'group', role: 'content', implementation: { kind: 'builtin', key: 'guoling.group' } }
-  value.instances['A-source'] = { id: 'A-source', definitionId: 'source', data: {} }; value.instances.B = { id: 'B', definitionId: 'group', data: { text: 'before' } }; value.surfaces[0].childIds.push('A-source', 'B')
+  let value = project(); setRootContainers(value, [componentSurfaces(value)[0], { ...componentSurfaces(value)[1], id: 'B-surface' }]); value.definitions.source = { id: 'source', role: 'content', implementation: source }; value.definitions.group = { id: 'group', role: 'content', implementation: { kind: 'builtin', key: 'guoling.group' } }
+  value.instances['A-source'] = { id: 'A-source', definitionId: 'source', data: {} }; value.instances.B = { id: 'B', definitionId: 'group', data: { text: 'before' } }; testContainerInstance(value, 0).childIds.push('A-source', 'B')
   const updates = vi.fn(), mounted = vi.fn(), received: JsonValue[] = []
   const implementation: ComponentRuntimeImplementation = { mount(context) { mounted(); context.scope.events.subscribe('__runtime.targets', value => received.push(value)); return { update: updates, dispose() {} } } }
   const runtime = new ComponentPlatformRuntime('facts', { resolveSource: async () => ({ implementation, artifactIdentity: 'same' }) }); const element = root(); runtime.bind('A-source', element)
   try {
     await runtime.sync(value, { assets: {}, components: {} }); value = { ...value, instances: { ...value.instances, B: { ...value.instances.B, data: { text: 'after' } } } }; await runtime.sync(value, { assets: {}, components: {} })
     expect(received.at(-1)).toEqual(expect.arrayContaining([expect.objectContaining({ instanceId: 'B', value: { text: 'after' } })])); expect(mounted).toHaveBeenCalledOnce(); expect(updates).not.toHaveBeenCalled()
-    value = { ...value, instances: { 'A-source': value.instances['A-source'] }, surfaces: [{ ...value.surfaces[0], childIds: ['A-source'] }, value.surfaces[1]] }; await runtime.sync(value, { assets: {}, components: {} })
+    const { B: _removed, ...remaining } = value.instances; value = { ...value, instances: { ...remaining, A: { ...remaining.A, childIds: ['A-source'] } } }; await runtime.sync(value, { assets: {}, components: {} })
     expect((received.at(-1) as Array<{ instanceId: string; reference: { kind: string } }>).some(value => value.reference.kind === 'instance' && value.instanceId === 'B')).toBe(false); expect(mounted).toHaveBeenCalledOnce()
   } finally { await runtime.dispose() }
 })
 
 it('CA152 retires only a changed resource origin environment and preserves generation on same-origin URL edits', async () => {
   let value = project(); value.definitions.web = { id: 'web', role: 'content', implementation: { kind: 'builtin', key: 'guoling.web' } }
-  value.instances.web = { id: 'web', definitionId: 'web', data: { html: '<p>web</p>', css: 'body{background:red}', resourceSources: [{ url: 'https://old.example/a.png', usage: 'image' }] } }; value.surfaces[0].childIds.push('web')
+  value.instances.web = { id: 'web', definitionId: 'web', data: { html: '<p>web</p>', css: 'body{background:red}', resourceSources: [{ url: 'https://old.example/a.png', usage: 'image' }] } }; testContainerInstance(value, 0).childIds.push('web')
   const mounts = vi.fn(), dispose = vi.fn(), update = vi.fn(), runtime = new ComponentPlatformRuntime('origin', { resolveBuiltin: async () => ({ artifactIdentity: 'same', implementation: { mount() { mounts(); return { update, dispose } } } }) })
   runtime.bind('web', root())
   const change = (url: string) => { value = { ...value, instances: { ...value.instances, web: { ...value.instances.web, data: { html: '<p>web</p>', css: 'body{background:red}', resourceSources: [{ url, usage: 'image' }] } } } } }
@@ -95,7 +97,7 @@ it('CA140 professional image/media implementations consume resource notification
 it('CA204 nested runtime events use canonical global/current-surface ownership; CA275 stopped native control clicks fire once', async () => {
   const value = project(), h = scope('popover'); value.definitions.group = { id: 'group', role: 'content', implementation: { kind: 'builtin', key: 'guoling.group' } }
   for (const id of ['global', 'nested', 'A-node', 'B-node', 'popover']) value.instances[id] = { id, definitionId: 'group', data: {} }
-  value.instances.global.childIds = ['nested']; value.global.overlay.push('global'); value.surfaces[0].childIds.push('A-node', 'popover'); value.surfaces[1].childIds.push('B-node')
+  value.instances.global.childIds = ['nested']; value.global.overlay.push('global'); testContainerInstance(value, 0).childIds.push('A-node', 'popover'); testContainerInstance(value, 1).childIds.push('B-node')
   let surface = 'A'; const nodes = new Map([['popover', root()]]), navigation = new ComponentNavigationOwner({ project: () => value, surfaceId: () => surface, select() {} }), world = new ComponentWorldInteractions({ project: () => value, element: id => nodes.get(id), document: () => document, audio: () => undefined, navigation, active: () => true, playback: () => true, report() {} })
   const ports = world.ports({ instance: value.instances.popover, scope: h.scope }), global = vi.fn(), scene = vi.fn(), click = vi.fn()
   const stops = [ports.subscribeTrigger({ type: 'runtime.event', scope: 'global', eventName: 'done' }, global), ports.subscribeTrigger({ type: 'runtime.event', scope: 'scene', eventName: 'done' }, scene), ports.subscribeTrigger({ type: 'node.click', nodeId: 'popover' }, click)]
@@ -108,11 +110,11 @@ it('CA204 nested runtime events use canonical global/current-surface ownership; 
 
 it('CA199 one stable activation is emitted after a node becomes visible; CA287 native audio identity is available to the current UI and reference resolver', async () => {
   const value = project(), activated: string[] = [], element = root()
-  value.definitions.group = { id: 'group', role: 'content', implementation: { kind: 'builtin', key: 'guoling.group' } }; value.instances.node = { id: 'node', definitionId: 'group', data: {}, playbackInitialVisibility: 'hidden' }; value.surfaces[0].childIds.push('node')
+  value.definitions.group = { id: 'group', role: 'content', implementation: { kind: 'builtin', key: 'guoling.group' } }; value.instances.node = { id: 'node', definitionId: 'group', data: {}, playbackInitialVisibility: 'hidden' }; testContainerInstance(value, 0).childIds.push('node')
   const nav = new ComponentNavigationOwner({ project: () => value, surfaceId: () => 'A', select() {} }), world = new ComponentWorldInteractions({ project: () => value, element: id => id === 'node' ? element : undefined, document: () => document, audio: () => undefined, navigation: nav, active: () => true, playback: () => true, report() {}, activated: id => activated.push(id) })
   try { world.applyAllVisibility(); expect(activated).toEqual([]); const visibility = world.presentationPort('node').visibility(true); expect(activated).toEqual(['node']); world.applyAllVisibility(); expect(activated).toEqual(['node']); await visibility.setVisible(false); await visibility.setVisible(true); expect(activated).toEqual(['node', 'node']); visibility.dispose() }
   finally { world.dispose(); nav.dispose() }
-  value.definitions.audio = { id: 'audio', role: 'content', implementation: { kind: 'builtin', key: 'guoling.audio' } }; value.instances.audio = { id: 'audio', definitionId: 'audio', name: 'Native audio', data: { assetId: 'asset', channel: 'narration', volume: .8, loop: false } }; value.surfaces[0].childIds.push('audio')
+  value.definitions.audio = { id: 'audio', role: 'content', implementation: { kind: 'builtin', key: 'guoling.audio' } }; value.instances.audio = { id: 'audio', definitionId: 'audio', name: 'Native audio', data: { assetId: 'asset', channel: 'narration', volume: .8, loop: false } }; testContainerInstance(value, 0).childIds.push('audio')
   expect(componentInteractionView(value, 'A').sounds.audio.name).toBe('Native audio'); expect(componentInteractionView(value, 'B').sounds.audio).toBeUndefined()
   expect(readComponentInteractionSounds({ project: value, surfaceId: 'A' } as never)).toContainEqual({ id: 'audio', name: 'Native audio' })
   expect(courseSoundReference(value, 'token', new Map([['token', { kind: 'sound', soundId: 'audio' }]]))).toBe('audio'); expect(value.media).toBeUndefined()
@@ -122,9 +124,9 @@ it('CA022 actual Published navigation reuses immutable bytes; replacing bytes or
   const value = project(), bytes = new Uint8Array(1024 * 1024)
   value.assets.asset = { id: 'asset', path: 'assets/asset', mimeType: 'image/png' }
   value.definitions.image = { id: 'image', role: 'content', implementation: { kind: 'builtin', key: 'guoling.image' } }
-  value.instances.image = { id: 'image', definitionId: 'image', data: createImageData('asset'), frame: { width: 100, height: 100, transform: [1, 0, 0, 1, 0, 0] } }; value.surfaces[0].childIds.push('image')
+  value.instances.image = { id: 'image', definitionId: 'image', data: createImageData('asset'), frame: { width: 100, height: 100, transform: [1, 0, 0, 1, 0, 0] } }; testContainerInstance(value, 0).childIds.push('image')
   const copy = vi.spyOn(Uint8Array, 'from'), revoke = vi.spyOn(URL, 'revokeObjectURL'), { revision: _revision, ...payload } = value
-  const player = await mountPublishedCourseV3({ ...payload, schemaVersion: 3, assets: { asset: { id: 'asset', url: 'asset.png', mimeType: 'image/png' } } }, root(), { preparedAssetBytes: { asset: bytes }, keyboardNavigation: false })
+  const player = await mountPublishedCourseV3({ ...payload, schemaVersion: 4, assets: { asset: { id: 'asset', url: 'asset.png', mimeType: 'image/png' } } }, root(), { preparedAssetBytes: { asset: bytes }, keyboardNavigation: false })
   try {
     const original = player.runtime.contentElement('image')!.querySelector('img')!.getAttribute('src')
     for (let index = 0; index < 3; index++) { await player.go('B'); await player.go('A') }

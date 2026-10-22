@@ -1,4 +1,5 @@
 // @vitest-environment node
+import { setRootContainers } from '../helpers/glxWorkFixture'
 import { afterEach, expect, it } from 'vitest'
 import { createServer, type Server } from 'node:http'
 import { mkdtemp, rm } from 'node:fs/promises'
@@ -97,7 +98,7 @@ function currentProject() {
   project.definitions.box = { id: 'box', role: 'content', implementation: { kind: 'source', language: 'javascript', source: 'export default {mount(){return {update(){},dispose(){}}}}' } }
   project.instances.box = { id: 'box', definitionId: 'box', data: {}, childIds: ['a'] }
   project.instances.a = { id: 'a', definitionId: TEXT_DEFINITION.id, data: textDataEdit('fixture', createTextComponentData('ABC')).value }
-  project.surfaces = [{ id: 'flow', kind: 'flow', title: '讲义', childIds: ['box'] }]
+  setRootContainers(project, [{ id: 'flow', kind: 'flow', title: '讲义', childIds: ['box'] }])
   return project
 }
 
@@ -164,7 +165,7 @@ it('discovers a deferred tool, sends its real schema on the next turn and execut
     yield complete(request, index, index < 2 ? { name: 'tools.load', input: { families: ['layout'], names: ['course.configure', 'not.a.tool'] } }
       : index === 2 ? { name: 'course.configure', input: { target: reference.target, settings: { title: '已发现并调用' } } } : undefined)
   } }
-  const engine = new ExecutionEngine({ registry: host.registry, gateway: host.tools, provider,
+  const engine = new ExecutionEngine({ registry: host.registry, gateway: host.tools, provider, diagnoseRequestPrefix: true,
     runs: new ExecutionRunStore(path.join(directory, 'family-runs')), events: new ExecutionEventStore({ directory: path.join(directory, 'family-events') }) })
   const selection: ModelSelection = { model: 'fixture', connection: { id: 'fixture', revision: 1, provider: 'fixture', protocol: 'openai-chat', baseURL: 'http://127.0.0.1:1/v1', accountId: 'fixture',
     auth: { kind: 'api-key', credentialRef: 'fixture' }, billing: { kind: 'unknown' }, capabilities: { tools: 'supported', stream: 'supported', vision: 'unsupported', reasoning: 'unknown' } } }

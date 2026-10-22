@@ -1,4 +1,5 @@
 // @vitest-environment node
+import { createTestPublishedFromLegacy, setRootContainers } from '../helpers/glxWorkFixture'
 import { expect, it } from 'vitest'
 import { build } from 'esbuild'
 import { chromium } from '@playwright/test'
@@ -13,14 +14,14 @@ import { auditExportPng } from '../fixtures/auditExportPng'
 
 function payload(): PublishedCourseV3 {
   const source = `export default {mount({root,instance}){root.textContent=instance.name;return {update(){},dispose(){root.replaceChildren()}}}}`
-  return publishedCourseV3Schema.parse({ schemaVersion: 3, id: 'static-teacher', title: 'Static teacher', assets: {},
+  return publishedCourseV3Schema.parse(createTestPublishedFromLegacy({ schemaVersion: 3, id: 'static-teacher', title: 'Static teacher', assets: {},
     definitions: { customTeacher: { id: 'customTeacher', role: 'mixed', professionalBuiltinKey: 'guoling.navigation', implementation: { kind: 'source', language: 'javascript', source, compiled: { code: source } } },
       ordinary: { id: 'ordinary', role: 'content', implementation: { kind: 'source', language: 'javascript', source, compiled: { code: source } } } },
     instances: { omitted: { id: 'omitted', definitionId: 'customTeacher', name: 'DEFAULT OMITTED TEACHER', data: {}, style: { display: 'flex' }, frame: { width: 220, height: 45, transform: [1, 0, 0, 1, 20, 20] } },
       included: { id: 'included', definitionId: 'customTeacher', name: 'EXPLICIT INCLUDED TEACHER', data: { includeInStaticExports: true }, frame: { width: 240, height: 45, transform: [1, 0, 0, 1, 20, 90] } },
       status: { id: 'status', definitionId: 'ordinary', name: 'GLOBAL STATUS 0', data: {}, frame: { width: 220, height: 45, transform: [1, 0, 0, 1, 20, 160] } } },
     surfaces: [{ id: 'space', title: 'Spatial', kind: 'spatial', childIds: [], spatial: { home: { x: 320, y: 180, zoom: 1 }, frames: [] } }],
-    global: { underlay: [], overlay: ['omitted', 'included', 'status'] } })
+    global: { underlay: [], overlay: ['omitted', 'included', 'status'] } }))
 }
 
 it('the formal delivery capture marks both surface and instance requests as static without changing its publication', async () => {
@@ -64,7 +65,7 @@ it('real Spatial capture omits only default-false professional teacher wrappers 
 
 it('PPTX professional source aliases obey the same teacher inclusion contract before invoking local capture', async () => {
   const source = payload(), before = structuredClone(source), calls: string[] = []
-  source.surfaces = [{ id: 'slide', kind: 'slide', title: 'Slide', childIds: [], designSize: { width: 640, height: 360 } }]
+  setRootContainers(source, [{ id: 'slide', kind: 'slide', title: 'Slide', childIds: [], designSize: { width: 640, height: 360 } }])
   const result = await buildComponentPptx(source, { captureInstance: ({ instance }) => { calls.push(instance.id); return `data:image/png;base64,${Buffer.from(auditExportPng(32, 16)).toString('base64')}` } })
   expect(calls).toEqual(['included', 'status'])
   expect(result.diagnostics).toContainEqual(expect.objectContaining({ code: 'teacher-controller-omitted', instanceId: 'omitted' }))

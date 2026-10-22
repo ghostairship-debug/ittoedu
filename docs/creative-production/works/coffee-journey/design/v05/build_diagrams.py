@@ -1,0 +1,18 @@
+"""Original precise editorial diagrams; generated from explicit layer states, not image synthesis."""
+from pathlib import Path
+ROOT=Path(__file__).resolve().parent/'assets'
+bean='M 330 103 C 272 95 229 143 231 220 C 234 286 271 327 320 315 C 346 307 345 280 345 225 C 344 170 350 125 330 103 Z'
+fruit='M 360 43 C 260 36 167 120 178 222 C 188 341 274 384 360 373 C 446 384 532 341 542 222 C 553 120 461 36 360 43 Z'
+for mode in ['natural','washed','honey']:
+    whole=mode=='natural';mucilage=mode!='washed'
+    parts=['<svg xmlns="http://www.w3.org/2000/svg" width="720" height="420" viewBox="0 0 720 420" role="img" aria-labelledby="title desc">',f'<title id="title">{dict(natural="日晒",washed="水洗",honey="蜜处理")[mode]}：开始干燥时的组织关系</title>','<desc id="desc">一对种子及其外围组织的概念性剖面。01果皮与果肉，02黏液，03羊皮层，04种子。虚线只标记已去除组织的位置；厚度不作测量。</desc>',f'<path d="{fruit}" fill="'+('#b8655422' if whole else 'none')+'" stroke="'+('#a56b5d' if whole else '#a3a998')+'" stroke-width="1.3"'+('' if whole else ' stroke-dasharray="3 7"')+'/>']
+    for transform in ['', 'translate(720 0) scale(-1 1)']:
+        parts.append(f'<g transform="{transform}">')
+        if mucilage:parts.append(f'<path d="{bean}" fill="none" stroke="#bd945c" stroke-opacity=".32" stroke-width="27"/>')
+        else:parts.append(f'<path d="{bean}" transform="translate(290 210) scale(1.085) translate(-290 -210)" fill="none" stroke="#a3a998" stroke-width="1" stroke-dasharray="3 5"/>')
+        parts.extend([f'<path d="{bean}" fill="#d7d0b6" stroke="#b5a67d" stroke-width="13"/>',f'<path d="{bean}" fill="#c5cbb7" stroke="#7e8b73" stroke-width="1.2"/>','<path d="M321 128 C 307 160 315 183 321 211 C 327 243 316 278 318 294" fill="none" stroke="#718067" stroke-width="1.1"/>','<path d="M292 126 C 265 139 249 172 249 210" fill="none" stroke="#e8eadb" stroke-width="1.6"/>','</g>'])
+    parts.append('<g fill="none" stroke="#818875" stroke-width="1"><path d="M277 60 H151 L127 72 H70"/><path d="M222 201 H139 L115 218 H70"/><path d="M427 112 H515 L540 88 H649"/><path d="M429 253 H507 L544 316 H649"/></g>')
+    parts.append('<g fill="#8d513a" font-family="Georgia,serif" font-style="italic" font-size="17"><text x="70" y="60">01</text><text x="70" y="206">02</text><text x="629" y="76">03</text><text x="629" y="304">04</text></g>')
+    parts.append('<g fill="#818875"><circle cx="277" cy="60" r="2"/><circle cx="222" cy="201" r="2"/><circle cx="427" cy="112" r="2"/><circle cx="429" cy="253" r="2"/></g></svg>')
+    (ROOT/(mode+'-layers.svg')).write_text('\n'.join(parts),encoding='utf-8')
+print('Built three restrained section diagrams')

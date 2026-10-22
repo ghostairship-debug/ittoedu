@@ -76,31 +76,136 @@ export function measureFlowParagraphLayout(paper: HTMLElement, scale = 1): reado
   return blocks
 }
 
-/** Batch DOM, size, and viewport changes into one read per animation frame. */
-export function observeFlowParagraphLayout(paper: HTMLElement, onLayout: (blocks: readonly FlowParagraphBlockRect[]) => void, scale = () => 1): () => void {
-  let pending = 0
-  let disposed = false
-  const schedule = () => {
-    if (!pending && !disposed) pending = requestAnimationFrame(() => { pending = 0; if (!disposed) onLayout(measureFlowParagraphLayout(paper, scale())) })
+export interface FlowParagraphLayoutChange {
+  /** New/replaced slot DOM needs projection paint; downstream reflow does not. */
+  paint: readonly HTMLElement[]
+  moved: readonly HTMLElement[]
+  retired: readonly HTMLElement[]
+}
+export type FlowParagraphLayoutObservation = (() => void) & { invalidate(elements?: Iterable<HTMLElement>): void }
+
+/** Keep the current DOM index across ACKs. A native layout tree is measured as
+ * one unit; size/flow changes also invalidate its following reading trees. */
+export function observeFlowParagraphLayout(paper: HTMLElement,
+  onLayout: (blocks: readonly FlowParagraphBlockRect[], change: FlowParagraphLayoutChange) => void,
+  scale = () => 1): FlowParagraphLayoutObservation {
+  let pending = 0, disposed = false, full = true, structure = true, suffix = Infinity
+  let width = -1, zoom = -1, ordered: HTMLElement[] = [], roots: HTMLElement[] = []
+  let published: readonly FlowParagraphBlockRect[] = []
+  const elements = new Set<HTMLElement>(), rects = new Map<HTMLElement, FlowParagraphBlockRect | null>()
+  const trees = new Map<HTMLElement, HTMLElement[]>(), rootIndexes = new Map<HTMLElement, number>()
+  const dirty = new Set<HTMLElement>(), paint = new Set<HTMLElement>(), retired = new Set<HTMLElement>()
+  const top = (element: HTMLElement) => {
+    let root = element
+    for (let parent = element.parentElement?.closest<HTMLElement>('[data-flow-block-id]'); parent && paper.contains(parent);
+      parent = parent.parentElement?.closest<HTMLElement>('[data-flow-block-id]')) root = parent
+    return root
   }
-  const resize = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(schedule)
-  const mutation = typeof MutationObserver === 'undefined' ? null : new MutationObserver(() => { watchSizes(); schedule() })
-  const observed = new Set<Element>()
-  const watchSizes = () => {
-    if (!resize) return
-    const present = new Set<Element>([paper, ...paper.querySelectorAll('[data-flow-block-id]')])
-    for (const element of observed) {
-      if (present.has(element)) continue
-      resize.unobserve(element); observed.delete(element)
-    }
-    for (const element of present) {
-      if (observed.has(element)) continue
-      observed.add(element); resize.observe(element)
-    }
+  const mark = (node: Node, flow: boolean, repaint = false) => {
+    const element = (node instanceof Element ? node : node.parentElement)?.closest<HTMLElement>('[data-flow-block-id]')
+    if (!element || !paper.contains(element)) { full = true; return }
+    const root = top(element); dirty.add(root)
+    if (repaint) paint.add(element)
+    if (flow) { const index = rootIndexes.get(root); if (index === undefined) full = true; else suffix = Math.min(suffix, index) }
   }
-  watchSizes()
-  mutation?.observe(paper, { childList: true, subtree: true, attributes: true, attributeFilter: ['style', 'class', 'data-flow-block-id'] })
-  window.addEventListener('resize', schedule)
+  const same = (a: FlowParagraphBlockRect | null | undefined, b: FlowParagraphBlockRect | null) => a === b || Boolean(a && b
+    && a.blockId === b.blockId && a.depth === b.depth && a.x === b.x && a.y === b.y && a.width === b.width && a.height === b.height)
+  const flush = () => {
+    pending = 0
+    if (disposed) return
+    if (structure) {
+      ordered = [...elements].sort((a, b) => a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1)
+      roots = []; trees.clear(); rootIndexes.clear()
+      for (const element of ordered) {
+        const root = top(element)
+        let tree = trees.get(root)
+        if (!tree) { tree = []; trees.set(root, tree); rootIndexes.set(root, roots.length); roots.push(root) }
+        tree.push(element)
+      }
+    }
+    const paperRect = paper.getBoundingClientRect(), currentScale = scale()
+    if (paperRect.width !== width || currentScale !== zoom) full = true
+    width = paperRect.width; zoom = currentScale
+    const moved: HTMLElement[] = [], measured = new Set<HTMLElement>()
+    let changed = structure
+    const measure = (element: HTMLElement) => {
+      if (measured.has(element)) return false
+      measured.add(element)
+      let value: FlowParagraphBlockRect | null = null
+      if (Number.isFinite(zoom) && zoom > 0 && width > 0 && element.getClientRects().length) {
+        const rect = element.getBoundingClientRect()
+        if (rect.width > 0 && rect.height > 0) value = { blockId: element.dataset.flowBlockId!, depth: depthWithin(element, paper),
+          x: (rect.left - paperRect.left) / zoom, y: (rect.top - paperRect.top) / zoom, width: rect.width / zoom, height: rect.height / zoom }
+      }
+      if (same(rects.get(element), value)) return false
+      rects.set(element, value); moved.push(element); changed = true
+      return true
+    }
+    if (full) ordered.forEach(measure)
+    else {
+      for (const root of dirty) {
+        let treeChanged = false
+        for (const element of trees.get(root) ?? []) treeChanged = measure(element) || treeChanged
+        if (treeChanged) suffix = Math.min(suffix, rootIndexes.get(root) ?? Infinity)
+      }
+      if (suffix < Infinity) for (const root of roots.slice(suffix)) for (const element of trees.get(root) ?? []) measure(element)
+    }
+    if (changed) {
+      const seen = new Set<string>()
+      published = ordered.flatMap(element => { const value = rects.get(element); if (!value || seen.has(value.blockId)) return []
+        seen.add(value.blockId); return [value] })
+    }
+    const repaint = [...paint].filter(element => elements.has(element))
+    const removed = [...retired].filter(element => !elements.has(element))
+    full = false; structure = false; suffix = Infinity; dirty.clear(); paint.clear()
+    retired.clear()
+    onLayout(published, { paint: repaint, moved, retired: removed })
+  }
+  const schedule = () => { if (!pending && !disposed) pending = requestAnimationFrame(flush) }
+  const invalidate = (values?: Iterable<HTMLElement>) => {
+    if (!values) full = true
+    else for (const element of values) mark(element, true)
+    schedule()
+  }
+  const resize = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(records => {
+    for (const record of records) if (record.target !== paper) mark(record.target, false)
+    schedule()
+  })
+  const watch = (element: HTMLElement) => {
+    const present = paper.contains(element) && element.hasAttribute('data-flow-block-id')
+    if (present) paint.add(element)
+    if (present && !elements.has(element)) { elements.add(element); resize?.observe(element); paint.add(element); retired.delete(element); structure = true }
+    else if (!present && elements.delete(element)) { resize?.unobserve(element); rects.delete(element); paint.delete(element); retired.add(element); structure = true }
+  }
+  const tree = (node: Node) => {
+    if (!(node instanceof HTMLElement)) return
+    const own = node.hasAttribute('data-flow-block-id') || elements.has(node)
+    const children = node.querySelectorAll<HTMLElement>('[data-flow-block-id]')
+    // A same-paper move keeps membership, but changes reading order and the
+    // suffix that a later resize must invalidate.
+    if (own || children.length) structure = true
+    if (own) watch(node)
+    children.forEach(watch)
+  }
+  const mutation = typeof MutationObserver === 'undefined' ? null : new MutationObserver(records => {
+    for (const record of records) {
+      mark(record.target, record.type !== 'characterData', record.type === 'childList' || record.type === 'attributes')
+      if (record.type === 'childList') { record.removedNodes.forEach(tree); record.addedNodes.forEach(tree) }
+      else if (record.attributeName === 'data-flow-block-id' && record.target instanceof HTMLElement) watch(record.target)
+    }
+    schedule()
+  })
+  const all = () => invalidate()
+  resize?.observe(paper); tree(paper)
+  mutation?.observe(paper, { childList: true, characterData: true, subtree: true, attributes: true, attributeFilter: ['style', 'class', 'data-flow-block-id'] })
+  window.addEventListener('resize', all)
+  const fonts = paper.ownerDocument.fonts
+  fonts?.addEventListener('loadingdone', all); fonts?.addEventListener('loadingerror', all)
+  void fonts?.ready.then(() => { if (!disposed) all() })
   schedule()
-  return () => { disposed = true; if (pending) cancelAnimationFrame(pending); resize?.disconnect(); mutation?.disconnect(); window.removeEventListener('resize', schedule) }
+  return Object.assign(() => { disposed = true; if (pending) cancelAnimationFrame(pending); resize?.disconnect(); mutation?.disconnect()
+    elements.clear(); rects.clear(); trees.clear(); rootIndexes.clear(); dirty.clear(); paint.clear(); retired.clear(); ordered = []; roots = []
+    window.removeEventListener('resize', all)
+    fonts?.removeEventListener('loadingdone', all); fonts?.removeEventListener('loadingerror', all)
+  }, { invalidate })
 }

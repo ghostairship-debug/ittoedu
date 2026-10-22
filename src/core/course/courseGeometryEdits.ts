@@ -1,3 +1,4 @@
+import { componentContainerForInstance, componentSurface } from '../../shared/contracts/component-platform/project'
 import type { ComponentEdit } from '../../shared/contracts/component-platform/operations'
 import { componentIsLocked, owningContainer, type ComponentContainer, type CourseProjectV10 } from '../../shared/contracts/component-platform/project'
 import { frameCorners, transformVector, invertMatrix, translateFrame } from '../components/geometry'
@@ -14,16 +15,19 @@ export function courseGeometryEdits(project: CourseProjectV10, instanceIds: read
   const distribution = intent.kind === 'distribute', kind = distribution ? intent.axis : intent.alignment
   if (ids.length < (distribution ? 3 : 2)) throw new Error(distribution ? '至少需要 3 个未锁定对象' : '至少需要 2 个未锁定对象')
   const rootOwner = (id: string): ComponentContainer | null => {
+    const container = componentContainerForInstance(project, id)
+    if (container) return { kind: 'instance', instanceId: container.id }
     let owner = owningContainer(project, id)
     while (owner?.kind === 'instance') owner = owningContainer(project, owner.instanceId)
     return owner
   }
   const firstOwner = rootOwner(ids[0])
   if (ids.some(id => !sameContainer(rootOwner(id), firstOwner))) throw new Error('不同归属的对象需要分别对齐')
-  if (firstOwner?.kind === 'surface' && project.surfaces.find(surface => surface.id === firstOwner.surfaceId)?.kind === 'flow') {
+  if ((firstOwner?.kind === 'instance' || firstOwner?.kind === 'surface')
+    && componentSurface(project, firstOwner.kind === 'instance' ? firstOwner.instanceId : firstOwner.surfaceId)?.kind === 'flow') {
     const carrier = (id: string): string => {
       let owner = owningContainer(project, id)
-      while (owner?.kind === 'instance') { id = owner.instanceId; owner = owningContainer(project, id) }
+      while (owner?.kind === 'instance' && !project.instances[owner.instanceId]?.container) { id = owner.instanceId; owner = owningContainer(project, id) }
       return id
     }
     const carriers = ids.map(carrier)

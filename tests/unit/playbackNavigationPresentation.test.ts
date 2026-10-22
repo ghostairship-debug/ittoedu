@@ -1,3 +1,5 @@
+import { setRootContainers } from '../helpers/glxWorkFixture'
+import { componentSurfaces } from '../../src/shared/contracts/component-platform/project'
 // @vitest-environment node
 import { expect, it } from 'vitest'
 import { build } from 'esbuild'
@@ -66,7 +68,7 @@ it('retains authored playback settings through surface creation, project.json ed
     if (!saved) throw new Error('Session must save actual archive bytes')
     const reopened = driver.load(saved)
     if (reopened.kind !== 'course-v10') throw new Error('Expected V10')
-    expect(reopened.project.surfaces).toHaveLength(2)
+    expect(componentSurfaces(reopened.project)).toHaveLength(2)
     expect(reopened.project.playback).toEqual({ ...project.playback, controls })
     const published = await buildPublishedCourseV3({ project: reopened.project, assetBytes: {} })
     expect(published.payload.playback).toEqual(reopened.project.playback)
@@ -87,9 +89,9 @@ it('uses content buttons for real step/scene navigation without outer chrome, wh
   const output = 'output/repair-visual-interactive-20261015/run-db19oE/navigation'
   await mkdir(output, { recursive: true })
   const project = createBlankCourseProjectV10('内容导航')
-  project.surfaces = [{ id: 'observe', kind: 'slide', title: '观察', childIds: [], designSize: { width: 1280, height: 720 },
+  setRootContainers(project, [{ id: 'observe', kind: 'slide', title: '观察', childIds: [], designSize: { width: 1280, height: 720 },
     presentation: { states: [{ id: 'clue', title: '线索', overrides: {} }] } },
-  { id: 'verify', kind: 'slide', title: '验证', childIds: [], designSize: { width: 1280, height: 720 } }]
+  { id: 'verify', kind: 'slide', title: '验证', childIds: [], designSize: { width: 1280, height: 720 } }])
   project.definitions.navigation = { id: 'navigation', role: 'content', implementation: { kind: 'source', language: 'javascript', source: authoredNavigation } }
   project.instances.navigation = { id: 'navigation', definitionId: 'navigation', data: {}, frame: { width: 620, height: 180, transform: [1, 0, 0, 1, 300, 470] } }
   project.global.overlay.push('navigation')

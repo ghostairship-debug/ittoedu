@@ -1,3 +1,4 @@
+import { componentSurfaces } from '../../src/shared/contracts/component-platform/project'
 import { requireWorkspaceRoot } from '../helpers/workspaceGrant'
 // @vitest-environment node
 import { promises as fs } from 'node:fs'
@@ -202,14 +203,14 @@ it('applies a material image source from its immutable directory entry as one ba
     materialIds: [original.id], fileAccess: { permission: 'workspace', workspaceRoot: root } })
   const listed = data(await host.tools.execute('material', 'list', { name: 'material.list', input: { attachmentId: original.id } }))
   const source = listed.representations.find((item: { kind: string }) => item.kind === 'image').source
-  const target = await host.tools.issueTarget('material', doc.documentId, { kind: 'course-surface', surfaceId: course(doc).project.surfaces[0]!.id })
+  const target = await host.tools.issueTarget('material', doc.documentId, { kind: 'course-surface', surfaceId: componentSurfaces(course(doc).project)[0]!.id })
   expect(await host.tools.execute('material', 'background', { name: 'surface.configure',
     input: { target, settings: { background: { mode: 'own', source, fit: 'cover' } } } }))
     .toMatchObject({ kind: 'document-operation', result: { status: 'applied' } })
   const applied = await host.internalAPI.read(doc.documentId), model = course(applied)
   expect(applied.undoDepth).toBe(doc.undoDepth + 1)
   expect(applied.revision).toBe(doc.revision + 1)
-  const assetId = model.project.surfaces[0]!.background!.assetId!
+  const assetId = componentSurfaces(model.project)[0]!.background!.assetId!
   expect(model.project.assets[assetId]).toMatchObject({ kind: 'image', mimeType: 'image/png' })
   expect(model.resources.assets[assetId]!.byteLength).toBe(original.byteLength)
   ids.clear()
@@ -219,7 +220,7 @@ it('applies a material image source from its immutable directory entry as one ba
   const filename = path.join(root, 'material.h5lesson')
   await host.internalAPI.save(doc.documentId, filename)
   const reopened = course(await new DocumentHostService(path.join(root, 'cold')).internalAPI.open(filename))
-  expect(reopened.project.surfaces[0]!.background!.assetId).toBe(assetId)
+  expect(componentSurfaces(reopened.project)[0]!.background!.assetId).toBe(assetId)
   expect(reopened.resources.assets[assetId]!.byteLength).toBe(original.byteLength)
 })
 
@@ -234,12 +235,12 @@ it('imports and replaces an authorized local video through the formal media cons
     resources: { assets: {}, components: {} } }, 'video.h5lesson')
   await host.tools.beginRun({ runId: 'video', actor: 'agent', documents: [{ documentId: doc.documentId, writable: [{ kind: 'document' }] }],
     fileAccess: { permission: 'workspace', workspaceRoot: root } })
-  const surfaceId = course(doc).project.surfaces[0]!.id
+  const surfaceId = componentSurfaces(course(doc).project)[0]!.id
   const surface = await host.tools.issueTarget('video', doc.documentId, { kind: 'course-surface', surfaceId })
   expect(await host.tools.execute('video', 'insert', { name: 'media.insert', input: { target: surface, source: 'motion.webm' } }))
     .toMatchObject({ kind: 'document-operation', result: { status: 'applied' } })
   const inserted = await host.internalAPI.read(doc.documentId), original = course(inserted)
-  const instanceId = original.project.surfaces[0]!.childIds[0]!, instance = original.project.instances[instanceId]!
+  const instanceId = componentSurfaces(original.project)[0]!.childIds[0]!, instance = original.project.instances[instanceId]!
   expect(instance.definitionId).toBe('guoling.video')
   const oldAssetId = (instance.data as { assetId: string }).assetId
   const frame = { width: 619, height: 311, transform: [1, .1, 0, 1, 43, 71] as [number, number, number, number, number, number] }
@@ -298,12 +299,12 @@ it('applies the source recovered by actual MCP success lookup without replay or 
     const source = recovered.content[0].source
     expect(source).toBe(response.content[0].source)
     expect(await host.tools.lookup('unrelated', 'remote', call)).toBeNull()
-    const surfaceId = course(doc).project.surfaces[0]!.id
+    const surfaceId = componentSurfaces(course(doc).project)[0]!.id
     const target = await host.tools.issueTarget('mcp', doc.documentId, { kind: 'course-surface', surfaceId })
     expect(await host.tools.execute('mcp', 'apply', { name: 'media.insert', input: { target, source } }))
       .toMatchObject({ kind: 'document-operation', result: { status: 'applied' } })
     const applied = await host.internalAPI.read(doc.documentId), model = course(applied)
-    const instance = model.project.instances[model.project.surfaces[0]!.childIds[0]!]!
+    const instance = model.project.instances[componentSurfaces(model.project)[0]!.childIds[0]!]!
     const assetId = (instance.data as { assetId: string }).assetId
     expect(model.resources.assets[assetId]!.byteLength).toBe(bytes.byteLength)
     expect(applied.undoDepth).toBe(doc.undoDepth + 1)

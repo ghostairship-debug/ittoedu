@@ -1,3 +1,5 @@
+import { componentSurfaces } from '../../src/shared/contracts/component-platform/project'
+import { testContainerInstance } from '../helpers/glxWorkFixture'
 // @vitest-environment node
 import { afterEach, expect, it, vi } from 'vitest'
 import * as library from '../../src/core/components/library'
@@ -18,7 +20,7 @@ function fixture() {
   project.definitions.shared = { id: 'shared', role: 'content', implementation: { kind: 'source', language: 'javascript',
     source: "export default { mount(context) { context.resources.url('picture'); return { dispose() {} } } }", resourceBindings: { picture: 'photo' } } }
   project.instances.source = { id: 'source', definitionId: 'source', data: { caption: 'Original' } }
-  project.surfaces[0].childIds = ['source']
+  testContainerInstance(project, 0).childIds = ['source']
   project.assets.photo = { id: 'photo', path: 'assets/photo.svg', mimeType: 'image/svg+xml' }
   return { kind: 'course-v10' as const, project, resources }
 }
@@ -29,9 +31,9 @@ it('reuses the same Source closure within a batch while giving every copy indepe
   let model = original
   const ids: string[] = [], owners: string[] = []
   for (let index = 0; index < 5; index++) {
-    const surface = model.project.surfaces[0]
+    const surface = componentSurfaces(model.project)[0]
     const copy = copies.prepare({ documentId: 'same', project: model.project, resources: model.resources, roots: ['source'] },
-      { capturedTarget: { documentId: 'same', ...model, surfaceId: surface.id }, container: { kind: 'surface', surfaceId: surface.id }, index: surface.childIds.length })
+      { capturedTarget: { documentId: 'same', ...model, surfaceId: surface.id }, container: { kind: 'surface', surfaceId: surface.id }, index: testContainerInstance(model.project, 0).childIds.length })
     const command = captureComponentOperation(model.project, copy.edits)
     model = planning.apply(command) as typeof original
     copies.applied(command.edits)
@@ -47,7 +49,7 @@ it('reuses the same Source closure within a batch while giving every copy indepe
   expect(new Set(ids).size).toBe(5); expect(new Set(owners).size).toBe(5)
   expect(original).toEqual(before)
   const reopened = driver.load(driver.serialize(model)) as typeof model
-  expect(reopened.project.surfaces[0].childIds).toEqual(['source', ...ids])
+  expect(testContainerInstance(reopened.project, 0).childIds).toEqual(['source', ...ids])
   expect(reopened.resources.assets.photo).toEqual(before.resources.assets.photo)
   for (const owner of owners) expect(reopened.resources.components[owner]['main.js']).toEqual(before.resources.components.owner['main.js'])
 })
@@ -56,8 +58,8 @@ it.each(['files', 'definition', 'data', 'asset'] as const)('refreshes captured c
   const driver = new CourseV10Driver(), copies = createCourseObjectPastePlanningBatch(), extraction = vi.spyOn(library, 'extractComponentLibraryEntry')
   let model = fixture()
   const prepare = () => copies.prepare({ documentId: 'same', project: model.project, resources: model.resources, roots: ['source'] },
-    { capturedTarget: { documentId: 'same', ...model, surfaceId: model.project.surfaces[0].id },
-      container: { kind: 'surface', surfaceId: model.project.surfaces[0].id }, index: model.project.surfaces[0].childIds.length })
+    { capturedTarget: { documentId: 'same', ...model, surfaceId: componentSurfaces(model.project)[0].id },
+      container: { kind: 'surface', surfaceId: componentSurfaces(model.project)[0].id }, index: testContainerInstance(model.project, 0).childIds.length })
   prepare()
   const edits: ComponentEdit[] = kind === 'files' ? [{ type: 'component.files.set', ownerId: 'owner', expectedFiles: model.resources.components.owner,
     files: { 'main.js': bytes("import shared from './shared'; /* changed */ export default shared") } }]

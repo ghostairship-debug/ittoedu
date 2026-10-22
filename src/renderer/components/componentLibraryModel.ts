@@ -1,13 +1,21 @@
 import type { AvailableComponentCatalogPackage, AvailableHtmlComponent } from '../../shared/componentCatalog'
 import { componentDefinitionBuiltinKey, type ComponentDefinition } from '../../shared/contracts/component-platform/project'
-import { builtinComponentSourceKeys } from '../../core/components/source/builtinSources'
+import { BUILTIN_SOURCE_ENTRIES } from '../../components/builtin-source/entries'
+import type { ComponentLibraryEntry } from '../../shared/contracts/component-platform/library'
 import {
   compareSemanticVersions,
 } from './componentCatalogStatus'
 
 export const GENERAL_COMPONENT_SUBJECT = '通用组件'
 
-const internalImplementationKeys = new Set(builtinComponentSourceKeys)
+/** Built-in work assets use the same insertion service and appear in the existing library. */
+export function filterBuiltInWorkAssets<T extends Pick<ComponentLibraryEntry, 'id' | 'title' | 'usage'>>(entries: readonly T[], query: string): T[] {
+  const term = query.trim().toLocaleLowerCase()
+  return entries.filter(entry => !term || [entry.id, entry.title, entry.usage?.kind, entry.usage?.description]
+    .filter(Boolean).join(' ').toLocaleLowerCase().includes(term))
+}
+
+const internalImplementationKeys = new Set(Object.keys(BUILTIN_SOURCE_ENTRIES))
 /** Engine definitions keep their editing actions; authored packages and custom definitions belong in this panel. */
 export function selectProjectLibraryDefinitions(definitions: Readonly<Record<string, ComponentDefinition>>): ComponentDefinition[] {
   return Object.values(definitions).filter(definition => {

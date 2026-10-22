@@ -1,3 +1,4 @@
+import { createTestProjectFromLegacy, testContainerInstance } from '../helpers/glxWorkFixture'
 import { promises as fs } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -36,8 +37,8 @@ it('keeps unset image package assets empty while diagnosing real missing asset i
   const bytes = await fs.readFile(path.join(process.cwd(), 'resources/built-in-components/packages/image-frame.h5component'))
   const { entry } = importComponentLibraryArchive(bytes)
   expect(entry.example.instances.example.data).toMatchObject({ assetId: '' })
-  const project: CourseProjectV10 = { schemaVersion: 10, id: 'unset-image-course', revision: 0, title: 'Flow', definitions: {}, instances: {}, assets: {},
-    surfaces: [{ id: 'flow-page', kind: 'flow', title: '正文', childIds: [] }], global: { underlay: [], overlay: [] } }
+  const project: CourseProjectV10 = createTestProjectFromLegacy({ schemaVersion: 10, id: 'unset-image-course', revision: 0, title: 'Flow', definitions: {}, instances: {}, assets: {},
+    surfaces: [{ id: 'flow-page', kind: 'flow', title: '正文', childIds: [] }], global: { underlay: [], overlay: [] } })
   const options = { container: { kind: 'surface' as const, surfaceId: 'flow-page' }, index: 0 }
   const insertion = prepareComponentLibraryInsertion(project, entry, options)
   expect(insertion.diagnostics).toEqual([])
@@ -80,8 +81,8 @@ it('sends only catalog identity fields for batch Flow insertion, preparation, up
       expect(input).toEqual(identity(entry!))
     }
     let model: Extract<DocumentModel, { kind: 'course-v10' }> = { kind: 'course-v10',
-      project: { schemaVersion: 10, id: 'flow-course', revision: 0, title: 'Flow', definitions: {}, instances: {}, assets: {},
-        surfaces: [{ id: 'flow-page', kind: 'flow', title: '正文', childIds: [] }], global: { underlay: [], overlay: [] } },
+      project: createTestProjectFromLegacy({ schemaVersion: 10, id: 'flow-course', revision: 0, title: 'Flow', definitions: {}, instances: {}, assets: {},
+        surfaces: [{ id: 'flow-page', kind: 'flow', title: '正文', childIds: [] }], global: { underlay: [], overlay: [] } }),
       resources: { assets: {}, components: {} } }
     let view = { project: model.project, activeDocumentId: 'flow-course', surfaceId: 'flow-page', selectedInstanceIds: [],
       views: [{ documentId: 'flow-course', model, surfaceId: 'flow-page', activeStateId: null, selectedInstanceIds: [], selectedInstanceId: null }] } as unknown as CourseV10ViewState
@@ -118,14 +119,14 @@ it('sends only catalog identity fields for batch Flow insertion, preparation, up
     expect(commands).toHaveLength(1)
     expect(commands[0]).toMatchObject({ documentId: 'flow-course', epoch: 'epoch' })
     expect(commands[0].edits.filter(edit => edit.type === 'instance.insert')).toHaveLength(4)
-    expect(model.project.surfaces[0].childIds).toHaveLength(4)
-    const roots = [...model.project.surfaces[0].childIds]
+    expect(testContainerInstance(model.project, 0).childIds).toHaveLength(4)
+    const roots = [...testContainerInstance(model.project, 0).childIds]
     act(() => hook.result.current.requestCatalogUpdate(packages[0]))
     expect(hook.result.current.catalogUpdateRequest).not.toBeNull()
     await act(async () => { hook.result.current.confirmCatalogUpdate(); await busy.at(-1) })
     expect(reads.at(-1)).toEqual(identity(packages[0]))
     expect(commands).toHaveLength(2)
-    expect(model.project.surfaces[0].childIds).toEqual(roots)
+    expect(testContainerInstance(model.project, 0).childIds).toEqual(roots)
     await act(async () => { await hook.result.current.deleteCatalogPackage(packages[0]) })
     expect(deletes).toEqual([identity(packages[0])])
     expect(ports.reportError).not.toHaveBeenCalled()
@@ -140,19 +141,19 @@ it('shows shipped visual packages and authored definitions, then inserts, reopen
     const scan = await scanComponentCatalogSources(process.cwd(), userData)
     const packages = [...scan.sources.values()].flatMap(source => source.packages)
     expect(packages.map(pkg => pkg.name).sort()).toEqual(['图片装饰容器', '文字视觉容器', '汉语拼音标注', '语文朗读标注'].sort())
-    expect(packages.every(pkg => pkg.runtimeApiVersion === 5 && pkg.componentSchemaVersion === 1 && pkg.thumbnailDataUrl)).toBe(true)
+    expect(packages.every(pkg => pkg.runtimeApiVersion === 5 && pkg.componentSchemaVersion === 2 && pkg.thumbnailDataUrl)).toBe(true)
     expect(scan.issues).toEqual([])
     const read = async (input: { sourceId: string; packageId: string; version: string }) =>
       readCatalogComponentPackage(scan.sources.get(input.sourceId)!, input.packageId, input.version)
     const authored = { id: 'my-card', role: 'content' as const, title: '文字', implementation: { kind: 'source' as const, language: 'javascript' as const, source: 'export default {mount(){return {update(){},dispose(){}}}}' } }
-    const project: CourseProjectV10 = { schemaVersion: 10, id: 'course', revision: 0, title: '课程', assets: {},
+    const project: CourseProjectV10 = createTestProjectFromLegacy({ schemaVersion: 10, id: 'course', revision: 0, title: '课程', assets: {},
       definitions: { text: { id: 'text', role: 'content', implementation: { kind: 'builtin', key: 'guoling.text' }, title: '内部文字' },
         formula: { id: 'formula', role: 'content', implementation: { kind: 'builtin', key: 'guoling.formula' }, title: '内部公式' },
         teacher: { id: 'teacher', role: 'mixed', implementation: { kind: 'builtin', key: 'guoling.navigation' }, title: '内部教师工作台' },
         block: { id: 'block', role: 'content', implementation: { kind: 'source', language: 'javascript', source: 'export default {}' }, professionalBuiltinKey: 'guoling.document-block', title: '内部文本块' },
         [authored.id]: authored },
       instances: { own: { id: 'own', definitionId: authored.id, data: { title: '用户构件' }, frame: { width: 200, height: 100, transform: [1, 0, 0, 1, 0, 0] } } },
-      surfaces: [{ id: 'page', kind: 'slide', title: '页面', childIds: ['own'] }], global: { underlay: [], overlay: [] } }
+      surfaces: [{ id: 'page', kind: 'slide', title: '页面', childIds: ['own'] }], global: { underlay: [], overlay: [] } })
     let model: Extract<DocumentModel, { kind: 'course-v10' }> = { kind: 'course-v10', project, resources: { assets: {}, components: {} } }
     let view = { project, activeDocumentId: 'course', surfaceId: 'page', selectedInstanceIds: [],
       views: [{ documentId: 'course', model }] } as unknown as CourseV10ViewState
@@ -189,11 +190,11 @@ it('shows shipped visual packages and authored definitions, then inserts, reopen
     for (const id of ['text', 'formula', 'teacher', 'block']) expect(screen.queryByTestId(`component-${id}`)).toBeNull()
     fireEvent.click(screen.getByLabelText('选择文字视觉容器'))
     fireEvent.click(screen.getByRole('button', { name: '添加到画布（1）' }))
-    await waitFor(() => expect(model.project.surfaces[0].childIds).toHaveLength(2))
+    await waitFor(() => expect(testContainerInstance(model.project, 0).childIds).toHaveLength(2))
     await act(async () => {})
     const reopened = driver.load(driver.serialize(model))
     if (reopened.kind !== 'course-v10') throw new Error('Expected V10 course')
-    const visual = reopened.project.instances[reopened.project.surfaces[0].childIds[1]]
+    const visual = reopened.project.instances[testContainerInstance(reopened.project, 0).childIds[1]]
     const definition = reopened.project.definitions[visual.definitionId]
     expect(definition.title).toBe('文字视觉容器')
     expect((definition.dataSchema?.['x-editor'] as JsonObject).presets).toHaveLength(3)

@@ -1,4 +1,5 @@
 // @vitest-environment node
+import { componentSurfaces } from '../../src/shared/contracts/component-platform/project'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
@@ -73,10 +74,10 @@ it('keeps delayed media in its captured document, saves after switching, and res
   })
   expect(errors).not.toHaveBeenCalled()
   expect(read().courseView.activeDocumentId).toBe(secondDocumentId)
-  expect(read().courseView.project?.surfaces[0].childIds).toEqual([])
+  expect(componentSurfaces(read().courseView.project!)[0].childIds).toEqual([])
   expect(Object.keys(read().courseView.project!.assets)).toEqual([])
   const first = read().courseBridge.captureTarget(firstDocumentId)
-  const imageId = first.project.surfaces.find(surface => surface.id === firstSurfaceId)!.childIds[0]
+  const imageId = componentSurfaces(first.project).find(surface => surface.id === firstSurfaceId)!.childIds[0]
   expect(first.project.instances[imageId].frame?.transform).toEqual([1, 0, 0, 1, 40, 60])
   const asset = Object.values(first.project.assets)[0]
   expect(asset.filename).toBe('课堂原图.png')

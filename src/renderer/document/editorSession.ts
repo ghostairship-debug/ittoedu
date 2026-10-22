@@ -22,12 +22,24 @@ import { previewCaretTransaction } from './editPreviewWidgets'
 import { createDocumentInputRuleResult, matchDocumentInputRule, type DocumentFormulaDraftRequest } from './documentInputRules'
 import { MermaidCodeBlockView } from './mermaidCodeBlockView'
 import { documentComponentKey } from './documentClipboardContext'
+import { editorTextChangeBlockIds } from './documentTransactionChanges'
 
 /** Sent from a document object (picture, chart, component) that was right-clicked, after selecting it (M21). */
 export const DOCUMENT_OBJECT_CONTEXT_MENU_EVENT = 'document-object-context-menu'
 export interface DocumentObjectContextMenuDetail { x: number; y: number; blockId: string }
 
+/** A component can own a nested editor or native input inside an otherwise atomic document object. */
+function isObjectControlEvent(event: Event, host: HTMLElement): boolean {
+  const target = event.target instanceof Element ? event.target
+    : event.target instanceof globalThis.Node ? event.target.parentElement : null
+  const control = target?.closest('input,button,select,textarea,[contenteditable=""],[contenteditable="true"],[contenteditable="plaintext-only"],[data-component-professional-editor]')
+  // closest() may reach the outer document editor: that is not a control owned by this object.
+  return Boolean(control && host.contains(control))
+}
+
 export interface DocumentOperation {
+  /** Present only for PM text/mark steps that preserve the existing document structure. */
+  changedBlockIds?: readonly string[]
   rangeProjection?: DocumentRangeProjection[]
   dataRangeProjection?: TextRangeProjection[]
   operationId: string; historyGroup: string; source: 'layout' | 'source'
@@ -98,7 +110,7 @@ export interface LayoutEditorOptions {
   hiddenBlockIds?:readonly string[]
   stateChanged?(state: EditorState): void
   requestMathDraft?(draft: DocumentFormulaDraftRequest): void
-  selection?(selection: DocumentSelection | null): void
+  selection?(selection: DocumentSelection | null, passiveDomSelection?: boolean): void
   undo(): void; redo(): void
   diagnostic(message: string): void
   readOnly?: boolean
@@ -107,8 +119,11 @@ export interface LayoutEditorOptions {
   runtimeSpacers?: readonly { readonly blockId: string; readonly height: number }[]
   renderInline?(instanceId: string, container: HTMLElement): (() => void) | void
   renderObject?(block: DocumentBlock, container: HTMLElement): (() => void) | void
+  /** Style only. ProseMirror exclusively owns every child of contentDOM. */
+  renderGroup?(instanceId: string, wrapper: HTMLElement, contentDOM: HTMLElement): void
   objectRevision?: unknown
   objectRevisionFor?(block:DocumentBlock):unknown
+  objectChangedIds?(previousRevision: unknown): ReadonlySet<string>
   beforeProjectionMutation?():void
   afterProjectionMutation?():void
   clipboardContext?: unknown
@@ -120,6 +135,7 @@ export function createLayoutEditor(element: HTMLElement, initial: LayoutEditorOp
   let options = initial
   const draftSession = initial.draftSession ?? createDocumentDraftSession(initial.document)
   let composing = false
+  let observingDomChange = false
   let group = crypto.randomUUID()
   let lastInput = 0
   let deferred: LayoutEditorOptions | null = null
@@ -133,7 +149,15 @@ export function createLayoutEditor(element: HTMLElement, initial: LayoutEditorOp
   const boundary = () => { group = crypto.randomUUID(); lastInput = 0 }
   const tablePlugin=tableEditing()
   const bookmarks=new Set<{bookmark:import('prosemirror-state').SelectionBookmark}>()
-  const objectRefreshers=new Set<()=>void>()
+  const objectRefreshers = new Map<string, Set<() => void>>()
+  const registerObjectRefresher = (id: string, refresh: () => void) => {
+    let values = objectRefreshers.get(id)
+    if (!values) { values = new Set(); objectRefreshers.set(id, values) }
+    values.add(refresh)
+    return () => { values!.delete(refresh); if (!values!.size) objectRefreshers.delete(id) }
+  }
+  let pendingTextBlocks: Set<string> | undefined = new Set()
+  let publishedDocument: import('prosemirror-model').Node | null = null
   const mapBookmarks=(transactions:readonly Transaction[])=>{for(const target of bookmarks)for(const transaction of transactions)target.bookmark=target.bookmark.map(transaction.mapping)}
   const clearCells=(state:EditorState,dispatch?: (transaction:Transaction)=>void)=>{
     if(!(state.selection instanceof CellSelection))return false
@@ -148,11 +172,22 @@ export function createLayoutEditor(element: HTMLElement, initial: LayoutEditorOp
     const at=direction<0 ? point.before():point.after(),neighbor=direction<0 ? state.doc.resolve(at).nodeBefore:state.doc.resolve(at).nodeAfter
     return Boolean(neighbor?.attrs.id && options.hiddenBlockIds?.includes(neighbor.attrs.id))
   }
+  // Browser document-edge navigation can escape a nested contenteditable into
+  // its containing Flow editor. The active editor owns its selection boundary.
+  const documentEdge = (state: EditorState, dispatch: ((transaction: Transaction) => void) | undefined, end: boolean, extend = false) => {
+    const edge = end ? TextSelection.atEnd(state.doc) : TextSelection.atStart(state.doc)
+    dispatch?.(state.tr.setSelection(extend ? TextSelection.between(state.selection.$anchor, edge.$head) : edge).scrollIntoView())
+    return true
+  }
   const view = new EditorView(element, {
     state: EditorState.create({ doc: toEditorDocument(initial.document.content), plugins: [...(initial.projectionPlugins ?? []), new Plugin({ view(view) { options.stateChanged?.(view.state); return { update(view) { options.stateChanged?.(view.state) } } } }), keymap({
       'Mod-z': () => { boundary(); void navigateHistory('undo'); return true },
       'Mod-Shift-z': () => { boundary(); void navigateHistory('redo'); return true },
       'Mod-y': () => { boundary(); void navigateHistory('redo'); return true },
+      'Mod-Home': (state, dispatch) => documentEdge(state, dispatch, false),
+      'Mod-End': (state, dispatch) => documentEdge(state, dispatch, true),
+      'Mod-Shift-Home': (state, dispatch) => documentEdge(state, dispatch, false, true),
+      'Mod-Shift-End': (state, dispatch) => documentEdge(state, dispatch, true, true),
       'Shift-Enter': (state,dispatch,currentView)=>options.contentScope==='formula' || chainCommands(exitCode,(state,dispatch)=>{dispatch?.(state.tr.replaceSelectionWith(schema.nodes.hard_break.create()).scrollIntoView());return true})(state,dispatch,currentView),
       Delete:(state,dispatch)=>clearCells(state,dispatch)||hiddenBoundary(state,1), Backspace:(state,dispatch)=>clearCells(state,dispatch)||hiddenBoundary(state,-1),
       Enter: (state, dispatch, currentView) => {
@@ -204,9 +239,21 @@ export function createLayoutEditor(element: HTMLElement, initial: LayoutEditorOp
         dom.style.display = 'inline-block'; dom.style.verticalAlign = 'baseline'
         let release = options.renderInline?.(node.attrs.data.instanceId, dom)
         if (!options.renderInline) dom.textContent = node.attrs.data.accessibleText
-        return { dom, ignoreMutation: () => true, stopEvent: event => event.target instanceof Element && Boolean(event.target.closest('input,button,select,textarea')), destroy: () => release?.() }
+        return { dom, ignoreMutation: () => true, stopEvent: event => isObjectControlEvent(event, dom), destroy: () => release?.() }
       },
       object: (node, view, getPos) => objectView(node, false, view, getPos),
+      layout_group: node => {
+        const dom = flowBlockElement(node, 'div'), contentDOM = document.createElement('div')
+        dom.dataset.flowReadingGroup = node.attrs.id
+        contentDOM.dataset.flowReadingGroupContent = node.attrs.id
+        dom.append(contentDOM)
+        const refresh = () => options.renderGroup?.(node.attrs.id, dom, contentDOM)
+        refresh(); const releaseRefresh = registerObjectRefresher(node.attrs.id, refresh)
+        return { dom, contentDOM,
+          update: (next: import('prosemirror-model').Node) => next.type === node.type && next.attrs.id === node.attrs.id,
+          ignoreMutation: (mutation: MutationRecord | { type: 'selection'; target: globalThis.Node }) => mutation.type === 'attributes' && (mutation.target === dom || mutation.target === contentDOM),
+          destroy: releaseRefresh }
+      },
       compound: (node, view, getPos) => objectView(node, true, view, getPos),
       code_block: (node, current) => new MermaidCodeBlockView(node, current),
       ...(initial.presentation !== 'flow' ? { slot: (node: import('prosemirror-model').Node) => {
@@ -240,7 +287,22 @@ export function createLayoutEditor(element: HTMLElement, initial: LayoutEditorOp
       } : {}),
     },
     handleDOMEvents: {
-      click: current => {
+      keydown: (currentView, event) => {
+        const complete = event.key === 'Escape' || event.key === 'Enter' && (event.ctrlKey || event.metaKey)
+        if (!options.contentScope || options.contentScope === 'document' || !complete
+          || event.isComposing || currentView.composing || event.keyCode === 229) return false
+        if (event.defaultPrevented) return true
+        // Professional shells own completion. Preserve preview/keymap priority,
+        // but skip PM's browser fallback that prevents unclaimed Esc/Mod-Enter.
+        if (currentView.someProp('handleKeyDown', handle => handle(currentView, event))) event.preventDefault()
+        return true
+      },
+      click: (current, event) => {
+        const target = event.target instanceof Element ? event.target : event.target instanceof globalThis.Node ? event.target.parentElement : null
+        const editable = target?.closest('[contenteditable]')
+        // Rendered objects can hand this pointer to their field owner. Their click
+        // must not republish a retained PM caret over that more precise selection.
+        if (editable?.getAttribute('contenteditable') === 'false' && current.dom.contains(editable)) return false
         const selected = describeSelection(current.state)
         if (selected !== undefined) options.selection?.(selected)
         return false
@@ -363,7 +425,13 @@ export function createLayoutEditor(element: HTMLElement, initial: LayoutEditorOp
     },
     dispatchTransaction(transaction: Transaction) {
       const applied = view.state.applyTransaction(transaction)
-      const state = applied.transactions.some(item => item.docChanged) ? identifyEditorState(applied.state) : applied.state
+      const changed = applied.transactions.some(item => item.docChanged)
+      const textBlocks = changed ? editorTextChangeBlockIds(applied.transactions) : []
+      const state = changed && textBlocks === undefined ? identifyEditorState(applied.state) : applied.state
+      if (changed) {
+        if (textBlocks === undefined) pendingTextBlocks = undefined
+        else if (pendingTextBlocks) textBlocks.forEach(id => pendingTextBlocks!.add(id))
+      }
       mapBookmarks(applied.transactions); applyState(state)
       if (transaction.docChanged && !composing) publish(transaction.getMeta('preparedResources'))
       else if (transaction.selectionSet && !transaction.docChanged) boundary()
@@ -372,9 +440,22 @@ export function createLayoutEditor(element: HTMLElement, initial: LayoutEditorOp
       // can replace an ordinary caret with a synthetic NodeSelection.
       if ((!transaction.selectionSet && !transaction.docChanged) || applied.transactions.some(item => item.getMeta(previewCaretTransaction))) return
       const described = describeSelection(state)
-      if (described !== undefined) options.selection?.(described)
+      if (described !== undefined) {
+        if (observingDomChange && !changed && !view.hasFocus()) options.selection?.(described, true)
+        else options.selection?.(described)
+      }
     },
   })
+  const observer = (view as unknown as { domObserver: {
+    forceFlush(): void; flush(): void; stop(): void; start(): void
+    handleDOMChange(from: number, to: number, typeOver: boolean, added: globalThis.Node[]): void
+  } }).domObserver
+  const handleDOMChange = observer.handleDOMChange
+  observer.handleDOMChange = (...args) => {
+    const previous = observingDomChange
+    observingDomChange = true
+    try { return handleDOMChange.apply(observer, args) } finally { observingDomChange = previous }
+  }
   function projectionMutation<T>(work:()=>T):T {
     options.beforeProjectionMutation?.()
     try{return work()}finally{options.afterProjectionMutation?.()}
@@ -383,9 +464,7 @@ export function createLayoutEditor(element: HTMLElement, initial: LayoutEditorOp
   function paintProjection(paint: () => void): void {
     // Keep this PM implementation detail here. Flush real pending input before excluding
     // only the synchronous projection writes, including during an active composition.
-    const observer = (view as unknown as { domObserver: {
-      forceFlush(): void; flush(): void; stop(): void; start(): void
-    } }).domObserver
+
     observer.forceFlush()
     observer.flush()
     if (view.isDestroyed) return
@@ -480,14 +559,14 @@ export function createLayoutEditor(element: HTMLElement, initial: LayoutEditorOp
         return true
       }
       object.addEventListener('mousedown', event => {
-        if (options.readOnly) return
+        if (options.readOnly || isObjectControlEvent(event, object)) return
         if (event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey) return
         event.preventDefault()
         selectBlock()
       })
       // A right-click selects the object the same way and asks the editor for its menu.
       object.addEventListener('contextmenu', event => {
-        if (options.readOnly) return
+        if (options.readOnly || isObjectControlEvent(event, object)) return
         event.preventDefault()
         if (!selectBlock()) return
         dom.dispatchEvent(new CustomEvent<DocumentObjectContextMenuDetail>(DOCUMENT_OBJECT_CONTEXT_MENU_EVENT, { bubbles: true, detail: { x: event.clientX, y: event.clientY, blockId: node.attrs.id } }))
@@ -505,9 +584,9 @@ export function createLayoutEditor(element: HTMLElement, initial: LayoutEditorOp
       if(renderedBlock===next && Object.is(renderedVersion,version))return
       renderedBlock=next;renderedVersion=version;destroy?.();objectHost.replaceChildren();destroy=options.renderObject?.(block,objectHost)
     }
-    if(objectHost)objectRefreshers.add(refresh)
-    return { dom, contentDOM, ...(objectHost ? {update(next:import('prosemirror-model').Node){if(next.type!==node.type || next.attrs.id!==node.attrs.id)return false;block={...next.attrs.data,id:next.attrs.id};refresh();return true}} : {}),
-      ignoreMutation: (mutation: MutationRecord | { type: 'selection'; target: globalThis.Node }) => mutation.type !== 'selection' && (!contentDOM || !contentDOM.contains(mutation.target)), destroy: () => {objectRefreshers.delete(refresh);destroy?.()} }
+    const releaseRefresh = objectHost ? registerObjectRefresher(node.attrs.id, refresh) : undefined
+    return { dom, contentDOM, stopEvent: (event: Event) => Boolean(objectHost && isObjectControlEvent(event, dom)), ...(objectHost ? {update(next:import('prosemirror-model').Node){if(next.type!==node.type || next.attrs.id!==node.attrs.id)return false;block={...next.attrs.data,id:next.attrs.id};refresh();return true}} : {}),
+      ignoreMutation: (mutation: MutationRecord | { type: 'selection'; target: globalThis.Node }) => mutation.type !== 'selection' && (!contentDOM || !contentDOM.contains(mutation.target)), destroy: () => {releaseRefresh?.();destroy?.()} }
   }
   function flowBlockElement(node: import('prosemirror-model').Node, tag: string) {
     const dom = document.createElement(tag)
@@ -595,8 +674,11 @@ export function createLayoutEditor(element: HTMLElement, initial: LayoutEditorOp
   function publish(prepared?: { value: unknown; discard(): Promise<void> }) {
     if (prepared) draftSession.prepare(prepared)
     try {
+      if (!prepared && view.state.doc === publishedDocument) return
       const content = fromEditorDocument(view.state.doc)
-      if (JSON.stringify(content) === JSON.stringify(draftSession.document.content)) return
+      if (JSON.stringify(content) === JSON.stringify(draftSession.document.content)) {
+        publishedDocument = view.state.doc; pendingTextBlocks = new Set(); return
+      }
       const now = Date.now()
       if (now - lastInput > 800) boundary()
       lastInput = now
@@ -607,7 +689,10 @@ export function createLayoutEditor(element: HTMLElement, initial: LayoutEditorOp
       } }
       options = { ...options, document }
       const owner = options
-      const result = draftSession.publish(document, { operationId: crypto.randomUUID(), historyGroup: group, source: 'layout', rangeProjection: projectDocumentRanges(content), ...(prepared ? { preparedResources: prepared.value } : {}) }, owner.change)
+      const result = draftSession.publish(document, { operationId: crypto.randomUUID(), historyGroup: group, source: 'layout',
+        ...(pendingTextBlocks ? { changedBlockIds: [...pendingTextBlocks] } : {}),
+        rangeProjection: projectDocumentRanges(content), ...(prepared ? { preparedResources: prepared.value } : {}) }, owner.change)
+      publishedDocument = view.state.doc; pendingTextBlocks = new Set()
       if (result instanceof Promise) void result.catch(error => owner.diagnostic(error instanceof Error ? error.message : String(error)))
     } catch (error) { options.diagnostic(error instanceof Error ? error.message : String(error)) }
   }
@@ -708,8 +793,10 @@ export function createLayoutEditor(element: HTMLElement, initial: LayoutEditorOp
     // An older ACK or external update may refresh view options, but cannot replace pending/rejected input.
     if (!draftSession.receive(next.document)) next = { ...next, document: draftSession.document }
     const changed = JSON.stringify(next.document.content) !== JSON.stringify(options.document.content)
-    const refreshObjects = next.objectRevision !== options.objectRevision
+    const previousObjectRevision = options.objectRevision
+    const refreshObjects = next.objectRevision !== previousObjectRevision
     const refreshSpacers = JSON.stringify(next.runtimeSpacers) !== JSON.stringify(options.runtimeSpacers)
+    const refreshEditability = Boolean(next.readOnly) !== Boolean(options.readOnly)
     options = next
     if (changed) {
       boundary()
@@ -736,8 +823,12 @@ export function createLayoutEditor(element: HTMLElement, initial: LayoutEditorOp
         reselect(kept)
       }
     }
-    if (refreshObjects) projectionMutation(()=>{for(const refresh of objectRefreshers)refresh()})
-    if (refreshSpacers) view.setProps({ decorations: view.props.decorations })
+    if (refreshObjects) projectionMutation(() => {
+      const changedIds = options.objectChangedIds?.(previousObjectRevision) ?? objectRefreshers.keys()
+      for (const id of changedIds) for (const refresh of objectRefreshers.get(id) ?? []) refresh()
+    })
+    // ProseMirror caches editable and contenteditable until its view props/state refresh.
+    if (refreshSpacers || refreshEditability) view.setProps({ decorations: view.props.decorations, editable: view.props.editable })
   }
   async function drain() {
     if (composing || view.composing) return false

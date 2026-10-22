@@ -1,4 +1,5 @@
 // @vitest-environment node
+import { testContainerInstance } from '../../../helpers/glxWorkFixture'
 import { promises as fs } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -19,7 +20,7 @@ it('broken image original bytes survive V10 save cold reopen and can be repaired
     project.definitions[HTML_PROGRAM_DEFINITION.id] = HTML_PROGRAM_DEFINITION
     const frame = { width: 300, height: 160, transform: [1, 0, 0, 1, 38, 49] as [number, number, number, number, number, number] }
     project.instances.program = { id: 'program', definitionId: HTML_PROGRAM_DEFINITION.id, data: { html: '<p>旧正文</p>' }, frame }
-    project.surfaces[0].childIds = ['program']
+    testContainerInstance(project, 0).childIds = ['program']
     const initial = await host.internalAPI.create({ kind: 'course-v10', project, resources: { assets: {}, components: {} } }, 'image.h5lesson')
     const measure = vi.fn(async () => { throw new Error('Local content edit must not remeasure the authored frame') })
     const compilation = new InMemoryComponentCompilation(createEsbuildComponentCompiler())

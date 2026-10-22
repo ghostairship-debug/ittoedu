@@ -1,3 +1,5 @@
+import { setRootContainers } from '../helpers/glxWorkFixture'
+import { componentSurfaces } from '../../src/shared/contracts/component-platform/project'
 import { expect, it } from 'vitest'
 import { createBlankCourseProjectV10 } from '../../src/core/course/createCourseProjectV10'
 import { captureComponentOperation } from '../../src/core/drivers/courseV10Operations'
@@ -7,7 +9,7 @@ import { createV10StoreHost } from '../helpers/courseV10StoreHost'
 
 it('deletes the final only-source guard in the same Session transaction and restores its exact restriction through Undo and cold open', async () => {
   const project = createBlankCourseProjectV10('guard deletion')
-  project.surfaces = ['source', 'other', 'target'].map(id => ({ id, title: id, kind: 'slide', childIds: [] }))
+  setRootContainers(project, ['source', 'other', 'target'].map(id => ({ id, title: id, kind: 'slide', childIds: [] })))
   project.logic = { courseState: [{ key: 'blocked', valueType: 'boolean', defaultValue: true }], navigationGuards: [
     { id: 'only', effect: 'block', fromSurfaceIds: ['source'], toSurfaceIds: ['target'], match: 'all', conditions: [{ type: 'compare', key: 'blocked', operator: 'eq', value: true }], message: 'source only' },
   ] }
@@ -23,7 +25,7 @@ it('deletes the final only-source guard in the same Session transaction and rest
       operationId: 'remove-source', actor: 'human', mutation: { type: 'command', command: captureComponentOperation(h.model().project, [{ type: 'surface.remove', surfaceId: 'source' }]) } })
     expect(result.status).toBe('applied')
     expect(h.first.read().undoDepth).toBe(before.undoDepth + 1)
-    expect(h.model().project.surfaces.map(surface => surface.id)).toEqual(['other', 'target'])
+    expect(componentSurfaces(h.model().project).map(surface => surface.id)).toEqual(['other', 'target'])
     expect(h.model().project.logic!.navigationGuards).toEqual([])
     expect(blocked('other')).toBe(false)
     expect(await navigation.execute({ type: 'scene.go', sceneId: 'target' })).toBe(true)
@@ -36,13 +38,13 @@ it('deletes the final only-source guard in the same Session transaction and rest
     const cold = await h.api.open('deleted-source.glx')
     if (cold.model.kind !== 'course-v10') throw new Error('Expected V10 cold open')
     expect(cold.model.project.logic!.navigationGuards).toEqual([])
-    expect(cold.model.project.surfaces.map(surface => surface.id)).toEqual(['other', 'target'])
+    expect(componentSurfaces(cold.model.project).map(surface => surface.id)).toEqual(['other', 'target'])
   } finally { navigation.dispose(); h.bridge.dispose() }
 })
 
 it('retains all-source historical meaning, narrows surviving restrictions, and canonicalizes new command and direct formal logic writes', async () => {
   const project = createBlankCourseProjectV10('guard source semantics')
-  project.surfaces = ['a', 'b', 'c', 'target'].map(id => ({ id, title: id, kind: 'slide', childIds: [] }))
+  setRootContainers(project, ['a', 'b', 'c', 'target'].map(id => ({ id, title: id, kind: 'slide', childIds: [] })))
   const base = { effect: 'block' as const, toSurfaceIds: ['target'], match: 'all' as const,
     conditions: [{ type: 'exists' as const, key: 'blocked', exists: true }], message: 'blocked' }
   project.logic = { courseState: [{ key: 'blocked', valueType: 'boolean', defaultValue: true }], navigationGuards: [

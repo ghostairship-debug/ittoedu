@@ -33,7 +33,7 @@ test('T08 actual hidden export entry reports progress, captures a running source
       project.definitions.program = { id: 'program', role: 'content', implementation: { kind: 'source', language: 'javascript',
         source: "export default { mount({root}) { root.style.background='#0077cc';root.style.color='white';root.style.fontSize='24px';root.textContent='Actual captured program';return {update(){},dispose(){root.replaceChildren()}} } }" } }
       project.instances.program = { id: 'program', definitionId: 'program', data: {}, frame: { width: 400, height: 200, transform: [1, 0, 0, 1, 60, 70] } }
-      project.surfaces[0].childIds = ['program']
+      project.instances[project.rootIds[0]].childIds = ['program']
       const snapshot = await host.internalAPI.create({ kind: 'course-v10', project, resources: { assets: {}, components: {} } }, 'capture.h5lesson')
       const identity = { documentId: snapshot.documentId, epoch: snapshot.epoch, revision: snapshot.revision, projectId: project.id }
       const entry = BrowserWindow.getAllWindows().find(window => window.webContents.getURL().startsWith('courseware-editor://'))?.webContents.getURL()

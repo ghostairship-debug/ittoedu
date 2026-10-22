@@ -1,4 +1,5 @@
 // @vitest-environment node
+import { testContainerInstance } from '../helpers/glxWorkFixture'
 import { promises as fs } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -33,7 +34,7 @@ const defaults = [WEB_DEFINITION, HTML_PROGRAM_DEFINITION, TEXT_DEFINITION, IMAG
 function sourceCustomizedProject(flow = false): CourseModel {
   let sequence = 0
   const project = createBlankCourseProjectV10('Definition collision', () => `seed-${++sequence}`)
-  if (flow) { project.surfaces[0]!.kind = 'flow'; delete project.surfaces[0]!.designSize }
+  if (flow) { testContainerInstance(project, 0).container.kind = 'flow'; delete testContainerInstance(project, 0).container.designSize }
   project.assets.old = { id: 'old', path: 'assets/old.svg', mimeType: 'image/svg+xml' }
   defaults.forEach((definition, index) => {
     project.definitions[definition.id] = structuredClone(definition)
@@ -42,7 +43,7 @@ function sourceCustomizedProject(flow = false): CourseModel {
       data: definition.id === TEXT_DEFINITION.id ? jsonValueSchema.parse(createTextComponentData('原有文字'))
         : definition.id === IMAGE_DEFINITION.id ? jsonValueSchema.parse(createImageData('old', '原有图片')) : { html: '<div>原有内容</div>' },
       frame: { width: 80, height: 30, transform: [1, 0, 0, 1, 900, 500 + index * 40] } }
-    project.surfaces[0]!.childIds.push(id)
+    testContainerInstance(project, 0).childIds.push(id)
   })
   const model: CourseModel = { kind: 'course-v10', project, resources: { assets: { old: svg }, components: {} } }
   const edited = new CourseV10Driver().apply(model, captureComponentOperation(project, defaults.flatMap(definition =>
@@ -106,7 +107,7 @@ async function fixture(model: CourseModel, coupled = false) {
       return receipt
     } }
 }
-const insertedRoots = (project: CourseProjectV10, old: CourseProjectV10) => project.surfaces[0]!.childIds.filter(id => !old.instances[id])
+const insertedRoots = (project: CourseProjectV10, old: CourseProjectV10) => testContainerInstance(project, 0).childIds.filter(id => !old.instances[id])
 function builtinKey(project: CourseProjectV10, definitionId: string) {
   const implementation = project.definitions[definitionId]?.implementation
   return implementation?.kind === 'builtin' ? implementation.key : undefined
@@ -120,7 +121,7 @@ function retained(model: CourseModel, original: CourseModel) {
 it('inserts and redoes Web/program HTML after shared source edits, retaining old objects and reusing default aliases', async () => {
   const original = sourceCustomizedProject()
   original.project.definitions['guoling.web.builtin'] = { ...original.project.definitions[WEB_DEFINITION.id]!, id: 'guoling.web.builtin' }
-  const test = await fixture(original), target = { kind: 'container' as const, container: { kind: 'surface' as const, surfaceId: original.project.surfaces[0]!.id } }
+  const test = await fixture(original), target = { kind: 'container' as const, container: { kind: 'surface' as const, surfaceId: testContainerInstance(original.project, 0).id } }
   const web = await test.service.apply({ intent: 'insert', target, viewport: { width: 320, height: 200 }, source: { kind: 'html', html: '<button>新按钮</button>' } })
   expect(web).toMatchObject({ commit: 'committed', receipt: { status: 'applied' } })
   const webId = insertedRoots(test.course().project, original.project)[0]!, alias = test.course().project.instances[webId]!.definitionId
@@ -144,7 +145,7 @@ it('inserts and redoes Web/program HTML after shared source edits, retaining old
 
 it('keeps newly allocated Web and program default frames in Flow and preserves program classification', async () => {
   const original = sourceCustomizedProject(true), test = await fixture(original, true)
-  const target = { kind: 'container' as const, container: { kind: 'surface' as const, surfaceId: original.project.surfaces[0]!.id } }
+  const target = { kind: 'container' as const, container: { kind: 'surface' as const, surfaceId: testContainerInstance(original.project, 0).id } }
   const web = await test.service.apply({ intent: 'insert', target, viewport: { width: 320, height: 200 },
     source: { kind: 'html', html: '<body style="display:grid"><button>耦合阅读内容</button></body>' } })
   expect(web.commit).toBe('committed')
@@ -164,7 +165,7 @@ it('retains professional text/image data and admitted resources through conflict
   original.project.definitions[textAlias.id] = textAlias
   const test = await fixture(original)
   const result = await test.service.apply({ intent: 'insert',
-    target: { kind: 'container', container: { kind: 'surface', surfaceId: original.project.surfaces[0]!.id } }, viewport: { width: 320, height: 200 },
+    target: { kind: 'container', container: { kind: 'surface', surfaceId: testContainerInstance(original.project, 0).id } }, viewport: { width: 320, height: 200 },
     source: { kind: 'html', html: '<p>可继续专业编辑</p><img src="picture.svg" alt="新图片">', siblingFiles: new Map([['picture.svg', svg]]) } })
   expect(result).toMatchObject({ commit: 'committed', receipt: { status: 'applied' } })
   const model = test.course(), inserted = result.insertedIds.map(id => model.project.instances[id]!)

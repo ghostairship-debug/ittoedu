@@ -1,3 +1,6 @@
+import { createTestProjectFromLegacy } from '../helpers/glxWorkFixture'
+import { componentSurfaces } from '../../src/shared/contracts/component-platform/project'
+import { testContainerInstance } from '../helpers/glxWorkFixture'
 import { expect, it, vi } from 'vitest'
 import { strFromU8, unzipSync } from 'fflate'
 import { courseProjectV10Schema, publishedCourseV3Schema } from '../../src/shared/contracts/component-platform'
@@ -19,7 +22,7 @@ const paint: ComponentBackground = { mode: 'own', paint: { layers: [
 ] } }
 
 function project(kind: 'slide' | 'flow' = 'slide') {
-  return courseProjectV10Schema.parse({ schemaVersion: 10, id: 'background-export', revision: 0, title: 'Background export',
+  return courseProjectV10Schema.parse(createTestProjectFromLegacy({ schemaVersion: 10, id: 'background-export', revision: 0, title: 'Background export',
     definitions: { text: { id: 'text', role: 'content', implementation: { kind: 'builtin', key: 'guoling.text' } } },
     instances: { text: { id: 'text', definitionId: 'text', data: createTextComponentData('Native editable foreground'),
       frame: { width: 500, height: 70, transform: [1, 0, 0, 1, 20, 30] } },
@@ -28,15 +31,15 @@ function project(kind: 'slide' | 'flow' = 'slide') {
     surfaces: [{ id: 'page', title: 'Background page', kind, childIds: ['text'], background: paint,
       ...(kind === 'slide' ? { designSize: { width: 800, height: 600 } } : {}) }],
     global: { underlay: [], overlay: ['global'] },
-    assets: { a: { id: 'a', path: 'assets/a.png', mimeType: 'image/png' }, b: { id: 'b', path: 'assets/b.png', mimeType: 'image/png' } } })
+    assets: { a: { id: 'a', path: 'assets/a.png', mimeType: 'image/png' }, b: { id: 'b', path: 'assets/b.png', mimeType: 'image/png' } } }))
 }
 
 it('background capture sends an initial-state background with no foreground or executable project owners', async () => {
   const source = project()
-  source.surfaces[0]!.presentation = { initialStateId: 'initial', states: [{ id: 'initial', title: 'Initial', overrides: {},
+  testContainerInstance(source, 0).container!.presentation = { initialStateId: 'initial', states: [{ id: 'initial', title: 'Initial', overrides: {},
     background: { mode: 'own', paint: { layers: [{ style: { 'background-image': 'linear-gradient(red, blue)' }, resourceBindings: {} }] } } }] }
   const { revision: _revision, ...plain } = source
-  const published = publishedCourseV3Schema.parse({ ...plain, schemaVersion: 3, assets: {
+  const published = publishedCourseV3Schema.parse({ ...plain, schemaVersion: 4, assets: {
     a: { id: 'a', mimeType: 'image/png', url: imageUrl }, b: { id: 'b', mimeType: 'image/png', url: imageUrl },
   } })
   const before = structuredClone(published), requests: CaptureObservationInput[] = []
@@ -49,10 +52,11 @@ it('background capture sends an initial-state background with no foreground or e
   const request = requests[0]!
   if (!('kind' in request) || request.kind !== 'published') throw new Error('Expected published capture')
   expect(publishedCourseV3Schema.safeParse(request.published).success).toBe(true)
-  expect(request.published.instances).toEqual({}); expect(request.published.definitions).toEqual({})
+  expect(Object.keys(request.published.instances)).toEqual(['page'])
+  expect(Object.values(request.published.definitions).map(definition => definition.implementation)).toEqual([{ kind: 'builtin', key: 'guoling.container.slide' }])
   expect(request.published.global).toEqual({ underlay: [], overlay: [] })
-  expect(request.published.surfaces).toEqual([{ id: 'page', title: 'Background page', kind: 'slide', childIds: [],
-    designSize: { width: 800, height: 600 }, background: expect.objectContaining({ paint: source.surfaces[0]!.presentation.states[0]!.background!.paint }) }])
+  expect(componentSurfaces(request.published)).toEqual([{ id: 'page', title: 'Background page', kind: 'slide', childIds: [],
+    designSize: { width: 800, height: 600 }, background: expect.objectContaining({ paint: testContainerInstance(source, 0).container!.presentation!.states[0]!.background!.paint }) }])
   expect(request).toMatchObject({ staticExport: true, stateId: null })
   expect(request.published).not.toHaveProperty('logic')
   expect(requests[1]).toMatchObject({ published, instanceId: 'text', stateId: 'initial' })
@@ -69,9 +73,9 @@ it('PPTX places the complex background image before editable foreground and leav
   expect(xml.match(/<p:pic>/g)).toHaveLength(1)
   expect(xml).toContain('Native editable foreground'); expect(xml).toContain('Global foreground')
   expect(xml.indexOf('name="page:background"')).toBeLessThan(xml.indexOf('Native editable foreground'))
-  expect(xml.match(/<p:sp>/g)).toHaveLength(2)
+  expect(xml.match(/<p:sp>/g)).toHaveLength(3)
   expect(source).toEqual(before)
-  source.surfaces[0]!.background = { mode: 'own', assetId: 'a', fit: 'fill' }
+  testContainerInstance(source, 0).container!.background = { mode: 'own', assetId: 'a', fit: 'fill' }
   captureBackground.mockClear()
   const simple = await buildComponentPptx(source, { captureBackground, resolveAsset: () => imageUrl })
   expect(captureBackground).not.toHaveBeenCalled()
@@ -91,11 +95,12 @@ it('Flow PDF HTML embeds both background resources in noninteractive paint layer
   } })
   const dom = new DOMParser().parseFromString(result.html, 'text/html')
   const root = dom.querySelector<HTMLElement>('[data-component-print-root]')!
-  const background = root.firstElementChild as HTMLElement
+  const background = root.querySelector<HTMLElement>('[data-surface-background] > [data-component-background-paint]')!
   expect(reads.sort()).toEqual(['a', 'b'])
   expect(background.hasAttribute('data-component-background-paint')).toBe(true)
   expect(background.style.pointerEvents).toBe('none'); expect(background.style.zIndex).toBe('-1')
   expect(background.children).toHaveLength(2)
+  expect((background.children[0] as HTMLElement).style.backgroundColor).toBe('rgb(32, 64, 96)')
   expect(background.innerHTML).toContain('linear-gradient')
   expect(background.innerHTML.match(/data:image\/png;base64/g)).toHaveLength(2)
   expect(background.querySelector('[data-component-output],[data-component-instance-id]')).toBeNull()

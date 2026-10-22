@@ -14,7 +14,7 @@ import markdown
 ROOT = Path(__file__).resolve().parents[1]
 REPO = ROOT.parents[1]
 CONVERGENCE = REPO / 'docs' / 'archive' / '2026-09-convergence' / '果铃2.0收敛方案.md'
-ROADMAP = REPO / 'docs' / 'ROADMAP.md'
+ROADMAP = REPO / 'docs' / 'archive' / '20261002-路线图.md'
 READER_ROOT_PATH = '../../docs/archive/2026-09-convergence/果铃2.0收敛方案.md'
 TASK_STATUSES = ('planned', 'in_progress', 'implemented', 'verified', 'blocked')
 CASE_STATUSES = ('not_run', 'passed', 'failed', 'blocked', 'skipped')

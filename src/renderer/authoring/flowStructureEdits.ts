@@ -5,14 +5,14 @@ export function flowStructureDisabledReason(project: CourseProjectV10, instanceI
   return componentIsLocked(project, instanceId) ? '对象已锁定，请先解锁' : null
 }
 
-const containerKey = (container: ComponentContainer) => container.kind === 'surface' ? `surface:${container.surfaceId}`
-  : container.kind === 'instance' ? `instance:${container.instanceId}` : `global:${container.plane}`
+const containerKey = (container: ComponentContainer) => container.kind === 'surface' ? `instance:${container.surfaceId}`
+  : container.kind === 'instance' ? `instance:${container.instanceId}` : container.kind === 'project' ? 'project' : `global:${container.plane}`
 const same = (left: unknown, right: unknown) => JSON.stringify(left) === JSON.stringify(right)
 
 /** The PM planner may move a surviving root just to make room for a new neighboring paragraph. */
 function passiveMoves(project: CourseProjectV10, edits: readonly ComponentEdit[]): Set<string> {
   const children = new Map<string, string[]>([
-    ...project.surfaces.map(surface => [`surface:${surface.id}`, [...surface.childIds]] as [string, string[]]),
+    ['project', [...project.rootIds]],
     ...Object.values(project.instances).map(instance => [`instance:${instance.id}`, [...(instance.childIds ?? [])]] as [string, string[]]),
     ['global:underlay', [...project.global.underlay]], ['global:overlay', [...project.global.overlay]],
   ])
@@ -35,7 +35,8 @@ function passiveMoves(project: CourseProjectV10, edits: readonly ComponentEdit[]
     const instance = project.instances[edit.instanceId], owner = owningContainer(project, edit.instanceId)
     if (!instance || !owner || containerKey(owner) !== containerKey(edit.container) || edit.frame && !same(edit.frame, instance.frame)) continue
     const before = containerChildIds(project, owner), after = children.get(containerKey(owner)) ?? []
-    const readingRoot = owner.kind === 'surface' && project.surfaces.find(surface => surface.id === owner.surfaceId)?.kind === 'flow'
+    const ownerId = owner.kind === 'instance' ? owner.instanceId : owner.kind === 'surface' ? owner.surfaceId : undefined
+    const readingRoot = ownerId && project.instances[ownerId]?.container?.kind === 'flow'
       && !instance.flowPlacement && project.definitions[instance.definitionId]?.role !== 'behavior'
     const orderPeer = (id: string) => !readingRoot || !project.instances[id]?.flowPlacement
       && project.definitions[project.instances[id]?.definitionId]?.role !== 'behavior'

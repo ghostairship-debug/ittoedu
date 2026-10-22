@@ -1,3 +1,4 @@
+import { componentContainerForInstance, componentSurface } from '../../shared/contracts/component-platform/project'
 import { nanoid } from 'nanoid'
 import type { ComponentContainer, ComponentDefinition, ComponentInstance, CourseProjectV10, JsonValue } from '../../shared/contracts/component-platform/project'
 import type { ComponentFrame } from '../../shared/contracts/component-platform/frame'
@@ -31,20 +32,29 @@ export interface CourseInsertionOptions {
   /** Existing UI default profile, prepared by the host rather than supplied by public intent. */
   origin?: 'slide-authoring'
 }
-interface CourseInsertionTarget { project: CourseProjectV10; surfaceId: string | null; instanceId?: string | null }
+interface CourseInsertionTarget { project: CourseProjectV10; surfaceId: string | null; instanceId?: string | null; rootInstanceId?: string | null }
 
 export function insertionContainer(target: CourseInsertionTarget, options: CourseInsertionOptions = {}): ComponentContainer {
+  if (target.instanceId && !target.project.instances[target.instanceId]) throw new Error('插入的原对象已不存在')
   if (options.destination === 'paper' && options.container?.kind !== 'global'
-    && target.project.surfaces.find(surface => surface.id === target.surfaceId)?.kind === 'flow') {
+    && target.surfaceId && componentSurface(target.project, target.surfaceId)?.kind === 'flow') {
     if (!target.surfaceId) throw new Error('插入目标没有页面')
-    return { kind: 'surface', surfaceId: target.surfaceId }
+    return { kind: 'instance', instanceId: target.surfaceId }
   }
   if (options.container) return options.container
   const selectedOwner = target.instanceId ? owningContainer(target.project, target.instanceId) : null
   if (selectedOwner?.kind === 'global') return selectedOwner
-  if (selectedOwner?.kind === 'instance' && target.project.surfaces.find(surface => surface.id === target.surfaceId)?.kind === 'flow') return selectedOwner
-  if (!target.surfaceId) throw new Error('插入目标没有页面')
-  return { kind: 'surface', surfaceId: target.surfaceId }
+  if (selectedOwner?.kind === 'instance' && target.surfaceId && componentSurface(target.project, target.surfaceId)?.kind === 'flow') return selectedOwner
+  if (target.surfaceId) return { kind: 'instance', instanceId: target.surfaceId }
+  const rootId = target.rootInstanceId ?? target.project.entry?.rootInstanceId
+  if (rootId) {
+    if (!target.project.rootIds.includes(rootId) || !target.project.instances[rootId]) throw new Error('插入的原作品根已不存在')
+    return { kind: 'instance', instanceId: rootId }
+  }
+  const selected = target.instanceId ? target.project.instances[target.instanceId] : undefined
+  if (selected?.childIds) return { kind: 'instance', instanceId: selected.id }
+  if (selectedOwner?.kind === 'instance') return selectedOwner
+  return { kind: 'project' }
 }
 export function insertionIndex(target: CourseInsertionTarget, container: ComponentContainer, options: CourseInsertionOptions = {}): number {
   const ids = containerChildIds(target.project, container)
@@ -63,24 +73,27 @@ export function courseAuthorData(data: unknown): JsonValue { return JSON.parse(J
 /** Shared placement for professional instances, media and library roots. */
 export function resolveCourseInsertionPlacement(target: CourseInsertionTarget, options: CourseInsertionOptions = {}, rootIds: readonly string[] = []) {
   const container = insertionContainer(target, options)
-  const flowPaper = container.kind !== 'global' && target.project.surfaces.find(surface => surface.id === target.surfaceId)?.kind === 'flow' && options.destination === 'paper'
+  const flowPaper = container.kind !== 'global' && target.surfaceId && componentSurface(target.project, target.surfaceId)?.kind === 'flow' && options.destination === 'paper'
   const edits: ComponentEdit[] = flowPaper ? rootIds.map(instanceId => ({ type: 'instance.flowPlacement.set', instanceId,
     flowPlacement: { space: 'paper', plane: 'overlay' } })) : []
   return { container, index: insertionIndex(target, container, options), edits }
 }
 export function courseInsertionFrame(target: CourseInsertionTarget, width: number, height: number, options: CourseInsertionOptions): ComponentFrame {
-  const surface = target.project.surfaces.find(value => value.id === target.surfaceId)!
-  const size = surface.designSize ?? { width: 1280, height: 720 }
+  const requested = options.container?.kind === 'instance' ? componentSurface(target.project, options.container.instanceId)
+    : options.container?.kind === 'surface' ? componentSurface(target.project, options.container.surfaceId) : undefined
+  const surface = requested ?? (target.surfaceId ? componentSurface(target.project, target.surfaceId)
+    : target.instanceId ? componentContainerForInstance(target.project, target.instanceId) : undefined)
+  const size = surface?.designSize ?? { width: 1280, height: 720 }
   const actualWidth = options.width ?? width, actualHeight = options.height ?? height
   return { width: actualWidth, height: actualHeight,
-    transform: [1, 0, 0, 1, options.x ?? (options.center ? options.center.x - actualWidth / 2 : options.origin === 'slide-authoring' ? 80 : surface.kind === 'slide' ? (size.width - width) / 2 : 0),
-      options.y ?? (options.center ? options.center.y - actualHeight / 2 : options.origin === 'slide-authoring' ? 80 : surface.kind === 'slide' ? (size.height - height) / 2 : 0)] }
+    transform: [1, 0, 0, 1, options.x ?? (options.center ? options.center.x - actualWidth / 2 : options.origin === 'slide-authoring' ? 80 : surface?.kind === 'slide' ? (size.width - width) / 2 : 0),
+      options.y ?? (options.center ? options.center.y - actualHeight / 2 : options.origin === 'slide-authoring' ? 80 : surface?.kind === 'slide' ? (size.height - height) / 2 : 0)] }
 }
 
 /** The original professional insertion algorithm; the caller retains capture, CAS and History. */
 export function prepareCourseElementEdits(project: CourseProjectV10, surfaceId: string | null, selectedInstanceId: string | null,
   kind: CourseElementKind, options: CourseInsertionOptions = {}): { edits: ComponentEdit[]; instanceIds: string[] } {
-  if (!project.surfaces.some(surface => surface.id === surfaceId)) throw new Error('插入的原页面已不存在')
+  if (surfaceId && !componentSurface(project, surfaceId)) throw new Error('插入的原页面已不存在')
   const target = { project, surfaceId, instanceId: selectedInstanceId }, slide = options.origin === 'slide-authoring'
   let definition: ComponentDefinition, data: unknown, width = slide ? 320 : 400, height = slide ? 80 : 70
   if (kind === 'text') { definition = TEXT_DEFINITION; data = createTextComponentData(options.text ?? '双击编辑文字') }
@@ -114,9 +127,9 @@ export function prepareCourseTeacherControllerEdits(project: CourseProjectV10, s
         ? [{ type: 'data.set' as const, instanceId: existing.id, path: ['sceneStyles', surfaceId, 'enabled'], value: true }] : []),
       ...(surfaceId ? courseGlobalPlacementEdits(project, existing.id, { atSurface: { surfaceId, visible: true } }) : [])], instanceIds: [existing.id] }
   }
-  const surface = project.surfaces.find(value => value.id === surfaceId)
-  if (!surface) throw new Error('插入的原页面已不存在')
-  const canvas = origin === 'slide-authoring' ? surface.designSize ?? { width: 1280, height: 720 } : undefined
+  const surface = surfaceId ? componentSurface(project, surfaceId) : undefined
+  if (surfaceId && !surface) throw new Error('插入的原页面已不存在')
+  const canvas = origin === 'slide-authoring' ? surface?.designSize ?? { width: 1280, height: 720 } : undefined
   const instance: ComponentInstance = { id: `instance_${nanoid()}`, definitionId: TEACHER_CONTROLLER_DEFINITION.id,
     ...(origin ? {} : { name: '教师控制台' }), data: courseAuthorData(createTeacherControllerData(canvas)),
     frame: origin ? createTeacherControllerFrame(canvas) : { width: 720, height: 80, transform: [1, 0, 0, 1, 20, 20] } }

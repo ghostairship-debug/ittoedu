@@ -1,3 +1,4 @@
+import { testContainerInstance } from '../helpers/glxWorkFixture'
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { expect, it, vi } from 'vitest'
 import { createImageData, IMAGE_DEFINITION, imageDataSchema } from '../../src/components/image'
@@ -20,7 +21,7 @@ it('edits stable safe-area identities through current Properties, undoes geometr
   project.definitions[IMAGE_DEFINITION.id] = IMAGE_DEFINITION
   project.instances.image = { id: 'image', definitionId: IMAGE_DEFINITION.id, data: courseAuthorData(createImageData('art')),
     frame: { width: 320, height: 180, transform: [1, 0, 0, 1, 40, 50] } }
-  project.surfaces[0].childIds.push('image'); project.assets.art = { id: 'art', path: 'assets/art.png', mimeType: 'image/png' }
+  testContainerInstance(project, 0).childIds.push('image'); project.assets.art = { id: 'art', path: 'assets/art.png', mimeType: 'image/png' }
   const h = await createV10StoreHost(project, { assets: { art: new Uint8Array([1, 2, 3]) }, components: {} }), previous = useEditorStore.getState()
   const areas = () => imageDataSchema.parse(h.model().project.instances.image.data).safeAreas
   try {

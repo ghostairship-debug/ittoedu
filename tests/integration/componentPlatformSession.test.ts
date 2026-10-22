@@ -1,4 +1,6 @@
 // @vitest-environment node
+import { componentSurfaces } from '../../src/shared/contracts/component-platform/project'
+import { testContainerInstance } from '../helpers/glxWorkFixture'
 import { promises as fs } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -35,7 +37,7 @@ function sample(): Extract<DocumentModel, { kind: 'course-v10' }> {
     title: { id: 'title', definitionId: 'text', data: { text: '原始标题', emphasis: ['原始'] }, frame: { width: 200, height: 40, transform: [1, 0, 0, 1, 15, 20] } },
     shape: { id: 'shape', definitionId: 'shape', data: { fill: '#ff0000' }, frame: { width: 60, height: 50, transform: [-1, 0, 0.2, 1, 180, 100] } },
   }
-  project.surfaces[0].childIds = ['card']
+  testContainerInstance(project, 0).childIds = ['card']
   project.assets = { raw: { id: 'raw', path: 'assets/original.bin', mimeType: 'application/octet-stream' } }
   return { kind: 'course-v10', project, resources: { assets: { raw: new Uint8Array([1, 2, 3]) }, components: {} } }
 }
@@ -67,7 +69,7 @@ it('saves authored Spatial cameras and inserts a surface with owned content thro
   const current = await host.internalAPI.read(initial.documentId)
   const driver = new CourseV10Driver(), reopened = await driver.load(await driver.serialize(current.model))
   if (reopened.kind !== 'course-v10') throw new Error('expected V10')
-  expect(reopened.project.surfaces[1]).toMatchObject({ id: 'world', childIds: ['world-title'], spatial: { ...spatial, home: { ...spatial.home, zoom: 3 } } })
+  expect(componentSurfaces(reopened.project)[1]).toMatchObject({ id: 'world', childIds: ['world-title'], spatial: { ...spatial, home: { ...spatial.home, zoom: 3 } } })
   expect(reopened.project.instances['world-title'].data).toEqual({ text: '仍保留' })
 })
 
@@ -117,15 +119,17 @@ it('commits local frame/content changes through the real Session, rebases indepe
 
 it('applies structure atomically, keeps one owning tree and rejects the old archive format without conversion', () => {
   const model = sample(), driver = new CourseV10Driver()
-  const command = captureComponentOperation(model.project, [{ type: 'instance.move', instanceId: 'shape', container: { kind: 'surface', surfaceId: model.project.surfaces[0].id }, index: 1,
+  const command = captureComponentOperation(model.project, [{ type: 'instance.move', instanceId: 'shape', container: { kind: 'surface', surfaceId: componentSurfaces(model.project)[0].id }, index: 1,
     frame: { width: 60, height: 50, transform: [0, -1, -1, 0.45, 20, 285] } }])
   const result = driver.apply(model, command)
-  expect(result).toMatchObject({ kind: 'course-v10', project: { surfaces: [{ childIds: ['card', 'shape'] }], instances: { card: { childIds: ['title'] } } } })
+  if (result.kind !== 'course-v10') throw new Error('Expected current course')
+  expect(result).toMatchObject({ kind: 'course-v10', project: { instances: { card: { childIds: ['title'] } } } })
+  expect(componentSurfaces(result.project)[0].childIds).toEqual(['card', 'shape'])
   expect(model.project.instances.card.childIds).toEqual(['title', 'shape'])
   const cycle = captureComponentOperation(model.project, [{ type: 'instance.move', instanceId: 'card', container: { kind: 'instance', instanceId: 'card' }, index: 0, frame: model.project.instances.card.frame }])
   expect(() => driver.apply(model, cycle)).toThrow('自身子树')
   const old = zipSync({ 'project.json': strToU8(JSON.stringify({ schemaVersion: 9 })) })
-  expect(() => driver.load(old)).toThrow('仅支持独立 Project V10')
+  expect(() => driver.load(old)).toThrow('此入口支持 Project 11 及现行 V10 的单次读入转换；原件未改变')
 })
 
 it('adds a professional definition, owned instance and immutable resource in one Session edit and reopens their exact values', async () => {
@@ -137,12 +141,13 @@ it('adds a professional definition, owned instance and immutable resource in one
   const edits: ComponentEdit[] = [
     { type: 'definition.set', definition: { id: 'guoling.image', role: 'content', implementation: { kind: 'builtin', key: 'guoling.image' } } },
     { type: 'asset.add', asset: { id: 'asset_image', path: 'assets/picture.png', mimeType: 'image/png' }, bytes: new Uint8Array([8, 7, 6]) },
-    { type: 'instance.insert', container: { kind: 'surface', surfaceId: initial.model.project.surfaces[0].id }, index: 0, rootIds: ['picture'],
+    { type: 'instance.insert', container: { kind: 'surface', surfaceId: componentSurfaces(initial.model.project)[0].id }, index: 0, rootIds: ['picture'],
       instances: [{ id: 'picture', definitionId: 'guoling.image', data: createImageData('asset_image'), frame: { width: 100, height: 60, transform: [1, 0.2, 0, 1, 30, 40] } }] },
   ]
   const command = operation(initial, 'insert-picture', edits)
   expect(await host.internalAPI.dispatch({ ...command, operationId: 'future', baseRevision: 100 })).toMatchObject({ status: 'conflict', applied: false })
-  expect(await host.internalAPI.dispatch(command)).toMatchObject({ status: 'applied', revision: 1, appliedChanges: { affectedTargets: ['picture'] } })
+  expect(await host.internalAPI.dispatch(command)).toMatchObject({ status: 'applied', revision: 1,
+    appliedChanges: { affectedTargets: [componentSurfaces(initial.model.project)[0].id, 'picture'] } })
   const filename = path.join(directory, '图片.h5lesson')
   await host.internalAPI.save(initial.documentId, filename)
   await host.operate({ type: 'close', documentId: initial.documentId })

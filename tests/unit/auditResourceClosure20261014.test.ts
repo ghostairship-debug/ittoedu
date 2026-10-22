@@ -1,3 +1,5 @@
+import { componentSurfaces } from '../../src/shared/contracts/component-platform/project'
+import { createTestProjectFromLegacy, testContainerInstance } from '../helpers/glxWorkFixture'
 import { afterEach, expect, it } from 'vitest'
 import { createDomAuthoring } from '../../src/components/web/authoringDom'
 import { refreshWebResourceReferences, resolveWebResourceBindings, webResourceReferenceMarker } from '../../src/components/web/resources'
@@ -17,9 +19,9 @@ import type { DocumentResources } from '../../src/shared/workbench/document'
 afterEach(() => document.body.replaceChildren())
 const token = 'cw-resource:replacement'
 const sourceCode = 'export default { mount() { return { dispose() {} } } }'
-const blank = (id: string): CourseProjectV10 => ({ schemaVersion: 10, id, revision: 0, title: id,
+const blank = (id: string): CourseProjectV10 => (createTestProjectFromLegacy({ schemaVersion: 10, id, revision: 0, title: id,
   definitions: {}, instances: {}, assets: {}, surfaces: [{ id: 'page', kind: 'slide', title: 'Page', childIds: [] }],
-  global: { underlay: [], overlay: [] } })
+  global: { underlay: [], overlay: [] } }))
 const record: ComponentAuthorRecord = { kind: 'image', binding: { kind: 'dom', path: [{ tag: 'img', index: 0, attributes: { id: 'photo' } }],
   baseline: 'cw-resource:original' }, overrides: { src: token } }
 
@@ -35,8 +37,8 @@ function fixture(sourceOwner: 'definition' | 'override' = 'override') {
     authoring: { records: { photo: structuredClone(record) }, resourceBindings: { [token]: 'base-photo' } } }
   project.instances.neighbor = { id: 'neighbor', definitionId: 'web', data: { html: '<p>Untouched neighbor</p>' },
     ...(sourceOwner === 'override' ? { implementationOverride: implementation } : {}) }
-  project.surfaces[0].childIds = ['web', 'neighbor']
-  project.surfaces[0].presentation = { states: [
+  testContainerInstance(project, 0).childIds = ['web', 'neighbor']
+  testContainerInstance(project, 0).container.presentation = { states: [
     { id: 'alternate', title: 'Alternate', overrides: { web: { authoring: {
       records: { photo: structuredClone(record) }, resourceBindings: { [token]: 'state-photo' } } } } },
     { id: 'sibling', title: 'Sibling', overrides: {} },
@@ -81,7 +83,7 @@ it.each(['definition', 'override'] as const)('closes %s Source image records thr
   expect(new TextDecoder().decode(reopened.resources.assets[newState])).toBe(new TextDecoder().decode(resources.assets['state-photo']))
   expect(copied.authoring).toEqual({ records: { photo: record }, resourceBindings: { [token]: newBase } })
   expect(copied.implementationOverride ?? reopened.project.definitions[copied.definitionId].implementation).toMatchObject({ kind: 'source', source: sourceCode })
-  const surfaceId = insertion.identities.surfaces.get('page')!, page = reopened.project.surfaces.find(surface => surface.id === surfaceId)!
+  const surfaceId = insertion.identities.surfaces.get('page')!, page = componentSurfaces(reopened.project).find(surface => surface.id === surfaceId)!
   const alternate = page.presentation!.states.find(state => state.title === 'Alternate')!, sibling = page.presentation!.states.find(state => state.title === 'Sibling')!
   const stateInstance = resolveComponentPresentation(reopened.project, surfaceId, alternate.id).instances[copiedId]
   expect(stateInstance.authoring?.resourceBindings?.[token]).toBe(newState)
@@ -96,7 +98,7 @@ it.each(['definition', 'override'] as const)('closes %s Source image records thr
   expect(mountedImage(copied, urls)).toBe(urls[newBase])
   expect(mountedImage(stateInstance, urls)).toBe(urls[newState])
   expect(published.payload.instances[copiedId].authoring).toEqual(copied.authoring)
-  expect(published.payload.surfaces.find(surface => surface.id === surfaceId)!.presentation!.states.find(state => state.id === alternate.id)!
+  expect(componentSurfaces(published.payload).find(surface => surface.id === surfaceId)!.presentation!.states.find(state => state.id === alternate.id)!
     .overrides[copiedId].authoring).toEqual(stateInstance.authoring)
   expect(project.instances.web.authoring?.resourceBindings?.[token]).toBe('base-photo')
 })

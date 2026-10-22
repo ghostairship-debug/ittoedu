@@ -1,3 +1,4 @@
+import { testContainerInstance } from '../helpers/glxWorkFixture'
 // @vitest-environment node
 import { transform } from 'esbuild'
 import { readFileSync } from 'node:fs'
@@ -41,7 +42,7 @@ function model() {
   const project = createBlankCourseProjectV10('局部增强真实执行')
   project.definitions.shared = { id: 'shared', title: 'Shared', role: 'content', implementation: source(baseSource) }
   for (const id of ['a', 'b']) project.instances[id] = { id, definitionId: 'shared', data: { version: 'first' } }
-  project.surfaces[0].childIds = ['a', 'b']
+  testContainerInstance(project, 0).childIds = ['a', 'b']
   return { kind: 'course-v10' as const, project, resources: { assets: {}, components: {} as Record<string, Record<string, Uint8Array>> } }
 }
 function enhance(current: ReturnType<typeof model>, text = enhancementSource) {

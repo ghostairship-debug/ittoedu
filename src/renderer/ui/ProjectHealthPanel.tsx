@@ -1,3 +1,4 @@
+import { componentContainers } from '../../shared/contracts/component-platform/project'
 import {
   AlertTriangle,
   CheckCircle2,
@@ -12,7 +13,7 @@ import {
   summarizeCourseProjectHealth,
   type ComponentProjectHealthFinding,
 } from '../../shared/componentProjectHealth'
-import { resolveCourseProjectHealthRoute } from '../diagnostics/projectHealthNavigation'
+import { resolveCourseProjectHealthRoute, selectCourseProjectDiagnosticRoute } from '../diagnostics/projectHealthNavigation'
 import {
   selectActiveCourseProjectDocument,
   selectActiveCourseResources,
@@ -80,10 +81,12 @@ function OpenProjectHealthPanel({
       for (const item of diagnostics.filter(item => item.severity === severity)) {
         const route = courseProject ? resolveCourseProjectHealthRoute(courseProject, item) : null
         const surface = route?.available && route.surfaceId
-          ? courseProject?.surfaces.find(surface => surface.id === route.surfaceId)
+          ? (courseProject == null ? undefined : componentContainers(courseProject).find(surface => surface.id === route.surfaceId))
           : undefined
         const label = surface
           ? `${surface.kind === 'slide' ? '演示页' : surface.kind === 'flow' ? '流式布局' : '无限画布'} · ${surface.title}`
+          : route?.available && route.rootInstanceId && courseProject
+            ? `作品 · ${courseProject.instances[route.rootInstanceId]?.name ?? courseProject.title}`
           : '整课与资源'
         groups.set(label, [...(groups.get(label) ?? []), item])
       }
@@ -98,9 +101,7 @@ function OpenProjectHealthPanel({
     if (!current) return
     const route = resolveCourseProjectHealthRoute(current, diagnostic)
     if (!route.available) { store.setStatus(route.reason); return }
-    if (route.surfaceId) store.courseKernel.selectSurface(route.surfaceId)
-    store.setEditingScope(route.scope)
-    store.courseKernel.selectInstances(route.instanceId ? [route.instanceId] : [], route.surfaceId)
+    selectCourseProjectDiagnosticRoute(store.courseKernel, route, store.setEditingScope)
     store.setActiveTab(route.tab)
     store.setStatus(`已定位：${diagnostic.message}`)
     onClose()

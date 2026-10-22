@@ -10,14 +10,16 @@ import type { ComponentLibraryEntry } from '../../src/shared/contracts/component
 
 it('keeps usable archives with invalid optional catalog/archive metadata, preserving core failures and valid enrichment', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'guoling-l0-optional-catalog-'))
-  const entry: ComponentLibraryEntry = { schemaVersion: 1, id: 'card', title: '可编辑卡片',
-    definitions: { card: { id: 'card', role: 'content', version: '1.0.0', implementation: { kind: 'builtin', key: 'fixture' } } },
+  const entry: ComponentLibraryEntry = { schemaVersion: 2, id: 'card', title: '可编辑卡片',
+    definitions: { card: { id: 'card', role: 'content', version: '1.0.0', library: { packageId: 'card', version: '1.0.0' }, implementation: { kind: 'builtin', key: 'fixture' } } },
     example: { rootIds: ['card'], instances: { card: { id: 'card', definitionId: 'card', data: { title: '保持正文' } } } },
     assets: {}, resources: { assets: {}, components: {} } }
   try {
     const archive = exportComponentLibraryArchive(entry, '1.0.0', { description: '包内说明' })
     await fs.writeFile(path.join(root, 'good.h5component'), archive)
-    const optionalEntry = { ...entry, id: 'optional-card' }
+    const optionalEntry = structuredClone(entry)
+    optionalEntry.id = 'optional-card'
+    optionalEntry.definitions.card.library!.packageId = optionalEntry.id
     const optionalFiles = unzipSync(exportComponentLibraryArchive(optionalEntry, '1.0.0', {
       description: '将被损坏的说明', subject: ['科学'], schoolStage: ['小学'], tags: ['卡片'], sourceCourse: '原课件',
     }))

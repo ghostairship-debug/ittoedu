@@ -1,4 +1,6 @@
 // @vitest-environment node
+import { componentSurfaces } from '../../src/shared/contracts/component-platform/project'
+import { testContainerInstance, setRootContainers } from '../helpers/glxWorkFixture'
 import { promises as fs } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -37,9 +39,9 @@ const reply = () => new Response(`data: ${JSON.stringify({ id: randomUUID(), mod
 async function fixture(model: (request: { instruction: string }) => Promise<void> = async () => {}, archive?: CourseProjectV10ArchiveData) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'g20-m15-element-')); roots.push(root)
   const project = createBlankCourseProjectV10('卡片课件')
-  project.global.overlay = []; project.instances = {}; project.definitions = { [TEXT_DEFINITION.id]: structuredClone(TEXT_DEFINITION) }
-  const surface = project.surfaces[0]
-  surface.childIds = ['a', 'b', 'c']
+  project.global.overlay = []; project.instances = { ...project.instances }; project.definitions = { ...project.definitions,  [TEXT_DEFINITION.id]: structuredClone(TEXT_DEFINITION)  }
+  const surface = componentSurfaces(project)[0]
+  testContainerInstance(project, 0).childIds = ['a', 'b', 'c']
   for (const [id, text, y] of [['a', '标题', 40], ['b', '要点', 160], ['c', '结语', 280]] as const) {
     project.instances[id] = { id, definitionId: TEXT_DEFINITION.id, data: JSON.parse(JSON.stringify(createTextComponentData(text))),
       frame: { width: 400, height: 80, transform: [1, 0, 0, 1, 40, y] } }
@@ -74,7 +76,7 @@ async function fixture(model: (request: { instruction: string }) => Promise<void
 
 const locationOf = (snapshot: DocumentSnapshot) => {
   if (snapshot.model.kind !== 'course-v10') throw new Error('course')
-  return snapshot.model.project.surfaces[0]!.id
+  return componentSurfaces(snapshot.model.project)[0]!.id
 }
 /** The object an element card edits, as its reference: readable and the only writable target. */
 function objectReference(snapshot: DocumentSnapshot, itemId: string): ExecutionDocumentReference {
@@ -183,8 +185,8 @@ it('M15 a request for an object is judged by that object: other edits do not ref
 
   // Once "a" is gone, a request captured before is refused as changed.
   await edit(f.documents, f.opened.documentId, project => {
-    const surface = project.surfaces[0]
-    surface.childIds = surface.childIds.filter(id => id !== 'a')
+    const surface = componentSurfaces(project)[0]
+    testContainerInstance(project, 0).childIds = surface.childIds.filter(id => id !== 'a')
     delete project.instances.a
   })
   const latest = await f.service.conversations.readConversation({ workspaceId: f.workspaceId, conversationId: card.conversationId })
@@ -280,8 +282,8 @@ it('M15 a card undoes only what its request changed, asks before overwriting lat
 
 it('M15 a document block card undoes only the fields its request changed and asks before overwriting', async () => {
   const project = createBlankCourseProjectV10('Flow 图片卡')
-  project.global.overlay = []; project.instances = {}; project.definitions = { image: { id: 'image', role: 'content', implementation: { kind: 'builtin', key: 'guoling.image' } } }
-  project.surfaces = [{ id: 'flow', kind: 'flow', title: '讲义', childIds: ['flow-media'] }]
+  project.global.overlay = []; project.instances = { ...project.instances }; project.definitions = { ...project.definitions,  image: { id: 'image', role: 'content', implementation: { kind: 'builtin', key: 'guoling.image' } }  }
+  setRootContainers(project, [{ id: 'flow', kind: 'flow', title: '讲义', childIds: ['flow-media'] }])
   project.assets.image = { id: 'image', path: 'assets/image.svg', mimeType: 'image/svg+xml', kind: 'image' }
   project.instances['flow-media'] = { id: 'flow-media', definitionId: 'image', data: JSON.parse(JSON.stringify(createImageData('image', '原插图'))),
     flowLayout: { width: 'content-width', caption: { inlines: [{ type: 'text', text: '原说明' }] } } }
@@ -377,8 +379,8 @@ it('M15 a Markdown text card follows its text through follow-ups and undoes and 
 
 it('M15 a Flow text card traces its range in the paragraph and undoes the paragraph text only', async () => {
   const project = createBlankCourseProjectV10('Flow 文字卡')
-  project.global.overlay = []; project.instances = {}; project.definitions = { [TEXT_DEFINITION.id]: structuredClone(TEXT_DEFINITION) }
-  project.surfaces = [{ id: 'flow', kind: 'flow', title: '讲义', childIds: ['flow-paragraph'] }]
+  project.global.overlay = []; project.instances = { ...project.instances }; project.definitions = { ...project.definitions,  [TEXT_DEFINITION.id]: structuredClone(TEXT_DEFINITION)  }
+  setRootContainers(project, [{ id: 'flow', kind: 'flow', title: '讲义', childIds: ['flow-paragraph'] }])
   project.instances['flow-paragraph'] = { id: 'flow-paragraph', definitionId: TEXT_DEFINITION.id,
     data: JSON.parse(JSON.stringify(createTextComponentData('这是一段可编辑正文。'))) }
   let f!: Awaited<ReturnType<typeof fixture>>
@@ -414,8 +416,8 @@ it.each([
   { mode: 'unproven child document', region: 'h2', dynamic: false, nested: true, lost: undefined },
 ])('M15 a Web card reports only proved lost light edits and restores its source without losing later edits: $mode', async ({ region, dynamic, nested, lost }) => {
   const project = createBlankCourseProjectV10('Web 卡')
-  project.global.overlay = []; project.instances = {}; project.definitions = { [WEB_DEFINITION.id]: structuredClone(WEB_DEFINITION) }
-  project.surfaces[0].childIds = ['quiz']
+  project.global.overlay = []; project.instances = { ...project.instances }; project.definitions = { ...project.definitions,  [WEB_DEFINITION.id]: structuredClone(WEB_DEFINITION)  }
+  testContainerInstance(project, 0).childIds = ['quiz']
   const program = dynamic ? '<script type="  text/javascript  ">window.renderLater=()=>document.querySelector("h2").textContent="听录音，选图片"</script>' : nested ? '<iframe srcdoc="&lt;h2&gt;听录音，选图片&lt;/h2&gt;"></iframe>' : ''
   const originalHtml = '<h2>听录音，选图片</h2><p>听录音，选图片</p><p>第 1 题</p>' + program
   const overrides: JsonObject[] = [{ original: '听录音，选图片', region, text: '人工改的标题' },

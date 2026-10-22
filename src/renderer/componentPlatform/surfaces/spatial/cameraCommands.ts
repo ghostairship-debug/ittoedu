@@ -1,3 +1,4 @@
+import { componentContainers } from '../../../../shared/contracts/component-platform/project'
 import type { ComponentSpatialPose, CourseProjectV10 } from '../../../../shared/contracts/component-platform'
 import { frameCorners } from '../../../../core/components/geometry'
 import { spatialWorldTargets } from './targets'
@@ -5,7 +6,7 @@ import { isComponentVisibleAtSurface } from '../../../../shared/contracts/compon
 import { spatialSemanticVisible } from '../../../../player/surfaces/spatial/componentPlatform/graph'
 export function fitSpatialComponentWorld(project: CourseProjectV10, surfaceId: string, viewport: { width: number; height: number },
   options: { scope?: 'visible' | 'all'; zoom?: number } = {}): ComponentSpatialPose {
-  const spatial = project.surfaces.find(value => value.id === surfaceId)?.spatial
+  const spatial = componentContainers(project).find(value => value.id === surfaceId)?.spatial
   const targets = spatialWorldTargets(project, surfaceId).filter(target => options.scope === 'all'
     || [...target.ancestors, target.instanceId].every(id => isComponentVisibleAtSurface(project.instances[id], surfaceId)
       && spatialSemanticVisible(spatial, id, options.zoom ?? 1)))

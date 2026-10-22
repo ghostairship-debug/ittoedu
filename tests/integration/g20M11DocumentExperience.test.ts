@@ -30,7 +30,9 @@ async function fixture() {
 
 it('M11 projects real saving, failed and restored-draft facts; retry clears failure only after a real save', async () => {
   const h = await fixture(), labels: string[] = []
-  h.documents.subscribe(event => { if (event.type === 'changed') labels.push(documentSaveLabel(event.snapshot)) })
+  h.documents.subscribe(event => {
+    if (event.type !== 'closed') labels.push(documentSaveLabel(event.type === 'changed' ? event.head ?? event.snapshot : event.head))
+  })
   await h.edit(h.id, 'unsaved recovery')
   expect(documentSaveLabel(await h.documents.read(h.id))).toBe('未保存')
   await fs.writeFile(h.filename, 'external copy')

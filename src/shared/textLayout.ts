@@ -112,6 +112,16 @@ function font(node: TextNode, fontSize: number, style: Required<TextRunStyle>): 
   return `${style.italic ? 'italic ' : ''}${style.bold ? '700 ' : '400 '}${runFontSize(node, fontSize, style)}px ${style.fontFamily || node.style.fontFamily}`
 }
 
+/** The same effective code-point run styles used by Canvas measurement. */
+export function textNodeFontRequests(node: TextNode): { font: string; text: string }[] {
+  const requests = new Map<string, string>()
+  Array.from(node.text).forEach((character, index) => {
+    const spec = font(node, node.style.fontSize, runStyle(node, index))
+    requests.set(spec, (requests.get(spec) ?? '') + character)
+  })
+  return Array.from(requests, ([font, text]) => ({ font, text }))
+}
+
 function runFontSize(node: TextNode, fontSize: number, style: Required<TextRunStyle>): number {
   return (style.fontSize || node.style.fontSize) * fontSize / node.style.fontSize
 }

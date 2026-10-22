@@ -1,3 +1,4 @@
+import { componentContainers } from '../../shared/contracts/component-platform/project'
 import { nanoid } from 'nanoid'
 import type { AudioChannel, ProjectAudioSettings, SoundDefinition } from '../../shared/contracts/media-v1'
 import type { ComponentEdit, CourseProjectV10 } from '../../shared/contracts/component-platform'
@@ -33,7 +34,7 @@ export function courseSoundEdits(project: CourseProjectV10, soundId: string, pat
         || rule.actions.some(({ action }) => 'soundId' in action && action.soundId === soundId
           || 'target' in action && action.target.kind === 'sound' && action.target.soundId === soundId))
     })
-    if (referenced(project) || project.surfaces.some(surface => surface.presentation?.states.some(state =>
+    if (referenced(project) || componentContainers(project).some(surface => surface.presentation?.states.some(state =>
       referenced(resolveComponentPresentation(project, surface.id, state.id)))))
       throw new Error('该声音仍被互动规则引用，请先删除或改写相关声音动作。')
     delete sounds[soundId]

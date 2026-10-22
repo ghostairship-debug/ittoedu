@@ -1,4 +1,6 @@
 // @vitest-environment node
+import { componentSurfaces } from '../../src/shared/contracts/component-platform/project'
+import { testContainerInstance } from '../helpers/glxWorkFixture'
 import { promises as fs } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -59,7 +61,7 @@ async function fixture(withImage = false, deferred = false) {
         flipX: true, cornerRadius: 16, filters: { brightness: 0.8, contrast: 1.2, saturation: 0.9, grayscale: 0, blur: 0 } } }
     project.instances.neighbor = { id: 'neighbor', definitionId: IMAGE_DEFINITION.id, data: createImageData('original', '邻居不可改'),
       frame: { width: 100, height: 70, transform: [1, 0, 0, 1, 550, 80] } }
-    project.surfaces[0].childIds = ['picture', 'neighbor']
+    testContainerInstance(project, 0).childIds = ['picture', 'neighbor']
   }
   const documents = new DocumentHostService(path.join(root, 'documents'))
   const initial = await documents.internalAPI.create({ kind: 'course-v10', project,
@@ -79,9 +81,9 @@ async function fixture(withImage = false, deferred = false) {
     stop: images.stop.bind(images), readResource: images.readResource.bind(images), readReadyResourceFromJob: images.readReadyResourceFromJob.bind(images) } })
   await gateway.beginRun({ runId: 'author', actor: 'agent', documents: [{ documentId: initial.documentId, writable: [{ kind: 'document' }] }],
     fileAccess: { permission: 'workspace', workspaceRoot: root } })
-  const page = await gateway.issueTarget('author', initial.documentId, { kind: 'course-surface', surfaceId: project.surfaces[0].id })
+  const page = await gateway.issueTarget('author', initial.documentId, { kind: 'course-surface', surfaceId: componentSurfaces(project)[0].id })
   const picture = withImage ? await gateway.issueTarget('author', initial.documentId,
-    { kind: 'course-instance', surfaceId: project.surfaces[0].id, instanceId: 'picture' }) : undefined
+    { kind: 'course-instance', surfaceId: componentSurfaces(project)[0].id, instanceId: 'picture' }) : undefined
   let sequence = 0
   const call = (name: string, input: unknown, id = `call-${++sequence}`) => gateway.execute('author', id, { name, input })
   const current = () => documents.internalAPI.read(initial.documentId)
@@ -132,9 +134,9 @@ it('automatically inserts once, replays without generation or application, and s
     const input = { prompt: '生成并插入原页面', application: { mode: 'insert', target: f.page } }
     const result = read(await f.call('image.generate', input, 'insert-once'))
     expect(result).toMatchObject({ status: 'ready', generation: { status: 'ready' }, application: { status: 'applied' }, save: { status: 'not_requested' } })
-    const applied = await f.current(), model = course(applied), id = model.project.surfaces[0].childIds[0]
+    const applied = await f.current(), model = course(applied), id = componentSurfaces(model.project)[0].childIds[0]
     expect(applied.revision).toBe(f.initial.revision + 1); expect(applied.undoDepth).toBe(1)
-    expect(model.project.surfaces[0].childIds).toHaveLength(1)
+    expect(componentSurfaces(model.project)[0].childIds).toHaveLength(1)
     const assetId = imageDataSchema.parse(model.project.instances[id].data).assetId
     expect((await sharp(model.resources.assets[assetId]).metadata())).toMatchObject({ format: 'png', width: 32, height: 24 })
     expect(read(await f.call('image.generate', input, 'insert-once')).application).toEqual(result.application)
@@ -170,7 +172,7 @@ it('automatically applies an image edit to its original full target while preser
     expect({ ...data, assetId: oldData.assetId, originalAssetId: oldData.originalAssetId }).toEqual(oldData)
     expect(data.assetId).not.toBe('original'); expect(data.originalAssetId).toBe(data.assetId)
     expect(model.project.instances.neighbor).toEqual(before.project.instances.neighbor)
-    expect(model.project.surfaces[0].childIds).toEqual(['picture', 'neighbor'])
+    expect(componentSurfaces(model.project)[0].childIds).toEqual(['picture', 'neighbor'])
     expect(await f.history('undo')).toMatchObject({ status: 'applied' }); expect(content(await f.current())).toEqual(content(f.initial))
     expect(await f.history('redo')).toMatchObject({ status: 'applied' }); expect(content(await f.current())).toEqual(content(after))
     const final = await f.current(), cold = await f.persist('auto-replace.glx')
@@ -195,7 +197,7 @@ it('retains a ready candidate when a human changes the same target during genera
     expect((await f.current()).model).toEqual(manual.model); expect((await f.current()).undoDepth).toBe(1)
     expect(read(await f.call('image.status', { job: result.job })).resources[0].resourceId).toBe(result.resources[0].resourceId)
     expect((await f.current()).model).toEqual(manual.model); expect(f.calls()).toBe(1)
-    const fresh = await f.gateway.issueTarget('author', f.initial.documentId, { kind: 'course-instance', surfaceId: f.project.surfaces[0].id, instanceId: 'picture' })
+    const fresh = await f.gateway.issueTarget('author', f.initial.documentId, { kind: 'course-instance', surfaceId: componentSurfaces(f.project)[0].id, instanceId: 'picture' })
     expect(await f.call('media.apply', { target: fresh, resource: result.resources[0].resource })).toMatchObject({ kind: 'document-operation', result: { status: 'applied' } })
     const final = await f.current(), data = imageDataSchema.parse(course(final).project.instances.picture.data)
     expect(final.undoDepth).toBe(2); expect(course(final).project.instances.picture.frame).toEqual(humanFrame)
@@ -253,7 +255,7 @@ it('another run querying the same ready image during preparation cannot apply or
     expect(readonly).toMatchObject({ kind: 'error', code: 'not-authorized' })
     // This run may use configured image tools but cannot write the original picture target.
     await f.gateway.beginRun({ runId: 'observer', actor: 'agent', documents: [{ documentId: f.initial.documentId,
-      writable: [{ kind: 'course-instance', surfaceId: f.project.surfaces[0].id, instanceId: 'neighbor' }] }],
+      writable: [{ kind: 'course-instance', surfaceId: componentSurfaces(f.project)[0].id, instanceId: 'neighbor' }] }],
       fileAccess: { permission: 'read-only', workspaceRoot: f.root } })
     const observer = read(await f.gateway.execute('observer', 'observe-ready', { name: 'image.status', input: { job: job.jobId } }))
     expect(observer.status).toBe('ready'); expect(observer.resources).toHaveLength(1)
@@ -265,7 +267,7 @@ it('another run querying the same ready image during preparation cannot apply or
     expect(author).toMatchObject({ status: 'ready', application: { status: 'applied' } })
     const applied = await f.current()
     expect(applied.revision).toBe(f.initial.revision + 1); expect(applied.undoDepth).toBe(1)
-    expect(course(applied).project.surfaces[0].childIds).toEqual(['picture', 'neighbor'])
+    expect(componentSurfaces(course(applied).project)[0].childIds).toEqual(['picture', 'neighbor'])
     expect(imageDataSchema.parse(course(applied).project.instances.picture.data).assetId).not.toBe('original')
     expect(course(applied).project.instances.neighbor).toEqual(f.project.instances.neighbor)
     expect(read(await f.call('image.status', { job: job.jobId })).application).toEqual(author.application)

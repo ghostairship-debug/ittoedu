@@ -1,3 +1,4 @@
+import { testContainerInstance } from '../helpers/glxWorkFixture'
 // @vitest-environment node
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
@@ -20,7 +21,7 @@ async function artifact() {
       return {update(){},async dispose(){marker.dataset.disposed='yes';if(instance.id==='first')throw new Error('author-dispose-failure')}};
     } }` } }
   for (const [index, id] of ['first', 'second'].entries()) project.instances[id] = { id, definitionId: 'source', data: {}, frame: { width: 200, height: 100, transform: [1, 0, 0, 1, index * 220, 0] } }
-  project.surfaces[0].childIds = ['first', 'second']
+  testContainerInstance(project, 0).childIds = ['first', 'second']
   const bytes = new TextEncoder().encode('resource lease probe')
   project.assets.probe = { id: 'probe', path: 'assets/probe.txt', mimeType: 'text/plain', byteLength: bytes.length, filename: 'probe.txt' }
   const published = await buildPublishedCourseV3({ project, assetBytes: { probe: bytes } }, { compilation: new InMemoryComponentCompilation(createEsbuildComponentCompiler()) })

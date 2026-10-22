@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { componentSurfaces } from '../../src/shared/contracts/component-platform/project'
 import { promises as fs } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -35,12 +36,12 @@ it('starts the App light-editing port without a document and commits its page ac
     const changed = await host.internalAPI.read(target.documentId)
     expect(changed).toMatchObject({ undoDepth: before.undoDepth + 1, model: { kind: 'course-v10' } })
     if (changed.model.kind !== 'course-v10') throw new Error('Expected V10')
-    expect(changed.model.project.surfaces.find(surface => surface.id === target.surfaceId)?.background?.color).toBe('#dbeafe')
+    expect(componentSurfaces(changed.model.project).find(surface => surface.id === target.surfaceId)?.background?.color).toBe('#dbeafe')
 
     await kernel.navigateHistory('undo')
     const undone = await host.internalAPI.read(target.documentId)
     if (undone.model.kind !== 'course-v10') throw new Error('Expected V10')
-    expect(undone.model.project.surfaces).toEqual(before.model.project.surfaces)
+    expect(componentSurfaces(undone.model.project)).toEqual(componentSurfaces(before.model.project))
     expect(undone.undoDepth).toBe(before.undoDepth)
   } finally {
     bridge.dispose()

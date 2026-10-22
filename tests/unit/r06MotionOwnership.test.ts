@@ -1,3 +1,5 @@
+import { testContainerInstance } from '../helpers/glxWorkFixture'
+import { componentSurfaces } from '../../src/shared/contracts/component-platform/project'
 import { expect, it, vi } from 'vitest'
 import { createComponentSpatialCameraPort } from '../../src/player/surfaces/spatial/componentPlatform/camera'
 import { teacherControllerActionSchema } from '../../src/shared/contracts/component-platform/teacherController'
@@ -9,9 +11,9 @@ it('honors an explicit Stop during the asynchronous realm reset owned by course 
   const project = createBlankCourseProjectV10('Stop during restart')
   project.definitions.source = { id: 'source', role: 'content', implementation: { kind: 'source', language: 'javascript', source: 'export function mount(){}' } }
   project.instances.source = { id: 'source', definitionId: 'source', data: {}, frame: { width: 100, height: 100, transform: [1, 0, 0, 1, 0, 0] } }
-  project.surfaces[0].childIds = ['source']
+  testContainerInstance(project, 0).childIds = ['source']
   let release!: () => void, disposing = false, first = true
-  const navigation = new ComponentNavigationOwner({ project: () => project, surfaceId: () => project.surfaces[0].id, select() {} })
+  const navigation = new ComponentNavigationOwner({ project: () => project, surfaceId: () => componentSurfaces(project)[0].id, select() {} })
   const cancel = vi.spyOn(navigation, 'cancel')
   const runtime = new ComponentPlatformRuntime('r06-stop-reset', { mode: 'play', studentNavigation: navigation, resolveSource: async () => ({ implementation: {
     mount: () => ({ update() {}, dispose: () => { if (!first) return; first = false; disposing = true; return new Promise<void>(done => { release = done }) } }),

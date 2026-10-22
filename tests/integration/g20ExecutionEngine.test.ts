@@ -23,6 +23,7 @@ import { runEndSummary } from '../../src/main/workbench/execution/executionOutco
 import { ExecutionRunStore } from '../../src/main/workbench/execution/ExecutionRunStore'
 import { ExecutionEventStore } from '../../src/main/workbench/execution/ExecutionEventStore'
 import { EditSessionService } from '../../src/main/workbench/execution/EditSessionService'
+import { StreamingEditArguments } from '../../src/core/execution/StreamingEditArguments'
 import { ChatGPTResponsesProvider, CHATGPT_RESPONSES_BASE_URL, serializeChatGPTResponsesRequest } from '../../src/main/workbench/providers/ChatGPTResponsesProvider'
 import { modelToolWireName } from '../../src/main/workbench/providers/OpenAIChatProvider'
 import { OpenAIChatProvider, serializeModelRequest } from '../../src/main/workbench/providers/OpenAIChatProvider'
@@ -93,6 +94,51 @@ const refsOf = (request: Pick<ModelRequest, 'messages'>) => JSON.parse(String(re
 }[]
 
 describe('G20 canonical model execution loop', () => {
+  it('feeds the accumulated unnamed prefix once and then parses only new text.replace deltas', async () => {
+    const snapshot = vi.spyOn(StreamingEditArguments.prototype, 'snapshot'), push = vi.spyOn(StreamingEditArguments.prototype, 'push')
+    let turns = 0
+    const provider: ModelProvider = { async *stream(request) {
+      if (turns++) { yield complete(request); return }
+      const target = refsOf(request)[0]!.writable[0]!.target
+      const raw = JSON.stringify({ target, content: '新😀内容\n保留尾部' })
+      const split = raw.indexOf('content')
+      yield { requestId: request.requestId, sequence: 1, type: 'tool.delta', index: 0, argumentsDelta: raw.slice(0, 5) }
+      yield { requestId: request.requestId, sequence: 2, type: 'tool.delta', index: 0, id: 'streamed', name: 'text.replace', argumentsDelta: raw.slice(5, split) }
+      yield { requestId: request.requestId, sequence: 3, type: 'tool.delta', index: 0, argumentsDelta: raw.slice(split) }
+      yield complete(request, [{ id: 'streamed', name: 'text.replace', argumentsText: raw }], '')
+    } }
+    const h = await fixture(provider), started = await h.engine.start(h.input), final = await h.engine.wait(started.runId)
+    expect(final.status).toBe('completed')
+    expect(snapshot).toHaveBeenCalledTimes(1)
+    expect(snapshot.mock.calls[0]![1]).toContain('"target"')
+    expect(push).toHaveBeenCalledTimes(1)
+    expect(h.session.read().model).toMatchObject({ source: '前文 新😀内容\n保留尾部 后文' })
+    expect(final.requests.every(request => request.payload?.prefix === undefined)).toBe(true)
+  })
+
+  it('waits for the real display append before consuming another provider fragment', async () => {
+    const entered = deferred(), release = deferred(), continued = vi.fn()
+    const provider: ModelProvider = { async *stream(request) {
+      yield { requestId: request.requestId, sequence: 1, type: 'text.delta', text: '持久化首片' }
+      continued()
+      yield complete(request, [], '持久化首片')
+    } }
+    const h = await fixture(provider), append = h.events.batchAppend.bind(h.events)
+    vi.spyOn(h.events, 'batchAppend').mockImplementation(async inputs => {
+      if (inputs.some(input => input.type === 'text' && input.data.status === 'running')) {
+        entered.resolve(); await release.promise
+      }
+      return append(inputs)
+    })
+    const started = await h.engine.start(h.input)
+    await entered.promise
+    await new Promise<void>(resolve => setImmediate(resolve))
+    expect(continued).not.toHaveBeenCalled()
+    release.resolve()
+    expect((await h.engine.wait(started.runId)).status).toBe('completed')
+    expect(continued).toHaveBeenCalledOnce()
+  })
+
   it('publishes the first display fragment after durable acknowledgement without waiting for the batching interval', async () => {
     const visible: string[] = []
     const provider: ModelProvider = { async *stream(request) {
@@ -640,7 +686,7 @@ describe('G20 canonical model execution loop', () => {
       if (!interrupted && String(to).startsWith(path.join(h.directory, 'runs'))) { interrupted = true; throw new Error('checkpoint rename interrupted') }
       return canonicalRename(from, to)
     })
-    await expect(h.runs.save({ ...old, version: old.version + 1 })).rejects.toThrow('checkpoint rename interrupted')
+    await expect(h.runs.save({ ...old, version: old.version + 1 }, { checkpoint: true })).rejects.toThrow('checkpoint rename interrupted')
     expect((await h.runs.read(crashRun))?.version).toBe(old.version)
     const restored = new DocumentRegistry({ drivers: [h.driver], persistence: h.journal, createId: randomUUID, bindingKey: binding => binding.path })
     await restored.restore((await h.journal.recover(h.session.documentId))!)

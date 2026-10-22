@@ -1,3 +1,4 @@
+import { componentContainers } from '../../shared/contracts/component-platform/project'
 import { z } from 'zod'
 import type { ComponentEdit, CourseProjectV10 } from '../../shared/contracts/component-platform'
 import { componentBackgroundSchema, componentPresentationSchema } from '../../shared/contracts/component-platform/schema'
@@ -27,7 +28,7 @@ export function coursePresentationEdits(project: CourseProjectV10,
   target: Extract<ToolTarget, { kind: 'course-surface' }>, input: Omit<CoursePresentationInput, 'target'>,
   createId: () => string = () => crypto.randomUUID()): ComponentEdit[] {
   const value = coursePresentationInputSchema.parse({ ...input, target: target.surfaceId })
-  const surface = project.surfaces.find(entry => entry.id === target.surfaceId)
+  const surface = componentContainers(project).find(entry => entry.id === target.surfaceId)
   if (!surface || surface.kind !== 'slide') throw new Error('请选择一个演示页面')
   const presentation = structuredClone(surface.presentation ?? { states: [] })
   const requireState = () => {

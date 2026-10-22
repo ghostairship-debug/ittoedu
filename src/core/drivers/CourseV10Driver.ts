@@ -1,5 +1,5 @@
 import type { DocumentCommand, DocumentDriver, DocumentModel } from '../../shared/workbench/document'
-import { applyComponentOperation, beginComponentOperationPlanning, ComponentOperationConflict, describeComponentChanges, equalComponentValue } from './courseV10Operations'
+import { applyComponentOperation, applyValidatedComponentOperation, beginComponentOperationPlanning, ComponentOperationConflict, describeComponentChanges, describeComponentOperationChanges, equalComponentValue } from './courseV10Operations'
 import { cloneDocumentResources } from './resources'
 import { validateComponentData } from '../components/validateComponentData'
 import { createCourseProjectV10Archive, openCourseProjectV10Archive, validateCourseProjectV10Archive, validateCourseProjectV10Resources } from './codecs/courseProjectV10Archive'
@@ -21,10 +21,17 @@ export class CourseV10Driver implements DocumentDriver {
   apply(model: DocumentModel, command: DocumentCommand): DocumentModel {
     this.validate(model)
     // Public callers own mutable buffers; detach them before using the Session path.
-    return this.applyValidated({ ...model, resources: cloneDocumentResources(model.resources) }, command)
+    course(model)
+    return this.applyValidated({ ...model, project: structuredClone(model.project), resources: cloneDocumentResources(model.resources) }, command)
   }
   applyValidated(model: DocumentModel, command: DocumentCommand): DocumentModel {
-    return this.applyCandidate(model, command, applyComponentOperation, true)
+    return this.applyCandidate(model, command, applyValidatedComponentOperation, true)
+  }
+  applyValidatedWithChanges(model: DocumentModel, command: DocumentCommand) {
+    const next = this.applyValidated(model, command)
+    course(model); course(next)
+    return { model: next, appliedChanges: command.type === 'component-platform.apply'
+      ? describeComponentOperationChanges(model.project, next.project, command) : this.describeChanges(model, next) }
   }
   beginPlanningBatch(model: DocumentModel) {
     this.validate(model)
@@ -47,7 +54,9 @@ export class CourseV10Driver implements DocumentDriver {
       if (!equalComponentValue(current, edit.expectedFiles)) throw new ComponentOperationConflict(['@componentFiles', edit.ownerId], '组件源码文件已变化')
     }
     command = { ...command, edits: scopeComponentSourceEdits(model.project, command.edits) }
-    const resources = { assets: { ...model.resources.assets }, components: { ...model.resources.components } }
+    const resources = command.edits.some(edit => edit.type === 'component.files.set' || edit.type === 'asset.add'
+      || edit.type === 'asset.replace' || edit.type === 'asset.remove')
+      ? { assets: { ...model.resources.assets }, components: { ...model.resources.components } } : model.resources
     for (const edit of command.edits) if (edit.type === 'component.files.set') {
       const current = Object.hasOwn(model.resources.components, edit.ownerId) ? model.resources.components[edit.ownerId] : null
       if (!equalComponentValue(current, edit.expectedFiles)) throw new ComponentOperationConflict(['@componentFiles', edit.ownerId], '组件源码文件已变化')
@@ -63,11 +72,11 @@ export class CourseV10Driver implements DocumentDriver {
       Object.defineProperty(resources.assets, edit.asset.id, { value: Uint8Array.from(edit.bytes), enumerable: true, configurable: true, writable: true })
     }
     const next: DocumentModel = { kind: 'course-v10', project: applyProject(model.project, command, model.resources), resources }
-    // applyComponentOperation already parses the candidate project. Only its resource
-    // closure and professional data remain to be checked at this boundary.
+    // The accepted project path validates changed fields or the full structural
+    // result. Unchanged resource closure and professional data remain validated.
     if (validateCandidate) {
-      validateCourseProjectV10Resources(next.project, next.resources)
-      validateComponentData(next.project)
+      if (next.project.assets !== model.project.assets || next.resources !== model.resources) validateCourseProjectV10Resources(next.project, next.resources)
+      validateComponentData(next.project, model.project)
     }
     return next
   }

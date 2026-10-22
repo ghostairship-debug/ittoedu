@@ -1,3 +1,4 @@
+import { createTestProjectFromLegacy } from '../helpers/glxWorkFixture'
 import { useSyncExternalStore } from 'react'
 import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/react'
 import { afterAll, beforeAll, expect, it, vi } from 'vitest'
@@ -43,7 +44,7 @@ afterAll(() => {
 
 it('uses the Flow toolbar, inserts at the selected middle block, drags through formal history and continues after a table or divider', async () => {
   const text = (id: string) => ({ id, definitionId: TEXT_DEFINITION.id, data: JSON.parse(JSON.stringify(createTextComponentData(id))) })
-  const initial: CourseProjectV10 = {
+  const initial: CourseProjectV10 = createTestProjectFromLegacy({
     schemaVersion: 10, id: 'owner-ux', revision: 0, title: '讲义',
     definitions: { [TEXT_DEFINITION.id]: TEXT_DEFINITION, [TABLE_DEFINITION.id]: TABLE_DEFINITION },
     instances: {
@@ -53,7 +54,7 @@ it('uses the Flow toolbar, inserts at the selected middle block, drags through f
     },
     surfaces: [{ id: 'flow', kind: 'flow', title: '正文', childIds: ['a', 'float', 'b', 'c', 'table'] }],
     global: { underlay: [], overlay: [] }, assets: {},
-  }
+  })
   const resources = { assets: {}, components: {} }
   const directory = await mkdtemp(path.join(tmpdir(), 'guoling-flow-owner-ux-'))
   const service = new DocumentHostService(path.join(directory, 'recovery'))

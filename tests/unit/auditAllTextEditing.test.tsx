@@ -1,3 +1,5 @@
+import { setRootContainers } from '../helpers/glxWorkFixture'
+import { componentSurfaces } from '../../src/shared/contracts/component-platform/project'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, fireEvent, render } from '@testing-library/react'
 import { createRef } from 'react'
@@ -172,7 +174,7 @@ describe('R27 clipboard and native copy drop',()=>{
     expect(current(value).blocks[0]).toMatchObject({content:text('FileB')});expect(change).toHaveBeenCalledTimes(1);expect(port).not.toHaveBeenCalled();expect(diagnostic).not.toHaveBeenCalled()
   })
   it('CA370 local cut B from p into q commits through Flow without reviving the still-present p instance',async()=>{
-    let project=createBlankCourseProjectV10();const surfaceId=project.surfaces[0].id;project.surfaces[0]={...project.surfaces[0],kind:'flow',childIds:['p','q']};project.definitions[TEXT_DEFINITION.id]=TEXT_DEFINITION
+    let project=createBlankCourseProjectV10();const surfaceId=componentSurfaces(project)[0].id;setRootContainers(project, [...componentSurfaces(project).slice(0, 0), {...componentSurfaces(project)[0],kind:'flow',childIds:['p','q']}, ...componentSurfaces(project).slice(0 + 1)]);project.definitions[TEXT_DEFINITION.id]=TEXT_DEFINITION
     project.instances.p={id:'p',definitionId:TEXT_DEFINITION.id,data:JSON.parse(JSON.stringify(createTextComponentData('ABC')))};project.instances.q={id:'q',definitionId:TEXT_DEFINITION.id,data:JSON.parse(JSON.stringify(createTextComponentData('Q')))}
     const port=vi.fn((context:unknown)=>createFlowDocumentResourcePort({target:{documentId:'doc',epoch:'epoch',project,editingProject:project,resources:{assets:{},components:{}},surfaceId,activeStateId:null,instanceIds:[],instanceId:null} as any,source:readCourseDocumentClipboardContext(context)}))
     const {value,change,diagnostic}=editor(projectFlowDocument(project,surfaceId).content.blocks,{clipboardContext:(_resources:unknown,content:any)=>createCourseDocumentClipboardContext({documentId:'doc',project,roots:content.blocks.map((block:any)=>block.id),resources:{assets:{},components:{}}}),clipboardResourcePort:port,change:next=>{project=applyComponentOperation(project,captureComponentOperation(project,flowDocumentEdits(project,surfaceId,next.content.blocks)));return true}})
@@ -181,7 +183,7 @@ describe('R27 clipboard and native copy drop',()=>{
     expect(await value.drain()).toBe(true);expect((project.instances.p.data as any).content).toEqual(text('AC'));expect((project.instances.q.data as any).content).toEqual(text('QB'));expect(port).not.toHaveBeenCalled();expect(diagnostic).not.toHaveBeenCalled()
   })
   it('CA369 real Ctrl click, dragstart and copy drop preserve the original block identity',()=>{
-    let project=createBlankCourseProjectV10();const surfaceId=project.surfaces[0].id;project.surfaces[0]={...project.surfaces[0],kind:'flow',childIds:['p','q']};project.definitions[TEXT_DEFINITION.id]=TEXT_DEFINITION
+    let project=createBlankCourseProjectV10();const surfaceId=componentSurfaces(project)[0].id;setRootContainers(project, [...componentSurfaces(project).slice(0, 0), {...componentSurfaces(project)[0],kind:'flow',childIds:['p','q']}, ...componentSurfaces(project).slice(0 + 1)]);project.definitions[TEXT_DEFINITION.id]=TEXT_DEFINITION
     const originalData=createTextComponentData('ABC');originalData.appearance.fontSize=36;originalData.appearance.color='#ff0000'
     project.instances.p={id:'p',definitionId:TEXT_DEFINITION.id,data:JSON.parse(JSON.stringify(originalData))};project.instances.q={id:'q',definitionId:TEXT_DEFINITION.id,data:JSON.parse(JSON.stringify(createTextComponentData('Q')))}
     const block={...para('p','ABC'),textDefaults:{fontSize:36,color:'#ff0000'}}, {value,diagnostic}=editor([block,para('q','Q')],{change:next=>{project=applyComponentOperation(project,captureComponentOperation(project,flowDocumentEdits(project,surfaceId,next.content.blocks)));return true}})
@@ -191,7 +193,7 @@ describe('R27 clipboard and native copy drop',()=>{
     const data=new Map<string,string>(),transfer={files:[],clearData:()=>data.clear(),setData:(kind:string,text:string)=>data.set(kind,text),getData:(kind:string)=>data.get(kind)??'',effectAllowed:'copyMove'}
     const drag=new MouseEvent('dragstart',{bubbles:true,cancelable:true,clientX:100,clientY:100,ctrlKey:true});Object.defineProperty(drag,'dataTransfer',{value:transfer});fireEvent(original,drag);expect(value.view.dragging).not.toBeNull()
     vi.mocked(value.view.posAtCoords).mockReturnValue({pos:0,inside:-1});const drop=new MouseEvent('drop',{bubbles:true,cancelable:true,clientX:90,clientY:90,ctrlKey:true});Object.defineProperty(drop,'dataTransfer',{value:transfer});fireEvent(value.view.dom,drop)
-    const blocks=current(value).blocks;expect(blocks).toHaveLength(3);expect(blocks[0].id).not.toBe('p');expect(blocks[1]).toEqual(block);expect(project.surfaces[0].childIds[1]).toBe('p');expect(project.instances.p.data).toMatchObject({appearance:{fontSize:36,color:'#ff0000'}});expect(diagnostic).not.toHaveBeenCalled()
+    const blocks=current(value).blocks;expect(blocks).toHaveLength(3);expect(blocks[0].id).not.toBe('p');expect(blocks[1]).toEqual(block);expect(componentSurfaces(project)[0].childIds[1]).toBe('p');expect(project.instances.p.data).toMatchObject({appearance:{fontSize:36,color:'#ff0000'}});expect(diagnostic).not.toHaveBeenCalled()
   })
 })
 describe('R26 compound slot edits',()=>{

@@ -1,5 +1,4 @@
 import path from 'node:path'
-import ExcelJS from 'exceljs'
 import { children, descendants, NS, OfficePackage, textOf } from './officePackage'
 import type { OfficeCalculation, OfficeCellValue, OfficeContentInspection, OfficeDiagnostic, OfficeRequest } from '../../../shared/workbench/officeFiles'
 
@@ -10,6 +9,7 @@ const calculate = require('xlsx-calc') as (workbook: CalcWorkbook) => void
 const supportedFunctions = new Set(['SUM', 'MIN', 'MAX', 'AVERAGE', 'ROUND', 'ABS', 'SQRT', 'IF'])
 
 export async function createXlsx(request: OfficeRequest<'xlsx', 'create'>): Promise<Uint8Array> {
+  const { default: ExcelJS } = await import('exceljs')
   const workbook = new ExcelJS.Workbook()
   workbook.creator = '果铃'
   for (const input of request.sheets) {

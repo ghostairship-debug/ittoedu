@@ -1,3 +1,5 @@
+import { createTestProjectFromLegacy } from '../helpers/glxWorkFixture'
+import { componentSurfaces } from '../../src/shared/contracts/component-platform/project'
 import { existsSync, readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -59,10 +61,10 @@ describe('current read models and authoring ownership boundaries', () => {
   })
 
   it('routes the single V10 surface identity for all three projections and rejects unavailable targets', () => {
-    const project: CourseProjectV10 = { schemaVersion: 10, id: 'route', title: 'Mixed', revision: 0, definitions: {}, instances: {},
+    const project: CourseProjectV10 = createTestProjectFromLegacy({ schemaVersion: 10, id: 'route', title: 'Mixed', revision: 0, definitions: {}, instances: {},
       surfaces: [{ id: 'slide', kind: 'slide', title: 'Slide', childIds: [] }, { id: 'flow', kind: 'flow', title: 'Flow', childIds: [] },
-        { id: 'spatial', kind: 'spatial', title: 'Spatial', childIds: [] }], global: { underlay: [], overlay: [] }, assets: {} }
-    for (const surface of project.surfaces) expect(resolveWorkspaceRoute({ project, surfaceId: surface.id })).toEqual({ kind: surface.kind })
+        { id: 'spatial', kind: 'spatial', title: 'Spatial', childIds: [] }], global: { underlay: [], overlay: [] }, assets: {} })
+    for (const surface of componentSurfaces(project)) expect(resolveWorkspaceRoute({ project, surfaceId: surface.id })).toEqual({ kind: surface.kind })
     for (const signals of [{ project, surfaceId: 'deleted' }, { project, surfaceId: null }, { project: null, surfaceId: 'slide' }])
       expect(resolveWorkspaceRoute(signals)).toMatchObject({ kind: 'conflict' })
   })

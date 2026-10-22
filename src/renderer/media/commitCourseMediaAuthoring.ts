@@ -1,3 +1,4 @@
+import { componentContainers } from '../../shared/contracts/component-platform/project'
 import { nanoid } from 'nanoid'
 import type { AssetMeta, AssetSource, ProjectAudioSettings, SoundDefinition } from '../../shared/contracts/media-v1'
 import type { ComponentAsset, ComponentDefinition, ComponentInstance } from '../../shared/contracts/component-platform/project'
@@ -9,6 +10,7 @@ import type { EditorStoreKernel } from '../store/editorStoreKernel'
 import type { CapturedCourseTarget, CourseV10ViewState } from '../documents/CourseV10DocumentBridge'
 import { capturedCourseViewIsCurrent } from '../documents/CourseV10DocumentBridge'
 import { IMAGE_DEFINITION, createImageData, imageDataSchema, planImageTransform, replaceImageSource } from '../../components/image'
+import { transformImageAssetOffThread } from '../project/imageTransformWorkerClient'
 import type { ImageTransformOperation } from '../../shared/imageTransformContract'
 import { readImageDimensions } from '../project/assetManager'
 import { AUDIO_DEFINITION, VIDEO_DEFINITION, createAudioData, createVideoData,
@@ -20,33 +22,33 @@ import { courseAudioSettings, courseAudioSettingsEdits, courseSoundEdits, course
 export interface ImportedAssetBatchItem { meta: AssetMeta & { source?: AssetSource }; bytes: Uint8Array }
 export { insertionContainer, insertionIndex, definitionInsertionEdits, courseAuthorData, resolveCourseInsertionPlacement } from '../../core/course/courseElementInsertion'
 export type { CourseInsertionOptions, CourseElementKind } from '../../core/course/courseElementInsertion'
-import { definitionInsertionEdits, courseAuthorData, resolveCourseInsertionPlacement, courseInsertionFrame as frame,
+import { definitionInsertionEdits, courseAuthorData, insertionContainer, resolveCourseInsertionPlacement, courseInsertionFrame as frame,
   prepareCourseElementEdits, prepareCourseTeacherControllerEdits, type CourseInsertionOptions, type CourseElementKind } from '../../core/course/courseElementInsertion'
-export interface CourseInsertionResult { instanceIds: string[]; documentId: string; surfaceId: string }
+export interface CourseInsertionResult { instanceIds: string[]; documentId: string; surfaceId: string | null }
 
 export function captureCourseInsertionTarget(kernel: EditorStoreKernel): CapturedCourseTarget {
   const target = kernel.captureTarget()
-  if (!target.surfaceId) throw new Error('请先选择要插入内容的页面')
   return target
 }
 export async function commitCourseInsertion(kernel: EditorStoreKernel, target: CapturedCourseTarget, definition: ComponentDefinition,
   instances: ComponentInstance[], options: CourseInsertionOptions = {}, additional: ComponentEdit[] = [],
   rootIds: string[] = instances.map(instance => instance.id)): Promise<CourseInsertionResult> {
-  const surface = target.project.surfaces.find(value => value.id === target.surfaceId)
-  if (!surface) throw new Error('插入的原页面已不存在')
+  const surface = componentContainers(target.project).find(value => value.id === target.surfaceId)
+  if (target.surfaceId && !surface) throw new Error('插入的原页面已不存在')
   const ids = rootIds, placement = resolveCourseInsertionPlacement(target, options, ids)
   const edits: ComponentEdit[] = [...definitionInsertionEdits(target, definition), ...additional,
     { type: 'instance.insert', container: placement.container, index: placement.index, instances, rootIds: ids }, ...placement.edits]
   await kernel.editCaptured(kernel.capture(edits, target))
   if (capturedCourseViewIsCurrent(kernel.readView(), target)) kernel.selectInstances(ids, target.surfaceId, target.documentId)
-  return { instanceIds: ids, documentId: target.documentId, surfaceId: surface.id }
+  return { instanceIds: ids, documentId: target.documentId, surfaceId: target.surfaceId }
 }
 export async function insertCourseElement(kernel: EditorStoreKernel, target: CapturedCourseTarget,
   kind: CourseElementKind, options: CourseInsertionOptions = {}): Promise<CourseInsertionResult> {
-  const { edits, instanceIds } = prepareCourseElementEdits(target.project, target.surfaceId, target.instanceId, kind, options)
+  const { edits, instanceIds } = prepareCourseElementEdits(target.project, target.surfaceId, target.instanceId, kind,
+    { ...options, container: options.container ?? insertionContainer(target, options) })
   await kernel.editCaptured(kernel.capture(edits, target))
   if (capturedCourseViewIsCurrent(kernel.readView(), target)) kernel.selectInstances(instanceIds, target.surfaceId, target.documentId)
-  return { instanceIds, documentId: target.documentId, surfaceId: target.surfaceId! }
+  return { instanceIds, documentId: target.documentId, surfaceId: target.surfaceId }
 }
 
 function mediaAssetKind(asset: ComponentAsset): AssetMeta['kind'] | null {
@@ -88,7 +90,7 @@ export async function importCourseMediaLibrary(kernel: EditorStoreKernel, target
 }
 export async function insertCourseMedia(kernel: EditorStoreKernel, target: CapturedCourseTarget,
   items: readonly ImportedAssetBatchItem[], options: CourseInsertionOptions = {}): Promise<CourseInsertionResult> {
-  if (!items.length) return { instanceIds: [], documentId: target.documentId, surfaceId: target.surfaceId ?? '' }
+  if (!items.length) return { instanceIds: [], documentId: target.documentId, surfaceId: target.surfaceId }
   const definitions = new Map<string, ComponentDefinition>()
   const instances = items.map((item, index): ComponentInstance => {
     const kind = item.meta.kind
@@ -135,7 +137,7 @@ export async function transformCourseImageAtTarget(kernel: EditorStoreKernel, ta
   if (!asset || !bytes) throw new Error('原图片素材不可用，无法变换')
   const plan = await planImageTransform(data, { assetId: data.assetId, bytes,
     filename: asset.filename ?? asset.path.split(/[\\/]/).at(-1) ?? asset.id,
-    mimeType: asset.mimeType ?? 'application/octet-stream' }, operations)
+    mimeType: asset.mimeType ?? 'application/octet-stream' }, operations, { transform: transformImageAssetOffThread })
   if (!plan.changed || !plan.resource) return
   await kernel.editCaptured(kernel.capture([...assetEdits(target, [plan.resource]),
     { type: 'data.set', instanceId: instance.id, path: [], value: courseAuthorData(plan.data) }], target))
@@ -200,5 +202,5 @@ export async function ensureCourseTeacherController(kernel: EditorStoreKernel, t
   const { edits, instanceIds } = prepareCourseTeacherControllerEdits(target.project, target.surfaceId, origin, target.instanceId)
   if (edits.length) await kernel.editCaptured(kernel.capture(edits, target))
   if (capturedCourseViewIsCurrent(kernel.readView(), target)) kernel.selectInstances(instanceIds, target.surfaceId, target.documentId)
-  return { instanceIds, documentId: target.documentId, surfaceId: target.surfaceId! }
+  return { instanceIds, documentId: target.documentId, surfaceId: target.surfaceId }
 }

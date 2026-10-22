@@ -1,4 +1,6 @@
 // @vitest-environment node
+import { componentSurfaces } from '../../src/shared/contracts/component-platform/project'
+import { appendRootContainers, testContainerInstance } from '../helpers/glxWorkFixture'
 import { expect, it, vi } from 'vitest'
 import { createBlankCourseProjectV10 } from '../../src/core/course/createCourseProjectV10'
 import { DocumentRegistry } from '../../src/core/documents/DocumentRegistry'
@@ -30,13 +32,13 @@ import { componentCompilationInput } from '../../src/core/components/compilation
 import { createEsbuildComponentCompiler } from '../../src/main/workbench/contentApply/compilation/esbuildComponentCompiler'
 const text=(value:string)=>({inlines:[{type:'text' as const,text:value}]})
 const json=(value:unknown)=>JSON.parse(JSON.stringify(value)) as JsonValue
-function project(flow=false){const value=createBlankCourseProjectV10();if(flow){value.surfaces[0].kind='flow';delete value.surfaces[0].designSize}
+function project(flow=false){const value=createBlankCourseProjectV10();if(flow){testContainerInstance(value, 0).container.kind='flow';delete testContainerInstance(value, 0).container.designSize}
   value.definitions.text={id:'text',role:'mixed',implementation:{kind:'builtin',key:'guoling.text'}}
   for(const [id,content] of [['a','TARGET tail'],['b','SUMMARY']])value.instances[id]={id,definitionId:'text',data:json(createTextComponentData(content))}
-  value.surfaces[0].childIds=['a','b'];return value}
+  testContainerInstance(value, 0).childIds=['a','b'];return value}
 async function fixture(value=project(),writable?:ToolTarget[],options:DocumentToolGatewayOptions={}) {
   const driver=new CourseV10Driver(),registry=new DocumentRegistry({drivers:[driver],createId:()=>crypto.randomUUID(),bindingKey:binding=>binding.path,persistence:{async append(){},async save(){throw new Error('unused')}}})
-  const session=await registry.create({kind:'course-v10',project:value,resources:{assets:{},components:{}}},'audit.h5lesson'),gateway=new DocumentToolGateway(registry,[driver],()=>crypto.randomUUID(),options),surfaceId=value.surfaces[0].id
+  const session=await registry.create({kind:'course-v10',project:value,resources:{assets:{},components:{}}},'audit.h5lesson'),gateway=new DocumentToolGateway(registry,[driver],()=>crypto.randomUUID(),options),surfaceId=componentSurfaces(value)[0].id
   await gateway.beginRun({runId:'run',actor:'agent',documents:[{documentId:session.documentId,writable:writable??[{kind:'document'}]}]})
   const issue=(target:ToolTarget)=>gateway.issueTarget('run',session.documentId,target)
   const execute=(name:string,input:Record<string,unknown>)=>gateway.execute('run',crypto.randomUUID(),{name,input} as Parameters<typeof gateway.execute>[2])
@@ -47,7 +49,7 @@ async function fixture(value=project(),writable?:ToolTarget[],options:DocumentTo
   return {driver,session,gateway,surfaceId,issue,execute,read,human,model,target}
 }
 it('CA011 an exact range read survives human text appended outside it while an overlapping read blocks another write',async()=>{
-  const value=project(),surfaceId=value.surfaces[0].id,range:ToolTarget={kind:'course-instance',surfaceId,instanceId:'a',dataPath:['content'],from:0,to:6},f=await fixture(value,[range,{kind:'course-instance',surfaceId,instanceId:'b'}])
+  const value=project(),surfaceId=componentSurfaces(value)[0].id,range:ToolTarget={kind:'course-instance',surfaceId,instanceId:'a',dataPath:['content'],from:0,to:6},f=await fixture(value,[range,{kind:'course-instance',surfaceId,instanceId:'b'}])
   const handle=await f.issue(range);expect(await f.read(handle)).toMatchObject({kind:'read'})
   await f.human([{type:'data.set',instanceId:'a',path:['content'],value:json(text('TARGET tail human'))}])
   expect(await f.execute('text.replace',{target:handle,content:'EDITED'})).toMatchObject({kind:'document-operation',result:{status:'applied'}})
@@ -71,7 +73,7 @@ it('CA123 a failed stale page never acknowledges changed unread content',async()
   expect(await f.execute('text.replace',{target:await f.issue(f.target('b',{dataPath:['content']})),content:'stale summary'})).toMatchObject({kind:'error',code:'read-basis-changed'})
 })
 it('CA012 named surface state reaches observation through both target and project-file routes',async()=>{
-  const value=project();value.surfaces[0].presentation={states:[{id:'answer',title:'答案',overrides:{}}]}
+  const value=project();testContainerInstance(value, 0).container.presentation={states:[{id:'answer',title:'答案',overrides:{}}]}
   const observe=vi.fn(async(input:Record<string,unknown>)=>({source:'live' as const,identity:{documentId:String(input.documentId),epoch:String(input.epoch),revision:Number(input.revision),locationId:String(input.locationId),stateId:input.stateId as string|null},coverage:{width:1,height:1},structure:[],diagnostics:[],image:{resourceId:'image',mimeType:'image/png',width:1,height:1,byteLength:1}}))
   const f=await fixture(value,undefined,{services:{observations:{observe,async readResource(){return {mimeType:'image/png',bytes:new Uint8Array([1])}}}}}),base=await f.issue({kind:'course-surface',surfaceId:f.surfaceId}),named=await f.read(base,{state:'answer'});if(named.kind!=='read')throw new Error('named');const handle=(named.data as {target:string}).target
   expect(await f.execute('view.observe',{target:handle})).toMatchObject({kind:'read'});expect(observe.mock.calls.at(-1)?.[0]).toMatchObject({stateId:'answer'})
@@ -79,8 +81,8 @@ it('CA012 named surface state reaches observation through both target and projec
   expect(await f.execute('view.observe',{project:handle,path:file.path})).toMatchObject({kind:'read'});expect(observe.mock.calls.at(-1)?.[0]).toMatchObject({stateId:'answer'})
 })
 it('CA035 a task-created child stays inside its original group grant; an external child does not',async()=>{
-  const value=project();value.definitions.group={id:'group',role:'mixed',implementation:{kind:'builtin',key:'guoling.group'}};value.instances.left={id:'left',definitionId:'group',data:{},childIds:['a']};value.surfaces[0].childIds=['left','b']
-  const surfaceId=value.surfaces[0].id,f=await fixture(value,[{kind:'course-instance',surfaceId,instanceId:'left'}]),root=await f.issue(f.target('left'))
+  const value=project();value.definitions.group={id:'group',role:'mixed',implementation:{kind:'builtin',key:'guoling.group'}};value.instances.left={id:'left',definitionId:'group',data:{},childIds:['a']};testContainerInstance(value, 0).childIds=['left','b']
+  const surfaceId=componentSurfaces(value)[0].id,f=await fixture(value,[{kind:'course-instance',surfaceId,instanceId:'left'}]),root=await f.issue(f.target('left'))
   const inserted=await f.execute('object.insert',{target:root,kind:'text',text:'created'});expect(inserted).toMatchObject({kind:'document-operation',result:{status:'applied'}});if(inserted.kind!=='document-operation')throw new Error('insert')
   const child=f.model().project.instances.left.childIds!.find(id=>id!=='a')!
   expect(await f.execute('text.replace',{target:await f.issue(f.target(child,{dataPath:['content']})),content:'continued'})).toMatchObject({kind:'document-operation',result:{status:'applied'}})
@@ -89,19 +91,19 @@ it('CA035 a task-created child stays inside its original group grant; an externa
 })
 it('CA195 visible text selection excludes both disabled headers and a hidden instance',async()=>{
   const value=project(true),data=createTableData({rows:1,columns:1});data.headerEnabled=false;data.columns[0].header=text('HIDDEN');data.rows[0].cells[0].text='VISIBLE'
-  value.definitions.table={id:'table',role:'mixed',implementation:{kind:'builtin',key:'guoling.table'}};value.instances.table={id:'table',definitionId:'table',data:json(data)};value.instances.secret={id:'secret',definitionId:'text',visible:false,data:json(createTextComponentData('SECRET'))};value.surfaces[0].childIds=['a','secret','table']
-  const model={kind:'course-v10' as const,project:value,resources:{assets:{},components:{}}},target=flowTextSelectionTarget(model,value.surfaces[0].id,{kind:'text',revision:'0',anchor:{blockId:'a',slot:{kind:'field',field:'content'},offset:0,affinity:'after'},head:{blockId:'table',slot:{kind:'cell',rowId:data.rows[0].id,columnId:data.columns[0].id},offset:7,affinity:'before'}})
+  value.definitions.table={id:'table',role:'mixed',implementation:{kind:'builtin',key:'guoling.table'}};value.instances.table={id:'table',definitionId:'table',data:json(data)};value.instances.secret={id:'secret',definitionId:'text',visible:false,data:json(createTextComponentData('SECRET'))};testContainerInstance(value, 0).childIds=['a','secret','table']
+  const model={kind:'course-v10' as const,project:value,resources:{assets:{},components:{}}},target=flowTextSelectionTarget(model,componentSurfaces(value)[0].id,{kind:'text',revision:'0',anchor:{blockId:'a',slot:{kind:'field',field:'content'},offset:0,affinity:'after'},head:{blockId:'table',slot:{kind:'cell',rowId:data.rows[0].id,columnId:data.columns[0].id},offset:7,affinity:'before'}})
   expect(readEditableTargetContent(model,target).text).toBe('TARGET tail<br>VISIBLE')
 })
 it('CA218 the visible table caption binds to data even when layout owns a different caption',async()=>{
-  const value=project(true),data=createTableData({rows:1,columns:1});data.caption=text('TABLE');value.definitions.table={id:'table',role:'mixed',implementation:{kind:'builtin',key:'guoling.table'}};value.instances.table={id:'table',definitionId:'table',data:json(data),flowLayout:{width:'content-width',caption:text('OTHER')}};value.surfaces[0].childIds.push('table')
+  const value=project(true),data=createTableData({rows:1,columns:1});data.caption=text('TABLE');value.definitions.table={id:'table',role:'mixed',implementation:{kind:'builtin',key:'guoling.table'}};value.instances.table={id:'table',definitionId:'table',data:json(data),flowLayout:{width:'content-width',caption:text('OTHER')}};testContainerInstance(value, 0).childIds.push('table')
   const f=await fixture(value),target=flowTextSelectionTarget(f.model(),f.surfaceId,{kind:'text',revision:'0',anchor:{blockId:'table',slot:{kind:'field',field:'caption'},offset:0,affinity:'after'},head:{blockId:'table',slot:{kind:'field',field:'caption'},offset:5,affinity:'before'}})
   expect(readEditableTargetContent(f.model(),target).text).toBe('TABLE');expect(await f.execute('text.replace',{target:await f.issue(target),content:'EDITED'})).toMatchObject({result:{status:'applied'}})
   expect(parseTableData(f.model().project.instances.table.data).caption).toEqual(text('EDITED'));expect(f.model().project.instances.table.flowLayout?.caption).toEqual(text('OTHER'))
 })
-function tableProject(){const value=project(true),data=createTableData({rows:1,columns:2});data.rows[0].cells[0].text='TARGET outside';data.rows[0].cells[1].text='BROTHER';value.definitions.table={id:'table',role:'mixed',implementation:{kind:'builtin',key:'guoling.table'}};value.instances.table={id:'table',definitionId:'table',data:json(data)};value.surfaces[0].childIds.push('table');return {value,data}}
+function tableProject(){const value=project(true),data=createTableData({rows:1,columns:2});data.rows[0].cells[0].text='TARGET outside';data.rows[0].cells[1].text='BROTHER';value.definitions.table={id:'table',role:'mixed',implementation:{kind:'builtin',key:'guoling.table'}};value.instances.table={id:'table',definitionId:'table',data:json(data)};testContainerInstance(value, 0).childIds.push('table');return {value,data}}
 it('CA259 formatting outside the selected plain table text retains its range grant after rich upgrade',async()=>{
-  const {value}=tableProject(),surfaceId=value.surfaces[0].id,target:ToolTarget={kind:'course-instance',surfaceId,instanceId:'table',dataPath:['rows','0','cells','0','text'],from:0,to:6},f=await fixture(value,[target]),handle=await f.issue(target);await f.read(handle)
+  const {value}=tableProject(),surfaceId=componentSurfaces(value)[0].id,target:ToolTarget={kind:'course-instance',surfaceId,instanceId:'table',dataPath:['rows','0','cells','0','text'],from:0,to:6},f=await fixture(value,[target]),handle=await f.issue(target);await f.read(handle)
   await f.human([formatCourseInstanceText(f.model(),{...target,from:7,to:14},{bold:true})])
   expect(await f.execute('text.replace',{target:handle,content:'CHANGED'})).toMatchObject({kind:'document-operation',result:{status:'applied'}})
   expect(parseTableData(f.model().project.instances.table.data).rows[0].cells[0]).toMatchObject({content:{inlines:[{text:'CHANGED '},{text:'outside',style:{bold:true}}]}})
@@ -122,24 +124,24 @@ it('CA245/272 formal cell selection without source ranges authorizes only the se
 })
 it('CA318 course productivity scans and canonically replaces a rich Flow media caption',()=>{
   const value=project(true);value.definitions.video={id:'video',role:'mixed',implementation:{kind:'builtin',key:'guoling.video'}};value.instances.a={id:'a',definitionId:'video',data:{},flowLayout:{width:'wide',caption:{inlines:[{type:'text',text:'CAPTION-OLD',style:{bold:true}}]}}}
-  const request={kind:'text' as const,scope:'course' as const,find:'OLD',replacement:'NEW'},preview=createCourseProductivityPreview(value,value.surfaces[0].id,request);expect(preview.items).toHaveLength(1)
-  const result=planCourseProductivityEdits(value,value.surfaces[0].id,request),after=applyComponentOperation(value,captureComponentOperation(value,result.edits));expect(after.instances.a.flowLayout).toEqual({width:'wide',caption:{inlines:[{type:'text',text:'CAPTION-NEW',style:{bold:true}}]}})
+  const request={kind:'text' as const,scope:'course' as const,find:'OLD',replacement:'NEW'},preview=createCourseProductivityPreview(value,componentSurfaces(value)[0].id,request);expect(preview.items).toHaveLength(1)
+  const result=planCourseProductivityEdits(value,componentSurfaces(value)[0].id,request),after=applyComponentOperation(value,captureComponentOperation(value,result.edits));expect(after.instances.a.flowLayout).toEqual({width:'wide',caption:{inlines:[{type:'text',text:'CAPTION-NEW',style:{bold:true}}]}})
 })
 it('CA321 whole-course preview and UI assembler replace each base and saved state while page scope keeps its current state',()=>{
-  const value=project();value.instances.a.data=json(createTextComponentData('OLD'));value.instances.b.data=json(createTextComponentData('OLD'));value.surfaces[0].childIds=['a'];value.surfaces.push({id:'second',kind:'slide',title:'2',childIds:['b'],designSize:{width:1280,height:720}})
-  value.surfaces[0].presentation={states:[{id:'talk',title:'讲解',overrides:{a:{data:json(createTextComponentData('OLD'))}}},{id:'answer',title:'答案',overrides:{a:{data:json(createTextComponentData('OLD'))}}}]};value.surfaces[1].presentation={states:[{id:'answer',title:'答案',overrides:{b:{data:json(createTextComponentData('OLD'))}}}]}
-  const context={document:resolveComponentPresentation(value,value.surfaces[0].id,'talk'),target:{documentId:'d',epoch:'e',project:value,editingProject:resolveComponentPresentation(value,value.surfaces[0].id,'talk'),surfaceId:value.surfaces[0].id,activeStateId:'talk'}} as ProductivityContext
+  const value=project();value.instances.a.data=json(createTextComponentData('OLD'));value.instances.b.data=json(createTextComponentData('OLD'));testContainerInstance(value, 0).childIds=['a'];appendRootContainers(value, {id:'second',kind:'slide',title:'2',childIds:['b'],designSize:{width:1280,height:720}})
+  testContainerInstance(value, 0).container.presentation={states:[{id:'talk',title:'讲解',overrides:{a:{data:json(createTextComponentData('OLD'))}}},{id:'answer',title:'答案',overrides:{a:{data:json(createTextComponentData('OLD'))}}}]};testContainerInstance(value, 1).container.presentation={states:[{id:'answer',title:'答案',overrides:{b:{data:json(createTextComponentData('OLD'))}}}]}
+  const context={document:resolveComponentPresentation(value,componentSurfaces(value)[0].id,'talk'),target:{documentId:'d',epoch:'e',project:value,editingProject:resolveComponentPresentation(value,componentSurfaces(value)[0].id,'talk'),surfaceId:componentSurfaces(value)[0].id,activeStateId:'talk'}} as ProductivityContext
   const request={kind:'text' as const,scope:'course' as const,find:'OLD',replacement:'NEW'},preview=createProductivityPreview(context,request);expect(preview.items).toHaveLength(5)
   const applied=applyProductivityPreview(context,preview,preview.items.map(item=>item.id));if(!applied.ok||!applied.step)throw new Error('plan');const after=applyComponentOperation(value,{type:applied.step.type,edits:applied.step.edits,expected:applied.step.expected})
-  for(const surface of after.surfaces)for(const stateId of [null,...surface.presentation!.states.map(state=>state.id)]){const id=surface.childIds[0],view=resolveComponentPresentation(after,surface.id,stateId);expect(plainDocumentText(textComponentDataSchema.parse(view.instances[id].data).content)).toBe('NEW')}
-  const local=createProductivityPreview(context,{...request,scope:'page'}),step=applyProductivityPreview(context,local,local.items.map(item=>item.id));if(!step.ok||!step.step)throw new Error('local');const localAfter=applyComponentOperation(value,{type:step.step.type,edits:step.step.edits,expected:step.step.expected});expect(localAfter.instances.a.data).toEqual(value.instances.a.data);expect(resolveComponentPresentation(localAfter,value.surfaces[0].id,'answer').instances.a.data).toEqual(value.instances.a.data)
+  for(const surface of componentSurfaces(after))for(const stateId of [null,...surface.presentation!.states.map(state=>state.id)]){const id=surface.childIds[0],view=resolveComponentPresentation(after,surface.id,stateId);expect(plainDocumentText(textComponentDataSchema.parse(view.instances[id].data).content)).toBe('NEW')}
+  const local=createProductivityPreview(context,{...request,scope:'page'}),step=applyProductivityPreview(context,local,local.items.map(item=>item.id));if(!step.ok||!step.step)throw new Error('local');const localAfter=applyComponentOperation(value,{type:step.step.type,edits:step.step.edits,expected:step.step.expected});expect(localAfter.instances.a.data).toEqual(value.instances.a.data);expect(resolveComponentPresentation(localAfter,componentSurfaces(value)[0].id,'answer').instances.a.data).toEqual(value.instances.a.data)
 })
 it('CA165 raising an unlocked object moves that object without a locked neighbor edit',()=>{
-  const value=project();value.instances.b.locked=true;const ids=courseObjectOrder(value,'a','forward')!,edits=courseObjectOrderEdits(value,ids);expect(edits).toMatchObject([{type:'instance.move',instanceId:'a',index:1}]);expect(applyComponentOperation(value,captureComponentOperation(value,edits)).surfaces[0].childIds).toEqual(['b','a'])
+  const value=project();value.instances.b.locked=true;const ids=courseObjectOrder(value,'a','forward')!,edits=courseObjectOrderEdits(value,ids);expect(edits).toMatchObject([{type:'instance.move',instanceId:'a',index:1}]);expect(componentSurfaces(applyComponentOperation(value,captureComponentOperation(value,edits)))[0].childIds).toEqual(['b','a'])
 })
 it('CA320 inherited locks are omitted from default replacement while healthy text still applies',()=>{
-  const value=project();value.definitions.group={id:'group',role:'mixed',implementation:{kind:'builtin',key:'guoling.group'}};value.instances.group={id:'group',definitionId:'group',data:{},locked:true,childIds:['a']};value.surfaces[0].childIds=['group','b'];value.instances.a.data=json(createTextComponentData('OLD'));value.instances.b.data=json(createTextComponentData('OLD'))
-  const request={kind:'text' as const,scope:'course' as const,find:'OLD',replacement:'NEW'},plan=planCourseProductivityEdits(value,value.surfaces[0].id,request);expect(plan.items.map(item=>item.id)).toEqual(['b/data/content/text/0']);expect(plan.unsupported.some(message=>message.includes('(a)'))).toBe(true);const after=applyComponentOperation(value,captureComponentOperation(value,plan.edits));expect(after.instances.a.data).toEqual(value.instances.a.data);expect(plainDocumentText(textComponentDataSchema.parse(after.instances.b.data).content)).toBe('NEW')
+  const value=project();value.definitions.group={id:'group',role:'mixed',implementation:{kind:'builtin',key:'guoling.group'}};value.instances.group={id:'group',definitionId:'group',data:{},locked:true,childIds:['a']};testContainerInstance(value, 0).childIds=['group','b'];value.instances.a.data=json(createTextComponentData('OLD'));value.instances.b.data=json(createTextComponentData('OLD'))
+  const request={kind:'text' as const,scope:'course' as const,find:'OLD',replacement:'NEW'},plan=planCourseProductivityEdits(value,componentSurfaces(value)[0].id,request);expect(plan.items.map(item=>item.id)).toEqual(['b/data/content/text/0']);expect(plan.unsupported.some(message=>message.includes('(a)'))).toBe(true);const after=applyComponentOperation(value,captureComponentOperation(value,plan.edits));expect(after.instances.a.data).toEqual(value.instances.a.data);expect(plainDocumentText(textComponentDataSchema.parse(after.instances.b.data).content)).toBe('NEW')
 })
 it('CA304 implementation-only shared edits ignore an independent locked override but metadata still protects it',()=>{
   const value=project();value.definitions.custom={id:'custom',role:'mixed',title:'source',implementation:{kind:'source',language:'javascript',source:'export default 1'}};value.instances.a.definitionId='custom';value.instances.b.definitionId='custom';value.instances.b.locked=true;value.instances.b.implementationOverride={kind:'source',language:'javascript',source:'export default 9'}
@@ -193,19 +195,19 @@ it('CA294 typed require and TSX retain actual module dependencies without freezi
 })
 it('CA175 a normal formal formula copy renews its inner identity and the resulting Flow body serializes',()=>{
   const value=project(true);value.definitions.formula={id:'formula',role:'mixed',implementation:{kind:'builtin',key:'guoling.formula'}};value.instances.a.definitionId='formula';value.instances.a.data=json(createFormulaComponentData('math-1','x^2'))
-  const target={documentId:'same',epoch:'e',surfaceId:value.surfaces[0].id,activeStateId:null,project:value,editingProject:value,resources:{assets:{},components:{}}} as CapturedCourseTarget
+  const target={documentId:'same',epoch:'e',surfaceId:componentSurfaces(value)[0].id,activeStateId:null,project:value,editingProject:value,resources:{assets:{},components:{}}} as CapturedCourseTarget
   const copied=prepareCourseObjectPaste({documentId:'same',project:value,resources:target.resources,roots:['a']},{capturedTarget:target,container:{kind:'surface',surfaceId:target.surfaceId!},index:2}),after=applyComponentOperation(value,captureComponentOperation(value,copied.edits)),id=copied.rootIds[0]
   expect((after.instances[id].data as any).formula.formulaId).not.toBe('math-1');expect(()=>serializeDocumentMarkdown(projectFlowDocument(after,target.surfaceId!),'flow')).not.toThrow()
 })
 it('CA254 copying a frameless Flow table to Slide prepares an editable free frame with fresh professional cell IDs',()=>{
-  const {value,data}=tableProject(),destination=project(),target={documentId:'destination',epoch:'e',surfaceId:destination.surfaces[0].id,activeStateId:null,project:destination,editingProject:destination,resources:{assets:{},components:{}}} as CapturedCourseTarget
+  const {value,data}=tableProject(),destination=project(),target={documentId:'destination',epoch:'e',surfaceId:componentSurfaces(destination)[0].id,activeStateId:null,project:destination,editingProject:destination,resources:{assets:{},components:{}}} as CapturedCourseTarget
   const copied=prepareCourseObjectPaste({documentId:'source',project:value,resources:target.resources,roots:['table']},{capturedTarget:target,container:{kind:'surface',surfaceId:target.surfaceId!},index:2}),after=applyComponentOperation(destination,captureComponentOperation(destination,copied.edits)),instance=after.instances[copied.rootIds[0]]
   expect(instance.frame).toMatchObject({width:600,height:220});expect(instance.frame?.transform.every(Number.isFinite)).toBe(true)
   const table=parseTableData(instance.data);expect(table.rows[0].cells[0].text).toBe('TARGET outside');expect(table.rows[0].cells[0].id).not.toBe(data.rows[0].cells[0].id);expect(table.rows[0].cells[0].columnId).toBe(table.columns[0].id)
   const resized=applyComponentOperation(after,captureComponentOperation(after,[{type:'frame.set',instanceId:instance.id,frame:{...instance.frame!,width:800}}]));expect(resized.instances[instance.id].frame?.width).toBe(800)
 })
 it('CA302 a course clipboard carries the selected object closure without unrelated pages or private prose',()=>{
-  const value=project(true);value.surfaces[0].childIds=['a'];value.surfaces.push({id:'private-page',title:'PRIVATE_PAGE',kind:'flow',childIds:['b']});value.instances.b.data=json(createTextComponentData('PRIVATE_TEXT'))
+  const value=project(true);testContainerInstance(value, 0).childIds=['a'];appendRootContainers(value, {id:'private-page',title:'PRIVATE_PAGE',kind:'flow',childIds:['b']});value.instances.b.data=json(createTextComponentData('PRIVATE_TEXT'))
   const context=createCourseDocumentClipboardContext({documentId:'source',project:value,resources:{assets:{},components:{}},roots:['a']}),encoded=JSON.stringify(context)
-  expect(encoded).not.toContain('PRIVATE_PAGE');expect(encoded).not.toContain('PRIVATE_TEXT');expect(Object.keys(context.project.instances)).toEqual(['a']);expect(context.project.surfaces).toHaveLength(1);expect(readCourseDocumentClipboardContext(context).project.instances.a.data).toEqual(value.instances.a.data)
+  expect(encoded).not.toContain('PRIVATE_PAGE');expect(encoded).not.toContain('PRIVATE_TEXT');expect(Object.keys(context.project.instances)).toEqual(['a']);expect(componentSurfaces(context.project)).toHaveLength(1);expect(readCourseDocumentClipboardContext(context).project.instances.a.data).toEqual(value.instances.a.data)
 })

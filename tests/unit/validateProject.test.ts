@@ -739,14 +739,16 @@ describe('historical V9 diagnostics and public V10 validation', () => {
         expect(JSON.parse(valid.stdout)).toMatchObject({
           reportVersion: 2,
           status: 'valid',
-          schema: { valid: true, schemaVersion: 10 },
-          protocols: { project: 10, publishedCourse: 3, component: 5 },
+          schema: { valid: true, schemaVersion: 11 },
+          protocols: { project: 11, publishedCourse: 4, component: 5 },
           project: { title: 'Current CLI fixture' },
         })
         expect(await readFile(lessonPath)).toEqual(Buffer.from(validBytes))
       }
 
-      const invalidSchema = { ...project, surfaces: [{ ...project.surfaces[0], kind: 'unknown' }] }
+      const rootId = project.rootIds[0]!
+      const invalidSchema = { ...project, instances: { ...project.instances,
+        [rootId]: { ...project.instances[rootId], container: { ...project.instances[rootId].container, kind: 'unknown' } } } }
       const missingAsset = { ...project, assets: { hero: { id: 'hero', path: 'assets/hero.png', mimeType: 'image/png', kind: 'image' } } }
       const cases = [
         { name: 'retired-v9', bytes: createCourseProjectArchive(blankArchiveData()), exitCode: 1,
@@ -754,8 +756,8 @@ describe('historical V9 diagnostics and public V10 validation', () => {
         { name: 'retired-v8', bytes: COURSE_PROJECT_REJECTION_INPUTS['v8-unsupported'], exitCode: 1,
           report: { status: 'invalid', schema: { valid: false, schemaVersion: 8 }, fatal: { code: 'unsupported-project-version' } } },
         { name: 'invalid-schema', bytes: archive(invalidSchema), exitCode: 1,
-          report: { status: 'invalid', schema: { valid: false, schemaVersion: 10,
-            issues: [expect.objectContaining({ path: ['surfaces', 0, 'kind'] })] } } },
+          report: { status: 'invalid', schema: { valid: false, schemaVersion: 11,
+            issues: [expect.objectContaining({ path: ['instances', rootId, 'container', 'kind'] })] } } },
         { name: 'missing-asset', bytes: archive(missingAsset), exitCode: 1,
           report: { status: 'invalid', fatal: { code: 'invalid-project-content', message: expect.stringContaining('hero') } } },
         { name: 'corrupt', bytes: Uint8Array.of(1, 2, 3), exitCode: 2,

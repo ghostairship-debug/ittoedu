@@ -11,6 +11,7 @@ import { pendingApproval, pendingQuestion, type PendingApproval, type PendingQue
 import { captureSelection, selectionReference, workbenchSelection, type SelectionCapture } from '../SelectionContextController'
 import type { DocumentSnapshot } from '../../../shared/workbench/document'
 import { isExecutionInputError } from '../../../shared/workbench/executionInputMessages'
+import { authorFieldIdentity } from '../../documents/interactionSelection'
 
 /**
  * Element AI cards (M15): every element has its own card with its requests and replies. A card is backed by an
@@ -105,10 +106,7 @@ interface CardRecord {
 /** One card per element: an object, or a document block, of one document. */
 export function elementCardKey(documentId: string, target: ExecutionSelectionTarget): string {
   if (target.kind === 'course-instance' && target.authorField) {
-    const field = target.authorField
-    const address = field.authorKey ? ['record', field.authorKey, field.kind] : field.sourceRegion
-      ? ['source', field.sourceRegion.kind, field.sourceRegion.path, field.sourceRegion.start, field.kind] : [field.fieldScope ?? 'data', field.dataPath]
-    return `${documentId}:instance:${target.instanceId}:state:${target.stateId ?? ''}:author:${JSON.stringify(address)}`
+    return `${documentId}:instance:${target.instanceId}:state:${target.stateId ?? ''}:author:${authorFieldIdentity(target.instanceId, target.authorField)}`
   }
   if (target.kind === 'course-instance') return `${documentId}:instance:${target.instanceId}:state:${target.stateId ?? ''}${target.dataPath ? `:${target.fieldScope ?? 'data'}:${JSON.stringify(target.dataPath)}` : ''}`
   if (target.kind === 'course-object') return `${documentId}:object:${target.itemId}${target.compositionNodeId ? `:composition:${target.compositionNodeId}` : ''}`

@@ -1,3 +1,6 @@
+import { TEACHER_CONTROLLER_DEFINITION } from '../../src/components/teacher-controller/data'
+import { componentSurfaces } from '../../src/shared/contracts/component-platform/project'
+import { testContainerInstance, appendRootContainers } from '../helpers/glxWorkFixture'
 // @vitest-environment node
 import { expect, it } from 'vitest'
 import { createBlankCourseProjectV10 } from '../../src/core/course/createCourseProjectV10'
@@ -43,10 +46,10 @@ async function semanticGateway(project: ReturnType<typeof fixture>) {
 }
 
 it('maps scoped authoring files for identical components, captures pagination and applies the observed identity', async () => {
-  const project = fixture(), surfaceId = project.surfaces[0].id
+  const project = fixture(), surfaceId = componentSurfaces(project)[0].id
   project.instances.b = { ...project.instances.a, id: 'b', data: { html: 'Other' } }
-  project.surfaces[0].childIds.push('b')
-  project.surfaces[0].presentation = { states: [{ id: 'answer', title: '答案', overrides: { b: { data: { html: 'State before' }, style: { color: 'red' } } } }] }
+  testContainerInstance(project, 0).childIds.push('b')
+  testContainerInstance(project, 0).container!.presentation = { states: [{ id: 'answer', title: '答案', overrides: { b: { data: { html: 'State before' }, style: { color: 'red' } } } }] }
   project.definitions[WEB_DEFINITION.id] = { ...WEB_DEFINITION, professionalBuiltinKey: 'guoling.web', implementation: {
     kind: 'source', language: 'javascript', source: 'export default {}', moduleBindings: { helper: 'helper' },
   } }
@@ -140,9 +143,10 @@ it('maps scoped authoring files for identical components, captures pagination an
 })
 
 it('shares live global settings and explicit state content through Gateway, preserving state order and one undo', async () => {
-  const project = fixture(), surface = project.surfaces[0]
-  project.instances.b = { ...project.instances.a, id: 'b', data: { html: 'Neighbor' } }; surface.childIds.push('b')
-  surface.presentation = { states: [{ id: 'state', title: '答案', order: ['b', 'a'], overrides: {} }] }
+  const project = fixture(), surface = componentSurfaces(project)[0]
+  project.playback = { ...project.playback!, controls: 'canvas' }
+  project.instances.b = { ...project.instances.a, id: 'b', data: { html: 'Neighbor' } }; testContainerInstance(project, 0).childIds.push('b')
+  testContainerInstance(project, 0).container!.presentation = { states: [{ id: 'state', title: '答案', order: ['b', 'a'], overrides: {} }] }
   const { session, call, handle, model, driver } = await semanticGateway(project)
   let submitted: ComponentEdit[] = []
   const owner = buildCourseGlobalPropertiesOwner({ read: { project, surface, editingGlobal: true, selectedInstanceIds: [], selectedIsGlobal: false, selectedInstance: null, error: null } as unknown as PropertiesOwnerReadModel,
@@ -169,11 +173,12 @@ it('shares live global settings and explicit state content through Gateway, pres
   expect(resolveComponentPresentation(model().project, surface.id, 'state').instances.a).toMatchObject({ data: { html: 'State answer' }, playbackInitialVisibility: 'hidden' })
   expect(session.read().undoDepth).toBe(undoDepth + 1)
   const reopened = driver.load(driver.serialize(model()))
-  expect(reopened.kind === 'course-v10' && reopened.project.surfaces[0].presentation).toEqual(model().project.surfaces[0].presentation)
+  const reopenedPresentation = reopened.kind === 'course-v10' && testContainerInstance(reopened.project, 0).container!.presentation
+  expect(reopenedPresentation, JSON.stringify({ reopened: reopenedPresentation, current: testContainerInstance(model().project, 0).container!.presentation })).toEqual(testContainerInstance(model().project, 0).container!.presentation)
   const current = session.read()
   expect(await session.execute({ documentId: current.documentId, epoch: current.epoch, operationId: 'undo-state', actor: 'human', baseRevision: current.revision, mutation: { type: 'undo' } }))
     .toMatchObject({ status: 'applied' })
-  expect(model().project.surfaces[0].presentation?.states[0].overrides).toEqual({})
+  expect(testContainerInstance(model().project, 0).container!.presentation?.states[0].overrides).toEqual({})
   // Human undo changes the observed content; consume that current object before the next mutation.
   expect(await call('read', { target: await handle({ kind: 'course-instance', surfaceId: surface.id, instanceId: 'a', stateId: 'state' }) })).toMatchObject({ kind: 'read' })
   const stateRead = await call('read', { target: await handle({ kind: 'course-surface', surfaceId: surface.id }), state: 'state' })
@@ -184,10 +189,10 @@ it('shares live global settings and explicit state content through Gateway, pres
 })
 
 it('routes public input authoring and actual ContentApply data through managed grading with one undo', async () => {
-  const project = fixture(), surfaceId = project.surfaces[0].id
+  const project = fixture(), surfaceId = componentSurfaces(project)[0].id
   project.definitions[INPUT_DEFINITION.id] = INPUT_DEFINITION
   project.instances.answer = { id: 'answer', definitionId: INPUT_DEFINITION.id, data: createInputData({ acceptedAnswers: ['42'] }) as unknown as JsonValue }
-  project.surfaces[0].childIds.push('answer')
+  testContainerInstance(project, 0).childIds.push('answer')
   const { session, call, handle, model, driver } = await semanticGateway(project)
   const motion = (show: boolean): InteractionRule['actions'][number]['action'] => ({ type: show ? 'node.enter' : 'node.exit', nodeId: 'a', effect: 'none', durationMs: 0, easing: 'linear' })
   expect(await call('object.author', { target: await handle({ kind: 'course-instance', surfaceId, instanceId: 'answer' }), change: { kind: 'input-rules', request: { mode: 'apply', config: {
@@ -197,8 +202,8 @@ it('routes public input authoring and actual ContentApply data through managed g
   const service = new ContentApplyService({ session: { project: () => baseline.project, resources: () => baseline.resources,
     dispatch: command => session.execute({ documentId: captured.documentId, epoch: captured.epoch, baseRevision: captured.revision, operationId: 'data-apply', actor: 'agent', mutation: { type: 'command', command } }) },
     compilation: { async compile() { throw new Error('Data edit must not compile') } }, async measure() { throw new Error('Data edit must not remeasure') } })
-  expect(await service.apply({ intent: 'content', target: { kind: 'instance', instanceId: 'answer' }, source: { kind: 'data', fields: [{ path: ['acceptedAnswers'], value: ['84'] }] } }))
-    .toMatchObject({ commit: 'committed', receipt: { status: 'applied' } })
+  const applied = await service.apply({ intent: 'content', target: { kind: 'instance', instanceId: 'answer' }, source: { kind: 'data', fields: [{ path: ['acceptedAnswers'], value: ['84'] }] } })
+  expect(applied, JSON.stringify(applied)).toMatchObject({ commit: 'committed', receipt: { status: 'applied' } })
   expect(inspectComponentInputRules(model().project, surfaceId, 'answer')).toMatchObject({ managed: true, conflict: false, config: { answers: ['84'] } })
   expect(model().project.instances.a).toEqual(project.instances.a)
   expect(session.read().undoDepth).toBe(captured.undoDepth + 1)
@@ -210,7 +215,7 @@ it('routes public input authoring and actual ContentApply data through managed g
 })
 
 it('keeps an existing image and full HTML input when content targets professional data, with actionable insertion guidance', async () => {
-  const project = fixture(), surfaceId = project.surfaces[0].id
+  const project = fixture(), surfaceId = componentSurfaces(project)[0].id
   project.definitions[WEB_DEFINITION.id] = { id: WEB_DEFINITION.id, role: 'content', implementation: { kind: 'builtin', key: 'guoling.image' } }
   const before = structuredClone(project)
   const html = '<main><h1>新的封面标题</h1></main>'
@@ -227,12 +232,12 @@ it('keeps an existing image and full HTML input when content targets professiona
 })
 
 it('commits public professional, interaction, logic and media semantics with software identities', async () => {
-  const project = fixture(), surfaceId = project.surfaces[0].id
+  const project = fixture(), surfaceId = componentSurfaces(project)[0].id
   for (const key of ['table', 'chart']) project.definitions[key] = { id: key, role: 'content', implementation: { kind: 'builtin', key: `guoling.${key}` } }
   const table = createTableData({ rows: 2, columns: 2 })
   project.instances.table = { id: 'table', definitionId: 'table', data: table as unknown as JsonValue }
   project.instances.chart = { id: 'chart', definitionId: 'chart', data: createChartData() as unknown as JsonValue }
-  project.surfaces[0].childIds.push('table', 'chart')
+  testContainerInstance(project, 0).childIds.push('table', 'chart')
   const { session, call, handle, model, driver } = await semanticGateway(project)
   expect(await call('batch', { operations: [
     { name: 'object.author', input: { target: await handle({ kind: 'course-instance', surfaceId, instanceId: 'table' }), change: { kind: 'table', edit: { kind: 'insert-row', referenceRowId: table.rows[0].id, position: 'after' } } } },
@@ -260,12 +265,12 @@ it('commits public professional, interaction, logic and media semantics with sof
 })
 
 it('preserves base and named-state world frames in public reparent, and discovers global placement before page copy', async () => {
-  const project = fixture(), surfaceId = project.surfaces[0].id
+  const project = fixture(), surfaceId = componentSurfaces(project)[0].id
   project.definitions.group = { id: 'group', role: 'content', implementation: { kind: 'builtin', key: 'guoling.group' } }
   for (const [id, x] of [['left', 100], ['right', 400]] as const) project.instances[id] = { id, definitionId: 'group', data: {},
     frame: { width: 300, height: 200, transform: [1, 0, 0, 1, x, 0] }, childIds: id === 'left' ? ['a'] : [] }
-  project.surfaces[0].childIds = ['left', 'right']
-  project.surfaces[0].presentation = { states: [{ id: 'answer', title: '答案', overrides: {
+  testContainerInstance(project, 0).childIds = ['left', 'right']
+  testContainerInstance(project, 0).container!.presentation = { states: [{ id: 'answer', title: '答案', overrides: {
     left: { frame: { width: 300, height: 200, transform: [1, 0, 0, 1, 200, 0] } },
     right: { frame: { width: 300, height: 200, transform: [1, 0, 0, 1, 700, 0] } },
     a: { frame: { width: 100, height: 30, transform: [1, 0, 0, 1, 30, 50] } },
@@ -280,9 +285,10 @@ it('preserves base and named-state world frames in public reparent, and discover
   const originalBase = world(project, null), originalState = world(project, 'answer')
   expect(await call('object.structure', { target: await handle({ kind: 'course-instance', surfaceId, instanceId: 'left', stateId: 'answer' }), action: 'move',
     destination: await handle({ kind: 'course-surface', surfaceId, stateId: 'answer' }), index: 1 })).toMatchObject({ kind: 'document-operation', result: { status: 'applied' } })
-  expect(model().project.surfaces[0].childIds).toEqual(['left', 'right'])
-  expect(model().project.surfaces[0].presentation?.states[0].order).toEqual(['right', 'left'])
-  expect(model().project.surfaces[0].presentation?.states[0].overrides.left.frame).toEqual(project.surfaces[0].presentation.states[0].overrides.left.frame)
+  expect(testContainerInstance(model().project, 0).childIds).toEqual(['left', 'right'])
+  expect(testContainerInstance(model().project, 0).container!.presentation?.states[0].order).toEqual(['right', 'left'])
+  expect(testContainerInstance(model().project, 0).container!.presentation?.states[0].overrides.left.frame).toEqual(testContainerInstance(project, 0).container!.presentation!.states[0].overrides.left.frame)
+  const rootBeforeReparent = structuredClone(testContainerInstance(model().project, 0))
   expect(await call('object.structure', { target: await handle({ kind: 'course-instance', surfaceId, instanceId: 'a', stateId: 'answer' }), action: 'move',
     destination: await handle({ kind: 'course-instance', surfaceId, instanceId: 'right', stateId: 'answer' }) })).toMatchObject({ kind: 'document-operation', result: { status: 'applied' } })
   expect(model().project.instances.right.childIds).toEqual(['a'])
@@ -292,21 +298,23 @@ it('preserves base and named-state world frames in public reparent, and discover
   expect(reopened.kind === 'course-v10' && world(reopened.project, 'answer')).toEqual(originalState)
   const current = session.read()
   expect(await session.execute({ documentId: current.documentId, epoch: current.epoch, operationId: 'undo-reparent', actor: 'human', baseRevision: current.revision, mutation: { type: 'undo' } })).toMatchObject({ status: 'applied' })
-  expect(model().project.instances).toEqual(project.instances)
+  const contentInstances = (value: typeof project) => Object.fromEntries(Object.entries(value.instances).filter(([, instance]) => !instance.container))
+  expect(contentInstances(model().project)).toEqual(contentInstances(project))
+  expect(testContainerInstance(model().project, 0)).toEqual(rootBeforeReparent)
   const listed = await call('listChildren', { target: await handle({ kind: 'document' }) })
   if (listed.kind !== 'read') throw new Error('Expected document children')
   const global = (listed.data as { target: string; label: string }[]).find(item => item.label.endsWith('Global marker'))!
   expect(global).toBeTruthy()
   expect(await call('object.place', { target: global.target, placement: { kind: 'global', plane: 'overlay' } })).toMatchObject({ kind: 'document-operation', result: { status: 'applied' } })
   expect(model().project.global.overlay).toContain('global'); expect(model().project.instances.global.visibility).toEqual(project.instances.global.visibility)
-  const sourcePage = model().project.surfaces[0]
+  const sourcePage = componentSurfaces(model().project)[0]
   expect(await call('surface.duplicate', { target: await handle({ kind: 'course-surface', surfaceId }) })).toMatchObject({ kind: 'document-operation', result: { status: 'applied' } })
-  const copy = model().project.surfaces[1]
-  const copiedState = copy.presentation!.states[0], sourceState = sourcePage.presentation!.states[0]
+  const copy = componentSurfaces(model().project)[1]
+  const copiedState = testContainerInstance(model().project, 1).container!.presentation!.states[0], sourceState = testContainerInstance(model().project, 0).container!.presentation!.states[0]
   expect(copiedState.id).not.toBe(sourceState.id)
   expect(copy.title).toBe(sourcePage.title + ' 副本'); expect(copiedState.title).toBe(sourceState.title)
-  expect(copy.childIds).not.toEqual(project.surfaces[0].childIds)
-  const [copiedLeft, copiedRight] = copy.childIds, copiedChild = model().project.instances[copiedLeft].childIds![0]
+  expect(testContainerInstance(model().project, 1).childIds).not.toEqual(testContainerInstance(project, 0).childIds)
+  const [copiedLeft, copiedRight] = testContainerInstance(model().project, 1).childIds, copiedChild = model().project.instances[copiedLeft].childIds![0]
   expect(copiedState.overrides).toEqual({
     [copiedLeft]: sourceState.overrides.left, [copiedRight]: sourceState.overrides.right, [copiedChild]: sourceState.overrides.a,
   })
@@ -317,27 +325,27 @@ it('preserves base and named-state world frames in public reparent, and discover
 })
 
 it('passes the measured frame through public nested Flow body to overlay placement and one undo', async () => {
-  const project = fixture(), surface = project.surfaces[0], surfaceId = surface.id
-  surface.kind = 'flow'; delete surface.designSize
+  const project = fixture(), surface = componentSurfaces(project)[0], surfaceId = surface.id
+  testContainerInstance(project, 0).container!.kind = 'flow'; delete testContainerInstance(project, 0).container!.designSize
   project.definitions.group = { id: 'group', role: 'content', implementation: { kind: 'builtin', key: 'guoling.group' } }
   project.instances.group = { id: 'group', definitionId: 'group', data: {}, childIds: ['a'] }
   delete project.instances.a.frame
   project.instances.b = { ...project.instances.a, id: 'b' }
   project.instances.floating = { ...project.instances.a, id: 'floating', frame: { width: 100, height: 30, transform: [1, 0, 0, 1, 0, 0] }, flowPlacement: { space: 'paper', plane: 'overlay' } }
-  surface.childIds = ['group', 'floating', 'b']
+  testContainerInstance(project, 0).childIds = ['group', 'floating', 'b']
   const { session, call, handle, model } = await semanticGateway(project)
   const frame = { width: 320, height: 180, transform: [1, 0, 0, 1, 20, 30] }
   expect(await call('object.place', { target: await handle({ kind: 'course-instance', surfaceId, instanceId: 'a' }), placement: {
     kind: 'flow-overlay', placement: { space: 'paper', plane: 'overlay', paragraphAnchor: { blockId: 'group', offsetY: 12, xRatio: .5 } }, frame,
   } })).toMatchObject({ kind: 'document-operation', result: { status: 'applied' } })
-  expect(model().project.surfaces[0].childIds).toEqual(['group', 'floating', 'b', 'a'])
+  expect(testContainerInstance(model().project, 0).childIds).toEqual(['group', 'floating', 'b', 'a'])
   expect(model().project.instances.group.childIds).toEqual([])
   expect(model().project.instances.a).toMatchObject({ id: 'a', frame, flowPlacement: { space: 'paper', plane: 'overlay', paragraphAnchor: { blockId: 'group', offsetY: 12, xRatio: .5 } } })
   expect(session.read().undoDepth).toBe(1)
   const current = session.read()
   expect(await session.execute({ documentId: current.documentId, epoch: current.epoch, operationId: 'undo-flow-place', actor: 'human', baseRevision: current.revision, mutation: { type: 'undo' } })).toMatchObject({ status: 'applied' })
   expect(model().project.instances).toEqual(project.instances)
-  const reading = () => model().project.surfaces[0].childIds.filter(id => !model().project.instances[id].flowPlacement)
+  const reading = () => testContainerInstance(model().project, 0).childIds.filter(id => !model().project.instances[id].flowPlacement)
   expect(await call('object.structure', { target: await handle({ kind: 'course-instance', surfaceId, instanceId: 'group' }), action: 'reorder', direction: 'forward' }))
     .toMatchObject({ kind: 'document-operation', result: { status: 'applied' } })
   expect(reading()).toEqual(['b', 'group'])
@@ -349,12 +357,12 @@ it('passes the measured frame through public nested Flow body to overlay placeme
 function fixture() {
   const project = createBlankCourseProjectV10('完整作者对象')
   project.definitions[WEB_DEFINITION.id] = WEB_DEFINITION
-  project.instances.a = { id: 'a', definitionId: WEB_DEFINITION.id, data: { html: 'Base' }, frame: { width: 100, height: 30, transform: [1, 0, 0, 1, 10, 20] } }
-  project.surfaces[0].childIds = ['a']
+  project.instances.a = { id: 'a', definitionId: WEB_DEFINITION.id, data: { html: 'Base' }, authoring: {}, frame: { width: 100, height: 30, transform: [1, 0, 0, 1, 10, 20] } }
+  testContainerInstance(project, 0).childIds = ['a']
   return project
 }
 it('deletes presentation references in one canonical operation without broadening conditions or breaking scene jumps', () => {
-  const project = fixture(), surface = project.surfaces[0]!, sid = surface.id
+  const project = fixture(), surface = componentSurfaces(project)[0]!, sid = surface.id
   project.definitions.interactions = { id: 'interactions', role: 'behavior', implementation: { kind: 'builtin', key: 'guoling.interactions' } }
   const rule = (id: string, action: InteractionRule['actions'][number]['action']): InteractionRule => ({ id, enabled: true,
     trigger: { type: 'node.click', nodeId: 'a' }, conditions: [], actions: [{ id: id + '-action', start: 'after-previous', delayMs: 0, action }] })
@@ -367,19 +375,21 @@ it('deletes presentation references in one canonical operation without broadenin
   const data = (rules: InteractionRule[]) => ({ rules }) as unknown as JsonValue
   project.instances.behavior = { id: 'behavior', definitionId: 'interactions', data: data([enter, set, chain, condition, mixed, continued]),
     attachments: [{ instanceId: 'behavior', target: { kind: 'surface', surfaceId: sid } }] }
-  surface.childIds.push('behavior')
-  const nav = Object.values(project.instances).find(instance => componentDefinitionBuiltinKey(project.definitions[instance.definitionId]) === 'guoling.navigation')!
+  testContainerInstance(project, 0).childIds.push('behavior')
+  project.definitions[TEACHER_CONTROLLER_DEFINITION.id] = TEACHER_CONTROLLER_DEFINITION
+  const nav = project.instances.nav = { id: 'nav', definitionId: TEACHER_CONTROLLER_DEFINITION.id, data: {} as JsonValue }
+  project.global.overlay.push(nav.id)
   nav.data = { buttons: [{ id: 'go', action: { type: 'scene.go', sceneId: sid, targetStateId: 'gone' } }] }
-  surface.presentation = { initialStateId: 'stay', states: [
+  testContainerInstance(project, 0).container!.presentation = { initialStateId: 'stay', states: [
     { id: 'gone', title: '删除', overrides: {} },
     { id: 'stay', title: '保留', overrides: { behavior: { data: data([mixed]) }, [nav.id]: { data: structuredClone(nav.data) } } },
   ] }
   project.instances.otherBehavior = { id: 'otherBehavior', definitionId: 'interactions', data: data([set, rule('other-jump', { type: 'scene.go', sceneId: sid, targetStateId: 'gone' })]),
     attachments: [{ instanceId: 'otherBehavior', target: { kind: 'surface', surfaceId: 'other' } }] }
-  project.surfaces.push({ id: 'other', kind: 'slide', title: '其他页', childIds: ['otherBehavior'],
+  appendRootContainers(project, { id: 'other', kind: 'slide', title: '其他页', childIds: ['otherBehavior'],
     presentation: { states: [{ id: 'gone', title: '同名仍存在', overrides: {} }] } })
   const command = captureComponentOperation(project, [{ type: 'surface.presentation.set', surfaceId: sid,
-    presentation: { ...surface.presentation, states: surface.presentation.states.filter(state => state.id !== 'gone') } }])
+    presentation: { ...testContainerInstance(project, 0).container!.presentation, states: testContainerInstance(project, 0).container!.presentation!.states.filter(state => state.id !== 'gone') } }])
   const result = applyComponentOperation(project, command)
   const rules = (result.instances.behavior.data as unknown as { rules: InteractionRule[] }).rules
   expect(rules.map(value => value.id)).toEqual(['mixed', 'continued'])
@@ -387,7 +397,7 @@ it('deletes presentation references in one canonical operation without broadenin
   expect(rules[0]!.actions[0]!.action).not.toHaveProperty('targetStateId')
   expect(rules[1]!.actions).toEqual([{ id: 'next-action', start: 'after-previous', delayMs: 0, action: { type: 'scene.next' } }])
   expect(result.instances.nav?.data ?? result.instances[nav.id].data).toEqual({ buttons: [{ id: 'go', action: { type: 'scene.go', sceneId: sid } }] })
-  const state = result.surfaces[0]!.presentation!.states[0]!
+  const state = testContainerInstance(result, 0).container!.presentation!.states[0]!
   expect(state.overrides[nav.id]!.data).toEqual(result.instances[nav.id].data)
   expect((state.overrides.behavior!.data as unknown as { rules: InteractionRule[] }).rules[0]!.conditions).toEqual([{ type: 'presentation.in', stateIds: ['stay'] }])
   expect((result.instances.otherBehavior.data as unknown as { rules: InteractionRule[] }).rules[0]).toEqual(set)
@@ -398,7 +408,7 @@ it('deletes presentation references in one canonical operation without broadenin
   expect(reopened.kind === 'course-v10' && reopened.project.instances[nav.id].data).toEqual(result.instances[nav.id].data)
 })
 it('copies ordinary click programs and managed input feedback through the real executor as one undoable author object', async () => {
-  const project = fixture(), surface = project.surfaces[0]!, surfaceId = surface.id, resources = { assets: {}, components: {} }
+  const project = fixture(), surface = componentSurfaces(project)[0]!, surfaceId = surface.id, resources = { assets: {}, components: {} }
   project.definitions[INPUT_DEFINITION.id] = INPUT_DEFINITION
   project.definitions.interactions = { id: 'interactions', role: 'behavior', implementation: { kind: 'builtin', key: 'guoling.interactions' } }
   const motion = (nodeId: string, show = true): InteractionRule['actions'][number]['action'] => ({ type: show ? 'node.enter' : 'node.exit', nodeId, effect: 'none', durationMs: 0, easing: 'linear' })
@@ -417,21 +427,21 @@ it('copies ordinary click programs and managed input feedback through the real e
   const unrelated: InteractionRule = { ...click, id: 'unrelated-rule', trigger: { type: 'node.click', nodeId: 'unrelated' }, actions: [{ ...click.actions[0]!, id: 'unrelated-action', action: { type: 'scene.next' } }] }
   project.instances.behavior = { id: 'behavior', definitionId: 'interactions', data: { rules: [...family, click, complete, unrelated] } as unknown as JsonValue,
     attachments: [{ instanceId: 'behavior', target: { kind: 'surface', surfaceId } }] }
-  surface.childIds = ['a', 'input', 'error', 'unrelated', 'behavior']
+  testContainerInstance(project, 0).childIds = ['a', 'input', 'error', 'unrelated', 'behavior']
   project.global.overlay.push('correct')
   project.instances.other = { ...project.instances.a, id: 'other' }
   const otherRule: InteractionRule = { ...unrelated, id: 'other-rule', trigger: { type: 'node.click', nodeId: 'other' },
     actions: [{ ...unrelated.actions[0]!, id: 'other-action' }] }
   project.instances.otherBehavior = { id: 'otherBehavior', definitionId: 'interactions', data: { rules: [otherRule] } as unknown as JsonValue,
     attachments: [{ instanceId: 'otherBehavior', target: { kind: 'surface', surfaceId: 'other-page' } }] }
-  project.surfaces.push({ id: 'other-page', kind: 'slide', title: 'Other page', childIds: ['other', 'otherBehavior'],
+  appendRootContainers(project, { id: 'other-page', kind: 'slide', title: 'Other page', childIds: ['other', 'otherBehavior'],
     presentation: { states: [{ id: 'unrelated-state', title: 'Unrelated state', overrides: { otherBehavior: { data: { rules: [{ ...otherRule, enabled: false }] } as unknown as JsonValue } } }] } })
   project.logic = { courseState: [{ key: 'input:input:value', valueType: 'string', defaultValue: '' }, { key: 'input:input:valid', valueType: 'boolean', defaultValue: false }], navigationGuards: [] }
-  surface.presentation = { states: [{ id: 'answer', title: '另一状态', overrides: { behavior: { data: { rules: [...family,
+  testContainerInstance(project, 0).container!.presentation = { states: [{ id: 'answer', title: '另一状态', overrides: { behavior: { data: { rules: [...family,
     { ...click, actions: [{ ...click.actions[0]!, action: motion('error') }] }, unrelated] } as unknown as JsonValue } } }] }
   const target: CapturedCourseTarget = { documentId: 'doc', epoch: 'epoch', project, editingProject: project, resources, activeStateId: null, surfaceId, instanceIds: ['a', 'input'], instanceId: 'a' }
   const plan = prepareCourseObjectPaste({ documentId: 'doc', project, roots: ['a', 'input'], resources },
-    { capturedTarget: target, container: { kind: 'surface', surfaceId }, index: surface.childIds.length, offset: { x: 20, y: 20 } })
+    { capturedTarget: target, container: { kind: 'surface', surfaceId }, index: testContainerInstance(project, 0).childIds.length, offset: { x: 20, y: 20 } })
   expect(plan.idMap.has('correct')).toBe(true); expect(plan.idMap.has('error')).toBe(true)
   expect(plan.idMap.has('unrelated')).toBe(false)
   const driver = new CourseV10Driver(), session = await DocumentSession.create({ documentId: 'doc', epoch: 'epoch', model: { kind: 'course-v10', project, resources },
@@ -441,7 +451,7 @@ it('copies ordinary click programs and managed input feedback through the real e
   const snapshot = session.read()
   if (snapshot.model.kind !== 'course-v10') throw new Error('Expected V10')
   const copied = snapshot.model.project, inputId = plan.idMap.get('input')!, buttonId = plan.idMap.get('a')!, correctId = plan.idMap.get('correct')!, errorId = plan.idMap.get('error')!
-  expect(copied.surfaces[0].presentation?.states.map(state => state.id)).toEqual(['answer'])
+  expect(testContainerInstance(copied, 0).container!.presentation?.states.map(state => state.id)).toEqual(['answer'])
   const input = inputDataSchema.parse(copied.instances[inputId].data), copiedRules = interactionRules(interactionBehavior(copied, { kind: 'surface', surfaceId }))
   expect(input.answer!.ruleFamilyRuleIds.every(id => copiedRules.some(rule => rule.id === id) && !family.some(rule => rule.id === id))).toBe(true)
   expect(copiedRules.filter(rule => rule.id === 'unrelated-rule')).toHaveLength(1)
@@ -477,11 +487,11 @@ it('copies ordinary click programs and managed input feedback through the real e
 it('enforces inherited author locks for data, frame and named-state edits while allowing an explicit unlock', () => {
   const project = fixture()
   project.instances.group = { id: 'group', definitionId: WEB_DEFINITION.id, data: { html: '' }, childIds: ['a'], locked: true }
-  project.surfaces[0].childIds = ['group']
+  testContainerInstance(project, 0).childIds = ['group']
   for (const edits of [
     [{ type: 'data.set' as const, instanceId: 'a', path: ['html'], value: 'Changed' }],
     [{ type: 'frame.set' as const, instanceId: 'a', frame: { width: 200, height: 30, transform: [1, 0, 0, 1, 10, 20] as [number, number, number, number, number, number] } }],
-    [{ type: 'surface.presentation.set' as const, surfaceId: project.surfaces[0].id, presentation: { states: [{ id: 'answer', title: '答案', overrides: { a: { visible: false } } }] } }],
+    [{ type: 'surface.presentation.set' as const, surfaceId: componentSurfaces(project)[0].id, presentation: { states: [{ id: 'answer', title: '答案', overrides: { a: { visible: false } } }] } }],
   ]) expect(() => applyComponentOperation(project, captureComponentOperation(project, edits))).toThrow('已锁定')
   const unlocked = applyComponentOperation(project, captureComponentOperation(project, [
     { type: 'instance.patch', instanceId: 'group', patch: { locked: false } },
@@ -499,7 +509,7 @@ it('blocks changed interaction rules targeting a locked author object without bl
     actions: [{ id: `${id}-action`, start: 'after-previous', delayMs: 0, action: { type: 'node.enter', nodeId, effect: 'none', durationMs: 0, easing: 'linear' } }] })
   const lockedRule = rule('locked-rule', 'a'), otherRule = rule('other-rule', 'b')
   project.instances.behavior = { id: 'behavior', definitionId: 'interactions', data: { rules: [lockedRule, otherRule] } }
-  project.surfaces[0].childIds.push('b', 'behavior')
+  testContainerInstance(project, 0).childIds.push('b', 'behavior')
   const change = (rules: ReturnType<typeof rule>[]) => captureComponentOperation(project,
     [{ type: 'data.set', instanceId: 'behavior', path: ['rules'], value: rules }])
   expect(() => applyComponentOperation(project, change([{ ...lockedRule, enabled: false }, otherRule]))).toThrow('已锁定')
@@ -509,11 +519,11 @@ it('blocks changed interaction rules targeting a locked author object without bl
   expect(updated.instances.a).toEqual(project.instances.a)
 })
 it('copies base values, all named states and local records in one undoable saved transaction', async () => {
-  const project = fixture(), surfaceId = project.surfaces[0].id
+  const project = fixture(), surfaceId = componentSurfaces(project)[0].id
   project.instances.a.data = { html: 'Base' }
   project.instances.a.authoring = { records: { local: { kind: 'text', scope: { item: 'a' },
     binding: { kind: 'dom', path: [{ tag: 'p', index: 0 }], baseline: 'Original' }, overrides: { text: 'Human', geometry: { translateX: 12 } } } } }
-  project.surfaces[0].presentation = { states: [
+  testContainerInstance(project, 0).container!.presentation = { states: [
     { id: 'question', title: '问题', overrides: { a: { visible: false } }, order: ['a'] },
     { id: 'answer', title: '答案', overrides: { a: { data: { html: 'Answer' }, frame: { width: 150, height: 40, transform: [1, 0, 0, 1, 40, 60] } } }, order: ['a'] },
   ] }
@@ -532,9 +542,9 @@ it('copies base values, all named states and local records in one undoable saved
   const id = plan.idMap.get('a')!, copied = model.project.instances[id]
   expect(copied.authoring!.records).toEqual(project.instances.a.authoring.records)
   expect(webDataSchema.parse(copied.data).html).toBe('Base')
-  expect(model.project.surfaces[0].presentation?.states[0].overrides[id]).toEqual({ visible: false })
-  expect(model.project.surfaces[0].presentation?.states[1].overrides[id]).toMatchObject({ data: { html: 'Answer' }, frame: { transform: [1, 0, 0, 1, 60, 80] } })
-  expect(model.project.surfaces[0].presentation?.states[1].order).toEqual(['a', id])
+  expect(testContainerInstance(model.project, 0).container!.presentation?.states[0].overrides[id]).toEqual({ visible: false })
+  expect(testContainerInstance(model.project, 0).container!.presentation?.states[1].overrides[id]).toMatchObject({ data: { html: 'Answer' }, frame: { transform: [1, 0, 0, 1, 60, 80] } })
+  expect(testContainerInstance(model.project, 0).container!.presentation?.states[1].order).toEqual(['a', id])
   const reopened = driver.load(driver.serialize(model))
   if (reopened.kind !== 'course-v10') throw new Error('Expected V10')
   expect(reopened.project.instances.a).toEqual(project.instances.a)
@@ -546,11 +556,11 @@ it('copies base values, all named states and local records in one undoable saved
 })
 it('rejects stateful Slide object paste into Flow or Spatial before a canonical write', async () => {
   const source = fixture(), resources = { assets: {}, components: {} }
-  source.surfaces[0].presentation = { states: [{ id: 'answer', title: '答案', overrides: { a: { data: { html: 'Answer' } } } }] }
+  testContainerInstance(source, 0).container!.presentation = { states: [{ id: 'answer', title: '答案', overrides: { a: { data: { html: 'Answer' } } } }] }
   const beforeSource = structuredClone(source)
   for (const kind of ['flow', 'spatial'] as const) {
-    const project = createBlankCourseProjectV10('目标'), surface = project.surfaces[0]
-    surface.kind = kind
+    const project = createBlankCourseProjectV10('目标'), surface = componentSurfaces(project)[0]
+    testContainerInstance(project, 0).container!.kind = kind
     const target: CapturedCourseTarget = { documentId: 'target', epoch: 'epoch', project, editingProject: project, resources,
       activeStateId: null, surfaceId: surface.id, instanceIds: [], instanceId: null }
     const session = await DocumentSession.create({ documentId: 'target', epoch: 'epoch', model: { kind: 'course-v10', project, resources },
@@ -563,14 +573,14 @@ it('rejects stateful Slide object paste into Flow or Spatial before a canonical 
       return session.execute({ documentId: 'target', epoch: 'epoch', operationId: 'paste', baseRevision: before.revision, actor: 'human',
         mutation: { type: 'command', command: captureComponentOperation(project, plan.edits) } })
     }
-    await expect(paste()).rejects.toThrow('不支持展示状态，无法完整粘贴这些对象')
+    await expect(paste()).rejects.toThrow('场景状态仅属于Slide，无法把这些状态并入当前容器。请粘贴到演示页面，或复制整个原容器。')
     expect(session.read()).toEqual(before)
     expect(project).toEqual(before.model.kind === 'course-v10' && before.model.project)
   }
   expect(source).toEqual(beforeSource)
 })
 it('canonically pastes an ordinary object into Flow or Spatial despite unrelated page states and an order entry', async () => {
-  const source = fixture(), resources = { assets: {}, components: {} }, sourceSurface = source.surfaces[0]
+  const source = fixture(), resources = { assets: {}, components: {} }, sourceSurface = componentSurfaces(source)[0]
   source.instances.other = { ...source.instances.a, id: 'other' }
   source.definitions.interactions = { id: 'interactions', role: 'behavior', implementation: { kind: 'builtin', key: 'guoling.interactions' } }
   const rule = (nodeId: string): InteractionRule => ({ id: `rule-${nodeId}`, enabled: true, trigger: { type: 'node.click', nodeId }, conditions: [],
@@ -578,14 +588,14 @@ it('canonically pastes an ordinary object into Flow or Spatial despite unrelated
   const copiedRule = rule('a'), otherRule = rule('other')
   source.instances.behavior = { id: 'behavior', definitionId: 'interactions', data: { rules: [copiedRule, otherRule] } as unknown as JsonValue,
     attachments: [{ instanceId: 'behavior', target: { kind: 'surface', surfaceId: sourceSurface.id } }] }
-  sourceSurface.childIds.push('other', 'behavior')
-  sourceSurface.presentation = { states: [{ id: 'unrelated', title: '其他对象状态', order: ['other', 'a', 'behavior'], overrides: {
+  testContainerInstance(source, 0).childIds.push('other', 'behavior')
+  testContainerInstance(source, 0).container!.presentation = { states: [{ id: 'unrelated', title: '其他对象状态', order: ['other', 'a', 'behavior'], overrides: {
     other: { visible: false }, behavior: { data: { rules: [copiedRule, { ...otherRule, enabled: false }] } as unknown as JsonValue },
   } }] }
   const beforeSource = structuredClone(source)
   for (const kind of ['flow', 'spatial'] as const) {
-    const project = createBlankCourseProjectV10('目标'), surface = project.surfaces[0]
-    surface.kind = kind
+    const project = createBlankCourseProjectV10('目标'), surface = componentSurfaces(project)[0]
+    testContainerInstance(project, 0).container!.kind = kind
     const target: CapturedCourseTarget = { documentId: 'target', epoch: 'epoch', project, editingProject: project, resources,
       activeStateId: null, surfaceId: surface.id, instanceIds: [], instanceId: null }
     const plan = prepareCourseObjectPaste({ documentId: 'source', project: source, roots: ['a'], resources },
@@ -599,7 +609,7 @@ it('canonically pastes an ordinary object into Flow or Spatial despite unrelated
     const after = session.read()
     if (after.model.kind !== 'course-v10') throw new Error('Expected V10')
     expect(after.model.project.instances[plan.idMap.get('a')!].data).toEqual(source.instances.a.data)
-    expect(after.model.project.surfaces[0].presentation).toBeUndefined()
+    expect(testContainerInstance(after.model.project, 0).container!.presentation).toBeUndefined()
     expect(interactionRules(interactionBehavior(after.model.project, { kind: 'surface', surfaceId: surface.id }))).toHaveLength(1)
     expect(after.undoDepth).toBe(1)
   }
@@ -612,8 +622,8 @@ it('keeps professional presentation and field metadata for source-customized def
 })
 
 it('keeps pre-playback visibility in the captured named state through normal save and reopen', () => {
-  const project = fixture(), surfaceId = project.surfaces[0].id
-  project.surfaces[0].presentation = { states: [{ id: 'a', title: 'A', overrides: {} }, { id: 'b', title: 'B', overrides: {} }] }
+  const project = fixture(), surfaceId = componentSurfaces(project)[0].id
+  testContainerInstance(project, 0).container!.presentation = { states: [{ id: 'a', title: 'A', overrides: {} }, { id: 'b', title: 'B', overrides: {} }] }
   const edits = presentationComponentEdits(project, surfaceId, 'b', [{ type: 'instance.patch', instanceId: 'a', patch: { playbackInitialVisibility: 'hidden' } }])
   const result = applyComponentOperation(project, captureComponentOperation(project, edits))
   expect(result.instances.a.playbackInitialVisibility).toBeUndefined()
@@ -621,12 +631,12 @@ it('keeps pre-playback visibility in the captured named state through normal sav
   expect(resolveComponentPresentation(result, surfaceId, 'b').instances.a.playbackInitialVisibility).toBe('hidden')
   const driver = new CourseV10Driver(), reopened = driver.load(driver.serialize({ kind: 'course-v10', project: result, resources: { assets: {}, components: {} } }))
   if (reopened.kind !== 'course-v10') throw new Error('Expected V10')
-  expect(reopened.project.surfaces[0].presentation?.states[1].overrides.a).toEqual({ playbackInitialVisibility: 'hidden' })
+  expect(testContainerInstance(reopened.project, 0).container!.presentation?.states[1].overrides.a).toEqual({ playbackInitialVisibility: 'hidden' })
 })
 
 it('preserves authored coordinates by default and explicitly refits each page, state and shared branch once', () => {
-  const project = fixture(), surfaceId = project.surfaces[0].id
-  project.surfaces[0].designSize = { width: 800, height: 400 }
+  const project = fixture(), surfaceId = componentSurfaces(project)[0].id
+  testContainerInstance(project, 0).container!.designSize = { width: 800, height: 400 }
   const groupFrame = { width: 200, height: 100, transform: [0, 1, -1, 0, 20, 30] as [number, number, number, number, number, number] }
   project.instances.group = { id: 'group', definitionId: WEB_DEFINITION.id, data: { html: '' }, frame: groupFrame, childIds: ['a'] }
   project.instances.flat = { id: 'flat', definitionId: WEB_DEFINITION.id, data: { html: '' }, childIds: ['child'] }
@@ -634,17 +644,19 @@ it('preserves authored coordinates by default and explicitly refits each page, s
   project.instances.b = { ...project.instances.a, id: 'b' }
   project.instances.global = { ...project.instances.a, id: 'global' }
   project.global.underlay.push('global')
-  project.surfaces[0].childIds = ['group', 'flat']
-  project.surfaces.push({ id: 'second', kind: 'slide', title: '第二页', childIds: ['b'], designSize: { width: 400, height: 400 } })
-  project.surfaces[0].presentation = { states: [
+  testContainerInstance(project, 0).childIds = ['group', 'flat']
+  appendRootContainers(project, { id: 'second', kind: 'slide', title: '第二页', childIds: ['b'], designSize: { width: 400, height: 400 } })
+  testContainerInstance(project, 0).container!.presentation = { states: [
     { id: 'framed', title: '有父框', overrides: { flat: { frame: { width: 200, height: 100, transform: [1, 0, 0, 1, 30, 20] } } } },
     { id: 'frameless', title: '无父框', overrides: { group: { frame: null }, global: { frame: { width: 30, height: 20, transform: [1, 0, 0, 1, 20, 10] } } } },
   ] }
   const resize = { surfaceIds: [surfaceId, 'second'], designSize: { width: 1200, height: 1200 } }
   const preserve = applyComponentOperation(project, captureComponentOperation(project,
     resizeComponentSurfacesEdits(project, { ...resize, mode: 'preserve' })))
-  expect(preserve.instances).toEqual(project.instances)
-  expect(preserve.surfaces[0].presentation).toEqual(project.surfaces[0].presentation)
+  const contentInstances = (value: typeof project) => Object.fromEntries(Object.entries(value.instances).filter(([, instance]) => !instance.container))
+  expect(contentInstances(preserve)).toEqual(contentInstances(project))
+  expect(componentSurfaces(preserve).map(surface => surface.designSize)).toEqual([resize.designSize, resize.designSize])
+  expect(testContainerInstance(preserve, 0).container!.presentation).toEqual(testContainerInstance(project, 0).container!.presentation)
   const edits = resizeComponentSurfacesEdits(project, { ...resize, mode: 'contain', globalReferenceSurfaceId: surfaceId })
   const result = applyComponentOperation(project, captureComponentOperation(project, edits))
   expect(result.instances.group.frame?.transform).toEqual([0, 1.5, -1.5, 0, 30, 345])

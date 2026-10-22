@@ -68,6 +68,10 @@ export async function buildDocumentExport(request: ExportBuildRequest, signal: A
     }), signal)
     signal?.throwIfAborted()
     const warnings = built.report.items.map(item => item.message)
+    if (request.includeDelivery) {
+      progress('complete')
+      return { ...base, status: 'generated', delivery: built, warnings }
+    }
     const mimeTypes = { html: 'text/html', zip: 'application/zip', pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
       docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', pdf: 'application/pdf' }
     const files = built.artifacts.filter(artifact => artifact.extension !== 'pdf').map(artifact => ({

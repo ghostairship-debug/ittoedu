@@ -1,5 +1,5 @@
 import type { ComponentLibraryEntry } from '../../shared/contracts/component-platform/library'
-import type { CourseProjectV10 } from '../../shared/contracts/component-platform/project'
+import { containerChildIds, type CourseProjectV10 } from '../../shared/contracts/component-platform/project'
 import { extractComponentLibraryEntry, prepareComponentLibraryInsertion, type InsertLibraryOptions, type LibraryDiagnostic } from '../../core/components/library'
 import { applyComponentOperation } from '../../core/drivers/courseV10Operations'
 import type { ComponentEdit } from '../../shared/contracts/component-platform/operations'
@@ -10,7 +10,7 @@ import { frameCorners } from '../../core/components/geometry'
 import { resolveCourseInsertionPlacement, type CourseInsertionOptions } from '../media/commitCourseMediaAuthoring'
 
 export type ComponentInsertionTarget = CapturedCourseTarget
-export type ComponentPackageInsertionOptions = CourseInsertionOptions & Pick<InsertLibraryOptions, 'targetBindings' | 'surfaceBindings'>
+export type ComponentPackageInsertionOptions = CourseInsertionOptions & Pick<InsertLibraryOptions, 'targetBindings' | 'surfaceBindings' | 'placement'>
 export const captureComponentInsertionTarget = (kernel: EditorStoreKernel) => kernel.captureTarget()
 
 export function componentDefinitionEntry(kernel: EditorStoreKernel, definitionId: string, target?: CapturedCourseTarget): ComponentLibraryEntry {
@@ -19,7 +19,7 @@ export function componentDefinitionEntry(kernel: EditorStoreKernel, definitionId
   const example = Object.values(project.instances).find(instance => instance.definitionId === definitionId)
   if (!example) throw new Error('此定义没有示例，请从组件库选择一个完整条目。')
   const resources = target?.resources ?? kernel.readResources()
-  return extractComponentLibraryEntry(project, resources, { id: definitionId, title: definition.title ?? definitionId, rootIds: [example.id] }).entry
+  return extractComponentLibraryEntry(project, resources, { id: definition.library?.packageId ?? definitionId, title: definition.title ?? definitionId, rootIds: [example.id] }).entry
 }
 
 /** Prepare all library entries against one captured author snapshot and dispatch one C1 history operation. */
@@ -32,15 +32,15 @@ export async function insertComponentPackagesAtTarget(kernel: EditorStoreKernel,
     let working: CourseProjectV10 = structuredClone(target.project)
     const edits: ComponentEdit[] = [], rootIds: string[] = [], diagnostics: LibraryDiagnostic[] = []
     for (const entry of entries) {
-      const children = owner.kind === 'global' ? working.global[owner.plane] : owner.kind === 'surface'
-        ? working.surfaces.find(surface => surface.id === owner.surfaceId)?.childIds : working.instances[owner.instanceId]?.childIds
+      const children = containerChildIds(working, owner)
       if (!children) throw new Error('组件放置目标已不存在。')
       const insertion = prepareComponentLibraryInsertion(working, entry, { container: owner, index: nextIndex,
-        targetBindings: options.targetBindings, surfaceBindings: options.surfaceBindings })
+        targetBindings: options.targetBindings, surfaceBindings: options.surfaceBindings, placement: options.placement })
       diagnostics.push(...insertion.diagnostics)
       const roots = new Set(insertion.rootIds)
       const inserted = insertion.command.edits.find(edit => edit.type === 'instance.insert')
-      if (!entry.surfaces?.length && inserted?.type === 'instance.insert') {
+      const insertsRoots = insertion.command.edits.some(edit => edit.type === 'instance.insert' && edit.container.kind === 'project')
+      if (!insertsRoots && inserted?.type === 'instance.insert') {
         const frames = inserted.instances.filter(instance => roots.has(instance.id) && instance.frame).map(instance => instance.frame!)
         const originX = frames.length ? Math.min(...frames.map(frame => frame.transform[4])) : 0
         const originY = frames.length ? Math.min(...frames.map(frame => frame.transform[5])) : 0
@@ -60,7 +60,7 @@ export async function insertComponentPackagesAtTarget(kernel: EditorStoreKernel,
         })
       }
       edits.push(...insertion.command.edits); rootIds.push(...insertion.rootIds)
-      if (!entry.surfaces?.length) nextIndex += insertion.rootIds.length
+      if (!insertsRoots) nextIndex += insertion.rootIds.length
       working = applyComponentOperation(working, insertion.command)
     }
     edits.push(...resolveCourseInsertionPlacement(target, options, rootIds).edits)

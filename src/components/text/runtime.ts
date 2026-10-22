@@ -1,7 +1,8 @@
 import { mountDocumentInlineComponents } from '../../shared/document/textInteraction'
-import type { ComponentInstance, ComponentLayoutPort, ComponentRuntimeImplementation, ComponentRuntimeScope } from '../../shared/contracts/component-platform'
+import type { ComponentInstance, ComponentLayoutInput, ComponentLayoutPort, ComponentRuntimeImplementation, ComponentRuntimeScope } from '../../shared/contracts/component-platform'
 import { formulaComponentDataSchema, textComponentDataSchema, type FormulaComponentData, type TextComponentData, type TextSizing } from './data'
 import { applyTextComponentLayout, measureTextComponent, renderFormulaComponent, renderTextComponent } from './render'
+import { elementTextFontRequests, prepareTextFonts } from '../../shared/fonts/ensureBundledFonts'
 
 /** A measured size is an observation. The host may turn it into a canonical frame edit. */
 export const TEXT_LAYOUT_EVENT = 'text.layout'
@@ -11,13 +12,14 @@ function mounted<Data>(initial: ComponentInstance<Data>, scope: ComponentRuntime
   let releaseInline: (() => void) | undefined
   let releaseLayout: (() => void) | undefined
   let observer: ResizeObserver | undefined
+  let fontGeneration = 0, fontsReady = true
   let contentBox: { width: number; height: number; key: string } | undefined
   const active = () => !disposed && scope.isActive() && !scope.signal.aborted
   const boxKey = (style: CSSStyleDeclaration | undefined) => [instance.frame?.width, instance.frame?.height,
     style?.width, style?.height, style?.boxSizing, style?.padding, style?.borderWidth].join('|')
-  const measure = () => {
-    if (!active() || !element?.isConnected || !instance.frame) return
-    const placement = layout?.read()
+  const measure = (accepted?: ComponentLayoutInput) => {
+    if (!active() || !fontsReady || !element?.isConnected || !instance.frame) return
+    const placement = accepted ?? layout?.read()
     if (placement?.mode === 'flow-content') return
     // Frame geometry includes the Surface wrapper's border/padding. Measure
     // the available local content box, before its camera/observation transform.
@@ -59,16 +61,17 @@ function mounted<Data>(initial: ComponentInstance<Data>, scope: ComponentRuntime
     scope.events.emit(TEXT_LAYOUT_EVENT, { instanceId: instance.id, width: result.width + instance.frame.width - size.width,
       height: result.height + instance.frame.height - size.height, scale: result.scale, overflows: result.overflows })
   }
-  const place = () => {
+  const place = (accepted?: ComponentLayoutInput) => {
     if (!active() || !element) return
+    const placement = accepted ?? layout?.read()
     if (layout) {
       // A flex text box isolates its lines from adjacent floats. Natural Flow
       // paragraphs participate in the surrounding reading flow instead.
-      const natural = layout.read().mode === 'flow-content'
+      const natural = placement?.mode === 'flow-content'
       element.style.display = natural ? 'block' : 'flex'
       element.style.height = natural ? 'auto' : '100%'
     }
-    measure()
+    measure(placement)
   }
   const paint = () => {
     if (!active() || !root) return
@@ -79,6 +82,17 @@ function mounted<Data>(initial: ComponentInstance<Data>, scope: ComponentRuntime
     releaseInline = mountDocumentInlineComponents(element, inline)
     previous?.()
     scope.events.emit('__runtime.text-ranges', { instanceId: instance.id })
+    const generation = ++fontGeneration
+    const pending = prepareTextFonts(elementTextFontRequests(element), root.ownerDocument.fonts)
+    fontsReady = !pending
+    if (pending) void pending.then(() => {
+      if (!active() || generation !== fontGeneration) return
+      fontsReady = true; place()
+    }, error => {
+      if (!active() || generation !== fontGeneration) return
+      // Keep the authored frame rather than persisting fallback-font geometry.
+      console.warn('当前文字字体准备失败，保留原文字框尺寸', error)
+    })
     place()
   }
   const dispose = () => { if (disposed) return; disposed = true; observer?.disconnect(); contentBox = undefined; releaseLayout?.(); releaseInline?.(); element?.remove(); element = null }
@@ -87,7 +101,7 @@ function mounted<Data>(initial: ComponentInstance<Data>, scope: ComponentRuntime
   const Observer = root?.ownerDocument.defaultView?.ResizeObserver
   if (root && Observer && active()) {
     observer = new Observer(entries => {
-      if (!active()) return
+      if (!active() || !instance.frame || layout?.read().mode === 'flow-content') return
       const entry = entries.find(value => value.target === root), box = entry?.contentBoxSize[0]
       if (!entry || !box) return
       const style = root.ownerDocument.defaultView?.getComputedStyle(root)
@@ -103,8 +117,9 @@ function mounted<Data>(initial: ComponentInstance<Data>, scope: ComponentRuntime
     })
     observer.observe(root)
   }
-  releaseLayout = layout?.subscribe(paint)
-  void root?.ownerDocument.fonts?.ready.then(() => { if (active()) paint() })
+  // Natural text reflows in CSS. Replacing its DOM from a height observation
+  // creates a ResizeObserver feedback loop and discards live inline handles.
+  releaseLayout = layout?.subscribe(input => { if (input.mode === 'flow-content') place(input); else paint() })
   return {
     update(next: ComponentInstance<Data>) { instance = next; paint() },
     updatePlacement(frame: ComponentInstance<Data>['frame']) { instance = { ...instance, frame }; paint() },

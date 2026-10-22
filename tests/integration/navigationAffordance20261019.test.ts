@@ -1,4 +1,5 @@
 // @vitest-environment node
+import { setRootContainers } from '../helpers/glxWorkFixture'
 import { expect, it } from 'vitest'
 import { build } from 'esbuild'
 import { chromium } from 'playwright'
@@ -16,8 +17,8 @@ import type { InteractionRule } from '../../src/shared/interactionTypes'
 it('runs ordinary authored page presets and live click affordances in Published and compiled carriers', async () => {
   const project = createBlankCourseProjectV10('导航预置与点击可供性')
   const frame = (y: number) => ({ width: 300, height: 70, transform: [1, 0, 0, 1, 80, y] as [number, number, number, number, number, number] })
-  project.surfaces = [{ id: 'A', kind: 'slide', title: '观察', childIds: ['go', 'author'], designSize: { width: 800, height: 600 } },
-    { id: 'B', kind: 'slide', title: '验证', childIds: ['back'], designSize: { width: 800, height: 600 } }]
+  setRootContainers(project, [{ id: 'A', kind: 'slide', title: '观察', childIds: ['go', 'author'], designSize: { width: 800, height: 600 } },
+    { id: 'B', kind: 'slide', title: '验证', childIds: ['back'], designSize: { width: 800, height: 600 } }])
   project.definitions.text = { id: 'text', role: 'content', implementation: { kind: 'builtin', key: 'guoling.text' } }
   project.definitions[INTERACTIONS_DEFINITION.id] = INTERACTIONS_DEFINITION
   for (const [index, id] of ['go', 'author', 'back'].entries()) project.instances[id] = {

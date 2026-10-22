@@ -1,6 +1,8 @@
-import { expect, it } from 'vitest'
-import { locateHtmlSourceTarget, escapeHtmlText } from '../../src/main/workbench/htmlPreview/htmlSourceLocator'
+import { expect, it, vi } from 'vitest'
+import { locateHtmlSourceTarget, escapeHtmlText, createHtmlSourceLocator, locateHtmlAuthorRecordSource } from '../../src/main/workbench/htmlPreview/htmlSourceLocator'
 import type { HtmlTargetReport } from '../../src/renderer/documentFiles/html/htmlPreviewController'
+import * as sourceParser from '../../src/shared/html/htmlSourceParser'
+import { inspectHtmlSource, flattenHtmlSourceNodes } from '../../src/shared/html/htmlSourceStructure'
 
 const identity = { documentId: 'doc', epoch: 'epoch', revision: 4, bindingVersion: 2 }
 const rectangle = { x: 1, y: 2, width: 30, height: 20 }
@@ -8,6 +10,47 @@ function textReport(path: HtmlTargetReport['domPath'], rawText: string, sectionO
   return { handle: 'one', kind: 'text', domPath: path, sectionOrder, rawText, attributeName: null,
     rect: rectangle, scriptCreated: false }
 }
+
+it('resolves a batch against one parsed source while retaining exact repeated-text identity', () => {
+  const source = '<html><body><p>same</p><p>same</p></body></html>'
+  const path = [{ name: 'html', index: 0 }, { name: 'body', index: 1 }, { name: 'p', index: 0 }]
+  const parse = vi.spyOn(sourceParser, 'parseHtmlSourceDocument')
+  try {
+    const locator = createHtmlSourceLocator(source)
+    expect(locator.locateTarget({ ...textReport(path, 'same'), scriptCreated: true }, identity).status).toBe('not-editable')
+    expect(parse).not.toHaveBeenCalled()
+    const first = locator.locateTarget(textReport(path, 'same'), identity)
+    const second = locator.locateTarget(textReport([...path.slice(0, 2), { name: 'p', index: 1 }], 'same'), identity)
+    expect(first.status).toBe('editable')
+    expect(second.status).toBe('editable')
+    if (first.status === 'editable' && second.status === 'editable') {
+      expect(first.locator.valueSpan!.start).toBe(source.indexOf('same'))
+      expect(second.locator.valueSpan!.start).toBe(source.lastIndexOf('same'))
+    }
+    expect(locator.locateTarget(textReport(path, 'changed'), identity)).toMatchObject({ status: 'not-editable' })
+    expect(parse).toHaveBeenCalledTimes(1)
+  } finally { parse.mockRestore() }
+})
+
+it('retains source locations and raw program ownership beside a long embedded script', () => {
+  const program = `const payload = '${'a'.repeat(2 * 1024 * 1024)}';`
+  const source = `<html><head><script>${program}</script></head><body><p>😀&amp;甲</p></body></html>`
+  const nodes = flattenHtmlSourceNodes(inspectHtmlSource(source).roots)
+  const script = nodes.find(node => node.name === 'script')!
+  expect(script.sourceOnly).toBe(true)
+  expect(source.slice(script.contentSpan!.from, script.contentSpan!.to)).toBe(program)
+  const target = locateHtmlSourceTarget(source, textReport([{ name: 'html', index: 0 },
+    { name: 'body', index: 1 }, { name: 'p', index: 0 }], '😀&甲'), identity)
+  expect(target.status).toBe('editable')
+  if (target.status === 'editable') expect(target.locator.expectedRaw).toBe('😀&amp;甲')
+})
+
+it('does not rebind a nested-document record to matching outer document text', () => {
+  const record = { kind: 'text' as const, scope: { 'html:frame': 'frame-0' },
+    binding: { kind: 'dom' as const, path: [{ tag: 'body', index: 1 }, { tag: 'p', index: 0 }], baseline: 'same', textIndex: 0 },
+    overrides: { text: 'nested edit' } }
+  expect(locateHtmlAuthorRecordSource('<p>same</p>', record, 'nested-key')).toBeNull()
+})
 
 it('locates only the selected repeated text and preserves source UTF-16 boundaries', () => {
   const source = '\uFEFF<html>\r\n<body><section><p>😀&amp;甲</p><p>😀&amp;甲</p></section></body></html>\r\n'

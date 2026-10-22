@@ -1,3 +1,5 @@
+import { createTestProjectFromLegacy } from '../helpers/glxWorkFixture'
+import { componentSurfaces } from '../../src/shared/contracts/component-platform/project'
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, expect, it } from 'vitest'
 import { createTextComponentData, formatTextComponentRange, textComponentDataSchema } from '../../src/components/text/data'
@@ -17,7 +19,7 @@ afterEach(() => { cleanup(); store().cancelTextEdit(); store().courseBridge.disp
 function fixture(): CourseProjectV10 {
   const data = createTextComponentData({ inlines: [{ type: 'text', text: '重点', style: { emphasis: false, highlightColor: null } }, { type: 'text', text: '内容' }] })
   data.appearance.highlightColor = '#ffee00'; data.sizing.mode = 'fixed'
-  return { schemaVersion: 10, id: 'native-presentation', revision: 0, title: '文字与背景', assets: {},
+  return createTestProjectFromLegacy({ schemaVersion: 10, id: 'native-presentation', revision: 0, title: '文字与背景', assets: {},
     definitions: { [TEXT_DEFINITION.id]: TEXT_DEFINITION, [SHAPE_DEFINITION.id]: SHAPE_DEFINITION },
     instances: {
       text: { id: 'text', definitionId: TEXT_DEFINITION.id, data: JSON.parse(JSON.stringify(data)), frame: { width: 300, height: 90, transform: [1, 0, 0, 1, 100, 80] } },
@@ -27,7 +29,7 @@ function fixture(): CourseProjectV10 {
       background: { mode: 'own', color: '#abcdef' }, presentation: { states: [{ id: 'named', title: '强调', overrides: {} }] } },
       { id: 'flow', kind: 'flow', title: '讲义', childIds: [], background: { mode: 'inherit', color: '#112233' } },
       { id: 'world', kind: 'spatial', title: '空间', childIds: [], spatial: { home: { x: 0, y: 0, zoom: 1 }, frames: [] } }],
-  }
+  })
 }
 async function host(project = fixture()) {
   const h = await createCourseDocumentHost()
@@ -43,8 +45,8 @@ it('previews the exact background/native owner without author writes and refuses
   const preview: BackgroundPreview = { target: { documentId: target.documentId, epoch: target.epoch, surfaceId: 'slide', stateId: null, owner: 'surface' },
     edits: [{ type: 'surface.background.set', surfaceId: 'slide', background: { mode: 'own', color: '#ff0000' } }] }
   const painted = projectWithBackgroundPreview(project, preview, target.documentId, 'slide', null, target.epoch)
-  expect(resolveComponentBackground(painted, painted.surfaces[0]).color).toBe('#ff0000')
-  expect(resolveComponentBackground(project, project.surfaces[0]).color).toBe('#abcdef')
+  expect(resolveComponentBackground(painted, componentSurfaces(painted)[0]).color).toBe('#ff0000')
+  expect(resolveComponentBackground(project, componentSurfaces(project)[0]).color).toBe('#abcdef')
   for (const args of [['other', 'slide', null, target.epoch], [target.documentId, 'slide', null, 'other'],
     [target.documentId, 'world', null, target.epoch], [target.documentId, 'slide', 'named', target.epoch]] as const)
     expect(projectWithBackgroundPreview(project, preview, args[0], args[1], args[2], args[3])).toBe(project)
@@ -80,10 +82,10 @@ it('writes named-state emphasis and nullable highlighting from the actual proper
   const { payload, diagnostics } = await buildPublishedCourseV3({ project: reopened.project, assetBytes: {} })
   expect(diagnostics).toEqual([])
   expect(payload.instances.text.data).toEqual(authored.instances.text.data)
-  expect(payload.surfaces[0].presentation).toEqual(authored.surfaces[0].presentation)
+  expect(componentSurfaces(payload)[0].presentation).toEqual(componentSurfaces(authored)[0].presentation)
   await act(async () => { await store().courseBridge.undo(h.documentId); await store().courseBridge.undo(h.documentId) })
   expect(store().courseView.project!.instances).toEqual(original.instances)
-  expect(store().courseView.project!.surfaces[0].presentation).toEqual(original.surfaces[0].presentation)
+  expect(componentSurfaces(store().courseView.project!)[0].presentation).toEqual(componentSurfaces(original)[0].presentation)
   // Local formatting preserves explicit false values and rich atoms rather than flattening them.
   const formatted = formatTextComponentRange(base, 2, 4, { emphasis: true })
   expect(formatted.content.inlines[0]).toEqual(base.content.inlines[0])
@@ -92,25 +94,25 @@ it('writes named-state emphasis and nullable highlighting from the actual proper
 
 it('retains dormant Flow/Spatial colors, clears a named-state override, and restores each captured background transaction once', async () => {
   const h = await host(), project = store().courseView.project!
-  expect(resolveComponentBackground(project, project.surfaces[1]).color).toBe('#123456')
-  expect(resolveComponentBackground(project, project.surfaces[2]).color).toBe('#123456')
+  expect(resolveComponentBackground(project, componentSurfaces(project)[1]).color).toBe('#123456')
+  expect(resolveComponentBackground(project, componentSurfaces(project)[2]).color).toBe('#123456')
   await act(async () => { await store().editComponents([
-    { type: 'surface.background.set', surfaceId: 'flow', background: { ...project.surfaces[1].background, mode: 'own' } },
+    { type: 'surface.background.set', surfaceId: 'flow', background: { ...componentSurfaces(project)[1].background, mode: 'own' } },
     { type: 'surface.background.set', surfaceId: 'world', background: { mode: 'own', color: '#654321' } },
     ...coursePresentationEdits(project, { kind: 'course-surface', surfaceId: 'slide' }, { action: 'background', state: 'named', background: { color: '#ccbb00', assetId: null } }),
   ]) })
   expect(h.session.read().undoDepth).toBe(1)
   let changed = store().courseView.project!
-  expect(resolveComponentBackground(changed, changed.surfaces[1]).color).toBe('#112233')
-  expect(resolveComponentBackground(changed, changed.surfaces[2]).color).toBe('#654321')
-  expect(resolveComponentBackground(changed, changed.surfaces[0], changed.surfaces[0].presentation!.states[0])).toMatchObject({ color: '#ccbb00', assetId: null })
+  expect(resolveComponentBackground(changed, componentSurfaces(changed)[1]).color).toBe('#112233')
+  expect(resolveComponentBackground(changed, componentSurfaces(changed)[2]).color).toBe('#654321')
+  expect(resolveComponentBackground(changed, componentSurfaces(changed)[0], componentSurfaces(changed)[0].presentation!.states[0])).toMatchObject({ color: '#ccbb00', assetId: null })
   await act(async () => { await store().editComponents(coursePresentationEdits(changed, { kind: 'course-surface', surfaceId: 'slide' },
     { action: 'background', state: 'named', background: {}, inherit: ['color', 'assetId'] })) })
   changed = store().courseView.project!
-  expect(resolveComponentBackground(changed, changed.surfaces[0], changed.surfaces[0].presentation!.states[0]).color).toBe('#abcdef')
+  expect(resolveComponentBackground(changed, componentSurfaces(changed)[0], componentSurfaces(changed)[0].presentation!.states[0]).color).toBe('#abcdef')
   expect(h.session.read().undoDepth).toBe(2)
   await act(async () => { await store().courseBridge.undo(h.documentId); await store().courseBridge.undo(h.documentId) })
-  expect(store().courseView.project!.surfaces).toEqual(project.surfaces)
+  expect(componentSurfaces(store().courseView.project!)).toEqual(componentSurfaces(project))
 })
 
 it('commits the original shape opacity gesture once while keeping neighboring text and its authored frame intact', async () => {

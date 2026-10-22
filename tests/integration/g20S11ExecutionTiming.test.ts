@@ -243,8 +243,9 @@ it('stamps a real DocumentSession disk ACK before the later timeline projection,
     const filename = path.join(directory, 'timed.md')
     expect((await events.readTiming(conversation.conversationId, taskId)).some(value => value.stage === 'save.finished')).toBe(false)
     const persistence = (documents.registry.get(document.documentId) as unknown as { persistence: DocumentPersistence }).persistence
-    const persistFile = persistence.save.bind(persistence), diskEntered = deferred(), allowDisk = deferred()
-    vi.spyOn(persistence, 'save').mockImplementation(async input => {
+    const savePort = persistence.savePrepared ? 'savePrepared' : 'save'
+    const persistFile = (persistence.savePrepared ?? persistence.save).bind(persistence), diskEntered = deferred(), allowDisk = deferred()
+    vi.spyOn(persistence, savePort).mockImplementation(async input => {
       diskEntered.resolve(); await allowDisk.promise
       return persistFile(input)
     })

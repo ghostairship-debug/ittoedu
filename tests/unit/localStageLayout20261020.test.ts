@@ -1,3 +1,5 @@
+import { testContainerInstance, setRootContainers, createTestProjectFromLegacy } from '../helpers/glxWorkFixture'
+import { componentSurfaces } from '../../src/shared/contracts/component-platform/project'
 // @vitest-environment node
 import { expect, it } from 'vitest'
 import { build } from 'esbuild'
@@ -35,13 +37,14 @@ it('uses the same derived stage policy in Published, compiled playback and offli
   project.instances.stage = { id: 'stage', definitionId: 'web', data: { html: markup, css }, frame: { width: 1040, height: 570, transform: [1, 0, 0, 1, 100, 70] } }
   project.instances.stage.locked = true
   project.instances.neighbor = { id: 'neighbor', definitionId: 'web', data: { html: '<p id="neighbor">Independent neighbor</p>' }, frame: { width: 500, height: 45, transform: [1, 0, 0, 1, 100, 10] } }
-  project.surfaces[0]!.childIds = ['stage', 'neighbor']; project.surfaces[0]!.designSize = { width: 1280, height: 720 }
+  testContainerInstance(project, 0).childIds = ['stage', 'neighbor']; testContainerInstance(project, 0).container!.designSize = { width: 1280, height: 720 }
   const original = structuredClone(project)
   const formal = JSON.parse(await readFile('tests/fixtures/creationStageAssembled20261020.json', 'utf8'))
+  formal.project = createTestProjectFromLegacy(formal.project)
   const formalBytes = Object.fromEntries(Object.entries(formal.resources.assets).map(([id, bytes]) => [id, new Uint8Array(Object.values(bytes as Record<string, number>))]))
   const formalPublished = await buildPublishedCourseV3({ project: formal.project, assetBytes: formalBytes }, { compilation: new InMemoryComponentCompilation(createEsbuildComponentCompiler()) })
   const flow = structuredClone(project)
-  flow.surfaces[0] = { id: 'flow', kind: 'flow', title: 'Natural article', childIds: ['stage'] }
+  setRootContainers(flow, [{ id: 'flow', kind: 'flow', title: 'Natural article', childIds: ['stage'] }])
   delete flow.instances.neighbor
   ;(flow.instances.stage!.data as { css: string }).css = css.replace('html,body{margin:0;width:100%;height:100%}', '')
   const flowPublished = await buildPublishedCourseV3({ project: flow, assetBytes: {} }, { compilation: new InMemoryComponentCompilation(createEsbuildComponentCompiler()) })
@@ -49,7 +52,7 @@ it('uses the same derived stage policy in Published, compiled playback and offli
   nested.definitions.island = { id: 'island', role: 'content', implementation: { kind: 'builtin', key: 'guoling.html-program' } }
   const nestedDocument = `<!doctype html><html><head><style>${css}</style></head><body>${markup}<script>document.querySelector('#next').onclick=()=>{document.querySelector('#feedback').textContent='The longest normal feedback remains readable and the primary Continue action stays inside this local activity.'}</script></body></html>`
   nested.instances.island = { id: 'island', definitionId: 'island', data: { html: `<iframe id="island" style="border:0;width:100%;height:100%" srcdoc="${nestedDocument.replaceAll('&', '&amp;').replaceAll('"', '&quot;').replaceAll('<', '&lt;')}"></iframe>` }, frame: { width: 1040, height: 570, transform: [1, 0, 0, 1, 100, 70] } }
-  nested.surfaces[0]!.childIds = ['island']; nested.surfaces[0]!.designSize = { width: 1280, height: 720 }
+  testContainerInstance(nested, 0).childIds = ['island']; testContainerInstance(nested, 0).container!.designSize = { width: 1280, height: 720 }
   const nestedPublished = await buildPublishedCourseV3({ project: nested, assetBytes: {} }, { compilation: new InMemoryComponentCompilation(createEsbuildComponentCompiler()) })
   const cold = openCourseProjectV10Archive(createCourseProjectV10Archive({ project, resources: { assets: {}, components: {} } }))
   expect(cold.project).toEqual(project)

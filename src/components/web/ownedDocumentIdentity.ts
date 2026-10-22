@@ -58,7 +58,7 @@ export function anchorOwnedDocumentAuthoring(source: string, observedPath: strin
     if (!frame || matching.length > 1 || currentKey && currentKey !== key || matching.length === 1 && matching[0] !== frame)
       throw new Error('子文档身份已变化，作者修改已保留，请重新选择')
     const srcdoc = frame.attrs.find(attribute => attribute.name === 'srcdoc'), location = frame.sourceCodeLocation
-    if (!srcdoc || !location?.startTag || !location.attrs?.srcdoc) throw new Error('原子文档源码已不存在，请重新选择')
+    if (!location?.startTag || depth + 1 < parts.length && (!srcdoc || !location.attrs?.srcdoc)) throw new Error('原子文档源码已不存在，请重新选择')
     stable.push(`key:${encodeURIComponent(key)}`)
     const edits: Array<{ start: number; end: number; value: string }> = []
     if (!currentKey) {
@@ -66,8 +66,8 @@ export function anchorOwnedDocumentAuthoring(source: string, observedPath: strin
       edits.push({ start: at, end: at, value: ` ${ownedDocumentKeyAttribute}="${quote(key)}"` })
     }
     if (depth + 1 < parts.length) {
-      const child = anchor(srcdoc.value, depth + 1)
-      if (child !== srcdoc.value) edits.push({ start: location.attrs.srcdoc.startOffset, end: location.attrs.srcdoc.endOffset,
+      const child = anchor(srcdoc!.value, depth + 1)
+      if (child !== srcdoc!.value) edits.push({ start: location.attrs!.srcdoc!.startOffset, end: location.attrs!.srcdoc!.endOffset,
         value: `srcdoc="${quote(child)}"` })
     }
     for (const edit of edits.sort((a, b) => b.start - a.start)) html = html.slice(0, edit.start) + edit.value + html.slice(edit.end)

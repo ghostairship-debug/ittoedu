@@ -1,4 +1,6 @@
 // @vitest-environment jsdom
+import { componentSurfaces } from '../../src/shared/contracts/component-platform/project'
+import { testContainerInstance } from '../helpers/glxWorkFixture'
 import { act, cleanup, renderHook } from '@testing-library/react'
 import { afterEach, expect, it } from 'vitest'
 import { createV10StoreHost, deferred } from '../helpers/courseV10StoreHost'
@@ -14,11 +16,11 @@ import { discardPropertiesDrafts } from '../../src/renderer/ui/properties/Proper
 afterEach(() => { cleanup(); const store = useEditorStore.getState(); if (store.courseView.activeDocumentId) discardPropertiesDrafts(store.courseView.activeDocumentId); useEditorStore.setState({ slideContentEdit: null }); store.courseBridge.dispose() })
 function textProject(flow = false) {
   const project = createBlankCourseProjectV10()
-  if (flow) { project.surfaces[0].kind = 'flow'; delete project.surfaces[0].designSize }
+  if (flow) { testContainerInstance(project, 0).container.kind = 'flow'; delete testContainerInstance(project, 0).container.designSize }
   project.definitions[TEXT_DEFINITION.id] = TEXT_DEFINITION
   project.instances.text = { id: 'text', definitionId: TEXT_DEFINITION.id, data: JSON.parse(JSON.stringify(createTextData('original'))),
     frame: { width: 200, height: 100, transform: [1, 0, 0, 1, 0, 0] } }
-  project.surfaces[0].childIds.push('text')
+  testContainerInstance(project, 0).childIds.push('text')
   return project
 }
 function drafts(h: Awaited<ReturnType<typeof createV10StoreHost>>) {
@@ -30,7 +32,7 @@ const data = (text: string) => JSON.parse(JSON.stringify(createTextData(text)))
 const text = (value: unknown) => textDataSchema.parse(value).content.inlines.map(inline => inline.type === 'text' ? inline.text : '').join('')
 
 it('CA016 retains composing text and its state, then commits before selecting another state', async () => {
-  const project = textProject(); project.surfaces[0].presentation = { states: [{ id: 'A', title: 'A', overrides: {} }, { id: 'B', title: 'B', overrides: {} }] }
+  const project = textProject(); testContainerInstance(project, 0).container.presentation = { states: [{ id: 'A', title: 'A', overrides: {} }, { id: 'B', title: 'B', overrides: {} }] }
   const h = await createV10StoreHost(project), d = drafts(h)
   h.bridge.selectPresentationState(h.first.documentId, 'A'); d.slice.beginSlideDataEdit('text'); d.slice.updateSlideDataDraft(data('A input'), true)
   await expect(d.slice.setActivePresentationState('B')).rejects.toThrow('完成正在输入')
@@ -85,7 +87,7 @@ it('CA097 uses the selected effective inline style when the same local range is 
 it('CA338 plans repeated grading changes against the effective named state and preserves untouched state fields', async () => {
   const project = textProject(); project.definitions[INPUT_DEFINITION.id] = INPUT_DEFINITION
   project.instances.input = { id: 'input', definitionId: INPUT_DEFINITION.id, data: JSON.parse(JSON.stringify(createInputData({ placeholder: 'base hint' }))), frame: { width: 200, height: 50, transform: [1, 0, 0, 1, 0, 0] } }
-  project.surfaces[0].childIds.push('input'); project.surfaces[0].presentation = { states: [{ id: 'B', title: 'B', overrides: {} }] }
+  testContainerInstance(project, 0).childIds.push('input'); testContainerInstance(project, 0).container.presentation = { states: [{ id: 'B', title: 'B', overrides: {} }] }
   const h = await createV10StoreHost(project); h.bridge.selectInstances(h.first.documentId, ['input']); h.bridge.selectPresentationState(h.first.documentId, 'B')
   await h.kernel.edit([{ type: 'data.set', instanceId: 'input', path: ['placeholder'], value: 'B hint' }])
   const configure = async (answer: string) => {
@@ -94,7 +96,7 @@ it('CA338 plans repeated grading changes against the effective named state and p
     await h.kernel.editCaptured(h.kernel.capture(edits, target))
   }
   await configure('first'); await configure('second')
-  const effective = h.kernel.readEditingDocument(), inspection = inspectComponentInputRules(effective, project.surfaces[0].id, 'input')
+  const effective = h.kernel.readEditingDocument(), inspection = inspectComponentInputRules(effective, componentSurfaces(project)[0].id, 'input')
   expect(inspection.conflict).toBe(false); expect(inspection.config).toMatchObject({ answers: ['second'] })
   expect(effective.instances.input.data).toMatchObject({ placeholder: 'B hint' }); expect(h.model().project.instances.input.data).toMatchObject({ placeholder: 'base hint', acceptedAnswers: [] })
   h.bridge.dispose()

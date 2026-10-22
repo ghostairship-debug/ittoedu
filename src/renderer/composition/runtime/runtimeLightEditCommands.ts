@@ -60,7 +60,7 @@ function read(itemId: string, documentId = useEditorStore.getState().courseView.
   if (!documentId) return null
   const entry = documents.get(documentId)
   if (!entry) return null
-  const target = entry.bridge.captureTarget(documentId), project = target.editingProject
+  const target = entry.bridge.captureOwnedTarget(documentId), project = target.editingProject
   if (!project.instances[itemId]) return null
   const seen = new Set<string>()
   const entries = entry.world.authorSpots().flatMap(spot => {

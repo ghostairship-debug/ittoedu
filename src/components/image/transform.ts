@@ -24,11 +24,11 @@ export async function planImageTransform(
   data: ImageData,
   source: ImageSourceResource,
   operations: readonly ImageTransformOperation[],
-  options: { signal?: AbortSignal; createId?: () => string; prepareResource?: PrepareImageResourcePort } = {},
+  options: { signal?: AbortSignal; createId?: () => string; prepareResource?: PrepareImageResourcePort; transform?: typeof transformImageAsset } = {},
 ): Promise<ImageTransformPlan> {
   if (source.assetId !== data.assetId) throw new Error('所选图片已不再引用本次源资源，请重新观察')
   const input = imageTransformInputSchema.parse({ sourceAssetId: source.assetId, operations })
-  const transformed = await transformImageAsset(source.bytes, source.mimeType, input, options.signal)
+  const transformed = await (options.transform ?? transformImageAsset)(source.bytes, source.mimeType, input, options.signal)
   if (!transformed.changed) return { data, sourceAssetId: source.assetId, changed: false }
   const filename = `${source.filename.replace(/\.[^.]+$/, '')}-edited.png`
   const resource = options.prepareResource

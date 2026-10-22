@@ -1,9 +1,10 @@
+import { componentContainers } from '../../../shared/contracts/component-platform/project'
 import { randomUUID } from 'node:crypto'
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import type { DocumentHostService } from '../DocumentHostService'
 import { htmlImportDesktopRequestSchema, type HtmlImportDesktopResult } from '../../../shared/workbench/htmlImportDesktop'
-import { containerChildIds, owningContainer, type ComponentContainer } from '../../../shared/contracts/component-platform'
+import { componentContainerForInstance, containerChildIds, owningContainer, type ComponentContainer } from '../../../shared/contracts/component-platform'
 import type { ComponentProjectSnapshot } from '../../../core/projectFiles/componentPlatform'
 import { decodeComponentHtmlSource, readComponentProjectFileInput } from '../projectFiles/componentPlatformFileInput'
 import { isSourceDocumentModel } from '../../../shared/workbench/document'
@@ -18,15 +19,15 @@ export class HtmlImportDesktopService {
     if (frozen.epoch !== input.epoch) throw new Error('HTML 导入工程会话已变化，请重新选择导入位置')
     if (frozen.revision !== input.revision) throw new Error('HTML 导入目标已改变，请重新选择导入位置')
     if (frozen.model.kind !== 'course-v10') throw new Error('HTML 页面只能导入 Course Project V10；原文件未修改')
-    const surface = frozen.model.project.surfaces.find(surface => surface.id === input.surfaceId)
+    const surface = componentContainers(frozen.model.project).find(surface => surface.id === input.surfaceId)
     if (!surface || !['slide', 'flow', 'spatial'].includes(surface.kind)) throw new Error('HTML 导入目标页面已不存在')
     let container: ComponentContainer = { kind: 'surface', surfaceId: surface.id }
     if (input.anchorInstanceId) {
       const owner = owningContainer(frozen.model.project, input.anchorInstanceId)
-      let rootOwner = owner
-      while (rootOwner?.kind === 'instance') rootOwner = owningContainer(frozen.model.project, rootOwner.instanceId)
-      if (!owner || rootOwner?.kind !== 'surface' || rootOwner.surfaceId !== surface.id) throw new Error('HTML 导入锚点不属于所选页面')
-      container = owner
+      const scope = componentContainerForInstance(frozen.model.project, input.anchorInstanceId)
+      if (!owner || scope?.id !== surface.id) throw new Error('HTML 导入锚点不属于所选页面')
+      container = owner.kind === 'instance' && owner.instanceId === surface.id
+        ? { kind: 'surface', surfaceId: surface.id } : owner
     }
     const index = input.anchorInstanceId ? containerChildIds(frozen.model.project, container).indexOf(input.anchorInstanceId) + 1 : surface.childIds.length
     const stateId = input.stateId ?? null

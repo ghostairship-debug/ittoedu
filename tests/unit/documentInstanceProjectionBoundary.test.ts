@@ -1,3 +1,4 @@
+import { setRootContainers } from '../helpers/glxWorkFixture'
 import { describe, expect, it, vi } from 'vitest'
 import { createBlankCourseProjectV10 } from '../../src/core/course/createCourseProjectV10'
 import { projectFlowDocument } from '../../src/core/components/document/flowDocumentProjection'
@@ -17,7 +18,7 @@ function fixture() {
   project.instances.custom = { id: 'custom', definitionId: 'custom', data: {} }
   project.instances.after = componentInstanceSchema.parse({ id: 'after', definitionId: TEXT_DEFINITION.id, data: createTextComponentData('后续正文') })
   project.global = { underlay: [], overlay: [] }
-  project.surfaces = [{ id: 'flow', kind: 'flow', title: '正文', childIds: ['custom', 'after'] }]
+  setRootContainers(project, [{ id: 'flow', kind: 'flow', title: '正文', childIds: ['custom', 'after'] }])
   const document = projectFlowDocument(project, 'flow')
   return { project, document }
 }

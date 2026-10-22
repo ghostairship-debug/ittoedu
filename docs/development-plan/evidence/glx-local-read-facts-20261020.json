@@ -1,0 +1,55 @@
+{
+  "capturedOn": "2026-10-20",
+  "command": "npx vitest run tests/integration/glxLocalReadScaleFacts20261020.test.ts --reporter=verbose",
+  "result": "1 test passed",
+  "owner": "DocumentHostService / public Gateway / DocumentSession",
+  "property": "Selected-owner project.read payload and file paths stay local when unrelated work roots increase.",
+  "limit": 128,
+  "characterUnit": "JavaScript string length; the selected HTML and Source are ASCII",
+  "scales": [
+    {
+      "rootCount": 1,
+      "instanceCount": 1,
+      "body": { "path": "roots/01-Web 程序.content.html", "returnedCharacters": 128, "totalCharacters": 831, "nextOffset": 128 },
+      "source": { "path": "roots/01-Web 程序.view.js", "returnedCharacters": 128, "totalCharacters": 834, "nextOffset": 128 },
+      "localFileCount": 9
+    },
+    {
+      "rootCount": 500,
+      "instanceCount": 501,
+      "unrelatedContent": "499 additional Slide roots, including one native text child in the last root",
+      "body": { "path": "roots/01-Web 程序.content.html", "returnedCharacters": 128, "totalCharacters": 831, "nextOffset": 128 },
+      "source": { "path": "roots/01-Web 程序.view.js", "returnedCharacters": 128, "totalCharacters": 834, "nextOffset": 128 },
+      "localFileCount": 9
+    }
+  ],
+  "sameLocalPathsAtBothScales": [
+    "theme.css",
+    "references/component-api5.md",
+    "components/01-Web 程序.definition.json",
+    "components/01-Web 程序.view.js",
+    "roots/01-Web 程序.content.html",
+    "roots/01-Web 程序.data.json",
+    "roots/01-Web 程序.style.json",
+    "roots/01-Web 程序.view.js",
+    "entry.html"
+  ],
+  "assertions": [
+    "Both returned content strings equal the first 128 characters of the same selected-owner source.",
+    "Both scales have identical body and Source paths, totals, continuation offsets and local directory paths.",
+    "No unrelated root name or unrelated native text appears in either read or the scoped directory."
+  ],
+  "fixedSnapshotContinuation": {
+    "command": "npx vitest run tests/unit/projectFileReading20261019.test.ts -t 'pages an explicit full source request' --reporter=verbose",
+    "case": "pages an explicit full source request without losing the fixed source, and repairs an absent captured page",
+    "result": "1 passed, 4 skipped",
+    "sourceCharacters": 120007,
+    "assertions": [
+      "full:true returns a first partial page with complete:false and requestedFull:true.",
+      "After a real human edit advances the current document from revision 0 to 1, every continuation retains revision 0 and reports currentRevision:1, basis:captured and staleSnapshot:true.",
+      "Concatenating all returned pages exactly reconstructs the original source.",
+      "An offset without a captured first page returns read-page-unavailable and an explicit per-file refresh repair."
+    ]
+  },
+  "measurementsNotMade": ["latency", "tokens", "fees"]
+}

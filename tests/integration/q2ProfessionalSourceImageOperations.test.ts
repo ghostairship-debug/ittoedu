@@ -1,4 +1,5 @@
 // @vitest-environment node
+import { testContainerInstance } from '../helpers/glxWorkFixture'
 import { promises as fs } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -34,7 +35,7 @@ it('replaces an aliased professional image with shared source through both live 
     const frame = { width: 310, height: 210, transform: [1, .2, 0, 1, 17, 29] as [number, number, number, number, number, number] }
     for (const id of ['image', 'other']) project.instances[id] = { id, definitionId: definition.id,
       data: structuredClone(imageData) as unknown as typeof project.instances[string]['data'], frame, style: { opacity: .7 } }
-    project.surfaces[0].childIds = ['image', 'other']
+    testContainerInstance(project, 0).childIds = ['image', 'other']
     project.assets[original.meta.id] = original.meta
     const host = new DocumentHostService(path.join(directory, 'recovery'))
     const initial = await host.internalAPI.create({ kind: 'course-v10', project,

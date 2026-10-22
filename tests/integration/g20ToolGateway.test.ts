@@ -1,4 +1,6 @@
 // @vitest-environment node
+import { testContainerInstance, appendRootContainers } from '../helpers/glxWorkFixture'
+import { componentSurfaces } from '../../src/shared/contracts/component-platform/project'
 import { describe, expect, it } from 'vitest'
 import sharp from 'sharp'
 import { JSDOM } from 'jsdom'
@@ -232,11 +234,11 @@ async function courseHarness(setup?: (project: CourseProjectV10) => void) {
   project.definitions[WEB_DEFINITION.id] = WEB_DEFINITION
   project.instances.label = { id: 'label', definitionId: WEB_DEFINITION.id, data: { html: '<p>Original</p>' },
     frame: { width: 200, height: 90, transform: [1, 0, 0, 1, 20, 30] } }
-  project.surfaces[0].childIds = ['label']
+  testContainerInstance(project, 0).childIds = ['label']
   setup?.(project)
   const session = await h.registry.create({ kind: 'course-v10', project, resources: { assets: {}, components: {} } }, 'current.glx')
   await h.gateway.beginRun({ runId: 'course', actor: 'agent', documents: [{ documentId: session.documentId, writable: [{ kind: 'document' }] }] })
-  const surfaceId = project.surfaces[0].id
+  const surfaceId = componentSurfaces(project)[0].id
   const address = { kind: 'course-instance' as const, surfaceId, instanceId: 'label' }
   const model = () => { const current = session.read().model; if (current.kind !== 'course-v10') throw new Error('Expected V10'); return current }
   const call = (id: string, name: string, input: unknown) => h.gateway.execute('course', id, { name, input })
@@ -350,7 +352,7 @@ it('performs current rule CRUD through observed V10 targets with one-entry batch
 })
 
 it('commits admitted V10 media bytes once, preserves durable resources through undo/redo and rejects invalid, foreign, stopped and atomic-failure inputs', async () => {
-  const h = await courseHarness(project => { project.surfaces.push({ id: 'flow', kind: 'flow', title: 'Flow', childIds: [] }, { id: 'world', kind: 'spatial', title: 'World', childIds: [] }) }), before = h.session.read()
+  const h = await courseHarness(project => { appendRootContainers(project, { id: 'flow', kind: 'flow', title: 'Flow', childIds: [] }, { id: 'world', kind: 'spatial', title: 'World', childIds: [] }) }), before = h.session.read()
   const page = await h.gateway.issueTarget('course', h.session.documentId, { kind: 'course-surface', surfaceId: h.surfaceId })
   const bytes = new Uint8Array(await sharp({ create: { width: 3, height: 2, channels: 4, background: '#11aa88' } }).png().toBuffer())
   await expect(h.gateway.provideImage('course', h.session.documentId, { bytes, filename: 'wrong.jpg', mimeType: 'image/jpeg' })).rejects.toThrow('不匹配')
@@ -437,7 +439,7 @@ it('commits admitted V10 media bytes once, preserves durable resources through u
     ...[page, flow, world].map(target => ({ name: 'surface.configure', input: { target, settings: { background: { mode: 'own', source: resource } } } })),
   ] })).toMatchObject({ kind: 'document-operation', result: { status: 'applied' } })
   const all = h.model()
-  for (const surface of all.project.surfaces) {
+  for (const surface of componentSurfaces(all.project)) {
     expect(surface.background?.assetId).toBeTruthy()
     expect(all.resources.assets[surface.background!.assetId!]).toEqual(frozenBytes)
     const image = surface.childIds.map(id => all.project.instances[id]).find(instance => instance.definitionId === 'guoling.image')!
@@ -464,13 +466,13 @@ it('commits admitted V10 media bytes once, preserves durable resources through u
 
 it('keeps Flow rich range grants exact across a concurrent neighbor edit, preserving math, styles, links and canonical undo', async () => {
   const h = await courseHarness(project => {
-    project.surfaces[0].kind = 'flow'; project.definitions[TEXT_DEFINITION.id] = TEXT_DEFINITION
+    testContainerInstance(project, 0).container.kind = 'flow'; project.definitions[TEXT_DEFINITION.id] = TEXT_DEFINITION
     const data = createTextComponentData('')
     data.content.inlines = [{ type: 'text', text: '甲', style: { bold: true } },
       { type: 'math', formulaId: 'math-one', latex: 'x^2', accessibleText: 'x平方' },
       { type: 'text', text: '乙😀丙', link: { href: 'https://example.org' } }]
     project.instances.paragraph = { id: 'paragraph', definitionId: TEXT_DEFINITION.id, data: JSON.parse(JSON.stringify(data)) }
-    project.surfaces[0].childIds.push('paragraph')
+    testContainerInstance(project, 0).childIds.push('paragraph')
   })
   const range: ToolTarget = { kind: 'course-instance', surfaceId: h.surfaceId, instanceId: 'paragraph', dataPath: ['content'], from: 2, to: 4 }
   await h.gateway.beginRun({ runId: 'range', actor: 'agent', documents: [{ documentId: h.session.documentId, writable: [range] }] })
@@ -500,10 +502,10 @@ it('keeps Flow rich range grants exact across a concurrent neighbor edit, preser
 
 it('moves Flow objects only into authorized destinations and rejects a cyclic move without a partial write', async () => {
   const h = await courseHarness(project => {
-    project.surfaces[0].kind = 'flow'
+    testContainerInstance(project, 0).container.kind = 'flow'
     project.definitions.container = { id: 'container', role: 'mixed', implementation: { kind: 'builtin', key: 'guoling.group' } }
     project.instances.section = { id: 'section', definitionId: 'container', data: {}, childIds: [] }
-    project.surfaces[0].childIds.push('section')
+    testContainerInstance(project, 0).childIds.push('section')
   })
   const source = h.address, destination = { kind: 'course-instance' as const, surfaceId: h.surfaceId, instanceId: 'section' }
   await h.gateway.beginRun({ runId: 'move', actor: 'agent', documents: [{ documentId: h.session.documentId, writable: [source] }] })
@@ -527,9 +529,9 @@ it('merges Flow table cells and inserts a row in one Gateway transaction, reject
   const table = createTableData({ rows: 1, columns: 2 }), rowId = table.rows[0].id
   table.rows[0].cells[0].text = '甲'; table.rows[0].cells[1].text = '乙'
   const h = await courseHarness(project => {
-    project.surfaces[0].kind = 'flow'; project.definitions[TABLE_DEFINITION.id] = TABLE_DEFINITION
+    testContainerInstance(project, 0).container.kind = 'flow'; project.definitions[TABLE_DEFINITION.id] = TABLE_DEFINITION
     project.instances.table = { id: 'table', definitionId: TABLE_DEFINITION.id, data: table as unknown as JsonValue }
-    project.surfaces[0].childIds.push('table')
+    testContainerInstance(project, 0).childIds.push('table')
   })
   const target = await h.gateway.issueTarget('course', h.session.documentId, { kind: 'course-instance', surfaceId: h.surfaceId, instanceId: 'table' })
   const call = (edit: unknown) => ({ name: 'object.author', input: { target, change: { kind: 'table', edit } } })
@@ -619,8 +621,7 @@ it('creates and configures a current managed input, preserves hand-edited feedba
 
 it('inserts professional instances on explicit Slide, Flow paper and Spatial owners, preserving identities and resources in one undoable batch while tracking parent order', async () => {
   const h = await courseHarness(project => {
-    project.surfaces.push({ id: 'flow', kind: 'flow', title: 'Flow', childIds: [] },
-      { id: 'world', kind: 'spatial', title: 'World', childIds: [], spatial: { home: { x: 150, y: -20, zoom: 2, rotation: 20 }, frames: [], paths: [] } })
+    appendRootContainers(project, { id: 'flow', kind: 'flow', title: 'Flow', childIds: [] }, { id: 'world', kind: 'spatial', title: 'World', childIds: [], spatial: { home: { x: 150, y: -20, zoom: 2, rotation: 20 }, frames: [], paths: [] } })
   })
   const page = await h.gateway.issueTarget('course', h.session.documentId, { kind: 'course-surface', surfaceId: h.surfaceId })
   const flow = await h.gateway.issueTarget('course', h.session.documentId, { kind: 'course-surface', surfaceId: 'flow' })
@@ -636,20 +637,20 @@ it('inserts professional instances on explicit Slide, Flow paper and Spatial own
     ...['formula', 'shape', 'chart', 'table'].map(kind => ({ name: 'object.insert', input: { target: world, kind, center: { x: -500, y: 300 } } })),
     { name: 'object.insert', input: { target: flow, kind: 'table', destination: 'paper', x: 45, y: 90 } },
   ] })).toMatchObject({ kind: 'document-operation', result: { status: 'applied' } })
-  const current = h.model(), roots = current.project.surfaces.flatMap(surface => surface.childIds).filter(id => id !== 'label')
+  const current = h.model(), roots = componentSurfaces(current.project).flatMap(surface => surface.childIds).filter(id => id !== 'label')
   expect(roots).toHaveLength(6); expect(new Set(roots).size).toBe(roots.length)
-  const slideText = current.project.instances[current.project.surfaces[0].childIds[1]]
+  const slideText = current.project.instances[componentSurfaces(current.project)[0].childIds[1]]
   expect(slideText.frame).toEqual({ width: 420, height: 70, transform: [1, 0, 0, 1, 10, 20] })
-  const paper = current.project.instances[current.project.surfaces.find(surface => surface.id === 'flow')!.childIds[0]]
+  const paper = current.project.instances[componentSurfaces(current.project).find(surface => surface.id === 'flow')!.childIds[0]]
   expect(paper.flowPlacement).toEqual({ space: 'paper', plane: 'overlay' })
   expect(paper.frame?.transform.slice(4)).toEqual([45, 90])
-  expect(current.project.surfaces.find(surface => surface.id === 'world')!.spatial).toEqual(h.project.surfaces.find(surface => surface.id === 'world')!.spatial)
+  expect(componentSurfaces(current.project).find(surface => surface.id === 'world')!.spatial).toEqual(componentSurfaces(h.project).find(surface => surface.id === 'world')!.spatial)
   expect(current.resources).toEqual(before.model.resources); expect(current.project.instances.label).toEqual(h.project.instances.label)
   expect(h.session.read().undoDepth).toBe(before.undoDepth + 1); expect(course.load(course.serialize(current))).toEqual(current)
   const snapshot = h.session.read()
   expect(await h.session.execute({ documentId: snapshot.documentId, epoch: snapshot.epoch, baseRevision: snapshot.revision,
     operationId: 'undo-professionals', actor: 'human', mutation: { type: 'undo' } })).toMatchObject({ status: 'applied' })
-  expect(h.model().project.instances).toEqual(h.project.instances); expect(h.model().project.surfaces).toEqual(h.project.surfaces)
+  expect(h.model().project.instances).toEqual(h.project.instances); expect(componentSurfaces(h.model().project)).toEqual(componentSurfaces(h.project))
   const owner = await h.gateway.issueTarget('course', h.session.documentId, { kind: 'course-surface', surfaceId: h.surfaceId }), beforeStyle = h.session.read()
   expect(await h.session.execute({ documentId: beforeStyle.documentId, epoch: beforeStyle.epoch, baseRevision: beforeStyle.revision,
     operationId: 'human-style', actor: 'human', mutation: { type: 'command', command: captureComponentOperation(h.model().project,

@@ -1,4 +1,5 @@
 // @vitest-environment node
+import { componentSurfaces } from '../../src/shared/contracts/component-platform/project'
 import { promises as fs } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -65,7 +66,7 @@ it('M19-T01 keeps an existing V10 1280×720 course as it is and carries a chosen
     expect(new Uint8Array(await fs.readFile(retiredPath))).toEqual(retiredBytes)
 
     const baseline = createBlankCourseProjectV10('既有尺寸课件')
-    const existingText = prepareCourseElementEdits(baseline, baseline.surfaces[0].id, null, 'text', { text: '已有内容', x: 80, y: 100 })
+    const existingText = prepareCourseElementEdits(baseline, componentSurfaces(baseline)[0].id, null, 'text', { text: '已有内容', x: 80, y: 100 })
     const existingProject = applyComponentOperation(baseline, captureComponentOperation(baseline, existingText.edits))
     existingProject.assets.existing = { id: 'existing', path: 'assets/existing.svg', mimeType: 'image/svg+xml', kind: 'image' }
     existingProject.background = { assetId: 'existing' }
@@ -77,7 +78,7 @@ it('M19-T01 keeps an existing V10 1280×720 course as it is and carries a chosen
     const existing = await host.open(existingPath)
     expect(existing.dirty).toBe(false)
     expect(course(existing)).toEqual({ kind: 'course-v10', ...openCourseProjectV10Archive(existingBytes) })
-    expect(course(existing).project.surfaces.find(surface => surface.kind === 'slide')!.designSize).toEqual({ width: 1280, height: 720 })
+    expect(componentSurfaces(course(existing).project).find(surface => surface.kind === 'slide')!.designSize).toEqual({ width: 1280, height: 720 })
 
     // A new 4:3 course from the explorer's create request.
     const created = await tree.operate({ type: 'create-course', workspaceId: registered.workspaceId, operationId: 'm19-create-4-3',
@@ -86,10 +87,10 @@ it('M19-T01 keeps an existing V10 1280×720 course as it is and carries a chosen
     const coursePath = path.join(workspace, '标准.glx')
     let current = await host.open(coursePath)
     const canvas = { width: 1024, height: 768 }
-    expect(course(current).project.surfaces[0].designSize).toEqual(canvas)
+    expect(componentSurfaces(course(current).project)[0].designSize).toEqual(canvas)
 
     // Text and an image are placed on the course canvas: both centred on it, the image at its default size.
-    const surfaceId = course(current).project.surfaces[0].id
+    const surfaceId = componentSurfaces(course(current).project)[0].id
     const png = new Uint8Array(solidPng(400, 300, [37, 99, 235]))
     const image = createImageAssetMetadata({ name: 'sample.png', mimeType: 'image/png', bytes: png }, { id: 'm19-image', dimensions: { width: 400, height: 300 } })
     const text = prepareCourseElementEdits(course(current).project, surfaceId, null, 'text', { text: '标题' })
@@ -110,8 +111,8 @@ it('M19-T01 keeps an existing V10 1280×720 course as it is and carries a chosen
     // Save and reopen: the canvas size and the coordinates on it are kept.
     await host.saveToPath(current.documentId)
     const saved = openCourseProjectV10Archive(new Uint8Array(await fs.readFile(coursePath)))
-    expect(saved.project.surfaces[0].designSize).toEqual(canvas)
-    expect(saved.project.surfaces.find(surface => surface.kind === 'slide')).toMatchObject({ designSize: canvas })
+    expect(componentSurfaces(saved.project)[0].designSize).toEqual(canvas)
+    expect(componentSurfaces(saved.project).find(surface => surface.kind === 'slide')).toMatchObject({ designSize: canvas })
     expect(frameOf(saved.project, titleId)).toEqual(title)
     expect(frameOf(saved.project, photoId)).toEqual(photo)
     expect(saved.resources.assets[image.meta.id]).toEqual(png)
@@ -121,7 +122,7 @@ it('M19-T01 keeps an existing V10 1280×720 course as it is and carries a chosen
     current = await apply(host, current, 'm19-resize', captureComponentOperation(course(current).project, surfaceSettingsEdits(course(current).project, surfaceId, { resize: { designSize: next, mode: 'contain', includeGlobal: true } })))
     await host.saveToPath(current.documentId)
     const resized = openCourseProjectV10Archive(new Uint8Array(await fs.readFile(coursePath)))
-    expect(resized.project.surfaces[0].designSize).toEqual(next)
+    expect(componentSurfaces(resized.project)[0].designSize).toEqual(next)
     const s = Math.min(next.width / canvas.width, next.height / canvas.height)
     const dx = (next.width - canvas.width * s) / 2, dy = (next.height - canvas.height * s) / 2
     for (const [id, before] of [[titleId, title], [photoId, photo]] as const) {

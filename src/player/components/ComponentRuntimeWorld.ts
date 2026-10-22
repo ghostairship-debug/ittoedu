@@ -10,15 +10,18 @@ import { CourseEventBus } from '../CourseEventBus'
 import { createComponentInteractionRuntime } from '../../renderer/interactions/componentInteractionRuntime'
 import { ComponentWorldInteractions } from './runtime/ComponentWorldInteractions'
 import { ComponentWorldMedia } from './runtime/ComponentWorldMedia'
-import { isComponentVisibleAtSurface, owningContainer } from '../../shared/contracts/component-platform'
+import { componentContainers, componentSurface, isComponentVisibleAtSurface } from '../../shared/contracts/component-platform'
 import { courseThemeStyleText } from '../../shared/contracts/design-v1/theme'
 import { componentLayoutInput } from '../../components/web/measuredFragmentBox'
-import { componentCompilationInput } from '../../core/components/compilation/componentCompilationInput'
+import { nativeFlowMediaBlockSize } from '../../shared/flowNativeLayout'
+import { createComponentCompilationInputReader } from '../../core/components/compilation/componentCompilationInput'
+import type { ComponentCompilationInput } from '../../core/components/compilation/types'
 import { flowObjectExtent } from '../../core/components/geometry/flowObjectExtent'
 import type { ComponentLayoutInput, ComponentLayoutPort, ComponentInstance, ComponentRuntimeActivity } from '../../shared/contracts/component-platform'
 import type { RuntimeTargetProfile } from '../../components/web/moduleGraph'
 import { allDocumentTextSlots,inlineComponentIds,documentTextAt,documentTextRanges,documentRangeElements,documentRangeAt } from '../../shared/document/textInteraction'
 import { isGlobalTeacherController } from '../../shared/teacherControllerViewportGeometry'
+import { instanceContainerId, instanceWorkRootId, isWithinContainer } from './runtime/containerScopes'
 
 type Listener = (value: JsonValue | undefined) => void
 const snapshotValue = <Value extends JsonValue | undefined>(value: Value): Value => value !== null && typeof value === 'object' ? structuredClone(value) : value
@@ -29,9 +32,15 @@ export class ComponentRuntimeWorld {
   readonly host: ComponentRuntimeHost
   private project?: CourseProjectV10
   private documentResources?: DocumentResources
-  private readonly layouts = new Map<string, { generation: number; notify(): void }>()
+  private readonly readCompilationInput = createComponentCompilationInputReader()
+  private readonly compilationInputIds = new WeakMap<ComponentCompilationInput, string>()
+  private compilationInputSequence = 0
+  private readonly layouts = new Map<string, { generation: number; notify(): void; sync(): void }>()
   private roots = new Map<string, HTMLElement>()
   private projectionRoots = new Map<string, HTMLElement>()
+  private readonly defaultProjectionRoots = new Map<string, HTMLElement>()
+  private readonly defaultTargetElements = new Map<string, HTMLElement>()
+  private readonly inlineBindings = new Map<string, { root: HTMLElement; ownerId: string }>()
   private parking?: HTMLElement
   private targetElements = new Map<string, HTMLElement>()
   private readonly state = new Map<string, JsonValue>()
@@ -50,6 +59,7 @@ export class ComponentRuntimeWorld {
   private resourceVersion = 0
   private publishedResourceVersion = -1
   private readonly synced = new Set<string>()
+  private readonly pendingSync = new Set<string>()
   private readonly implementations: Map<string, ComponentRuntimeImplementation>
   private readonly audioEvents = new CourseEventBus()
   private audioManager?: AudioManager
@@ -73,6 +83,7 @@ export class ComponentRuntimeWorld {
   private retired = false
   private disposal?: Promise<void>
   private readonly surfaceId?: () => string | null
+  private readonly navigation?: TeacherControllerPort
   private readonly readInstanceData?:(instance:ComponentInstance)=>JsonValue
   private readonly authoringEnabled:boolean
   private readonly fixedViewport?:(instance:ComponentInstance)=>boolean|undefined
@@ -120,14 +131,14 @@ export class ComponentRuntimeWorld {
     this.cancelNavigation = (options.studentNavigation ?? options.teacherController)?.cancel
     this.isAssetPending = options.isAssetPending
     this.fontFaceCss = options.fontFaceCss ?? ''
-    this.surfaceId = options.teacherController && options.teacherController.readLocation
+    this.navigation = options.studentNavigation ?? options.teacherController
+    this.surfaceId = this.navigation?.readLocation
     this.report = message => options.report?.(message)
     this.audioEvents.on<AudioPlaybackEvent>('audio:ended', event => {
       if (event && !this.retired) this.emit('audio.ended', { soundId: event.soundId })
     })
     this.media = new ComponentWorldMedia(() => this.audioManager, this.report, id => {
-      const surface = this.instanceSurfaceId(id)
-      return this.playing && !this.retired && (!surface || !this.surfaceId || surface === this.surfaceId())
+      return this.playing && this.instanceActive(id)
     }, () => this.playbackEpoch)
     this.interactions = new ComponentWorldInteractions({ project: () => this.project, element: id => this.targetElement(id),
       document: () => this.targetElements.values().next().value?.ownerDocument ?? this.roots.values().next().value?.ownerDocument,
@@ -136,14 +147,15 @@ export class ComponentRuntimeWorld {
       instanceActive: id => this.instanceActive(id),
       notifyVisibility: id => {
         this.emit('__runtime.visibility', null); this.refreshActivity()
-        if (id && !this.synced.has(id)) void this.syncInstance(id).catch(error => this.report(String(error)))
+        if (id && (!this.synced.has(id) || this.pendingSync.has(id))) void this.syncInstance(id).catch(error => this.report(String(error)))
       },
       activated: instanceId => this.emit('node.activated', { instanceId }),
       controlsInitiallyVisible: () => this.mode === 'edit' && !this.playing || this.project?.playback?.controls !== 'none' })
     // The World owns actions/state/media/lifetimes. Entry owners provide only
     // the professional implementations this carrier actually consumes.
-    this.implementations = new Map([
+    this.implementations = new Map<string, ComponentRuntimeImplementation>([
       ['guoling.group', { mount: () => ({ update() {}, dispose() {} }) }],
+      ...(['slide', 'flow', 'spatial'] as const).map(kind => [`guoling.container.${kind}`, { mount: () => ({ update() {}, dispose() {} }) }] as const),
       ['guoling.interactions', createComponentInteractionRuntime(context => this.interactions.ports(context))],
       ...(options.builtinFactory?.({assetUrl: id => this.assetUrl(id), teacherController: options.teacherController,
         reportImage: (message,assetId) => { if (!options.isAssetPending?.(assetId)) options.report?.(message) }}) ?? []),
@@ -162,33 +174,77 @@ export class ComponentRuntimeWorld {
       authoring: options.authoring===false?undefined:(_scope, instanceId, generation) => ({ register: (spot, callbacks) => this.registerAuthorSpot(instanceId, generation, spot, callbacks) }),
       layout: (_scope, instance, generation) => this.layoutPort(instance, generation),
       inline: scope => ({ mount: (id,root) => {
-        const owner=this.project?.instances[scope.instanceId]
-        if(!scope.isActive()||!owner?.childIds?.includes(id)||!allDocumentTextSlots(owner.data).some(slot=>inlineComponentIds(slot.content).includes(id)))return()=>{}
-        this.bind(id,root);this.bindTarget(id,root)
-        return()=>{if(this.projectionRoots.get(id)===root){this.bind(id,null);this.bindTarget(id,null)}}
+        const project = this.project, owner = project?.instances[scope.instanceId]
+        const implementation = owner && (owner.implementationOverride ?? project?.definitions[owner.definitionId]?.implementation)
+        const ownsSlot = Boolean(owner?.container || implementation?.kind === 'source'
+          || implementation?.kind === 'builtin' && ['guoling.web', 'guoling.html-program'].includes(implementation.key))
+        if (!scope.isActive() || !owner?.childIds?.includes(id)
+          || !ownsSlot && !allDocumentTextSlots(owner.data).some(slot => inlineComponentIds(slot.content).includes(id))) return () => {}
+        const binding = { root, ownerId: scope.instanceId }
+        this.inlineBindings.set(id, binding)
+        this.bindProjection(id, root); this.bindEffectiveTarget(id, root)
+        let bound = true
+        const release = () => {
+          if (!bound) return
+          bound = false
+          if (this.inlineBindings.get(id) !== binding) return
+          this.inlineBindings.delete(id)
+          if (this.retired || !this.project?.instances[id]) return
+          this.bindProjection(id, this.defaultProjectionRoots.get(id) ?? null)
+          this.bindEffectiveTarget(id, this.defaultTargetElements.get(id) ?? null)
+        }
+        scope.cleanup(release)
+        return release
       }}),
       resolveImplementation: (implementation, _definition, signal, instance) => {
         const navigation = this.project && isGlobalTeacherController(this.project, instance.id) ? options.teacherController : options.studentNavigation
         const originalController = navigation?.forInstance?.(instance.id) ?? navigation
         const canAct = () => this.instanceActive(instance.id) && this.playing
         const canView = () => this.instanceActive(instance.id) && (this.playing || this.mode === 'edit')
-        const controller = originalController && { ...originalController,
-          canExecute: (action: Parameters<TeacherControllerPort['canExecute']>[0]) => canAct() && originalController.canExecute(action),
-          execute: (...args: Parameters<TeacherControllerPort['execute']>) => canAct() ? originalController.execute(...args) : Promise.resolve(false),
-          setCollapsed: (value: boolean) => { if (canView()) originalController.setCollapsed(value) },
-          moveBy: (dx: number, dy: number) => { if (canView()) originalController.moveBy(dx, dy) },
-          setZoom: (value: number) => { if (canView()) originalController.setZoom(value) },
-          resetView: () => { if (canView()) originalController.resetView() },
-        }
-        const controllerForScope = (scope: import('../../shared/contracts/component-platform').ComponentRuntimeScope) => controller && {
-          ...controller,
-          subscribe: (listener: () => void) => {
-            let listening = true
-            const unsubscribe = controller.subscribe(() => { if (listening && scope.isActive()) listener() })
-            const off = () => { if (listening) { listening = false; unsubscribe() } }
-            scope.cleanup(off)
-            return off
-          },
+        const controllerForScope = (scope: import('../../shared/contracts/component-platform').ComponentRuntimeScope): TeacherControllerPort | undefined => {
+          if (!originalController) return undefined
+          const wrappers = new WeakMap<TeacherControllerPort, TeacherControllerPort>()
+          const alive = () => scope.isActive() && !scope.signal.aborted
+          const wrap = (port: TeacherControllerPort): TeacherControllerPort => {
+            const previous = wrappers.get(port)
+            if (previous) return previous
+            const subscribe = (register: (listener: () => void) => () => void, listener: () => void) => {
+              if (!alive()) return () => {}
+              let listening = true
+              const unsubscribe = register(() => { if (listening && alive()) listener() })
+              const off = () => { if (listening) { listening = false; unsubscribe() } }
+              scope.cleanup(off)
+              return off
+            }
+            const guarded: TeacherControllerPort = { ...port,
+              readLocation: () => alive() ? port.readLocation() : null,
+              read: () => alive() ? port.read() : { locationId: null, interactive: false, scenes: [], progress: null, zoom: 1, muted: false, fullscreen: false },
+              subscribe: listener => subscribe(port.subscribe, listener),
+              ...(port.subscribePlacement ? { subscribePlacement: (listener: () => void) => subscribe(port.subscribePlacement!, listener) } : {}),
+              ...(port.forContainer ? { forContainer: (id: string) => alive() ? wrap(port.forContainer!(id)) : guarded } : {}),
+              ...(port.forInstance ? { forInstance: (id: string) => alive() ? wrap(port.forInstance!(id)) : guarded } : {}),
+              ...(port.currentStateId ? { currentStateId: () => alive() ? port.currentStateId!() : null } : {}),
+              ...(port.isContainerActive ? { isContainerActive: (id: string) => alive() && port.isContainerActive!(id) } : {}),
+              ...(port.readVisibility ? { readVisibility: () => alive() ? port.readVisibility!() : { zoom: 1, stateId: null } } : {}),
+              canExecute: action => alive() && canAct() && port.canExecute(action),
+              execute: async (action, signal, onCommit) => {
+                if (!alive() || !canAct() || signal?.aborted) return false
+                const request = new AbortController(), abort = () => request.abort()
+                scope.signal.addEventListener('abort', abort, { once: true }); signal?.addEventListener('abort', abort, { once: true })
+                if (scope.signal.aborted || signal?.aborted) abort()
+                try { return await port.execute(action, request.signal, () => { if (alive()) onCommit?.() }) }
+                finally { scope.signal.removeEventListener('abort', abort); signal?.removeEventListener('abort', abort) }
+              },
+              cancel: () => { if (alive() && canAct()) port.cancel?.() },
+              setCollapsed: value => { if (alive() && canView()) port.setCollapsed(value) },
+              moveBy: (dx, dy) => { if (alive() && canView()) port.moveBy(dx, dy) },
+              setZoom: value => { if (alive() && canView()) port.setZoom(value) },
+              resetView: () => { if (alive() && canView()) port.resetView() },
+            }
+            wrappers.set(port, guarded)
+            return guarded
+          }
+          return wrap(originalController)
         }
         const connectNavigation = async (prepared: PreparedComponentRuntime | Promise<PreparedComponentRuntime>): Promise<PreparedComponentRuntime> => {
           const loaded = await prepared
@@ -254,10 +310,13 @@ export class ComponentRuntimeWorld {
       prepare: (id, signal) => this.prepareNavigationInstance(id, signal),
     })
     let locationId: string | null | undefined
-    let visibilityZoom: number | undefined
+    let visibilityProject: CourseProjectV10 | undefined
+    let visibilityBindings: Array<{ id: string; navigation: TeacherControllerPort }> = []
+    const visibilitySignatures = new Map<string, string>()
+    let workVisibilitySignature: string | undefined
     this.audioEvents.on('audio:change', () => options.studentNavigation?.changed?.())
-    const stopNavigation = options.teacherController?.subscribe(() => {
-      const snapshot = options.teacherController!.read(), current = snapshot.locationId
+    const stopNavigation = this.navigation?.subscribe(() => {
+      const snapshot = this.navigation!.read(), current = snapshot.locationId
       const previous = locationId, changed = previous !== current
       if (locationId !== current) {
         if (locationId) this.audioEvents.emit('scene:leave', { sceneId: locationId })
@@ -265,15 +324,31 @@ export class ComponentRuntimeWorld {
         locationId = current
         this.interactions.surfaceChanged()
       }
-      if ((this.mode !== 'edit' || this.playing) && (changed || visibilityZoom !== snapshot.zoom)) {
-        this.interactions.applyAllVisibility(snapshot, new Set([previous, current].filter((id): id is string => Boolean(id))))
-        visibilityZoom = snapshot.zoom
+      if (this.mode !== 'edit' || this.playing) {
+        const project = this.project
+        if (project !== visibilityProject) {
+          visibilityProject = project
+          visibilityBindings = project && this.navigation?.forContainer ? Object.values(project.instances)
+            .filter(instance => instance.container).map(instance => ({ id: instance.id, navigation: this.navigation!.forContainer!(instance.id) })) : []
+          visibilitySignatures.clear()
+        }
+        const workSignature = JSON.stringify([current, snapshot.zoom, this.navigation?.currentStateId?.() ?? null])
+        const workChanged = workSignature !== workVisibilitySignature
+        workVisibilitySignature = workSignature
+        const changedScopes = new Set<string>(workChanged ? [previous, current].filter((id): id is string => Boolean(id)) : [])
+        for (const binding of visibilityBindings) {
+          const visibility = binding.navigation.readVisibility?.() ?? { zoom: binding.navigation.read().zoom, stateId: binding.navigation.currentStateId?.() ?? null }
+          const signature = JSON.stringify([visibility.zoom, visibility.stateId])
+          if (visibilitySignatures.get(binding.id) !== signature) { visibilitySignatures.set(binding.id, signature); changedScopes.add(binding.id) }
+        }
+        if (changedScopes.size || workChanged) this.interactions.applyAllVisibility(snapshot, changedScopes, workChanged)
       }
       this.emit('__runtime.presentation', current ?? null)
       this.refreshActivity()
     })
     const stopReplay = options.teacherController?.subscribeSceneReplay?.(surfaceId => {
-      if (this.retired || options.teacherController!.readLocation() !== surfaceId) return
+      if (this.retired || this.navigation?.isContainerActive?.(surfaceId) === false
+        || !this.navigation?.isContainerActive && this.navigation?.readLocation() !== surfaceId) return
       this.emit('__runtime.scene.reset', surfaceId)
       this.interactions.resetSurface(surfaceId)
       // Same-scene replay retires only that scene's audio, retaining global playback and mounts.
@@ -291,18 +366,59 @@ export class ComponentRuntimeWorld {
     let observer: ResizeObserver | undefined
     let observed: HTMLElement | undefined, projected: HTMLElement | undefined
     let measured: { inlineSize: number; blockSize: number } | undefined
-    const read = (): ComponentLayoutInput => {
+    const authored = (withAuthoredHeight = true) => {
       const instance = this.project?.instances[id] ?? mounted
       const target = this.targetElements.get(id), root = this.projectionRoots.get(id)
-      const width = target?.clientWidth || root?.parentElement?.clientWidth || instance.frame?.width || 1
-      const extent = !instance.frame && instance.childIds?.length && this.project ? flowObjectExtent(this.project, id) : null
-      return componentLayoutInput(instance, { project: this.project!, kind: target?.dataset.componentPlacement === 'flow' ? 'flow' : 'free-frame',
-        inlineSize: width, viewport: extent ?? { width, height: target?.clientHeight || instance.frame?.height || 1 },
-        definition: this.project?.definitions[instance.definitionId] },this.fixedViewport?.(instance))
+      const inline = this.inlineBindings.has(id), program = target?.dataset.componentPlacement === 'program'
+      let input: ComponentLayoutInput
+      let extent: ReturnType<typeof flowObjectExtent> = null
+      if (inline) input = { mode: 'free-frame', inlineSize: instance.frame?.width ?? 1, blockSize: instance.frame?.height ?? 1 }
+      else if (program) input = { mode: 'program-viewport', inlineSize: 1, blockSize: 1 }
+      else {
+        const host = { project: this.project!, kind: target?.dataset.componentPlacement === 'flow' ? 'flow' as const : 'free-frame' as const,
+          inlineSize: 1, viewport: { width: 1, height: 1 }, definition: this.project?.definitions[instance.definitionId] }
+        const fixed = this.fixedViewport?.(instance)
+        input = componentLayoutInput(instance, host, fixed)
+        if (input.mode !== 'flow-content' && !instance.frame && instance.childIds?.length && this.project) {
+          extent = flowObjectExtent(this.project, id)
+          if (extent) input = componentLayoutInput(instance, { ...host, viewport: extent }, fixed)
+        }
+      }
+      const authoredHeight = withAuthoredHeight && input.mode === 'flow-content' && this.project ? nativeFlowMediaBlockSize(this.project, instance) : undefined
+      return { instance, target, root, inline, program, input, extent, authoredHeight }
     }
-    let last = ''
-    const slot = { generation, notify: () => {
-      const input = read(), signature = JSON.stringify(input)
+    const measuredInput = (facts: ReturnType<typeof authored>, usedFallback?: () => void): ComponentLayoutInput => {
+      const { instance, target, root, inline, program, input, extent } = facts
+      const width = () => {
+        const value = target?.clientWidth
+        if (value) return value
+        usedFallback?.()
+        return root?.parentElement?.clientWidth || instance.frame?.width || 1
+      }
+      const height = (fallback: () => number) => {
+        const value = target?.clientHeight
+        if (value) return value
+        usedFallback?.()
+        return fallback()
+      }
+      if (inline) return { mode: 'free-frame', inlineSize: width(), blockSize: height(() => instance.frame?.height || 1) }
+      if (program) return { mode: 'program-viewport', inlineSize: width(), blockSize: height(() => root?.parentElement?.clientHeight || 1) }
+      if (input.mode === 'flow-content') return { mode: 'flow-content', inlineSize: width() }
+      // These branches use author dimensions in the existing layout contract.
+      // Reading a client box before returning the same frame forces needless layout.
+      if (instance.frame || extent) return input
+      return { mode: input.mode, inlineSize: width(), blockSize: height(() => 1) }
+    }
+    const read = (): ComponentLayoutInput => measuredInput(authored(false))
+    const authorSignature = (facts: ReturnType<typeof authored>) => JSON.stringify([facts.inline, facts.program,
+      facts.instance.frame?.width, facts.instance.frame?.height, facts.input, facts.authoredHeight])
+    let last = '', lastAuthor = '', lastTargetGeometry = false, ownsAuthoredFlowHeight = false
+    const notify = (facts = authored()) => {
+      let targetGeometry = true
+      const input = measuredInput(facts, () => { targetGeometry = false }), { authoredHeight } = facts
+      lastTargetGeometry = targetGeometry
+      lastAuthor = authorSignature(facts)
+      const signature = JSON.stringify([input, authoredHeight])
       const target = this.targetElements.get(id)
       if (observer && target !== observed) { observer.disconnect(); if (target) observer.observe(target); observed = target }
       const root = this.projectionRoots.get(id), mount = this.roots.get(id)
@@ -314,12 +430,30 @@ export class ComponentRuntimeWorld {
       if (signature === last) return
       last = signature
       if (root && mount) {
-        root.style.height = input.mode === 'flow-content' ? 'var(--component-flow-height, auto)'
+        root.style.height = authoredHeight ? '100%' : input.mode === 'flow-content' ? 'var(--component-flow-height, auto)'
           : input.mode === 'flow-viewport' ? `${input.blockSize}px` : '100%'
-        mount.style.height = input.mode === 'flow-content' ? 'auto' : '100%'
-        if (input.mode !== 'flow-content') root.style.removeProperty('--component-flow-height')
+        mount.style.height = input.mode === 'flow-content' && !authoredHeight ? 'auto' : '100%'
+        // The runtime host adds its own retained child and consumes this same
+        // inherited height variable. Keep the CSS-owned size through that layer.
+        if (authoredHeight) {
+          root.style.setProperty('--component-flow-height', '100%')
+          ownsAuthoredFlowHeight = true
+        } else if (ownsAuthoredFlowHeight || input.mode !== 'flow-content') {
+          root.style.removeProperty('--component-flow-height')
+          ownsAuthoredFlowHeight = false
+        }
       }
       for (const listener of listeners) listener(input)
+      this.refreshProfessionalBounds(id)
+    }
+    const slot = { generation, notify: () => notify(), sync: () => {
+      const facts = authored()
+      // The live target observer owns DOM-size changes, including ancestor CSS,
+      // font reflow and reconnect. Without it retain the original sync sampling.
+      // A zero-sized target can fall back to a parent box outside this observer.
+      // Only the last actual notification can establish this sampling boundary.
+      if (observer && observed && lastTargetGeometry && authorSignature(facts) === lastAuthor) return
+      notify(facts)
     } }
     this.layouts.set(id, slot)
     this.projectionRoots.get(id)?.style.removeProperty('--component-flow-height')
@@ -340,7 +474,7 @@ export class ComponentRuntimeWorld {
       reportSize: report => {
         if (this.layouts.get(id) !== slot) return
         const input = read()
-        if (input.mode !== 'flow-content' || !Number.isFinite(report.inlineSize) || !Number.isFinite(report.blockSize) || report.blockSize < 0
+        if (input.mode !== 'flow-content' || this.project && nativeFlowMediaBlockSize(this.project, this.project.instances[id] ?? mounted) || !Number.isFinite(report.inlineSize) || !Number.isFinite(report.blockSize) || report.blockSize < 0
           || Math.abs(report.inlineSize - input.inlineSize) > 0.5) return
         const root = this.projectionRoots.get(id), mount = this.roots.get(id)
         if (!root || !mount) return
@@ -382,11 +516,11 @@ export class ComponentRuntimeWorld {
     }
     const read = () => {
       if (reference.kind === 'project') return JSON.parse(JSON.stringify(this.readInstanceData&&this.project?{...this.project,instances:Object.fromEntries(Object.entries(this.project.instances).map(([id,instance])=>[id,{...instance,data:this.readInstanceData!(instance)}]))}:this.project)) as JsonValue
-      if (reference.kind === 'surface') return JSON.parse(JSON.stringify(this.project?.surfaces.find(surface => surface.id === reference.surfaceId) ?? null)) as JsonValue
+       if (reference.kind === 'surface') return JSON.parse(JSON.stringify(this.project && componentSurface(this.project, reference.surfaceId) || null)) as JsonValue
       const instance=this.project?.instances[reference.instanceId];return structuredClone(instance?(this.readInstanceData?.(instance)??instance.data):null)
     }
     const id = reference.kind === 'instance' ? reference.instanceId : reference.kind === 'surface' ? reference.surfaceId : project.id
-    if (reference.kind === 'instance' && !project.instances[id] || reference.kind === 'surface' && !project.surfaces.some(surface => surface.id === id)) return null
+    if (reference.kind === 'instance' && !project.instances[id] || reference.kind === 'surface' && !componentSurface(project, id)) return null
     const runtime = this
     return { instanceId: id, get element() { return runtime.targetElements.get(id) ?? runtime.projectionRoots.get(id)?.parentElement ?? undefined }, read,
       emit: (name: string, value: JsonValue) => this.emit(name, value),
@@ -414,8 +548,12 @@ export class ComponentRuntimeWorld {
   private instanceActive(id: string): boolean {
     if (this.retired || !this.project?.instances[id]) return false
     if (this.mode === 'edit' && !this.playing) return true
-    const owner = this.instanceSurfaceId(id)
-    return !owner || !this.surfaceId || owner === this.surfaceId()
+    const rootId = this.instanceSurfaceId(id)
+    if (rootId === null || !this.surfaceId) return true
+    const current = this.surfaceId() ?? this.project.entry?.rootInstanceId
+    if (rootId !== current) return false
+    const containerId = instanceContainerId(this.project, id, true)
+    return !containerId || this.navigation?.isContainerActive?.(containerId) !== false
   }
   private runtimeActivity(id: string, currentViewport = false): ComponentRuntimeActivity {
     const active = this.instanceActive(id), instance = this.project?.instances[id]
@@ -460,15 +598,22 @@ export class ComponentRuntimeWorld {
           if (!instanceId || this.observed.get(instanceId) !== entry.target) continue
           this.intersections.set(instanceId, entry.isIntersecting)
           this.refreshActivity(instanceId)
-          if (entry.isIntersecting && !this.synced.has(instanceId)) void this.syncInstance(instanceId).catch(error => this.report(String(error)))
+          if (entry.isIntersecting && (!this.synced.has(instanceId) || this.pendingSync.has(instanceId))) void this.syncInstance(instanceId).catch(error => this.report(String(error)))
         }
       })
       this.observed.set(id, element); this.visibilityIds.set(element, id); this.visibilityObserver.observe(element)
     }
     this.refreshActivity(id)
   }
-  bind = (instanceId: string, element: HTMLElement | null): void => {
-    if (this.retired) return
+  bind = (instanceId: string, element: HTMLElement | null, expectedDefault?: HTMLElement): void => {
+    if (this.retired || element === null && expectedDefault && this.defaultProjectionRoots.get(instanceId) !== expectedDefault) return
+    if (element) this.defaultProjectionRoots.set(instanceId, element)
+    else this.defaultProjectionRoots.delete(instanceId)
+    if (!this.inlineBindings.has(instanceId)) this.bindProjection(instanceId, element)
+  }
+  private bindProjection(instanceId: string, element: HTMLElement | null): void {
+    const previous = this.projectionRoots.get(instanceId) ?? null
+    let moved = false
     if (element) {
       element.dataset.componentCourseWorld = this.themeMarker
       this.projectionRoots.set(instanceId, element)
@@ -480,18 +625,21 @@ export class ComponentRuntimeWorld {
         this.roots.set(instanceId, root)
       }
       // Moving author ownership changes the projection parent, not the run slot or its DOM.
-      if (root.parentElement !== element) this.placeRoot(element, root)
+      if (root.parentElement !== element) { this.placeRoot(element, root); moved = true }
     } else {
       const root = this.roots.get(instanceId)
       if (root) {
         if (!this.parking) { this.parking = root.ownerDocument.createElement('div'); this.parking.hidden = true; root.ownerDocument.body.append(this.parking) }
-        this.placeRoot(this.parking, root)
+        if (root.parentElement !== this.parking) { this.placeRoot(this.parking, root); moved = true }
       }
       this.projectionRoots.delete(instanceId)
     }
     if (element && this.project && !this.projectionManaged) void this.syncInstance(instanceId).catch(() => {})
     if (element?.isConnected && this.projectionManaged) this.onProjectionCommit?.()
-    this.layouts.get(instanceId)?.notify()
+    const layout = this.layouts.get(instanceId)
+    if (previous !== element || moved) layout?.notify()
+    else layout?.sync()
+    this.refreshProfessionalBounds(instanceId)
     this.observeVisibility(instanceId)
     this.refreshActivity(instanceId)
   }
@@ -520,9 +668,21 @@ export class ComponentRuntimeWorld {
     else parent.append(root)
   }
   /** Park before a projection moves/removes ancestors; source browsing contexts stay connected. */
-  beforeProjectionMutation(): void {
-    for (const root of this.roots.values()) {
+  beforeProjectionMutation(instanceIds?: ReadonlySet<string>): void {
+    for (const [id, root] of this.roots) {
+      if (instanceIds && !instanceIds.has(id)) continue
       if (!root.querySelector('iframe')) continue
+      if (!this.parking) { this.parking = root.ownerDocument.createElement('div'); this.parking.hidden = true; root.ownerDocument.body.append(this.parking) }
+      if (root.parentElement !== this.parking) this.placeRoot(this.parking, root)
+    }
+  }
+  /** A deferred React unmount reports refs after its disposable wrapper can be
+   * removed. Park this retiring subtree's current roots first, including empty
+   * roots whose pending Source mount may create its iframe on the next turn. */
+  beforeProjectionRemoval(retiring: HTMLElement): void {
+    for (const [id, root] of this.roots) {
+      const projection = this.projectionRoots.get(id)
+      if (!projection || !retiring.contains(projection) || !retiring.contains(root)) continue
       if (!this.parking) { this.parking = root.ownerDocument.createElement('div'); this.parking.hidden = true; root.ownerDocument.body.append(this.parking) }
       if (root.parentElement !== this.parking) this.placeRoot(this.parking, root)
     }
@@ -530,7 +690,7 @@ export class ComponentRuntimeWorld {
   afterProjectionMutation(): void {
     for (const [id, element] of this.projectionRoots) {
       const root = this.roots.get(id)
-      if (root && element.isConnected && root.parentElement !== element) this.placeRoot(element, root)
+      if (root && element.isConnected && root.parentElement !== element) { this.placeRoot(element, root); this.layouts.get(id)?.notify() }
     }
     if (this.projectionManaged) { this.projectionTargetsChanged = true; this.onProjectionCommit?.(); return }
     if ([...this.projectionRoots.values()].some(element => element.isConnected)) {
@@ -557,25 +717,28 @@ export class ComponentRuntimeWorld {
     // A low-level runtime without a surface navigation owner keeps its original
     // document scope. Editor and Player both supply their one navigation owner.
     if (!this.surfaceId) return true
-    let container = owningContainer(project, id)
-    while (container?.kind === 'instance') container = owningContainer(project, container.instanceId)
-    return container?.kind === 'global' || container?.kind === 'surface' && container.surfaceId === this.surfaceId()
+    return this.instanceActive(id)
   }
   private instanceSurfaceId(id: string): string | null | undefined {
     const project = this.project
     if (!project) return undefined
-    let owner = owningContainer(project, id)
-    while (owner?.kind === 'instance') owner = owningContainer(project, owner.instanceId)
-    return owner?.kind === 'surface' ? owner.surfaceId : owner?.kind === 'global' ? null : undefined
+    return instanceWorkRootId(project, id)
   }
-  bindTarget = (instanceId: string, element: HTMLElement | null): void => {
-    if (this.retired) return
+  bindTarget = (instanceId: string, element: HTMLElement | null, expectedDefault?: HTMLElement): void => {
+    if (this.retired || element === null && expectedDefault && this.defaultTargetElements.get(instanceId) !== expectedDefault) return
+    if (element) this.defaultTargetElements.set(instanceId, element)
+    else this.defaultTargetElements.delete(instanceId)
+    if (!this.inlineBindings.has(instanceId)) this.bindEffectiveTarget(instanceId, element)
+  }
+  private bindEffectiveTarget(instanceId: string, element: HTMLElement | null): void {
     const previous = this.targetElements.get(instanceId)
     if (previous && previous !== element) { this.interactions.cancelMotions(instanceId); this.interactions.retirePresentation(instanceId) }
     if (element) { element.dataset.componentCourseWorld = this.themeMarker; this.targetElements.set(instanceId, element) }
     else this.targetElements.delete(instanceId)
     this.interactions.refreshClickAffordances()
-    this.layouts.get(instanceId)?.notify()
+    const layout = this.layouts.get(instanceId)
+    if (previous !== element) layout?.notify()
+    else layout?.sync()
     if (this.mode !== 'edit') this.interactions.applyVisibility(instanceId)
     this.observeVisibility(instanceId)
     this.refreshActivity(instanceId)
@@ -597,11 +760,21 @@ export class ComponentRuntimeWorld {
     this.refreshActivity(id)
     // Temporary absence preserves the existing generation; first use is lazy.
     // Retirement still belongs to deletion, changed implementation, reset or close.
-    if (sourceRealm && this.mode !== 'capture' && !this.runtimeActivity(id, navigationTarget).visible) return
+    if (sourceRealm && this.mode !== 'capture' && !this.runtimeActivity(id, navigationTarget).visible) {
+      // A retained generation can still have pending author changes. Visibility
+      // must sync the latest project before treating that generation as current.
+      this.pendingSync.add(id)
+      return
+    }
+    this.pendingSync.delete(id)
     this.synced.add(id)
-    let sourceSignature: unknown
+    let sourceSignature: string | undefined
     if (effective.kind === 'source' && this.project) {
-      try { sourceSignature = componentCompilationInput(this.project, effective, this.documentResources) }
+      try {
+        const input = this.sourceCompilationInput(effective)
+        sourceSignature = this.compilationInputIds.get(input)
+        if (!sourceSignature) { sourceSignature = `source-input:${++this.compilationInputSequence}`; this.compilationInputIds.set(input, sourceSignature) }
+      }
       catch (error) { sourceSignature = String(error) }
     }
     const web = hasWebContentData(instance.data) && (effective.kind === 'source' || ['guoling.web', 'guoling.html-program'].includes(effective.key))
@@ -614,7 +787,7 @@ export class ComponentRuntimeWorld {
       ? JSON.stringify([[...(this.project?.logic?.network?.connectOrigins ?? [])].sort(), sourceOrigins,
         Boolean(this.project && isGlobalTeacherController(this.project, id))]) : undefined
     const handle = await this.host.sync({ runScopeId: this.runScopeId, instance, definition, root, environmentSignature,
-      preparationSignature: effective.kind === 'source' ? JSON.stringify(sourceSignature) : undefined,
+      preparationSignature: sourceSignature,
       canProject: definition.role === 'behavior' ? () => this.behaviorCanProject(id) : undefined })
     if (!handle?.scope.isActive()) return handle
     const implementation = instance.implementationOverride ?? definition.implementation
@@ -625,10 +798,22 @@ export class ComponentRuntimeWorld {
     if (this.authoringEnabled && field && data && data[field] !== undefined && root) {
       const spot: ComponentAuthorSpot = { id: spotId, instanceId: id, mountGeneration: handle.scope.generation,
         kind: field === 'content' ? 'text' : 'image', dataPath: [field], initialValue: structuredClone(data[field]),
-        localBounds: { width: instance.frame?.width ?? root.clientWidth, height: instance.frame?.height ?? root.scrollHeight, transform: [1, 0, 0, 1, 0, 0] } }
+        localBounds: this.professionalBounds(instance, root) }
       if (!previous || JSON.stringify(previous) !== JSON.stringify(spot)) { this.spots.set(spotId, spot); this.notifySpots() }
     } else if (previous) { this.spots.delete(spotId); this.notifySpots() }
     return handle
+  }
+  private professionalBounds(instance: ComponentInstance, root: HTMLElement): ComponentAuthorSpot['localBounds'] {
+    const slot = this.inlineBindings.has(instance.id) ? this.targetElements.get(instance.id) : undefined
+    return { width: slot?.clientWidth || instance.frame?.width || root.clientWidth,
+      height: slot?.clientHeight || instance.frame?.height || root.scrollHeight, transform: [1, 0, 0, 1, 0, 0] }
+  }
+  private refreshProfessionalBounds(id: string): void {
+    const spot = this.spots.get(`professional:${id}`), instance = this.project?.instances[id], root = this.roots.get(id)
+    if (!spot || !instance || !root) return
+    const localBounds = this.professionalBounds(instance, root)
+    if (JSON.stringify(spot.localBounds) === JSON.stringify(localBounds)) return
+    this.spots.set(spot.id, { ...spot, localBounds }); this.notifySpots()
   }
   /** Wait only for the selected visible target; cancellation stops waiting, not its living program. */
   private prepareNavigationInstance(id: string, signal: AbortSignal): Promise<boolean> {
@@ -652,17 +837,33 @@ export class ComponentRuntimeWorld {
     if (this.reset) await this.reset
     if (this.retired) return
     this.project = project; this.documentResources = resources
-    if (this.targetProject !== project) { this.targetProject = project; this.emit('__runtime.targets', this.targetSnapshots('full') as unknown as JsonValue) }
-    for (const layout of this.layouts.values()) layout.notify()
+    for (const [id, binding] of this.inlineBindings) {
+      if (project.instances[binding.ownerId]?.childIds?.includes(id)) continue
+      this.inlineBindings.delete(id)
+      if (!project.instances[id]) continue
+      this.bindProjection(id, this.defaultProjectionRoots.get(id) ?? null)
+      this.bindEffectiveTarget(id, this.defaultTargetElements.get(id) ?? null)
+    }
+    if (this.targetProject !== project) {
+      this.targetProject = project
+      // Managed realms resolve their own existing target profile on this small
+      // invalidation. Explicit author subscriptions keep the full event value.
+      this.emit('__runtime.targets.changed', null)
+      if (this.eventListeners.get('__runtime.targets')?.size) this.emit('__runtime.targets', this.targetSnapshots('full') as unknown as JsonValue)
+    }
+    for (const layout of this.layouts.values()) layout.sync()
     this.prepareResources(project, resources)
-    if (this.publishedResourceVersion !== this.resourceVersion) { this.publishedResourceVersion = this.resourceVersion; this.emit('__runtime.resources', this.resourceUrls()) }
+    if (this.publishedResourceVersion !== this.resourceVersion) {
+      this.publishedResourceVersion = this.resourceVersion
+      if (this.eventListeners.get('__runtime.resources')?.size) this.emit('__runtime.resources', this.resourceUrls())
+    }
     const themeText = this.themeCss()
     const owner = this.roots.values().next().value?.ownerDocument ?? this.targetElements.values().next().value?.ownerDocument
     if (owner) {
       if (!this.themeStyle) { this.themeStyle = owner.createElement('style'); owner.head.append(this.themeStyle) }
       // The outer host already declares its faces. Scope only author theme rules;
       // isolated content documents receive their own faces through themeCss/events.
-      this.themeStyle.textContent = `@scope ([data-component-course-world="${this.themeMarker}"]) {${this.courseThemeCss().replace(/:root\b/g, ':scope')}}`
+      if (themeText !== this.themeText || !this.themeStyle.textContent) this.themeStyle.textContent = `[data-component-course-world="${this.themeMarker}"][hidden]{display:none!important}@scope ([data-component-course-world="${this.themeMarker}"]) {${this.courseThemeCss().replace(/:root\b/g, ':scope')}}`
     }
     if (themeText !== this.themeText) { this.themeText = themeText; this.emit('__runtime.theme', themeText) }
     if (!this.audioManager) {
@@ -682,8 +883,10 @@ export class ComponentRuntimeWorld {
       this.implementations.set('guoling.video', createVideoRuntimeImplementation(mediaOptions) as ComponentRuntimeImplementation)
     } else if (this.mediaSettings !== project.media) { this.audioManager.updateProject(project); this.mediaSettings = project.media }
     for (const declaration of project.logic?.courseState ?? []) if (!this.state.has(declaration.key)) this.state.set(declaration.key, structuredClone(declaration.defaultValue))
-    for (const id of [...this.synced]) if (!project.instances[id]) {
-      this.synced.delete(id); await this.host.dispose(this.runScopeId, id)
+    const boundIds = new Set([...this.synced, ...this.pendingSync, ...this.roots.keys(), ...this.defaultProjectionRoots.keys(), ...this.defaultTargetElements.keys(), ...this.inlineBindings.keys()])
+    for (const id of boundIds) if (!project.instances[id]) {
+      this.inlineBindings.delete(id); this.defaultProjectionRoots.delete(id); this.defaultTargetElements.delete(id)
+      this.synced.delete(id); this.pendingSync.delete(id); await this.host.dispose(this.runScopeId, id)
       if (this.retired) return
       this.roots.get(id)?.remove(); this.roots.delete(id); this.projectionRoots.delete(id); this.targetElements.delete(id)
       const observed = this.observed.get(id); if (observed) this.visibilityObserver?.unobserve(observed)
@@ -703,6 +906,11 @@ export class ComponentRuntimeWorld {
     this.refreshActivity()
   }
   stateSnapshot(): Record<string, JsonValue> { return Object.fromEntries([...this.state].map(([name, value]) => [name, snapshotValue(value)])) }
+  /** Shared by signature preparation and the renderer's actual compiler call. */
+  sourceCompilationInput(implementation: Extract<ComponentImplementation, { kind: 'source' }>): ComponentCompilationInput {
+    if (!this.project) throw new Error('组件作品尚未准备')
+    return this.readCompilationInput(this.project, implementation, this.documentResources)
+  }
   /** Prepare local assets before a placement paints its background. */
   prepareResources(project: CourseProjectV10, resources: DocumentResources): void {
     if (this.retired) return
@@ -718,10 +926,9 @@ export class ComponentRuntimeWorld {
       if (previousUrl) URL.revokeObjectURL(previousUrl)
       this.assetContents.set(id, { source, mimeType })
       this.assetUrls.set(id, URL.createObjectURL(new Blob([bytes], { type: mimeType })))
-      // Opaque component realms cannot dereference their parent's Blob storage key.
-      let binary = ''
-      for (let at = 0; at < bytes.length; at += 8192) binary += String.fromCharCode(...bytes.subarray(at, at + 8192))
-      this.contentAssetUrls.set(id, `data:${mimeType};base64,${btoa(binary)}`)
+      // A native-only consumer needs a Blob, not an additional data URL. A
+      // content realm still receives all authorized assets when it asks below.
+      this.contentAssetUrls.delete(id)
       this.resourceVersion++
     }
   }
@@ -737,9 +944,23 @@ export class ComponentRuntimeWorld {
     return url
   }
   assetUrl(id: string): string | undefined { return this.assetUrls.get(id) ?? this.referencedAssetUrl(id) }
-  contentAssetUrl(id: string): string | undefined { return this.contentAssetUrls.get(id) ?? this.referencedAssetUrl(id) }
+  contentAssetUrl(id: string): string | undefined {
+    const existing = this.contentAssetUrls.get(id)
+    if (existing) return existing
+    const asset = this.assetContents.get(id)
+    if (!asset) return this.referencedAssetUrl(id)
+    // Opaque component realms cannot dereference their parent's Blob storage key.
+    let binary = ''
+    for (let at = 0; at < asset.source.length; at += 8192) binary += String.fromCharCode(...asset.source.subarray(at, at + 8192))
+    const url = `data:${asset.mimeType};base64,${btoa(binary)}`
+    this.contentAssetUrls.set(id, url)
+    return url
+  }
   resourceUrls(): Record<string, string> {
-    // Enumerating resources for a realm is not itself a request to fetch every asset.
+    // Keep the existing synchronous dynamic-asset contract. Until the carrier
+    // supplies stable authorized URLs, a realm conservatively gets the full
+    // available directory; native consumers no longer pay this representation.
+    for (const id of this.assetContents.keys()) this.contentAssetUrl(id)
     return Object.fromEntries([...this.referencedAssetUrls, ...this.contentAssetUrls].filter(([id]) => this.project?.assets[id]))
   }
   targetElement(id: string): HTMLElement | undefined { return this.targetElements.get(id) ?? this.projectionRoots.get(id)?.parentElement ?? undefined }
@@ -759,11 +980,11 @@ export class ComponentRuntimeWorld {
     if (this.reset) return this.reset.then(() => this.resetSurfacePrograms(surfaceId))
     const ids = Object.values(this.project?.instances ?? {}).filter(instance => {
       const definition = this.project?.definitions[instance.definitionId]
-      return definition && this.instanceSurfaceId(instance.id) === surfaceId
+      return definition && this.project && isWithinContainer(this.project, instance.id, surfaceId)
         && usesContentRealm(instance.implementationOverride ?? definition.implementation)
     }).map(instance => instance.id)
     this.reset = (async () => {
-      for (const id of ids) this.synced.delete(id)
+      for (const id of ids) { this.synced.delete(id); this.pendingSync.delete(id) }
       await Promise.all(ids.map(id => this.host.dispose(this.runScopeId, id)))
       if (this.retired) return
       await Promise.allSettled(ids.map(id => this.syncInstance(id, true)))
@@ -783,7 +1004,7 @@ export class ComponentRuntimeWorld {
     this.reset = (async () => {
       await this.host.disposeScope(this.runScopeId)
       if (this.retired || !this.project) return
-      this.synced.clear()
+      this.synced.clear(); this.pendingSync.clear()
       this.spots.clear(); this.spotPreviews.clear(); this.notifySpots(); this.state.clear()
       for (const declaration of this.project.logic?.courseState ?? []) this.setState(declaration.key, declaration.defaultValue)
       if (resetEpoch === this.playbackEpoch) this.playing = playing
@@ -833,7 +1054,7 @@ export class ComponentRuntimeWorld {
   targetSnapshots(profile: RuntimeTargetProfile): Array<{ reference: ComponentTarget; instanceId: string; value?: JsonValue }>
   targetSnapshots(profile: RuntimeTargetProfile = 'full'): Array<{ reference: ComponentTarget; instanceId: string; value?: JsonValue }> {
     if (!this.project) return []
-    const references: ComponentTarget[] = [{ kind: 'project' }, ...this.project.surfaces.map(surface => ({ kind: 'surface' as const, surfaceId: surface.id })),
+    const references: ComponentTarget[] = [{ kind: 'project' }, ...componentContainers(this.project).map(surface => ({ kind: 'surface' as const, surfaceId: surface.id })),
       ...Object.keys(this.project.instances).map(instanceId => ({ kind: 'instance' as const, instanceId })),
       ...Object.values(this.project.instances).flatMap(instance=>allDocumentTextSlots(instance.data).flatMap(slot=>[...documentTextRanges(slot.content).keys()].map(rangeId=>({kind:'text-range' as const,instanceId:instance.id,dataPath:slot.path,rangeId}))))]
     if (profile === 'references') return references.map(reference => ({ reference,
@@ -854,7 +1075,7 @@ export class ComponentRuntimeWorld {
     this.visibilityObserver?.disconnect(); this.visibilityObserver = undefined
     this.observed.clear(); this.intersections.clear(); this.activities.clear()
     for (const root of this.roots.values()) root.remove()
-    this.roots.clear(); this.projectionRoots.clear(); this.targetElements.clear(); this.synced.clear(); this.eventListeners.clear(); this.stateListeners.clear(); this.state.clear()
+    this.roots.clear(); this.projectionRoots.clear(); this.targetElements.clear(); this.defaultProjectionRoots.clear(); this.defaultTargetElements.clear(); this.inlineBindings.clear(); this.synced.clear(); this.pendingSync.clear(); this.eventListeners.clear(); this.stateListeners.clear(); this.state.clear()
     for (const url of this.assetUrls.values()) URL.revokeObjectURL(url)
     this.assetUrls.clear(); this.contentAssetUrls.clear(); this.referencedAssetUrls.clear(); this.assetContents.clear(); this.themeStyle?.remove(); this.themeStyle = undefined
     this.parking?.remove(); this.parking = undefined

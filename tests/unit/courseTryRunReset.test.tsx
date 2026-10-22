@@ -1,3 +1,4 @@
+import { createTestProjectFromLegacy } from '../helpers/glxWorkFixture'
 import { useEffect, useState } from 'react'
 import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/react'
 import { afterEach, expect, it, vi } from 'vitest'
@@ -22,7 +23,7 @@ vi.mock('../../src/renderer/components/SandboxComponentImplementation', () => ({
 afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); programs.contexts.clear(); programs.retire.clear() })
 
 function course(): CourseProjectV10 {
-  return { schemaVersion: 10, revision: 3, id: 'reset', title: 'Explicit reset',
+  return createTestProjectFromLegacy({ schemaVersion: 10, revision: 3, id: 'reset', title: 'Explicit reset',
     definitions: {
       source: { id: 'source', role: 'content', implementation: { kind: 'source', language: 'javascript', source: 'export function mount() {}' } },
       html: { id: 'html', role: 'content', implementation: { kind: 'builtin', key: 'guoling.html-program' } },
@@ -37,9 +38,9 @@ function course(): CourseProjectV10 {
         trigger: { type: 'scene.enter' }, conditions: [], actions: [{ id: 'write', start: 'after-previous', delayMs: 0,
           action: { type: 'course-state.set', key: 'entered', value: true } }] }] } },
     },
-    surfaces: ['one', 'two'].map(id => ({ id, kind: 'slide', title: id, childIds: id === 'one' ? ['one', 'html', 'enter'] : ['two'], designSize: { width: 800, height: 600 } })),
+    surfaces: ['one', 'two'].map(id => ({ id: 'page-' + id, kind: 'slide', title: id, childIds: id === 'one' ? ['one', 'html', 'enter'] : ['two'], designSize: { width: 800, height: 600 } })),
     assets: {}, global: { underlay: [], overlay: ['global'] },
-  }
+  })
 }
 
 async function editor() {
@@ -47,15 +48,15 @@ async function editor() {
   const project = course(), before = structuredClone(project), report = vi.fn()
   let ports!: CourseV10RuntimePorts
   function Editor() {
-    const [surface, select] = useState('one'), [mode, setMode] = useState<'edit' | 'run'>('run')
+    const [surface, select] = useState('page-one'), [mode, setMode] = useState<'edit' | 'run'>('run')
     useEffect(() => { ports.setPlaying(mode === 'run') }, [mode])
     return <CourseV10RuntimeView documentId="reset-doc" model={{ kind: 'course-v10', project, resources: { assets: {}, components: {} } }}
       surfaceId={surface} selectedInstanceId={null} player={false} onSelect={() => {}} onSurfaceSelect={select} report={report}
       renderWorkspace={runtime => { ports = runtime; return <>
         <CourseNavigationControls canvasMode={mode} onCanvasModeChange={setMode} navigation={runtime.navigation.editorPort()}
           resetPlayback={runtime.resetPlayback} report={report} />
-        <div hidden={surface !== 'one'}>{runtime.renderInstance('one')}{runtime.renderInstance('html')}</div>
-        <div hidden={surface !== 'two'}>{runtime.renderInstance('two')}</div>
+        <div hidden={surface !== 'page-one'}>{runtime.renderInstance('one')}{runtime.renderInstance('html')}</div>
+        <div hidden={surface !== 'page-two'}>{runtime.renderInstance('two')}</div>
         {runtime.renderInstance('global')}
       </> }} />
   }
@@ -120,7 +121,7 @@ it('keeps a stop made during slow program retirement and runs both frozen scene 
       await Promise.resolve(); await Promise.resolve()
     })
     await waitFor(() => expect(programs.contexts.get('one')![0].scope.isActive()).toBe(false))
-    second = run.read().world.resetSurfacePrograms('two')
+    second = run.read().world.resetSurfacePrograms('page-two')
     act(() => run.read().setPlaying(false))
     await act(async () => { release(); await first; await second })
     expect(run.read().world.isPlaying()).toBe(false)
@@ -140,7 +141,7 @@ it('executes a full course restart queued behind a scene reset and preserves a l
     const global = programs.contexts.get('global')![0]
     run.read().world.setState('course-progress', 17)
     programs.retire.set('one', () => pending)
-    const sceneReset = run.read().world.resetSurfacePrograms('one')
+    const sceneReset = run.read().world.resetSurfacePrograms('page-one')
     await waitFor(() => expect(programs.contexts.get('one')![0].scope.isActive()).toBe(false))
     const restart = run.read().navigation.execute({ type: 'course.restart' })
     act(() => run.read().setPlaying(false))

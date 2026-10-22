@@ -1,4 +1,5 @@
 // @vitest-environment node
+import { testContainerInstance } from '../helpers/glxWorkFixture'
 import { expect, it } from 'vitest'
 import { build } from 'esbuild'
 import { chromium } from 'playwright'
@@ -31,7 +32,7 @@ it('keeps the frozen example on one line through the shared Player runtime, whil
       const reports: string[] = []
       const model = () => ({ kind: 'course-v10', project, resources: { assets: {}, components: {} } })
       const player = (window as any).TextPrecision.mountV10Model({ root: document.querySelector('#player'),
-        model: model(), runScopeId: 'text-layout-precision', initialSurfaceId: project.surfaces[0].id,
+        model: model(), runScopeId: 'text-layout-precision', initialSurfaceId: testContainerInstance(project, 0).id,
         mode: 'play', report: (message: string) => reports.push(message) })
       const settle = async () => {
         await player.ready

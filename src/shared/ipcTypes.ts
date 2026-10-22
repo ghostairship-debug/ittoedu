@@ -135,13 +135,18 @@ export interface DesktopAPI {
   workspaceFiles?: import('./workbench/workspaceFiles').WorkspaceFilesAPI
   skillCatalog?: import('./workbench/skillCatalogDesktop').SkillCatalogAPI
   mediaFiles?(input: import('./workbench/mediaFiles').MediaFilesRequest): Promise<import('./workbench/mediaFiles').MediaFileSnapshot>
+  releaseMediaFileDraft?(binding: import('./workbench/mediaFiles').FileArtifactBinding): Promise<void>
   onWorkspaceFilesChanged?(listener: (event: import('./workbench/workspaceFiles').WorkspaceFilesChange) => void): () => void
   documents?: import('./workbench/desktop').DocumentHostAPI
   lessonMaterials?: import('./lessonMaterialDesktop').LessonMaterialDesktopAPI
   lessonFiles?: import('./lessonDocumentDesktop').LessonDocumentDesktopAPI
   lesson?(input: import('./lessonDesktopContract').LessonDesktopRequest): Promise<import('./lessonDesktopContract').LessonDesktopResult>
   legacyPpt(input: { operation: 'select' | 'cancel' }): Promise<LegacyPptImportResult | null>
+  buildPptxImport?(input: import('./workbench/pptxImport').PptxImportBuildInput): Promise<import('./workbench/pptxImport').PptxImportBuildResult>
+  cancelPptxImport?(input: { requestId: string }): Promise<boolean>
   captureAuthoringObservation?(input: CaptureObservationInput): Promise<{ dataUrl: string; capturedAt: number; width: number; height: number }>
+  buildFrozenDelivery?(input: import('./workbench/frozenDelivery').FrozenDeliveryBuildInput): Promise<import('./workbench/frozenDelivery').BuiltComponentDelivery>
+  cancelFrozenDelivery?(input: { requestId: string }): Promise<boolean>
   dynamicAdmission?(input: DynamicAdmissionRequest): Promise<DynamicAdmissionResult>
   materials(input: MaterialRequest): Promise<MaterialRecordV1[]>
   openProject(): Promise<OpenProjectFileResult | null>
@@ -248,6 +253,7 @@ export const IPC_CHANNELS = {
   workspaceFiles: 'workspace-files:operate',
   skillCatalog: 'skills:catalog',
   mediaFiles: 'media-files:operate',
+  mediaFileRelease: 'media-files:release-draft',
   workspaceFilesChanged: 'workspace-files:changed',
   documents: 'documents:operate',
   documentEvent: 'documents:event',
@@ -288,6 +294,10 @@ export const IPC_CHANNELS = {
   exportPdf: 'export:write-pdf',
   documentExportBuildRequest: 'document-export:build-request',
   documentExportBuildReply: 'document-export:build-reply',
+  frozenDeliveryBuild: 'document-export:frozen-build',
+  frozenDeliveryCancel: 'document-export:frozen-cancel',
+  pptxImportBuild: 'pptx-import:build',
+  pptxImportCancel: 'pptx-import:cancel',
   documentExportBuildCancel: 'document-export:build-cancel',
   documentExportBuildProgress: 'document-export:build-progress',
   previewNetworkDocumentToken: 'preview-network:document-token',

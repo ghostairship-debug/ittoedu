@@ -1,3 +1,4 @@
+import { componentContainers } from '../../../../shared/contracts/component-platform/project'
 import { containerChildIds, owningContainer, type ComponentContainer, type ComponentInstance, type CourseProjectV10, type JsonValue } from '../../../../shared/contracts/component-platform/project'
 import type { ComponentEdit } from '../../../../shared/contracts/component-platform/operations'
 import { equalComponentValue } from '../../../../core/drivers/courseV10Operations'
@@ -5,7 +6,7 @@ import type { TextComponentData } from '../../../../components/text/data'
 
 /** The view borrows the canonical ownership relation; it never stores a body document. */
 export function flowSurface(project: CourseProjectV10, surfaceId: string) {
-  const surface = project.surfaces.find(value => value.id === surfaceId)
+  const surface = componentContainers(project).find(value => value.id === surfaceId)
   if (!surface || surface.kind !== 'flow') throw new Error('当前表面不是讲义')
   return surface
 }

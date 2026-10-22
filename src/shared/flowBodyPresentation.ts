@@ -1,12 +1,4 @@
 import { BUNDLED_TEXT_FONT_FAMILY } from './fonts/bundledFontFamilies'
-import { resolveComponentBackground, type ComponentSurface, type CourseProjectV10 } from './contracts/component-platform'
-
-/** Explicit page/course paint belongs on the paper; the legacy paper color is its fallback. */
-export function resolveFlowPaperBackground(project: Pick<CourseProjectV10, 'background'>, surface: ComponentSurface) {
-  const background = resolveComponentBackground(project, surface)
-  return !project.background && surface.background?.mode !== 'own'
-    ? { ...background, color: surface.flow?.layout.paperBackgroundColor ?? background.color } : background
-}
 
 /** The authoring paper and every Published carrier share these content metrics. */
 export const FLOW_BODY_FONT_FAMILY = `"${BUNDLED_TEXT_FONT_FAMILY}","Microsoft YaHei","PingFang SC",sans-serif`
@@ -16,16 +8,24 @@ export const FLOW_BODY_PAPER_PADDING = '28px 36px 64px'
 export const FLOW_COMPONENT_BLOCK_HEIGHT = 320
 export interface FlowWidthLayout {
   readonly widthMode?: 'fluid' | 'reading'
+  /** The work owns its section gutters; default document paper remains unchanged. */
+  readonly edgeToEdge?: boolean
   readonly readingWidth: number
   readonly wideContentWidth?: number
 }
-export function flowPaperMaxWidth(layout: FlowWidthLayout): string {
-  return `${layout.widthMode === 'fluid' ? layout.wideContentWidth ?? layout.readingWidth : layout.readingWidth}px`
+export function flowScrollPadding(layout?: Pick<FlowWidthLayout, 'edgeToEdge'>): string {
+  return layout?.edgeToEdge ? '0px' : FLOW_BODY_SCROLL_PADDING
 }
-/** Fixed logical reading width; host width affects scrolling/fit, never line wrapping. */
-export function resolveFlowBodyWidth(layout: FlowWidthLayout, _viewportWidth: number): number {
-  const paper = layout.widthMode === 'fluid' ? layout.wideContentWidth ?? layout.readingWidth : layout.readingWidth
-  return Math.max(0, paper - 72)
+export function flowPaperPadding(layout?: Pick<FlowWidthLayout, 'edgeToEdge'>): string {
+  return layout?.edgeToEdge ? '0px' : FLOW_BODY_PAPER_PADDING
+}
+export function flowPaperMaxWidth(layout: FlowWidthLayout): string {
+  return layout.widthMode === 'fluid' ? '100%' : `${layout.readingWidth}px`
+}
+/** Numeric counterpart of the responsive paper, excluding its existing side padding. */
+export function resolveFlowBodyWidth(layout: FlowWidthLayout, viewportWidth: number): number {
+  const paper = layout.widthMode === 'fluid' ? viewportWidth : Math.min(layout.readingWidth, viewportWidth)
+  return Math.max(0, paper - (layout.edgeToEdge ? 0 : 72))
 }
 export interface FlowParagraphPresentation {
   readonly textAlign: 'left' | 'center' | 'right'

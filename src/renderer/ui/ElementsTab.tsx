@@ -1,3 +1,4 @@
+import { componentContainers } from '../../shared/contracts/component-platform/project'
 import {
   AreaChart,
   BarChart3,
@@ -216,7 +217,7 @@ export function ElementsTab({
   const addElement = (kind: CourseElementKind, options: Parameters<typeof insertCourseElement>[3] = {}) => {
     try {
       const target = captureCourseInsertionTarget(kernel), owner = target.instanceId ? owningContainer(target.project, target.instanceId) : null
-      const camera = target.project.surfaces.find(surface => surface.id === target.surfaceId)?.kind === 'spatial' && editingScope !== 'global'
+      const camera = componentContainers(target.project).find(surface => surface.id === target.surfaceId)?.kind === 'spatial' && editingScope !== 'global'
         ? useEditorStore.getState().readSpatialView(target.surfaceId ?? '', target.documentId).camera : null
       void insertCourseElement(kernel, target, kind,
         { ...(editingScope === 'global' ? { container: owner?.kind === 'global' ? owner : { kind: 'global' as const, plane: 'overlay' as const } } : {}),
@@ -236,7 +237,7 @@ export function ElementsTab({
   const mediaAssets = useMemo(() => readCourseMediaLibrary(view).assets, [view])
   const audioSettings = useMemo(() => readCourseAudioSettings(view), [view])
   const editingScope = useEditorStore(selectEditingScope)
-  const surfaceKind = view.project?.surfaces.find(surface => surface.id === view.surfaceId)?.kind
+  const surfaceKind = (view.project == null ? undefined : componentContainers(view.project).find(surface => surface.id === view.surfaceId)?.kind)
   const spatialInsertionScope: SpatialInsertionScope | null = surfaceKind === 'spatial' ? editingScope === 'global' ? 'global' : 'world' : null
   const flowSessionActive = surfaceKind === 'flow'
   const authoringSurface: AuthoringSurface = spatialInsertionScope

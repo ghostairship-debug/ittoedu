@@ -1,9 +1,10 @@
+import { componentContainers, componentSurface } from '../../shared/contracts/component-platform/project'
 import { isSourceDocumentModel, type DocumentModel, type DocumentSnapshot } from '../../shared/workbench/document'
 import type { ToolTarget, TextFragmentTarget } from '../../shared/workbench/tools'
 import type { DocumentSelection, DocumentSlot } from '../../shared/document/ports'
 import type { ExecutionContentOutput } from '../../shared/workbench/execution'
 import { documentDigest } from '../documents/documentDigest'
-import { componentDefinitionBuiltinKey, componentIsLocked, owningContainer, resolveComponentPresentation, type CourseProjectV10, type JsonValue } from '../../shared/contracts/component-platform/project'
+import { componentDefinitionBuiltinKey, componentIsLocked, owningContainer, resolveComponentPresentation, type ComponentSurface, type CourseProjectV10, type JsonValue } from '../../shared/contracts/component-platform/project'
 import { tableCellTextField, tableCellRichTextEdit } from '../../components/table/data'
 import type { ComponentEdit } from '../../shared/contracts/component-platform/operations'
 import { componentFieldIdentityPaths, componentValueAt, equalComponentValue } from '../drivers/courseV10Operations'
@@ -25,13 +26,13 @@ import { formatTextContent, type TextStyle } from './textFormatting'
 import { authorSpotEdits } from '../components/authoring/componentAuthorEdits'
 import { normalizeOwnedDocumentPath } from '../../components/web/ownedDocumentIdentity'
 import { readAuthorSourceText } from '../components/authoring/sourceAuthorText'
-import type { ComponentAuthorField, ComponentAuthorSpot } from '../../shared/contracts/component-platform/runtime'
+import type { ComponentAuthorField } from '../../shared/contracts/component-platform/runtime'
 import { allocateTextSelectionReplacement } from '../../shared/document/textSelectionReplacement'
 
 export type CourseInstanceTarget = Extract<ToolTarget, { kind: 'course-instance' }>
 
 /** Freeze only author coordinates; runtime bounds and mount identity are never author authority. */
-export function courseAuthorFieldTarget(surfaceId: string, spot: ComponentAuthorSpot, stateId?: string | null): CourseInstanceTarget {
+export function courseAuthorFieldTarget(surfaceId: string, spot: ComponentAuthorField & { instanceId: string }, stateId?: string | null): CourseInstanceTarget {
   const { kind, authorKey, scope, binding, bindingStatus, fieldScope, dataPath, sourceRegion, initialValue } = spot
   if (kind === 'text' && dataPath?.length && !sourceRegion && fieldScope !== 'authoring')
     return { kind: 'course-instance', surfaceId, instanceId: spot.instanceId, stateId: stateId ?? null,
@@ -109,7 +110,7 @@ export function courseAuthorFieldReadPaths(model: DocumentModel, target: CourseI
     if (path && normalizeOwnedDocumentPath(path) !== path) paths.push([...base, 'data', 'html'])
   } else if (field.dataPath) paths.push([...base, field.fieldScope ?? 'data', ...field.dataPath])
   if (target.stateId) {
-    const index = model.kind === 'course-v10' ? model.project.surfaces.find(surface => surface.id === target.surfaceId)?.presentation?.states.findIndex(state => state.id === target.stateId) : -1
+    const index = model.kind === 'course-v10' ? componentContainers(model.project).find(surface => surface.id === target.surfaceId)?.presentation?.states.findIndex(state => state.id === target.stateId) : -1
     if (index === undefined || index < 0) throw new Error('展示状态已不存在')
     const state = ['@surface', target.surfaceId, 'presentation', 'states', String(index)]
     paths.push([...state, 'id'])
@@ -377,14 +378,39 @@ export function instanceRootOwner(project: CourseProjectV10, instanceId: string)
   while (owner?.kind === 'instance') owner = owningContainer(project, owner.instanceId)
   return owner
 }
-export function courseInstanceContext(model: DocumentModel, target: CourseInstanceTarget): { project: CourseProjectV10; instance: CourseProjectV10['instances'][string]; surface: CourseProjectV10['surfaces'][number]; owner: NonNullable<ReturnType<typeof instanceRootOwner>>; value?: unknown } {
+/** The captured editing context is an owned container or a complete program root. */
+export function courseInstanceScopeId(project: CourseProjectV10, instanceId: string): string | undefined {
+  let id = instanceId
+  while (project.instances[id]) {
+    if (project.instances[id].container) return id
+    const owner = owningContainer(project, id)
+    if (owner?.kind === 'project') return id
+    if (owner?.kind === 'instance') { id = owner.instanceId; continue }
+    if (owner?.kind === 'surface') return owner.surfaceId
+    if (owner?.kind === 'global') return project.entry?.rootInstanceId ?? project.rootIds[0] ?? instanceId
+    return undefined
+  }
+  return undefined
+}
+export function instanceWithinScope(project: CourseProjectV10, instanceId: string, scopeId: string): boolean {
+  if (instanceId === scopeId) return Boolean(project.instances[scopeId])
+  let owner = owningContainer(project, instanceId)
+  while (owner?.kind === 'instance') {
+    if (owner.instanceId === scopeId) return true
+    owner = owningContainer(project, owner.instanceId)
+  }
+  return owner?.kind === 'surface' && owner.surfaceId === scopeId
+}
+export function courseInstanceContext(model: DocumentModel, target: CourseInstanceTarget): { project: CourseProjectV10; instance: CourseProjectV10['instances'][string]; surface?: Readonly<ComponentSurface>; owner: NonNullable<ReturnType<typeof instanceRootOwner>>; value?: unknown } {
   if (model.kind !== 'course-v10') throw new Error('对象目标需要 Project V10 文档')
-  if (target.stateId && !model.project.surfaces.find(value => value.id === target.surfaceId)?.presentation?.states.some(value => value.id === target.stateId)) throw new Error('捕获的展示状态已不存在')
+  if (target.stateId && !componentContainers(model.project).find(value => value.id === target.surfaceId)?.presentation?.states.some(value => value.id === target.stateId)) throw new Error('捕获的展示状态已不存在')
   const project = resolveComponentPresentation(model.project, target.surfaceId, target.stateId ?? null)
   const instance = project.instances[target.instanceId]
-  const surface = model.project.surfaces.find(value => value.id === target.surfaceId)
+  const surface = componentSurface(model.project, target.surfaceId)
   const owner = instanceRootOwner(model.project, target.instanceId)
-  if (!instance || !surface || !owner || owner.kind === 'surface' && owner.surfaceId !== surface.id) throw new Error('对象不属于捕获的表面')
+  const scopeExists = Boolean(surface || model.project.rootIds.includes(target.surfaceId))
+  if (!instance || !owner || !scopeExists || !instanceWithinScope(model.project, target.instanceId, target.surfaceId)
+    && owner.kind !== 'global') throw new Error('对象不属于捕获的容器或程序根')
   if (target.authorField) return readCourseAuthorField(model, target)
   const field = target.dataPath === undefined ? undefined : componentValueAt(project, ['instances', instance.id, target.fieldScope ?? 'data', ...target.dataPath])
   if (field && !field.exists && target.fieldScope === 'authoring' && target.dataPath?.length === 4
@@ -666,23 +692,27 @@ export function containsTarget(allowed: ToolTarget, target: ToolTarget, model?: 
         { kind: target.record.kind, scope: target.record.scope, binding: target.record.binding })
   if (allowed.kind === 'course-surface' && target.kind === 'spatial-graph') return allowed.surfaceId === target.surfaceId && !allowed.stateId
   if (allowed.kind === 'course-surface' && target.kind === 'course-instance' && model?.kind === 'course-v10') {
-    const owner = instanceRootOwner(model.project, target.instanceId)
-    return allowed.surfaceId === target.surfaceId && owner?.kind === 'surface' && owner.surfaceId === allowed.surfaceId
-      && (allowed.stateId === undefined || allowed.stateId === (target.stateId ?? null))
+    return instanceWithinScope(model.project, target.instanceId, allowed.surfaceId)
+      && (allowed.stateId === undefined || allowed.stateId === null && !target.stateId
+        || allowed.surfaceId === target.surfaceId && allowed.stateId === target.stateId)
   }
-  if (allowed.kind === 'course-surface' && target.kind === 'course-surface') return allowed.surfaceId === target.surfaceId
-    && (allowed.stateId === undefined || allowed.stateId === target.stateId)
+  if (allowed.kind === 'course-surface' && target.kind === 'course-surface') return (allowed.surfaceId === target.surfaceId
+    || model?.kind === 'course-v10' && instanceWithinScope(model.project, target.surfaceId, allowed.surfaceId))
+    && (allowed.stateId === undefined || allowed.stateId === null && !target.stateId
+      || allowed.surfaceId === target.surfaceId && allowed.stateId === target.stateId)
+  if (allowed.kind === 'course-instance' && target.kind === 'course-surface') return !allowed.authorField && !allowed.dataPath
+    && allowed.from === undefined && allowed.to === undefined && allowed.instanceId === target.surfaceId
+    && (allowed.stateId ?? null) === (target.stateId ?? null)
+    && (!allowed.stateId || allowed.surfaceId === target.surfaceId)
   if (allowed.kind === 'course-instance' && target.kind === 'course-instance') {
-    if (allowed.surfaceId !== target.surfaceId || (allowed.stateId ?? null) !== (target.stateId ?? null)) return false
+    if ((allowed.stateId ?? null) !== (target.stateId ?? null) || allowed.stateId && allowed.surfaceId !== target.surfaceId) return false
     if (allowed.instanceId !== target.instanceId) {
       if (allowed.authorField || allowed.dataPath || model?.kind !== 'course-v10') return false
-      let owner = owningContainer(model.project, target.instanceId)
-      while (owner?.kind === 'instance') {
-        if (owner.instanceId === allowed.instanceId) return true
-        owner = owningContainer(model.project, owner.instanceId)
-      }
-      return false
+      return instanceWithinScope(model.project, target.instanceId, allowed.instanceId)
     }
+    if (allowed.surfaceId !== target.surfaceId && (model?.kind !== 'course-v10'
+      || !instanceWithinScope(model.project, allowed.instanceId, allowed.surfaceId)
+      || !instanceWithinScope(model.project, target.instanceId, target.surfaceId))) return false
     if (allowed.authorField) return Boolean(target.authorField && equalComponentValue(authorFieldIdentity(allowed.authorField), authorFieldIdentity(target.authorField))
       && equalComponentValue(allowed.authorField.sourceRegion, target.authorField.sourceRegion))
     if (!allowed.dataPath) return true
@@ -703,7 +733,9 @@ export function readTarget(model: DocumentModel, target: ToolTarget): unknown {
     if (isSourceDocumentModel(model)) return model.source
     if (model.kind === 'course-v10') return { title: model.project.title, background: model.project.background,
       designTokens: model.project.designTokens, playback: model.project.playback, media: model.project.media, logic: model.project.logic,
-      global: model.project.global, surfaces: model.project.surfaces.map(value => ({ id: value.id, kind: value.kind, title: value.title })) }
+      global: model.project.global, rootIds: model.project.rootIds, entry: model.project.entry,
+      roots: model.project.rootIds.map(id => ({ id, title: model.project.instances[id].name ?? model.project.definitions[model.project.instances[id].definitionId]?.title,
+        ...(model.project.instances[id].container ? { kind: model.project.instances[id].container.kind } : {}) })) }
     throw new Error('当前工具只支持 Project V10、Markdown 和 Text 文档')
   }
   if (target.kind === 'markdown-range') {
@@ -725,10 +757,10 @@ export function readTarget(model: DocumentModel, target: ToolTarget): unknown {
     return { id, definitionId, ...(Object.hasOwn(instance, 'frame') ? { frame } : {}), ...fields }
   }
   if (target.kind === 'course-surface') {
-    if (target.stateId && !model.project.surfaces.find(value => value.id === target.surfaceId)?.presentation?.states.some(value => value.id === target.stateId))
+    if (target.stateId && !componentContainers(model.project).find(value => value.id === target.surfaceId)?.presentation?.states.some(value => value.id === target.stateId))
       throw new Error('展示状态已不存在')
     const project = target.stateId ? resolveComponentPresentation(model.project, target.surfaceId, target.stateId) : model.project
-    const surface = project.surfaces.find(value => value.id === target.surfaceId)
+    const surface = componentContainers(project).find(value => value.id === target.surfaceId)
     if (!surface) throw new Error('表面已不存在')
     return surface
   }
@@ -759,7 +791,7 @@ export function readSemanticTarget(model: DocumentModel, target: ToolTarget): un
   }
   const current = readTarget(model, target)
   if (target.kind === 'course-surface' && model.kind === 'course-v10') {
-    const surface = current as CourseProjectV10['surfaces'][number]
+    const surface = current as Readonly<ComponentSurface>
     return { ...surface, ...(surface.presentation ? { presentation: { ...surface.presentation,
       states: surface.presentation.states.map(({ id, title, order }) => ({ id, title, ...(order ? { order } : {}) })) } } : {}) }
   }
@@ -949,10 +981,10 @@ export function childTargets(model: DocumentModel, target: ToolTarget): { target
   if (model.kind === 'course-v10' && (target.kind === 'course-surface' || target.kind === 'course-instance')) {
     readTarget(model, target)
     const project = target.stateId ? resolveComponentPresentation(model.project, target.surfaceId, target.stateId) : model.project
-    const ids = target.kind === 'course-surface' ? project.surfaces.find(value => value.id === target.surfaceId)!.childIds
+    const ids = target.kind === 'course-surface' ? componentContainers(project).find(value => value.id === target.surfaceId)!.childIds
       : target.authorField || target.dataPath ? [] : project.instances[target.instanceId].childIds ?? []
     const graphs = target.kind === 'course-surface' && !target.stateId
-      ? (['paths', 'relations'] as const).flatMap(kind => (project.surfaces.find(value => value.id === target.surfaceId)?.spatial?.[kind] ?? []).map(item => ({
+      ? (['paths', 'relations'] as const).flatMap(kind => (componentContainers(project).find(value => value.id === target.surfaceId)?.spatial?.[kind] ?? []).map(item => ({
           target: { kind: 'spatial-graph' as const, surfaceId: target.surfaceId, graph: kind === 'paths' ? 'path' as const : 'relation' as const, graphId: item.id },
           label: ('title' in item ? item.title : 'label' in item ? item.label : undefined) ?? (kind === 'paths' ? '路径' : '关系') }))) : []
     return [...graphs, ...ids.map(instanceId => ({ target: { kind: 'course-instance' as const, surfaceId: target.surfaceId, instanceId, stateId: target.stateId ?? null },
@@ -961,9 +993,12 @@ export function childTargets(model: DocumentModel, target: ToolTarget): { target
   if (target.kind === 'document') {
     if (isSourceDocumentModel(model)) return [{ target: { kind: 'markdown-range', from: 0, to: model.source.length }, label: '正文' }]
     if (model.kind === 'course-v10') return [
-      ...model.project.surfaces.map(surface => ({ target: { kind: 'course-surface' as const, surfaceId: surface.id }, label: surface.title })),
+      ...model.project.rootIds.map(instanceId => ({ target: model.project.instances[instanceId].container
+        ? { kind: 'course-surface' as const, surfaceId: instanceId }
+        : { kind: 'course-instance' as const, surfaceId: instanceId, instanceId },
+        label: model.project.instances[instanceId].name ?? model.project.definitions[model.project.instances[instanceId].definitionId]?.title ?? '作品根' })),
       ...(['underlay', 'overlay'] as const).flatMap(plane => model.project.global[plane].map(instanceId => ({
-        target: { kind: 'course-instance' as const, surfaceId: model.project.surfaces[0]!.id, instanceId },
+        target: { kind: 'course-instance' as const, surfaceId: courseInstanceScopeId(model.project, instanceId)!, instanceId },
         label: `全局${plane === 'underlay' ? '底层' : '上层'} · ${model.project.instances[instanceId].name ?? model.project.definitions[model.project.instances[instanceId].definitionId]?.title ?? '对象'}`,
       }))),
       ...Object.values(model.project.assets).map(asset => ({ target: { kind: 'course-asset' as const, assetId: asset.id }, label: asset.path })),

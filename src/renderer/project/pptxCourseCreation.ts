@@ -4,13 +4,16 @@ import { createTeacherControllerFrame } from '../../components/teacher-controlle
 import type { CourseProjectV10 } from '../../shared/contracts/component-platform'
 import type { DocumentResources } from '../../shared/workbench/document'
 import { SLIDE_CANVAS_MAX, SLIDE_CANVAS_MIN, SLIDE_CANVAS_PRESETS, type SlideCanvasSize } from '../../shared/slideCanvas'
-import { parsePptxImport } from './pptxImport'
+import { parsePptxImportPackage } from './pptxImport'
 import { planPptxImportTransaction } from './pptxImportTransaction'
-import { openPptxPackage, pptxReject, xmlFirst, type PptxImportIssue } from './pptxPackage'
+import { openPptxPackage, pptxReject, xmlFirst, type PptxPackage, type PptxImportIssue } from './pptxPackage'
 
 /** The Slide canvas of an H5 presentation made from this PPT: its own page ratio, at the usual size. */
 export function pptxCourseCanvas(bytes: Uint8Array): SlideCanvasSize {
-  const size = xmlFirst(openPptxPackage(bytes).xml('ppt/presentation.xml'), 'sldSz')
+  return pptxPackageCanvas(openPptxPackage(bytes))
+}
+function pptxPackageCanvas(pkg: PptxPackage): SlideCanvasSize {
+  const size = xmlFirst(pkg.xml('ppt/presentation.xml'), 'sldSz')
   const width = Number(size?.getAttribute('cx')), height = Number(size?.getAttribute('cy'))
   if (!(width > 0 && height > 0)) pptxReject('页面尺寸', '页面宽高必须大于零')
   const ratio = width / height
@@ -29,10 +32,14 @@ export interface PptxCourse {
 
 /** A new H5 presentation holding the PPT's pages, and nothing else (M21 "从 PPT 新建 果铃工程"). */
 export async function createCourseFromPptx(bytes: Uint8Array, title: string): Promise<PptxCourse> {
-  const canvas = pptxCourseCanvas(bytes)
-  const draft = await parsePptxImport(bytes, canvas)
+  const pkg = openPptxPackage(bytes)
+  const canvas = pptxPackageCanvas(pkg)
+  const draft = await parsePptxImportPackage(pkg, canvas)
   const project = createBlankCourseProjectV10(title)
-  project.surfaces = []
+  // This factory draft has no author content. Replace its empty root with the PPT's pages.
+  for (const id of project.rootIds) delete project.instances[id]
+  project.rootIds = []
+  delete project.entry
   for (const id of project.global.overlay) if (project.instances[id].definitionId === 'guoling.navigation') project.instances[id].frame = createTeacherControllerFrame(canvas)
   const driver = new CourseV10Driver()
   const resources: DocumentResources = { assets: {}, components: {} }

@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { createTestProjectFromLegacy, testContainerInstance } from '../helpers/glxWorkFixture'
 import { createRef, useSyncExternalStore } from 'react'
 import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/react'
 import { afterAll, beforeAll, expect, it, vi } from 'vitest'
@@ -34,7 +35,7 @@ afterAll(() => geometry.forEach((key, index) => {
 it('projects the actual heading caret into the paragraph selector, commits body once and restores the heading through formal undo', async () => {
   const heading: DocumentBlock = { id: 'heading', type: 'heading', level: 2,
     content: { inlines: [{ type: 'text', text: '原生标题', style: { italic: true, color: '#123456' } }] } }
-  const project: CourseProjectV10 = {
+  const project: CourseProjectV10 = createTestProjectFromLegacy({
     schemaVersion: 10, id: 'paragraph-selector', revision: 0, title: '段落类型',
     definitions: { [DOCUMENT_BLOCK_DEFINITION.id]: DOCUMENT_BLOCK_DEFINITION, [TEXT_DEFINITION.id]: TEXT_DEFINITION },
     instances: {
@@ -43,7 +44,7 @@ it('projects the actual heading caret into the paragraph selector, commits body 
     },
     surfaces: [{ id: 'flow', kind: 'flow', title: '讲义', childIds: ['heading', 'body'] }],
     global: { underlay: [], overlay: [] }, assets: {},
-  }
+  })
   const directory = await mkdtemp(path.join(tmpdir(), 'guoling-r1-paragraph-'))
   const host = new DocumentHostService(path.join(directory, 'recovery')), bridge = new CourseV10DocumentBridge()
   const created = await host.internalAPI.create({ kind: 'course-v10', project, resources: { assets: {}, components: {} } }, '段落类型')
@@ -83,7 +84,7 @@ it('projects the actual heading caret into the paragraph selector, commits body 
     expect(editor.view.state.selection.$head.parent.attrs.id).toBe('heading')
     expect(commit).toHaveBeenCalledTimes(1)
     expect(projectFlowDocument(bridge.read().project!, 'flow').content.blocks[0]).toMatchObject({ id: 'heading', type: 'paragraph', content: heading.content })
-    expect(bridge.read().project!.surfaces[0].childIds).toEqual(['heading', 'body'])
+    expect(testContainerInstance(bridge.read().project!, 0).childIds).toEqual(['heading', 'body'])
     expect(bridge.read().project!.instances.body).toEqual(originalBody)
     expect((await host.internalAPI.read(created.documentId)).undoDepth).toBe(1)
     await act(async () => { editor.view.dom.dispatchEvent(new KeyboardEvent('keydown', { key: 'z', ctrlKey: true, bubbles: true, cancelable: true })) })

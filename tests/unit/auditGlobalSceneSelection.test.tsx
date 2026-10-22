@@ -1,3 +1,6 @@
+import { setRootContainers } from '../helpers/glxWorkFixture'
+import { componentSurfaces } from '../../src/shared/contracts/component-platform/project'
+import { appendRootContainers, testContainerInstance } from '../helpers/glxWorkFixture'
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, expect, it, vi } from 'vitest'
 import { createBlankCourseProjectV10 } from '../../src/core/course/createCourseProjectV10'
@@ -19,16 +22,16 @@ afterEach(() => {
   vi.restoreAllMocks()
 })
 function fixture(): CourseProjectV10 {
-  const project = createBlankCourseProjectV10(), surface = project.surfaces[0]
-  surface.id = 'slide'; surface.presentation = { states: [{ id: 'answer', title: '答案', overrides: {} }] }
-  project.surfaces.push({ id: 'flow', kind: 'flow', title: '讲义', childIds: [] })
+  const project = createBlankCourseProjectV10(), surface = componentSurfaces(project)[0]
+  setRootContainers(project, [{ ...componentSurfaces(project)[0], id: 'slide' }]); testContainerInstance(project, 0).container.presentation = { states: [{ id: 'answer', title: '答案', overrides: {} }] }
+  appendRootContainers(project, { id: 'flow', kind: 'flow', title: '讲义', childIds: [] })
   project.definitions.text = { id: 'text', role: 'content', implementation: { kind: 'builtin', key: 'guoling.text' } }
   project.definitions.group = { id: 'group', role: 'mixed', implementation: { kind: 'builtin', key: 'guoling.group' } }
   for (const [id, x] of [['local', 100], ['shared', 300], ['child', 5]] as const) project.instances[id] = { id, definitionId: 'text',
     data: JSON.parse(JSON.stringify(createTextComponentData(id))) as JsonValue,
     frame: { width: 120, height: 40, transform: [1, 0, 0, 1, x, 40] } }
   project.instances.group = { id: 'group', definitionId: 'group', data: {}, childIds: ['child'], frame: { width: 160, height: 100, transform: [1, 0, 0, 1, 500, 100] } }
-  project.global.overlay.push('shared', 'group'); surface.childIds = ['local']
+  project.global.overlay.push('shared', 'group'); testContainerInstance(project, 0).childIds = ['local']
   return project
 }
 async function connected(project = fixture()) {
@@ -66,7 +69,7 @@ it('the existing Slide scene hit/controller selects and transforms the same glob
   expect(after.model.project.instances.shared.frame?.transform).toEqual([1, 0, 0, 1, 320, 50])
   expect(owningContainer(after.model.project, 'shared')).toEqual({ kind: 'global', plane: 'overlay' })
   expect(after.model.project.instances.local).toEqual(project.instances.local)
-  expect(after.model.project.surfaces[0].presentation).toEqual(project.surfaces[0].presentation)
+  expect(componentSurfaces(after.model.project)[0].presentation).toEqual(componentSurfaces(project)[0].presentation)
   expect(store().courseView).toMatchObject({ activeDocumentId: documentId, surfaceId: 'slide', activeStateId: 'answer', selectedInstanceIds: ['shared'] })
   expect(store().editingScope).toBe('scene')
   controller.pointerDown({ x: 110, y: 50, additive: true }, [1, 0, 0, 1, 0, 0])
@@ -97,7 +100,7 @@ it('the real shared quick bar labels a scene-selected global object and writes i
   await act(async () => { fireEvent.click(within(bar).getByRole('button', { name: '加粗' })); await store().drainCourseDocument() })
   expect(session.read().undoDepth).toBe(before.undoDepth + 1)
   expect(store().courseView.project!.instances.shared.data).toMatchObject({ appearance: { bold: true } })
-  expect(store().courseView.project!.surfaces[0].presentation?.states[0].overrides).toEqual({})
+  expect(componentSurfaces(store().courseView.project!)[0].presentation?.states[0].overrides).toEqual({})
   expect(store().courseView.project!.global.overlay).toContain('shared')
   act(() => { store().courseBridge.selectSurface(documentId, 'flow'); store().selectNodes(['shared']) })
   await waitFor(() => expect(screen.getByRole('toolbar', { name: '选中对象快捷工具' })).toHaveTextContent('全局元素，修改会影响所有场景'))

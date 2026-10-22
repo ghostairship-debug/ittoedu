@@ -1,11 +1,12 @@
 import { Box, Check, ChevronLeft, Download, Info, Library, LocateFixed, MoreVertical, RefreshCw, Search, ShieldAlert, Trash2, Upload, X } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import type { AvailableComponentCatalogPackage, AvailableHtmlComponent, ComponentCatalogSnapshot } from '../../shared/componentCatalog'
-import type { ComponentDefinition } from '../../shared/contracts/component-platform/project'
+import { componentSurface, componentSurfaces, type ComponentDefinition } from '../../shared/contracts/component-platform/project'
 import type { FlowDeepInsertPort } from './RightSidebar'
 import { collectCourseComponentPackageUsage, type CourseComponentPackageUsage } from '../components/courseComponentPackageTransactions'
-import { collectComponentLibrarySubjects, filterComponentLibraryPackages, filterHtmlComponents, selectCurrentCatalogPackages, selectCurrentHtmlComponents, componentCatalogInstallStatus, selectProjectLibraryDefinitions,projectLibraryDefinition } from '../components/componentLibraryModel'
-import { componentDefinitionEntry, insertComponentDefinitionAtTarget } from '../components/insertComponentPackages'
+import { collectComponentLibrarySubjects, filterComponentLibraryPackages, filterHtmlComponents, selectCurrentCatalogPackages, selectCurrentHtmlComponents, componentCatalogInstallStatus, selectProjectLibraryDefinitions,projectLibraryDefinition, filterBuiltInWorkAssets } from '../components/componentLibraryModel'
+import { componentDefinitionEntry, insertComponentDefinitionAtTarget, insertComponentPackagesAtTarget } from '../components/insertComponentPackages'
+import { builtInWorkAssetMetadata, loadBuiltInWorkAsset } from '../../core/components/library/workAssets'
 import { createComponentAuthoringActions } from '../components/commitComponentPackageAuthoring'
 import { extractComponentLibraryEntry } from '../../core/components/library'
 import { exportComponentLibraryArchive } from '../../core/components/library/archive'
@@ -93,6 +94,40 @@ function HtmlComponentLibrarySection({ entries, onRefresh }: { entries: Availabl
       </div>
     </section>
   )
+}
+
+function WorkAssetLibrarySection({ query }: { query: string }) {
+  const kernel = useEditorStore(state => state.courseKernel)
+  const assets = useMemo(() => filterBuiltInWorkAssets(builtInWorkAssetMetadata(), query), [query])
+  const [adding, setAdding] = useState<string | null>(null), [message, setMessage] = useState<string | null>(null)
+  const add = async (id: string, placement?: 'local') => {
+    setAdding(id); setMessage(null)
+    try {
+      const target = kernel.captureTarget()
+      const selected = await loadBuiltInWorkAsset(id)
+      if (!selected) throw new Error('资产已不存在')
+      const result = await insertComponentPackagesAtTarget(kernel, target, [selected], {
+        placement,
+        ...(target.instanceId ? { targetBindings: { navigation: target.instanceId } } : {}),
+      })
+      if (!result.ok) throw new Error(result.reason ?? '资产未能应用')
+      setMessage(selected.usage?.kind === 'transition' ? '转场已应用到所选导航动作。' : '资产已插入，可继续编辑。')
+    } catch (error) { setMessage(error instanceof Error ? error.message : String(error)) }
+    finally { setAdding(null) }
+  }
+  if (!assets.length) return null
+  return <section aria-label="内置作品资产" data-testid="work-asset-library">
+    <div className="component-library__results-heading"><div><strong>内置作品资产</strong><span>{assets.length} 个结果</span></div></div>
+    {message && <p role="status">{message}</p>}
+    <div className="component-library__grid">{assets.map(asset => <article className="component-library-card" key={asset.id} data-testid={`work-asset-${asset.id}`}>
+      <div className="component-library-card__copy"><div className="component-library-card__title"><strong>{asset.title}</strong></div><p>{asset.usage?.description}</p>
+        <div className="component-library-card__metadata"><span>{asset.usage?.editable?.map(value => value === 'parameters' ? '参数' : value === 'structure' ? '结构' : '源码').join(' / ')}</span></div>
+      </div>
+      <div className="component-library-card__actions"><button type="button" className="secondary-button" disabled={adding !== null} onClick={() => void add(asset.id)}>
+        {adding === asset.id ? '正在应用…' : asset.usage?.kind === 'transition' ? '应用到所选导航' : '插入'}
+      </button>{(asset.usage?.kind === 'container' || asset.usage?.kind === 'template') && <button type="button" className="secondary-button" disabled={adding !== null} onClick={() => void add(asset.id, 'local')}>放入当前容器</button>}</div>
+    </article>)}</div>
+  </section>
 }
 
 interface ComponentLibraryDialogProps {
@@ -226,6 +261,7 @@ export function ComponentLibraryDialog({
         </nav>
 
         <main className="component-library__results">
+          {(!subject || subject === '通用组件') && !schoolStage && !category && <WorkAssetLibrarySection query={query} />}
           <div className="component-library__results-heading">
             <div><strong>{subject ?? '全部组件'}</strong><span>{visibleEntries.length} 个结果</span></div>
             <button
@@ -345,7 +381,7 @@ export function ComponentsTab({componentCatalog=EMPTY_CATALOG,onImportExternalCo
   const report=(error:unknown)=>kernel.setFeedback({errorMessage:error instanceof Error?error.message:String(error)})
   const insert=(id:string,destination:'document'|'paper'='document')=>{
     const target=kernel.captureTarget(),state=useEditorStore.getState()
-    const camera=target.project.surfaces.find(surface=>surface.id===target.surfaceId)?.kind==='spatial'&&selectEditingScope(state)!=='global'
+    const camera=(target.surfaceId ? componentSurface(target.project,target.surfaceId) : undefined)?.kind==='spatial'&&selectEditingScope(state)!=='global'
       ? state.readSpatialView(target.surfaceId??'',target.documentId).camera:null
     void insertComponentDefinitionAtTarget(kernel,target,id,undefined,{destination,...(camera?{center:{x:camera.x,y:camera.y}}:{})}).then(result=>{if(!result.ok)report(result.reason)})
   }
@@ -361,13 +397,13 @@ export function ComponentsTab({componentCatalog=EMPTY_CATALOG,onImportExternalCo
     <div className="component-entry-actions"><button type="button" className="component-entry-action" data-testid="open-component-library" onClick={()=>setLibraryOpen(true)}><Library size={20}/><span><strong>打开组件与资产库</strong><small>按通用和学科浏览，可多选添加到画布</small></span></button><button type="button" className="component-entry-action" data-testid="import-external-components" disabled={!onImportExternalComponents} onClick={onImportExternalComponents}><Upload size={20}/><span><strong>导入外部组件</strong><small>保留源码与资源，可继续编辑</small></span></button></div>
     <div className="section-heading section-heading--spaced"><span>工程组件</span><span>{packages.length}</span></div>
     <div className="composition-fragment-actions"><select aria-label="提炼范围" value={extractKind} onChange={event=>{setExtractKind(event.currentTarget.value as typeof extractKind);setExtractPages(null)}}><option value="objects">所选对象组合</option><option value="page">当前页面模板</option><option value="structure">所选课程结构</option></select><input aria-label="资产名称" placeholder="为资产命名" value={extractName} onChange={event=>setExtractName(event.currentTarget.value)}/><button type="button" disabled={(extractKind==='objects'?!view.selectedInstanceIds.length:extractKind==='page'?!view.surfaceId:!selectedTemplatePages.length)||!extractName.trim()||extracting} onClick={()=>void extract()}>提炼到我的资产库</button></div>
-    {extractKind==='structure'&&<fieldset><legend>保留顺序的页面</legend>{project?.surfaces.map(surface=><label key={surface.id}><input type="checkbox" checked={selectedTemplatePages.includes(surface.id)} onChange={event=>setExtractPages(event.currentTarget.checked?[...selectedTemplatePages,surface.id]:selectedTemplatePages.filter(id=>id!==surface.id))}/>{surface.title}</label>)}</fieldset>}
+    {extractKind==='structure'&&<fieldset><legend>保留顺序的页面</legend>{project && componentSurfaces(project).map(surface=><label key={surface.id}><input type="checkbox" checked={selectedTemplatePages.includes(surface.id)} onChange={event=>setExtractPages(event.currentTarget.checked?[...selectedTemplatePages,surface.id]:selectedTemplatePages.filter(id=>id!==surface.id))}/>{surface.title}</label>)}</fieldset>}
     <label className="component-project-search"><Search size={15}/><input type="search" aria-label="搜索工程组件" placeholder="搜索工程组件" value={searchQuery} onChange={event=>setSearchQuery(event.currentTarget.value)}/></label>
     {!visible.length?<div className="empty-state">{packages.length?'没有符合条件的组件。':'工程中还没有组件。请从组件库加入，或导入外部组件。'}</div>:<div className="project-component-list">{visible.map(data=>{
       const id=data.id, usage=collectCourseComponentPackageUsage(project!,id),entry=current.find(value=>value.packageId===(data.library?.packageId ?? id)),status=entry?componentCatalogInstallStatus(entry,data):null
       return <article className="project-component-card" key={id} data-testid={`component-package-${id}`}><div className="project-component-card__main">
         <button type="button" className="component-card" data-testid={`component-${id}`} draggable={usage.totalInstanceCount>0} onDragStart={event=>{event.dataTransfer.effectAllowed='copy';event.dataTransfer.setData('application/x-courseware-element',`component:${id}`);event.dataTransfer.setData('text/plain',data.title??id)}} onClick={()=>insert(id)}><span className="component-card__thumbnail"><Box size={20}/></span><span><strong>{data.title??id}</strong><small>{data.library?.version ?? data.version ?? '工程定义'} · {usage.totalInstanceCount} 个实例</small></span><Box size={15}/></button>
-        {project?.surfaces.find(surface=>surface.id===view.surfaceId)?.kind==='flow'&&<button type="button" aria-label={`将${data.title??id}放到纸面上`} onClick={()=>insert(id,'paper')}>放到纸面上</button>}
+        {(project && view.surfaceId ? componentSurface(project,view.surfaceId) : undefined)?.kind==='flow'&&<button type="button" aria-label={`将${data.title??id}放到纸面上`} onClick={()=>insert(id,'paper')}>放到纸面上</button>}
         <details className="project-component-menu"><summary aria-label={`管理${data.title??id}`}><MoreVertical size={17}/></summary><div className="project-component-menu__panel" role="menu">
           <button type="button" role="menuitem" onClick={event=>{closeContainingMenu(event.currentTarget);setDetailsId(id)}}><Info size={14}/>查看详情</button>
           <button type="button" role="menuitem" disabled={!usage.totalInstanceCount} onClick={()=>void(async()=>{try{if(!window.desktopAPI)throw new Error('请在桌面软件中导出资产。');await window.desktopAPI.exportBinary({suggestedName:`${data.title??id}.h5component`,extension:'h5component',bytes:exportComponentLibraryArchive(componentDefinitionEntry(kernel,id))})}catch(error){report(error)}})()}><Download size={14}/>导出结构资产</button>

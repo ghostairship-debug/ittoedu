@@ -1,4 +1,6 @@
 // @vitest-environment node
+import { componentSurfaces } from '../../src/shared/contracts/component-platform/project'
+import { testContainerInstance } from '../helpers/glxWorkFixture'
 import { modelToolWireName } from '../../src/main/workbench/providers/OpenAIChatProvider'
 import { randomUUID } from 'node:crypto'
 import { promises as fs } from 'node:fs'
@@ -26,10 +28,10 @@ async function fixture(mode: 'surface' | 'range' = 'surface', saveProjection = t
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'g20-saved-course-'))
   const documents = new DocumentHostService(path.join(root, 'documents'))
   const project = createBlankCourseProjectV10('Original work', randomUUID)
-  const surfaceId = project.surfaces[0]!.id, instanceId = randomUUID()
+  const surfaceId = componentSurfaces(project)[0]!.id, instanceId = randomUUID()
   project.definitions[TEXT_DEFINITION.id] = structuredClone(TEXT_DEFINITION)
   project.instances[instanceId] = { id: instanceId, definitionId: TEXT_DEFINITION.id, data: { content: { inlines: [{ type: 'text', text: 'ABCDEF' }] } } }
-  project.surfaces[0]!.childIds.push(instanceId)
+  testContainerInstance(project, 0).childIds.push(instanceId)
   const document = await documents.internalAPI.create({ kind: 'course-v10', project,
     resources: { assets: {}, components: {} } }, 'lesson.h5lesson')
   const settings = new ExecutionSettingsStore({ directory: path.join(root, 'settings'), encryption: {
@@ -198,8 +200,10 @@ it('retries a normally saved and reopened V10 work with the original scope and f
   expect((await f.service.submissions.read(submissionId))?.documents).toEqual(f.send.documents)
   expect((await f.service.engine.read(f.failed.runId))?.documentBindings?.[f.document.documentId])
     .toMatchObject({ path: f.filename, kind: 'course-v10', projectId: f.project.id, epoch: f.document.epoch, savedRevision: 1 })
-  expect(await f.documents.internalAPI.read(reopened.documentId)).toMatchObject({ dirty: true,
-    model: { project: { title: 'Saved human edit', surfaces: [{ title: 'Later unsaved human edit' }] } } })
+  const continued = await f.documents.internalAPI.read(reopened.documentId)
+  expect(continued).toMatchObject({ dirty: true, model: { project: { title: 'Saved human edit' } } })
+  if (continued.model.kind !== 'course-v10') throw new Error('Expected current course')
+  expect(componentSurfaces(continued.model.project)[0].title).toBe('Later unsaved human edit')
   expect((await f.service.events.snapshot(f.send.conversationId)).items.filter(item => item.type === 'document.save')).toEqual([])
 })
 

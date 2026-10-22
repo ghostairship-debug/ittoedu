@@ -14,7 +14,7 @@ function project(title: string) {
   value.definitions[TEXT_DEFINITION.id] = TEXT_DEFINITION
   value.instances.text = { id: 'text', definitionId: TEXT_DEFINITION.id, data: courseAuthorData(createTextData(title)),
     frame: { width: 200, height: 80, transform: [1, 0, 0, 1, 20, 20] } }
-  value.surfaces[0].childIds.push('text')
+  value.instances[value.rootIds[0]].childIds!.push('text')
   return value
 }
 
@@ -143,7 +143,10 @@ it.each([false, true])('releases a native listener when execCommand returns %s w
     await waitFor(() => expect(h.feedback).toHaveBeenCalledWith(expect.objectContaining({ errorMessage: '系统剪贴板命令未完成，请重试' })))
     const b = await h.selectB()
     emitNative('cut')
-    await waitFor(() => expect(h.registry.get(b.documentId).read().model).toMatchObject({ project: { surfaces: [{ childIds: [] }] } }))
+    await waitFor(() => {
+      const model = h.registry.get(b.documentId).read().model
+      expect(model.kind === 'course-v10' && model.project.instances[model.project.rootIds[0]].childIds).toEqual([])
+    })
     expect(h.model().project.instances.text).toBeDefined()
     expect(h.first.read().undoDepth).toBe(0)
   } finally { h.stop() }

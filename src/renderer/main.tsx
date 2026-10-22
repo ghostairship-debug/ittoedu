@@ -6,7 +6,6 @@ import { selectHasUnsavedCourseDocuments, useEditorStore } from './store/editorS
 import { AppErrorBoundary } from './ui/AppErrorBoundary'
 import { installRendererDiagnostics } from './diagnostics/installRendererDiagnostics'
 import { BUNDLED_FONT_MANIFEST } from '../shared/fonts/bundledFontAssets'
-import { ensureBundledFonts } from '../shared/fonts/ensureBundledFonts'
 import { installBundledFontFaces } from '../shared/fonts/installBundledFontFaces'
 import { installFetchBundledFontEmbedSource } from './export/bundledFontEmbedSourceFetch'
 
@@ -20,12 +19,9 @@ useEditorStore.subscribe((state) => {
 const root = document.getElementById('root')
 if (!root) throw new Error('应用根节点不存在')
 
-// Slide text is measured synchronously into canvases the moment a surface
-// mounts, and the Player freezes that measurement into a texture. Register and
-// start loading the bundled faces now. BundledFontBoundary holds metric-sensitive
-// surfaces until ready without delaying the workspace shell. `ensureBundledFonts()` never rejects.
+// Keep every face declared. CSS and precision measurements request the slices
+// their actual text needs, rather than loading the complete family at startup.
 installBundledFontFaces()
-void ensureBundledFonts()
 
 // Teach the export path where the editor's font bytes are. This is a
 // registration, not a read: nothing is fetched until an export asks for it, so

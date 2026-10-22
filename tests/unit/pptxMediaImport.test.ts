@@ -1,3 +1,4 @@
+import { componentSurfaces } from '../../src/shared/contracts/component-platform/project'
 import { beforeEach, expect, it, vi } from 'vitest'
 import { parsePptxImport } from '@/renderer/project/pptxImport'
 import { readMediaMetadata } from '@/renderer/project/assetManager'
@@ -14,7 +15,7 @@ import { courseProjectV10Schema } from '@/shared/contracts/component-platform/sc
 function importProject(draft: Awaited<ReturnType<typeof parsePptxImport>>) {
   const project = createBlankCourseProjectV10('媒体'), resources = { assets: {}, components: {} }
   const step = planPptxImportTransaction({ documentId: 'media', epoch: 'epoch', project, resources, editingProject: project,
-    activeStateId: null, surfaceId: project.surfaces[0].id, instanceIds: [], instanceId: null }, draft, '媒体')
+    activeStateId: null, surfaceId: componentSurfaces(project)[0].id, instanceIds: [], instanceId: null }, draft, '媒体')
   const model = new CourseV10Driver().apply({ kind: 'course-v10', project, resources }, { type: step.type, edits: step.edits, expected: step.expected })
   if (model.kind !== 'course-v10') throw new Error('V10 required')
   return { original: project, project: model.project }

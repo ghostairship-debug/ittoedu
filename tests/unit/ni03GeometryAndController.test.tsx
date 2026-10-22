@@ -1,3 +1,5 @@
+import { appendRootContainers, testContainerInstance } from '../helpers/glxWorkFixture'
+import { componentSurfaces } from '../../src/shared/contracts/component-platform/project'
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { expect, it } from 'vitest'
 import { promises as fs } from 'node:fs'
@@ -34,7 +36,7 @@ function fixture() {
     project.instances[id] = { id, definitionId: TEXT_DEFINITION.id, data: JSON.parse(JSON.stringify(createTextComponentData(id))),
       ...(id === 'locked' ? { locked: true } : {}), frame: { width, height, transform: [1, 0, 0, 1, x, y] } }
   }
-  project.surfaces[0].childIds = ['group']
+  testContainerInstance(project, 0).childIds = ['group']
   return project
 }
 function GeometryPanel() {
@@ -78,10 +80,10 @@ it('keeps the active affine calculation, roots and locks, preserves same-space F
   expect(distributed.instances.locked).toEqual(project.instances.locked)
   expect(() => courseGeometryEdits(project, ['group', 'a'], { kind: 'align', alignment: 'left' })).toThrow('至少需要')
   project.instances.remote = { ...structuredClone(project.instances.a), id: 'remote' }
-  project.surfaces.push({ id: 'remote-surface', kind: 'slide', title: '别页', childIds: ['remote'] })
+  appendRootContainers(project, { id: 'remote-surface', kind: 'slide', title: '别页', childIds: ['remote'] })
   expect(() => courseGeometryEdits(project, ['a', 'remote'], { kind: 'align', alignment: 'left' })).toThrow('不同归属')
-  project.surfaces[0].kind = 'flow'
-  project.surfaces[0].childIds = ['a', 'b', 'c', 'locked']
+  testContainerInstance(project, 0).container.kind = 'flow'
+  testContainerInstance(project, 0).childIds = ['a', 'b', 'c', 'locked']
   delete project.instances.group
   project.instances.a.flowPlacement = { space: 'paper', plane: 'overlay' }
   project.instances.b.flowPlacement = { space: 'viewport', plane: 'overlay' }
@@ -93,7 +95,7 @@ it('keeps the active affine calculation, roots and locks, preserves same-space F
   expect(() => courseGeometryEdits(project, ['a', 'b'], { kind: 'align', alignment: 'left' })).toThrow('当前正文排版位置')
   delete project.instances.b.flowPlacement
   expect(() => courseGeometryEdits(project, ['a', 'b'], { kind: 'align', alignment: 'left' })).toThrow('正文保持阅读布局')
-  const input = { kind: 'overlay' as const, surfaceId: project.surfaces[0].id,
+  const input = { kind: 'overlay' as const, surfaceId: componentSurfaces(project)[0].id,
     placement: { space: 'paper' as const, plane: 'overlay' as const, paragraphAnchor: { blockId: 'observed-anchor', offsetY: 14, xRatio: .25 } } }
   const refs = new Map([['observed-anchor', { kind: 'instance' as const, instanceId: 'b' }]])
   const anchorEdit = flowPlacementEdits(project, 'a', input, refs).find(edit => edit.type === 'instance.flowPlacement.set')
@@ -119,7 +121,7 @@ it('uses the original multi-selection properties UI and one Session Undo with ro
 
 it('aligns free children inside the same Flow floating container without requiring child placements', () => {
   const project = fixture()
-  project.surfaces[0].kind = 'flow'
+  testContainerInstance(project, 0).container.kind = 'flow'
   project.instances.group.flowPlacement = { space: 'paper', plane: 'overlay', paragraphAnchor: { blockId: 'body', offsetY: 12, xRatio: .5 } }
   const aligned = apply(project, courseGeometryEdits(project, ['a', 'b', 'c'], { kind: 'align', alignment: 'left' }))
   expect(aligned.instances.a.frame!.transform).toEqual([1, 0, 0, 1, 10, 70])
@@ -134,7 +136,7 @@ it.each(['elements', 'slide-authoring'] as const)('uses %s controller defaults a
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'ni03-controller-owner-'))
   try {
     const project = fixture()
-    project.surfaces[0].designSize = { width: 1000, height: 600 }
+    testContainerInstance(project, 0).container.designSize = { width: 1000, height: 600 }
     // The blank-course factory already includes a controller; exercise the original missing-controller repair path.
     for (const instance of Object.values(project.instances)) if (instance.definitionId === TEACHER_CONTROLLER_DEFINITION.id) {
       delete project.instances[instance.id]

@@ -46,6 +46,8 @@ export const mediaFilesRequestSchema = z.discriminatedUnion('type', [
 ])
 export type MediaFilesRequest = z.infer<typeof mediaFilesRequestSchema>
 export interface MediaFileEditorPort {
+  /** End only this derived preview; formal file data remains owned by Main. */
+  release?(binding: FileArtifactBinding): Promise<void> | void
   preview(binding: FileArtifactBinding, operations: readonly MediaFileOperation[]): Promise<MediaFileSnapshot>
   save(binding: FileArtifactBinding, operations: readonly MediaFileOperation[]): Promise<MediaFileSnapshot>
   /** Explicit discard/reload must obtain a fresh binding from the file owner. */

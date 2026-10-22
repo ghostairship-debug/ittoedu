@@ -1,20 +1,8 @@
 /**
- * Load every bundled face before anything measures text.
- *
- * Why this has to happen before the first frame: slide text is laid out
- * synchronously by `renderTextNodeCanvas`, and the Player bakes that
- * measurement into a GPU texture (`scene.textures.addCanvas`) which is only
- * repainted on an explicit update. Canvas 2D silently falls back to another
- * font while a webfont is still loading, so line breaks, auto-height and
- * auto-shrink would all be computed against the fallback metrics and then
- * frozen. That is worse than a visible reflow: the drift becomes permanent, and
- * DOM surfaces on the same page — which do reflow when the font arrives — end
- * up disagreeing with the canvas about metrics.
- *
- * Why `FontFace.load()` and not `document.fonts.load(spec, text)`: the latter
- * only loads faces whose `unicode-range` intersects the text it is given, and
- * we have no way to collect the text of a whole project up front. `load()` on
- * each face ignores `unicode-range` and pulls the full set from local disk.
+ * Precision measurements prepare their current CSS font specs and characters.
+ * This avoids freezing fallback metrics while loading only the unicode slices
+ * needed in the actual Document. Explicit all-face callers retain the original
+ * ensureBundledFonts API; editor startup uses declarations alone.
  *
  * This module imports only the family constants, never the font assets, so the
  * Player runtime can depend on it without inlining any font bytes.
@@ -34,7 +22,7 @@ export interface LoadableFontFaceSet {
 
 const BUNDLED_FAMILY_NAMES = new Set(BUNDLED_FONT_FAMILIES)
 
-let bundledFontLoad: Promise<void> | null = null
+const bundledFontLoads = new WeakMap<LoadableFontFaceSet, Promise<void>>()
 
 /**
  * `FontFace.family` keeps whatever quoting the `@font-face` rule used, so
@@ -82,14 +70,52 @@ async function loadBundledFontFaces(fontSet: LoadableFontFaceSet | null): Promis
  * Load every bundled face registered on the document.
  *
  * Idempotent and concurrency-safe: the first call starts the work and every
- * later call awaits the same promise, so the faces are never requested twice.
+ * later call for that same FontFaceSet awaits its promise.
  * The returned promise always resolves — font failures are reported, not
  * thrown, because no caller may refuse to boot over typography.
  *
- * `fontSet` exists for tests; production callers pass nothing and get
- * `document.fonts`. It is only consulted on the call that starts the load.
+ * Explicit all-face consumers retain this API. New precision consumers use
+ * prepareTextFonts with their current spec/text instead.
  */
 export function ensureBundledFonts(fontSet?: LoadableFontFaceSet | null): Promise<void> {
-  bundledFontLoad ??= loadBundledFontFaces(fontSet ?? documentFontFaceSet())
-  return bundledFontLoad
+  const target = fontSet === undefined ? documentFontFaceSet() : fontSet
+  if (!target) return Promise.resolve()
+  let pending = bundledFontLoads.get(target)
+  if (!pending) { pending = loadBundledFontFaces(target); bundledFontLoads.set(target, pending) }
+  return pending
+}
+
+export interface TextFontRequest { readonly font: string; readonly text: string }
+export interface TextFontFaceSet {
+  load(font: string, text?: string): Promise<unknown>
+  check?(font: string, text?: string): boolean
+}
+
+/** Prepare only the faces needed by this text in its actual measuring realm.
+ * The browser owns face caching; a later character or style is checked again. */
+export function prepareTextFonts(requests: readonly TextFontRequest[], fonts: TextFontFaceSet | null | undefined): Promise<void> | undefined {
+  if (!fonts?.load) return undefined
+  const grouped = new Map<string, string>()
+  for (const { font, text } of requests) if (text) grouped.set(font, (grouped.get(font) ?? '') + text)
+  const pending: Promise<unknown>[] = []
+  for (const [font, text] of grouped) {
+    if (fonts.check?.(font, text)) continue
+    pending.push(fonts.load(font, text))
+  }
+  return pending.length ? Promise.all(pending).then(() => {}) : undefined
+}
+
+/** Read the rendered run styles, including formula glyphs and inherited fonts. */
+export function elementTextFontRequests(element: HTMLElement): TextFontRequest[] {
+  const dom = element.ownerDocument, view = dom.defaultView
+  if (!view) return []
+  const requests: TextFontRequest[] = [], walker = dom.createTreeWalker(element, 4 /* SHOW_TEXT */)
+  for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+    const text = node.textContent, parent = node.parentElement
+    if (!text || !parent) continue
+    const style = view.getComputedStyle(parent)
+    const font = style.font || `${style.fontStyle || 'normal'} ${style.fontWeight || '400'} ${style.fontSize || '16px'} ${style.fontFamily || 'sans-serif'}`
+    requests.push({ font, text })
+  }
+  return requests
 }

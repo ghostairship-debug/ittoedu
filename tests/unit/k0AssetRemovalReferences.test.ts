@@ -1,3 +1,4 @@
+import { testContainerInstance } from '../helpers/glxWorkFixture'
 // @vitest-environment node
 import { expect, it } from 'vitest'
 import { createBlankCourseProjectV10 } from '../../src/core/course/createCourseProjectV10'
@@ -9,7 +10,7 @@ function sample(): Extract<DocumentModel, { kind: 'course-v10' }> {
   const project = createBlankCourseProjectV10('引用')
   project.definitions.custom = { id: 'custom', role: 'content', implementation: { kind: 'builtin', key: 'group' } }
   project.instances.custom = { id: 'custom', definitionId: 'custom', data: {} }
-  project.surfaces[0].childIds.push('custom')
+  testContainerInstance(project, 0).childIds.push('custom')
   project.assets.art = { id: 'art', path: 'assets/art.png', mimeType: 'image/png' }
   return { kind: 'course-v10', project, resources: { assets: { art: new Uint8Array([1, 2, 3]) }, components: {} } }
 }
@@ -20,7 +21,7 @@ it('keeps assets used by an effective builtin override, including a named presen
   model.project.instances.custom.data = { html: '<img src="picture">', resourceBindings: { picture: 'art' } }
   expect(() => driver.apply(model, captureComponentOperation(model.project, [{ type: 'asset.remove', assetId: 'art' }]))).toThrow('素材仍被工程内容使用')
   model.project.instances.custom.data = { html: '' }
-  model.project.surfaces[0].presentation = { states: [{ id: 'show', title: '呈现', overrides: { custom: {
+  testContainerInstance(model.project, 0).container!.presentation = { states: [{ id: 'show', title: '呈现', overrides: { custom: {
     data: { html: '<img src="picture">', resourceBindings: { picture: 'art' } },
   } } }] }
   expect(() => driver.apply(model, captureComponentOperation(model.project, [{ type: 'asset.remove', assetId: 'art' }]))).toThrow('素材仍被工程内容使用')

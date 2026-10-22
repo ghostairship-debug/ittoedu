@@ -1,4 +1,6 @@
 // @vitest-environment node
+import { componentSurfaces } from '../../src/shared/contracts/component-platform/project'
+import { testContainerInstance } from '../helpers/glxWorkFixture'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
@@ -45,7 +47,7 @@ function imported(id: string, kind: 'image' | 'audio' | 'video', bytes: Uint8Arr
 }
 
 it('replaces and transforms a customized professional image without replacing source, frame or captured state', async () => {
-  const project = createBlankCourseProjectV10('定制图片续编辑'), surface = project.surfaces[0]
+  const project = createBlankCourseProjectV10('定制图片续编辑'), surface = componentSurfaces(project)[0]
   const definition = customized(IMAGE_DEFINITION)
   project.definitions[definition.id] = definition
   const data = { ...createImageData('original', '原图说明'), fit: 'cover' as const,
@@ -53,8 +55,8 @@ it('replaces and transforms a customized professional image without replacing so
   const stateData = { ...data, alt: '命名态人工说明' }
   project.instances.image = { id: 'image', definitionId: definition.id, data, frame }
   project.instances.neighbor = { id: 'neighbor', definitionId: definition.id, data: createImageData('original') }
-  surface.childIds = ['image', 'neighbor']
-  surface.presentation = { initialStateId: 'question', states: [{ id: 'question', title: '提问', overrides: { image: { data: stateData } } }] }
+  testContainerInstance(project, surface.id).childIds = ['image', 'neighbor']
+  testContainerInstance(project, surface.id).container.presentation = { initialStateId: 'question', states: [{ id: 'question', title: '提问', overrides: { image: { data: stateData } } }] }
   const originalBytes = encodeImageTransformPng({ width: 1, height: 1, data: Uint8Array.from([0, 0, 255, 255]) })
   const replacementBytes = encodeImageTransformPng({ width: 1, height: 1, data: Uint8Array.from([255, 0, 0, 127]) })
   const replacement = imported('replacement', 'image', replacementBytes)
@@ -105,7 +107,7 @@ it('replaces and transforms a customized professional image without replacing so
 })
 
 it.each(['audio', 'video'] as const)('replaces customized professional %s using the same media predicate and one formal undo', async kind => {
-  const project = createBlankCourseProjectV10('定制播放媒体'), surface = project.surfaces[0]
+  const project = createBlankCourseProjectV10('定制播放媒体'), surface = componentSurfaces(project)[0]
   const definition = customized(kind === 'audio' ? AUDIO_DEFINITION : VIDEO_DEFINITION)
   project.definitions[definition.id] = definition
   const data = kind === 'audio'
@@ -113,7 +115,7 @@ it.each(['audio', 'video'] as const)('replaces customized professional %s using 
     : { ...createVideoData('original', '人工视频'), volume: .35, loop: true, startTime: 2, endTime: 8, fit: 'cover' as const }
   project.instances.media = { id: 'media', definitionId: definition.id, data, frame }
   project.instances.neighbor = { id: 'neighbor', definitionId: definition.id, data }
-  surface.childIds = ['media', 'neighbor']
+  testContainerInstance(project, surface.id).childIds = ['media', 'neighbor']
   const originalBytes = Uint8Array.from([1, 2, 3]), replacement = imported('replacement', kind, Uint8Array.from([4, 5, 6]))
   project.assets.original = { ...imported('original', kind, originalBytes).meta }
   const { bridge, documentId, kernel } = await setup(project, { assets: { original: originalBytes }, components: {} })

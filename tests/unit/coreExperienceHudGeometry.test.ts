@@ -1,3 +1,5 @@
+import { createTestProjectFromLegacy } from '../helpers/glxWorkFixture'
+import { componentSurfaces } from '../../src/shared/contracts/component-platform/project'
 import { expect, it } from 'vitest'
 import type { ComponentFrame, CourseProjectV10 } from '../../src/shared/contracts/component-platform'
 import { createTeacherControllerData, TEACHER_CONTROLLER_DEFINITION } from '../../src/components/teacher-controller'
@@ -5,11 +7,11 @@ import { frameCorners, transformPoint } from '../../src/core/components/geometry
 import { createTeacherControllerHudGeometry, projectTeacherControllerInstances, restoreTeacherControllerFrameEdits,
   teacherControllerReferenceSize } from '../../src/shared/teacherControllerViewportGeometry'
 
-const project = (): CourseProjectV10 => ({ schemaVersion: 10, id: 'hud', revision: 0, title: 'Mixed', definitions: { [TEACHER_CONTROLLER_DEFINITION.id]: TEACHER_CONTROLLER_DEFINITION },
+const project = (): CourseProjectV10 => (createTestProjectFromLegacy({ schemaVersion: 10, id: 'hud', revision: 0, title: 'Mixed', definitions: { [TEACHER_CONTROLLER_DEFINITION.id]: TEACHER_CONTROLLER_DEFINITION },
   instances: { teacher: { id: 'teacher', definitionId: TEACHER_CONTROLLER_DEFINITION.id, data: JSON.parse(JSON.stringify({ ...createTeacherControllerData(), defaultCollapsed: false })),
     frame: { width: 880, height: 64, transform: [1, 0, 0, 1, 200, 638] } } }, global: { underlay: [], overlay: ['teacher'] }, assets: {},
   surfaces: [{ id: 'slide', kind: 'slide', title: 'Slide', childIds: [], designSize: { width: 1280, height: 720 } },
-    { id: 'flow', kind: 'flow', title: 'Flow', childIds: [] }, { id: 'spatial', kind: 'spatial', title: 'Spatial', childIds: [], designSize: { width: 960, height: 640 } }] })
+    { id: 'flow', kind: 'flow', title: 'Flow', childIds: [] }, { id: 'spatial', kind: 'spatial', title: 'Spatial', childIds: [], designSize: { width: 960, height: 640 } }] }))
 
 it('projects directly into the actual HUD rect from one global reference, with the same inverse for hit and handles', () => {
   const original = project(), saved = structuredClone(original)
@@ -46,10 +48,10 @@ it('keeps the formal frame reference stable when differently sized surfaces are 
   const show = (value: CourseProjectV10) => projectTeacherControllerInstances(value, createTeacherControllerHudGeometry({
     referenceSize: teacherControllerReferenceSize(value), viewportRect: { x: 0, y: 0, width: 1000, height: 500 },
   })).instances.teacher.frame
-  const before = show(original), reordered = { ...original, surfaces: [...original.surfaces].reverse() }
+  const before = show(original), reordered = { ...original, rootIds: [...original.rootIds].reverse() }
   expect(show(reordered)).toEqual(before)
   const data = JSON.parse(JSON.stringify(original.instances.teacher.data)); delete data.hudReferenceSize
   original.instances.teacher.data = data
   expect(teacherControllerReferenceSize(original)).toEqual({ width: 1280, height: 720 })
-  expect(teacherControllerReferenceSize({ ...original, surfaces: reordered.surfaces })).toEqual({ width: 1280, height: 720 })
+  expect(teacherControllerReferenceSize({ ...original, rootIds: reordered.rootIds })).toEqual({ width: 1280, height: 720 })
 })

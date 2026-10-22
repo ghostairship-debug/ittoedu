@@ -1,4 +1,5 @@
 // @vitest-environment node
+import { setRootContainers } from '../helpers/glxWorkFixture'
 import { promises as fs } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -50,10 +51,10 @@ async function fixture() {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'explicit-delivery-')); roots.push(root)
   const host = new DocumentHostService(path.join(root, 'journal'))
   const project = createBlankCourseProjectV10('明确交付')
-  project.global.overlay = []; project.definitions = { text: { id: 'text', role: 'content', implementation: { kind: 'builtin', key: 'guoling.text' } } }
-  project.instances = { text: { id: 'text', definitionId: 'text', data: textDataEdit('text', createTextComponentData('当前正式正文')).value,
-    frame: { width: 500, height: 100, transform: [1, 0, 0, 1, 20, 20] } } }
-  project.surfaces = [{ id: 'page', kind: 'slide', title: '首页', childIds: ['text'], designSize: { width: 1280, height: 720 } }]
+  project.global.overlay = []; project.definitions = { ...project.definitions,  text: { id: 'text', role: 'content', implementation: { kind: 'builtin', key: 'guoling.text' } }  }
+  project.instances = { ...project.instances,  text: { id: 'text', definitionId: 'text', data: textDataEdit('text', createTextComponentData('当前正式正文')).value,
+    frame: { width: 500, height: 100, transform: [1, 0, 0, 1, 20, 20] } }  }
+  setRootContainers(project, [{ id: 'page', kind: 'slide', title: '首页', childIds: ['text'], designSize: { width: 1280, height: 720 } }])
   const document = await host.internalAPI.create({ kind: 'course-v10', project, resources: { assets: {}, components: {} } }, '明确交付.h5lesson')
   const operations = new DocumentDeliveryOperationStore(path.join(root, 'operations')), stop = new AbortController()
   const saveWithFact = vi.fn(host.saveWithFact.bind(host)), authorize = vi.fn(async () => {})

@@ -1,4 +1,5 @@
 // @vitest-environment node
+import { createTestProjectFromLegacy, testContainerInstance } from '../helpers/glxWorkFixture'
 import { beforeEach, expect, it, vi } from 'vitest'
 import { parse } from '@babel/parser'
 import { createComponentReferenceCapture } from '../../src/core/components/library/references'
@@ -21,9 +22,9 @@ const entryText = 'import "./helper"; export default { mount(ctx) { ctx.resource
 const helperText = 'export const icon = ctx => ctx.resources.url("icon")'
 const source = (text: string): Extract<ComponentImplementation, { kind: 'source' }> => ({ kind: 'source', language: 'javascript', source: text })
 function fixture(): { project: CourseProjectV10; resources: DocumentResources } {
-  const project: CourseProjectV10 = { schemaVersion: 10, id: 'capture', revision: 0, title: 'Source capture',
-    definitions: {}, instances: {}, assets: {}, surfaces: [{ id: 'page', kind: 'slide', title: 'Page', childIds: ['a1', 'a2', 'b'] }],
-    global: { underlay: [], overlay: [] } }
+  const project: CourseProjectV10 = createTestProjectFromLegacy({ schemaVersion: 10, id: 'capture', revision: 0, title: 'Source capture',
+    definitions: {}, instances: {}, assets: {}, surfaces: [{ id: 'page', kind: 'slide', title: 'Page', childIds: [] }],
+    global: { underlay: [], overlay: [] } })
   const resources: DocumentResources = { assets: {}, components: {} }
   for (const id of ['a', 'b']) {
     project.definitions[id] = { id, role: 'content', professionalBuiltinKey: 'guoling.image', implementation: {
@@ -36,7 +37,8 @@ function fixture(): { project: CourseProjectV10; resources: DocumentResources } 
   for (const [id, definitionId] of [['a1', 'a'], ['a2', 'a'], ['b', 'b']]) project.instances[id] = {
     id, definitionId, data: { assetId: 'data-image' }, authoring: { resourceBindings: { authored: 'authored-base' } },
   }
-  project.surfaces[0].presentation = { states: [{ id: 'alternate', title: 'Alternate', overrides: {
+  testContainerInstance(project, 0).childIds = ['a1', 'a2', 'b']
+  testContainerInstance(project, 0).container.presentation = { states: [{ id: 'alternate', title: 'Alternate', overrides: {
     a2: { authoring: { resourceBindings: { authored: 'authored-state' } } },
   } }] }
   for (const id of ['photo-a', 'photo-b', 'icon-a', 'icon-b', 'data-image', 'authored-base', 'authored-state', 'unused']) {
@@ -46,6 +48,11 @@ function fixture(): { project: CourseProjectV10; resources: DocumentResources } 
   return { project, resources }
 }
 const callsFor = (text: string) => vi.mocked(parse).mock.calls.filter(([value]) => value === text)
+const expectSourceOwnerReuse = () => {
+  const implementations = vi.mocked(liveSourceOwners).mock.calls.map(([, implementation]) => implementation)
+  expect(implementations.filter(implementation => implementation.kind === 'source')).toHaveLength(2)
+  expect(implementations.filter(implementation => implementation.kind === 'builtin')).toEqual([{ kind: 'builtin', key: 'guoling.container.slide' }])
+}
 beforeEach(() => { vi.mocked(parse).mockClear(); vi.mocked(liveSourceOwners).mockClear() })
 
 it('shares import/resource syntax and each Source closure across instances and states without sharing owner bindings', () => {
@@ -82,7 +89,7 @@ it('shares removal scanning and protects Source dependencies, image data and aut
   expect(removed.assets.unused).toBeUndefined()
   expect(callsFor(entryText)).toHaveLength(1)
   expect(callsFor(helperText)).toHaveLength(1)
-  expect(liveSourceOwners).toHaveBeenCalledTimes(2)
+  expectSourceOwnerReuse()
   for (const assetId of ['icon-b', 'data-image', 'authored-state']) expect(() => applyComponentOperation(project,
     captureComponentOperation(project, [{ type: 'asset.remove', assetId }]), resources)).toThrow('素材仍被工程内容使用')
   expect(project.assets.unused).toBeDefined()
@@ -96,7 +103,7 @@ it('reuses Source analysis while checking locked replacement candidates and thei
   expect(result.assets.unused.filename).toBe('replacement.png')
   expect(callsFor(entryText)).toHaveLength(1)
   expect(callsFor(helperText)).toHaveLength(1)
-  expect(liveSourceOwners).toHaveBeenCalledTimes(2)
+  expectSourceOwnerReuse()
   expect(() => applyComponentOperation(project, captureComponentOperation(project, [{ type: 'asset.replace',
     asset: { ...project.assets['authored-state'], filename: 'replacement.png' }, bytes: Uint8Array.of(2),
     expectedBytes: resources.assets['authored-state'] }]), resources)).toThrow('对象已锁定')

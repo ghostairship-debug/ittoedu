@@ -332,6 +332,9 @@
                   {
                     "additionalProperties": false,
                     "properties": {
+                      "containerId": {
+                        "$ref": "#/$defs/__schema2"
+                      },
                       "stateId": {
                         "$ref": "#/$defs/__schema2"
                       },
@@ -365,6 +368,9 @@
                   {
                     "additionalProperties": false,
                     "properties": {
+                      "containerId": {
+                        "$ref": "#/$defs/__schema2"
+                      },
                       "locationId": {
                         "$ref": "#/$defs/__schema2"
                       },
@@ -408,13 +414,33 @@
                   {
                     "additionalProperties": false,
                     "properties": {
+                      "containerId": {
+                        "$ref": "#/$defs/__schema2"
+                      },
                       "transition": {
                         "$ref": "#/$defs/__schema13"
                       },
                       "type": {
                         "enum": [
                           "step.next",
-                          "step.previous",
+                          "step.previous"
+                        ],
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "type"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "additionalProperties": false,
+                    "properties": {
+                      "transition": {
+                        "$ref": "#/$defs/__schema13"
+                      },
+                      "type": {
+                        "enum": [
                           "scene.next",
                           "scene.previous",
                           "scene.replay",

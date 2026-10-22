@@ -1,8 +1,9 @@
+import { createTestProjectFromLegacy } from '../helpers/glxWorkFixture'
 import { describe, expect, it } from 'vitest'
 import { resolveCourseProjectDiagnosticTargetRoute, resolveCourseProjectDeliveryFindingRoute, resolveCourseProjectHealthRoute } from '../../src/renderer/diagnostics/projectHealthNavigation'
 import type { CourseProjectV10 } from '../../src/shared/contracts/component-platform/project'
 
-const fixture = (): CourseProjectV10 => ({
+const fixture = (): CourseProjectV10 => (createTestProjectFromLegacy({
   schemaVersion: 10, id: 'health', revision: 0, title: '工程',
   definitions: { group: { id: 'group', role: 'content', implementation: { kind: 'builtin', key: 'guoling.group' } } },
   instances: {
@@ -13,7 +14,7 @@ const fixture = (): CourseProjectV10 => ({
   },
   surfaces: [{ id: 'slide', kind: 'slide', title: '第1页', childIds: ['group'] }],
   global: { underlay: [], overlay: ['globalGroup'] }, assets: { hero: { id: 'hero', path: 'hero.png' } },
-})
+}))
 
 describe('current V10 project diagnostic routes', () => {
   it('follows nested ownership to the actual surface or global scope for health and delivery', () => {

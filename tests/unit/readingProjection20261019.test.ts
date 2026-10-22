@@ -1,3 +1,5 @@
+import { testContainerInstance } from '../helpers/glxWorkFixture'
+import { componentSurfaces } from '../../src/shared/contracts/component-platform/project'
 // @vitest-environment node
 import { expect, it } from 'vitest'
 import { createBlankCourseProjectV10 } from '../../src/core/course/createCourseProjectV10'
@@ -13,7 +15,7 @@ function fixture() {
   for (const id of ['first', 'second']) project.instances[id] = { id, definitionId: 'web', frame, data: {
     html: `<style>.x{color:red}</style><h1>${id} 当前正文</h1><button>记录结果</button><script>const internal = '不属于正文';</script>`,
   } }
-  project.surfaces[0].childIds = ['second', 'first']
+  testContainerInstance(project, 0).childIds = ['second', 'first']
   return { project, resources: { assets: {}, components: {} as Record<string, Record<string, Uint8Array>> } }
 }
 
@@ -32,7 +34,7 @@ it('keeps the complete API in one directly readable reference instead of every S
     expect(file.content).toBeTruthy()
   }
   expect(componentProjectScopeFiles(project, files, { kind: 'instance', instanceId: 'first' })).toContain(references[0])
-  expect(componentProjectScopeFiles(project, files, { kind: 'surface', surfaceId: project.surfaces[0].id })).toContain(references[0])
+  expect(componentProjectScopeFiles(project, files, { kind: 'surface', surfaceId: componentSurfaces(project)[0].id })).toContain(references[0])
   expect(project).toEqual(before)
 })
 

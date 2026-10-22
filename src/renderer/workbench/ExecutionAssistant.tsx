@@ -11,6 +11,7 @@ import { type ConversationRecord } from '../../shared/workbench/conversations'
 import { type ExecutionRunRecord, type ExecutionContentOutput } from '../../shared/workbench/execution'
 import { captureRendererTiming, disclosedExecutionSettings, executionSelectionTargetSchema, type ExecutionDesktopAPI, type ExecutionDocumentReference, type ExecutionSendInput, type ExecutionSubmissionMode, type ExecutionSubmissionRecord } from '../../shared/workbench/executionDesktop'
 import { emptyExecutionProjection, foldExecutionEvents, type ExecutionEvent, type ExecutionProjection } from '../../shared/workbench/executionEvents'
+import type { ExecutionTimelineEntryPage, ExecutionTimelinePageRequest, ExecutionTimelineWindowControl } from '../../shared/workbench/executionTimelineWindow'
 import type { InputAttachmentReference } from '../../shared/workbench/attachments'
 import type { ExecutionRoleSelection, ExecutionSettingsView } from '../../shared/workbench/executionSettings'
 import type { DiscoveredModel, DiscoveredModels, DiscoveredReasoningEffort, ExecutionSettingsAPI } from '../../shared/workbench/executionSettingsDesktop'
@@ -24,7 +25,7 @@ import type { ExternalMcpAPI } from '../../shared/workbench/external'
 import { ExecutionSettingsPanel } from './ExecutionSettingsPanel'
 import { ExternalMcpPanel } from './ExternalMcpPanel'
 import { useExternalUiStateProvider } from './useExternalUiState'
-import { ExecutionTimeline, type ExecutionTimelineProps } from './ExecutionTimeline'
+import { ExecutionTimeline, type ExecutionTimelineProps, type ExecutionTimelineReadingState } from './ExecutionTimeline'
 import { ExecutionDelegationChildren, createExecutionDelegationInteraction, type ExecutionDelegationInteraction } from './ExecutionDelegationChildren'
 import { ExecutionChangeReview, type ExecutionChangeReviewProps } from './ExecutionChangeReview'
 import type { UserCheckpointIndex } from '../../shared/workbench/executionReview'
@@ -149,6 +150,7 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
   const sessionScope = sessionDock.scope
   const selectionVersion = useSyncExternalStore(workbenchSelection.subscribe, workbenchSelection.readVersion)
   const api = suppliedAPI ?? defaultExecutionAPI()
+  const timelineConsumerId = useId(), timelineGeneration = useRef(0)
   const settingsAPI = suppliedSettingsAPI ?? window.desktopAPI?.executionSettings
   const externalAPI = suppliedExternalAPI ?? window.desktopAPI?.externalMcp
   const [workspaceId, setWorkspaceId] = useState('')
@@ -164,6 +166,12 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
   const [permissionOpen, setPermissionOpen] = useState(false), [plusOpen, setPlusOpen] = useState(false)
   const [contextFrozen, setContextFrozen] = useState(false)
   const [projection, setProjection] = useState<ExecutionProjection>(() => emptyExecutionProjection(''))
+  const [timelinePage, setTimelinePage] = useState<ExecutionTimelineEntryPage | null>(null)
+  const timelinePageRef = useRef<ExecutionTimelineEntryPage | null>(null)
+  const timelineReaders = useRef<Omit<ExecutionTimelineWindowControl, 'page' | 'busy'> | null>(null)
+  const refreshTimeline = useRef<(() => void) | null>(null)
+  const timelineContext = useRef('')
+  const timelineReadings = useRef(new Map<string, ExecutionTimelineReadingState>())
   const [run, setRun] = useState<ExecutionRunRecord | null>(null)
   const [settings, setSettings] = useState<ExecutionSettingsView | null>(null)
   const [settingsOpen, setSettingsOpen] = useState(false)
@@ -192,6 +200,8 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
   const modelMenuRef = useRef<HTMLDivElement>(null)
   const [submissions, setSubmissions] = useState<ExecutionSubmissionRecord[]>([])
   const [userHistoryOffsets, setUserHistoryOffsets] = useState<Record<string, number>>({})
+  const userHistoryOffset = active ? userHistoryOffsets[active.conversationId] ?? 0 : 0
+  const userHistoryOffsetRef = useRef(userHistoryOffset); userHistoryOffsetRef.current = userHistoryOffset
   const [latestRequest, setLatestRequest] = useState<ExecutionTimelineProps['latestRequest']>()
   const [sessionSearch, setSessionSearch] = useState('')
   const [sessionMenuId, setSessionMenuId] = useState<string | null>(null)
@@ -305,7 +315,7 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
     setActive(conversation); activeRef.current = conversation
     setDraft(conversation.inputDraft); draftRef.current = conversation.inputDraft
     setAttachments(conversation.inputAttachments); attachmentsRef.current = conversation.inputAttachments
-    setRun(null); setSubmissions([]); setProjection(emptyExecutionProjection(conversation.conversationId)); setError('')
+    setRun(null); setSubmissions([]); setProjection(emptyExecutionProjection(conversation.conversationId)); setTimelinePage(null); timelinePageRef.current = null; setError('')
     const remembered = documentsByConversation.current.get(conversation.conversationId)
     const restored = remembered ?? restoredDocuments(conversation)
     documentsByConversation.current.set(conversation.conversationId, restored)
@@ -465,10 +475,11 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
       setDocumentReferenceIssues(Object.fromEntries(current.filter(value => value.issue).map(value => [value.id, value.issue])))
     } })
     const unsubscribe = documentsAPI.subscribe?.(event => {
-      const id = event.type === 'changed' ? event.snapshot.documentId : event.documentId
+      const facts = event.type === 'changed' ? event.head ?? event.snapshot : event.type === 'closed' ? null : event.head
+      const id = event.type === 'closed' ? event.documentId : facts!.documentId
       const reference = documents.find(value => value.documentId === id)
       if (disposed || !reference) return
-      const snapshot = event.type === 'changed' ? event.snapshot : null
+      const snapshot = facts
       const name = snapshot ? snapshot.binding.kind === 'file' ? snapshot.binding.path.split(/[\\/]/).at(-1) || '已绑定文档' : snapshot.binding.suggestedName
         : latestMetadata.get(id)?.name ?? documentNames[id] ?? '原文档'
       const issue = snapshot ? snapshot.epoch !== reference.epoch ? '原引用需要重新选择' : '' : '原文档尚未打开'
@@ -484,7 +495,12 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
 
   useEffect(() => {
     const conversationId = active?.conversationId
+    timelineContext.current = JSON.stringify([conversationId, active?.revision, userHistoryOffsetRef.current])
+    setTimelinePage(null); timelinePageRef.current = null; timelineReaders.current = null
     if (!api || !conversationId) { setProjection(emptyExecutionProjection(conversationId ?? '')); return }
+    const consumerId = `${timelineConsumerId}:${++timelineGeneration.current}`
+    const windowed = Boolean(api.timelineWindow && api.timelineGroup && api.timelineBody)
+    if (windowed) setProjection(emptyExecutionProjection(conversationId))
     let disposed = false
     let current = emptyExecutionProjection(conversationId)
     let published = current
@@ -530,6 +546,42 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
       if (observedEndedRuns.has(runId)) return
       observedEndedRuns.add(runId); pendingEndedRuns.add(runId)
     }
+    const savedReading = timelineReadings.current.get(conversationId)
+    let windowRequest: ExecutionTimelinePageRequest = savedReading && !savedReading.following
+      ? { start: savedReading.range.start, limit: Math.max(1, savedReading.range.end - savedReading.range.start),
+        anchorKey: savedReading.anchorKey, groups: savedReading.groups } : { groups: savedReading?.groups }
+    let windowTicket = 0
+    const viewInput = () => {
+      const selected = activeRef.current
+      if (disposed || selected?.conversationId !== conversationId) throw new Error('任务过程视图已关闭')
+      return { workspaceId: selected.workspaceId, conversationId, consumerId,
+        userHistoryRevision: selected.revision, userHistoryOffset: userHistoryOffsetRef.current }
+    }
+    const readWindow = async (input: ExecutionTimelinePageRequest, select = false) => {
+      // Navigation is the user's current display intent as soon as they choose it.
+      // A newer durable refresh follows that range while this request is in flight.
+      if (select) windowRequest = { ...input, groups: input.groups ?? windowRequest.groups }
+      const request = select ? windowRequest : input
+      const ticket = ++windowTicket
+      const page = await api.timelineWindow!({ ...viewInput(), ...request })
+      if (!disposed && ticket === windowTicket && page.cursor >= (timelinePageRef.current?.cursor ?? 0)) {
+        const groups = windowRequest.groups
+        windowRequest = request.start === undefined && !request.anchorKey ? { groups }
+          : { start: page.start, limit: request.limit, anchorKey: page.anchorKey, groups }
+        timelinePageRef.current = page; setTimelinePage(page)
+        page.endedRunIds?.forEach(observeEndedRun)
+      }
+      return page
+    }
+    if (windowed) timelineReaders.current = {
+      readPage: input => readWindow(input, true),
+      readGroup: async input => {
+        const { key, ...range } = input
+        windowRequest = { ...windowRequest, groups: { ...windowRequest.groups, [key]: range } }
+        return api.timelineGroup!({ ...viewInput(), ...input })
+      },
+      readBody: input => api.timelineBody!({ ...viewInput(), ...input }),
+    }
     const catchUp = () => {
       catchUpPending = true
       if (catchingUp || disposed) return
@@ -537,8 +589,14 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
       void (async () => {
         while (!disposed && catchUpPending) {
           catchUpPending = false
+          if (windowed) {
+            await readWindow({ ...windowRequest, includeEndedRuns: initial })
+            initial = false
+            if (!disposed) refreshConversation()
+            continue
+          }
           if (initial) {
-            current = await api.timeline(conversationId)
+            current = await api.timeline(conversationId, consumerId)
             initial = false
             current.items.filter(item => item.type === 'run.end').forEach(item => observeEndedRun(item.runId))
           }
@@ -604,6 +662,7 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
       // Only new results received by the selected built-in conversation navigate.
       // Loading a timeline or catching up history must never reopen an old course.
       void focusOpenedCourse(event)
+      if (windowed && event.type === 'run.end') observeEndedRun(event.runId)
       catchUp()
       if (event.type === 'run.end' || event.type === 'run.state' || runRef.current?.runId !== event.runId) {
         if (event.type === 'run.end') void settingsAPI?.read().then(setSettings).catch(() => undefined)
@@ -611,14 +670,27 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
         if (event.type === 'run.end' || event.type === 'run.state') refreshSubmissions()
       }
     })
+    refreshTimeline.current = catchUp
     catchUp()
     const latestRunId = active.runIndex.builtinRunIds.at(-1)
     if (latestRunId) refreshRun(latestRunId)
-    return () => { disposed = true; unsubscribe() }
-  }, [api, active?.conversationId])
+    return () => {
+      disposed = true; unsubscribe(); refreshTimeline.current = null; timelineReaders.current = null
+      void api.releaseTimeline?.(conversationId, consumerId).catch(() => undefined)
+    }
+  }, [api, active?.conversationId, timelineConsumerId])
+  useEffect(() => {
+    const context = JSON.stringify([active?.conversationId, active?.revision, userHistoryOffset])
+    if (context === timelineContext.current) return
+    timelineContext.current = context
+    if (api?.timelineWindow) refreshTimeline.current?.()
+  }, [api, active?.conversationId, active?.revision, userHistoryOffset])
 
-  const openQuestion = useMemo(() => pendingQuestion(projection), [projection])
-  const openApproval = useMemo(() => pendingApproval(projection), [projection])
+  const selectedTimelinePage = timelinePage?.conversationId === active?.conversationId ? timelinePage : null
+  const timelineWindow = useMemo<ExecutionTimelineWindowControl | undefined>(() => selectedTimelinePage && timelineReaders.current
+    ? { page: selectedTimelinePage, ...timelineReaders.current } : undefined, [selectedTimelinePage])
+  const openQuestion = useMemo(() => selectedTimelinePage ? selectedTimelinePage.pendingQuestion : pendingQuestion(projection), [projection, selectedTimelinePage])
+  const openApproval = useMemo(() => selectedTimelinePage ? selectedTimelinePage.pendingApproval : pendingApproval(projection), [projection, selectedTimelinePage])
   const reviewAPI = api
   const reviewLoader = useMemo(() => reviewAPI?.changeReview && active
     ? (input: Parameters<ExecutionChangeReviewProps['loadPage']>[0]) => reviewAPI.changeReview!({
@@ -1260,7 +1332,6 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
     finally { setBusy(false) }
   }
 
-  const userHistoryOffset = active ? userHistoryOffsets[active.conversationId] ?? 0 : 0
   const userHistory = useMemo(() => userMessageWindow(active?.messages ?? [], userHistoryOffset), [active?.messages, userHistoryOffset])
   const readTimelineBlob = useMemo<ExecutionTimelineProps['readBlob']>(() => api && active
     ? ref => api.blob(active.conversationId, ref) : undefined, [api, active?.conversationId])
@@ -1354,7 +1425,7 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
       </section>}
       {error && <p className="execution-assistant__error" role="alert">{error}</p>}
       <div className="execution-assistant__history">
-        {isEmptySession && projection.items.length === 0 && submissions.length === 0 && !historySearchOpen ? <section className="execution-assistant__welcome" aria-label="开始创作">
+        {isEmptySession && (selectedTimelinePage?.total ?? projection.items.length) === 0 && submissions.length === 0 && !historySearchOpen ? <section className="execution-assistant__welcome" aria-label="开始创作">
           <span className="execution-assistant__welcome-mark" aria-hidden="true">✦</span>
           <h2>告诉我想做什么</h2>
           <p>描述目标，或拖入材料，我们一起完善内容。</p>
@@ -1375,7 +1446,7 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
             </nav>
           </header>
         </section>}
-        <ExecutionTimeline projection={projection} userMessages={userHistory.messages} latestRequest={latestRequest} imageResults={active?.conversationId === projection.conversationId ? window.desktopAPI?.imageResults : undefined} workspaceId={active?.workspaceId} onLocateDocument={onLocateDocument} onOpenSavedFile={openSavedFile} readBlob={readTimelineBlob} searchEvents={searchTimelineEvents} historySearchOpen={historySearchOpen} onHistorySearchClose={() => setHistorySearchOpen(false)}
+        <ExecutionTimeline {...(timelineWindow ? { window: timelineWindow } : { projection, userMessages: userHistory.messages })} readingStates={timelineReadings.current} latestRequest={latestRequest} imageResults={active?.conversationId === (selectedTimelinePage?.conversationId ?? projection.conversationId) ? window.desktopAPI?.imageResults : undefined} workspaceId={active?.workspaceId} onLocateDocument={onLocateDocument} onOpenSavedFile={openSavedFile} readBlob={readTimelineBlob} searchEvents={searchTimelineEvents} historySearchOpen={historySearchOpen} onHistorySearchClose={() => setHistorySearchOpen(false)}
           onFirstVisible={api?.timing ? (taskId, itemId, stamp) => {
             const owner = timedSubmissions.current.get(taskId)
             if (!owner) return

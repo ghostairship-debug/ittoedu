@@ -1,3 +1,6 @@
+import { parseContentObjectSource } from '../../contentApply/planning/objectSource'
+import { componentFlowStylePolicy } from '../../../shared/flowNativeLayout'
+import { componentContainers, componentSurfaces } from '../../../shared/contracts/component-platform/project'
 import { z } from 'zod'
 import { literalTextMatches } from '../../tools/literalTextSearch'
 import { taskTargetRegion, type TaskTargetMetadata } from '../../../shared/workbench/taskTargetContext'
@@ -13,7 +16,7 @@ import { captureComponentOperation, equalComponentValue, presentationComponentEd
 import { applyComponentStylePatch, cssStyleName } from '../../../shared/componentStylePatch'
 import { CourseV10Driver } from '../../drivers/CourseV10Driver'
 import type { ContentApplyDiagnostic, ContentApplyIntent, ContentApplyRequest, ContentApplyTarget, ContentApplyResult, ContentApplySource, SurfaceApplyRequest } from '../../contentApply/planning/types'
-import { componentProjectFiles, componentProjectFileSummary, componentProjectLayoutViewports, componentProjectScopeFiles, type ComponentProjectFile, type ComponentProjectFileScope, type ComponentProjectFileState } from './projection'
+import { componentProjectFiles, componentProjectFileSummary, componentProjectLayoutViewports, componentProjectScopeFiles, copyComponentProjectFile, prepareComponentProjectFileSource, type ComponentProjectFile, type ComponentProjectFileScope, type ComponentProjectFileState } from './projection'
 import { assetReferencePath, cssUrlReferences } from '../../../shared/composition/projectReferences'
 import { flowDocumentEdits } from '../../components/document/flowDocumentProjection'
 import { parseDocumentMarkdown } from '../../../shared/document/markdown'
@@ -29,6 +32,7 @@ import { plainDocumentText } from '../../../shared/document/content'
 import { parseFragment, type DefaultTreeAdapterTypes } from 'parse5'
 import { publicContentApplyReceipt, publicOperationReceipt } from '../../tools/publicWriteReceipt'
 import { MODEL_DELIVERY_BYTES, modelTextEnd, modelJsonBytes } from '../../tools/modelDeliveryBudget'
+import { loadBuiltinComponentSource } from '../../components/source/builtinSources'
 
 export type ComponentProjectSnapshot = DocumentSnapshot & { model: Extract<DocumentSnapshot['model'], { kind: 'course-v10' }> }
 export interface ComponentProjectFileInput {
@@ -74,6 +78,8 @@ export interface ComponentProjectFileBatchItem {
   reprepare?(candidate: ComponentProjectSnapshot): Promise<{ baseline: ComponentProjectSnapshot; request: ContentApplyRequest }>
   /** Only a target created by an earlier item uses the batch candidate as its read basis. */
   candidateTarget?: boolean
+  /** A newly established source owner and its initial content cannot commit separately. */
+  required?: boolean
   acknowledge?(command: ComponentOperationBatch): void
 }
 const selector = z.string().min(1).optional(), path = z.string().min(1)
@@ -89,6 +95,8 @@ export const componentProjectFileSchemas = {
   'project.list': z.object({ project: selector, offset: z.number().int().nonnegative().optional(), limit: z.number().int().positive().optional() }).strict(),
   'project.read': z.object({ project: selector, path, query: z.string().min(1).optional(), refresh: z.boolean().optional(), full: z.boolean().optional(), offset: z.number().int().nonnegative().optional(), limit: z.number().int().positive().optional() }).strict(),
   'project.apply': z.union([
+    z.object({ project: selector, path: z.literal('entry.html'), intent: z.literal('program.set'), content: z.string() }).strict(),
+    z.object({ project: selector, path: z.literal('entry.html'), intent: z.literal('program.set'), from: z.string().min(1), content: z.string().optional() }).strict(),
     z.object({ project: selector, operations: z.array(contentApplyFileSchema).min(1) }).strict(),
     z.object({ ...common, content: z.string() }).strict(), z.object({ ...common, from: z.string().min(1), content: z.string().optional() }).strict(),
     z.object({ project: selector, path, region, intent: z.enum(['content', 'style']).optional(),
@@ -107,11 +115,17 @@ const failure = (code: string, message: string, data?: unknown): ToolResult => (
 const key = (documentId: string, path: string) => `${documentId}\u0000${path}`
 const fileKey = (documentId: string, path: string, scope: ComponentProjectFileScope = { kind: 'document' }) => key(documentId, `${JSON.stringify(scope)}\u0000${path}`)
 const surfaceIdOf = (file: ComponentProjectFile | undefined): string | undefined => file?.target?.kind === 'container'
-  && file.target.container.kind === 'surface' ? file.target.container.surfaceId : undefined
+  ? file.target.container.kind === 'surface' ? file.target.container.surfaceId
+    : file.target.container.kind === 'instance' ? file.target.container.instanceId : undefined : undefined
 const layoutContext = (file: ComponentProjectFile | undefined) => ({
   ...(file?.frame ? { frame: structuredClone(file.frame) } : {}),
   ...(file?.programViewport ? { viewport: { ...file.programViewport } } : {}),
 })
+function fileWriteContext(file: ComponentProjectFile): { target?: ContentApplyTarget; editingContext?: ComponentProjectFile['editingContext'] } {
+  const target = file.target ?? (file.binding?.kind === 'flow' || file.binding?.kind === 'spatial'
+    ? { kind: 'container' as const, container: { kind: 'surface' as const, surfaceId: file.binding.surfaceId } } : undefined)
+  return { ...(target ? { target } : {}), ...(file.editingContext ? { editingContext: file.editingContext } : {}) }
+}
 function projectAssetContext(snapshot: ComponentProjectSnapshot, file: ComponentProjectFile): NonNullable<ComponentProjectFileInput['assetContext']> {
   const project = snapshot.model.project
   const data = file.target?.kind === 'instance' ? project.instances[file.target.instanceId]?.data : undefined
@@ -123,23 +137,38 @@ function projectAssetContext(snapshot: ComponentProjectSnapshot, file: Component
 const listedFiles = (files: ComponentProjectFile[]) => files.map(file => ({ path: file.path, type: file.kind,
   ...layoutContext(file), ...(file.summary ? { summary: file.summary } : {}), ...(file.references ? { references: file.references } : {}), ...(file.note ? { note: file.note } : {}) }))
 
-function authoringFiles(snapshot: ComponentProjectSnapshot, state?: ComponentProjectFileState): ComponentProjectFile[] {
-  const files = componentProjectFiles(snapshot.model.project, snapshot.model.resources)
-  if (!state) return files
-  const surface = snapshot.model.project.surfaces.find(value => value.id === state.surfaceId)
+const fileCaptures = new WeakMap<ComponentProjectSnapshot, Map<string, ComponentProjectFile[]>>()
+function authoringFiles(snapshot: ComponentProjectSnapshot, state?: ComponentProjectFileState, requested?: string | ComponentProjectFile): ComponentProjectFile[] {
+  const requestKey = typeof requested === 'string' ? `path:${requested}` : requested ? `binding:${requested.path}\u0000${JSON.stringify(requested.target)}` : 'all:'
+  const key = `${JSON.stringify(state ?? null)}\u0000${requestKey}`, captures = fileCaptures.get(snapshot) ?? new Map<string, ComponentProjectFile[]>()
+  const captured = captures.get(key)
+  if (captured) return captured
+  const files = componentProjectFiles(snapshot.model.project, snapshot.model.resources, requested)
+  fileCaptures.set(snapshot, captures)
+  if (!state) { captures.set(key, files); return files }
+  const surface = componentContainers(snapshot.model.project).find(value => value.id === state.surfaceId)
   if (!surface?.presentation?.states.some(value => value.id === state.stateId)) throw new Error('展示状态已不存在，请读取当前目标。')
   const project = resolveComponentPresentation(snapshot.model.project, state.surfaceId, state.stateId)
   const layouts = componentProjectLayoutViewports(project)
-  return files.map(file => {
-    if (file.target?.kind !== 'instance') return { ...file, observedState: state }
+  const projected = files.map(file => {
+    if (file.target?.kind !== 'instance') return copyComponentProjectFile(file, { observedState: state })
     const instance = project.instances[file.target.instanceId]
-    const current = { ...file, observedState: state, frame: instance.frame,
-      programViewport: layouts.instances.get(instance.id) }
-    if (file.kind !== 'data' && file.kind !== 'style') return current
-    const content = JSON.stringify(file.binding?.kind === 'instance-authoring' ? instance.authoring ?? {} : file.kind === 'data' ? instance.data : instance.style ?? {}, null, 2)
-    return { ...current, editingContext: state, content, summary: componentProjectFileSummary({ ...file, content }) }
+    const current = copyComponentProjectFile(file, { observedState: state, frame: instance.frame,
+      programViewport: layouts.instances.get(instance.id) })
+    if (file.binding?.kind === 'instance-source' || file.kind !== 'data' && file.kind !== 'style') return current
+    let content: string | undefined, summary: string | undefined
+    return copyComponentProjectFile(current, { editingContext: state,
+      get content() { return content ??= JSON.stringify(file.binding?.kind === 'instance-authoring' ? instance.authoring ?? {} : file.kind === 'data' ? instance.data : instance.style ?? {}, null, 2) },
+      get summary() { return summary ??= componentProjectFileSummary({ kind: file.kind, content: this.content }) } })
   })
+  captures.set(key, projected)
+  return projected
 }
+
+/** A scoped directory does not need page HTML outside that scope merely to discover paths. */
+const scopeFileRequest = (scope: ComponentProjectFileScope): ComponentProjectFile | string | undefined => scope.kind === 'document' ? undefined
+  : scope.kind === 'graph' ? '' : { path: '', kind: 'structure', target: scope.kind === 'instance'
+    ? { kind: 'instance', instanceId: scope.instanceId } : { kind: 'container', container: { kind: 'surface', surfaceId: scope.surfaceId } } }
 type ObservedFile = { snapshot: ComponentProjectSnapshot; file: ComponentProjectFile; unavailable?: boolean
   /** ACK projections are explained values, not actual Session captures of that revision. */
   captured?: boolean
@@ -223,7 +252,7 @@ export function canonicalComponentFileEdits(snapshot: ComponentProjectSnapshot, 
     const edit = binding.graphScope
       ? prepareSpatialGraphSourceEdit(project, binding.graphScope, JSON.parse(content), binding.refs, binding.objectPaths, currentSpatialViewport)
       : prepareSpatialSourceEdit(project, binding.surfaceId, JSON.parse(content), binding.refs, binding.objectPaths, currentSpatialViewport)
-    const previousDefault = project.surfaces.find(surface => surface.id === binding.surfaceId)?.spatial?.defaultPathId
+    const previousDefault = componentContainers(project).find(surface => surface.id === binding.surfaceId)?.spatial?.defaultPathId
     if (edit.type === 'spatial.set' && previousDefault && !edit.spatial.paths?.some(path => path.id === previousDefault)
       && edit.spatial.defaultPathId === null) diagnostics.push({ level: 'info', code: 'spatial-default-route-reset', message: '已删除默认路径，默认播放路线已回到按镜头顺序。' })
     return [edit]
@@ -264,7 +293,7 @@ export function canonicalComponentFileEdits(snapshot: ComponentProjectSnapshot, 
   }
   const instanceByPath = (path: string) => Object.entries(binding.objectPaths).find(([, observed]) => observed === path)?.[0]
   const context = { assets: project.assets, packageName: (id: string) => id,
-    instanceHtml: (id: string) => `<guoling-instance path="${(binding.objectPaths[id] ?? '').replace(/&/g, '&amp;').replace(/"/g, '&quot;')}"></guoling-instance>` }
+    instanceHtml: (id: string, childrenHtml?: string) => `<guoling-instance path="${(binding.objectPaths[id] ?? '').replace(/&/g, '&amp;').replace(/"/g, '&quot;')}"${childrenHtml === undefined ? '' : ' data-flow-layout-group="true"'}>${childrenHtml ?? ''}</guoling-instance>` }
   const parsed = parseFlowHtml(content, { assets: project.assets, requireResolvedAssets: true, instanceByPath })
   diagnostics.push(...parsed.diagnostics.map(issue => ({ ...issue, repairable: true })))
   const aligned = alignFlowBlocks(parsed.blocks, binding.document.content.blocks, context)
@@ -288,6 +317,7 @@ function dataFields(before: unknown, next: z.infer<typeof jsonValueSchema>, path
   return [{ path, value: next }]
 }
 export function componentFileContentSource(file: ComponentProjectFile, content: string, input?: ComponentProjectFileInput): ContentApplySource {
+  if (file.kind === 'structure' && content.trimStart().startsWith('{')) return parseContentObjectSource(JSON.parse(content))
   if (file.kind === 'page' || file.kind === 'html' || file.kind === 'structure') return { kind: 'html', html: content,
     scope: 'target', ...(input?.siblingFiles ? { siblingFiles: input.siblingFiles } : {}),
     ...(input?.resourceNamespace ? { resourceNamespace: input.resourceNamespace } : {}) }
@@ -365,7 +395,7 @@ export class ComponentProjectFileCoordinator {
     if (captured && captured.snapshot.epoch !== current.epoch) throw new Error('工程身份已变化，请从目录开头重新读取。')
     if (offset && !captured) throw new Error('目录续页尚未读取，请从目录开头重新读取。')
     if (!captured) {
-      captured = { snapshot: current, files: componentProjectScopeFiles(current.model.project, authoringFiles(current, scope.state), scope) }
+      captured = { snapshot: current, files: componentProjectScopeFiles(current.model.project, authoringFiles(current, scope.state, scopeFileRequest(scope)), scope) }
       listings.set(listingKey, captured); this.listings.set(runId, listings)
     }
     const end = Math.min(captured.files.length, offset + Math.min(limit, 1000))
@@ -430,7 +460,7 @@ export class ComponentProjectFileCoordinator {
         const observed = observeSpatialSource(next.snapshot.model.project, file.binding.surfaceId, file.binding.objectPaths, seen.file.binding.refs)
         file = { ...file, content: JSON.stringify(observed.source, null, 2), binding: { ...file.binding, refs: observed.refs, ...(seen.file.binding.graphScope ? { graphScope: seen.file.binding.graphScope } : {}) } }
       }
-      reads.set(pathKey, file ? { snapshot: next.snapshot, file: { ...file, path: seen.file.path }, ...(seen.pagination ? { pagination: seen.pagination } : {}) }
+      reads.set(pathKey, file ? { snapshot: next.snapshot, file: copyComponentProjectFile(file, { path: seen.file.path }), ...(seen.pagination ? { pagination: seen.pagination } : {}) }
         : { ...seen, unavailable: true })
     }
   }
@@ -443,7 +473,7 @@ export class ComponentProjectFileCoordinator {
     if (seen?.unavailable) throw new Error('原工程文件目标已不存在或类型已变化；请用 project.list 或 project.read 读取当前文件。')
     if (seen) return seen
     if (requireObserved) throw new Error('对象路径尚未观察；请先用 project.list 或 project.read 读取当前工程文件。')
-    const file = componentProjectScopeFiles(current.model.project, authoringFiles(current, scope?.state), scope ?? { kind: 'document' }).find(value => value.path === path)
+    const file = componentProjectScopeFiles(current.model.project, authoringFiles(current, scope?.state, path), scope ?? { kind: 'document' }).find(value => value.path === path)
     if (!file) throw new Error(`没有这个工程文件：${path}`)
     return { snapshot: current, file }
   }
@@ -497,10 +527,10 @@ export class ComponentProjectFileCoordinator {
     const container = file.target?.kind === 'container' ? file.target.container
       : instanceId ? owningContainer(project, instanceId) : undefined
     let owner = container
-    while (owner?.kind === 'instance') owner = owningContainer(project, owner.instanceId)
-    const surfaceId = owner?.kind === 'surface' ? owner.surfaceId
+    while (owner?.kind === 'instance' && !project.instances[owner.instanceId]?.container) owner = owningContainer(project, owner.instanceId)
+    const surfaceId = owner?.kind === 'surface' ? owner.surfaceId : owner?.kind === 'instance' ? owner.instanceId
       : file.binding?.kind === 'flow' || file.binding?.kind === 'spatial' ? file.binding.surfaceId : undefined
-    const surface = project.surfaces.find(value => value.id === surfaceId)
+    const surface = componentContainers(project).find(value => value.id === surfaceId)
     const snippets = (id: string) => {
       const instance = project.instances[id]!, definition = project.definitions[instance.definitionId]
       const title = instance.name ?? definition?.title
@@ -526,7 +556,7 @@ export class ComponentProjectFileCoordinator {
     }
     // Sibling and global frames describe the existing composition, including
     // custom HTML navigation. No neighbor Source or extra write target is exposed.
-    const siblingIds = !surface ? [] : container?.kind === 'instance' ? project.instances[container.instanceId]?.childIds ?? [] : surface.childIds
+    const siblingIds = container?.kind === 'instance' ? project.instances[container.instanceId]?.childIds ?? [] : surface?.childIds ?? []
     const globalIds = !surface ? [] : [...project.global.underlay, ...project.global.overlay].filter(id => {
       const instance = project.instances[id]
       return instance && isComponentVisibleAtSurface(instance, surface.id)
@@ -552,11 +582,12 @@ export class ComponentProjectFileCoordinator {
   /** Introduce result addresses only from existing ACK projections; never adopt unread human values. */
   private async contentReceipt(runId: string, selector: string | undefined, inputPath: string,
     baseline: ComponentProjectSnapshot, original: ComponentProjectFile, result: ContentApplyResult,
-    scope: ComponentProjectFileScope = { kind: 'document' }, enhancementId?: string): Promise<ToolResult> {
+    scope: ComponentProjectFileScope = { kind: 'document' }, enhancementId?: string,
+    committedSnapshot?: ComponentProjectSnapshot): Promise<ToolResult> {
     const data = { path: inputPath, ...publicContentApplyReceipt(result) }
     if (result.commit !== 'committed' && result.commit !== 'unchanged') {
       let repair = this.repairDetails(runId, baseline, original, inputPath, selector)
-      try { repair = this.repairDetails(runId, await this.host.document(runId, selector, 'read'), original, inputPath, selector) } catch { /* captured paths remain readable repair context */ }
+      try { repair = this.repairDetails(runId, committedSnapshot ?? await this.host.document(runId, selector, 'read'), original, inputPath, selector) } catch { /* captured paths remain readable repair context */ }
       if (result.commit === 'unknown') return { kind: 'read', data: { ...data, ...repair,
         repair: { read: repair.repair.read, next: '本次提交效果未知；保留原回执，先沿原操作和当前文件查证，不重新应用原输入。' } } }
       return { kind: 'read', data: { ...data, ...repair, diagnostics: result.diagnostics.map(item => ({ ...item, file: item.file ?? inputPath, repairable: item.repairable ?? true })) } }
@@ -565,12 +596,12 @@ export class ComponentProjectFileCoordinator {
     if (!resolvesPaths && !original.programViewport)
       return { kind: 'read', data }
     try {
-      const after = await this.host.document(runId, selector, 'read')
+      const after = committedSnapshot ?? await this.host.document(runId, selector, 'read')
       if (!resolvesPaths) {
         // Content writes preserve identity. Read geometry from its owner instead
         // of materializing every source/project file once per batch child.
         const state = scope.state
-        if (state && !after.model.project.surfaces.find(value => value.id === state.surfaceId)
+        if (state && !componentContainers(after.model.project).find(value => value.id === state.surfaceId)
           ?.presentation?.states.some(value => value.id === state.stateId)) throw new Error('展示状态已不存在，请读取当前目标。')
         const project = state ? resolveComponentPresentation(after.model.project, state.surfaceId, state.stateId) : after.model.project
         const layouts = componentProjectLayoutViewports(project), target = original.target
@@ -584,7 +615,7 @@ export class ComponentProjectFileCoordinator {
           ...(viewport ? { viewport } : {}) } }
       }
       const currentFiles = authoringFiles(after, scope.state)
-      const resolved = componentProjectApplyReceiptFiles(baseline, original, result, after, scope)
+      const resolved = componentProjectApplyReceiptFiles(baseline, original, result, after, scope, currentFiles)
       const prefix = fileKey(baseline.documentId, '', scope), reads = this.reads.get(runId)
       const observations = [...(reads?.entries() ?? [])].filter(([savedKey, seen]) => savedKey.startsWith(prefix)
         && !seen.unavailable && seen.snapshot.epoch === baseline.epoch).map(([, seen]) => seen)
@@ -659,8 +690,8 @@ export class ComponentProjectFileCoordinator {
     const prepared: { baseline: ComponentProjectSnapshot; request: ContentApplyRequest; path: string; file: ComponentProjectFile }[] = []
     const outcomes: ToolResult[] = []
     const positions: number[] = []
+    const current = await this.host.document(runId, input.project, 'write')
     for (const [operationIndex, operation] of input.operations.entries()) {
-      const current = await this.host.document(runId, input.project, 'write')
       let captured: ReturnType<ComponentProjectFileCoordinator['captureFile']>
       try { captured = this.captureFile(runId, current, operation.path, false, input.project) }
       catch (error) { outcomes.push(failure('target-not-found', `operations[${operationIndex}] ${error instanceof Error ? error.message : String(error)}`,
@@ -670,7 +701,7 @@ export class ComponentProjectFileCoordinator {
         async (_run, _operation, _digest, baseline, request) => {
           item = { baseline, request, path: operation.path, file: captured.file }
           return { commit: 'not_committed', usability: 'unverified', delivery: 'not_requested', diagnostics: [], insertedIds: [], input: request }
-        })
+        }, current)
       positions.push(outcomes.length)
       outcomes.push(result.kind === 'error' ? { ...result, message: `operations[${operationIndex}] ${result.message}`,
         data: { ...(result.data && typeof result.data === 'object' ? result.data : {}), operationIndex, path: operation.path } } : result)
@@ -686,22 +717,24 @@ export class ComponentProjectFileCoordinator {
     planning.reads.set(runId, new Map(this.reads.get(runId)))
     const items: ComponentProjectFileBatchItem[] = prepared.map((item, index) => ({ ...item,
       acknowledge: command => planning.acknowledge(runId, item.baseline.documentId, item.baseline.epoch, item.baseline.revision, command),
-      ...(item.file.authorSource || item.file.sourceFile ? { reprepare: async () => {
+      ...(item.file.authorSource || item.file.sourceFile ? { reprepare: async (candidate: ComponentProjectSnapshot) => {
         let refreshed: { baseline: ComponentProjectSnapshot; request: ContentApplyRequest } | undefined
         const operation = input.operations[positions[index]!]!
         const result = await planning.execute(runId, operationId, requestDigest, 'project.apply', { ...operation, project: input.project },
           async (_run, _id, _digest, baseline, request) => {
             refreshed = { baseline, request }
             return { commit: 'not_committed', usability: 'unverified', delivery: 'not_requested', input: request, insertedIds: [], diagnostics: [] }
-          })
+          }, candidate)
         if (!refreshed) throw new Error(result.kind === 'error' ? result.message : '原Source文件不能在本批候选上继续准备。')
         return refreshed
       } } : {}),
     }))
     const results = await this.host.applyBatch(runId, operationId, requestDigest, items)
+    let committedSnapshot: ComponentProjectSnapshot | undefined
+    try { committedSnapshot = await this.host.document(runId, input.project, 'read') } catch { /* Each receipt retains its existing captured repair path. */ }
     for (const [index, item] of prepared.entries()) {
       const scope = this.host.scope?.(runId, input.project, item.baseline)
-      const outcome = await this.contentReceipt(runId, input.project, item.path, item.baseline, item.file, results[index]!, scope)
+      const outcome = await this.contentReceipt(runId, input.project, item.path, item.baseline, item.file, results[index]!, scope, undefined, committedSnapshot)
       if (outcome.kind === 'read' && outcome.data && typeof outcome.data === 'object') {
         const { receipt: _commonReceipt, ...local } = outcome.data as Record<string, unknown>
         outcomes[positions[index]!] = { ...outcome, data: { ...local, operationIndex: positions[index] } }
@@ -749,8 +782,67 @@ export class ComponentProjectFileCoordinator {
         : results.some(result => result.usability === 'unverified') ? 'unverified' : 'usable' }
   }
 
+  /** Establish the program owner, then let the existing HTML/resource planner fill it in the same transaction. */
+  private async setProgramEntry(runId: string, operationId: string, requestDigest: string,
+    baseline: ComponentProjectSnapshot, input: { project?: string; content?: string; from?: string },
+    scope: ComponentProjectFileScope = { kind: 'document' }): Promise<ToolResult> {
+    const project = baseline.model.project, entry = project.entry && project.instances[project.entry.rootInstanceId]
+    const isProgram = entry && !entry.container && componentDefinitionBuiltinKey(project.definitions[entry.definitionId]) === 'guoling.html-program'
+    if (scope.kind !== 'document' && (!isProgram || scope.kind !== 'instance' || scope.instanceId !== entry.id))
+      return failure('not-authorized', '当前所选范围不包含作品入口；请选择入口程序或当前工程，原有内容未改变。')
+    const instanceId = isProgram ? entry.id : crypto.randomUUID()
+    const operations: ComponentProjectFileBatchItem[] = []
+    if (!isProgram) {
+      if (!this.host.applyBatch) throw new Error('当前宿主没有同批工程内容规划服务。')
+      const definitionId = crypto.randomUUID(), implementation = await loadBuiltinComponentSource('guoling.html-program')
+      if (!implementation) throw new Error('程序组件源码尚未就绪。')
+      const edits: ComponentEdit[] = [
+        { type: 'definition.set', definition: { id: definitionId, role: 'mixed', title: 'Web 程序', implementation, professionalBuiltinKey: 'guoling.html-program' } },
+        { type: 'instance.insert', container: { kind: 'project' }, index: project.rootIds.length,
+          rootIds: [instanceId], instances: [{ id: instanceId, definitionId, name: project.title, data: { html: '' } }] },
+        { type: 'project.entry.set', entry: { rootInstanceId: instanceId } },
+      ]
+      // The untouched factory placeholder is not authored content. Real existing roots always remain.
+      const placeholder = project.rootIds.length === 1 && project.instances[project.rootIds[0]!]
+      const placeholderDefinition = placeholder && project.definitions[placeholder.definitionId]
+      if (project.revision === 0 && placeholder && placeholder.container?.kind === 'slide'
+        && placeholderDefinition && placeholderDefinition.role === 'mixed' && placeholderDefinition.title === '幻灯片容器'
+        && placeholderDefinition.implementation.kind === 'builtin' && placeholderDefinition.implementation.key === placeholder.definitionId
+        && Object.keys(placeholderDefinition).every(key => ['id', 'role', 'title', 'implementation'].includes(key))
+        && placeholder.name === '第 1 页' && equalComponentValue(placeholder.data, {})
+        && equalComponentValue(placeholder.container, { kind: 'slide', designSize: { width: 1280, height: 720 } })
+        && Object.keys(placeholder).every(key => ['id', 'definitionId', 'name', 'data', 'childIds', 'container'].includes(key))
+        && !placeholder.childIds?.length && Object.keys(project.definitions).length === 1
+        && !Object.keys(project.assets).length && !project.global.underlay.length && !project.global.overlay.length)
+        edits.push({ type: 'instance.remove', instanceId: placeholder.id })
+      operations.push({ baseline, request: { intent: 'canonical', edits }, required: true })
+    }
+    const prepare = async (candidate: ComponentProjectSnapshot): Promise<{ baseline: ComponentProjectSnapshot; request: ContentApplyRequest }> => {
+      const file: ComponentProjectFile = { path: 'entry.html', kind: 'html', target: { kind: 'instance', instanceId } }
+      const actual = input.from !== undefined ? await this.host.source(runId, input.from, candidate, input.content)
+        : { filename: 'entry.html', bytes: new TextEncoder().encode(input.content ?? ''), text: input.content ?? '' }
+      actual.assetContext = projectAssetContext(candidate, file)
+      let source = this.host.prepareSource ? await this.host.prepareSource(actual, file, 'content', runId)
+        : actual.text !== undefined ? componentFileContentSource(file, actual.text, actual)
+          : (() => { throw new Error('完整程序需要可读取的 HTML 源文。') })()
+      if (input.from === undefined && source.kind === 'html') { const { original: _original, ...literal } = source; source = literal }
+      return { baseline: candidate, request: { intent: 'content', target: file.target!, source,
+        ...(actual.diagnostics?.length ? { diagnostics: actual.diagnostics } : {}) } }
+    }
+    const results = isProgram ? [await this.host.apply(runId, operationId, requestDigest, baseline, (await prepare(baseline)).request)]
+      : await this.host.applyBatch!(runId, operationId, requestDigest,
+        [...operations, { baseline, request: { intent: 'canonical', edits: [] }, candidateTarget: true, required: true, reprepare: prepare }])
+    const first = results[0]!
+    const result = { ...first, insertedIds: isProgram ? first.insertedIds : first.commit === 'committed' ? [instanceId] : [],
+      diagnostics: results.flatMap(item => item.diagnostics),
+      usability: results.some(item => item.usability === 'partial' || item.usability === 'unusable') ? 'partial' as const
+        : results.some(item => item.usability === 'unverified') ? 'unverified' as const : 'usable' as const }
+    return { kind: 'read', data: { path: 'entry.html', ...publicContentApplyReceipt(result),
+      next: '通过 project.read 读取 entry.html，或 project.list 读取同一入口的参数和源码文件。' } }
+  }
+
   async execute(runId: string, operationId: string, requestDigest: string, name: ComponentProjectFileToolName, raw: unknown,
-    captureApply?: ComponentProjectFileHost['apply']): Promise<ToolResult> {
+    captureApply?: ComponentProjectFileHost['apply'], preparedDocument?: ComponentProjectSnapshot): Promise<ToolResult> {
     let repairContext: { snapshot: ComponentProjectSnapshot; file: ComponentProjectFile; path: string; project?: string } | undefined
     try {
       const apply = captureApply ?? this.host.apply.bind(this.host)
@@ -778,9 +870,11 @@ export class ComponentProjectFileCoordinator {
           return failure('project-changed', '工程身份已变化；可局部读取当前稿。', { repair: { read: [reread] } })
         const captured = offset && !input.refresh ? seen?.pagination : undefined
         const snapshot = captured?.snapshot ?? current
-        const projected = captured ? [] : componentProjectScopeFiles(snapshot.model.project, authoringFiles(snapshot, scope?.state), scope ?? { kind: 'document' })
+        const projected = captured ? [] : componentProjectScopeFiles(snapshot.model.project,
+          authoringFiles(snapshot, scope?.state, seen && !input.refresh ? seen.file : input.path), scope ?? { kind: 'document' })
         const currentFile = seen && !input.refresh && seen.snapshot.epoch === current.epoch
           ? projected.find(file => sameFile(seen.file, file)) : projected.find(file => file.path === input.path)
+        await prepareComponentProjectFileSource(currentFile)
         const file = captured?.file ?? (currentFile ? { ...currentFile, path: input.path } : undefined)
         if (!file) return failure('not-found', `没有这个工程文件：${input.path}`, { repair: { read: [reread] } })
         this.remember(runId, snapshot, [file], true, scope)
@@ -814,23 +908,25 @@ export class ComponentProjectFileCoordinator {
       if ('operations' in parsedInput) return this.applyFiles(runId, operationId, requestDigest, parsedInput)
       let input = parsedInput
       const projectionEdit = 'edits' in input
-      const current = await this.host.document(runId, input.project, 'write')
+      const current = preparedDocument ?? await this.host.document(runId, input.project, 'write')
       const scope = this.host.scope?.(runId, input.project, current)
       const seen = this.reads.get(runId)?.get(fileKey(current.documentId, input.path, scope))
       if (seen && seen.snapshot.epoch !== current.epoch) return failure('project-changed', '工程身份已变化，请读取当前工程文件。')
       if (seen?.unavailable) return failure('target-not-found', '原工程文件目标已不存在或类型已变化；请用 project.list 或 project.read 读取当前文件。')
       let baseline = seen?.snapshot ?? current
-      let file = seen?.file ?? componentProjectScopeFiles(current.model.project, authoringFiles(current, scope?.state), scope ?? { kind: 'document' }).find(file => file.path === input.path)
+      let file = seen?.file ?? componentProjectScopeFiles(current.model.project, authoringFiles(current, scope?.state, input.path), scope ?? { kind: 'document' }).find(file => file.path === input.path)
+      await prepareComponentProjectFileSource(file)
+      if (input.intent === 'program.set') return this.setProgramEntry(runId, operationId, requestDigest, baseline, input, scope)
       if (input.path === 'pages' && input.intent === 'surface.title') {
         const pages = authoringFiles(current).filter(file => file.kind === 'structure' && surfaceIdOf(file))
-        const currentPage = current.model.project.surfaces.length === 1 ? current.model.project.surfaces[0] : undefined
+        const currentPage = componentSurfaces(current.model.project).length === 1 ? componentSurfaces(current.model.project)[0] : undefined
         const prefix = fileKey(current.documentId, '', scope)
         const observed = [...(this.reads.get(runId)?.entries() ?? [])]
           .filter(([savedKey, value]) => savedKey.startsWith(prefix) && !value.unavailable && value.snapshot.epoch === current.epoch)
           .map(([, value]) => value.snapshot).reduce<ComponentProjectSnapshot | undefined>((latest, snapshot) =>
             !latest || snapshot.revision > latest.revision ? snapshot : latest, seen?.snapshot)
         if (scope && scope.kind !== 'document' || !currentPage
-          || observed && (observed.model.project.surfaces.length !== 1 || observed.model.project.surfaces[0]!.id !== currentPage.id))
+          || observed && (componentSurfaces(observed.model.project).length !== 1 || componentSurfaces(observed.model.project)[0]!.id !== currentPage.id))
           return failure('target-not-found', 'pages 只有在当前与已观察工程均确定为同一唯一页面时才能命名；请使用实际页面路径。', { pages: listedFiles(pages) })
         baseline = observed ?? current
         file = authoringFiles(baseline).find(value => value.kind === 'structure' && surfaceIdOf(value) === currentPage.id)
@@ -907,9 +1003,9 @@ export class ComponentProjectFileCoordinator {
                 resolvedPath = nextFile.path.replace(/\.json$/, '') + `-${suffix++}.json`
               }
               this.remember(runId, after, [{ ...nextFile, path: resolvedPath }], true, scope)
-              const surface = after.model.project.surfaces.find(value => value.id === surfaceId)!
+              const surface = componentContainers(after.model.project).find(value => value.id === surfaceId)!
               return { surfaceId, path: resolvedPath, kind: surface.kind, title: surface.title,
-                order: after.model.project.surfaces.indexOf(surface) }
+                order: componentSurfaces(after.model.project).findIndex(value => value.id === surface.id) }
             })
             return { kind: 'read', data: { path: targets[0]?.path ?? input.path, ...publicContentApplyReceipt(result), targets } }
           }
@@ -957,8 +1053,9 @@ export class ComponentProjectFileCoordinator {
         const instanceId = file.binding.instanceId
         const id = edits.filter(edit => edit.type === 'implementation.set' && edit.instanceId === instanceId).at(-1)
         const enhancementId = id?.type === 'implementation.set' && id.implementation?.kind === 'source' ? id.implementation.moduleBindings?.['./enhancement'] : undefined
-        const result = await apply(runId, operationId, requestDigest, baseline, { intent: 'canonical', edits, diagnostics: actual?.diagnostics })
-        return this.contentReceipt(runId, input.project, input.path, baseline, file, result, scope, enhancementId)
+        const result = await apply(runId, operationId, requestDigest, baseline, { intent: 'canonical', edits, ...fileWriteContext(file), diagnostics: actual?.diagnostics })
+        return captureApply ? { kind: 'read', data: publicContentApplyReceipt(result) }
+          : this.contentReceipt(runId, input.project, input.path, baseline, file, result, scope, enhancementId)
       }
       if (file?.binding) {
         const intent = input.intent ?? 'content'
@@ -993,8 +1090,9 @@ export class ComponentProjectFileCoordinator {
         const edits = file.binding.kind === 'project-settings' && this.host.settings
           ? await this.host.settings(runId, baseline, componentProjectSettings(baseline, content ?? ''))
           : [...actual?.resourceEdits ?? [], ...canonicalComponentFileEdits(baseline, file, content, source, actual, diagnostics, viewport)]
-        const result = await apply(runId, operationId, requestDigest, baseline, { intent: 'canonical', edits, diagnostics })
-        return this.contentReceipt(runId, input.project, input.path, baseline, file, result, scope)
+        const result = await apply(runId, operationId, requestDigest, baseline, { intent: 'canonical', edits, ...fileWriteContext(file), diagnostics })
+        return captureApply ? { kind: 'read', data: publicContentApplyReceipt(result) }
+          : this.contentReceipt(runId, input.project, input.path, baseline, file, result, scope)
       }
       if (!file?.target) return failure('target-not-found', `没有可应用的工程目标：${input.path}`)
       // Literal CSS/JS inside .content.html belongs to the observed HTML owner,
@@ -1003,7 +1101,7 @@ export class ComponentProjectFileCoordinator {
         ? 'content' : input.intent ?? (file.kind === 'style' ? 'style' : 'content')
       if (file.kind === 'structure' && intent === 'content') return failure('content-target-required', '这是工程结构观察；请修改同名目录中的对象内容，或明确插入/重做意图。',
         { commit: 'not_committed', ...this.repairDetails(runId, current, file, input.path, input.project) })
-      if (file.kind === 'html' && file.note && !file.projection && intent === 'content') return failure('professional-target-required', file.note,
+      if (file.kind === 'html' && file.contentEditUnavailable && !file.projection && intent === 'content') return failure('professional-target-required', file.contentEditUnavailable,
         { commit: 'not_committed', ...this.repairDetails(runId, current, file, input.path, input.project) })
       const actual = 'from' in input ? await this.host.source(runId, input.from, baseline, input.content) : undefined
       const effectiveRegion = input.region ?? taskTargetRegion(actual?.metadata?.targetContext, {
@@ -1038,12 +1136,13 @@ export class ComponentProjectFileCoordinator {
         const instance = project.instances[file.target.instanceId]!
         const style = applyComponentStylePatch(instance.style, source.style, (name, reason) => diagnostics.push(reason === 'geometry'
           ? { level: 'info', code: 'frame-style-preserved', message: `外层 ${name} 由正式 frame 持有，样式修改未改变它。` }
-          : { level: 'warning', code: 'unsupported-css-value', message: `${name} 不是当前 CSS consumer 支持的标量样式值，已保留其余样式。`, repairable: true }))
+          : { level: 'warning', code: 'unsupported-css-value', message: `${name} 不是当前 CSS consumer 支持的标量样式值，已保留其余样式。`, repairable: true }), componentFlowStylePolicy(project, instance, source.style))
         const edits: ComponentEdit[] = equalComponentValue(instance.style ?? {}, style) ? []
           : [{ type: 'style.set', instanceId: instance.id, path: [], value: style }]
         const mapped = context ? presentationComponentEdits(baseline.model.project, context.surfaceId, context.stateId, edits) : edits
-        const result = await apply(runId, operationId, requestDigest, baseline, { intent: 'canonical', edits: mapped, diagnostics })
-        return this.contentReceipt(runId, input.project, input.path, baseline, file, result, scope)
+        const result = await apply(runId, operationId, requestDigest, baseline, { intent: 'canonical', edits: mapped, ...fileWriteContext(file), diagnostics })
+        return captureApply ? { kind: 'read', data: publicContentApplyReceipt(result) }
+          : this.contentReceipt(runId, input.project, input.path, baseline, file, result, scope)
       }
       if (source.kind === 'html') source = { ...source, scope: projectionEdit && file.projection ? 'projection' : 'target' }
       const request: ContentApplyRequest = { intent, target: file.target, source, ...(file.projection ? { projection: file.projection } : {}),
@@ -1051,7 +1150,8 @@ export class ComponentProjectFileCoordinator {
         ...(effectiveRegion ? { region: effectiveRegion } : {}),
         ...(file.editingContext ? { editingContext: file.editingContext } : {}) }
       const result = await apply(runId, operationId, requestDigest, baseline, request)
-      return this.contentReceipt(runId, input.project, input.path, baseline, file, result, scope)
+      return captureApply ? { kind: 'read', data: publicContentApplyReceipt(result) }
+        : this.contentReceipt(runId, input.project, input.path, baseline, file, result, scope)
     } catch (error) {
       if (error instanceof z.ZodError) {
         const detail = compactToolInputError(error, { name, input: raw as Record<string, unknown> })

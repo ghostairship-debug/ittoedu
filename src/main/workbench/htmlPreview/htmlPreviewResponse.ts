@@ -11,7 +11,7 @@ const BASE_CSP = [
   "child-src 'self' blob:",
   "worker-src 'none'",
   "object-src 'none'",
-  "base-uri 'none'",
+  "base-uri 'self'",
   "form-action 'none'",
   "sandbox allow-scripts allow-same-origin",
 ]
@@ -61,6 +61,10 @@ export function htmlPreviewResponse(
   })
   if (input.contentType) headers.set('Content-Type', input.contentType)
   if (input.method === 'HEAD') body = null
-  const responseBody = body instanceof Uint8Array ? Uint8Array.from(body).buffer : body
+  // Response snapshots a BufferSource itself. Keep the view's offset/length and
+  // avoid a second eager byte copy; shared buffers still need a private view.
+  const responseBody = body instanceof Uint8Array
+    ? body.buffer instanceof ArrayBuffer ? new Uint8Array(body.buffer, body.byteOffset, body.byteLength) : Uint8Array.from(body)
+    : body
   return new Response(responseBody, { status: input.status ?? 200, headers })
 }

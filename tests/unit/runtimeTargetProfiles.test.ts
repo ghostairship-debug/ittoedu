@@ -1,3 +1,5 @@
+import { createTestProjectFromLegacy } from '../helpers/glxWorkFixture'
+import { componentSurfaces } from '../../src/shared/contracts/component-platform/project'
 import { expect, it, vi } from 'vitest'
 import { webRuntimeTargetProfile } from '../../src/components/web/moduleGraph'
 import { ComponentPlatformRuntime } from '../../src/player/components/ComponentPlatformRuntime'
@@ -19,11 +21,11 @@ it('uses references only for known static projected Web, retaining every executa
 })
 
 it('constructs references without target/read/value and preserves full project/surface/unvisited data', async () => {
-  const project: CourseProjectV10 = { schemaVersion: 10, id: 'refs-project', revision: 0, title: 'Formal',
+  const project: CourseProjectV10 = createTestProjectFromLegacy({ schemaVersion: 10, id: 'refs-project', revision: 0, title: 'Formal',
     definitions: { web: { id: 'web', role: 'content', implementation: { kind: 'builtin', key: 'guoling.web' } } },
     instances: { unvisited: { id: 'unvisited', definitionId: 'web', data: { html: '<p>Unvisited</p>', sentinel: 'formal' } } },
     surfaces: [{ id: 'unvisited-page', title: 'Unvisited page', kind: 'slide', childIds: ['unvisited'] }],
-    global: { underlay: [], overlay: [] }, assets: {} }
+    global: { underlay: [], overlay: [] }, assets: {} })
   const world = new ComponentPlatformRuntime('target-profiles', { mode: 'edit' })
   try {
     await world.sync(project, { assets: {}, components: {} })
@@ -34,10 +36,11 @@ it('constructs references without target/read/value and preserves full project/s
       { reference: { kind: 'project' }, instanceId: 'refs-project' },
       { reference: { kind: 'surface', surfaceId: 'unvisited-page' }, instanceId: 'unvisited-page' },
       { reference: { kind: 'instance', instanceId: 'unvisited' }, instanceId: 'unvisited' },
+      { reference: { kind: 'instance', instanceId: 'unvisited-page' }, instanceId: 'unvisited-page' },
     ])
     const full = world.targetSnapshots('full')
-    expect(target).toHaveBeenCalledTimes(3)
-    expect(full.map(item => item.value)).toEqual([project, project.surfaces[0], project.instances.unvisited.data])
+    expect(target).toHaveBeenCalledTimes(4)
+    expect(full.map(item => item.value)).toEqual([project, componentSurfaces(project)[0], project.instances.unvisited.data, project.instances['unvisited-page'].data])
     full[2]!.value = null
     expect(world.targetSnapshots()[2]!.value).toEqual(project.instances.unvisited.data)
   } finally { await world.dispose() }

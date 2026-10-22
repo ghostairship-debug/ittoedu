@@ -1,3 +1,4 @@
+import { testContainerInstance } from '../../../helpers/glxWorkFixture'
 import { jsonValueSchema } from '../../../../src/shared/contracts/component-platform/schema'
 import { _electron as electron, expect, test, type ElectronApplication, type Page } from '@playwright/test'
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
@@ -59,7 +60,7 @@ test('T03 real GUI preserves half JSON and numeric raw at normal close and resto
   project.instances.source = { id: 'source', name: 'Source target', definitionId: 'custom', data: {}, frame: { width: 160, height: 80, transform: [1, 0, 0, 1, 30, 40] } }
   project.instances.text = { id: 'text', name: 'Teacher text', definitionId: 'text', data: jsonValueSchema.parse(createTextComponentData('Keep teacher text')), frame: { width: 200, height: 80, transform: [1, 0, 0, 1, 250, 40] } }
   project.instances.canvas = { id: 'canvas', name: 'Canvas teacher target', definitionId: 'canvas', data: { label: 'Canvas teacher original' }, frame: { width: 180, height: 80, transform: [1, 0, 0, 1, 250, 190] } }
-  project.surfaces[0].childIds = ['source', 'text', 'canvas']
+  testContainerInstance(project, 0).childIds = ['source', 'text', 'canvas']
   const filename = join(workspace, 'drafts.h5lesson')
   writeFileSync(filename, createCourseProjectV10Archive({ project, resources: { assets: {}, components: { code: { 'main.js': new TextEncoder().encode("export default {mount({root}){root.textContent='42';return {update(){},dispose(){}}}}") } } } }))
   const sourceText = "export default {mount({root}){root.textContent='85';return {update(){},dispose(){}}}}", halfJson = '{"data":', canvasRaw = '尚未完成的画布拼音稿'

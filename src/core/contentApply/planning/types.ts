@@ -16,6 +16,9 @@ export interface HtmlContentProjection {
 /** Identity-free assembly input. Definition references belong to the software adapter. */
 export interface ContentObjectDraft {
   definitionId: string
+  name?: string
+  flowLayout?: import('../../../shared/contracts/component-platform').ComponentFlowBodyLayout
+  viewportPinned?: boolean
   data: JsonValue
   authoring?: import('../../../shared/contracts/component-platform').ComponentAuthoring
   style?: JsonObject
@@ -67,6 +70,9 @@ export type SurfaceApplyRequest =
 export interface CanonicalContentApplyRequest {
   intent: 'canonical'
   edits: ComponentEdit[]
+  /** Captured file owner used by the existing Gateway to retain its writable scope. */
+  target?: ContentApplyTarget
+  editingContext?: { surfaceId: string; stateId: string | null }
   /** Local parser findings accompany the usable content and any retained original. */
   diagnostics?: ContentApplyDiagnostic[]
 }

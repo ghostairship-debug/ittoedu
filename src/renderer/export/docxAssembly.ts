@@ -61,6 +61,10 @@ export interface FlowDocxResult {
   layerReport: FlowDocxLayerReportItem[]
 }
 
+export interface FlowDocxPartsResult extends Omit<FlowDocxResult, 'bytes'> {
+  files: Record<string, Uint8Array>
+}
+
 interface ImagePart {
   relationshipId: string
   path: string
@@ -747,6 +751,20 @@ export function buildFlowDocxFromPlan(
   plan: FlowPrintPlan,
   options: FlowDocxOptions = {},
 ): FlowDocxResult {
+  const { files, ...report } = buildFlowDocxPartsFromPlan(plan, options)
+  return {
+    bytes: zipSync(files, {
+      level: 6,
+      mtime: createTimezoneStableZipMtime('1980-01-01T00:00:00.000Z'),
+    }),
+    ...report,
+  }
+}
+
+export function buildFlowDocxPartsFromPlan(
+  plan: FlowPrintPlan,
+  options: FlowDocxOptions = {},
+): FlowDocxPartsResult {
   const context: BuildContext = {
     chartMaxHeight: resolveFlowDocxPageBox(plan.pageSize, plan.orientation).maxContentHeightPx - 32,
     warnings: [...wordTextAlphaWarnings(plan.nodes), ...wordXmlTextWarnings(plan.nodes)],
@@ -767,7 +785,9 @@ export function buildFlowDocxFromPlan(
   }
   const body = plan.nodes.map((node) => renderPrintNode(node, context)).join('') + creditsSection(options.credits)
   const page = pageSizeTwips(plan.pageSize)
-  const documentXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" xmlns:m="http://schemas.openxmlformats.org/officeDocument/2006/math" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture" xmlns:wps="http://schemas.microsoft.com/office/word/2010/wordprocessingShape"><w:body>${body}<w:sectPr><w:pgSz w:w="${page.width}" w:h="${page.height}"/><w:pgMar w:top="1134" w:right="1134" w:bottom="1134" w:left="1134" w:header="708" w:footer="708" w:gutter="0"/></w:sectPr></w:body></w:document>`
+  const background = plan.backgroundColor && wordColor(plan.backgroundColor)
+  const paper = background && background !== 'FFFFFF' ? `<w:background w:color="${background}"/>` : ''
+  const documentXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" xmlns:m="http://schemas.openxmlformats.org/officeDocument/2006/math" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture" xmlns:wps="http://schemas.microsoft.com/office/word/2010/wordprocessingShape">${paper}<w:body>${body}<w:sectPr><w:pgSz w:w="${page.width}" w:h="${page.height}"/><w:pgMar w:top="1134" w:right="1134" w:bottom="1134" w:left="1134" w:header="708" w:footer="708" w:gutter="0"/></w:sectPr></w:body></w:document>`
   const createdAt = isoDate(options.createdAt ?? new Date('1980-01-01T00:00:00.000Z'))
   const core = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:dcterms="http://purl.org/dc/terms/" xmlns:dcmitype="http://purl.org/dc/dcmitype/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"><dc:title>${xml(plan.title)}</dc:title><dc:creator>${xml(options.author ?? 'ittoedu')}</dc:creator><cp:lastModifiedBy>${xml(options.author ?? 'ittoedu')}</cp:lastModifiedBy><dcterms:created xsi:type="dcterms:W3CDTF">${createdAt}</dcterms:created><dcterms:modified xsi:type="dcterms:W3CDTF">${createdAt}</dcterms:modified></cp:coreProperties>`
   const app = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties" xmlns:vt="http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes"><Application>果铃工作台</Application><AppVersion>1.0</AppVersion></Properties>'
@@ -783,10 +803,7 @@ export function buildFlowDocxFromPlan(
   }
   for (const image of context.images) files[`word/${image.path}`] = image.bytes
   return {
-    bytes: zipSync(files, {
-      level: 6,
-      mtime: createTimezoneStableZipMtime('1980-01-01T00:00:00.000Z'),
-    }),
+    files,
     warnings: context.warnings,
     report: context.report,
     layerReport: context.layerReport,

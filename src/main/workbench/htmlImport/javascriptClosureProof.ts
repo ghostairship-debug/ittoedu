@@ -73,10 +73,18 @@ export function analyzeJavaScriptClosure(root: JsNode, inertCalls: Set<JsNode> =
     for (const child of children(node)) index(child, scope, node)
   }
   index(root, program)
+  const resolvedBindings = new Map<JsNode, Binding | null>()
   const bindingOf = (node: JsNode): Binding | undefined => {
     if (node.type !== 'Identifier') return undefined
+    const retained = resolvedBindings.get(node)
+    if (retained !== undefined) return retained ?? undefined
     let scope = scopes.get(node)
-    while (scope) { const binding = scope.bindings.get(String(node.name)); if (binding) return binding; scope = scope.parent }
+    while (scope) {
+      const binding = scope.bindings.get(String(node.name))
+      if (binding) { resolvedBindings.set(node, binding); return binding }
+      scope = scope.parent
+    }
+    resolvedBindings.set(node, null)
     return undefined
   }
   const topStatement = (node: JsNode): JsNode => {
@@ -84,7 +92,8 @@ export function analyzeJavaScriptClosure(root: JsNode, inertCalls: Set<JsNode> =
     while (parents.get(current) && parents.get(current) !== root) current = parents.get(current)!
     return current
   }
-  const isReference = (node: JsNode): boolean => {
+  const referenceKinds = new Map<JsNode, boolean>()
+  const referenceKind = (node: JsNode): boolean => {
     if (node.type !== 'Identifier') return false
     const parent = parents.get(node)
     if (!parent) return false
@@ -104,9 +113,29 @@ export function analyzeJavaScriptClosure(root: JsNode, inertCalls: Set<JsNode> =
       || (FUNCTIONS.has(parent.type) && (parent.id === node || (parent.params as JsNode[]).includes(node)))) return false
     return true
   }
+  const isReference = (node: JsNode): boolean => {
+    if (node.type !== 'Identifier') return false
+    const retained = referenceKinds.get(node)
+    if (retained !== undefined) return retained
+    const value = referenceKind(node)
+    referenceKinds.set(node, value)
+    return value
+  }
   const allNodes: JsNode[] = []
   const collect = (node: JsNode) => { allNodes.push(node); for (const child of children(node)) collect(child) }
   collect(root)
+  // Scope and parent facts are fixed by index(). Reusing their lexical-reference
+  // index keeps every proof below identical without rescanning the whole program
+  // for each DOM/data/state binding in a bundled runtime.
+  const referencesByBinding = new Map<Binding, JsNode[]>()
+  for (const node of allNodes) {
+    if (!isReference(node)) continue
+    const binding = bindingOf(node)
+    if (!binding) continue
+    const references = referencesByBinding.get(binding)
+    if (references) references.push(node); else referencesByBinding.set(binding, [node])
+  }
+  const referencesOf = (binding: Binding): readonly JsNode[] => referencesByBinding.get(binding) ?? []
   const audited = recognizeReact1927(root)
   const libraryBindings = new Set<Binding>()
   if (audited) for (const declaration of audited.declarations.values()) {
@@ -377,7 +406,7 @@ export function analyzeJavaScriptClosure(root: JsNode, inertCalls: Set<JsNode> =
     const ownedLiterals = new Set(producers.flatMap(stringLeaves))
     // Following an alias proves a value, but never gives ownership of its source.
     if (uses.some(input => input.proof.kind === 'proven-resource' && input.proof.literals.some(literal => !ownedLiterals.has(literal)))) continue
-    const references = allNodes.filter(node => isReference(node) && bindingOf(node) === binding)
+    const references = referencesOf(binding)
     const allowed = references.every(reference => {
       const parent = parents.get(reference)!
       if (writes.includes(parent) && ((parent.type === 'AssignmentExpression' && parent.left === reference) || (isObjectAssign(parent) && (parent.arguments as JsNode[])[0] === reference))) return true
@@ -450,7 +479,7 @@ export function analyzeJavaScriptClosure(root: JsNode, inertCalls: Set<JsNode> =
     if (!callee || memberName(callee) !== 'useState' || !libraryBindings.has(bindingOf(callee.object as JsNode)!)) continue
     const setter = ((declaration.id as JsNode).elements as Array<JsNode | null>)[1], binding = setter && bindingOf(setter)
     if (!binding) continue
-    const passive = allNodes.filter(ref => isReference(ref) && bindingOf(ref) === binding).every(ref => {
+    const passive = referencesOf(binding).every(ref => {
       const call = parents.get(ref)
       if (call?.type !== 'CallExpression' || call.callee !== ref) return false
       return (call.arguments as JsNode[]).every(arg => !FUNCTIONS.has(arg.type) || !allNodes.some(child => arg.start <= child.start && child.end <= arg.end && ['CallExpression', 'NewExpression', 'AssignmentExpression', 'UpdateExpression'].includes(child.type)))
@@ -600,7 +629,7 @@ export function analyzeJavaScriptClosure(root: JsNode, inertCalls: Set<JsNode> =
     const stateBinding = bindingOf(state), setterBinding = bindingOf(setter)
     if (!stateBinding || !setterBinding || stateBinding.duplicate || setterBinding.duplicate || mutations.has(stateBinding) || assignments.has(stateBinding) || mutations.has(setterBinding) || assignments.has(setterBinding)) continue
     const updaterParams = new Set<Binding>()
-    const valid = allNodes.filter(ref => isReference(ref) && bindingOf(ref) === setterBinding).every(ref => {
+    const valid = referencesOf(setterBinding).every(ref => {
       const call = parents.get(ref)
       if (call?.type !== 'CallExpression' || call.callee !== ref || (call.arguments as JsNode[]).length !== 1) return false
       const value = (call.arguments as JsNode[])[0]
@@ -623,17 +652,22 @@ export function analyzeJavaScriptClosure(root: JsNode, inertCalls: Set<JsNode> =
     const use = parents.get(node)
     return use?.type === 'MemberExpression' && use.object === node && domMembers.has(memberName(use) ?? '')
   }
+  const stableDomBindings = new Map<Binding, boolean>()
   const domCollection = (node: JsNode, seen = new Set<Binding>()): boolean => {
     if (node.type === 'Identifier') {
       const binding = bindingOf(node)
       if (!binding?.initial || binding.duplicate || seen.has(binding) || assignments.has(binding) || objectAssigns.has(binding)) return false
       // Do not infer collection provenance after replacement, mutation or escape to an unknown function.
-      const stable = allNodes.filter(ref => isReference(ref) && bindingOf(ref) === binding).every(ref => {
-        const use = parents.get(ref)
-        if (use?.type !== 'MemberExpression' || use.object !== ref) return false
-        if (memberName(use) === 'length') return parents.get(use)?.type !== 'AssignmentExpression'
-        return use.computed === true && indexedDomUse(use)
-      })
+      let stable = stableDomBindings.get(binding)
+      if (stable === undefined) {
+        stable = referencesOf(binding).every(ref => {
+          const use = parents.get(ref)
+          if (use?.type !== 'MemberExpression' || use.object !== ref) return false
+          if (memberName(use) === 'length') return parents.get(use)?.type !== 'AssignmentExpression'
+          return use.computed === true && indexedDomUse(use)
+        })
+        stableDomBindings.set(binding, stable)
+      }
       return stable && domCollection(binding.initial, new Set(seen).add(binding))
     }
     if (node.type === 'ArrayExpression') {
@@ -660,7 +694,22 @@ export function analyzeJavaScriptClosure(root: JsNode, inertCalls: Set<JsNode> =
     return localContainer(binding.initial, new Set(seen).add(binding))
   }
   const dataReceiver = (node: JsNode): boolean => !!localContainer(node)
-  const inInert = (node: JsNode): boolean => { let current: JsNode | undefined = node; while (current) { if (inertCalls.has(current)) return true; current = parents.get(current) } return false }
+  const provenResourceNodes = new Set(resourceInputs.filter(input => input.proof.kind === 'proven-resource').map(input => input.value))
+  const inertNodes = new Map<JsNode, boolean>()
+  const inInert = (node: JsNode): boolean => {
+    if (!inertCalls.size) return false
+    const path: JsNode[] = []
+    let current: JsNode | undefined = node, value = false
+    while (current) {
+      const retained = inertNodes.get(current)
+      if (retained !== undefined) { value = retained; break }
+      if (inertCalls.has(current)) { value = true; break }
+      path.push(current)
+      current = parents.get(current)
+    }
+    for (const entry of path) inertNodes.set(entry, value)
+    return value
+  }
   for (const node of allNodes) {
     if (inLibrary(node) || inInert(node)) continue
     const parent = parents.get(node)
@@ -670,7 +719,7 @@ export function analyzeJavaScriptClosure(root: JsNode, inertCalls: Set<JsNode> =
       && !dataReceiver(node.object as JsNode)
       && ((parent.type === 'CallExpression' && parent.callee === node) || !dataValue(node.object as JsNode))
       && !(indexedDomUse(node) && domCollection(node.object as JsNode))
-      && !resourceInputs.some(input => input.value === node && input.proof.kind === 'proven-resource')
+      && !provenResourceNodes.has(node)
       && !((node.property as JsNode).type === 'Literal' && typeof (node.property as JsNode).value === 'number')) capabilityErrors.push(node)
     if (name && networks.has(name)) networkCalls.push(node)
     else if (name && ['eval', 'Function', 'Reflect', 'constructor', 'getOwnPropertyDescriptor', 'getOwnPropertyDescriptors', '__lookupGetter__', '__lookupSetter__'].includes(name)) capabilityErrors.push(node)

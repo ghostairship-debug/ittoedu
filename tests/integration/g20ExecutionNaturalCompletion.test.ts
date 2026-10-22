@@ -312,7 +312,7 @@ it('reads historical captured target labels in memory without rewriting journals
   const started = await h.engine.start(h.input), final = await h.engine.wait(started.runId)
   const digest = (value: string) => createHash('sha256').update(value).digest('hex')
   const runFilename = path.join(h.directory, 'runs', `${digest(final.runId)}.json`)
-  const rawRun = JSON.parse(await readFile(runFilename, 'utf8'))
+  const rawRun = JSON.parse(JSON.stringify(await new ExecutionRunStore(path.join(h.directory, 'runs')).read(final.runId)))
   rawRun.input.contentOutput.kind = 'replace-text'
   const oldRunBytes = JSON.stringify(rawRun)
   await writeFile(runFilename, oldRunBytes)

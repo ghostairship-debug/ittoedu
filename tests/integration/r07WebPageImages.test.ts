@@ -1,4 +1,5 @@
 // @vitest-environment node
+import { componentSurfaces } from '../../src/shared/contracts/component-platform/project'
 import { expect, it } from 'vitest'
 import fs from 'node:fs/promises'
 import os from 'node:os'
@@ -72,7 +73,7 @@ it('uses search -> opened page -> allowed image candidate -> preview -> formal i
     expect(fetched).toMatchObject({ status: 'ready', source: { kind: 'open-library', url: pageUrl, author: 'Museum author', license: { id: 'CC BY 4.0' } } })
     expect(imageDownloads).toBe(2)
     if (created.model.kind !== 'course-v10') throw new Error('V10 required')
-    const target = await host.tools.issueTarget('run', created.documentId, { kind: 'course-surface', surfaceId: created.model.project.surfaces[0].id })
+    const target = await host.tools.issueTarget('run', created.documentId, { kind: 'course-surface', surfaceId: componentSurfaces(created.model.project)[0].id })
     await host.tools.loadToolFamilies('run', ['media'])
     expect(await call('insert', 'media.insert', { target, resource: fetched.resource })).toMatchObject({ kind: 'document-operation', result: { status: 'applied' } })
     const saved = path.join(folder, 'originals.glx')

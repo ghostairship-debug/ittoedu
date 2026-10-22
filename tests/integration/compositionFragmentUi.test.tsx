@@ -1,3 +1,5 @@
+import { componentSurfaces } from '../../src/shared/contracts/component-platform/project'
+import { testContainerInstance } from '../helpers/glxWorkFixture'
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, expect, it, vi } from 'vitest'
 import { createBlankCourseProjectV10 } from '../../src/core/course/createCourseProjectV10'
@@ -20,7 +22,7 @@ it('extracts the actual selected subtree and bytes to the library, then inserts 
   project.instances.root = { id: 'root', definitionId, data: {}, childIds: ['text', 'image'], frame: { width: 700, height: 300, transform: [1, 0, 0, 1, 60, 80] } }
   project.instances.text = { id: 'text', definitionId: TEXT_DEFINITION.id, data: json(createTextComponentData({ inlines: [{ type: 'text', text: '观察与思考' }] })), frame: { width: 280, height: 100, transform: [1, 0, 0, 1, 0, 0] } }
   project.instances.image = { id: 'image', definitionId: IMAGE_DEFINITION.id, data: json(createImageData('photo')), frame: { width: 320, height: 240, transform: [1, 0, 0, 1, 330, 0] } }
-  project.surfaces[0].childIds.push('root')
+  testContainerInstance(project, 0).childIds.push('root')
   await store().createCourseDocumentFrom(project, { assets: { photo: bytes }, components: {} })
   store().setEditingScope('scene'); store().selectNode('root')
   const documentId = store().courseView.activeDocumentId!, session = h.registry.get(documentId), before = session.read()
@@ -37,7 +39,7 @@ it('extracts the actual selected subtree and bytes to the library, then inserts 
   await act(async () => { fireEvent.click(screen.getByTestId(`component-${definitionId}`)); await store().courseBridge.drain() })
   const added = session.read(); if (added.model.kind !== 'course-v10') throw new Error('Expected V10')
   expect(added.undoDepth).toBe(before.undoDepth + 1)
-  const roots = added.model.project.surfaces[0].childIds
+  const roots = componentSurfaces(added.model.project)[0].childIds
   expect(roots).toHaveLength(2); expect(new Set(roots).size).toBe(2)
   const inserted = added.model.project.instances[roots[1]]
   expect(added.model.project.definitions[inserted.definitionId].implementation.kind).toBe('source'); expect(inserted.childIds).toHaveLength(2)

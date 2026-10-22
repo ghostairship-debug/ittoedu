@@ -1,3 +1,4 @@
+import { testContainerInstance } from '../../../helpers/glxWorkFixture'
 // @vitest-environment node
 import { createServer } from 'node:http'
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
@@ -43,7 +44,7 @@ it('an actual compiled source realm resolves an assetId without optional binding
     } }`
     project.definitions.source = { id: 'source', role: 'content', implementation: { kind: 'source', language: 'javascript', source } }
     project.instances.source = { id: 'source', definitionId: 'source', data: { assetId: 'current' }, frame: { width: 320, height: 200, transform: [1, 0, 0, 1, 0, 0] } }
-    project.surfaces[0].childIds = ['source']
+    testContainerInstance(project, 0).childIds = ['source']
     project.assets.current = { id: 'current', path: 'assets/current.png', mimeType: 'image/png' }
     project.assets.unused = { id: 'unused', path: 'assets/unused.png', mimeType: 'image/png' }
     const compilation = new InMemoryComponentCompilation(createEsbuildComponentCompiler())

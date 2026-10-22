@@ -1,3 +1,4 @@
+import { componentContainers } from '../../../../shared/contracts/component-platform/project'
 import { frameContainsPoint, frameCorners, frameToSpaceMatrix, IDENTITY_MATRIX, multiplyMatrices, transformPoint, type AffineMatrix, type GeometryPoint } from '../../../../core/components/geometry'
 import { lineStrokeHit, resolveNativeLinePoints } from '../../../../shared/nativeLineGeometry'
 import { shapeDataSchema } from '../../../../components/shape/data'
@@ -32,12 +33,12 @@ export function freeSurfaceTargets(project: CourseProjectV10, surfaceId: string)
         ...(key === 'guoling.text' ? { resizeMode: 'box' as const, directSelection: true } : {}),
         ...(shape?.success && (shape.data.shapeType === 'line' || shape.data.shapeType === 'elbow-arrow') ? {
           stroke: { points: resolveNativeLinePoints(shape.data.lineGeometry, instance.frame.width, instance.frame.height, shape.data.shapeType), width: shape.data.style.borderWidth } } : {}) })
-      visit(instance.childIds ?? [], { kind: 'instance', instanceId: id },
+      if (!instance.container) visit(instance.childIds ?? [], { kind: 'instance', instanceId: id },
         instance.frame ? multiplyMatrices(matrix, instance.frame.transform) : matrix, [...ancestors, id])
     }
   }
   visit(project.global.underlay, { kind: 'global', plane: 'underlay' }, IDENTITY_MATRIX, [])
-  const surface = project.surfaces.find(value => value.id === surfaceId)
+  const surface = componentContainers(project).find(value => value.id === surfaceId)
   if (surface) visit(surface.childIds, { kind: 'surface', surfaceId }, IDENTITY_MATRIX, [])
   visit(project.global.overlay, { kind: 'global', plane: 'overlay' }, IDENTITY_MATRIX, [])
   return result

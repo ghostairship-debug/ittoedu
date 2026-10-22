@@ -14,7 +14,7 @@ import { disclosureDataSchema } from '../../../../components/disclosure'
 import { popoverDataSchema } from '../../../../components/popover'
 import { documentBlockOutputAdapter } from '../../../../components/document-block'
 import type { DocumentBlock } from '../../../../shared/document/content'
-import { componentOutputPresentation } from '../presentation'
+import { componentOutputPresentation, componentOutputSurface } from '../presentation'
 import { audioDataSchema, videoDataSchema, type MediaData } from '../../../../components/media'
 import type { FlowDocxPageSize, FlowDocxOrientation } from '../../flowPageBox'
 import { componentDefinitionBuiltinKey } from '../../../../shared/contracts/component-platform/project'
@@ -71,7 +71,7 @@ export function escapeOutput(value: string): string {
 }
 export function buildComponentReadingProjection(document: ComponentExportDocument, surfaceId: string): ComponentReadingProjection {
   document = componentOutputPresentation(document, surfaceId)
-  const surface = document.surfaces.find(item => item.id === surfaceId)
+  const surface = componentOutputSurface(document, surfaceId)
   if (!surface) throw new Error(`导出表面不存在：${surfaceId}`)
   if (surface.kind !== 'flow') throw new Error(`表面 ${surfaceId} 需要实际页面／镜头捕获，不能按阅读流重排。`)
   const projection: ComponentReadingProjection = { title: surface.title || document.title, surface, blocks: [], diagnostics: [] }
@@ -99,7 +99,10 @@ export function buildComponentReadingProjection(document: ComponentExportDocumen
     if (instance.attachments?.length) diagnostic(instance, 'static-behavior', '附加行为在静态文件中不执行。')
     let block: ProfessionalBlock | undefined
     try {
-      switch (key) {
+      if (instance.container) {
+        block = { kind: 'static', label: instance.name ?? definition.title ?? instance.id, lines: [], captureRequired: true }
+        diagnostic(instance, 'container-static-capture', '局部容器保留其实际视口图面，内部布局和镜头不按外层阅读流重新排版。')
+      } else switch (key) {
         case 'guoling.document-block': block = { kind: 'document-block', data: documentBlockOutputAdapter.block(instance.data, instance.id) }; break
         case 'guoling.audio': block = { kind: 'media', mediaKind: 'audio', data: audioDataSchema.parse(instance.data) }; break
         case 'guoling.video': block = { kind: 'media', mediaKind: 'video', data: videoDataSchema.parse(instance.data) }; break
@@ -138,6 +141,10 @@ export function buildComponentReadingProjection(document: ComponentExportDocumen
         ...(floatingPlacement ? { floatingPlacement, ...(floatingAnchorFrame ? { floatingAnchorFrame } : {}), ...(outputFrame ? { outputFrame } : {}) } : {}) })
       if (block.kind === 'static' && !block.captureRequired) diagnostic(instance, 'static-interaction', '打印保留题面／说明和作者初值，不带学生临时答案或互动。')
     }
+    // A container owns its descendants' layout and camera. Its actual capture
+    // includes them; emitting the same children in the outer flow would duplicate
+    // content and discard that local projection.
+    if (instance.container) return
     instance.childIds?.forEach(child => walk(child, globalPlane, matrix, floatingPlacement, floatingAnchorFrame, outputOpacity))
   }
   const global = (plane: 'underlay' | 'overlay') => {

@@ -11,7 +11,7 @@ import { courseInstanceContext, courseInstanceFieldIdentity, courseInstanceTextT
 import type { TextCodec } from './CardTextEdits'
 import { documentSourceEdits } from '../../../shared/document/sourceMerge'
 import { mapAcknowledgedRange } from '../../../core/tools/ToolReadCoverage'
-import { componentDefinitionBuiltinKey } from '../../../shared/contracts/component-platform/project'
+import { componentContainerForInstance, componentDefinitionBuiltinKey } from '../../../shared/contracts/component-platform/project'
 import { documentDigest } from '../../../core/documents/documentDigest'
 import { parse, parseFragment, type DefaultTreeAdapterTypes } from 'parse5'
 import { lightEditTextOverridesSchema, normalizeLightEditText } from '../../../shared/contracts/runtime/lightEdit'
@@ -72,10 +72,13 @@ function lostWebTexts(before: DocumentModel, after: DocumentModel, instanceId: s
 
 const componentStringCodec: TextCodec<string> = { length: value => Array.from(value).length,
   slice: (value, from, to) => Array.from(value).slice(from, to).join(''), join: values => values.join(''), equal: (a, b) => a === b }
+/** Named-state fields belong to the captured nearest container, never its ultimate project owner. */
+const componentStateOwned = (model: DocumentModel, target: CourseInstanceTarget): boolean => model.kind === 'course-v10'
+  && !!target.stateId && componentContainerForInstance(model.project, target.instanceId)?.id === target.surfaceId
 const componentFields = (model: import('../../../shared/workbench/document').DocumentModel, target: CourseInstanceTarget) => {
   try {
     const context = courseInstanceContext(model, target)
-    return model.kind === 'course-v10' && target.stateId && context.owner.kind === 'surface'
+    return model.kind === 'course-v10' && target.stateId && componentStateOwned(model, target)
       ? readComponentStateElementFields(model.project, target.surfaceId, target.stateId, target.instanceId)
       : readComponentElementFields(context.project, target.instanceId)
   } catch { return null }
@@ -83,8 +86,8 @@ const componentFields = (model: import('../../../shared/workbench/document').Doc
 const componentRoots = (model: import('../../../shared/workbench/document').DocumentModel, target: CourseInstanceTarget) => {
   if (target.dataPath) target = courseInstanceTextTarget(model, target)
   if (target.fieldScope === 'flowLayout') return null
-  const context = courseInstanceContext(model, target)
-  return model.kind === 'course-v10' && target.stateId && context.owner.kind === 'surface'
+  courseInstanceContext(model, target)
+  return model.kind === 'course-v10' && target.stateId && componentStateOwned(model, target)
     ? readComponentStateOverrideRoots(model.project, target.surfaceId, target.stateId, target.instanceId) : null
 }
 const componentFieldPath = (key: string, instanceId: string) => {
@@ -360,7 +363,7 @@ export class ElementChangeTracker {
       } else if (snapshot.model.kind === 'course-v10' && this.target.kind === 'course-instance') {
         const t: CourseInstanceTarget = this.target
         if (!componentFields(snapshot.model, t)) return { status: 'unavailable', message: UNTRACEABLE }
-        const context = courseInstanceContext(snapshot.model, t), stateOwned = !!t.stateId && context.owner.kind === 'surface'
+        const context = courseInstanceContext(snapshot.model, t), stateOwned = componentStateOwned(snapshot.model, t)
         if (this.componentText) {
           const original = readCourseInstanceText(snapshot.model, t)
           const content = this.richComponentText && original !== null ? normalizeDocumentText(typeof original === 'string' ? { inlines: [{ type: 'text', text: original }] } : original) : original

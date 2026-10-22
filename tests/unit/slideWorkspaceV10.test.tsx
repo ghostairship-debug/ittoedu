@@ -1,3 +1,4 @@
+import { createTestProjectFromLegacy, testContainerInstance } from '../helpers/glxWorkFixture'
 import { expect, it, vi } from 'vitest'
 import { fireEvent, render, screen, waitFor, cleanup, act } from '@testing-library/react'
 import { useSyncExternalStore } from 'react'
@@ -28,7 +29,7 @@ import { placeQuickBar } from '../../src/renderer/editing/quickbar/placeQuickBar
 // Quickbar/AI is U7's consumer. This check exercises the original workspace gesture and rich text routes.
 const selectionProbe = vi.hoisted(() => ({ bounds: null as null | ((id: string) => { left: number; top: number; width: number; height: number } | null) }))
 vi.mock('../../src/renderer/workbench/NativeSelectionContext', () => ({ NativeSelectionContext: (props: { bounds?: typeof selectionProbe.bounds }) => { selectionProbe.bounds = props.bounds ?? null; return null } }))
-const fixture = (): CourseProjectV10 => ({
+const fixture = (): CourseProjectV10 => (createTestProjectFromLegacy({
   schemaVersion: 10, id: 'u4', revision: 0, title: '原画布',
   definitions: { [TEXT_DEFINITION.id]: TEXT_DEFINITION, [SHAPE_DEFINITION.id]: SHAPE_DEFINITION },
   instances: {
@@ -39,7 +40,7 @@ const fixture = (): CourseProjectV10 => ({
   },
   surfaces: [{ id: 'slide', kind: 'slide', title: '演示', childIds: ['text', 'shape'], designSize: { width: 960, height: 640 } }],
   global: { underlay: [], overlay: [] }, assets: {},
-})
+}))
 async function host(project = fixture()) {
   const driver = new CourseV10Driver(), listeners = new Set<(event: DocumentEvent) => void>()
   const registry = new DocumentRegistry({ drivers: [driver], createId: () => 'u4-doc', bindingKey: value => value.path,
@@ -98,11 +99,11 @@ it('retains invalid Chart property input and refuses to open a different canvas 
   const project = fixture(), source = '// 原文字'
   project.definitions.custom = { id: 'custom', role: 'content', implementation: { kind: 'source', language: 'javascript', source } }
   project.instances.custom = { id: 'custom', definitionId: 'custom', data: {}, frame: { width: 300, height: 160, transform: [1, 0, 0, 1, 280, 180] } }
-  project.surfaces[0].childIds.push('custom')
+  testContainerInstance(project, 0).childIds.push('custom')
   const chart = createChartData()
   project.definitions[CHART_DEFINITION.id] = CHART_DEFINITION
   project.instances.chart = { id: 'chart', definitionId: CHART_DEFINITION.id, data: JSON.parse(JSON.stringify(chart)), frame: { width: 320, height: 200, transform: [1, 0, 0, 1, 0, 0] } }
-  project.surfaces[0].childIds.push('chart')
+  testContainerInstance(project, 0).childIds.push('chart')
   const h = await host(project), kernel = createEditorStoreKernel({ bridge: h.bridge, commit() {} })
   let owned = createInitialSlideOwnedState()
   const slice = createSlideAuthoringSlice(kernel, { read: () => owned, patch: patch => { owned = { ...owned, ...patch } } })
@@ -138,7 +139,7 @@ it('commits registered spot drafts once and preserves source frames and replacem
   project.definitions.custom = { id: 'custom', role: 'content', implementation: { kind: 'source', language: 'javascript', source } }
   project.instances.custom = { id: 'custom', definitionId: 'custom', data: { label: '原文字', assetId: 'old' },
     frame: { width: 300, height: 160, transform: [0.9, 0.2, -0.1, 1, 280, 180] } }
-  project.surfaces[0].childIds.push('custom')
+  testContainerInstance(project, 0).childIds.push('custom')
   const h = await host(project), kernel = createEditorStoreKernel({ bridge: h.bridge, commit() {} })
   let owned = createInitialSlideOwnedState()
   const slice = createSlideAuthoringSlice(kernel, { read: () => owned, patch: patch => { owned = { ...owned, ...patch } } })
@@ -189,7 +190,7 @@ it('replaces an HTML spot image through a managed resource binding and reopens i
   const project = fixture(), html = '<img src="old.png">'
   project.definitions[WEB_DEFINITION.id] = WEB_DEFINITION
   project.instances.web = { id: 'web', definitionId: WEB_DEFINITION.id, data: { html }, frame: { width: 300, height: 200, transform: [1, 0.15, -0.1, 1, 280, 190] } }
-  project.surfaces[0].childIds.push('web')
+  testContainerInstance(project, 0).childIds.push('web')
   const h = await host(project), kernel = createEditorStoreKernel({ bridge: h.bridge, commit() {} })
   const spot: ComponentAuthorSpot = { id: 'registered-html-image', instanceId: 'web', mountGeneration: 1, kind: 'image', initialValue: 'old.png',
     sourceRegion: { kind: 'data', path: ['html'], start: html.indexOf('old.png'), end: html.indexOf('old.png') + 7, encoding: 'html-attribute' },

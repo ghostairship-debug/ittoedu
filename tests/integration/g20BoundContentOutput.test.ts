@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import os from 'node:os'
@@ -23,6 +23,7 @@ import type { ExecutionSendResult } from '../../src/shared/workbench/executionDe
 
 const roots: string[] = []
 afterEach(async () => {
+  vi.restoreAllMocks()
   for (const root of roots.splice(0)) {
     if (!path.resolve(root).startsWith(path.resolve(os.tmpdir()) + path.sep)) throw new Error('Unsafe fixture path')
     await fs.rm(root, { recursive: true, force: true, maxRetries: 8, retryDelay: 25 })
@@ -55,6 +56,42 @@ async function fixture(provider: ModelProvider, source = '前文 OLD 后文') {
 }
 
 describe('U01 explicit bound content output', () => {
+  it('rolls back an unauthorized initial default target and permits a clean retry with the exact grant', async () => {
+    const h = await fixture({ async *stream() { throw new Error('Gateway-only fixture cannot send a model request') } })
+    let begins = 0, stops = 0
+    h.gateway.configureHostServices({ beginRun: async () => { begins++ }, stopRun: async () => { stops++ } })
+    const runId = 'initial-target-rollback'
+    const grant = { runId, actor: 'agent' as const, documents: [{ documentId: h.session.documentId,
+      writable: [{ kind: 'markdown-range' as const, from: 3, to: 6 }] }], contentOutput: h.input.contentOutput }
+    await expect(h.gateway.beginRun(grant)).rejects.toMatchObject({ code: 'not-authorized' })
+    expect(h.gateway.runtimeCounts(runId)).toMatchObject({ activeRuns: 0, handles: 0, host: { runs: 0 } })
+    expect({ begins, stops }).toEqual({ begins: 1, stops: 1 })
+    const before = h.session.read()
+    await h.gateway.beginRun({ ...grant, documents: h.input.documents })
+    expect(await h.gateway.execute(runId, 'default-replace', { name: 'text.replace', input: { content: '只走正式写入' } }))
+      .toMatchObject({ kind: 'document-operation', result: { status: 'applied' } })
+    expect(h.session.read()).toMatchObject({ revision: before.revision + 1, undoDepth: before.undoDepth + 1, model: { source: '只走正式写入' } })
+    await h.gateway.stop(runId)
+    await expect(h.gateway.issueTarget(runId, h.session.documentId, { kind: 'document' })).rejects.toMatchObject({ code: 'run-stopped' })
+  })
+  it('publishes no authority while preparing the default target and respects a closing generation before publish', async () => {
+    const h = await fixture({ async *stream() { throw new Error('Gateway-only fixture cannot send a model request') } })
+    const entered = deferred(), release = deferred(), drain = h.session.drain.bind(h.session)
+    let calls = 0
+    vi.spyOn(h.session, 'drain').mockImplementation(async () => {
+      const snapshot = await drain()
+      if (++calls === 2) { entered.resolve(); await release.promise }
+      return snapshot
+    })
+    const runId = 'initial-target-closing', before = h.session.read()
+    const pending = h.gateway.beginRun({ runId, actor: 'agent', documents: h.input.documents, contentOutput: h.input.contentOutput })
+    const rejected = expect(pending).rejects.toMatchObject({ code: 'document-write-tasks-blocked' })
+    await entered.promise
+    await expect(h.gateway.issueTarget(runId, h.session.documentId, { kind: 'document' })).rejects.toMatchObject({ code: 'unknown-run' })
+    await h.gateway.withWriteTaskBarrier([h.session.documentId], async () => { release.resolve(); await rejected })
+    expect(h.gateway.runtimeCounts(runId)).toMatchObject({ activeRuns: 0, handles: 0, host: { runs: 0 } })
+    expect(h.session.read()).toEqual(before)
+  })
   it('receives complete text at its default tool target, applies once through canonical history, and does not apply ordinary chat or replay a settled continuation', async () => {
     const source = '完整正文'.repeat(1500) + '尾部不可截断', requests: ModelRequest[] = []
     let h!: Awaited<ReturnType<typeof fixture>>

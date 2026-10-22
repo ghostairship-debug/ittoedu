@@ -1,3 +1,5 @@
+import { componentSurfaces } from '../../src/shared/contracts/component-platform/project'
+import { setRootContainers } from '../helpers/glxWorkFixture'
 import { describe, expect, it } from 'vitest'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
@@ -16,9 +18,9 @@ function xml(bytes: Uint8Array) {
 // A native-only cut of X1's sample isolates the editable semantics from capture.
 function nativeCut() {
   const { project } = createComponentPlatformMixedDeliveryFixture()
-  project.surfaces = [project.surfaces[0]!]
+  setRootContainers(project, [componentSurfaces(project)[0]!])
   project.instances['slide-group']!.childIds = ['slide-data-group', 'slide-styled-text']
-  const ids = ['slide-group', 'slide-data-group', 'slide-table', 'slide-chart', 'slide-styled-text']
+  const ids = [...project.rootIds, 'slide-group', 'slide-data-group', 'slide-table', 'slide-chart', 'slide-styled-text']
   project.instances = Object.fromEntries(ids.map(id => [id, project.instances[id]!]))
   return project
 }
@@ -35,7 +37,7 @@ describe('X2 editable PPTX output consumer', () => {
       license: { id: 'CC-BY-4.0', url: 'https://creativecommons.org/licenses/by/4.0/' } })
     const { revision: _revision, ...publishedData } = project
     const { path: _path, ...asset } = project.assets['circuit-image']!
-    const published: PublishedCourseV3 = { ...publishedData, schemaVersion: 3, assets: { 'circuit-image': {
+    const published: PublishedCourseV3 = { ...publishedData, schemaVersion: 4, assets: { 'circuit-image': {
       ...asset, url: 'https://media.example.org/circuit.svg',
     } } }
     const before = structuredClone(published), result = await buildComponentPptx(published)
@@ -48,7 +50,7 @@ describe('X2 editable PPTX output consumer', () => {
     expect(credits.documentElement.textContent).toContain('出处：https://example.org/circuit-source')
     expect(credits.documentElement.textContent).not.toContain('https://media.example.org/circuit.svg')
     expect(credits.getElementsByTagNameNS(p, 'pic')).toHaveLength(0)
-    const output = resolve('output/component-platform-x2'); mkdirSync(output, { recursive: true })
+    const output = resolve('output/unified-edit-performance-20261022/candidates/delivery/evidence/pptx'); mkdirSync(output, { recursive: true })
     writeFileSync(resolve(output, 'editable-native-with-credits-diagnosed.pptx'), result.bytes)
     writeFileSync(resolve(output, 'editable-native-with-credits-diagnosed-report.json'), JSON.stringify({
       status: result.status, slideCount: result.slideCount, diagnostics: result.diagnostics,

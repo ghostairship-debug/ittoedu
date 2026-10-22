@@ -13,8 +13,12 @@ export interface DocumentEditPreview { editId: string; sequence?: number; target
 /** Flow's canonical instance address projects to the existing document slot, never a new author target. */
 export function documentPreviewTarget(target: EditTarget): EditTarget {
   if (target.kind !== 'course-instance') return target
-  if (target.from === undefined || target.to === undefined) return { kind: 'flow-block', surfaceId: target.surfaceId, blockId: target.instanceId, parentId: null }
-  const field = target.fieldScope === 'flowLayout' ? 'caption' : target.dataPath?.at(-1)
+  if (target.authorField) return target
+  if (target.from === undefined || target.to === undefined) return target.dataPath !== undefined || target.fieldScope !== undefined
+    ? target : { kind: 'flow-block', surfaceId: target.surfaceId, blockId: target.instanceId, parentId: null }
+  if (target.fieldScope === 'authoring' || target.dataPath?.length !== 1) return target
+  const field = target.dataPath[0]
+  if (target.fieldScope === 'flowLayout' && field !== 'caption') return target
   if (!['content', 'citation', 'caption', 'title', 'body'].includes(field ?? '')) return target
   return { kind: 'flow-range', surfaceId: target.surfaceId, blockId: target.instanceId, parentId: null,
     slot: { kind: 'field', field: field as 'content' | 'citation' | 'caption' | 'title' | 'body' }, from: target.from, to: target.to }

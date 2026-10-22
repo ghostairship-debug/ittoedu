@@ -3,7 +3,7 @@ import { promises as fs } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { componentCatalogSchema } from '@/shared/componentCatalog'
+import { componentCatalogSchema, parseComponentCatalog } from '@/shared/componentCatalog'
 import { exportComponentLibraryArchive, importComponentLibraryArchive } from '@/core/components/library/archive'
 import { unzipSync, zipSync } from 'fflate'
 import {
@@ -36,7 +36,7 @@ function catalogPackage(sha256 = '0'.repeat(64)) {
     packagePath: 'packages/catalog-card.h5component',
     thumbnailPath: 'thumbnails/catalog-card.svg',
     sha256,
-    componentSchemaVersion: 1 as const,
+    componentSchemaVersion: 2 as const,
     runtimeApiVersion: 5 as const,
     renderMode: 'dom' as const,
     supportedScopes: ['scene'] as const,
@@ -62,6 +62,14 @@ async function packageArchive(payload?: Uint8Array, title = '目录卡片') {
 }
 
 describe('Component Catalog V1', () => {
+  it('adapts only earlier library metadata at the read boundary and emits current metadata', () => {
+    const legacy = { catalogVersion: 1, packages: [{ ...catalogPackage(), componentSchemaVersion: 1 }] }
+    expect(componentCatalogSchema.safeParse(legacy).success).toBe(false)
+    expect(parseComponentCatalog(legacy).packages[0].componentSchemaVersion).toBe(2)
+    expect(legacy.packages[0].componentSchemaVersion).toBe(1)
+    expect(() => parseComponentCatalog({ ...legacy, packages: [{ ...catalogPackage(), componentSchemaVersion: 4 }] })).toThrow()
+  })
+
   it('接受 API5 experimental 并禁止未授权条目升级为 stable', () => {
     const experimental = componentCatalogSchema.safeParse({
       catalogVersion: 1,

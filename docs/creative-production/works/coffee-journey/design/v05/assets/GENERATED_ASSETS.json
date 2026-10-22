@@ -1,0 +1,82 @@
+[
+  {
+    "name": "roast",
+    "source": "exec-6d71adfe-3616-4d2b-a7f7-4a4bc2a1d7e1.png",
+    "asset": "assets/roast.webp",
+    "size": [
+      1254,
+      1254
+    ],
+    "bytes": 306710,
+    "status": "selected",
+    "type": "AI generated interpretive still life",
+    "processing": "format conversion only; no crop, repaint or retouch",
+    "reference": "gold",
+    "selection": "Same object contour and seam, selected after actual mid-transition review"
+  },
+  {
+    "name": "green",
+    "source": "exec-54ea96ff-67f5-4c8e-96d3-2fd65c641853.png",
+    "asset": "assets/green.webp",
+    "size": [
+      1254,
+      1254
+    ],
+    "bytes": 224896,
+    "status": "selected",
+    "type": "AI generated interpretive still life",
+    "processing": "format conversion only; no crop, repaint or retouch"
+  },
+  {
+    "name": "gold",
+    "source": "exec-534fdc1d-10b4-4d49-8a1f-07b5e862d8c9.png",
+    "asset": "assets/gold.webp",
+    "size": [
+      1254,
+      1254
+    ],
+    "bytes": 261754,
+    "status": "selected",
+    "type": "AI generated interpretive still life",
+    "processing": "format conversion only; no crop, repaint or retouch"
+  },
+  {
+    "name": "natural",
+    "source": "exec-93b47a97-82c9-4fb2-9cc3-0de6962ec2ee.png",
+    "asset": "assets/natural.webp",
+    "size": [
+      1254,
+      1254
+    ],
+    "bytes": 207752,
+    "status": "selected",
+    "type": "AI generated interpretive still life",
+    "processing": "format conversion only; no crop, repaint or retouch"
+  },
+  {
+    "name": "washed",
+    "source": "exec-9add14c8-dc15-4909-83ec-097362de9082.png",
+    "asset": "assets/washed.webp",
+    "size": [
+      1420,
+      1108
+    ],
+    "bytes": 275184,
+    "status": "selected",
+    "type": "AI generated interpretive still life",
+    "processing": "format conversion only; no crop, repaint or retouch"
+  },
+  {
+    "name": "honey",
+    "source": "exec-dc91f443-da4a-4b35-8f94-c4c98d66e723.png",
+    "asset": "assets/honey.webp",
+    "size": [
+      1420,
+      1108
+    ],
+    "bytes": 255870,
+    "status": "selected",
+    "type": "AI generated interpretive still life",
+    "processing": "format conversion only; no crop, repaint or retouch"
+  }
+]

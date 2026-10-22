@@ -1,3 +1,5 @@
+import { componentSurfaces } from '../../src/shared/contracts/component-platform/project'
+import { testContainerInstance } from '../helpers/glxWorkFixture'
 import { describe, expect, it } from 'vitest'
 import { createBlankCourseProjectV10 } from '../../src/core/course/createCourseProjectV10'
 import { WEB_DEFINITION } from '../../src/components/web/data'
@@ -12,10 +14,10 @@ import { elementCardKey } from '../../src/renderer/workbench/elementCards/elemen
 import { continueDocumentTargets } from '../../src/main/workbench/execution/continuationTargets'
 import { captureComponentOperation } from '../../src/core/drivers/courseV10Operations'
 function fixture(source='<h1>Same</h1><p>Same</p>') {
-  const project=createBlankCourseProjectV10('Precise'),surfaceId=project.surfaces[0].id
+  const project=createBlankCourseProjectV10('Precise'),surfaceId=componentSurfaces(project)[0].id
   project.definitions[WEB_DEFINITION.id]=structuredClone(WEB_DEFINITION)
   project.instances.box={id:'box',definitionId:WEB_DEFINITION.id,data:{html:source},frame:{width:300,height:200,transform:[1,0,0,1,0,0]}}
-  project.surfaces[0].childIds=['box']
+  testContainerInstance(project, 0).childIds=['box']
   const model:DocumentModel={kind:'course-v10',project,resources:{assets:{},components:{}}}
   const spot:ComponentAuthorSpot={id:'s',instanceId:'box',kind:'text',mountGeneration:1,initialValue:'Same',localBounds:{width:10,height:10,transform:[1,0,0,1,0,0]},sourceRegion:{kind:'data',path:['html'],start:4,end:8,encoding:'html-text'}}
   return {model,project,spot,surfaceId,target:courseAuthorFieldTarget(surfaceId,spot)}
@@ -77,7 +79,8 @@ describe('A01 exact author field targets',()=>{
   expect(h.session.read().model).toMatchObject({project:{instances:{box:{data:{html:'<h1>Same</h1><p>Same</p>'},authoring:{records:{title:{overrides:{text:'Title only'}},other:{overrides:{text:'Same'}}}}}}}})
  })
  it('keeps affected author addresses current after a reverse-order batch before continuing a field',async()=>{
-  const h=await harness(),tail=courseAuthorFieldTarget(h.surfaceId,{...h.spot,id:'tail',sourceRegion:{...h.spot.sourceRegion!,start:16,end:20}})
+  const h=await harness(),tailSpot:ComponentAuthorSpot={...h.spot,id:'tail',sourceRegion:{...h.spot.sourceRegion!,start:16,end:20}}
+  const tail=courseAuthorFieldTarget(h.surfaceId,tailSpot)
   await h.gateway.beginRun({runId:'batch',actor:'agent',documents:[{documentId:h.session.documentId,writable:[h.target,tail]}]})
   const headingHandle=await h.gateway.issueTarget('batch',h.session.documentId,h.target)
   const tailHandle=await h.gateway.issueTarget('batch',h.session.documentId,tail)

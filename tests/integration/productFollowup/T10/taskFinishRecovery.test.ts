@@ -1,4 +1,5 @@
 // @vitest-environment node
+import { setRootContainers } from '../../../helpers/glxWorkFixture'
 import { promises as fs } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -31,7 +32,7 @@ it.each([false, true])('recovering a finish-executing crash slice keeps the comm
   const host = new DocumentHostService(path.join(directory, 'documents')), project = createBlankCourseProjectV10('finish恢复')
   project.definitions[TEXT_DEFINITION.id] = TEXT_DEFINITION
   project.instances.body = { id: 'body', definitionId: TEXT_DEFINITION.id, data: textDataEdit('fixture', createTextComponentData('原稿')).value }
-  project.surfaces = [{ id: 'flow', title: '讲义', kind: 'flow', childIds: ['body'] }]
+  setRootContainers(project, [{ id: 'flow', title: '讲义', kind: 'flow', childIds: ['body'] }])
   const initial = await host.internalAPI.create({ kind: 'course-v10', project, resources: { assets: {}, components: {} } }, 'finish.h5lesson')
   const target = { kind: 'course-instance' as const, surfaceId: 'flow', instanceId: 'body', dataPath: ['content'] }
   const contentOutput = prepareExecutionContentOutput(initial, target)

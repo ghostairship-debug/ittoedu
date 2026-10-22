@@ -1,8 +1,8 @@
 // @vitest-environment node
-import { expect, it } from 'vitest'
+import { expect, it, vi } from 'vitest'
 import { createHash } from 'node:crypto'
 import type { ModelChatMessage } from '../../src/shared/workbench/modelProvider'
-import { contextMessageId, contextSourceIndex, projectExecutionContext } from '../../src/main/workbench/execution/ExecutionContextProjection'
+import { contextMessageId, contextSourceIndex, projectExecutionContext, initialHistorySources, ContextProjectionMetadata } from '../../src/main/workbench/execution/ExecutionContextProjection'
 import { contextReadSchema, readContextMessage } from '../../src/main/workbench/execution/ContextReadTool'
 import { modelToolWireName } from '../../src/main/workbench/providers/OpenAIChatProvider'
 import { CHATGPT_RESPONSES_BASE_URL, serializeChatGPTResponsesRequest } from '../../src/main/workbench/providers/ChatGPTResponsesProvider'
@@ -10,6 +10,61 @@ import type { ModelSelection } from '../../src/shared/workbench/modelProvider'
 const pixels = (id: number) => `data:image/png;base64,${Buffer.from(`purpose-created-image-${id}`).toString('base64')}`
 const picture = (id: number): ModelChatMessage => ({ role: 'user', content: [{ type: 'text', text: `capture ${id}` }, { type: 'image_url', image_url: { url: pixels(id) } }] })
 const hash = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex')
+
+it('reuses immutable receipt and image metadata without retaining old projection policy', () => {
+  const urls = [0, 1, 2].map(index => `data:image/png;base64,${String(index).repeat(30_000)}`)
+  const receipt = JSON.stringify({ kind: 'read', data: { text: 'old result'.repeat(5000) } })
+  const messages: ModelChatMessage[] = [{ role: 'user', content: urls.map(url => ({ type: 'image_url', image_url: { url } })) },
+    { role: 'assistant', content: null, tool_calls: [{ id: 'read', type: 'function', function: { name: 'project.read', arguments: '{}' } }] },
+    { role: 'tool', tool_call_id: 'read', content: receipt }, { role: 'assistant', content: 'next round' }]
+  const expected = projectExecutionContext('run', messages, 1, 0)
+  const metadata = new ContextProjectionMetadata(), parse = vi.spyOn(JSON, 'parse'), byteLength = vi.spyOn(Buffer, 'byteLength')
+  try {
+    expect(projectExecutionContext('run', messages, 1, 0, undefined, new Set(), new Set(), metadata)).toEqual(expected)
+    expect(projectExecutionContext('run', messages, 1, 0, undefined, new Set(), new Set(), metadata)).toEqual(expected)
+    expect(parse.mock.calls.filter(([value]) => value === receipt)).toHaveLength(1)
+    for (const url of urls) expect(byteLength.mock.calls.filter(([value]) => value === url)).toHaveLength(1)
+    // A changed policy still projects the original receipt at the new limit.
+    const smaller = projectExecutionContext('run', messages, 1, 0, 2000, new Set(), new Set(), metadata)
+    expect(smaller).toEqual(projectExecutionContext('run', messages, 1, 0, 2000))
+    expect(smaller.messages[2]).not.toEqual(expected.messages[2])
+    const changedReceipt = JSON.stringify({ kind: 'read', data: { text: 'new result'.repeat(5000) } })
+    const changed = [...messages]; changed[2] = { ...messages[2]!, content: changedReceipt }
+    expect(projectExecutionContext('run', changed, 1, 0, undefined, new Set(), new Set(), metadata))
+      .toEqual(projectExecutionContext('run', changed, 1, 0))
+    expect(parse.mock.calls.filter(([value]) => value === changedReceipt)).toHaveLength(2) // cached path + reference path
+  } finally { parse.mockRestore(); byteLength.mockRestore() }
+})
+
+it('maps duplicate history provenance to original unused positions with one initial-prefix pass', () => {
+  const messages: ModelChatMessage[] = [{ role: 'system', content: 'runtime' }, { role: 'user', content: '相同历史' },
+    { role: 'assistant', content: '中间答复' }, { role: 'user', content: '相同历史' }, { role: 'user', content: '原始目标' }]
+  const context = [
+    { message: structuredClone(messages[1]!), provenance: { kind: 'history' as const, id: 'history-first' } },
+    { message: structuredClone(messages[3]!), provenance: { kind: 'history' as const, id: 'history-second' } },
+    { message: { role: 'user', content: '不存在' } as ModelChatMessage, provenance: { kind: 'history' as const, id: 'missing' } },
+    { message: structuredClone(messages[0]!), provenance: { kind: 'runtime' as const, id: 'runtime' } },
+  ]
+  const stringify = vi.spyOn(JSON, 'stringify')
+  try {
+    const result = initialHistorySources({ runId: 'run', messages, initialMessageCount: 5,
+      input: { inputContext: { id: 'context', instruction: '目标', capturedAt: 1, context, attachments: [] } } })
+    const initialCounts = messages.map(message => stringify.mock.calls.filter(([value]) => value === message).length)
+    expect([...result]).toEqual([[1, 'history-first'], [3, 'history-second']])
+    expect(initialCounts).toEqual([1, 1, 1, 1, 1])
+    const legacy = initialHistorySources({ runId: 'legacy', messages, initialMessageCount: 4,
+      input: { context: [structuredClone(messages[1]!), structuredClone(messages[3]!)] } })
+    expect([...legacy]).toEqual([[1, 'run:legacy:1'], [3, 'run:legacy:3']])
+  } finally { stringify.mockRestore() }
+})
+
+it('does not serialize the initial payload when it contains no supplied history', () => {
+  const stringify = vi.spyOn(JSON, 'stringify')
+  try {
+    initialHistorySources({ runId: 'run', messages: [{ role: 'user', content: 'large attachment context' }], initialMessageCount: 1, input: {} })
+    expect(stringify).not.toHaveBeenCalled()
+  } finally { stringify.mockRestore() }
+})
 
 it('retires old native source and its call/output together in the actual wire, keeping recent native items and steering intact', () => {
   const selection: ModelSelection = { model: 'fixture', connection: { id: 'local', revision: 1, provider: 'openai',

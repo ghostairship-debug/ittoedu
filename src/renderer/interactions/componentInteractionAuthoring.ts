@@ -1,3 +1,4 @@
+import { componentSurface } from '../../shared/contracts/component-platform/project'
 import { componentClickInteractionEdits, interactionBehavior, interactionRules } from '../../shared/componentInteractionData'
 export { INTERACTIONS_DEFINITION, componentRuleEdits, interactionBehavior, interactionRules,
   componentInteractionDataSchema, remapComponentInteractionData, createComponentInteractionCopyIdentities,
@@ -23,14 +24,21 @@ export function componentNavigationScene(surface: ComponentSurface): Interaction
       states: surface.presentation.states.map(state => ({ id: state.id, name: state.title })) } : undefined,
     ...(surface.kind === 'spatial' ? { spatial: { frames: (surface.spatial?.frames ?? []).map(frame => ({ id: frame.id, name: frame.title ?? frame.id })) } } : {}) }
 }
+/** The interaction UI needs only identity, label and supported local navigation. */
+export function componentWorkNavigationScenes(project: CourseProjectV10): InteractionSceneListItem[] {
+  return project.rootIds.flatMap(id => {
+    const surface = componentSurface(project, id), root = project.instances[id]
+    return surface ? [componentNavigationScene(surface)] : root ? [{ id, name: root.name ?? project.definitions[root.definitionId]?.title ?? id }] : []
+  })
+}
 export function componentInteractionView(project: CourseProjectV10, surfaceId: string, global = false) {
-  const surface = project.surfaces.find(value => value.id === surfaceId)
-  if (!surface) throw new Error('互动目标页面已不存在')
-  const target: ComponentTarget = global ? { kind: 'project' } : { kind: 'surface', surfaceId }
+  const surface = componentSurface(project, surfaceId), root = project.rootIds.includes(surfaceId) ? project.instances[surfaceId] : undefined
+  if (!surface && !root) throw new Error('互动目标已不存在')
+  const target: ComponentTarget = global ? { kind: 'project' } : { kind: 'instance', instanceId: surfaceId }
   const behavior = interactionBehavior(project, target), rules = interactionRules(behavior)
   const ids = new Set<string>()
-  const visit = (id: string) => { if (ids.has(id)) return; ids.add(id); project.instances[id]?.childIds?.forEach(visit) }
-  const roots = [...project.global.underlay, ...project.global.overlay, ...surface.childIds]
+  const visit = (id: string) => { if (ids.has(id)) return; ids.add(id); if (!project.instances[id]?.container) project.instances[id]?.childIds?.forEach(visit) }
+  const roots = [...project.global.underlay, ...project.global.overlay, ...(surface?.childIds ?? (root ? [root.id] : []))]
   roots.forEach(visit)
   const nodes: InteractionLayerTarget[] = [...ids].flatMap(id => {
     const instance = project.instances[id], definition = instance && project.definitions[instance.definitionId]
@@ -45,9 +53,9 @@ export function componentInteractionView(project: CourseProjectV10, surfaceId: s
         loop: typeof instance.data.loop === 'boolean' ? instance.data.loop : undefined,
       } : {}) }]
   })
-  const scene: InteractionSceneView = { ...componentNavigationScene(surface), nodes, interactions: rules }
+  const scene: InteractionSceneView = { ...(surface ? componentNavigationScene(surface) : { id: root!.id, name: root!.name ?? project.title }), nodes, interactions: rules }
+  const scenes = componentWorkNavigationScenes(project)
   return { target, behavior, rules, nodes, scene, sounds: componentAudioSounds(project, ids),
-    scenes: project.surfaces.map(componentNavigationScene),
-    locations: project.surfaces.map(value => ({ id: value.id, label: value.title })),
+    scenes, locations: scenes.map(value => ({ id: value.id, label: value.name })),
   }
 }

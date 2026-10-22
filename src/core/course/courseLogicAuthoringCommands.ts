@@ -1,3 +1,4 @@
+import { componentContainers, componentSurface } from '../../shared/contracts/component-platform/project'
 import { courseStateDeclarationSchema } from '../../shared/contracts/course-state/schema'
 import { canonicalNavigationGuard } from '../../shared/courseNavigationGuards'
 import type { CourseStateDeclaration } from '../../shared/contracts/course-state/types'
@@ -18,7 +19,8 @@ export interface CourseLogicAuthoringView {
 }
 export function courseLogicAuthoringView(project: CourseProjectV10): CourseLogicAuthoringView {
   return { id: project.id, revision: project.revision, courseState: project.logic?.courseState ?? [],
-    navigationGuards: project.logic?.navigationGuards ?? [], surfaces: project.surfaces.map(({ id, title }) => ({ id, title })) }
+    navigationGuards: project.logic?.navigationGuards ?? [], surfaces: project.rootIds.map(id => ({ id,
+      title: project.instances[id]?.name ?? project.definitions[project.instances[id]?.definitionId]?.title ?? id })) }
 }
 export interface CourseLogicAuthoringTarget { readonly projectId: string; readonly baseRevision: number }
 export type CourseLogicAuthoringCommand = CourseLogicAuthoringTarget & (
@@ -49,13 +51,13 @@ export function executeCourseLogicAuthoringCommand(project: CourseProjectV10, co
   try {
     const logic: CourseProjectLogic = structuredClone(project.logic ?? { courseState: [], navigationGuards: [] })
     const behaviors = Object.values(project.instances).filter(instance => componentDefinitionBuiltinKey(project.definitions[instance.definitionId]) === 'guoling.interactions')
-    const stateRules = project.surfaces.flatMap(surface => (surface.presentation?.states ?? []).flatMap(state => behaviors.flatMap(instance => {
+    const stateRules = componentContainers(project).flatMap(surface => (surface.presentation?.states ?? []).flatMap(state => behaviors.flatMap(instance => {
       const data = state.overrides[instance.id]?.data
       return data === undefined ? [] : [{ surfaceId: surface.id, stateId: state.id, instance, data, rules: interactionRules({ ...instance, data }) }]
     })))
     const rules = [...behaviors.flatMap(instance => interactionRules(instance)), ...stateRules.flatMap(slot => slot.rules)]
     const inputs = Object.values(project.instances).filter(instance => componentDefinitionBuiltinKey(project.definitions[instance.definitionId]) === 'guoling.input')
-    const inputSlots = project.surfaces.flatMap(surface => (surface.presentation?.states ?? []).flatMap(state => inputs.flatMap(instance => {
+    const inputSlots = componentContainers(project).flatMap(surface => (surface.presentation?.states ?? []).flatMap(state => inputs.flatMap(instance => {
       const data = state.overrides[instance.id]?.data
       return data === undefined ? [] : [{ surfaceId: surface.id, stateId: state.id, instance, data }]
     })))
@@ -104,14 +106,14 @@ export function executeCourseLogicAuthoringCommand(project: CourseProjectV10, co
             for (const slot of stateRules) {
               const next = renameRules(slot.rules)
               if (JSON.stringify(next) === JSON.stringify(slot.rules)) continue
-              const presentation = presentations.get(slot.surfaceId) ?? structuredClone(project.surfaces.find(surface => surface.id === slot.surfaceId)!.presentation!)
+              const presentation = presentations.get(slot.surfaceId) ?? structuredClone(componentSurface(project,slot.surfaceId)!.presentation!)
               presentation.states.find(state => state.id === slot.stateId)!.overrides[slot.instance.id]!.data = { ...(slot.data as JsonObject), rules: json(next) }
               presentations.set(slot.surfaceId, presentation)
             }
             for (const slot of inputSlots) {
               const matching = componentInputStateReferences(slot.data).filter(reference => reference.key === key)
               if (!matching.length) continue
-              const presentation = presentations.get(slot.surfaceId) ?? structuredClone(project.surfaces.find(surface => surface.id === slot.surfaceId)!.presentation!)
+              const presentation = presentations.get(slot.surfaceId) ?? structuredClone(componentSurface(project,slot.surfaceId)!.presentation!)
               const data = presentation.states.find(state => state.id === slot.stateId)!.overrides[slot.instance.id]!.data! as JsonObject
               for (const reference of matching) {
                 if (reference.path.length === 1) data[reference.path[0]!] = declaration.key
@@ -131,7 +133,7 @@ export function executeCourseLogicAuthoringCommand(project: CourseProjectV10, co
       else {
         const guard = canonicalNavigationGuard(courseProjectLogicSchema.shape.navigationGuards.element.parse(prepareCourseNavigationGuard(project, command.guard, references)))
         if (logic.navigationGuards.some((value, i) => value.id === guard.id && i !== index)) throw new LogicError('guard-id-exists', '导航守卫身份重复。')
-        const surfaces = new Set(project.surfaces.map(surface => surface.id))
+        const surfaces = new Set(project.rootIds)
         if ([...(guard.fromSurfaceIds ?? []), ...guard.toSurfaceIds].some(id => !surfaces.has(id))) throw new LogicError('invalid-document', '守卫引用的页面已不存在。')
         for (const condition of guard.conditions) {
           const declaration = logic.courseState.find(state => state.key === condition.key)

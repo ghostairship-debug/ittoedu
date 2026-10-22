@@ -36,6 +36,27 @@ async function newMarkdown(persistence = memoryPersistence()) {
 }
 
 describe('G20 S02/S03 authoritative document session', () => {
+  it('reads only detached identity facts after the current canonical operation has settled', async () => {
+    const { session, persistence } = await newMarkdown()
+    let release!: () => void, entered!: () => void
+    const gate = new Promise<void>(resolve => { release = resolve })
+    const started = new Promise<void>(resolve => { entered = resolve })
+    const append = persistence.port.append
+    persistence.port.append = async state => { entered(); await gate; await append(state) }
+    const pending = session.execute(operation(session, 'pending-identity', 'current source'))
+    await started
+    let settled = false
+    const read = session.drainIdentity().then(value => { settled = true; return value })
+    await Promise.resolve()
+    expect(settled).toBe(false)
+    release(); await pending
+    const identity = await read
+    expect(identity).toMatchObject({ documentId: 'md', epoch: 'epoch-1', revision: 1, kind: 'markdown' })
+    expect(identity).not.toHaveProperty('model')
+    if (identity.binding.kind === 'untitled') identity.binding.suggestedName = 'changed.md'
+    expect(session.read().binding).toMatchObject({ suggestedName: '未保存.md' })
+  })
+
   it('a plain save queued behind Save As resolves its actual binding and keeps exactly one writer', async () => {
     let id = 0, release!: () => void, started!: () => void
     const gate = new Promise<void>(resolve => { release = resolve })
@@ -235,7 +256,7 @@ describe('G20 S02/S03 authoritative document session', () => {
     expect(registry.list()).toHaveLength(1)
     await registry.close(a.documentId, { discardDirty: true })
     expect(registry.list()).toHaveLength(0)
-    expect(persistence.states.at(-1)).toMatchObject({ schemaVersion: 2, disposition: 'discarded', revision: 1 })
+    expect(persistence.states.at(-1)).toMatchObject({ schemaVersion: 3, disposition: 'discarded', revision: 1 })
     const reopened = await registry.open(binding, async () => md('disk'))
     expect(reopened.documentId).not.toBe(a.documentId)
     expect(reopened.read()).toMatchObject({ undoDepth: 0, model: { source: 'disk' } })
@@ -268,7 +289,7 @@ describe('G20 S02/S03 authoritative document session', () => {
       binding: { kind: 'untitled', suggestedName: 'saved.md' }, saved: true }, createMarkdownDriver(), persistence.port)
     await session.close()
     const terminal = persistence.states.at(-1)!
-    expect(terminal).toMatchObject({ schemaVersion: 2, disposition: 'closed', sequence: 1, revision: 0, savedRevision: 0 })
+    expect(terminal).toMatchObject({ schemaVersion: 3, disposition: 'closed', sequence: 1, revision: 0, savedRevision: 0 })
     await session.stopRun('stopped-after-close')
     expect(persistence.states.at(-1)).toEqual(terminal)
     await expect(DocumentSession.restore(terminal, 'restart', createMarkdownDriver(), persistence.port)).rejects.toThrow('终态')

@@ -1,3 +1,4 @@
+import { componentSurfaces } from '../../shared/contracts/component-platform/project'
 import { isNativeProjectFilename, nativeProjectStem } from '../../shared/nativeProjectFile'
 import path from 'node:path'
 import { createHash } from 'node:crypto'
@@ -19,8 +20,8 @@ export class WorkspaceFilesDesktopService {
   private readonly authorized = new Map<string, RegisteredWorkspaceRoot>()
   private readonly pendingHomes = new Map<string, { input: Extract<Parameters<WorkspaceFilesAPI>[0], { type: 'rename' | 'move' | 'trash' }>; result: WorkspaceOperationResult }>()
   private readonly listeners = new Set<(event: WorkspaceFilesChange) => void>()
-  private readonly watchers = new Map<string, () => void>()
-  private readonly preparedCourses = new Map<string, { input: string; bytes: Uint8Array }>()
+  private readonly watchers = new Map<string, { leases: Set<string>; close(): void }>()
+  private readonly preparedCourses = new Map<string, { input: string; bytes?: Uint8Array; result?: WorkspaceOperationResult }>()
   private previewHost: HtmlPreviewHost | null = null
   constructor(private readonly files: WorkspaceFiles, private readonly relocateConversationHomes?: RelocateConversationHomes) { this.operate.subscribe = this.subscribe }
   /** Inject the HTML preview service (B2). Until then preview requests fail closed. */
@@ -31,17 +32,36 @@ export class WorkspaceFilesDesktopService {
     return resolved
   }
   readonly subscribe = (listener: (event: WorkspaceFilesChange) => void) => { this.listeners.add(listener); return () => { this.listeners.delete(listener) } }
-  dispose() { for (const close of this.watchers.values()) close(); this.watchers.clear(); this.listeners.clear() }
-  private watch(workspaceId: string) {
-    if (!this.watchers.has(workspaceId)) {
+  dispose() { for (const watcher of this.watchers.values()) watcher.close(); this.watchers.clear(); this.listeners.clear() }
+  private watch(workspaceId: string, watchId: string) {
+    let current = this.watchers.get(workspaceId)
+    if (!current) {
       let timer: ReturnType<typeof setTimeout> | undefined
-      const close = this.files.watch(workspaceId, () => {
-        clearTimeout(timer); timer = setTimeout(() => { for (const listener of this.listeners) listener({ workspaceId }) }, 80)
+      let unknown = false
+      const paths = new Set<string>()
+      const close = this.files.watch(workspaceId, changedPaths => {
+        if (!changedPaths) unknown = true
+        else for (const changedPath of changedPaths) paths.add(changedPath)
+        clearTimeout(timer); timer = setTimeout(() => {
+          const event: WorkspaceFilesChange = { workspaceId, ...(!unknown ? { changedPaths: [...paths] } : {}) }
+          unknown = false; paths.clear()
+          for (const listener of this.listeners) listener(event)
+        }, 80)
         timer.unref?.()
       })
-      this.watchers.set(workspaceId, () => { clearTimeout(timer); close() })
+      current = { leases: new Set(), close: () => { clearTimeout(timer); close(); this.files.releaseDirectoryListings(workspaceId) } }
+      this.watchers.set(workspaceId, current)
     }
+    current.leases.add(watchId)
     return { workspaceId, watching: true }
+  }
+  private unwatch(workspaceId: string, watchId: string) {
+    const current = this.watchers.get(workspaceId)
+    if (current) {
+      current.leases.delete(watchId)
+      if (!current.leases.size) { current.close(); this.watchers.delete(workspaceId) }
+    }
+    return { workspaceId, watching: this.watchers.has(workspaceId) }
   }
   async authorizeRoot(directory: string): Promise<RegisteredWorkspaceRoot> {
     const root = await this.files.registerRoot(directory)
@@ -134,7 +154,8 @@ export class WorkspaceFilesDesktopService {
       throw new Error('目标工作空间尚未授权')
     }
     switch (input.type) {
-      case 'watch': return this.watch(input.workspaceId)
+      case 'watch': return this.watch(input.workspaceId, input.watchId)
+      case 'unwatch': return this.unwatch(input.workspaceId, input.watchId)
       case 'list': return this.files.listChildren(input)
       case 'resolve': return this.files.resolveEntry(input.workspaceId, input.entryId)
       case 'read-media': {
@@ -164,15 +185,20 @@ export class WorkspaceFilesDesktopService {
         const identity = JSON.stringify(archive ? { ...request, archive: createHash('sha256').update(archive).digest('hex') } : request)
         const old = this.preparedCourses.get(input.operationId)
         if (old && old.input !== identity) throw new Error('同一文件操作不能改变参数')
+        if (old?.result) return structuredClone(old.result)
         if (!old && archive) {
           try { openCourseProjectV10Archive(archive) } catch { throw new UserFacingError('无法新建 果铃工程', '此入口只支持 Project V10 归档，原文件未修改。', '请保留原件；对应导入功能接入后再导入。') }
           this.preparedCourses.set(input.operationId, { input: identity, bytes: Uint8Array.from(archive) })
         } else if (!old) {
           const project = createBlankCourseProjectV10(nativeProjectStem(input.name))
-          if (input.canvas) project.surfaces[0].designSize = { width: input.canvas.width, height: input.canvas.height }
+          if (input.canvas) project.instances[project.rootIds[0]].container!.designSize = { width: input.canvas.width, height: input.canvas.height }
           this.preparedCourses.set(input.operationId, { input: identity, bytes: createCourseProjectV10Archive({ project, resources: { assets: {}, components: {} } }) })
         }
-        return this.files.createFile({ ...request, format: 'course-v10', bytes: this.preparedCourses.get(input.operationId)!.bytes })
+        const result = await this.files.createFile({ ...request, format: 'course-v10', bytes: this.preparedCourses.get(input.operationId)!.bytes! })
+        // The file owner has acknowledged publication. Retain its exact small
+        // receipt for retries; an unknown/failed outcome still owns its bytes.
+        if (result.status === 'success') this.preparedCourses.set(input.operationId, { input: identity, result: structuredClone(result) })
+        return result
       }
       case 'import-files': {
         const items: WorkspaceItemResult[] = [], directories = new Map<string, string>([['', input.targetDirectoryId]])

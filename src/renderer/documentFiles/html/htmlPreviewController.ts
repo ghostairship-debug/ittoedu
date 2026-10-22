@@ -1,14 +1,18 @@
 import type { DocumentSnapshot } from '../../../shared/workbench/document'
 import {
-  acceptHtmlPreviewPageMessage, htmlPreviewPageMessageSchema,
+  acceptHtmlPreviewPageMessage, htmlPreviewPageMessageSchema, HTML_PREVIEW_TARGET_MAX,
   type HtmlPreviewEditOutcome, type HtmlPreviewLease, type HtmlPreviewResolvedTarget, type HtmlPreviewRequest,
 } from '../../../shared/workbench/htmlPreview'
 import { htmlPreviewTargetReportSchema } from '../../../shared/workbench/htmlPreview'
 import type { z } from 'zod'
 import { readHtmlAuthoringRecords } from '../../../shared/html/htmlAuthoringRecords'
+import type { HtmlSourceAnalysis } from './htmlSourceAnalysis'
 
 export type HtmlTargetReport = z.infer<typeof htmlPreviewTargetReportSchema>
 export type HtmlSelectedTarget = { report: HtmlTargetReport; resolved: HtmlPreviewResolvedTarget }
+type HtmlSourceChange = Extract<HtmlPreviewRequest, { type: 'html-preview.edit' }>['change']
+type HtmlEditIntent = Exclude<HtmlSourceChange, { kind: 'image' }>
+  | (Omit<Extract<HtmlSourceChange, { kind: 'image' }>, 'bytes'> & { bytes: Uint8Array })
 export interface HtmlPreviewControllerEvents {
   onTarget(target: HtmlSelectedTarget | null, issue?: string): void
   onReady(sectionCount: number, ambiguous: boolean): void
@@ -18,6 +22,7 @@ export interface HtmlPreviewControllerEvents {
   onApplied(revision: number, patch: Extract<HtmlPreviewEditOutcome, { status: 'applied' }>['patch'], beforeValue: string): void
   onEditSettled(): void
   onPatchMismatch(): void
+  onSelection?(handle: string, selection: { anchor: number; focus: number; word?: boolean }): void
 }
 
 /** Renderer broker. The opaque page only reports observations; all writes go through Main. */
@@ -29,12 +34,16 @@ export class HtmlPreviewController {
   private reloading = false
   private reloadFrameLoaded = false
   private selected: HtmlSelectedTarget | null = null
+  private resolvingSelection: { handle: string; selection?: HtmlTargetReport['selection'] } | null = null
   private requestSerial = 0
   private modeRequest: { requestId: string; enabled: boolean } | null = null
   private editMode = false
   private readonly cardKeys = new Set<string>()
   private readonly cardTargets = new Map<string, HtmlTargetReport>()
   private modeSerial = 0
+  private recordsSource: string | undefined
+  private confirming = false
+  private pendingConfirmation: { scanId: string; targets: HtmlTargetReport[] } | null = null
   constructor(
     private readonly iframe: HTMLIFrameElement,
     readonly lease: HtmlPreviewLease,
@@ -44,12 +53,15 @@ export class HtmlPreviewController {
     window.addEventListener('message', this.onMessage)
   }
 
-  updateCommitted(snapshot: DocumentSnapshot): void {
+  updateCommitted(snapshot: DocumentSnapshot, analysis?: HtmlSourceAnalysis): void {
     if (snapshot.documentId !== this.lease.documentId || snapshot.epoch !== this.lease.epoch) return
     const changed = snapshot.revision > this.revision
     this.revision = Math.max(this.revision, snapshot.revision)
-    if (snapshot.model.kind === 'text') this.iframe.contentWindow?.postMessage({ type: 'html-preview.authoring-records',
-      loadId: this.lease.loadId, records: readHtmlAuthoringRecords(snapshot.model.source) }, '*')
+    if (snapshot.model.kind === 'text' && snapshot.model.source !== this.recordsSource) {
+      const records = analysis?.source === snapshot.model.source ? analysis.authoring.authoringRecords : readHtmlAuthoringRecords(snapshot.model.source)
+      this.recordsSource = snapshot.model.source
+      this.iframe.contentWindow?.postMessage({ type: 'html-preview.authoring-records', loadId: this.lease.loadId, records }, '*')
+    }
     if (changed && this.editMode) this.iframe.contentWindow?.postMessage({ type: 'html-preview.refresh-targets', loadId: this.lease.loadId }, '*')
     if (this.selected && (this.selected.resolved.status !== 'editable'
       || this.selected.resolved.locator.revision !== snapshot.revision)) this.select(null)
@@ -81,7 +93,12 @@ export class HtmlPreviewController {
       this.events.onEditModeReady(message.enabled)
     }
     if (this.visible && message.event === 'targets') void this.resolve(message.targets)
-    if (this.visible && this.editMode && message.event === 'edit-targets') void this.confirmTargets(message.scanId, message.targets)
+    if (this.visible && this.editMode && message.event === 'selection') {
+      const selection = { anchor: message.anchor, focus: message.focus, ...(message.word ? { word: true } : {}) }
+      if (this.resolvingSelection?.handle === message.handle) this.resolvingSelection.selection = selection
+      if (this.selected?.report.handle === message.handle) this.events.onSelection?.(message.handle, selection)
+    }
+    if (this.visible && this.editMode && message.event === 'edit-targets') this.queueConfirmation(message.scanId, message.targets)
   }
 
   init(): void {
@@ -103,6 +120,11 @@ export class HtmlPreviewController {
     return true
   }
   clearSelection(): void { this.select(null) }
+  selectSource(domPath: HtmlTargetReport['domPath'], kind: HtmlTargetReport['kind'] | null, expectedText?: string): void {
+    if (!this.active || !this.visible) return
+    this.iframe.contentWindow?.postMessage({ type: 'html-preview.select-source', loadId: this.lease.loadId, domPath, kind,
+      ...(expectedText === undefined ? {} : { expectedText }) }, '*')
+  }
 
   beginReload(): void {
     this.reloading = true
@@ -111,6 +133,8 @@ export class HtmlPreviewController {
     this.requestSerial += 1
     this.modeRequest = null
     this.modeSerial++
+    this.pendingConfirmation = null
+    this.recordsSource = undefined
     this.select(null)
   }
 
@@ -121,7 +145,7 @@ export class HtmlPreviewController {
 
   setVisibility(visible: boolean): void {
     this.visible = visible
-    if (!visible) this.requestSerial++
+    if (!visible) { this.requestSerial++; this.pendingConfirmation = null }
     this.iframe.contentWindow?.postMessage({ type: 'html-preview.visibility', loadId: this.lease.loadId, active: visible }, '*')
   }
 
@@ -139,6 +163,7 @@ export class HtmlPreviewController {
     this.editMode = enabled
     this.modeSerial++
     this.requestSerial++
+    this.pendingConfirmation = null
     this.select(null)
     this.iframe.contentWindow?.postMessage({ type: 'html-preview.edit-mode', loadId: this.lease.loadId, requestId, enabled }, '*')
   }
@@ -149,9 +174,30 @@ export class HtmlPreviewController {
 
   private select(value: HtmlSelectedTarget | null, issue?: string): void {
     this.selected = value
+    if (!value) this.resolvingSelection = null
     this.iframe.contentWindow?.postMessage({ type: 'html-preview.selection', loadId: this.lease.loadId,
       handle: value?.report.handle ?? null, editable: value?.resolved.status === 'editable' }, '*')
     this.events.onTarget(value, issue)
+  }
+
+  /** Discovery is replaceable observation. Retain all chunks of the latest scan,
+   * but never queue work for scans superseded before their first IPC. */
+  private queueConfirmation(scanId: string, targets: HtmlTargetReport[]): void {
+    if (this.pendingConfirmation?.scanId === scanId) this.pendingConfirmation.targets.push(...targets)
+    else this.pendingConfirmation = { scanId, targets: [...targets] }
+    if (!this.confirming) void this.drainConfirmations()
+  }
+
+  private async drainConfirmations(): Promise<void> {
+    this.confirming = true
+    try {
+      while (this.active && this.visible && this.editMode && this.pendingConfirmation) {
+        const pending = this.pendingConfirmation
+        const targets = pending.targets.splice(0, HTML_PREVIEW_TARGET_MAX)
+        if (!pending.targets.length) this.pendingConfirmation = null
+        await this.confirmTargets(pending.scanId, targets)
+      }
+    } finally { this.confirming = false }
   }
 
   private async confirmTargets(scanId: string, targets: HtmlTargetReport[]): Promise<void> {
@@ -170,10 +216,13 @@ export class HtmlPreviewController {
     const serial = ++this.requestSerial
     if (targets.length !== 1) { this.select(null); return }
     const report = targets[0]!
+    const selection = this.resolvingSelection = { handle: report.handle, selection: report.selection }
     try {
       const response = await window.desktopAPI.workspaceFiles!({ type: 'html-preview.resolve-target',
         leaseId: this.lease.leaseId, loadId: this.lease.loadId, revision: this.revision, targets: [report] })
       if (!this.active || serial !== this.requestSerial || response.revision !== this.revision) return
+      if (selection.selection) report.selection = selection.selection
+      this.resolvingSelection = null
       const resolved = response.targets[0]
       if (!resolved) { this.select(null); return }
       if (resolved.status !== 'editable') {
@@ -184,7 +233,7 @@ export class HtmlPreviewController {
     } catch { if (this.active && serial === this.requestSerial) this.select(null, '源码已变化，请重新选择。') }
   }
 
-  async editText(value: string): Promise<HtmlPreviewEditOutcome> { return this.edit({ kind: 'text', value }) }
+  async editText(value: string, target?: HtmlSelectedTarget): Promise<HtmlPreviewEditOutcome> { return this.edit({ kind: 'text', value }, target) }
   async editStyle(patch: Record<string, string | null>): Promise<HtmlPreviewEditOutcome> { return this.edit({ kind: 'style', patch }) }
   async editGeometry(geometry: NonNullable<NonNullable<HtmlTargetReport['authoring']>['record']['overrides']['geometry']>): Promise<HtmlPreviewEditOutcome> {
     return this.edit({ kind: 'geometry', geometry })
@@ -194,11 +243,11 @@ export class HtmlPreviewController {
     this.iframe.contentWindow?.postMessage({ type: 'html-preview.authoring-preview', loadId: this.lease.loadId, authorKey, geometry }, '*')
   }
   async editImage(image: { name: string; mimeType: string; bytes: Uint8Array }): Promise<HtmlPreviewEditOutcome> {
-    return this.edit({ kind: 'image', ...image, bytes: Uint8Array.from(image.bytes) })
+    return this.edit({ kind: 'image', ...image })
   }
 
-  private async edit(change: Extract<HtmlPreviewRequest, { type: 'html-preview.edit' }>['change']): Promise<HtmlPreviewEditOutcome> {
-    const target = this.selected
+  private async edit(change: HtmlEditIntent, captured?: HtmlSelectedTarget): Promise<HtmlPreviewEditOutcome> {
+    const target = captured ?? this.selected
     if (!target || !this.active || target.resolved.status !== 'editable'
       || target.resolved.locator.revision !== this.revision) return { status: 'rejected', reason: 'stale-revision' }
     const request: Extract<HtmlPreviewRequest, { type: 'html-preview.edit' }> = { type: 'html-preview.edit',
@@ -219,7 +268,7 @@ export class HtmlPreviewController {
           this.events.onApplied(result.revision, result.patch, target.report.rawText)
           if (change.kind === 'style' && !result.patch.authoringRecords) this.events.onPatchMismatch()
         }
-        this.select(null)
+        if (this.selected === target) this.select(null)
       }
       return result
     } finally {
@@ -232,5 +281,7 @@ export class HtmlPreviewController {
     this.requestSerial += 1
     window.removeEventListener('message', this.onMessage)
     this.selected = null
+    this.pendingConfirmation = null
+    this.recordsSource = undefined
   }
 }

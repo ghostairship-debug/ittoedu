@@ -1,11 +1,12 @@
+import { visibleComponentAuthorHit } from '../components/componentAuthorHit'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Hand, Maximize2, Minus, Plus } from 'lucide-react'
 import { ImageSafeAreaGuides } from './workspaces/ImageSafeAreaGuides'
+import { useComponentAuthorInteraction } from './workspaces/useComponentAuthorInteraction'
 import type { ComponentEdit, ComponentFrame, CourseProjectV10, ComponentInstance, JsonValue } from '../../shared/contracts/component-platform'
-import { componentDefinitionBuiltinKey, owningContainer, isComponentVisibleAtSurface, resolveComponentPresentation } from '../../shared/contracts/component-platform/project'
-import { layoutTable } from '../../components/table/render'
-import { parseTableData } from '../../components/table/data'
-import { flowInlineStyleDefaults } from './flow/flowInlineStyleDefaults'
+import { owningContainer, componentDefinitionBuiltinKey, componentContainerForInstance, isComponentVisibleAtSurface, resolveComponentPresentation } from '../../shared/contracts/component-platform/project'
+import { createFlowInlineStyleDefaults } from './flow/flowInlineStyleDefaults'
+import { createFlowObjectVersions } from './flow/flowObjectVersions'
 import { createRoot } from 'react-dom/client'
 import { createPortal } from 'react-dom'
 import { renderDocumentText } from '../../shared/document/render'
@@ -25,11 +26,14 @@ import type { FlowParagraphBlockRect } from '../../shared/flowParagraphAnchors'
 import { flowParagraphAnchorAt, flowParagraphAnchoredFrame } from '../../shared/flowParagraphAnchors'
 import { createFlowViewportGeometry } from '../../shared/flowViewportGeometry'
 import { isViewportComponent, projectTeacherControllerInstances, restoreTeacherControllerFrameEdits, createTeacherControllerHudGeometry, teacherControllerReferenceSize, type TeacherControllerHudGeometry } from '../../shared/teacherControllerViewportGeometry'
-import { FLOW_BODY_CSS, FLOW_BODY_PAPER_PADDING, FLOW_BODY_SCROLL_PADDING, flowPaperMaxWidth, resolveFlowPaperBackground } from '../../shared/flowBodyPresentation'
+import { createFlowReadingNavigation, observeFlowReading } from '../../shared/flowReading'
+import { FLOW_BODY_CSS, flowPaperPadding, flowScrollPadding, flowPaperMaxWidth, resolveFlowBodyWidth } from '../../shared/flowBodyPresentation'
+import { resolveComponentBackground, resolveComponentSurfaceBackground } from '../../shared/contracts/component-platform/project'
 import { ComponentBackgroundPaint } from '../components/ComponentBackgroundPaint'
-import { resolveComponentOuterPresentation } from '../../shared/componentPresentation'
+import { resolveComponentOuterPresentation, applyComponentPresentationStyle } from '../../shared/componentPresentation'
 import { SharedDocumentEditor, type SharedDocumentEditorHandle } from '../document'
 import { prepareDocumentSelection, prepareDocumentTextEdit, requestDocumentSelection, type DocumentSelectionAdapter } from '../document/documentSelectionCommands'
+import { createFlowBlockPaint } from './flow/flowBlockPaint'
 import { observeFlowParagraphLayout, measureFlowParagraphLayout, flowDocumentInsertionAt, flowFloatingModeEdits, flowContentClientMatrix, type FlowFloatingMode } from './flow/flowParagraphLayout'
 import { flowPlacementEdits, flowReadingOrderEdits } from '../../core/course/courseFlowEdits'
 import { projectFlowDocument,flowDocumentBlock } from '../componentPlatform/surfaces/flow/documentProjection'
@@ -48,18 +52,11 @@ import { useEditorStore } from '../store/editorStore'
 import { captureCourseInstanceSelection, captureFlowSelection, workbenchSelection } from '../workbench/SelectionContextController'
 import { ElementAiButton } from '../workbench/elementCards/ElementAiCard'
 import { TextAiButton } from '../workbench/elementCards/ElementTextCards'
-import { TextComponentEditor, FormulaComponentEditor } from '../../components/text/editor'
-import { textComponentDataSchema, formulaComponentDataSchema } from '../../components/text/data'
-import { textAppearanceStyles } from '../../components/text/render'
-import type { SlideContentEdit } from '../store/slices/slideAuthoringSlice'
 import { frameContainsPoint, invertMatrix, multiplyMatrices, transformPoint } from '../../core/components/geometry'
 import { MIXED_GLOBAL_GEOMETRY, mixedGlobalGeometryEdits, type MixedGlobalGeometryRequest } from './workspaces/mixedGlobalGeometry'
-import { componentFrameStyle } from '../componentPlatform/surfaces/slide'
-import { CanvasPlainTextEditor } from './CanvasPlainTextEditor'
 import { WORKSPACE_MEDIA_DRAG_TYPE } from '../lessonWorkspace/workspaceMediaDrag'
 import { useWorkspaceMediaSource } from '../lessonWorkspace/workspaceMediaSourceContext'
 import { deliverWorkspaceMediaDrop } from '../lessonWorkspace/workspaceMediaDrop'
-import { componentLayoutInput } from '../../components/web/measuredFragmentBox'
 import type { DocumentContent } from '../../shared/document/content'
 import type { DocumentResources } from '../../shared/document/resources'
 import { createCourseDocumentClipboardContext, readCourseDocumentClipboardContext } from '../document/documentClipboardContext'
@@ -67,8 +64,7 @@ import { createFlowDocumentResourcePort, captureFlowPreparedDocumentResources,pr
 import { assertFlowStructureEditsAllowed, flowStructureDisabledReason } from '../authoring/flowStructureEdits'
 import { registerFlowMenuCapture, registerFlowWorkspaceFlush, registerFlowWorkspaceDrain, registerFlowCaretFormat, registerFlowBlockFocus,
   registerFlowBlockSelection, type FlowBlockFocusRequest, type FlowMenuPageCapture } from '../document/flowWorkspaceRegistry'
-import { allDocumentTextSlots, inlineComponentIds, documentInlineChildIds, type TextRangeProjection } from '../../shared/document/textInteraction'
-import { courseInstanceSlotPath } from '../../core/tools/ToolTargets'
+import { allDocumentTextSlots, inlineComponentIds, documentInlineChildIds } from '../../shared/document/textInteraction'
 import { FlowTextInteractionActions } from './flow/FlowTextInteractionActions'
 import './flow/flowWorkspaceLayout.css'
 import { mountComponentFlowToc } from '../../player/componentPlatform/flowToc'
@@ -88,7 +84,10 @@ export interface FlowWorkspaceProps {
 export function FlowWorkspace({ documentId, project, surfaceId, toolbarContainer, readOnly = false, onDropWorkspaceMedia, onSelectImageAsset, onSelectMediaAsset, onStatus }: FlowWorkspaceProps) {
   const runtime = useCourseV10Runtime()
   const bridge = useEditorStore(state => state.courseBridge)
+  const interactionSelection = useEditorStore(state => state.courseView.activeDocumentId === documentId ? state.courseView.interactionSelection : null)
   const kernel = useEditorStore(state => state.courseKernel)
+  const editingScope = useEditorStore(state => state.editingScope)
+  const globalEditing = !readOnly && editingScope === 'global'
   const mimeTypes = useMemo(() => Object.fromEntries(Object.values(project.assets).map(asset => [asset.id, asset.mimeType ?? 'application/octet-stream'])), [project.assets])
   const assetUrls = useAssetObjectUrls(runtime.resources.assets, mimeTypes)
   const draft = useEditorStore(state => state.flowDocumentDrafts?.[documentId])
@@ -97,23 +96,20 @@ export function FlowWorkspace({ documentId, project, surfaceId, toolbarContainer
   const editingInstance = useEditorStore(state => state.flowEditingInstance)
   const contentDraft = useEditorStore(state => state.slideContentEdit)
   const beginContentEdit = useEditorStore(state => state.beginSlideDataEdit)
-  const beginSpotEdit = useEditorStore(state => state.beginSlideSpotEdit)
-  const updateSpotDraft = useEditorStore(state => state.updateSlideSpotDraft)
-  const updateContentDraft = useEditorStore(state => state.updateSlideDataDraft)
   const commitContentEdit = useEditorStore(state => state.commitSlideContentEdit)
-  const cancelContentEdit = useEditorStore(state => state.cancelTextEdit)
   const surface = flowSurface(project, surfaceId)
-  const layout = surface.flow?.layout ?? { widthMode: 'reading', readingWidth: 860, wideContentWidth: 1100, paperBackgroundColor: '#ffffff' }
+  const layout = surface.flow?.layout ?? { widthMode: 'reading', readingWidth: 860, wideContentWidth: 1100 }
   const editor = useRef<SharedDocumentEditorHandle>(null), paper = useRef<HTMLElement>(null), scroll = useRef<HTMLDivElement>(null)
   const paperPointer = useRef<{ x: number; y: number } | null>(null)
   const workspace=useRef<HTMLDivElement>(null)
   useEffect(() => {
-    if (!workspace.current || surface.flow?.layout.toc === 'hidden') return
-    const toc = mountComponentFlowToc(workspace.current, surfaceId, runtime.navigation.editorPort(), {
+    if (!workspace.current || globalEditing || surface.flow?.layout.toc === 'hidden') return
+    const navigation = runtime.navigation.editorPort()
+    const toc = mountComponentFlowToc(workspace.current, surfaceId, project.rootIds.includes(surfaceId) ? navigation : navigation.forContainer?.(surfaceId) ?? navigation, {
       beforeNavigate: () => commitContentEdit(), onError: onStatus,
     })
     return () => toc.destroy()
-  }, [surfaceId, surface.flow?.layout.toc, runtime.navigation, commitContentEdit, onStatus])
+  }, [surfaceId, surface.flow?.layout.toc, runtime.navigation, commitContentEdit, onStatus, globalEditing])
   const observationMount=useRef<HTMLDivElement>(null),observationRoot=useRef<HTMLDivElement>(null),observationContent=useRef<HTMLDivElement>(null)
   const viewSession=useRef<PlaybackViewSession|null>(null),[observationHost,setObservationHost]=useState<HTMLElement|null>(null)
   const readBaseScale = () => viewSession.current?.fitScale(surfaceId) ?? 1
@@ -121,6 +117,7 @@ export function FlowWorkspace({ documentId, project, surfaceId, toolbarContainer
   const [viewport,setViewport]=useState({width:0,height:0})
   const [viewZoom, setViewZoom] = useState(1)
   const [paperMinimumHeight, setPaperMinimumHeight] = useState(0)
+  const [layoutBody, setLayoutBody] = useState<HTMLElement | null>(null)
   const [controllerPreview, setControllerPreview] = useState<Record<string, ComponentFrame>>({})
   const controllerGesture = useRef<{ pointerId: number; start: { x: number; y: number }; moved: boolean; captured: CapturedCourseTarget;
     original: CourseProjectV10; display: CourseProjectV10; viewport: TeacherControllerHudGeometry; offset: { x: number; y: number }; value: FreeTransformGesture; edits: ComponentEdit[] } | null>(null)
@@ -138,15 +135,45 @@ export function FlowWorkspace({ documentId, project, surfaceId, toolbarContainer
     return () => observer.disconnect()
   }, [toolbarContainer, formatHost])
   const [error, setError] = useState<string | null>(null)
+  const authorInteraction = useComponentAuthorInteraction({ root: workspace, documentId, surfaceId,
+    enabled: !readOnly, contextKey: globalEditing ? 'global' : 'body', selectImage: onSelectImageAsset, report: setError })
+  const selectedAuthorSpot = runtime.selectedInstanceIds.length === 1
+    && authorInteraction.selectedSpot?.instanceId === runtime.selectedInstanceIds[0] ? authorInteraction.selectedSpot : undefined
   const [selection, setSelection] = useState<DocumentSelection | null>(null)
   const [crop, setCrop] = useState<{ target: CapturedCourseTarget; instance: ComponentInstance; data: ImageData } | null>(null)
   const [caption, setCaption] = useState<{ content: FlowTextContent; confirm(value: FlowTextContent): Promise<void>; cancel(): void } | null>(null)
   const [paperLayout, setPaperLayout] = useState<{ width: number; rects: readonly FlowParagraphBlockRect[] }>({ width: 0, rects: [] })
-  const bodyPaint=useRef(new WeakMap<HTMLElement,string>())
+  const containerRoots = useRef(new Map<string, { root: ReturnType<typeof createRoot>; project: CourseProjectV10; render: typeof runtime.renderContainer }>())
   const mediaSource = useWorkspaceMediaSource()
-  const latest = useRef({ project, surfaceId, documentId, selection, runtime, mediaSource })
-  latest.current = { project, surfaceId, documentId, selection, runtime, mediaSource }
+  const latest = useRef({ project, surfaceId, documentId, selection, runtime, mediaSource, globalEditing })
+  latest.current = { project, surfaceId, documentId, selection, runtime, mediaSource, globalEditing }
+  useLayoutEffect(() => {
+    for (const [id, entry] of containerRoots.current) if (project.instances[id]?.container && (entry.project !== project || entry.render !== runtime.renderContainer)) {
+      entry.project = project; entry.render = runtime.renderContainer
+      entry.root.render(<>{entry.render(id, project)}</>)
+    }
+  }, [project, runtime.renderContainer])
   const document = useMemo(() => projectFlowDocument(project, surfaceId), [project, surfaceId])
+  const readObjectVersions = useMemo(() => createFlowObjectVersions(), [documentId, surfaceId])
+  const objectVersions = useMemo(() => readObjectVersions(project, document.content.blocks, layout, paperLayout.width, surfaceId),
+    [readObjectVersions, project, document, layout, paperLayout.width, surfaceId])
+  const readInlineDefaults = useMemo(() => createFlowInlineStyleDefaults(), [documentId, surfaceId])
+  const inlineDefaults = useMemo(() => readInlineDefaults(project, document.content.blocks), [readInlineDefaults, project, document])
+  const renderReadingGroup = (instanceId: string, wrapper: HTMLElement, contentDOM: HTMLElement) => {
+    const instance = project.instances[instanceId]
+    if (!instance) return
+    const presentation = resolveComponentOuterPresentation(project, instance, {
+      placement: 'flow', purpose: 'author', inlineSize: paperLayout.width, flowLayout: layout,
+    })
+    wrapper.dataset.componentInstance = instanceId
+    wrapper.dataset.componentFlowId = instanceId
+    wrapper.dataset.componentPlacement = 'flow'
+    applyComponentPaintStyle(wrapper, instance, project.definitions[instance.definitionId])
+    applyComponentPresentationStyle(wrapper, { ...presentation.outerStyle, ...(instance.visible === false ? { display: 'none' } : {}) })
+    // The PM contentDOM is the direct native layout holder. PM owns every child.
+    applyComponentPresentationStyle(contentDOM, { ...presentation.childrenStyle, pointerEvents: 'auto' })
+    runtime.onTargetElement(instanceId, wrapper)
+  }
   useLayoutEffect(()=>{
     const mount=observationMount.current;if(!mount)return
     const session=new PlaybackViewSession();viewSession.current=session
@@ -156,25 +183,28 @@ export function FlowWorkspace({ documentId, project, surfaceId, toolbarContainer
   useLayoutEffect(()=>{
     const session=viewSession.current,root=observationRoot.current,content=observationContent.current
     if(!observationHost || !session || !root || !content)return
-    session.register({id:surfaceId,kind:'flow',root,content,fitViewport:()=>{
+    session.register({id:surfaceId,kind:'flow',root,content,onObservationChange:()=>root.style.setProperty('--flow-observation-transform',content.style.transform),fitViewport:()=>{
       const shell=workspace.current?.closest<HTMLElement>('.workspace')
       return shell && shell.clientWidth > 0 && shell.clientHeight > 0
         ? {width:shell.clientWidth,height:shell.clientHeight}:session.state.viewport
     }});session.activate(surfaceId)
+    root.style.setProperty('--flow-observation-transform',content.style.transform)
+    const view = runtime.containerViewState?.(surfaceId), element = scroll.current
+    if (view) {
+      if (view.zoom !== undefined) session.zoomTo(view.zoom)
+      if (view.pan) session.panTo(view.pan)
+      if (element) { element.scrollTop = view.scrollTop ?? 0; element.scrollLeft = view.scrollLeft ?? 0 }
+    }
+    const readingBody = () => paper.current?.querySelector<HTMLElement>('.ProseMirror')
+    const readingTarget = (id: string) => paper.current?.querySelector<HTMLElement>(`[data-flow-block-id="${CSS.escape(id)}"],[data-component-instance="${CSS.escape(id)}"]`)
+    const reading = createFlowReadingNavigation(() => {
+      const body = readingBody(), host = scroll.current
+      return body && host ? { scroll: host, body } : null
+    }, readingTarget)
     const release=runtime.registerObservation(surfaceId,{readZoom:()=>session.state.zoom,setZoom:zoom=>session.zoomTo(zoom),reset:()=>{
-      if (scroll.current) { scroll.current.scrollTop = 0; scroll.current.scrollLeft = 0 }
+      reading.goToInstance(null)
       session.reset()
-    },goToInstance:(instanceId,signal)=>{
-      if(signal?.aborted || !scroll.current || !paper.current)return false
-      if(instanceId===null){scroll.current.scrollTop=0;scroll.current.scrollLeft=0;return true}
-      const target=paper.current.querySelector<HTMLElement>(`[data-flow-block-id="${CSS.escape(instanceId)}"]`)
-      if(!target)return false
-      let ancestor=target.parentElement
-      while(ancestor && ancestor!==paper.current){if(ancestor.tagName==='DETAILS')(ancestor as HTMLDetailsElement).open=true;ancestor=ancestor.parentElement}
-      const scale=session.fitScale(surfaceId)*session.state.zoom
-      scroll.current.scrollTop+=(target.getBoundingClientRect().top-scroll.current.getBoundingClientRect().top)/Math.max(.000001,scale)
-      return true
-    }})
+    },...reading})
     const unsubscribe=session.subscribe(()=>{
       setViewZoom(session.state.zoom)
       runtime.navigation.changed()
@@ -184,8 +214,19 @@ export function FlowWorkspace({ documentId, project, surfaceId, toolbarContainer
       setPaperLayout(previous=>JSON.stringify(previous)===JSON.stringify(next) ? previous:next)
     })
     runtime.navigation.changed()
-    return()=>{unsubscribe();release()}
-  },[observationHost,surfaceId,runtime.registerObservation,runtime.navigation])
+    return()=>{
+      if (view) {
+        const observation = session.state
+        view.zoom = observation.zoom; view.pan = observation.pan
+        if (element) { view.scrollTop = element.scrollTop; view.scrollLeft = element.scrollLeft }
+      }
+      unsubscribe();release()
+    }
+  },[observationHost,surfaceId,runtime.registerObservation,runtime.navigation,runtime.containerViewState])
+  useEffect(() => {
+    const host = scroll.current
+    if (host && layoutBody) return observeFlowReading(host, layoutBody, runtime.navigation.changed)
+  }, [observationHost, layoutBody, runtime.navigation])
   useLayoutEffect(()=>{viewSession.current?.refreshBounds()},[project.revision,paperLayout,viewport,observationHost])
   useLayoutEffect(() => { setPaperMinimumHeight(0) }, [documentId, surfaceId])
   useLayoutEffect(() => {
@@ -208,18 +249,17 @@ export function FlowWorkspace({ documentId, project, surfaceId, toolbarContainer
     setDraft({surfaceId:target.surfaceId!,revision:target.project.revision,source,composing:false,preparedResources:retainedFlowPreparedResources(target,preparedResources.current),diagnostics:[{message,offset:0,endOffset:0,line:1,column:1}]},target.documentId)
   }
   const submitCaptured = async (next: MarkdownDocument, operation: DocumentOperation, target: CapturedCourseTarget): Promise<boolean> => {
-    const source = serializeDocumentMarkdown(next, 'flow')
     try {
       if (target.surfaceId !== surfaceId) throw new Error('正文页面已切换，请重新编辑')
       const resources = [...new Set([...retainedFlowPreparedResources(target,preparedResources.current),
         ...(operation.preparedResourceBatches ?? (operation.preparedResources === undefined ? [] : [operation.preparedResources]))])]
-      const planned = prepareFlowDocumentResourceTransaction(target, surfaceId, next.content.blocks, resources, operation.rangeProjection)
+      const planned = prepareFlowDocumentResourceTransaction(target, surfaceId, next.content.blocks, resources, operation.rangeProjection, operation.changedBlockIds)
       assertFlowStructureEditsAllowed(target.editingProject, planned.edits, true)
       if (planned.edits.length) await bridge.editCaptured(bridge.capture(planned.edits, planned.target, planned.readPaths), operation.historyGroup)
       releaseFlowPreparedResources(planned.prepared)
       preparedResources.current = preparedResources.current.filter(value => !planned.prepared.includes(value))
       setError(null); setDraft(null, target.documentId); return true
-    } catch (failure) { preserveRejectedDraft(target, source, failure); return false }
+    } catch (failure) { preserveRejectedDraft(target, serializeDocumentMarkdown(next, 'flow'), failure); return false }
   }
   const submit = (next: MarkdownDocument, operation: DocumentOperation): Promise<boolean> => {
     const pending = composition.current
@@ -227,7 +267,7 @@ export function FlowWorkspace({ documentId, project, surfaceId, toolbarContainer
       pending.next = next; pending.operation = operation
       return new Promise(resolve => pending.pending.push(resolve))
     }
-    try { return submitCaptured(next, operation, bridge.captureTarget(documentId)) }
+    try { return submitCaptured(next, operation, bridge.captureOwnedTarget(documentId)) }
     catch (failure) { setError(failure instanceof Error ? failure.message : String(failure)); return Promise.resolve(false) }
   }
   const flush = useCallback(() => {
@@ -245,58 +285,31 @@ export function FlowWorkspace({ documentId, project, surfaceId, toolbarContainer
   useEffect(() => registerFlowWorkspaceFlush(documentId, flush), [documentId, flush])
   useEffect(() => registerFlowWorkspaceDrain(documentId, drain), [documentId, drain])
   useEffect(() => registerFlowCaretFormat(documentId, style => editor.current?.applyInlineStyle(style) ?? false), [documentId])
-  useLayoutEffect(() => paper.current ? observeFlowParagraphLayout(paper.current, rects => {
-    const nextLayout={width:(paper.current?.getBoundingClientRect().width ?? 0)/readContentScale(),rects}
-    setPaperLayout(previous=>JSON.stringify(previous)===JSON.stringify(nextLayout) ? previous:nextLayout)
-    const probe=window.document.createElement('div').style
-    const style=(element:HTMLElement,values:Record<string,string|undefined>)=>{for(const [key,value]of Object.entries(values))if(value!==undefined){
-      (probe as any)[key]=value;const normalized=(probe as any)[key]
-      if((element.style as any)[key]!==normalized)(element.style as any)[key]=normalized
-    }}
-    editor.current?.paintProjection(() => {
-      for (const element of paper.current?.querySelectorAll<HTMLElement>('[data-flow-block-id]') ?? []) {
-        const instance = latest.current.project.instances[element.dataset.flowBlockId!]
-        element.dataset.componentFlowId = instance?.id ?? ''
-        if(instance){
-          const definition = latest.current.project.definitions[instance.definitionId]
-          const signature=JSON.stringify([componentPaintStyle(instance,definition),instance.visible])
-          if(bodyPaint.current.get(element)!==signature){
-            applyComponentPaintStyle(element,instance,definition)
-            const display=componentPaintStyle(instance,definition).display
-            element.style.display=instance.visible===false ? 'none':typeof display==='string' ? display:''
-            bodyPaint.current.set(element,signature)
-          }
-        }
-        const key = instance && latest.current.project.definitions[instance.definitionId]?.implementation
-        if (key?.kind === 'builtin' && key.key === 'guoling.text' && !instance.implementationOverride) {
-          const data=textComponentDataSchema.parse(instance.data),presentation=textAppearanceStyles(data.appearance,data.sizing)
-          const {height:_height,display:_display,flexDirection:_direction,justifyContent:_justify,...box}=presentation.box
-          const {height:_contentHeight,...content}=presentation.content
-          style(element,{...box,...content})
-        }
-        if(key?.kind === 'builtin' && key.key === 'guoling.table' && !instance.implementationOverride) {
-          const data=parseTableData(instance.data),table=element.querySelector<HTMLTableElement>('table'),measured=layoutTable(data)
-          if(table)style(table,{width:`${measured.width}px`,maxWidth:'100%',borderCollapse:'collapse',tableLayout:'fixed'})
-          for(const row of data.rows)for(const cell of row.cells) {
-            const slot=element.querySelector<HTMLElement>(`[data-document-slot="${CSS.escape(`cell:${JSON.stringify([row.id,cell.columnId])}`)}"]`),owner=slot?.closest<HTMLElement>('td,th')
-            const effective=measured.cells.find(value=>value.id===cell.id)?.style,column=data.columns.find(value=>value.id===cell.columnId)
-            if(owner && effective)style(owner,{width:`${column?.width ?? 200}px`,height:`${row.height}px`,padding:`${effective.cellPadding}px`,backgroundColor:effective.fillColor,color:effective.textColor,
-              fontFamily:effective.fontFamily,fontSize:`${effective.fontSize}px`,fontWeight:effective.bold ? '700':'400',fontStyle:effective.italic ? 'italic':'normal',textAlign:effective.horizontalAlign,verticalAlign:effective.verticalAlign,
-              border:`${effective.borderWidth}px ${effective.lineStyle} ${effective.borderColor}`})
-          }
-        }
-        if (instance) {
-          if (element.matches('p,h1,h2,h3,h4,h5,h6')) element.dataset.documentPath = JSON.stringify(['content'])
-          for (const slot of element.querySelectorAll<HTMLElement>('[data-document-slot]')) {
-            const key = slot.dataset.documentSlot!
-            const field = key.startsWith('item:') ? { kind: 'item' as const, itemId: key.slice(5) } : key.startsWith('column:') ? { kind: 'header' as const, columnId: key.slice(7) } : key.startsWith('cell:') ? (() => { const [rowId, columnId] = JSON.parse(key.slice(5)); return { kind: 'cell' as const, rowId, columnId } })() : { kind: 'field' as const, field: key as 'content' }
-            slot.dataset.documentPath = JSON.stringify(courseInstanceSlotPath(instance.data, field))
-          }
-          runtime.onTargetElement(instance.id, element)
-        }
+  const paragraphObservation = useRef<{ stop: ReturnType<typeof observeFlowParagraphLayout>; paint: ReturnType<typeof createFlowBlockPaint> } | null>(null)
+  useLayoutEffect(() => {
+    const element = paper.current
+    if (!element || !layoutBody) return
+    const paint = createFlowBlockPaint(element, surfaceId, () => latest.current.project,
+      (id, target) => latest.current.runtime.onTargetElement(id, target), update => editor.current?.paintProjection(update))
+    const stop = observeFlowParagraphLayout(element, (rects, change) => {
+      paint.retire(change.retired)
+      const painted = new Set(paint.paint(change.paint))
+      for (const target of change.moved) {
+        const instance = latest.current.project.instances[target.dataset.flowBlockId!]
+        if (instance && !instance.container && !painted.has(target))
+          latest.current.runtime.onTargetElement(instance.id, target)
       }
-    })
-  },readContentScale) : undefined, [project,surfaceId, runtime.onTargetElement,observationHost])
+      const nextLayout = { width: element.getBoundingClientRect().width / readContentScale(), rects }
+      setPaperLayout(previous => previous.width === nextLayout.width && previous.rects === rects ? previous : nextLayout)
+    }, readContentScale)
+    paragraphObservation.current = { stop, paint }
+    return () => { stop(); paint.destroy(); paragraphObservation.current = null }
+  }, [documentId, surfaceId, layoutBody, observationHost])
+  useLayoutEffect(() => {
+    const observation = paragraphObservation.current
+    const changed = observation?.paint.refresh()
+    if (changed?.length) observation!.stop.invalidate(changed)
+  }, [project])
   useEffect(() => {
     const capture = (): FlowMenuPageCapture => {
       const result = flush(); if (!result.ok) return { ok: false, reason: result.reason! }
@@ -310,21 +323,21 @@ export function FlowWorkspace({ documentId, project, surfaceId, toolbarContainer
         ?? flowParagraphAnchorAt({ x: 36, y, width: 1, height: 1 }, width, paragraphRects)?.blockId ?? null
       return { ok: true, documentId, projectId: value.project.id, revision: value.project.revision, locationId: surfaceId, surfaceId,
         generation: bridge.read().activation, selectedBlockId, selectionSignature: JSON.stringify(value.selection), paperWidth: width,
-        bodyWidth: Math.max(0, width - 72), paragraphRects }
+        bodyWidth: resolveFlowBodyWidth(layout, width), paragraphRects }
     }
     return registerFlowMenuCapture(capture)
   }, [documentId, surfaceId, bridge, flush])
   useEffect(() => {
     const focus = (request: FlowBlockFocusRequest) => {
       const value = latest.current
-      if (request.documentId !== documentId || request.surfaceId !== surfaceId || request.revision !== value.project.revision) return false
+      if (value.globalEditing || request.documentId !== documentId || request.surfaceId !== surfaceId || request.revision !== value.project.revision) return false
       const accepted = editor.current?.focusBlock(request.blockId) ?? false
       if (accepted) value.runtime.selectInstances([request.blockId], surfaceId)
       return accepted
     }
     const releaseFocus = registerFlowBlockFocus(focus)
     const releaseSelection = registerFlowBlockSelection(documentId, surfaceId, blockId => {
-      if (!latest.current.project.instances[blockId]) return false
+      if (latest.current.globalEditing || !latest.current.project.instances[blockId]) return false
       latest.current.runtime.selectInstances([blockId], surfaceId)
       editor.current?.selectBlock(blockId)
       paper.current?.querySelector<HTMLElement>(`[data-flow-block-id="${CSS.escape(blockId)}"]`)?.scrollIntoView({ block: 'nearest' })
@@ -339,16 +352,17 @@ export function FlowWorkspace({ documentId, project, surfaceId, toolbarContainer
     catch (failure) { setError(failure instanceof Error ? failure.message : String(failure)) }
   }
   const selectDocument = (value: DocumentSelection | null) => {
+    if (latest.current.globalEditing) return
     setSelection(value)
     setFlowContextSelection(value)
-    const ids = value?.kind === 'text' ? [...new Set([value.anchor.blockId, value.head.blockId])] : value?.kind === 'object' ? [value.blockId] : value?.kind === 'cells' ? [value.tableId] : []
-    runtime.selectInstances(ids, surfaceId)
+    bridge.selectInteraction(documentId, value ? { kind: 'document', selection: value } : null, surfaceId)
   }
   const captureContextual = (): DocumentSelectionAdapter => {
-    const captured = bridge.captureTarget(documentId)
+    const current = bridge.read()
+    const captured = { epoch: current.snapshot?.epoch, projectId: current.project?.id, activeStateId: current.activeStateId }
     return (snapshot, target) => {
     if (target.mode !== 'layout' || !target.selection) throw new Error('请回到正文选择内容后修改')
-    if (snapshot.model.kind !== 'course-v10' || snapshot.epoch !== captured.epoch || snapshot.model.project.id !== captured.project.id
+    if (snapshot.model.kind !== 'course-v10' || snapshot.epoch !== captured.epoch || snapshot.model.project.id !== captured.projectId
       || target.revision !== String(snapshot.revision)) throw new Error('正文选区已改变，请重新选择')
     if (target.selection.kind === 'text' || target.selection.kind === 'cells') return captureFlowSelection(snapshot, surfaceId, target, captured.activeStateId)
     const ids = [target.selection.blockId]
@@ -364,6 +378,7 @@ export function FlowWorkspace({ documentId, project, surfaceId, toolbarContainer
       for (const block of blocks) {
         if (captured.project.instances[block.id]) roots.push(block.id)
         else if (block.type === 'section') visit(block.blocks)
+        else if (block.type === 'course-instance' && block.blocks) visit(block.blocks)
       }
     }
     visit(content.blocks)
@@ -377,8 +392,9 @@ export function FlowWorkspace({ documentId, project, surfaceId, toolbarContainer
       onPrepared: prepared => { preparedResources.current = [...preparedResources.current,prepared] },
       onDiscard: prepared => { preparedResources.current = preparedResources.current.filter(value=>value!==prepared) } })
   }
-  const floating = surface.childIds.filter(id => project.instances[id]?.flowPlacement)
-  const globals = [...project.global.underlay, ...project.global.overlay].filter(id=>isComponentVisibleAtSurface(project.instances[id],surfaceId))
+  const floating = globalEditing ? [] : surface.childIds.filter(id => project.instances[id]?.flowPlacement)
+  const globals = project.rootIds.includes(surfaceId) || editingScope === 'global'
+    ? [...project.global.underlay, ...project.global.overlay].filter(id=>isComponentVisibleAtSurface(project.instances[id],surfaceId)) : []
   const teacherChrome = (id:string) => {
     return isViewportComponent(project, id)
   }
@@ -418,7 +434,7 @@ export function FlowWorkspace({ documentId, project, surfaceId, toolbarContainer
   const beginControllerDrag = (event: React.PointerEvent<HTMLDivElement>, instanceId: string) => {
     const targets = freeSurfaceTargets(controllerBaseProjection, surfaceId).filter(target => target.instanceId === instanceId)
     if (readOnly || event.button !== 0 || flowStructureDisabledReason(project, instanceId) || !targets.length) return
-    event.preventDefault(); event.stopPropagation(); event.currentTarget.setPointerCapture(event.pointerId)
+    event.preventDefault(); event.stopPropagation()
     controllerGesture.current = { pointerId: event.pointerId, start: { x: event.clientX, y: event.clientY }, moved: false,
       captured: bridge.captureTarget(documentId), original: project, display: controllerBaseProjection, viewport: hudGeometry,
       offset: runtime.navigation.placement?.() ?? { x: 0, y: 0 }, edits: [], value: new FreeTransformGesture({
@@ -493,41 +509,14 @@ export function FlowWorkspace({ documentId, project, surfaceId, toolbarContainer
         state.setActiveTab('properties'); proEditorRailController.open('properties')
       } }
   }
-  const background = resolveFlowPaperBackground(project,surface)
+  const background = resolveComponentSurfaceBackground(project,surface)
   const readPaperOffset = () => {
     const paperBox = paper.current?.getBoundingClientRect(), contentBox = observationContent.current?.getBoundingClientRect()
     const scale = readContentScale()
     return { x: paperBox && contentBox ? (paperBox.left - contentBox.left) / scale : 0,
       y: paperBox && contentBox ? (paperBox.top - contentBox.top) / scale : 0 }
   }
-  const beginRegisteredSpot = useCallback(async (instanceId: string, point: { x: number; y: number }, generation?: number, authorKey?: string) => {
-    if (readOnly || !project.instances[instanceId]) return false
-    const spot = [...runtime.world.authorSpots()].reverse().find(value => value.instanceId === instanceId && value.kind === 'text'
-      && typeof value.initialValue === 'string' && (generation === undefined || value.mountGeneration === generation)
-      && (authorKey === undefined ? frameContainsPoint(value.localBounds, point) : value.authorKey === authorKey))
-    if (!spot) return false
-    const target = bridge.captureTarget(documentId)
-    const readCurrentSpot = () => {
-      const current = runtime.world.authorSpots()
-      return current.find(value => value.id === spot.id && value.mountGeneration === spot.mountGeneration)
-        ?? current.find(value => value.instanceId === spot.instanceId && value.kind === spot.kind
-          && (spot.authorKey ? value.authorKey === spot.authorKey && JSON.stringify(value.scope ?? {}) === JSON.stringify(spot.scope ?? {})
-            : spot.dataPath ? JSON.stringify(value.dataPath) === JSON.stringify(spot.dataPath) : false))
-    }
-    if (!await beginSpotEdit(spot, { ...target, instanceId, instanceIds: [instanceId] }, readCurrentSpot)) return false
-    runtime.selectInstances([instanceId], surfaceId)
-    return true
-  }, [readOnly, project, runtime.world, runtime.selectInstances, bridge, documentId, surfaceId, beginSpotEdit])
-  useEffect(() => {
-    const root = workspace.current
-    if (!root) return
-    const open = async (event: Event) => {
-      const request = (event as CustomEvent<{ instanceId: string; mountGeneration: number; localPoint: { x: number; y: number }; authorKey?: string }>).detail
-      if (request && await beginRegisteredSpot(request.instanceId, request.localPoint, request.mountGeneration, request.authorKey)) { event.preventDefault(); event.stopPropagation() }
-    }
-    root.addEventListener('component-author-double-click', open)
-    return () => root.removeEventListener('component-author-double-click', open)
-  }, [beginRegisteredSpot])
+  const beginRegisteredSpot = authorInteraction.beginRegisteredSpot
   const drop = (event: React.DragEvent<HTMLElement>) => {
     if (!onDropWorkspaceMedia || !event.dataTransfer.types.includes(WORKSPACE_MEDIA_DRAG_TYPE)) return
     event.preventDefault(); event.stopPropagation()
@@ -543,7 +532,9 @@ export function FlowWorkspace({ documentId, project, surfaceId, toolbarContainer
     data-flow-location-id={surfaceId} data-observation-source="authoring" data-observation-revision={project.revision}
     data-observation-project-id={project.id} data-observation-surface-id={surfaceId} data-observation-ready="true"
     style={{ position: 'relative', width: '100%', height: '100%', overflow: 'hidden', isolation: 'isolate' }}
+    onContextMenuCapture={event => { authorInteraction.contextMenuFromElement(event) }}
     onPointerDownCapture={event => {
+      if (authorInteraction.pointerFromElement(event)) return
       if (!contentDraft || contentDraft.target.documentId !== documentId || contentDraft.composing) return
       const target=event.target instanceof Element ? event.target : null
       if(target?.closest('[data-component-professional-editor],.text-edit-toolbar,.selection-quick-bar'))return
@@ -570,8 +561,8 @@ export function FlowWorkspace({ documentId, project, surfaceId, toolbarContainer
       event.preventDefault();event.stopPropagation();runtime.selectInstances([instance.id],surfaceId)
       beginContentEdit(instance.id,'canvas')
     }}>
-    {!readOnly && runtime.selectedInstanceIds.length > 0 && runtime.selectedInstanceIds.every(id => globals.includes(id) || floating.includes(id))
-      && <NativeSelectionContext documentId={documentId} revision={project.revision} surfaceId={surfaceId} itemIds={runtime.selectedInstanceIds} enabled />}
+    {!readOnly && runtime.selectedInstanceIds.length > 0 && (Boolean(selectedAuthorSpot) || runtime.selectedInstanceIds.every(id => globals.includes(id) || floating.includes(id)))
+      && <NativeSelectionContext documentId={documentId} revision={project.revision} surfaceId={surfaceId} itemIds={runtime.selectedInstanceIds} enabled textEditing={Boolean(contentDraft)} authorSpot={selectedAuthorSpot} authorBounds={authorInteraction.authorBounds} />}
     {!readOnly && selectedControllerTargets.length > 0 && <div data-flow-controller-selection="true"
       style={{ position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 8 }}
       onPointerDown={beginControllerResize} onPointerMove={moveControllerResize} onPointerUp={event => finishControllerResize(event)}
@@ -582,32 +573,33 @@ export function FlowWorkspace({ documentId, project, surfaceId, toolbarContainer
     <div ref={observationMount} style={{position:'absolute',inset:`${formatHeight}px 0 0`}} data-page-insets={formatPageInsets(EDITOR_PAGE_INSETS)} data-page-backdrop="transparent" />
     {observationHost && createPortal(<div ref={observationRoot} data-flow-observation-root="true"
       data-canvas-width={surface.designSize?.width ?? 1280} data-canvas-height={surface.designSize?.height ?? 720}>
-    <div ref={observationContent} data-playback-content="true" style={{position:'absolute',inset:0,transformOrigin:'0 0'}}>
+    <ComponentBackgroundPaint background={project.rootIds.includes(surfaceId) ? resolveComponentBackground(project) : undefined} resolveAsset={id => assetUrls[id]} />
+    <div ref={observationContent} data-playback-content="true" style={{position:'absolute',inset:0,transformOrigin:'0 0',zIndex:2}}>
+    {!globalEditing && <div data-surface-background={surface.id} style={{ position: 'absolute', inset: 0, zIndex: 2, isolation: 'isolate', pointerEvents: 'none' }}><ComponentBackgroundPaint background={background} resolveAsset={id => assetUrls[id]} /></div>}
     <div ref={scroll} className="flow-workspace__scroll flow-media-query-root" data-testid="flow-workspace-scroll" data-flow-paper-scroll="true"
       onScroll={event => {
         const element = event.currentTarget
         if (!readOnly && paper.current && element.scrollTop + element.clientHeight >= element.scrollHeight - element.clientHeight / 2)
           setPaperMinimumHeight(height => Math.max(height, paper.current!.offsetHeight) + element.clientHeight)
       }}
-      style={{ position: 'relative', overflow: 'auto', height: '100%', padding: FLOW_BODY_SCROLL_PADDING }}>
+      style={{ display: globalEditing ? 'none' : undefined, position: 'relative', isolation: 'isolate', zIndex: 4, overflow: 'auto', height: '100%', padding: flowScrollPadding(layout) }}>
       <article ref={paper} className="flow-paper flow-body-content" data-testid="flow-paper" data-flow-reading-width={layout.readingWidth}
         onPointerDownCapture={event => { paperPointer.current = { x: event.clientX, y: event.clientY } }}
         onClick={event => { if (!readOnly && event.target === event.currentTarget) editor.current?.focusEndParagraph() }}
         onDragOver={event => { if (onDropWorkspaceMedia && event.dataTransfer.types.includes(WORKSPACE_MEDIA_DRAG_TYPE)) { event.preventDefault(); event.dataTransfer.dropEffect = 'copy' } }}
-        onDrop={drop} style={{ position: 'relative', isolation: 'isolate', width: flowPaperMaxWidth(layout), maxWidth: flowPaperMaxWidth(layout), containerType: 'inline-size', minHeight: readOnly ? '100%' : paperMinimumHeight || '200%', margin: '0 auto', padding: FLOW_BODY_PAPER_PADDING, color: '#1f2937' }}>
-        <ComponentBackgroundPaint background={background} resolveAsset={id => assetUrls[id]} />
+        onDrop={drop} style={{ position: 'relative', isolation: 'isolate', width: '100%', maxWidth: flowPaperMaxWidth(layout), containerType: 'inline-size', minHeight: readOnly ? '100%' : paperMinimumHeight || '200%', margin: '0 auto', padding: flowPaperPadding(layout), color: '#1f2937' }}>
         <style>{FLOW_BODY_CSS}</style>
-        <div style={{ position:'relative',zIndex:2 }}><SharedDocumentEditor key={`${documentId}/${surfaceId}`} ref={editor} cardDocumentId={documentId ?? undefined} document={document} revision={String(project.revision)} readOnly={readOnly}
-          objectRevision={JSON.stringify(Object.values(project.instances).map(instance=>[instance.id,instance.definitionId,
-            instance.implementationOverride ?? project.definitions[instance.definitionId]?.implementation,
-            componentLayoutInput(instance,{project,kind:'flow',inlineSize:paperLayout.width,definition:project.definitions[instance.definitionId]}).mode,
-            instance.flowLayout,instance.childIds,instance.frame,instance.style]))}
+        <div style={{ position:'relative',zIndex:2 }}><SharedDocumentEditor key={`${documentId}/${surfaceId}`} ref={editor} cardDocumentId={documentId ?? undefined} document={document} revision={String(project.revision)} readOnly={readOnly || globalEditing || Boolean(contentDraft)} active={!globalEditing && !contentDraft}
+          objectRevision={objectVersions.revision} objectRevisionFor={objectVersions.forBlock} objectChangedIds={objectVersions.changedSince}
+          onLayoutMount={setLayoutBody}
           beforeProjectionMutation={()=>runtime.world.beforeProjectionMutation()}
           afterProjectionMutation={()=>queueMicrotask(()=>runtime.world.afterProjectionMutation())}
           resolveImage={source => {const asset=Object.values(project.assets).find(asset=>asset.path===source);if(!asset)throw new Error(`素材引用不存在：${source}`);return {assetId:asset.id,source:{kind:'project'}}}}
           hiddenBlockIds={Object.values(project.instances).filter(instance => instance.visible === false).map(instance => instance.id)}
-          inlineStyleDefaults={(blockId, point) => flowInlineStyleDefaults(project, blockId, point ?? undefined)}
-          target="flow" toolbarHost={toolbarContainer ?? formatHost} sourceDraft={draft?.surfaceId === surfaceId ? draft.source : undefined}
+          inlineStyleDefaults={inlineDefaults}
+          renderGroup={renderReadingGroup}
+          contextualCardSuppressed={interactionSelection?.kind !== 'document'}
+          target="flow" deferLayoutSource toolbarHost={toolbarContainer ?? formatHost} sourceDraft={draft?.surfaceId === surfaceId ? draft.source : undefined}
           sourceDiagnostics={draft?.surfaceId===surfaceId ? draft.diagnostics:undefined}
           clipboardContext={clipboardContext} clipboardResourcePort={clipboardResourcePort}
           onDiscardDraft={()=>{releaseFlowPreparedResources(preparedResources.current);preparedResources.current=[];setDraft(null,documentId);setError(null)}}
@@ -620,7 +612,7 @@ export function FlowWorkspace({ documentId, project, surfaceId, toolbarContainer
               preparedResources:owner ? retainedFlowPreparedResources(owner,preparedResources.current) : [] } : null,documentId)
           }}
           onCompositionChange={(active, source) => {
-            if (active) { if (!composition.current) composition.current = { target: bridge.captureTarget(documentId), next: null, pending: [] }; setDraft({ surfaceId, revision: project.revision, source, diagnostics: [], composing: true },documentId) }
+            if (active) { if (!composition.current) composition.current = { target: bridge.captureOwnedTarget(documentId), next: null, pending: [] }; setDraft({ surfaceId, revision: project.revision, source, diagnostics: [], composing: true },documentId) }
             else setTimeout(async () => {
               const pending = composition.current; composition.current = null
               if (!pending) return
@@ -629,7 +621,11 @@ export function FlowWorkspace({ documentId, project, surfaceId, toolbarContainer
               pending.pending.forEach(resolve => resolve(accepted))
             }, 0)
           }} onSelection={selectDocument}
-          onContextualTargetChange={target => { if (target?.mode === 'layout') void contextual(target).then(value => workbenchSelection.observe(documentId, project.revision, () => value)).catch(() => {}) }}
+          onContextualTargetChange={target => { if (target?.mode === 'layout') {
+            // Passive selection observation must not drain or close a newly opened component draft.
+            const capture = captureContextual()
+            workbenchSelection.observeSnapshot(documentId, project.revision, bridge.read().snapshot, snapshot => capture(snapshot, target))
+          } }}
           onContextualCommand={async (instruction, target) => { await requestDocumentSelection(documentId, target, instruction, captureContextual()) }}
           renderAiButton={(target, issue) => {
             if (target.selection?.kind === 'text' || target.selection?.kind === 'cells') return <TextAiButton documentId={documentId} selectionIdentity={JSON.stringify([project.revision,target.selection])}
@@ -645,40 +641,66 @@ export function FlowWorkspace({ documentId, project, surfaceId, toolbarContainer
           renderQuickBarActions={target => { const id=target.selection?.kind === 'object' ? target.selection.blockId : null, value=id && actions(id); return value ? <FlowBlockQuickActions {...value}/> : null }}
           renderQuickBarMenu={target => { const id=target.selection?.kind === 'object' ? target.selection.blockId : null, value=id && actions(id); return value ? <FlowBlockQuickMenu {...value}/> : null }}
           renderObject={(block, host) => {
-            const objectProject = project.instances[block.id] ? project : projectFlowPreparedResources(bridge.captureTarget(documentId), preparedResources.current)
+            const objectProject = project.instances[block.id] ? project : projectFlowPreparedResources(bridge.captureOwnedTarget(documentId), preparedResources.current)
             let disposed=false
             const shell = host.closest<HTMLElement>('[data-flow-block-id]') ?? host
             shell.dataset.componentFlowId = block.id
             shell.dataset.componentInstance = block.id
             shell.dataset.componentPlacement = 'flow'
-            runtime.onTargetElement(block.id, shell)
             const instance = objectProject.instances[block.id]
             if (!instance) throw new Error(`正文引用的正式实例已不存在：${block.id}`)
-            const bodyLayout = instance?.flowLayout
-            const children=instance?.childIds?.length ? window.document.createElement('div') : null
-            const root=children ? createRoot(children) : null
+            if (!instance.container) runtime.onTargetElement(block.id, shell)
+            const bodyLayout = instance.flowLayout
+            // A deferred React unmount must own a disposable target, never the
+            // host that the NodeView will reuse for the next render.
+            const content=instance.container ? window.document.createElement('div') : null
+            if(content){Object.assign(content.style,{width:'100%',height:'100%'});host.append(content)}
+            const children=!instance.container && instance.childIds?.length ? window.document.createElement('div') : null
+            const root=content ? createRoot(content) : children ? createRoot(children) : null
             const stage=window.document.createElement('div')
             shell.prepend(stage); stage.append(host); if(children) stage.append(children)
             let resize:ResizeObserver|undefined
             let presentation = resolveComponentOuterPresentation(objectProject, instance, { placement: 'flow', purpose: 'author', inlineSize: paperLayout.width, flowLayout: layout })
             const place=()=>{
-              Object.assign(shell.style,presentation.outerStyle)
+              applyComponentPresentationStyle(shell,presentation.outerStyle)
               presentation=resolveComponentOuterPresentation(objectProject,instance,{placement:'flow',purpose:'author',inlineSize:shell.clientWidth || paperLayout.width,flowLayout:layout})
-              Object.assign(stage.style,presentation.stageStyle)
-              Object.assign(host.style,presentation.contentStyle)
-              if(children)Object.assign(children.style,presentation.childrenStyle)
+              applyComponentPresentationStyle(stage,presentation.stageStyle)
+              applyComponentPresentationStyle(host,presentation.contentStyle)
+              if (instance.container) {
+                shell.style.height = 'auto'
+                Object.assign(stage.style, { position: 'relative', width: '100%', height: `${instance.frame?.height ?? instance.container.designSize?.height ?? 320}px` })
+                Object.assign(host.style, { position: 'relative', left: '0px', top: '0px', width: '100%', height: '100%', transform: 'none' })
+              }
+              if(children)applyComponentPresentationStyle(children,presentation.childrenStyle)
             }
             place()
             if(typeof ResizeObserver!=='undefined'){resize=new ResizeObserver(place);resize.observe(shell)}
-            if(children) {
-              root!.render(<>{instance.childIds!.filter(id => !allDocumentTextSlots(instance.data).some(slot => inlineComponentIds(slot.content).includes(id))
-                && !(!objectProject.instances[id]?.frame && !objectProject.instances[id]?.flowPlacement && documentInlineChildIds(bridge.captureTarget(documentId).project, instance.id).includes(id))).map(id=>runtime.renderInstance(id,objectProject,presentation.childrenPlacement))}</>)
+            if (instance.container) {
+              containerRoots.current.set(block.id, { root: root!, project: objectProject, render: runtime.renderContainer })
+              root!.render(<>{runtime.renderContainer(block.id, objectProject)}</>)
+            }
+            else if(children) {
+              const inlineIds = new Set(allDocumentTextSlots(instance.data).flatMap(slot => inlineComponentIds(slot.content)))
+              const documentInlineIds = new Set(documentInlineChildIds(objectProject, instance.id))
+              root!.render(<>{instance.childIds!.filter(id => !inlineIds.has(id)
+                && !(!objectProject.instances[id]?.frame && !objectProject.instances[id]?.flowPlacement && documentInlineIds.has(id))).map(id=>runtime.renderInstance(id,objectProject,presentation.childrenPlacement))}</>)
             }
             // Attach and size the NodeView shell before moving its retained runtime root.
-            queueMicrotask(()=>{if(!disposed && host.isConnected){place();runtime.onElement(block.id,host);runtime.world.afterProjectionMutation()}})
+            queueMicrotask(()=>{if(!disposed && host.isConnected){place();if(!instance.container)runtime.onElement(block.id,host);runtime.world.afterProjectionMutation()}})
             const note=block.type==='course-instance' && bodyLayout?.caption ? window.document.createElement('figcaption') : null
             if(note) {note.innerHTML=renderDocumentText(bodyLayout!.caption!);shell.append(note)}
-            return () => {disposed=true;runtime.onElement(block.id,null);runtime.onTargetElement(block.id,null);resize?.disconnect();if(root) queueMicrotask(() => root.unmount());children?.remove();note?.remove();stage?.remove() }
+            return () => {
+              disposed=true
+              if(containerRoots.current.get(block.id)?.root===root)containerRoots.current.delete(block.id)
+              if(!instance.container){runtime.onElement(block.id,null);runtime.onTargetElement(block.id,null)}
+              resize?.disconnect()
+              if(root)queueMicrotask(()=>root.unmount())
+              runtime.world.beforeProjectionRemoval(stage)
+              // Restore the reusable NodeView host before discarding this render's
+              // stage. Children stay its siblings so their selection is unchanged.
+              stage.before(host)
+              content?.remove();children?.remove();note?.remove();stage.remove()
+            }
           }} /></div>
         {!readOnly && <button type="button" aria-label="继续输入正文" title="点击继续输入正文" data-flow-document-end="true"
           onMouseDown={event => event.preventDefault()} onClick={() => editor.current?.focusEndParagraph()}
@@ -691,7 +713,7 @@ export function FlowWorkspace({ documentId, project, surfaceId, toolbarContainer
           onSelect={() => runtime.selectInstances([id], surfaceId)} onEdits={edit} onElement={runtime.onElement} onTargetElement={runtime.onTargetElement} />)}
       </article>
     </div>
-    {[...globals.filter(id=>!teacherChrome(id)), ...floating.filter(id => project.instances[id].flowPlacement?.space === 'viewport')].map(id => <FlowFloatingInstance key={id} project={project} instanceId={id}
+    {floating.filter(id => project.instances[id].flowPlacement?.space === 'viewport').map(id => <FlowFloatingInstance key={id} project={project} instanceId={id}
       readPaperOffset={readPaperOffset}
       readObservationScale={readContentScale}
       selected={runtime.selectedInstanceIds.includes(id)} readOnly={readOnly} paperWidth={paperLayout.width} paragraphRects={paperLayout.rects}
@@ -699,9 +721,10 @@ export function FlowWorkspace({ documentId, project, surfaceId, toolbarContainer
       viewport={{ width: viewport.width / readBaseScale(), height: viewport.height / readBaseScale() }}
       onSelect={() => runtime.selectInstances([id], surfaceId)} onEdits={edit} onElement={runtime.onElement} onTargetElement={runtime.onTargetElement} />)}
     </div>
-    {globals.filter(teacherChrome).map(id=><FlowFloatingInstance key={id} project={controllerProjection} instanceId={id}
+    {globals.map(id=><FlowFloatingInstance key={id} project={teacherChrome(id) ? controllerProjection : project} instanceId={id}
+      readObservationScale={teacherChrome(id) ? undefined : readContentScale}
       selected={runtime.selectedInstanceIds.includes(id)} readOnly={readOnly} paperWidth={paperLayout.width} paragraphRects={paperLayout.rects}
-      globalPlane={project.global.underlay.includes(id) ? 'underlay':'overlay'} viewport={viewport}
+      globalPlane={project.global.underlay.includes(id) ? 'underlay':'overlay'} viewport={teacherChrome(id) ? viewport : { width: viewport.width / readBaseScale(), height: viewport.height / readBaseScale() }}
       controllerDrag={{ start: beginControllerDrag, move: moveControllerResize, finish: finishControllerResize }}
       onSelect={()=>runtime.selectInstances([id],surfaceId)} onEdits={edits => edit(restoreTeacherControllerFrameEdits(edits, project, controllerProjection, hudGeometry,
         runtime.navigation.placement?.() ?? { x: 0, y: 0 }, runtime.navigation))} onElement={runtime.onElement} onTargetElement={runtime.onTargetElement}/>)}
@@ -713,12 +736,7 @@ export function FlowWorkspace({ documentId, project, surfaceId, toolbarContainer
       <button type="button" aria-label="适合窗口" title="重置缩放与平移" onClick={() => viewSession.current?.reset()}><Maximize2 size={14} /></button>
       <span title="Ctrl+滚轮缩放；按住空格或鼠标中键拖动画布"><Hand size={13} /></span>
     </div>}
-    {!readOnly && contentDraft?.source==='canvas' && contentDraft.target.documentId===documentId && contentDraft.target.surfaceId===surfaceId
-      && <FlowProfessionalDraftEditor key={`${contentDraft.target.epoch}:${contentDraft.instanceId}`} project={project} draft={contentDraft}
-        target={()=>contentDraft.authorSpot ? runtime.world.contentElement(contentDraft.instanceId) : runtime.world.targetElement(contentDraft.instanceId)}
-        update={updateContentDraft} updateSpot={updateSpotDraft} commit={commitContentEdit} cancel={cancelContentEdit}
-        undo={async ()=>{await commitContentEdit();await bridge.undo(contentDraft.target.documentId)}}
-        redo={async ()=>{await commitContentEdit();await bridge.redo(contentDraft.target.documentId)}} report={setError} />}
+    {authorInteraction.editor}
     {crop && <div className="flow-media-modal" style={{position:'absolute',inset:24,zIndex:20,background:'#fff',padding:24,overflow:'auto'}}><FlowMediaCropEditor instance={crop.instance} imageData={crop.data} url={assetUrls[crop.data.assetId]}
       onCancel={() => setCrop(null)} onConfirm={async patch => {
         const value=crop
@@ -727,47 +745,6 @@ export function FlowWorkspace({ documentId, project, surfaceId, toolbarContainer
       }}/></div>}
     {caption && <FlowMediaCaptionEditor content={caption.content} resources={document.resources} onConfirm={caption.confirm} onCancel={caption.cancel} />}
   </div>
-}
-
-/** The existing runtime target owns all Flow/free-group geometry; this portal owns only the captured field input. */
-function FlowProfessionalDraftEditor({project,draft,target,update,updateSpot,commit,cancel,undo,redo,report}:{
-  project:CourseProjectV10;draft:SlideContentEdit;target():HTMLElement|undefined
-  update(data:unknown,composing?:boolean,height?:number,width?:number,rangeProjection?:TextRangeProjection[]):void;commit():Promise<void>;cancel():unknown;undo():void|Promise<void>;redo():void|Promise<void>;report(message:string):void
-  updateSpot(value:string,composing?:boolean):void
-}) {
-  const [host,setHost]=useState<HTMLElement|null>(null),[toolbar,setToolbar]=useState<HTMLDivElement|null>(null)
-  const root=useRef<HTMLDivElement>(null),latest=useRef({draft,commit,report})
-  latest.current={draft,commit,report}
-  useLayoutEffect(()=>{setHost(target() ?? null)},[draft.instanceId,target])
-  useLayoutEffect(()=>{root.current?.querySelector<HTMLElement>('.ProseMirror,textarea,input')?.focus({preventScroll:true})},[host])
-  const kind=componentDefinitionBuiltinKey(draft.target.editingProject.definitions[draft.definitionId])
-  if(!host || (!draft.authorSpot && kind!=='guoling.text' && kind!=='guoling.formula'))return null
-  const owner={revision:`${draft.target.epoch}:${draft.instanceId}`,toolbarHost:toolbar,onUndo:undo,onRedo:redo,onDiagnostic:report,
-    onCompositionChange:(active:boolean)=>update(latest.current.draft.data,active),onChange:(data:unknown,operation:DocumentOperation)=>{update(data,undefined,undefined,undefined,operation.dataRangeProjection);return true}}
-  return createPortal(<div ref={root} data-component-professional-editor="" className="text-edit-overlay"
-    style={{...(draft.authorSpot ? componentFrameStyle(draft.authorSpot.localBounds) : {position:'absolute' as const,inset:0}),zIndex:20,pointerEvents:'auto',background:'#fff',overflow:'visible'}}
-    onPointerDown={event=>event.stopPropagation()} onDoubleClick={event=>event.stopPropagation()}
-    onKeyDown={event=>{if(event.key==='Escape' && !event.nativeEvent.isComposing && !latest.current.draft.composing){event.stopPropagation();cancel()}}}
-    onBlur={event=>{
-      if(latest.current.draft.authorSpot)return
-      const next=event.relatedTarget
-      if(next instanceof Node && event.currentTarget.contains(next))return
-      if(next instanceof Element && next.closest('.text-edit-toolbar,.selection-quick-bar'))return
-      const blurred=event.target
-      queueMicrotask(()=>{
-        const active=window.document.activeElement
-        if(active && (root.current?.contains(active) || active.closest('.text-edit-toolbar,.selection-quick-bar')))return
-        if(blurred instanceof Node && !blurred.isConnected && root.current?.isConnected){root.current.querySelector<HTMLElement>('.ProseMirror')?.focus({preventScroll:true});return}
-        if(!latest.current.draft.composing)void latest.current.commit().catch(failure=>latest.current.report(failure instanceof Error ? failure.message:String(failure)))
-      })
-    }}>
-    {!draft.authorSpot && <div className="text-edit-toolbar" ref={setToolbar}/>}
-    {draft.authorSpot ? <CanvasPlainTextEditor key={draft.authorSpot.id} bounds={{x:0,y:0,width:draft.authorSpot.localBounds.width,height:draft.authorSpot.localBounds.height}}
-      value={draft.spotText ?? ''} multiline label="编辑此处文字" onDraftChange={updateSpot}
-      onCommit={value=>{updateSpot(value,false);void commit().catch(failure=>report(failure instanceof Error ? failure.message:String(failure)))}} onCancel={cancel}/>
-      : kind==='guoling.text' ? <TextComponentEditor {...owner} data={textComponentDataSchema.parse(draft.data)}/>
-      : <FormulaComponentEditor {...owner} data={formulaComponentDataSchema.parse(draft.data)}/>}
-  </div>,host)
 }
 
 function FlowFloatingInstance({ project, instanceId, selected, readOnly, paperWidth, paragraphRects, onSelect, onEdits, onElement, onTargetElement,globalPlane,viewport,readObservationScale,readPaperOffset,controllerDrag }: {
@@ -789,6 +766,11 @@ function FlowFloatingInstance({ project, instanceId, selected, readOnly, paperWi
   const controller = isViewportComponent(project, instanceId)
   const [preview, setPreview] = useState<typeof instance.frame | null>(null)
   const drag = useRef<{ x: number; y: number; frame: NonNullable<typeof instance.frame>; resize: boolean; point(value:{x:number;y:number}):{x:number;y:number}; preview?: NonNullable<typeof instance.frame> } | null>(null)
+  const pendingController = useRef<{ input: React.PointerEvent<HTMLDivElement>; latest: React.PointerEvent<HTMLDivElement>; ended: boolean; cancel?: boolean } | null>(null)
+  const freezePointer = (event: React.PointerEvent<HTMLDivElement>) => ({ ...event, currentTarget: event.currentTarget,
+    preventDefault: () => event.preventDefault(), stopPropagation: () => event.stopPropagation() })
+  const visibleAt = (element: HTMLElement, point: { x: number; y: number }) => visibleComponentAuthorHit(
+    element.closest<HTMLElement>('.flow-workspace') ?? element.ownerDocument.body, point, id => runtime.world.contentElement?.(id))
   const bind = useCallback((element: HTMLDivElement | null) => onElement(instanceId, element), [instanceId, onElement])
   const target = useCallback((element: HTMLDivElement | null) => onTargetElement(instanceId, element), [instanceId, onTargetElement])
   if (!instance?.frame) return null
@@ -797,8 +779,8 @@ function FlowFloatingInstance({ project, instanceId, selected, readOnly, paperWi
     ? flowParagraphAnchoredFrame(placement.paragraphAnchor, { x: stored.transform[4], y: stored.transform[5], width: stored.width, height: stored.height }, paperWidth, paragraphRects) : null
   const frame = anchored && !preview ? { ...stored, transform: [...stored.transform.slice(0, 4), anchored.x, anchored.y] as typeof stored.transform } : stored
   const structureDisabledReason = flowStructureDisabledReason(project, instanceId)
-  const owner = owningContainer(project, instanceId)
-  const surfaceId = owner?.kind === 'surface' ? owner.surfaceId : undefined
+  const owner = componentContainerForInstance(project, instanceId)
+  const surfaceId = owner?.kind === 'flow' ? owner.id : undefined
   const updatePlacement = (value: typeof placement | null) => {
     if (!surfaceId) return
     onEdits(flowPlacementEdits(project, instanceId, value ? { kind: 'overlay', surfaceId, placement: value } : { kind: 'document', surfaceId }))
@@ -821,12 +803,32 @@ function FlowFloatingInstance({ project, instanceId, selected, readOnly, paperWi
   }
   return <div ref={target} data-flow-overlay-id={instanceId} data-component-instance={instanceId} data-controller-authoring-id={controller ? instanceId : undefined} data-component-placement="free" data-playback-bounds="true"
     style={{ ...componentPaintStyle(instance,project.definitions[instance.definitionId]), position: 'absolute', left: 0, top: 0, width: frame.width, height: frame.height,
-      transform: `matrix(${frame.transform.join(',')})`, transformOrigin: '0 0', zIndex: (globalPlane ?? placement?.plane) === 'underlay' ? 1 : 4,
+      transform: `${globalPlane && !controller ? 'var(--flow-observation-transform, translate(0px, 0px)) ' : ''}matrix(${frame.transform.join(',')})`, transformOrigin: '0 0', zIndex: globalPlane ? globalPlane === 'underlay' ? 1 : 6 : placement?.space === 'viewport' ? placement.plane === 'underlay' ? 3 : 5 : placement?.plane === 'underlay' ? 1 : 4,
       display: instance.visible === false ? 'none' : undefined, outline: selected ? '2px solid #2563eb' : undefined }}
-    onPointerDownCapture={event => { if (controller && !readOnly && event.button === 0) { onSelect(); controllerDrag?.start(event, instanceId) } }}
-    onPointerMove={event => controllerDrag?.move(event)} onPointerUp={event => controllerDrag?.finish(event)}
-    onPointerCancel={event => controllerDrag?.finish(event, true)} onLostPointerCapture={event => controllerDrag?.finish(event, true)}
-    onPointerDown={event => { if (!readOnly) { event.stopPropagation(); onSelect() } }}>
+    onPointerDownCapture={event => { if (controller && !readOnly && event.button === 0) {
+      event.preventDefault(); event.stopPropagation()
+      const input = freezePointer(event), pending = { input, latest: input, ended: false, cancel: false }; pendingController.current = pending
+      input.currentTarget.setPointerCapture(input.pointerId)
+      void visibleAt(input.currentTarget, { x: input.clientX, y: input.clientY }).then(hit => {
+        if (pendingController.current !== pending) return
+        pendingController.current = null
+        if (pending.cancel || !input.currentTarget.isConnected || hit?.instanceId !== instanceId) return
+        onSelect(); controllerDrag?.start(input, instanceId)
+        controllerDrag?.move(pending.latest)
+        if (pending.ended) controllerDrag?.finish(pending.latest, pending.cancel)
+      })
+    } }}
+    onPointerMove={event => { if (pendingController.current) pendingController.current.latest = freezePointer(event); else controllerDrag?.move(event) }}
+    onPointerUp={event => { if (pendingController.current) { pendingController.current.latest = freezePointer(event); pendingController.current.ended = true } else controllerDrag?.finish(event) }}
+    onPointerCancel={event => { if (pendingController.current) { pendingController.current.latest = freezePointer(event); pendingController.current.ended = true; pendingController.current.cancel = true } else controllerDrag?.finish(event, true) }}
+    onLostPointerCapture={event => { if (pendingController.current) { if (!pendingController.current.ended) pendingController.current.cancel = true } else controllerDrag?.finish(event, true) }}
+    onPointerDown={event => { if (!readOnly) {
+      event.stopPropagation()
+      const element = event.currentTarget, point = { x: event.clientX, y: event.clientY }
+      void visibleAt(element, point).then(hit => {
+        if (element.isConnected && hit?.instanceId === instanceId) onSelect()
+      })
+    } }}>
     <div ref={bind} data-component-render={instanceId} style={{ width: '100%', height: '100%' }} />
     {!readOnly && <ImageSafeAreaGuides instance={{ ...instance, frame }} project={project} />}
     {instance.childIds?.map(id=>runtime.renderInstance(id,project,'free'))}

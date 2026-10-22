@@ -10,12 +10,13 @@ import { resolveFlowDocxPageBox, resolvePrintPageSize } from '../../flowPageBox'
 import { buildComponentReadingProjection, escapeOutput as x, type ComponentExportDocument, type ComponentOutputDiagnostic, type ComponentReadingBlock } from '../document/reading'
 import type { ComponentDocumentOutputOptions, ComponentCaptureRequest } from '../document/reading'
 import { documentBlockOutputAdapter } from '../../../../components/document-block'
-import { resolveComponentBackground, type ComponentFlowPlacement } from '../../../../shared/contracts/component-platform/project'
+import { componentBackgroundChain, resolveComponentBackground, type ComponentFlowPlacement } from '../../../../shared/contracts/component-platform/project'
 import { flowParagraphAnchoredFrame, type FlowParagraphBlockRect } from '../../../../shared/flowParagraphAnchors'
 import { renderDocumentText } from '../../../../shared/document/render'
 import { collectComponentAssetCredits, withCourseCreditsPage } from '../../course/courseCredits'
 import { outputImageDimensions } from '../../outputImage'
 import { applyComponentBackgroundPaint, componentBackgroundAssetIds } from '../../../../shared/componentBackgroundPaint'
+import { componentOutputSurface } from '../presentation'
 
 export interface ComponentPrintOutputOptions extends ComponentDocumentOutputOptions {
   pageId?: string
@@ -46,7 +47,7 @@ function flowPrintCss(name: string, width: number, cssSize: string): string {
   return `@page ${name}{size:${cssSize};margin:20mm}`
     + `${scope}{page:${name};box-sizing:border-box;max-width:${width}px;margin:0 auto;position:relative;color:#1f2937;background:#fff;font-family:"Noto Sans SC","Microsoft YaHei",sans-serif;-webkit-print-color-adjust:exact;print-color-adjust:exact}`
     + rule('*', 'box-sizing:border-box')
-    + rule('.component-output', 'margin:0 0 16px;overflow-wrap:anywhere;position:relative;z-index:1')
+    + rule('.component-output', 'margin:0 0 16px;overflow-wrap:anywhere;position:relative;z-index:3')
     + rule('.component-output p', 'white-space:pre-wrap;margin:0')
     + rule('.component-output img,.component-output svg', 'max-width:100%;height:auto')
     + rule('.component-output-chart,.component-output-image,.component-output-shape', 'break-inside:avoid')
@@ -56,7 +57,7 @@ function flowPrintCss(name: string, width: number, cssSize: string): string {
     + rule('tr', 'break-inside:avoid')
     + rule('th,td', 'padding:8px;border:1px solid #d1d5db;text-align:left')
     + rule('.output-diagnostic', 'border:1px dashed #b45309;padding:8px;color:#92400e')
-    + rule('h1', 'break-after:avoid;font-size:24px')
+    + rule('h1', 'break-after:avoid;font-size:24px;position:relative;z-index:3')
     + 'html,body{margin:0;padding:0}'
 }
 function shapeSvg(block: Extract<ComponentReadingBlock, { kind: 'shape' }>, width: number, height: number): string | undefined {
@@ -76,7 +77,7 @@ function shapeSvg(block: Extract<ComponentReadingBlock, { kind: 'shape' }>, widt
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}" width="${width}" height="${height}" role="img" aria-label="${x(data.shapeType)}">${drawing}</svg>`
 }
 export async function buildComponentPrintHtml(document: ComponentExportDocument, options: ComponentPrintOutputOptions) {
-  const surface = document.surfaces.find(item => item.id === options.surfaceId)
+  const surface = componentOutputSurface(document, options.surfaceId)
   if (!surface) throw new Error(`导出表面不存在：${options.surfaceId}`)
   if (surface.kind !== 'flow') {
     if (!options.captureSurface) throw new Error(`表面 ${surface.id} 需要实际 Player 页面／镜头捕获。`)
@@ -191,6 +192,7 @@ export async function buildComponentPrintHtml(document: ComponentExportDocument,
   body.dataset.componentPrintSurface = surface.id
   body.dataset.componentPrintRoot = name
   body.style.page = name
+  body.style.minHeight = `${page.maxContentHeightPx}px`
   const title = globalThis.document.createElement('h1'); title.textContent = projection.title; body.append(title)
   for (const block of projection.blocks) if (!block.floatingPlacement) body.append(blocks.get(block.instance.id)!)
   // Measure the same semantic print body to resolve paragraph anchors with the shared rule.
@@ -225,22 +227,28 @@ export async function buildComponentPrintHtml(document: ComponentExportDocument,
     if (anchored) { matrix[4] = matrix[4]! + anchored.x - anchorFrame.transform[4]; matrix[5] = matrix[5]! + anchored.y - anchorFrame.transform[5] }
     Object.assign(element.style, { position: 'absolute', left: '0', top: '0',
       width: `${frame.width}px`, height: `${frame.height}px`, transformOrigin: '0 0', transform: `matrix(${matrix.join(',')})`,
-      zIndex: placement.plane === 'underlay' ? '0' : '2', margin: '0' })
+      zIndex: block.globalPlane === 'underlay' ? '0' : block.globalPlane === 'overlay' ? '5' : placement.plane === 'underlay' ? '2' : '4', margin: '0' })
     body.append(element)
     if (placement.space === 'viewport') diagnostics.push({ surfaceId: surface.id, instanceId: block.instance.id, code: 'viewport-print-placement', message: '视口浮层保留作者位置于本讲义首个页面；静态分页不执行随视口滚动。' })
     if (anchor && !anchored) element.insertAdjacentHTML('afterbegin', note(block, 'floating-anchor-unresolved', '段落锚点没有可靠排版位置，按正式 frame 保留浮层。'))
   }
-  const background = resolveComponentBackground(document, projection.surface)
-  const paperColor = projection.surface.flow?.layout.paperBackgroundColor ?? background.color
+  const background = resolveComponentBackground(document)
+  const surfaceBackgrounds = componentBackgroundChain(document, projection.surface).slice(1)
   const backgroundUrls = new Map<string, string>()
-  await Promise.all(componentBackgroundAssetIds(background).map(async assetId => {
+  await Promise.all([...new Set([...componentBackgroundAssetIds(background), ...surfaceBackgrounds.flatMap(componentBackgroundAssetIds)])].map(async assetId => {
     const asset = await options.resolveAsset?.(assetId)
     const url = asset ? bytesToDataUrl(asset.bytes, asset.mimeType) : options.resolveAssetUrl?.(assetId)
     if (url) backgroundUrls.set(assetId, url)
     else diagnostics.push({ surfaceId: surface.id, instanceId: '', code: 'asset-missing', message: `背景资源 ${assetId} 缺少实际字节。`, assetId })
   }))
-  applyComponentBackgroundPaint(body, { ...background, color: paperColor }, assetId => backgroundUrls.get(assetId))
-  body.style.backgroundColor = paperColor
+  applyComponentBackgroundPaint(body, background, assetId => backgroundUrls.get(assetId))
+  for (const ownBackground of surfaceBackgrounds) {
+    const layer = globalThis.document.createElement('div')
+    layer.dataset.surfaceBackground = surface.id
+    Object.assign(layer.style, { position: 'absolute', inset: '0px', zIndex: '1', pointerEvents: 'none', isolation: 'isolate' })
+    applyComponentBackgroundPaint(layer, ownBackground, assetId => backgroundUrls.get(assetId))
+    body.append(layer)
+  }
   body.style.setProperty('--component-reading-width', `${projection.surface.flow?.layout.readingWidth ?? width}px`)
   body.style.setProperty('--component-wide-width', `${projection.surface.flow?.layout.wideContentWidth ?? width}px`)
   return { html: withCourseCreditsPage(`<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><title>${x(projection.title)}</title><style>${css}</style></head><body>${body.outerHTML}</body></html>`, collectComponentAssetCredits(document.assets)), diagnostics,

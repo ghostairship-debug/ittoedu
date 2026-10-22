@@ -20,7 +20,7 @@ export interface CompiledWebModuleProgram {entries:readonly CompiledWebModuleAct
 export interface CompiledWebInitialization {classicPrograms:readonly PreparedClassicProgram[];handlerFactories:readonly ((globals:Record<string,unknown>)=>unknown)[]}
 export type CompiledWebProgram=ReturnType<typeof compilePublishedWebProgram> & {declarations?:string[];fixedViewport?:boolean;fragment?:boolean;semanticData?:{data:WebRuntimeData;declarations?:string[]};nativeData?:WebRuntimeData}
 export interface CompiledCoursePlayback {
- format:'compiled-course-v1'; id:string; title:string; html:string
+ format:'compiled-course-v2'; id:string; title:string; html:string
  course:PublishedCourseV3
  staticViews:Record<string,Array<{signature:string;html:string}>>
  webPrograms:Record<string,Array<{signature:string;program:CompiledWebProgram}>>

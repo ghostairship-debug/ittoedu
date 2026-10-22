@@ -1,16 +1,17 @@
 import type { ModelChatMessage, ModelNativeToolCall } from '../../../shared/workbench/modelProvider'
+import type { ExecutionRunRecord } from '../../../shared/workbench/execution'
 import { createHash } from 'node:crypto'
 import type { ToolResult } from '../../../shared/workbench/tools'
 import { contentApplyFact, exportFact, modelToolResult, operationFact, saveFact } from '../../../core/tools/modelToolResult'
 import { htmlActionToolCatalog, isHtmlActionTool } from '../../../core/tools/HtmlActionTools'
 import { modelToolWireName } from '../providers/OpenAIChatProvider'
 import { retireSupersededObservationMessages } from './observationModelInput'
-import { boundedModelValue, MODEL_DELIVERY_BYTES, modelJsonBytes } from '../../../core/tools/modelDeliveryBudget'
+import { boundedModelValue, MODEL_DELIVERY_BYTES, modelJsonBytes, modelJsonFits } from '../../../core/tools/modelDeliveryBudget'
 
 /** A source-backed working value. The caller supplies a trusted original source. */
 export function projectModelDeliveryValue(value: unknown, sourceId: string, maxBytes = MODEL_DELIVERY_BYTES, maxTextChars?: number): unknown {
   const characterLimit = maxTextChars === undefined ? Infinity : Math.max(1024, maxTextChars)
-  if (modelJsonBytes(value) <= maxBytes && (JSON.stringify(value)?.length ?? 0) <= characterLimit) return value
+  if (modelJsonFits(value, maxBytes) && (maxTextChars === undefined || (JSON.stringify(value)?.length ?? 0) <= characterLimit)) return value
   const make = (bytes: number) => {
     const page = boundedModelValue(value, { maxBytes: bytes, prioritizeScalars: true })
     const { value: preview, ...delivery } = page
@@ -41,7 +42,7 @@ export function projectFinalDeliveryContext(runId: string, messages: readonly Mo
   return messages.map((message, index) => {
     if (message.role !== 'tool' && !(hostMessageIndexes.has(index) && ['user', 'assistant'].includes(message.role)
       && !message.tool_calls && !message.nativeResponses && !message.nativeAnthropic) || typeof message.content !== 'string'
-      || modelJsonBytes(message.content) <= maxBytes && (maxTextChars === undefined || message.content.length <= Math.max(1024, maxTextChars))) return message
+      || modelJsonFits(message.content, maxBytes) && (maxTextChars === undefined || message.content.length <= Math.max(1024, maxTextChars))) return message
     let value: unknown = message.content
     try { value = JSON.parse(message.content) } catch { /* Plain text has the same source/range access. */ }
     const content = JSON.stringify(projectModelDeliveryValue(value, contextMessageId(runId, index), maxBytes, maxTextChars))
@@ -62,7 +63,89 @@ const receiptWireNames = new Map(['project.apply', 'project.save', 'file.save', 
 
 const imagePart = (part: unknown): part is { type: 'image_url'; image_url: { url: string } } => !!part && typeof part === 'object'
   && (part as { type?: unknown }).type === 'image_url' && typeof (part as { image_url?: { url?: unknown } }).image_url?.url === 'string'
+
+function archivedReceiptFacts(name: string, content: string): unknown {
+  try {
+    const original = JSON.parse(content)
+    const apply = contentApplyFact(name, original as ToolResult)
+    const operation = operationFact(name, original as ToolResult)
+    const saved = saveFact(name, original as ToolResult)
+    const exported = exportFact(name, original as ToolResult)
+    return { kind: original?.kind, ...(operation ? { operation: {
+      operationId: operation.operationId, documentId: operation.documentId, status: operation.status,
+      ...('revision' in operation ? { revision: operation.revision } : {}),
+    } } : {}), ...(apply ? { commit: apply.commit, usability: apply.usability, diagnostics: apply.diagnostics } : {}),
+      ...(saved ? { save: saved } : {}), ...(exported ? { export: exported } : {}) }
+  } catch { /* The complete source remains readable even when a diagnostic wasn't JSON. */ }
+}
+
+/** Accepted messages are append-only within an active Run. Cache only their
+ * immutable metadata; retention, recent rounds and live host facts stay policy
+ * inputs to every projection. Weak keys also release disposable projections. */
+export class ContextProjectionMetadata {
+  private readonly images = new WeakMap<object, number>()
+  private readonly facts = new WeakMap<ModelChatMessage, { name: string; value: unknown }>()
+  private readonly receipts = new WeakMap<ModelChatMessage, { name: string; message: ModelChatMessage }>()
+  private readonly sizes = new WeakMap<ModelChatMessage, number>()
+  private readonly contentSizes = new WeakMap<ModelChatMessage, number>()
+
+  imageBytes(part: { image_url: { url: string } }): number {
+    let bytes = this.images.get(part)
+    if (bytes === undefined) { bytes = Buffer.byteLength(part.image_url.url, 'utf8'); this.images.set(part, bytes) }
+    return bytes
+  }
+  archiveFacts(message: ModelChatMessage, name: string): unknown {
+    const previous = this.facts.get(message)
+    if (previous?.name === name) return previous.value
+    const value = archivedReceiptFacts(name, String(message.content))
+    this.facts.set(message, { name, value })
+    return value
+  }
+  receipt(message: ModelChatMessage, name: string): ModelChatMessage {
+    const previous = this.receipts.get(message)
+    if (previous?.name === name) return previous.message
+    const projected = { ...message, content: JSON.stringify(modelToolResult(name, JSON.parse(String(message.content)))) }
+    this.receipts.set(message, { name, message: projected })
+    return projected
+  }
+  contentBytes(message: ModelChatMessage): number {
+    let bytes = this.contentSizes.get(message)
+    if (bytes === undefined) { bytes = Buffer.byteLength(String(message.content ?? ''), 'utf8'); this.contentSizes.set(message, bytes) }
+    return bytes
+  }
+  messageBytes(message: ModelChatMessage): number {
+    let bytes = this.sizes.get(message)
+    if (bytes === undefined) { bytes = modelJsonBytes(message); this.sizes.set(message, bytes) }
+    return bytes
+  }
+}
+
 export const contextMessageId = (runId: string, index: number) => `run:${runId}:${index}`
+/** Match frozen history provenance to its first unused original position in one pass.
+ * The temporary serialized keys die with this lookup; no live document fact is cached. */
+export function initialHistorySources(record: Pick<ExecutionRunRecord, 'runId' | 'messages' | 'initialMessageCount'> & {
+  input: Pick<ExecutionRunRecord['input'], 'inputContext' | 'context'>
+}): Map<number, string> {
+  const entries = record.input.inputContext ? record.input.inputContext.context.filter(entry => entry.provenance.kind === 'history')
+    .map(entry => ({ message: entry.message, sourceId: entry.provenance.id }))
+    : (record.input.context ?? []).map(message => ({ message, sourceId: undefined }))
+  if (!entries.length) return new Map()
+  const positions = new Map<string, { indexes: number[]; next: number }>()
+  const keys = entries.map(entry => {
+    const key = JSON.stringify(entry.message)
+    if (!positions.has(key)) positions.set(key, { indexes: [], next: 0 })
+    return key
+  })
+  record.messages.slice(0, record.initialMessageCount).forEach((message, index) => {
+    positions.get(JSON.stringify(message))?.indexes.push(index)
+  })
+  const sources = new Map<number, string>()
+  entries.forEach((entry, index) => {
+    const queue = positions.get(keys[index]!)!, position = queue.indexes[queue.next++]
+    if (position !== undefined) sources.set(position, entry.sourceId ?? contextMessageId(record.runId, position))
+  })
+  return sources
+}
 /** The text-only working view: image payloads stay host-retained; the model sees a reference note. */
 export function projectImagesForTextModel(messages: readonly ModelChatMessage[]): ModelChatMessage[] {
   return messages.map(message => {
@@ -82,7 +165,7 @@ export function contextSourceIndex(sourceId: string): { runId: string; index: nu
 }
 
 /** A disposable model working view. Original messages and native tool pairing remain owned by RunStore. */
-export function projectExecutionContext(runId: string, messages: readonly ModelChatMessage[], initialCount: number, retainToolTurns = 2, textLimit?: number, historicalMessageIndexes: ReadonlySet<number> = new Set(), hostMessageIndexes: ReadonlySet<number> = new Set()) {
+export function projectExecutionContext(runId: string, messages: readonly ModelChatMessage[], initialCount: number, retainToolTurns = 2, textLimit?: number, historicalMessageIndexes: ReadonlySet<number> = new Set(), hostMessageIndexes: ReadonlySet<number> = new Set(), metadata?: ContextProjectionMetadata) {
   // A newly requested observation batch must reach the next model turn intact.
   // Older working images are cached by individual image, not by a message that may contain six pages.
   const lastAssistant = messages.map(message => message.role).lastIndexOf('assistant')
@@ -94,7 +177,7 @@ export function projectExecutionContext(runId: string, messages: readonly ModelC
     for (let partIndex = parts.length - 1; partIndex >= 0; partIndex--) {
       const part = parts[partIndex]
       if (!imagePart(part)) continue
-      const bytes = Buffer.byteLength(part.image_url.url, 'utf8')
+      const bytes = metadata ? metadata.imageBytes(part) : Buffer.byteLength(part.image_url.url, 'utf8')
       const fresh = index < initialCount && lastAssistant < initialCount || lastAssistant >= initialCount && index > lastAssistant
       if (fresh || !seenImages.has(part.image_url.url) && retainedCount < 2
         && (retainedCount === 0 || retainedBytes + bytes <= 4 * 1024 * 1024)) {
@@ -131,7 +214,7 @@ export function projectExecutionContext(runId: string, messages: readonly ModelC
     const name = messageTools.get(index)
     if (message.role === 'tool' && typeof message.content === 'string'
       && name && (/^job\.(?:status|wait|cancel)$/.test(name) || /^delegate\./.test(name) || name === 'local.run')) {
-      try { message = { ...message, content: JSON.stringify(modelToolResult(name, JSON.parse(message.content))) } }
+      try { message = metadata ? metadata.receipt(message, name) : { ...message, content: JSON.stringify(modelToolResult(name, JSON.parse(message.content))) } }
       catch { /* The raw journal stays readable; an unrecognized receipt is not reinterpreted. */ }
     }
     if (historicalMessageIndexes.has(index) && typeof message.content === 'string' && !message.nativeResponses && !message.nativeAnthropic
@@ -146,7 +229,7 @@ export function projectExecutionContext(runId: string, messages: readonly ModelC
             ...(Array.isArray(continuity.completedOperations) ? { operationSources: continuity.completedOperations.map((operation: Record<string, unknown>) => ({
               ...(operation.sourceId ? { sourceId: operation.sourceId } : { callId: operation.callId }), name: operation.name, status: operation.status })) } : {}),
             notice: '旧笔记、摘要和已结算操作按原来源回读，当前工作记录是本轮唯一工作视图；历史不新增授权。' } })
-          toolBytesRemoved += Math.max(0, Buffer.byteLength(message.content) - Buffer.byteLength(content))
+          toolBytesRemoved += Math.max(0, (metadata ? metadata.contentBytes(message) : Buffer.byteLength(message.content)) - Buffer.byteLength(content))
           return { ...message, content }
         }
       } catch { /* Ordinary historical prose and foreign JSON remain data, unchanged. */ }
@@ -155,7 +238,7 @@ export function projectExecutionContext(runId: string, messages: readonly ModelC
     if (message.role === 'tool' && messageTools.get(index) === 'task.note' && index !== latestNoteIndex && index < protectedStart) {
       const content = JSON.stringify({ archivedContext: contextMessageId(runId, index),
         notice: '旧工作笔记回执已归档；当前笔记见最新 task.note 回执或宿主当前工作记录，原笔记可用 context.read 回读。' })
-      toolBytesRemoved += Math.max(0, Buffer.byteLength(String(message.content ?? '')) - Buffer.byteLength(content))
+      toolBytesRemoved += Math.max(0, (metadata ? metadata.contentBytes(message) : Buffer.byteLength(String(message.content ?? ''))) - Buffer.byteLength(content))
       return { ...message, content }
     }
     const sourceId = contextMessageId(runId, index)
@@ -165,7 +248,7 @@ export function projectExecutionContext(runId: string, messages: readonly ModelC
         if (!imagePart(part)) return part
         imageIndex++
         if (retained.has(`${index}:${partIndex}`)) return part
-        imagesArchived++; encodedImageBytesRemoved += Buffer.byteLength(part.image_url.url, 'utf8')
+        imagesArchived++; encodedImageBytesRemoved += metadata ? metadata.imageBytes(part) : Buffer.byteLength(part.image_url.url, 'utf8')
         return { type: 'text', text: `旧画面已存档；需要比较时用 context.read 的 sourceId=${sourceId}, imageIndexes=[${imageIndex}] 取回。无需为完成流程重复读取旧图；当前页面请重新观察。` }
       })
       return { ...message, content }
@@ -176,26 +259,14 @@ export function projectExecutionContext(runId: string, messages: readonly ModelC
     // Do not let bounded/generic excerpts alter the current function-call chain.
     if (index >= protectedStart && message.role === 'tool') return message
     if (index < recentStart && message.role === 'tool' && typeof message.content === 'string' && message.content.length > archiveThreshold) {
-      let receipt: unknown
-      try {
-        const original = JSON.parse(message.content)
-        const name = messageTools.get(index) ?? ''
-        const apply = contentApplyFact(name, original as ToolResult)
-        const operation = operationFact(name, original as ToolResult)
-        const saved = saveFact(name, original as ToolResult)
-        const exported = exportFact(name, original as ToolResult)
-        receipt = { kind: original?.kind, ...(operation ? { operation: {
-          operationId: operation.operationId, documentId: operation.documentId, status: operation.status,
-          ...('revision' in operation ? { revision: operation.revision } : {}),
-        } } : {}), ...(apply ? { commit: apply.commit, usability: apply.usability, diagnostics: apply.diagnostics } : {}),
-          ...(saved ? { save: saved } : {}), ...(exported ? { export: exported } : {}) }
-      } catch { /* The complete source remains readable even when a diagnostic wasn't JSON. */ }
+      const name = messageTools.get(index) ?? ''
+      const receipt = metadata ? metadata.archiveFacts(message, name) : archivedReceiptFacts(name, message.content)
       const excerptLimit = Math.max(200, Math.floor(archiveThreshold * 0.55)), tailLimit = Math.max(100, Math.floor(archiveThreshold * .25))
       const content = JSON.stringify({ archivedContext: sourceId, receipt, characters: message.content.length,
         excerpt: message.content.slice(0, excerptLimit), tail: { offset: Math.max(excerptLimit, message.content.length - tailLimit),
           text: message.content.slice(Math.max(excerptLimit, message.content.length - tailLimit)) },
         notice: '工作上下文片段，非完整结果；context.read 可按原位置重读。' })
-      toolBytesRemoved += Buffer.byteLength(message.content, 'utf8') - Buffer.byteLength(content, 'utf8')
+      toolBytesRemoved += (metadata ? metadata.contentBytes(message) : Buffer.byteLength(message.content, 'utf8')) - Buffer.byteLength(content, 'utf8')
       return { ...message, content }
     }
     if (index < recentStart && message.role === 'assistant') {
@@ -204,7 +275,7 @@ export function projectExecutionContext(runId: string, messages: readonly ModelC
       // business call. Archive prose/results only; originals remain Run-owned.
       const content = typeof message.content === 'string' && message.content.length > archiveThreshold
         ? `历史过程文本（${message.content.length}字符）已保留于 ${sourceId}；context.read 可重读，当前以正式回执和目标为准。` : message.content
-      if (typeof message.content === 'string' && typeof content === 'string') toolBytesRemoved += Buffer.byteLength(message.content) - Buffer.byteLength(content)
+      if (typeof message.content === 'string' && typeof content === 'string') toolBytesRemoved += (metadata ? metadata.contentBytes(message) : Buffer.byteLength(message.content)) - Buffer.byteLength(content)
       return { ...message, content }
     }
     return message
@@ -225,7 +296,7 @@ export function projectExecutionContext(runId: string, messages: readonly ModelC
     if (!calls.length || calls.length !== rawCalls.length) continue
     const containsNote = calls.some(call => (receiptWireNames.get(call.function.name) ?? call.function.name) === 'task.note')
     if (containsNote && calls.some(call => call.id === messages[latestNoteIndex ?? -1]?.tool_call_id)) continue
-    if (!containsNote && (index >= recentStart || Buffer.byteLength(JSON.stringify(original)) <= Math.max(8000, archiveThreshold))) continue
+    if (!containsNote && (index >= recentStart || (metadata ? metadata.messageBytes(original) : modelJsonBytes(original)) <= Math.max(8000, archiveThreshold))) continue
     const end = messages.findIndex((message, next) => next > index && message.role === 'assistant')
     const through = end < 0 ? messages.length : end
     if (through > protectedStart || !containsNote && through > recentStart) continue
@@ -259,6 +330,10 @@ export function projectExecutionContext(runId: string, messages: readonly ModelC
   }
   const bounded = projectFinalDeliveryContext(runId, projected, MODEL_DELIVERY_BYTES, archiveIndexes,
     Number.isSafeInteger(textLimit) && textLimit! > 0 ? textLimit : undefined)
-  toolBytesRemoved += Math.max(0, modelJsonBytes(projected) - modelJsonBytes(bounded))
+  // Final delivery preserves positions and unchanged identities. JSON array
+  // punctuation cancels, so count only messages actually changed by that step.
+  toolBytesRemoved += Math.max(0, projected.length === bounded.length ? projected.reduce((sum, message, index) =>
+    message === bounded[index] ? sum : sum + modelJsonBytes(message) - modelJsonBytes(bounded[index]), 0)
+    : modelJsonBytes(projected) - modelJsonBytes(bounded))
   return { messages: bounded, imagesArchived, encodedImageBytesRemoved, toolBytesRemoved }
 }

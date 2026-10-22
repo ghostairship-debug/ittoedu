@@ -15,13 +15,13 @@ import type { resolveComponentOuterPresentation } from '../../src/shared/compone
 import type { applyComponentPaintStyle } from '../../src/player/components/componentPlacementStyle'
 import type { ComponentRuntimeWorld } from '../../src/player/components/ComponentRuntimeWorld'
 
-type ProbeApi = { textRuntimeImplementation: typeof textRuntimeImplementation; createComponentSpatialAdapter: typeof createComponentSpatialAdapter;
+type ProbeApi = { createTestProjectFromLegacy: typeof import('../helpers/glxWorkFixture').createTestProjectFromLegacy; textRuntimeImplementation: typeof textRuntimeImplementation; createComponentSpatialAdapter: typeof createComponentSpatialAdapter;
   createComponentSpatialCameraPort: typeof createComponentSpatialCameraPort; createVideoRuntimeImplementation: typeof createVideoRuntimeImplementation;
   waitForPublishedObservationReady: typeof waitForPublishedObservationReady; resolveComponentOuterPresentation: typeof resolveComponentOuterPresentation;
   applyComponentPaintStyle: typeof applyComponentPaintStyle; ComponentRuntimeWorld: typeof ComponentRuntimeWorld }
 let browser: Browser, bundle: string
 beforeAll(async () => {
-  bundle = (await build({ stdin: { contents: `export {textRuntimeImplementation} from './src/components/text/runtime';
+  bundle = (await build({ stdin: { contents: `export {createTestProjectFromLegacy} from './tests/helpers/glxWorkFixture';export {textRuntimeImplementation} from './src/components/text/runtime';
     export {createComponentSpatialAdapter,createComponentSpatialCameraPort} from './src/player/surfaces/spatial/componentSpatialAdapter';
     export {createVideoRuntimeImplementation} from './src/components/media/runtime';
     export {waitForPublishedObservationReady} from './src/player/surfaces/publishedCapture';
@@ -42,10 +42,10 @@ it('text initial hidden mount uses the formal frame and keeps placement updates 
       await document.fonts.ready
       const api = (window as unknown as { auditNative: ProbeApi }).auditNative
       const outer = document.getElementById('outer')!, projection = document.getElementById('projection')!
-      const project: CourseProjectV10 = { schemaVersion: 10, id: 'initial-frame', revision: 0, title: 'Initial frame', assets: {}, global: { underlay: [], overlay: [] },
+      const project: CourseProjectV10 = api.createTestProjectFromLegacy({ schemaVersion: 10, id: 'initial-frame', revision: 0, title: 'Initial frame', assets: {}, global: { underlay: [], overlay: [] },
         definitions: { text: { id: 'text', role: 'content', implementation: { kind: 'builtin', key: 'guoling.text' } } },
         instances: { text: { id: 'text', definitionId: 'text', data, frame: { width: 400, height: 80, transform: [1, 0, 0, 1, 48, 376] } } },
-        surfaces: [{ id: 'slide', kind: 'slide', title: 'Slide', childIds: ['text'] }] }
+        surfaces: [{ id: 'slide', kind: 'slide', title: 'Slide', childIds: ['text'] }] })
       const world = new api.ComponentRuntimeWorld('initial-frame', { mode: 'edit', builtins: new Map([['guoling.text', api.textRuntimeImplementation]]) })
       world.bind('text', projection); world.bindTarget('text', outer)
       const before = JSON.stringify(project)
@@ -88,10 +88,10 @@ it('precise box observations remeasure shrink text from authored fonts and resto
       const data = input as CourseProjectV10['instances'][string]['data']
       const api = (window as unknown as { auditNative: ProbeApi }).auditNative
       const outer = document.getElementById('outer')!, projection = document.getElementById('projection')!
-      const project: CourseProjectV10 = { schemaVersion: 10, id: 'precise-shrink', revision: 0, title: 'Precise shrink', assets: {}, global: { underlay: [], overlay: [] },
+      const project: CourseProjectV10 = api.createTestProjectFromLegacy({ schemaVersion: 10, id: 'precise-shrink', revision: 0, title: 'Precise shrink', assets: {}, global: { underlay: [], overlay: [] },
         definitions: { text: { id: 'text', role: 'content', implementation: { kind: 'builtin', key: 'guoling.text' } } },
         instances: { text: { id: 'text', definitionId: 'text', data, frame: { width: 432.664, height: 29.5, transform: [1, 0, 0, 1, 0, 0] } } },
-        surfaces: [{ id: 'slide', kind: 'slide', title: 'Slide', childIds: ['text'] }] }
+        surfaces: [{ id: 'slide', kind: 'slide', title: 'Slide', childIds: ['text'] }] })
       const original = structuredClone(project)
       const world = new api.ComponentRuntimeWorld('precise-shrink', { mode: 'play', builtins: new Map([['guoling.text', api.textRuntimeImplementation]]) })
       world.bind('text', projection); world.bindTarget('text', outer)
@@ -129,10 +129,10 @@ it('hidden free-frame text keeps the padded content box before visibility or lay
       await document.fonts.ready
       const api = (window as unknown as { auditNative: ProbeApi }).auditNative
       const outer = document.getElementById('outer')!, projection = document.getElementById('projection')!
-      const project: CourseProjectV10 = { schemaVersion: 10, id: 'hidden-padding', revision: 0, title: 'Hidden padding', assets: {}, global: { underlay: [], overlay: [] },
+      const project: CourseProjectV10 = api.createTestProjectFromLegacy({ schemaVersion: 10, id: 'hidden-padding', revision: 0, title: 'Hidden padding', assets: {}, global: { underlay: [], overlay: [] },
         definitions: { text: { id: 'text', role: 'content', implementation: { kind: 'builtin', key: 'guoling.text' } } },
         instances: { text: { id: 'text', definitionId: 'text', data, frame: { width: 460, height: 210, transform: [1, 0, 0, 1, 70, 185] } } },
-        surfaces: [{ id: 'slide', kind: 'slide', title: 'Slide', childIds: ['text'] }] }
+        surfaces: [{ id: 'slide', kind: 'slide', title: 'Slide', childIds: ['text'] }] })
       const world = new api.ComponentRuntimeWorld('hidden-padding', { mode: 'edit', builtins: new Map([['guoling.text', api.textRuntimeImplementation]]) })
       world.bind('text', projection); world.bindTarget('text', outer)
       try {
@@ -158,12 +158,12 @@ it('GUI free-frame stage honours wrapper padding without shifting child world co
     const data = createTextComponentData('站点一：观察\n电压 6 V，电阻 20 Ω。'); data.appearance.fontSize = 33
     const result = await page.evaluate(async data => {
       const api = (window as unknown as { auditNative: ProbeApi }).auditNative, world = document.getElementById('world')!, zoom = 1280 / 460
-      const project: CourseProjectV10 = { schemaVersion: 10, id: 'gui-padding', revision: 0, title: 'GUI', assets: {}, global: { underlay: [], overlay: [] },
+      const project: CourseProjectV10 = api.createTestProjectFromLegacy({ schemaVersion: 10, id: 'gui-padding', revision: 0, title: 'GUI', assets: {}, global: { underlay: [], overlay: [] },
         definitions: { text: { id: 'text', role: 'content', implementation: { kind: 'builtin', key: 'guoling.text' } } },
         instances: { station: { id: 'station', definitionId: 'text', data: JSON.parse(JSON.stringify(data)), frame: { width: 460, height: 210, transform: [1, 0, 0, 1, 0, 0] },
           style: { background: '#ecfdf5', border: '2px solid #10b981', padding: '18px' }, childIds: ['child'] },
           child: { id: 'child', definitionId: 'text', data: {}, frame: { width: 5, height: 5, transform: [1, 0, 0, 1, 12, 8] } } },
-        surfaces: [{ id: 'space', kind: 'spatial', title: 'GUI', childIds: ['station'] }] }
+        surfaces: [{ id: 'space', kind: 'spatial', title: 'GUI', childIds: ['station'] }] })
       const before = JSON.stringify(project), instance = project.instances.station!, presentation = api.resolveComponentOuterPresentation(project, instance, { placement: 'free', purpose: 'playback', inlineSize: 460 })
       const outer = document.createElement('div'), stage = document.createElement('div'), root = document.createElement('div'), children = document.createElement('div'), child = document.createElement('div')
       api.applyComponentPaintStyle(outer, instance, project.definitions.text)
@@ -200,12 +200,12 @@ it('Spatial runtime measures the actual padded content box while preserving form
       const abort = new AbortController(), events: unknown[] = []
       const scope: ComponentRuntimeScope = { instanceId: 'station', generation: 1, runScopeId: 'probe', signal: abort.signal, isActive: () => !abort.signal.aborted,
         cleanup() {}, target: () => null, state: { get: () => undefined, set() {}, subscribe: () => () => {} }, events: { emit(_name, value) { events.push(value) }, subscribe: () => () => {} } }
-      const project: CourseProjectV10 = { schemaVersion: 10, id: 'probe', revision: 0, title: 'Spatial', assets: {}, global: { underlay: [], overlay: [] },
+      const project: CourseProjectV10 = api.createTestProjectFromLegacy({ schemaVersion: 10, id: 'probe', revision: 0, title: 'Spatial', assets: {}, global: { underlay: [], overlay: [] },
         definitions: { text: { id: 'text', role: 'content', implementation: { kind: 'builtin', key: 'guoling.text' } } },
         instances: { station: { id: 'station', definitionId: 'text', data: JSON.parse(JSON.stringify(data)), frame: { width: 460, height: 210, transform: [1, 0, 0, 1, 70, 185] },
           style: { background: '#ecfdf5', border: '2px solid #10b981', padding: '18px', borderRadius: '16px' }, childIds: ['child'] },
           child: { id: 'child', definitionId: 'text', data: {}, frame: { width: 5, height: 5, transform: [1, 0, 0, 1, 12, 8] } } },
-        surfaces: [{ id: 'space', kind: 'spatial', title: 'Spatial', childIds: ['station'] }] }
+        surfaces: [{ id: 'space', kind: 'spatial', title: 'Spatial', childIds: ['station'] }] })
       const before = JSON.stringify(project), camera = api.createComponentSpatialCameraPort({ x: 300, y: 290, zoom: 1280 / 460 })
       const roots = new Map<string, HTMLElement>(), adapter = api.createComponentSpatialAdapter({ container: document.getElementById('root')!, camera,
         onElement: (id, root) => { if (root) roots.set(id, root) } })

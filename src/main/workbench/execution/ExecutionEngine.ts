@@ -1,4 +1,5 @@
-import { estimateSerializedTokens, isContextLengthFailure, modelContextBudget } from '../../../core/execution/modelContextBudget'
+import { componentContainers } from '../../../shared/contracts/component-platform/project'
+import { estimateSerializedTokens, isContextLengthFailure, modelContextBudget, PreparedPayloadTokenEstimator } from '../../../core/execution/modelContextBudget'
 import { createHash, randomUUID } from 'node:crypto'
 import path from 'node:path'
 import { z } from 'zod'
@@ -30,7 +31,7 @@ import type { ModelToolCall, ToolResult, ToolTarget } from '../../../shared/work
 import { isCourseInstanceRange, readEditableTargetContent, readTarget } from '../../../core/tools/ToolTargets'
 import { executionContentOutputSchema } from '../../../shared/workbench/executionDesktop'
 import type { AttachmentService } from '../attachments/AttachmentService'
-import { projectExecutionContext, contextMessageId, contextSourceIndex, projectImagesForTextModel } from './ExecutionContextProjection'
+import { projectExecutionContext, contextMessageId, contextSourceIndex, projectImagesForTextModel, initialHistorySources, ContextProjectionMetadata } from './ExecutionContextProjection'
 import { contextReadSchema, contextReadTool, readContextMessage } from './ContextReadTool'
 import { DisplayEventBuffer } from './DisplayEventBuffer'
 import { appendObservationModelMessages, type ObservationModelInput } from './observationModelInput'
@@ -52,7 +53,7 @@ import type { ExecutionChangeReviewService } from '../review/ExecutionChangeRevi
 import type { HostArtifactDeliveryService } from './HostArtifactDeliveryService'
 import { htmlActionModelMessage } from '../observation/HtmlActionModelInput'
 import { runToolRoundInOrder } from './ReadOnlyToolScheduler'
-import { continuationDocumentIds, reboundSavedDocumentBinding, savedDocumentBinding } from './savedDocumentBinding'
+import { continuationDocumentIds, reboundSavedDocumentBinding, savedDocumentBinding, type ReboundDocumentIdentity } from './savedDocumentBinding'
 import type { DocumentSaveFact, SavedCourseIdentity } from '../../../shared/workbench/documentSave'
 import { relocatedDocumentPath } from '../DocumentFileCoordinator'
 import type { WorkspaceMutationAction } from '../WorkspaceFiles'
@@ -80,6 +81,8 @@ export interface ExecutionEngineOptions {
   createId?: () => string
   now?: () => number
   serializePayload?: typeof serializeModelPayload
+  /** Expensive byte-prefix comparison is an explicit diagnostic, never model request preparation. */
+  diagnoseRequestPrefix?: boolean
   initialCompiler?: PayloadCompiler
   programmatic?: ProgrammaticToolRunner
   /** The existing conversation owner persists a user preference; this loop keeps only ordered accepted facts. */
@@ -122,6 +125,8 @@ interface ActiveRun {
   forceCompaction: boolean
   contextMessages: ModelChatMessage[]
   contextImageSources: Map<ModelChatMessage, string[]>
+  contextPreparation?: { messages: ModelChatMessage[]; initialCount: number; retainedMessages: number;
+    historySources: Map<number, string>; metadata: ContextProjectionMetadata; tokens: PreparedPayloadTokenEstimator }
   record: ExecutionRunRecord; controller: AbortController; stopped: boolean
   steeringClosed?: boolean
   streams: Map<number, StreamingCall>; completion: Promise<void>
@@ -326,7 +331,7 @@ export class ExecutionEngine {
       if (fact.status !== 'saved' || !fact.savedBinding) return Promise.resolve()
       return this.queueDocumentBinding(async () => {
         this.savedBindings.set(fact.documentId, structuredClone(fact.savedBinding!))
-        const records = await this.bindingRecords()
+        const records = await this.bindingRecords(fact.documentId)
         for (const record of records.values()) if (trustedRunDocumentIds(record).includes(fact.documentId))
           await this.recordDocumentBinding(record.runId, fact.documentId, this.savedBindings.get(fact.documentId)!)
       })
@@ -334,15 +339,20 @@ export class ExecutionEngine {
     options.subscribeDocumentEvents?.(event => {
       // Committed author edits do not change a file binding. Rebind/save/recovery snapshots
       // have no operationId and remain useful even when the author document is dirty.
-      if (event.type !== 'changed' || event.operationId || event.snapshot.binding.kind !== 'file') return
-      void this.observeDocumentSnapshot(event.snapshot).catch(() => undefined)
+      if (event.type === 'closed' || event.operationId) return
+      const head = event.head
+      if (head) {
+        if (head.kind !== 'course-v10' || head.binding.kind !== 'file' || !head.projectId) return
+        void this.observeDocumentSnapshot({ documentId: head.documentId, binding: head.binding,
+          model: { kind: 'course-v10', project: { id: head.projectId } } }).catch(() => undefined)
+      } else if (event.type === 'changed' && event.snapshot.binding.kind === 'file') void this.observeDocumentSnapshot(event.snapshot).catch(() => undefined)
     })
     options.subscribeFileRelocations?.(action => this.observeFileRelocation(action))
   }
-  private async bindingRecords(): Promise<Map<string, ExecutionRunRecord>> {
-    const records = new Map((await this.options.runs.list()).map(record => [record.runId, record]))
-    for (const record of this.preparingRecords.values()) records.set(record.runId, record)
-    for (const active of this.active.values()) records.set(active.record.runId, active.record)
+  private async bindingRecords(documentId?: string): Promise<Map<string, ExecutionRunRecord>> {
+    const records = new Map((await (documentId ? this.options.runs.forDocument(documentId) : this.options.runs.list())).map(record => [record.runId, record]))
+    for (const record of this.preparingRecords.values()) if (!documentId || trustedRunDocumentIds(record).includes(documentId)) records.set(record.runId, record)
+    for (const active of this.active.values()) if (!documentId || trustedRunDocumentIds(active.record).includes(documentId)) records.set(active.record.runId, active.record)
     return records
   }
   private queueDocumentBinding(work: () => Promise<void>): Promise<void> {
@@ -370,13 +380,16 @@ export class ExecutionEngine {
     })
   }
   /** Restore/open return formal snapshots without necessarily publishing a changed event. */
-  observeDocumentSnapshot(observed: DocumentSnapshot): Promise<void> {
-    const snapshot = structuredClone(observed)
+  observeDocumentSnapshot(observed: ReboundDocumentIdentity & Pick<DocumentSnapshot, 'documentId'>): Promise<void> {
+    const projectId = observed.model.project?.id
+    if (observed.binding.kind !== 'file' || observed.model.kind !== 'course-v10' || !projectId) return Promise.resolve()
+    const snapshot: ReboundDocumentIdentity & Pick<DocumentSnapshot, 'documentId'> = { documentId: observed.documentId, binding: { ...observed.binding },
+      model: { kind: observed.model.kind, project: { id: projectId } } }
     return this.queueDocumentBinding(async () => {
       const known = this.savedBindings.get(snapshot.documentId)
       const observedBinding = known && reboundSavedDocumentBinding(snapshot, known)
       if (known && (!observedBinding || JSON.stringify(observedBinding) === JSON.stringify(known))) return
-      const records = await this.bindingRecords()
+      const records = await this.bindingRecords(snapshot.documentId)
       const prior = known ?? [...records.values()].sort((a, b) => b.updatedAt - a.updatedAt)
         .map(record => record.documentBindings?.[snapshot.documentId]).find(Boolean)
       if (!prior) return // A path alone never creates a saved identity or additional targets.
@@ -574,8 +587,9 @@ export class ExecutionEngine {
     if (!buffer) {
       buffer = new DisplayEventBuffer(async inputs => {
         // The existing buffer hands its ordered batch to the existing event owner.
-        // Its flush now means queued, while EventStore tracks the durable ACK/diagnostic.
-        void this.options.events.batchAppend(inputs).catch(() => undefined)
+        // Keep its bytes pending until the real append completes. Display failures
+        // remain EventStore diagnostics and cannot change the business outcome.
+        await this.options.events.batchAppend(inputs).catch(() => undefined)
       })
       this.displayBuffers.set(record.runId, buffer)
     }
@@ -1108,13 +1122,15 @@ export class ExecutionEngine {
         if (call) call.invalid = event.reason
       })
       this.active.set(runId, active)
+      this.options.events.retain(record.input.conversationId, `run:${runId}`)
       this.preparingRecords.delete(runId)
       const abort = () => { void this.stop(runId).catch(() => undefined) }
       options?.signal?.addEventListener('abort', abort, { once: true })
       if (options?.signal?.aborted) abort()
-      active.completion = this.drive(active).finally(() => {
+      active.completion = this.drive(active).finally(async () => {
         options?.signal?.removeEventListener('abort', abort)
         this.active.delete(runId); this.displayBuffers.delete(runId)
+        await this.options.events.release(record.input.conversationId, `run:${runId}`)
       })
       // Keep a rejection observed even if no renderer ever waits. Durable records retain the failure.
       void active.completion.catch(() => undefined)
@@ -1859,13 +1875,13 @@ export class ExecutionEngine {
     }
     return allowed
   }
-  private preparePayload(selection: ModelSelection, messages: ModelChatMessage[], tools: ModelToolDefinition[], sessionAffinity?: { key: string }): PreparedExecutionContext {
+  private preparePayload(selection: ModelSelection, messages: ModelChatMessage[], tools: ModelToolDefinition[], sessionAffinity?: { key: string }, estimator = new PreparedPayloadTokenEstimator()): PreparedExecutionContext {
     const input = { selection, messages, tools, ...(sessionAffinity ? { sessionAffinity } : {}) }
     const customSerializer = this.options.serializePayload && this.options.serializePayload !== serializeModelPayload
-    const prepared = !customSerializer ? this.options.provider.prepare?.(input) : undefined
+    const prepared = !customSerializer ? this.options.provider.prepare?.(input, { measurePayload: body => estimator.estimate(body) }) : undefined
     const serialized = prepared?.serialized ?? (this.options.serializePayload ?? serializeModelPayload)(input)
     return { messages, serialized, ...(prepared ? { prepared } : {}),
-      bytes: Buffer.byteLength(serialized, 'utf8'), tokens: estimateSerializedTokens(serialized) }
+      bytes: Buffer.byteLength(serialized, 'utf8'), tokens: prepared?.tokens ?? estimateSerializedTokens(serialized) }
   }
   private async summarizeContext(active: ActiveRun, until: number,
     history?: { indices: number[]; sourceIds: Map<number, string>; previous?: string }): Promise<{ summary: string; throughMessage: number } | undefined> {
@@ -2026,32 +2042,25 @@ export class ExecutionEngine {
       active.currentWorkFacts = Object.fromEntries(Object.entries(currentWork).map(([key, value]) => [key, JSON.stringify(value)]))
       active.currentDocumentFacts = new Map(currentDocuments.map(({ target: _target, ...document }) => [document.documentId, JSON.stringify(document)]))
     }
-    const historySources = new Map<number, string>()
-    const usedHistoryPositions = new Set<number>()
-    const historyPosition = (message: ModelChatMessage) => {
-      const serialized = JSON.stringify(message)
-      const index = record.messages.slice(0, record.initialMessageCount)
-        .findIndex((candidate, position) => !usedHistoryPositions.has(position) && JSON.stringify(candidate) === serialized)
-      if (index >= 0) usedHistoryPositions.add(index)
-      return index
+    // Compilation may replace the initial prefix once. Thereafter this owner
+    // only appends accepted messages; a new prefix gets its own metadata.
+    if (!active.contextPreparation || active.contextPreparation.messages !== record.messages
+      || active.contextPreparation.initialCount !== record.initialMessageCount) active.contextPreparation = {
+      messages: record.messages, initialCount: record.initialMessageCount, retainedMessages: 0,
+      historySources: initialHistorySources(record), metadata: new ContextProjectionMetadata(), tokens: new PreparedPayloadTokenEstimator(),
     }
-    for (const entry of record.input.inputContext?.context ?? []) {
-      if (entry.provenance.kind !== 'history') continue
-      const index = historyPosition(entry.message)
-      if (index >= 0) historySources.set(index, entry.provenance.id)
-    }
-    if (!record.input.inputContext) for (const message of record.input.context ?? []) {
-      const index = historyPosition(message)
-      if (index >= 0) historySources.set(index, contextMessageId(record.runId, index))
-    }
+    const preparation = active.contextPreparation
+    for (; preparation.retainedMessages < record.messages.length; preparation.retainedMessages++)
+      preparation.tokens.retain(record.messages[preparation.retainedMessages])
+    const historySources = preparation.historySources
     const historyIndexes = new Set(historySources.keys())
     const hostDataIndexes = new Set(record.hostDataMessageIndexes ?? [])
-    const projection = projectExecutionContext(record.runId, record.messages, record.initialMessageCount, 2, undefined, historyIndexes, hostDataIndexes)
+    const projection = projectExecutionContext(record.runId, record.messages, record.initialMessageCount, 2, undefined, historyIndexes, hostDataIndexes, preparation.metadata)
     const textOnly = needsVisualAssistance(record.input)
     if (textOnly) projection.messages = projectImagesForTextModel(projection.messages)
     const boundedThrough = record.compacted?.boundedThroughMessage
     if (boundedThrough) {
-      const archived = projectExecutionContext(record.runId, record.messages, record.initialMessageCount, 0, record.compacted?.boundedTextLimit, historyIndexes, hostDataIndexes).messages
+      const archived = projectExecutionContext(record.runId, record.messages, record.initialMessageCount, 0, record.compacted?.boundedTextLimit, historyIndexes, hostDataIndexes, preparation.metadata).messages
       const prior = textOnly ? projectImagesForTextModel(archived) : archived
       for (let index = record.initialMessageCount; index < Math.min(boundedThrough, projection.messages.length); index++) projection.messages[index] = prior[index]
     }
@@ -2063,7 +2072,7 @@ export class ExecutionEngine {
       const existing = candidates.get(messages)
       if (existing) return existing
       const result = this.preparePayload(record.input.selection, messages, tools,
-        { key: `conversation:${record.input.conversationId}:main` })
+        { key: `conversation:${record.input.conversationId}:main` }, preparation.tokens)
       result.remainingSignature = remainingSignature
       candidates.set(messages, result)
       return result
@@ -2140,7 +2149,7 @@ export class ExecutionEngine {
         const availableTokens = Math.max(0, Math.min(inputLimit, active.rejectedInputLimit ?? Infinity) - measure(header).tokens - 2000)
         textLimit = Math.max(300, Math.min(8000, Math.floor(availableTokens / results / 1.5)))
         for (;;) {
-          const bounded = projectExecutionContext(record.runId, record.messages, record.initialMessageCount, 0, textLimit, historyIndexes, hostDataIndexes).messages
+          const bounded = projectExecutionContext(record.runId, record.messages, record.initialMessageCount, 0, textLimit, historyIndexes, hostDataIndexes, preparation.metadata).messages
           tail = (textOnly ? projectImagesForTextModel(bounded) : bounded).slice(start)
           candidate = [...header, ...tail]; cost = measure(candidate)
           if (fits(cost) || textLimit <= 300) break
@@ -2219,8 +2228,13 @@ export class ExecutionEngine {
     }
     if (stream.name !== 'text.replace' || stream.invalid) return
     try {
-      stream.parser ??= new StreamingEditArguments({ toolCallId: stream.callId, toolName: 'text.replace', ...(active.contentOutput ? { defaultTarget: active.contentOutput.targetHandle } : {}) })
-      const decoded = stream.parser.snapshot(stream.sequence++, stream.raw)
+      let decoded: ReturnType<StreamingEditArguments['push']>
+      if (!stream.parser) {
+        stream.parser = new StreamingEditArguments({ toolCallId: stream.callId, toolName: 'text.replace', ...(active.contentOutput ? { defaultTarget: active.contentOutput.targetHandle } : {}) })
+        // The tool name can arrive after its first argument fragments. Initialize
+        // once with the accumulated prefix, then feed only newly received units.
+        decoded = stream.parser.snapshot(stream.sequence++, stream.raw)
+      } else decoded = stream.parser.push(stream.sequence++, event.argumentsDelta)
       if (decoded.target && !stream.editing && !stream.previewSkipped && this.options.edits) {
         try {
           await this.options.edits.begin({ editId: stream.callId, toolCallId: stream.callId, runId: active.record.runId, targetHandle: decoded.target })
@@ -2833,7 +2847,7 @@ export class ExecutionEngine {
         const current = await this.options.registry.get(identity.documentId).drain()
         fresh = current.epoch === identity.epoch && current.revision === identity.revision
           && current.model.kind === 'course-v10'
-          && current.model.project.surfaces.some(surface => surface.id === identity.locationId)
+          && componentContainers(current.model.project).some(surface => surface.id === identity.locationId)
       } catch { /* Closed documents cannot supply a current picture. */ }
       const target = tool.call.input && typeof tool.call.input === 'object'
         ? (tool.call.input as { target?: unknown }).target : undefined
@@ -3089,7 +3103,7 @@ export class ExecutionEngine {
         const payloadDigest = createHash('sha256').update(serialized).digest('hex')
         if (initial && record.initialPayload && payloadDigest !== record.initialPayload.payloadDigest) throw new Error('首次最终请求与编译清单不一致，未发送')
         const requestId = `${logicalRoundId}.attempt-${attempts + 1}`, request: ExecutionRunRecord['requests'][number] = { requestId, state: 'sending', payload: { phase: initial ? 'initial' : 'dynamic', digest: payloadDigest, serializedBytes: Buffer.byteLength(serialized, 'utf8') } }
-        if (active.previousRequest) {
+        if (this.options.diagnoseRequestPrefix && active.previousRequest) {
           const previous = active.previousRequest, before = Buffer.from(previous.serialized), after = Buffer.from(serialized)
           let stableBytes = 0
           while (stableBytes < Math.min(before.length, after.length) && before[stableBytes] === after[stableBytes]) stableBytes++
@@ -3104,7 +3118,7 @@ export class ExecutionEngine {
           } catch { /* Unsupported serializer still has an exact byte prefix diagnostic. */ }
           request.payload!.prefix = { previousRequestId: previous.requestId, stableBytes, previousBytes: before.length, firstDifference }
         }
-        active.previousRequest = { requestId, serialized }
+        if (this.options.diagnoseRequestPrefix) active.previousRequest = { requestId, serialized }
         this.timing(record, `${record.runId}:${requestId}:prepared`, 'request.prepared', { requestId,
           detail: { serializedBytes: Buffer.byteLength(serialized, 'utf8') } })
         attempts += 1

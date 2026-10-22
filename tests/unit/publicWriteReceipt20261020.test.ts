@@ -1,3 +1,5 @@
+import { testContainerInstance } from '../helpers/glxWorkFixture'
+import { componentSurfaces } from '../../src/shared/contracts/component-platform/project'
 // @vitest-environment node
 import { expect, it } from 'vitest'
 import { DocumentSession } from '../../src/core/documents/DocumentSession'
@@ -31,7 +33,7 @@ async function fixture(count = 1) {
   for (let index = 0; index < count; index++) {
     const id = `object-${index}`
     project.instances[id] = { id, definitionId: WEB_DEFINITION.id, data: { html: `<p>old ${index}</p>` } }
-    project.surfaces[0].childIds.push(id)
+    testContainerInstance(project, 0).childIds.push(id)
   }
   const session = await DocumentSession.create({ documentId: 'public-write', epoch: 'epoch', binding: { kind: 'untitled', suggestedName: 'receipt.glx' },
     model: { kind: 'course-v10', project, resources: { assets: {}, components: {} } } }, new CourseV10Driver(),
@@ -233,12 +235,12 @@ it('keeps Gateway execute and lookup compact, reuses the same operation, and nev
   const project = createBlankCourseProjectV10('Gateway receipts')
   project.definitions[WEB_DEFINITION.id] = WEB_DEFINITION
   project.instances.web = { id: 'web', definitionId: WEB_DEFINITION.id, data: { html: '<p>old</p>' } }
-  project.surfaces[0].childIds.push('web')
+  testContainerInstance(project, 0).childIds.push('web')
   const session = await registry.create({ kind: 'course-v10', project, resources: { assets: {}, components: {} } }, 'gateway.glx')
   const gateway = new DocumentToolGateway(registry, [driver], () => crypto.randomUUID())
   await gateway.beginRun({ runId: 'gateway', actor: 'agent', documents: [{ documentId: session.documentId, writable: [{ kind: 'document' }] }] })
   try {
-    const target = await gateway.issueTarget('gateway', session.documentId, { kind: 'course-instance', surfaceId: project.surfaces[0].id, instanceId: 'web' })
+    const target = await gateway.issueTarget('gateway', session.documentId, { kind: 'course-instance', surfaceId: componentSurfaces(project)[0].id, instanceId: 'web' })
     const body = `<p>GATEWAY_PAYLOAD_${'g'.repeat(1024 * 1024)}</p>`
     const call = { name: 'object.update', input: { target, properties: { data: { html: body } } } }
     const result = await gateway.execute('gateway', 'write', call)

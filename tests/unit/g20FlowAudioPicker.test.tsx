@@ -1,3 +1,5 @@
+import { createTestProjectFromLegacy, testContainerInstance } from '../helpers/glxWorkFixture'
+import { componentSurfaces } from '../../src/shared/contracts/component-platform/project'
 import { act, cleanup, renderHook } from '@testing-library/react'
 import { afterEach, expect, it, vi } from 'vitest'
 import { mkdtemp, rm } from 'node:fs/promises'
@@ -28,10 +30,10 @@ async function harness() {
   const directory = await mkdtemp(path.join(tmpdir(), 'guoling-flow-audio-'))
   disposals.push(() => rm(directory, { recursive: true, force: true }))
   const service = new DocumentHostService(path.join(directory, 'recovery'))
-  const project: CourseProjectV10 = { schemaVersion: 10, id: 'audio-course', revision: 0, title: '讲义',
+  const project: CourseProjectV10 = createTestProjectFromLegacy({ schemaVersion: 10, id: 'audio-course', revision: 0, title: '讲义',
     definitions: { [TEXT_DEFINITION.id]: TEXT_DEFINITION },
     instances: { body: { id: 'body', definitionId: TEXT_DEFINITION.id, data: JSON.parse(JSON.stringify(createTextComponentData('原正文'))) } },
-    surfaces: [{ id: 'flow', kind: 'flow', title: '正文', childIds: ['body'] }], global: { underlay: [], overlay: [] }, assets: {} }
+    surfaces: [{ id: 'flow', kind: 'flow', title: '正文', childIds: ['body'] }], global: { underlay: [], overlay: [] }, assets: {} })
   const model = { kind: 'course-v10' as const, project, resources: { assets: {}, components: {} } }
   const original = await service.internalAPI.create(model, '讲义')
   const other = await service.internalAPI.create({ ...model, project: { ...project, id: 'other-course' } }, '另一讲义')
@@ -60,7 +62,7 @@ it('keeps a pending Flow audio picker on its original document, with one body/re
   const saved = await h.service.internalAPI.read(h.original.documentId)
   if (saved.model.kind !== 'course-v10') throw new Error('Expected V10')
   expect(saved.undoDepth).toBe(1)
-  const roots = saved.model.project.surfaces[0].childIds
+  const roots = testContainerInstance(saved.model.project, 0).childIds
   expect(roots.at(-1)).toBe('body'); expect(roots).toHaveLength(3)
   for (const id of roots.slice(0, 2)) {
     const data = audioDataSchema.parse(saved.model.project.instances[id].data)
@@ -72,7 +74,7 @@ it('keeps a pending Flow audio picker on its original document, with one body/re
   expect(h.errors).toEqual([])
   await h.bridge.undo(h.original.documentId)
   const undone = await h.service.internalAPI.read(h.original.documentId)
-  expect(undone.model.kind === 'course-v10' && undone.model.project.surfaces[0].childIds).toEqual(['body'])
+  expect(undone.model.kind === 'course-v10' && testContainerInstance(undone.model.project, 0).childIds).toEqual(['body'])
   expect(undone.model.kind === 'course-v10' && undone.model.resources.assets).toEqual({})
   await h.bridge.redo(h.original.documentId)
   const filename = path.join(h.directory, 'audio.h5lesson'); await h.service.internalAPI.save(h.original.documentId, filename)
@@ -91,7 +93,7 @@ it('rejects a changed Flow placement, retains decoded audio in its original libr
   const retained = await h.service.internalAPI.read(h.original.documentId)
   if (before.model.kind !== 'course-v10' || retained.model.kind !== 'course-v10') throw new Error('Expected V10')
   expect(retained.model.project.instances).toEqual(before.model.project.instances)
-  expect(retained.model.project.surfaces).toEqual(before.model.project.surfaces)
+  expect(componentSurfaces(retained.model.project)).toEqual(componentSurfaces(before.model.project))
   expect(Object.keys(retained.model.resources.assets)).toHaveLength(2)
   expect(retained.undoDepth).toBe(before.undoDepth + 1)
   expect((await h.service.internalAPI.read(h.other.documentId)).undoDepth).toBe(0)

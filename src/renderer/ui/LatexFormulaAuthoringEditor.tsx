@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { FORMULA_SLOT, insertFormulaTemplate } from '../../shared/formulaLinear'
 import { describeDocumentMath, parseDocumentMath } from '../../shared/document/math'
 import { renderDocumentMath } from '../../shared/document/render'
@@ -34,24 +34,52 @@ const templates = [
   ['圆括号', `(${FORMULA_SLOT})`],
 ] as const
 
-function parseDraft(source: string) {
+interface FormulaAnalysis {
+  source: string
+  accessibleText: string
+  error: string | null
+  preview?: { html: string; error: string | null }
+}
+
+function parseDraft(source: string): FormulaAnalysis {
   try {
     const math = parseDocumentMath(source)
-    return { accessibleText: describeDocumentMath(math), html: renderDocumentMath(source.replaceAll(FORMULA_SLOT, '\\square'), true), error: null }
+    return { source, accessibleText: describeDocumentMath(math), error: null }
   } catch (error) {
-    return { accessibleText: '', html: '', error: error instanceof Error ? error.message : String(error) }
+    return { source, accessibleText: '', error: error instanceof Error ? error.message : String(error) }
   }
+}
+
+function previewDraft(analysis: FormulaAnalysis) {
+  if (!analysis.preview) {
+    try { analysis.preview = { html: analysis.error ? '' : renderDocumentMath(analysis.source.replaceAll(FORMULA_SLOT, '\\square'), true), error: analysis.error } }
+    catch (error) { analysis.preview = { html: '', error: error instanceof Error ? error.message : String(error) } }
+  }
+  return { accessibleText: analysis.preview.error ? '' : analysis.accessibleText, ...analysis.preview }
 }
 
 export function LatexFormulaAuthoringEditor(props: LatexFormulaAuthoringEditorProps) {
   const [localSource, setLocalSource] = useState(props.latex)
   const source = props.draftSource ?? localSource
-  const parsed = useMemo(() => parseDraft(source), [source])
+  const [isComposing, setIsComposing] = useState(false)
+  // At most the canonical source and the current draft survive. Rendering,
+  // draft notifications and completion share the same analysis and preview.
+  const analyses = useRef<FormulaAnalysis[]>([])
+  const analyse = (value: string) => {
+    const previous = analyses.current.find(item => item.source === value)
+    if (previous) return previous
+    const next = parseDraft(value)
+    analyses.current = [...analyses.current.filter(item => item.source === props.latex), next]
+    return next
+  }
+  const canonicalDescription = props.accessibleText ? analyse(props.latex).accessibleText : ''
+  const previewSource = useRef(source)
+  if (!isComposing) previewSource.current = source
+  const parsed = previewDraft(analyse(previewSource.current))
   const input = useRef<HTMLInputElement>(null)
   const selection = useRef<[number, number] | null>(null)
   const composing = useRef(false)
   const finish = useRef(false)
-  const canonicalDescription = useMemo(() => parseDraft(props.latex).accessibleText, [props.latex])
   const automatic = !props.accessibleText || props.accessibleText.replace(/\s/g, '') === canonicalDescription.replace(/\s/g, '')
   const hasSlots = source.includes(FORMULA_SLOT)
   const commitRef = useRef<() => void>(() => {})
@@ -67,13 +95,18 @@ export function LatexFormulaAuthoringEditor(props: LatexFormulaAuthoringEditorPr
   }, [source])
   const publish = (value: string) => {
     if (props.draftSource === undefined) setLocalSource(value)
-    const next = parseDraft(value)
-    props.onDraftChange?.({ source: value, accessibleText: automatic ? next.accessibleText : props.accessibleText!, error: next.error, committable: !next.error && !value.includes(FORMULA_SLOT) && !composing.current })
+    if (!props.onDraftChange) return
+    if (composing.current) {
+      props.onDraftChange({ source: value, accessibleText: automatic ? parsed.accessibleText : props.accessibleText!, error: null, committable: false })
+      return
+    }
+    const next = previewDraft(analyse(value))
+    props.onDraftChange({ source: value, accessibleText: automatic ? next.accessibleText : props.accessibleText!, error: next.error, committable: !next.error && !value.includes(FORMULA_SLOT) })
   }
   const commit = () => {
     if (composing.current) { finish.current = true; return }
     const value = input.current?.value ?? source
-    const next = parseDraft(value)
+    const next = previewDraft(analyse(value))
     if (next.error || value.includes(FORMULA_SLOT)) return
     props.onCommit(value, automatic ? next.accessibleText : props.accessibleText!)
   }
@@ -90,8 +123,8 @@ export function LatexFormulaAuthoringEditor(props: LatexFormulaAuthoringEditorPr
     </div>
     <div className="form-field"><label htmlFor={`formula-latex-${props.id}`}>LaTeX</label><input ref={input} id={`formula-latex-${props.id}`} className="form-input formula-linear-input" aria-label="公式 LaTeX"
       value={source} spellCheck={false} onFocus={props.onBeginEdit} onChange={event => publish(event.currentTarget.value)}
-      onCompositionStart={() => { composing.current = true; props.onCompositionChange?.(true) }}
-      onCompositionEnd={event => { composing.current = false; publish(event.currentTarget.value); props.onCompositionChange?.(false); if (finish.current) { finish.current = false; queueMicrotask(() => commitRef.current()) } }}
+      onCompositionStart={() => { composing.current = true; setIsComposing(true); props.onCompositionChange?.(true) }}
+      onCompositionEnd={event => { composing.current = false; setIsComposing(false); publish(event.currentTarget.value); props.onCompositionChange?.(false); if (finish.current) { finish.current = false; queueMicrotask(() => commitRef.current()) } }}
       onKeyDown={event => {
         if (composing.current || event.nativeEvent.isComposing) return
         if (event.key === 'Tab' && hasSlots) {

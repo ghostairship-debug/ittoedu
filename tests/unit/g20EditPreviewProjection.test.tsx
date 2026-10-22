@@ -23,6 +23,21 @@ const preview = (patch: Partial<EditSessionSnapshot> = {}): EditSessionSnapshot 
   targetHandle: 'handle', target: { kind: 'markdown-range', from: 0, to: 3 }, value: '生成内容', sequence: 0, status: 'active', ...patch })
 
 describe('mounted canonical editors with volatile generation projection', () => {
+  it('releases finished bodies only after every mounted canonical consumer observes the committed revision', () => {
+    const store = new EditPreviewProjection({ edits: async () => [], subscribeEdits: () => () => {}, stop: vi.fn() })
+    const stop = store.subscribe(() => {}), first = {}, second = {}
+    store.observeCanonical('doc', first, 0); store.observeCanonical('doc', second, 0)
+    const finished = preview({ status: 'finished', revision: 1, value: '最终完整正文'.repeat(1000) })
+    store.receive({ type: 'edit.finished', snapshot: finished, result: { status: 'applied', documentId: 'doc', operationId: 'edit', beforeRevision: 0, revision: 1, persistence: 'recoverable' } })
+    store.observeCanonical('doc', first, 1)
+    expect(store.readAll('doc', 0)[0]?.value).toBe(finished.value)
+    store.observeCanonical('doc', second, 1)
+    expect((store as unknown as { values: Map<string, unknown> }).values.has('edit')).toBe(false)
+    store.receive({ type: 'edit.changed', snapshot: preview({ sequence: 9, value: '迟到正文' }) })
+    expect(store.readAll('doc', 1)).toEqual([])
+    store.releaseCanonical('doc', first); store.releaseCanonical('doc', second); stop()
+  })
+
   it('hydrates and retains every independent group with stable arrays and removes only each acknowledged or aborted preview', async () => {
     let listener!: (event: EditEvent) => void, resolve!: (value: EditSessionSnapshot[]) => void
     const store = new EditPreviewProjection({ edits: () => new Promise(done => { resolve = done }), subscribeEdits: next => { listener = next; return () => {} }, stop: vi.fn() })

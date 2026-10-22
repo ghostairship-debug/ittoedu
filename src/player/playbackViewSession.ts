@@ -18,7 +18,7 @@ export interface PlaybackViewHost {
   kind: 'slide' | 'flow' | 'spatial'
   root: HTMLElement
   content: HTMLElement
-  /** Editor tool rows reduce the reading viewport, but all surface papers share the same workspace fit. */
+  /** Optional page-fit viewport; Flow always lays out in its actual reading viewport. */
   fitViewport?(): { width: number; height: number }
   onObservationChange?(): void
 }
@@ -189,13 +189,12 @@ export class PlaybackViewSession implements PlaybackViewPort {
   #pageInsets(): PageFrameInsets { return this.#fullscreen() ? NO_PAGE_INSETS : this.#insets }
   #fit(host: PlaybackViewHost): void {
     if (host.kind === 'flow') {
-      const fit = fitPage(host.fitViewport?.() ?? this.#state.viewport, hostStage(host), this.#pageInsets())
-      // The paper keeps its authored line wrapping, while its scroll viewport is expressed in the same logical
-      // units. The root and controller siblings stay in screen pixels; only reading content inherits this fit.
+      // Flow's baseline is one logical unit per CSS pixel. Its available width
+      // reflows the paper; authored canvas sizes belong to Slide/Spatial fit.
       Object.assign(host.root.style, { position: 'absolute', transformOrigin: '0 0', transform: 'none', width: '100%', height: '100%',
         minWidth: '0', minHeight: '0', left: '0px', top: '0px', overflow: 'visible' })
-      Object.assign(host.content.style, { width: `${this.#state.viewport.width / fit.scale}px`, height: `${this.#state.viewport.height / fit.scale}px`, right: 'auto', bottom: 'auto' })
-      host.root.dataset.stageFitScale = String(fit.scale)
+      Object.assign(host.content.style, { width: `${this.#state.viewport.width}px`, height: `${this.#state.viewport.height}px`, right: 'auto', bottom: 'auto' })
+      host.root.dataset.stageFitScale = '1'
       return
     }
     const canvas = hostStage(host)

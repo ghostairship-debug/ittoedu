@@ -1,4 +1,6 @@
 // @vitest-environment node
+import { componentSurfaces } from '../../src/shared/contracts/component-platform/project'
+import { testContainerInstance } from '../helpers/glxWorkFixture'
 import { afterAll, beforeAll, expect, it } from 'vitest'
 import { build } from 'esbuild'
 import { chromium, type Browser } from 'playwright'
@@ -63,7 +65,7 @@ async function measured(request: HtmlDesignMeasurementRequest, screenshot: boole
 }
 
 async function authoring(screenshot = false) {
-  const project = createBlankCourseProjectV10('Complex background paint'); project.surfaces[0]!.designSize = viewport
+  const project = createBlankCourseProjectV10('Complex background paint'); testContainerInstance(project, 0).container.designSize = viewport
   const driver = new CourseV10Driver()
   let saved: Uint8Array | undefined, observation: Awaited<ReturnType<typeof measured>> | undefined
   const persistence: DocumentPersistence = { async append() {}, async save(input) {
@@ -80,7 +82,7 @@ async function authoring(screenshot = false) {
   } }, measure: async request => { observation = await measured(request, screenshot); return observation.assembly },
     compilation: { async compile() { throw new Error('Ordinary measured content requires no source compilation') } } })
   return { current, service, resources: () => session.read().model.resources, observation: () => observation!,
-    apply: (html: string, siblingFiles?: ReadonlyMap<string, Uint8Array>) => service.apply({ intent: 'insert', target: { kind: 'container', container: { kind: 'surface', surfaceId: current().surfaces[0]!.id } }, source: { kind: 'html', html, siblingFiles } }),
+    apply: (html: string, siblingFiles?: ReadonlyMap<string, Uint8Array>) => service.apply({ intent: 'insert', target: { kind: 'container', container: { kind: 'surface', surfaceId: componentSurfaces(current())[0]!.id } }, source: { kind: 'html', html, siblingFiles } }),
     canonical: (edits: ComponentEdit[]) => service.apply({ intent: 'canonical', edits }),
     async reopen() {
       const binding = { kind: 'file' as const, path: 'D:/complex-paint-test.glx', version: null, bindingVersion: 0 }
@@ -104,7 +106,7 @@ it('carries measured multi-image/gradient page paint through formal save and com
   const files = new Map(await Promise.all(['left.png', 'right.png'].map(async filename => [filename, new Uint8Array(await readFile(`${fixture}/${filename}`))] as const)))
   const harness = await authoring(true)
   expect(await harness.apply(html, files)).toMatchObject({ commit: 'committed', usability: 'usable' })
-  const first = harness.current(), surface = first.surfaces[0]!, background = surface.background!, assetIds = componentBackgroundAssetIds(background)
+  const first = harness.current(), surface = componentSurfaces(first)[0]!, background = surface.background!, assetIds = componentBackgroundAssetIds(background)
   expect(background.paint?.layers).toHaveLength(2)
   expect(background).not.toHaveProperty('color'); expect(background).not.toHaveProperty('assetId'); expect(background).not.toHaveProperty('fit')
   expect(background.paint!.layers[0]!.style['background-image']).toContain('linear-gradient')
@@ -113,9 +115,9 @@ it('carries measured multi-image/gradient page paint through formal save and com
   expect(Object.keys(first.assets).sort()).toEqual([...assetIds].sort())
   expect(Object.keys(harness.resources().assets).sort()).toEqual([...assetIds].sort())
   expect(surface.childIds).toHaveLength(2)
-  expect(Object.values(first.instances).map(instance => instance.definitionId)).toEqual(['guoling.text', 'guoling.text'])
+  expect(Object.values(first.instances).filter(instance => !instance.container).map(instance => instance.definitionId)).toEqual(['guoling.text', 'guoling.text'])
   expect(surface.childIds.every(id => !first.instances[id]!.childIds?.length)).toBe(true)
-  expect(Object.values(first.instances).map(instance => instance.frame?.transform)).toEqual([[1, 0, 0, 1, 40, 30], [1, 0, 0, 1, 40, 90]])
+  expect(Object.values(first.instances).filter(instance => !instance.container).map(instance => instance.frame?.transform)).toEqual([[1, 0, 0, 1, 40, 30], [1, 0, 0, 1, 40, 90]])
   const original = await pixels(harness.observation().originalPixels!)
   expectPixels(original.slice(0, 2), [[229, 94, 86], [79, 109, 221]])
 
@@ -129,11 +131,11 @@ it('carries measured multi-image/gradient page paint through formal save and com
     { action: 'background', state: 'color', background: { color: '#11aa33' } }))).toMatchObject({ commit: 'committed' })
   expect(await harness.canonical(coursePresentationEdits(harness.current(), { kind: 'course-surface', surfaceId: surface.id },
     { action: 'background', state: 'paint', background: structuredClone(background) }))).toMatchObject({ commit: 'committed' })
-  const stateBackground = (id: string) => harness.current().surfaces[0]!.presentation!.states.find(state => state.id === id)!.background!
+  const stateBackground = (id: string) => componentSurfaces(harness.current())[0]!.presentation!.states.find(state => state.id === id)!.background!
   expect(stateBackground('color')).not.toHaveProperty('paint')
   expect(stateBackground('paint')).not.toHaveProperty('assetId')
   const beforeSave = harness.current(), reloaded = await harness.reopen()
-  expect(reloaded.surfaces).toEqual(beforeSave.surfaces); expect(reloaded.instances).toEqual(beforeSave.instances)
+  expect(componentSurfaces(reloaded)).toEqual(componentSurfaces(beforeSave)); expect(reloaded.instances).toEqual(beforeSave.instances)
   expect(Object.keys(harness.resources().assets).sort()).toEqual([...assetIds].sort())
   const published = await buildPublishedCourseV3({ project: reloaded, assetBytes: harness.resources().assets })
   expect(published.offlineComplete).toBe(true); expect(published.diagnostics).toEqual([])
@@ -150,38 +152,38 @@ it('carries measured multi-image/gradient page paint through formal save and com
     }, published.payload)
     expectPixels(await pixels(await page.screenshot()), original)
     const inspectPaint = () => page.evaluate(() => {
-      const root = document.querySelector<HTMLElement>('[data-compiled-course]')!, paint = root.querySelector<HTMLElement>(':scope > [data-component-background-paint]')!
+      const root = document.querySelector<HTMLElement>('[data-compiled-surface]')!, paint = root.querySelector<HTMLElement>(':scope > [data-component-background-paint]')!
       return { first: root.firstElementChild === paint, count: paint.children.length, pointer: getComputedStyle(paint).pointerEvents,
         hitPaint: !!document.elementFromPoint(10, 10)?.closest('[data-component-background-paint]'),
         instance: !!paint.querySelector('[data-compiled-node],[data-component-object],[data-component-instance-id]'),
         images: [...paint.children].map(layer => getComputedStyle(layer).backgroundImage) }
     })
-    expect(await inspectPaint()).toMatchObject({ first: true, count: 3, pointer: 'none', hitPaint: false, instance: false })
+    expect(await inspectPaint()).toMatchObject({ first: true, count: 2, pointer: 'none', hitPaint: false, instance: false })
     for (const [stateId, expected] of [['clear', [[255, 255, 255], [255, 255, 255], [255, 255, 255]]], ['color', [[17, 170, 51], [17, 170, 51], [17, 170, 51]]], ['paint', original], ['inherit', original]] as const) {
       expect(await page.evaluate(async ({ id, state }) => (window as any).complexPlayer.go(id, state), { id: surface.id, state: stateId })).toBe(true)
       expectPixels(await pixels(await page.screenshot()), expected as unknown as number[][])
       const statePaint = await inspectPaint()
-      expect(statePaint).toMatchObject({ count: stateId === 'clear' || stateId === 'color' ? 1 : 3, hitPaint: false, instance: false })
+      expect(statePaint).toMatchObject({ count: stateId === 'clear' || stateId === 'color' ? 1 : 2, hitPaint: false, instance: false })
       if (stateId === 'clear' || stateId === 'color') expect(statePaint.images).toEqual(['none'])
     }
   } finally { await page.close() }
 
   const mutate = (edits: ComponentEdit[], project = reloaded) => applyComponentOperation(project, captureComponentOperation(project, edits))
   let settings = mutate(surfaceSettingsEdits(reloaded, surface.id, { background: { color: '#abcdef' } }))
-  expect(settings.surfaces[0]!.background).not.toHaveProperty('paint')
+  expect(componentSurfaces(settings)[0]!.background).not.toHaveProperty('paint')
   settings = mutate(surfaceSettingsEdits(settings, surface.id, { background }), settings)
-  expect(settings.surfaces[0]!.background).not.toHaveProperty('color')
+  expect(componentSurfaces(settings)[0]!.background).not.toHaveProperty('color')
   settings = mutate(surfaceSettingsEdits(settings, surface.id, { background: { assetId: assetIds[0]!, fit: 'fill' } }), settings)
-  expect(settings.surfaces[0]!.background).not.toHaveProperty('paint')
+  expect(componentSurfaces(settings)[0]!.background).not.toHaveProperty('paint')
   const inherited = structuredClone(reloaded); inherited.background = background
   settings = mutate(surfaceSettingsEdits(inherited, surface.id, { background: { mode: 'inherit' } }), inherited)
-  expect(resolveComponentBackground(settings, settings.surfaces[0]).paint).toEqual(background.paint)
+  expect(resolveComponentBackground(settings, componentSurfaces(settings)[0]).paint).toEqual(background.paint)
   expect(settings.background).toEqual(background)
   const inheritedState = mutate(coursePresentationEdits(reloaded, { kind: 'course-surface', surfaceId: surface.id },
     { action: 'background', state: 'paint', inherit: ['color'] }))
-  const state = inheritedState.surfaces[0]!.presentation!.states.find(value => value.id === 'paint')!
+  const state = componentSurfaces(inheritedState)[0]!.presentation!.states.find(value => value.id === 'paint')!
   expect(state.background).not.toHaveProperty('paint')
-  expect(resolveComponentBackground(inheritedState, inheritedState.surfaces[0], state).paint).toEqual(background.paint)
+  expect(resolveComponentBackground(inheritedState, componentSurfaces(inheritedState)[0], state).paint).toEqual(background.paint)
 }, 30000)
 
 it('retains a padded content-box background as one repairable source scope without duplicating its body', async () => {
@@ -190,12 +192,12 @@ it('retains a padded content-box background as one repairable source scope witho
   const result = await harness.apply(html)
   expect(result).toMatchObject({ commit: 'committed', usability: 'partial' })
   expect(result.diagnostics).toContainEqual(expect.objectContaining({ code: 'html-page-background-source-retained', repairable: true }))
-  const project = harness.current(), instances = Object.values(project.instances)
+  const project = harness.current(), instances = Object.values(project.instances).filter(instance => !instance.container)
   expect(instances).toHaveLength(1)
   const retained = instances[0]!.data as { html: string }
   expect(retained.html).toContain('padding:40px')
   expect(retained.html).toContain('background-clip:content-box')
   expect(retained.html.match(/Single preserved body/g)).toHaveLength(1)
   expect(instances[0]!.childIds ?? []).toEqual([])
-  expect(project.surfaces[0]!.background?.paint).toBeUndefined()
+  expect(componentSurfaces(project)[0]!.background?.paint).toBeUndefined()
 }, 10000)

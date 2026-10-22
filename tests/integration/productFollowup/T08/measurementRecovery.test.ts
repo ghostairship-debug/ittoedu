@@ -1,4 +1,5 @@
 // @vitest-environment node
+import { componentSurfaces } from '../../../../src/shared/contracts/component-platform/project'
 import { promises as fs } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -25,7 +26,7 @@ it.each(['worker-failure', 'user-abort'] as const)('measurement %s preserves usa
       dispatch: command => host.internalAPI.dispatch({ documentId: snapshot.documentId, epoch: snapshot.epoch, baseRevision: snapshot.revision,
         operationId: 'apply', actor: 'agent', mutation: { type: 'command', command } }) } })
     const html = '<h1>可用教学正文</h1><details><summary>查看答案</summary><p>答案为二</p></details>'
-    const result = await service.apply({ intent: 'insert', target: { kind: 'container', container: { kind: 'surface', surfaceId: project.surfaces[0].id } },
+    const result = await service.apply({ intent: 'insert', target: { kind: 'container', container: { kind: 'surface', surfaceId: componentSurfaces(project)[0].id } },
       source: { kind: 'html', html, original: { bytes: new TextEncoder().encode(html), filename: 'teacher.html', mimeType: 'text/html' } } }, controller.signal)
     expect(measure).toHaveBeenCalledTimes(1)
     const current = await host.internalAPI.read(snapshot.documentId)

@@ -5,7 +5,7 @@ import { courseStateDeclarationSchema, courseStateConditionSchema } from '../cou
 import { courseProjectDesignTokensSchema, courseThemeSchema } from '../design-v1/schema'
 import { projectPlaybackSettingsSchema } from '../playback-v1/schema'
 import { assetRemoteDeliveryUrlSchema, assetSourceSchema, projectMediaSettingsSchema } from '../media-v1/schema'
-import type { ComponentImplementation, CourseProjectV10, JsonValue } from './project'
+import type { ComponentContainerAuthoring, ComponentImplementation, CourseProjectV10, LegacyCourseProjectV10, JsonValue } from './project'
 import type { ComponentOperationBatch } from './operations'
 import type { ComponentAuthorRecord } from './runtime'
 
@@ -71,7 +71,7 @@ export const componentFlowPlacementSchema = z.object({
   paragraphAnchor: z.object({ blockId: id, offsetY: finite, xRatio: finite }).strict().optional(),
 }).strict()
 export const componentFlowAuthoringSchema = z.object({ layout: z.object({
-  toc: z.enum(['auto', 'hidden']).optional(), widthMode: z.enum(['fluid', 'reading']).optional(), readingWidth: finite.positive(), wideContentWidth: finite.positive(), paperBackgroundColor: z.string().optional(),
+  toc: z.enum(['auto', 'hidden']).optional(), widthMode: z.enum(['fluid', 'reading']).optional(), edgeToEdge: z.boolean().optional(), readingWidth: finite.positive(), wideContentWidth: finite.positive(),
 }).strict() }).strict()
 export const componentPresentationSchema = z.object({
   states: z.array(z.object({ id, title: z.string(), overrides: ownRecordSchema(z.string(), z.object({
@@ -102,12 +102,17 @@ export const componentInstanceSchema = z.object({
   playbackInitialVisibility: z.enum(['inherit', 'hidden']).optional(), flowPlacement: componentFlowPlacementSchema.optional(), flowLayout: componentFlowBodyLayoutSchema.optional(),
   style: ownRecordSchema(z.string(), jsonValueSchema).optional(), frame: componentFrameSchema.optional(),
   childIds: z.array(id).optional(), attachments: z.array(behaviorAttachmentSchema).optional(),
+  container: z.lazy((): z.ZodType<ComponentContainerAuthoring> => componentContainerAuthoringSchema).optional(),
   implementationOverride: componentImplementationSchema.optional(),
 }).strict()
 export const componentDefinitionSchema = z.object({
   id, role: z.enum(['content', 'behavior', 'mixed']), implementation: componentImplementationSchema,
   dataSchema: ownRecordSchema(z.string(), jsonValueSchema).optional(), version: z.string().optional(), title: z.string().optional(),
-  library: z.object({ packageId: id, version: z.string().optional() }).strict().optional(),
+  library: z.object({ packageId: id, version: z.string().optional(), baseline: z.object({
+    implementation: componentImplementationSchema,
+    dataSchema: ownRecordSchema(z.string(), jsonValueSchema).optional(),
+    sourceFiles: ownRecordSchema(z.string(), z.string()).optional(),
+  }).strict().optional() }).strict().optional(),
   professionalBuiltinKey: id.optional(),
 }).strict()
 export const componentAssetSchema = z.object({ id, path: id, mimeType: z.string().optional(), filename: z.string().optional(),
@@ -116,6 +121,7 @@ export const componentAssetSchema = z.object({ id, path: id, mimeType: z.string(
   remote: z.object({ url: assetRemoteDeliveryUrlSchema }).strict().optional(), source: assetSourceSchema.optional(),
 }).strict()
 export const componentContainerSchema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('project') }).strict(),
   z.object({ kind: z.literal('instance'), instanceId: id }).strict(),
   z.object({ kind: z.literal('surface'), surfaceId: id }).strict(),
   z.object({ kind: z.literal('global'), plane: z.enum(['underlay', 'overlay']) }).strict(),
@@ -148,12 +154,32 @@ export const componentSurfaceSchema = z.object({
   if (surface.spatial && surface.kind !== 'spatial') context.addIssue({ code: 'custom', message: '只有Spatial表面可保存镜头配置' })
 })
 
-export const courseProjectV10Schema: z.ZodType<CourseProjectV10> = z.object({
+export const componentContainerAuthoringSchema = z.object({
+  kind: z.enum(['slide', 'flow', 'spatial']),
+  designSize: z.object({ width: finite.positive(), height: finite.positive() }).strict().optional(),
+  spatial: componentSpatialAuthoringSchema.optional(), background: componentBackgroundSchema.optional(),
+  flow: componentFlowAuthoringSchema.optional(), presentation: componentPresentationSchema.optional(),
+}).strict().superRefine((container, context) => {
+  if (container.flow && container.kind !== 'flow') context.addIssue({ code: 'custom', message: '只有Flow容器可保存纸张布局' })
+  if (container.presentation && container.kind !== 'slide') context.addIssue({ code: 'custom', path: ['presentation'], message: '场景状态仅属于Slide；Flow使用章节标题，Spatial使用镜头' })
+  if (container.spatial && container.kind !== 'spatial') context.addIssue({ code: 'custom', message: '只有Spatial容器可保存镜头配置' })
+})
+
+export const workEntrySchema = z.object({ rootInstanceId: id }).strict()
+export const componentContainerPatchSchema = z.object({
+  kind: z.enum(['slide', 'flow', 'spatial']).optional(),
+  designSize: z.object({ width: finite.positive(), height: finite.positive() }).strict().nullable().optional(),
+  spatial: componentSpatialAuthoringSchema.nullable().optional(), background: componentBackgroundSchema.nullable().optional(),
+  flow: componentFlowAuthoringSchema.nullable().optional(), presentation: componentPresentationSchema.nullable().optional(),
+}).strict().refine(patch => Object.keys(patch).length > 0, '容器修改不能为空')
+
+/** The V10 schema is confined to one-time import/recovery conversion. */
+export const legacyCourseProjectV10Schema: z.ZodType<LegacyCourseProjectV10> = z.object({
   schemaVersion: z.literal(10), id, revision: z.number().int().nonnegative(), title: z.string(),
   background: componentBackgroundSchema.optional(), designTokens: courseProjectDesignTokensSchema.optional(), theme: courseThemeSchema.optional(),
   playback: projectPlaybackSettingsSchema.optional(), media: projectMediaSettingsSchema.optional(), logic: courseProjectLogicSchema.optional(),
   definitions: ownRecordSchema(z.string(), componentDefinitionSchema),
-  instances: ownRecordSchema(z.string(), componentInstanceSchema),
+  instances: ownRecordSchema(z.string(), componentInstanceSchema.omit({ container: true })),
   surfaces: z.array(componentSurfaceSchema),
   global: z.object({ underlay: z.array(id), overlay: z.array(id) }).strict(),
   assets: ownRecordSchema(z.string(), componentAssetSchema),
@@ -196,6 +222,53 @@ export const courseProjectV10Schema: z.ZodType<CourseProjectV10> = z.object({
   for (const instanceId of Object.keys(project.instances)) if (!visited.has(instanceId)) issue(`对象未归属或形成循环：${instanceId}`)
 })
 
+export const courseProjectV11Schema: z.ZodType<CourseProjectV10> = z.object({
+  schemaVersion: z.literal(11), id, revision: z.number().int().nonnegative(), title: z.string(),
+  background: componentBackgroundSchema.optional(), designTokens: courseProjectDesignTokensSchema.optional(), theme: courseThemeSchema.optional(),
+  playback: projectPlaybackSettingsSchema.optional(), media: projectMediaSettingsSchema.optional(), logic: courseProjectLogicSchema.optional(),
+  definitions: ownRecordSchema(z.string(), componentDefinitionSchema),
+  instances: ownRecordSchema(z.string(), componentInstanceSchema),
+  rootIds: z.array(id), entry: workEntrySchema.optional(),
+  global: z.object({ underlay: z.array(id), overlay: z.array(id) }).strict(),
+  assets: ownRecordSchema(z.string(), componentAssetSchema),
+}).strict().superRefine((project, context) => {
+  const issue = (message: string, path: (string | number)[] = []) => context.addIssue({ code: 'custom', message, path })
+  for (const [key, definition] of Object.entries(project.definitions)) if (key !== definition.id) issue('定义索引与身份不一致', ['definitions', key])
+  for (const [key, asset] of Object.entries(project.assets)) if (key !== asset.id) issue('素材索引与身份不一致', ['assets', key])
+  const owners = new Set<string>()
+  const claim = (children: readonly string[]) => {
+    for (const childId of children) {
+      if (!Object.hasOwn(project.instances, childId)) issue(`所属对象不存在：${childId}`)
+      if (owners.has(childId)) issue(`对象重复归属：${childId}`)
+      owners.add(childId)
+    }
+  }
+  claim(project.rootIds); claim(project.global.underlay); claim(project.global.overlay)
+  if (project.entry && !project.rootIds.includes(project.entry.rootInstanceId)) issue('作品入口必须引用存在的顶层实例', ['entry', 'rootInstanceId'])
+  for (const [key, instance] of Object.entries(project.instances)) {
+    if (key !== instance.id) issue('实例索引与身份不一致', ['instances', key])
+    if (!Object.hasOwn(project.definitions, instance.definitionId)) issue(`定义不存在：${instance.definitionId}`, ['instances', key])
+    if (instance.childIds) claim(instance.childIds)
+    if (instance.container && !instance.childIds) issue('容器实例必须声明子内容集合', ['instances', key, 'childIds'])
+    for (const attachment of instance.attachments ?? []) {
+      if (!Object.hasOwn(project.instances, attachment.instanceId)) issue(`行为实例不存在：${attachment.instanceId}`)
+      if ((attachment.target.kind === 'instance' || attachment.target.kind === 'text-range') && !Object.hasOwn(project.instances, attachment.target.instanceId)) issue('行为目标不存在')
+      if (attachment.target.kind === 'surface' && !project.instances[attachment.target.surfaceId]?.container) issue('行为容器不存在')
+    }
+  }
+  const visited = new Set<string>()
+  const visit = (instanceId: string) => {
+    if (visited.has(instanceId)) return
+    visited.add(instanceId)
+    for (const childId of project.instances[instanceId]?.childIds ?? []) visit(childId)
+  }
+  for (const rootId of [...project.rootIds, ...project.global.underlay, ...project.global.overlay]) visit(rootId)
+  for (const instanceId of Object.keys(project.instances)) if (!visited.has(instanceId)) issue(`对象未归属或形成循环：${instanceId}`)
+})
+
+/** Internal import compatibility only: the writable format is always Project 11. */
+export const courseProjectV10Schema = courseProjectV11Schema
+
 const fieldPath = z.array(id).min(1)
 const dataPath = z.array(id)
 export const componentExpectationSchema = z.object({ path: fieldPath, exists: z.boolean(), value: jsonValueSchema.optional() }).strict()
@@ -203,6 +276,8 @@ export const componentOperationBatchSchema: z.ZodType<ComponentOperationBatch> =
   type: z.literal('component-platform.apply'),
   edits: z.array(z.discriminatedUnion('type', [
     z.object({ type: z.literal('project.title.set'), title: z.string() }).strict(),
+    z.object({ type: z.literal('project.entry.set'), entry: workEntrySchema.nullable() }).strict(),
+    z.object({ type: z.literal('container.patch'), instanceId: id, patch: componentContainerPatchSchema }).strict(),
     z.object({ type: z.literal('project.background.set'), background: componentBackgroundSchema.nullable() }).strict(),
     z.object({ type: z.literal('project.designTokens.set'), designTokens: courseProjectDesignTokensSchema.nullable() }).strict(),
     z.object({ type: z.literal('project.theme.set'), theme: courseThemeSchema.nullable() }).strict(),

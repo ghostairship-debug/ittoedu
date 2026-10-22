@@ -1,3 +1,5 @@
+import { componentSurfaces } from '../../src/shared/contracts/component-platform/project'
+import { testContainerInstance } from '../helpers/glxWorkFixture'
 // @vitest-environment node
 import { randomUUID } from 'node:crypto'
 import { promises as fs } from 'node:fs'
@@ -28,7 +30,7 @@ async function fixture(options: { workspaceRoot?: string; services?: HostToolSer
   project.logic = { courseState: [{ key: 'score', valueType: 'number', defaultValue: 0 }, { key: 'total', valueType: 'number', defaultValue: 1 }], navigationGuards: [] }
   for (const [index, id] of ['a', 'b'].entries()) project.instances[id] = { id, definitionId: 'shared', data: { marker: id },
     stateBindings: { input: 'score' }, frame: { width: 300, height: 160, transform: [1, 0, 0, 1, 40 + index * 340, 80] } }
-  project.surfaces[0].childIds = ['a', 'b']
+  testContainerInstance(project, 0).childIds = ['a', 'b']
   const resources = { assets: {}, components: {} }
   const driver = new CourseV10Driver(), registry = new DocumentRegistry({ drivers: [driver], createId: randomUUID,
     bindingKey: binding => binding.path, persistence: { async append() {}, async save() { throw new Error('No save requested') } } })
@@ -121,7 +123,7 @@ it('admits an enhancement from a real module/resource closure and compiles its p
 
 it('merges and removes explicit aliases through object.update and keeps unknown declarations local', async () => {
   const h = await fixture()
-  const target = await h.gateway.issueTarget('behavior', h.session.documentId, { kind: 'course-instance', surfaceId: h.project.surfaces[0].id, instanceId: 'a' })
+  const target = await h.gateway.issueTarget('behavior', h.session.documentId, { kind: 'course-instance', surfaceId: componentSurfaces(h.project)[0].id, instanceId: 'a' })
   const update = (stateBindings: Record<string, string | null> | null) => h.call('object.update', { target, properties: { stateBindings } })
   expect(await update({ output: 'total' })).toMatchObject({ kind: 'document-operation', result: { status: 'applied' } })
   expect(h.model().project.instances.a.stateBindings).toEqual({ input: 'score', output: 'total' })

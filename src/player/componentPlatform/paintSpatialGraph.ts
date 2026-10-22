@@ -1,3 +1,4 @@
+import { componentContainers } from '../../shared/contracts/component-platform/project'
 import type {CourseProjectV10} from '../../shared/contracts/component-platform'
 import {isComponentVisibleAtSurface,owningContainer} from '../../shared/contracts/component-platform'
 import {componentSurfaceGeometryTargets} from './spatialTargets'
@@ -5,7 +6,7 @@ import {componentSpatialCameraMatrix,type ComponentSpatialCamera} from '../surfa
 import {transformPoint} from '../../core/components/geometry'
 import {spatialComponentCenter,spatialConnectionSegments,spatialConnectionTargets,spatialPathPoints,spatialPathTargetIds,spatialRelationLabelPosition,spatialSemanticVisible} from '../surfaces/spatial/componentPlatform/graph'
 export function paintComponentSpatialGraph(document:Document,project:CourseProjectV10,id:string,svg:SVGSVGElement,pose:ComponentSpatialCamera,viewport:{width:number;height:number}){
-const surface=project.surfaces.find(value=>value.id===id);if(!surface)return;const targets=componentSurfaceGeometryTargets(project,id);const matrix=componentSpatialCameraMatrix(pose,{x:0,y:0,...viewport});
+const surface=componentContainers(project).find(value=>value.id===id);if(!surface)return;const targets=componentSurfaceGeometryTargets(project,id);const matrix=componentSpatialCameraMatrix(pose,{x:0,y:0,...viewport});
     const element = (tag: string, attributes: Record<string, string | number>) => {
       const value = document.createElementNS('http://www.w3.org/2000/svg', tag)
       for (const [key, item] of Object.entries(attributes)) value.setAttribute(key, String(item))

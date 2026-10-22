@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto'
 import type {
   ModelAssistantMessage, ModelConnectionSnapshot, ModelEvent, ModelFailure, ModelJson,
-  ModelJsonObject, ModelNativeToolCall, ModelProvider, ModelRequest, ModelUsage, PreparedModelRequest, ModelTransportDiagnostic,
+  ModelJsonObject, ModelNativeToolCall, ModelProvider, ModelRequest, ModelUsage, PreparedModelRequest, ModelPreparationOptions, ModelTransportDiagnostic,
 } from '../../../shared/workbench/modelProvider'
 import { modelAcceptsImages } from '../../../shared/workbench/modelProvider'
 import { effectiveModelProtocol } from '../../../shared/workbench/modelRouting'
@@ -142,11 +142,11 @@ export class OpenAIChatProvider implements ModelProvider {
   readonly retrySafety = 'pure-generation' as const
   constructor(private readonly options: OpenAIChatProviderOptions) {}
 
-  prepare(input: ModelRequestPayload): PreparedModelRequest {
+  prepare(input: ModelRequestPayload, accounting?: ModelPreparationOptions): PreparedModelRequest {
     const request = structuredClone(input)
     const prepared = prepare(request)
     const serialized = JSON.stringify(prepared.body)
-    return { serialized, stream: (requestId, options) => this.streamPrepared({ ...request, requestId }, prepared, serialized, options) }
+    return { serialized, ...(accounting ? { tokens: accounting.measurePayload(prepared.body) } : {}), stream: (requestId, options) => this.streamPrepared({ ...request, requestId }, prepared, serialized, options) }
   }
   async *stream(input: ModelRequest, options: { signal?: AbortSignal } = {}): AsyncGenerator<ModelEvent> {
     let prepared: PreparedModelRequest

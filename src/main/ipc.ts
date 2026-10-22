@@ -1,7 +1,10 @@
 import { isNativeProjectFilename } from '../shared/nativeProjectFile'
 import { installDocumentExportBuildListeners } from './workbench/delivery/DocumentExportBuildListeners'
 import { saveDocumentWithDialog } from './workbench/documentSaveDialog'
-import { acceptWorkbenchExportBuildReply, acceptWorkbenchExportBuildProgress, disposeWorkbenchExportPort, installWorkbenchToolServices, workbenchImageService, workbenchImageSelection, setWorkbenchHtmlPreview, workbenchHtmlActions, releaseWorkbenchHtmlDocument } from './workbench/workbenchToolServices'
+import { acceptWorkbenchExportBuildReply, acceptWorkbenchExportBuildProgress, disposeWorkbenchExportPort, installWorkbenchToolServices, workbenchImageService, workbenchImageSelection, setWorkbenchHtmlPreview, workbenchHtmlActions, releaseWorkbenchHtmlDocument, buildWorkbenchDocumentExport, buildWorkbenchPptxImport } from './workbench/workbenchToolServices'
+import { pptxImportBuildSchema, pptxImportCancelSchema } from '../shared/workbench/pptxImport'
+import { FrozenDocumentExportService } from './workbench/delivery/FrozenDocumentExportService'
+import { builtComponentDeliverySchema, frozenDeliveryBuildSchema, frozenDeliveryCancelSchema } from '../shared/workbench/frozenDelivery'
 import { ImageResultsDesktopService } from './workbench/images/ImageResultsDesktopService'
 import { HtmlImportDesktopService } from './workbench/htmlImport/HtmlImportDesktopService'
 import { importFlowDocument } from './workbench/office/flowDocumentImport'
@@ -10,7 +13,7 @@ import { promises as fs } from 'node:fs'
 import { closeDocumentWithDialog } from './workbench/documentCloseDialog'
 import { trashWorkspaceWithDialog } from './workbench/workspaceTrashDialog'
 import { workspaceFilesRequestSchema } from '../shared/workbench/workspaceFiles'
-import { mediaFilesRequestSchema, mediaFileDraftInputSchema } from '../shared/workbench/mediaFiles'
+import { mediaFilesRequestSchema, mediaFileDraftInputSchema, fileArtifactBindingSchema } from '../shared/workbench/mediaFiles'
 import { operateMediaFiles } from './workbench/mediaFilesDesktopService'
 import { operateExternalMcp, closeExternalMcpService, attachExternalMcpWindow } from './workbench/external/externalDesktopService'
 import { operateExecutionSettings } from './workbench/providers/executionSettingsService'
@@ -108,6 +111,7 @@ const documentExportBuildReplySchema = z.object({
   printHtml: z.string().optional(),
   warnings: z.array(z.string()),
   reason: z.string().optional(),
+  delivery: builtComponentDeliverySchema.optional(),
 }).strict()
 const documentExportBuildProgressSchema = z.object({
   requestId: z.uuid(), identity: documentExportBuildReplySchema.shape.identity,
@@ -307,11 +311,14 @@ function registerSafeHandler<T>(
 }
 
 let stopWorkspaceFileEvents: (() => void) | undefined
+let stopExecutionTimelineClients: (() => void) | undefined
 let documentSaveEvents: ReturnType<typeof installDocumentSaveEvents> | undefined
 let elementCardCleanup: (() => void) | undefined
 let imageResults: ImageResultsDesktopService | undefined
 let workspaceFileEventGeneration = 0
 let stopExportBuildListeners: (() => void) | undefined
+let frozenDeliveryBuilds: FrozenDocumentExportService | undefined
+const pptxImportJobs = new Map<string, AbortController>()
 let htmlPreview: HtmlPreviewService | undefined
 let htmlPreviewClosedCleanup: (() => void) | undefined
 export function releaseAllHtmlPreviewLeases(): void { htmlPreview?.releaseAll() }
@@ -350,6 +357,38 @@ function requestRendererInput<T>(window: BrowserWindow, requestChannel: string, 
 
 export function registerIpcHandlers(context: IpcContext): void {
   installWorkbenchToolServices(context)
+  stopExecutionTimelineClients?.()
+  const timelineRegistrationId = randomUUID()
+  const timelineClients = new Map<number, { current(): { id: string; isCurrent(): boolean }; dispose(): void }>()
+  const timelineClient = (sender: IpcMainInvokeEvent['sender']) => {
+    let client = timelineClients.get(sender.id)
+    if (!client) {
+      let generation = 0, disposed = false
+      const id = () => `${timelineRegistrationId}:${sender.id}:${generation}`
+      const invalidate = () => {
+        const previous = id(); generation++
+        void executionDesktopService().then(service => service.releaseTimelineClient(previous)).catch(() => undefined)
+      }
+      const navigated = (details: { isMainFrame: boolean; isSameDocument: boolean }) => { if (details.isMainFrame && !details.isSameDocument) invalidate() }
+      const dispose = () => {
+        if (disposed) return
+        disposed = true; invalidate(); timelineClients.delete(sender.id)
+        sender.removeListener('destroyed', dispose)
+        sender.removeListener('render-process-gone', invalidate)
+        sender.removeListener('did-start-navigation', navigated)
+      }
+      sender.on('destroyed', dispose)
+      sender.on('render-process-gone', invalidate)
+      sender.on('did-start-navigation', navigated)
+      client = { current: () => {
+        const expected = generation
+        return { id: id(), isCurrent: () => !disposed && !sender.isDestroyed() && expected === generation }
+      }, dispose }
+      timelineClients.set(sender.id, client)
+    }
+    return client.current()
+  }
+  stopExecutionTimelineClients = () => { for (const client of [...timelineClients.values()]) client.dispose() }
   stopExportBuildListeners?.()
   stopExportBuildListeners = installDocumentExportBuildListeners(ipcMain, { progress: (event: IpcMainEvent, raw: unknown) => {
     try {
@@ -426,7 +465,8 @@ export function registerIpcHandlers(context: IpcContext): void {
   registerSafeHandler(IPC_CHANNELS.execution, context, {
     // The service maps its own failures to specific reasons; this is left for a service that could not be reached.
     code: 'EXECUTION_FAILED', title: '会话操作未完成', message: '会话服务暂时不可用。', suggestion: '请重试；若仍失败，请重新启动编辑器。当前输入和已应用的修改已保留。',
-  }, async (_event, args) => {
+  }, async (event, args) => {
+    const client = timelineClient(event.sender)
     const service = await executionDesktopService()
     const input = requireSingleArgument(args)
     if (input && typeof input === 'object' && (input as { type?: unknown }).type === 'delete-conversation') await imageResultsReady
@@ -435,7 +475,7 @@ export function registerIpcHandlers(context: IpcContext): void {
       if (window && !window.isDestroyed()) window.webContents.send(channel, event)
     }
     service.setSinks(event => send(IPC_CHANNELS.executionEvent, event), event => send(IPC_CHANNELS.executionEdit, event))
-    return service.operate(input)
+    return service.operate(input, client)
   })
   registerSafeHandler(IPC_CHANNELS.executionSettings, context, {
     code: 'EXECUTION_SETTINGS_FAILED', title: '模型连接设置未完成',
@@ -446,6 +486,47 @@ export function registerIpcHandlers(context: IpcContext): void {
     message: 'Pixabay 设置未能保存，原配置已保留。', suggestion: '请检查系统安全存储。',
   }, async (_event, args) => operatePixabaySettings(requireSingleArgument(args)))
   const documents = documentHost()
+  frozenDeliveryBuilds?.dispose()
+  const frozenBuilds = new FrozenDocumentExportService({
+    readRevision: (documentId, revision) => documents.registry.get(documentId).readRevision(revision),
+    build: buildWorkbenchDocumentExport,
+  })
+  frozenDeliveryBuilds = frozenBuilds
+  registerSafeHandler(IPC_CHANNELS.frozenDeliveryBuild, context, {
+    code: 'EXPORT_BUILD_FAILED', title: '导出未能生成', message: '当前工程与原文件已保留。', suggestion: '请查看具体原因后重试。',
+  }, async (event, args) => frozenBuilds.build(frozenDeliveryBuildSchema.parse(requireSingleArgument(args)), {
+    id: event.sender.id,
+    onDestroyed: stop => {
+      event.sender.once('destroyed', stop)
+      if (event.sender.isDestroyed()) stop()
+      return () => { event.sender.removeListener('destroyed', stop) }
+    },
+  }))
+  registerSafeHandler(IPC_CHANNELS.frozenDeliveryCancel, context, {
+    code: 'EXPORT_CANCEL_FAILED', title: '导出停止未完成', message: '当前工程与原文件已保留。', suggestion: '请查看任务状态。',
+  }, async (event, args) => frozenBuilds.cancel(frozenDeliveryCancelSchema.parse(requireSingleArgument(args)).requestId, event.sender.id))
+  registerSafeHandler(IPC_CHANNELS.pptxImportBuild, context, {
+    code: 'PPTX_IMPORT_FAILED', title: 'PPTX 导入未完成', message: '源文件和当前工程已保留。', suggestion: '请查看具体原因后重试。',
+  }, async (event, args) => {
+    const input = pptxImportBuildSchema.parse(requireSingleArgument(args)), key = `${event.sender.id}:${input.requestId}`
+    if (pptxImportJobs.has(key)) throw new Error('PPTX 转换请求编号重复')
+    const controller = new AbortController(), destroyed = () => controller.abort(new Error('PPTX 导入窗口已关闭'))
+    pptxImportJobs.set(key, controller); event.sender.once('destroyed', destroyed)
+    if (event.sender.isDestroyed()) destroyed()
+    try {
+      controller.signal.throwIfAborted()
+      const result = await buildWorkbenchPptxImport(input, controller.signal)
+      controller.signal.throwIfAborted(); return result
+    }
+    finally { event.sender.removeListener('destroyed', destroyed); if (pptxImportJobs.get(key) === controller) pptxImportJobs.delete(key) }
+  })
+  registerSafeHandler(IPC_CHANNELS.pptxImportCancel, context, {
+    code: 'PPTX_CANCEL_FAILED', title: 'PPTX 转换停止未完成', message: '源文件和当前工程已保留。', suggestion: '请查看转换状态。',
+  }, async (event, args) => {
+    const input = pptxImportCancelSchema.parse(requireSingleArgument(args)), job = pptxImportJobs.get(`${event.sender.id}:${input.requestId}`)
+    if (!job) return false
+    job.abort(new Error('PPTX 导入已取消')); return true
+  })
   documents.setDocumentInputPreparer(documentId => requestRendererInput(requireWindow(context),
     IPC_CHANNELS.requestPrepareDocumentInput, IPC_CHANNELS.prepareDocumentInputResult, documentId, () => undefined))
   documents.setSpatialViewportPreparer(input => requestRendererInput(requireWindow(context),
@@ -461,6 +542,8 @@ export function registerIpcHandlers(context: IpcContext): void {
   htmlPreview?.dispose()
   const preview = new HtmlPreviewService({
     readDocument: documentId => documents.registry.get(documentId).drain(),
+    readDocumentIdentity: documentId => documents.registry.get(documentId).drainIdentity(),
+    readCapturedHtmlPreviewSources: (documentId, source, root) => documents.readCapturedHtmlPreviewSources(documentId, source, root),
     networkOwner: () => mainPreviewNetworkPolicy.currentDocumentOwner(),
     currentMainFrame: () => {
       const window = context.getMainWindow()
@@ -507,7 +590,8 @@ export function registerIpcHandlers(context: IpcContext): void {
     message: 'HTML 页面未能导入。', suggestion: '请检查来源文件与当前目标后重试。',
   }, async (_event, args) => htmlImport.import(requireSingleArgument(args)))
   documents.setEventSink(event => {
-    if (event.type === 'changed') preview.releaseChangedBinding(event.snapshot)
+    if (event.type === 'state') preview.releaseChangedBinding(event.head)
+    else if (event.type === 'changed') preview.releaseChangedBinding(event.head ?? event.snapshot)
     const window = context.getMainWindow()
     if (window && !window.isDestroyed()) window.webContents.send(IPC_CHANNELS.documentEvent, uiDocumentEvent(event))
   })
@@ -568,10 +652,15 @@ export function registerIpcHandlers(context: IpcContext): void {
     code: 'MEDIA_FILE_OPERATION_FAILED', title: '媒体文件操作未完成',
     message: '当前修改已保留。', suggestion: '请查看具体原因后重试。',
   }, async (_event, args) => operateMediaFiles(mediaFilesRequestSchema.parse(requireSingleArgument(args))))
+  registerSafeHandler(IPC_CHANNELS.mediaFileRelease, context, {
+    code: 'MEDIA_DRAFT_RELEASE_FAILED', title: '媒体预览未能释放', message: '原文件保持不变。', suggestion: '关闭后可重新打开。',
+  }, async (_event, args) => { documents.artifacts.media.release(fileArtifactBindingSchema.parse(requireSingleArgument(args))) })
   registerSafeHandler(IPC_CHANNELS.lessonMaterial, context, {
     code: 'LESSON_MATERIAL_FAILED', title: '材料操作未完成',
     message: '无法读取或保存课例材料。', suggestion: '请检查材料文件和课例目录。',
-  }, async (_event, args) => operateLessonMaterial(requireWindow(context), requireSingleArgument(args)))
+  }, async (event, args) => operateLessonMaterial(requireWindow(context), requireSingleArgument(args), progress => {
+    if (!event.sender.isDestroyed()) event.sender.send(`${IPC_CHANNELS.lessonMaterial}:progress`, progress)
+  }))
   registerSafeHandler(IPC_CHANNELS.lessonDocument, context, {
     code: 'LESSON_DOCUMENT_FAILED', title: '文档操作未完成',
     message: '无法完成课例文档操作。', suggestion: '请保留当前稿并检查文件状态。',
@@ -1176,7 +1265,11 @@ export function registerIpcHandlers(context: IpcContext): void {
 }
 
 export function unregisterIpcHandlers(): void {
+  stopExecutionTimelineClients?.(); stopExecutionTimelineClients = undefined
   workspaceFileEventGeneration++
+  frozenDeliveryBuilds?.dispose(); frozenDeliveryBuilds = undefined
+  for (const controller of pptxImportJobs.values()) controller.abort(new Error('PPTX 导入服务已关闭'))
+  pptxImportJobs.clear()
   stopExportBuildListeners?.(); stopExportBuildListeners = undefined
   disposeWorkbenchExportPort()
   htmlPreviewClosedCleanup?.(); htmlPreviewClosedCleanup = undefined

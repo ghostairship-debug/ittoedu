@@ -1,8 +1,33 @@
 import { expect, it } from 'vitest'
+import type { Component } from 'grapesjs'
 import { createHtmlGrapesProjection } from '../../src/renderer/documentFiles/html/htmlGrapesProjection'
 import { applyHtmlSourceEdit } from '../../src/main/workbench/htmlPreview/htmlSourceEdits'
 import { inspectHtmlSource, flattenHtmlSourceNodes } from '../../src/shared/html/htmlSourceStructure'
 import type { HtmlSourceEditCommand } from '../../src/shared/html/sourceEditCommands'
+
+it('retains existing GJS models for a canonical local style and text update', () => {
+  const container = document.createElement('div'); document.body.append(container)
+  const commits: HtmlSourceEditCommand[] = []
+  const projection = createHtmlGrapesProjection(container, { select() {}, async commit(command) { commits.push(command) } })
+  const source = '<main><p id="a">A</p><script>window.keep=1</script><p id="b">B</p></main>'
+  try {
+    projection.project(source)
+    const byId = (id: string) => {
+      const collect = (model: Component | undefined): Component[] => model
+        ? [model, ...model.components().models.flatMap(child => collect(child))] : []
+      return collect(projection.editor.getWrapper()).find(model => model.getAttributes().id === id)!
+    }
+    const a = byId('a'), b = byId('b')
+    const next = source.replace('<p id="a">A</p>', '<p id="a" style="color:red">Longer text</p>')
+    projection.project(next, undefined, inspectHtmlSource(next))
+    expect(byId('a')).toBe(a)
+    expect(byId('b')).toBe(b)
+    expect(a.getStyle().color).toBe('red')
+    expect(a.components().at(0).get('content')).toBe('Longer text')
+    expect(commits).toHaveLength(0)
+    expect(projection.editor.UndoManager.getStack().length).toBe(0)
+  } finally { projection.dispose(); container.remove() }
+})
 
 it('projects real GJS move and style into local source commands without add/remove or replay writes', async () => {
   const container = document.createElement('div'); document.body.append(container)

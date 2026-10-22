@@ -1,4 +1,6 @@
 // @vitest-environment node
+import { componentSurfaces } from '../../src/shared/contracts/component-platform/project'
+import { testContainerInstance } from '../helpers/glxWorkFixture'
 import { promises as fs } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -79,7 +81,7 @@ it('shares one native build across admission, registered IPC and isolated observ
       kind: 'source', language: 'javascript', workspace: { ownerId: 'shared', entry: 'main.js' },
     } }
     project.instances.a = { id: 'a', definitionId: 'custom', data: {} }
-    project.surfaces[0].childIds = ['a']
+    testContainerInstance(project, 0).childIds = ['a']
     const opened = await host.internalAPI.create({ kind: 'course-v10', project, resources: {
       assets: {}, components: { shared: { 'main.js': new TextEncoder().encode(source) } },
     } }, 'compilation.h5lesson')
@@ -111,7 +113,7 @@ it('shares one native build across admission, registered IPC and isolated observ
     }
     expect(await invoke(input)).toMatchObject({ status: 'ready', cacheHit: true })
     const identity = { documentId: snapshot.documentId, epoch: snapshot.epoch, revision: snapshot.revision,
-      locationId: project.surfaces[0].id, stateId: null, viewGeneration: 'r2-compiled' }
+      locationId: componentSurfaces(project)[0].id, stateId: null, viewGeneration: 'r2-compiled' }
     for (let capture = 0; capture < 2; capture++) {
       const observation = new ViewObservationDesktopService({ rendererEntryUrl: frame.url, compilation: host.compilation })
       expect(await observation.captureIsolated({ identity, snapshot })).toMatchObject({ identity, diagnostics: [] })

@@ -32,7 +32,7 @@ function catalogEntry(
     packagePath: `packages/component-${index}.h5component`,
     thumbnailPath: `thumbnails/component-${index}.svg`,
     sha256: index.toString(16).padStart(64, '0'),
-    componentSchemaVersion: 1,
+    componentSchemaVersion: 2,
     runtimeApiVersion: 5,
     renderMode: 'dom',
     supportedScopes: ['scene'],

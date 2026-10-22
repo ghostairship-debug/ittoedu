@@ -14,6 +14,14 @@ const directories: string[] = []
 afterEach(async () => { await Promise.all(directories.splice(0).map(directory => rm(directory, { recursive: true, force: true }))) })
 
 describe('M23 preview protocol', () => {
+  it('snapshots only the binary view range without transferring the owner buffer', async () => {
+    const owner = new Uint8Array([1, 2, 3, 4])
+    const response = htmlPreviewResponse(owner.subarray(1, 3))
+    owner[1] = 9
+    expect([...new Uint8Array(await response.arrayBuffer())]).toEqual([2, 3])
+    expect([...owner]).toEqual([1, 9, 3, 4])
+  })
+
   it('accepts only the leased file shape and one decoded relative path', () => {
     const url = htmlPreviewFileUrl(token, '子目录/我的图.png')
     expect(parseHtmlPreviewProtocolUrl(url)).toEqual({ kind: 'file', token, relativePath: '子目录/我的图.png', hasQuery: false })
@@ -42,6 +50,7 @@ describe('M23 preview protocol', () => {
     expect(csp).not.toContain('https://bad.example')
     expect(csp).toContain("connect-src 'self'")
     expect(csp).toContain("frame-src 'self' blob:")
+    expect(csp).toContain("base-uri 'self'")
     expect(csp).toContain("script-src 'self' 'unsafe-inline' 'unsafe-eval' blob:")
     expect(csp).toContain("sandbox allow-scripts allow-same-origin")
     expect(csp).toContain("worker-src 'none'")

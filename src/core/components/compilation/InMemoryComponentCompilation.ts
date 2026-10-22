@@ -57,12 +57,12 @@ export class InMemoryComponentCompilation {
   }
 
   async compile(input: ComponentCompilationInput): Promise<ComponentCompilationResult> {
+    const started = performance.now()
     const source = snapshot(input)
     // This key identifies the exact compiler input; binary bytes never become
     // millions of numeric JSON property names retained for every edit version.
     const key = createHash('sha256').update(JSON.stringify([this.compiler.identity, source], (_name, value) =>
       value instanceof Uint8Array ? Buffer.from(value).toString('base64') : value)).digest('hex')
-    const started = performance.now()
     const existing = this.cache.get(key)
     const work = existing ?? Promise.resolve().then(() => this.compiler.compile(source))
     if (!existing) { this.cache.set(key, work); this.pending.add(work) }

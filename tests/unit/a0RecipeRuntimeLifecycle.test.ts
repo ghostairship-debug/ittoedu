@@ -1,4 +1,5 @@
 // @vitest-environment node
+import { componentSurfaces } from '../../src/shared/contracts/component-platform/project'
 import { compileFunction, constants } from 'node:vm'
 import { JSDOM } from 'jsdom'
 import userEvent from '@testing-library/user-event'
@@ -18,7 +19,7 @@ import type { ComponentImplementation } from '../../src/shared/contracts/compone
 /** Use the formal recipe source and the same World/navigation ports that Editor and Player consume. */
 async function recipeRuntime(recipeId: RecipeId, initialStep = '0') {
   const original = createBlankCourseProjectV10('配方行为保全')
-  const originId = original.surfaces[0].id, resources = { assets: {}, components: {} }
+  const originId = componentSurfaces(original)[0].id, resources = { assets: {}, components: {} }
   const slots = recipeDefaults(recipeId)
   if (recipeId === 'step-reveal-v1') slots.initialStep = initialStep
   else slots.mode = 'sort'
@@ -27,7 +28,7 @@ async function recipeRuntime(recipeId: RecipeId, initialStep = '0') {
   if (!result.ok) throw new Error(result.reason)
   const model = new CourseV10Driver().apply({ kind: 'course-v10', project: original, resources }, captureComponentOperation(original, result.edits))
   if (model.kind !== 'course-v10') throw new Error('Expected a formal V10 recipe')
-  const surface = model.project.surfaces.find(value => value.id === result.createdLocationId)!
+  const surface = componentSurfaces(model.project).find(value => value.id === result.createdLocationId)!
   const instance = surface.childIds.map(id => model.project.instances[id]).find(value => model.project.definitions[value.definitionId].implementation.kind === 'source')!
   const dom = new JSDOM('<!doctype html><body><div id="recipe"></div></body>')
   const root = dom.window.document.getElementById('recipe')!

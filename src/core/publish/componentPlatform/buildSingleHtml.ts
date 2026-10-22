@@ -1,4 +1,4 @@
-import type { PublishedCourseV3 } from '../../../shared/contracts/component-platform/published'
+import type { PublishedCourseV4 } from '../../../shared/contracts/component-platform/published'
 
 const escapeAttribute = (value: string) => value.replace(/[&<>"']/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[character]!)
 const scriptLiteral = (value: string) => JSON.stringify(value).replace(/</g, '\\u003c')
@@ -20,8 +20,8 @@ function singleHtml(payload: { title: string }, playerBundle: string, entry: str
 }
 
 /** Fixed host template; source remains JSON data until the isolated runtime loads compiled ESM. */
-export function buildComponentSingleHtml(payload: PublishedCourseV3, playerBundle: string, options: { preparedAssetScriptUrl?: string; fontFaceCssElementId?: string } = {}): string {
-  return singleHtml(payload, playerBundle, 'CoursewarePlayer.mountPublishedCourseV3', options)
+export function buildComponentSingleHtml(payload: PublishedCourseV4, playerBundle: string, options: { preparedAssetScriptUrl?: string; fontFaceCssElementId?: string } = {}): string {
+  return singleHtml(payload, playerBundle, 'CoursewarePlayer.mountPublishedCourseV4', options)
 }
 
 /** Final delivery template consumes materialized compiled content and the shared runtime only. */

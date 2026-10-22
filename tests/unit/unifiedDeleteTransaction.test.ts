@@ -1,3 +1,4 @@
+import { createTestProjectFromLegacy, testContainerInstance } from '../helpers/glxWorkFixture'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { TextEncoder as NodeTextEncoder } from 'node:util'
 import { createV10StoreHost } from '../helpers/courseV10StoreHost'
@@ -21,7 +22,7 @@ function fixture(): CourseProjectV10 {
   const keep = rule('keep', { type: 'node.click', nodeId: 'kept' }, { type: 'node.enter', nodeId: 'spatial-object', effect: 'fade', durationMs: 200, easing: 'ease-out' })
   keep.actions.push({ id: 'remaining-action', start: 'with-previous', delayMs: 0, action: { type: 'node.exit', nodeId: 'kept', effect: 'fade', durationMs: 200, easing: 'ease-out' } })
   const rules = [root, follower, last, keep]
-  return { schemaVersion: 10, id: 'delete-project', revision: 0, title: '一次删除',
+  return createTestProjectFromLegacy({ schemaVersion: 10, id: 'delete-project', revision: 0, title: '一次删除',
     definitions: { [TEXT_DEFINITION.id]: TEXT_DEFINITION, [WEB_DEFINITION.id]: WEB_DEFINITION, [INTERACTIONS_DEFINITION.id]: INTERACTIONS_DEFINITION },
     instances: {
       'slide-object': { id: 'slide-object', definitionId: WEB_DEFINITION.id, data: { html: '删除的演示对象' }, frame },
@@ -46,7 +47,7 @@ function fixture(): CourseProjectV10 {
         paths: [{ id: 'path', frameIds: ['place'], instanceIds: ['spatial-object', 'kept'] }],
         relations: [{ id: 'relation', sourceInstanceId: 'spatial-object', targetInstanceId: 'kept', kind: 'arrow' }],
         semanticZoom: [{ id: 'zoom', instanceIds: ['spatial-object', 'kept'], minZoom: .5, maxZoom: 2, visible: true }] } },
-    ], global: { underlay: ['attached'], overlay: ['global-object'] }, assets: { image: { id: 'image', path: 'assets/image.png', mimeType: 'image/png' } } }
+    ], global: { underlay: ['attached'], overlay: ['global-object'] }, assets: { image: { id: 'image', path: 'assets/image.png', mimeType: 'image/png' } } })
 }
 async function harness(project = fixture()) {
   useEditorStore.getState().courseBridge.dispose()
@@ -69,16 +70,16 @@ it('deletes a mixed surface/global selection, repairs formal references and save
   const project = after.model.project
   expect(project.instances.attached.attachments).toEqual([{ instanceId: 'attached', target: { kind: 'instance', instanceId: 'kept' } }])
   expect(project.instances.floating.flowPlacement?.paragraphAnchor).toBeUndefined()
-  const stateView = project.surfaces[0].presentation!.states[0]
+  const stateView = testContainerInstance(project, 0).container.presentation!.states[0]
   expect(stateView.order).toEqual(['behavior']); expect(stateView.overrides['slide-object']).toBeUndefined()
   for (const data of [project.instances.behavior.data, stateView.overrides.behavior.data!]) {
     const rules = interactionRules({ ...project.instances.behavior, data })
     expect(rules.map(value => value.id)).toEqual(['keep'])
     expect(rules[0].actions).toEqual([{ id: 'remaining-action', start: 'after-previous', delayMs: 0, action: { type: 'node.exit', nodeId: 'kept', effect: 'fade', durationMs: 200, easing: 'ease-out' } }])
   }
-  expect(project.surfaces[2].spatial).toMatchObject({ frames: [{ id: 'place', pose: { x: 0, y: 0, zoom: 1 } }],
+  expect(testContainerInstance(project, 2).container.spatial).toMatchObject({ frames: [{ id: 'place', pose: { x: 0, y: 0, zoom: 1 } }],
     paths: [{ instanceIds: ['kept'] }], relations: [], semanticZoom: [{ instanceIds: ['kept'] }] })
-  expect(project.surfaces[2].spatial!.frames[0].targetInstanceId).toBeUndefined()
+  expect(testContainerInstance(project, 2).container.spatial!.frames[0].targetInstanceId).toBeUndefined()
   expect(project.instances.kept).toEqual(before.model.project.instances.kept)
   expect(after.model.resources).toEqual(before.model.resources)
   await state.saveCourseDocument()

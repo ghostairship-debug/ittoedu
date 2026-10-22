@@ -1,3 +1,5 @@
+import { appendRootContainers, setRootContainers } from '../helpers/glxWorkFixture'
+import { componentSurfaces } from '../../src/shared/contracts/component-platform/project'
 // @vitest-environment node
 import { expect, it } from 'vitest'
 import { createBlankCourseProjectV10 } from '../../src/core/course/createCourseProjectV10'
@@ -9,8 +11,8 @@ import type { DocumentModel } from '../../src/shared/workbench/document'
 
 function sample(): Extract<DocumentModel, { kind: 'course-v10' }> {
   const project = createBlankCourseProjectV10('共享母版')
-  project.surfaces[0].id = 'page-a'
-  project.surfaces.push({ id: 'page-b', kind: 'slide', title: '第二页', childIds: [] })
+  setRootContainers(project, [{ ...componentSurfaces(project)[0], id: 'page-a' }])
+  appendRootContainers(project, { id: 'page-b', kind: 'slide', title: '第二页', childIds: [] })
   project.definitions.image = { id: 'image', role: 'content', implementation: { kind: 'builtin', key: 'guoling.image' } }
   project.assets.art = { id: 'art', path: 'assets/art.png', mimeType: 'image/png' }
   for (const [id, mode, surfaceIds] of [

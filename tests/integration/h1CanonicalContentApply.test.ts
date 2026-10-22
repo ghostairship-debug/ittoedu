@@ -1,4 +1,5 @@
 // @vitest-environment node
+import { testContainerInstance } from '../helpers/glxWorkFixture'
 import { randomUUID } from 'node:crypto'
 import { promises as fs } from 'node:fs'
 import os from 'node:os'
@@ -24,7 +25,7 @@ it.each(['ready', 'invalid'] as const)('commits a canonical %s source and owner 
       frame: { width: 180, height: 60, transform: [1, 0, 0, 1, 51, 77] } }
     project.instances.neighbor = { id: 'neighbor', definitionId: 'custom', data: {},
       frame: { width: 180, height: 60, transform: [1, 0, 0, 1, 290, 130] } }
-    project.surfaces[0]!.childIds = ['first', 'neighbor']
+    testContainerInstance(project, 0).childIds = ['first', 'neighbor']
     const documents = new DocumentHostService(path.join(root, 'documents'))
     const captured = await documents.internalAPI.create({ kind: 'course-v10', project,
       resources: { assets: {}, components: { [ownerId]: { 'main.js': encode(originalSource) } } } }, 'canonical.h5lesson')

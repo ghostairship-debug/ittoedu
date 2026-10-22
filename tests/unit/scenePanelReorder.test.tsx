@@ -1,3 +1,4 @@
+import { componentSurfaces } from '../../src/shared/contracts/component-platform/project'
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, expect, it } from 'vitest'
 import { useEditorStore } from '../../src/renderer/store/editorStore'
@@ -19,7 +20,7 @@ async function fixture() {
   const spatialId = store().courseView.surfaceId!
   await store().addTextNode()
   await store().addSpatialCameraFrameFromSession(spatialId)
-  const world = store().courseView.project!.surfaces.find(surface => surface.id === spatialId)!
+  const world = componentSurfaces(store().courseView.project!).find(surface => surface.id === spatialId)!
   return { host, documentId, session, spatialId, cameraId: world.spatial!.frames[0].id, cameraTitle: world.spatial!.frames[0].title!, textId: world.childIds[0] }
 }
 
@@ -35,7 +36,7 @@ it('keeps page and camera tree targets separate and makes same-owner reorders on
   if (plan?.kind !== 'surfaces') throw new Error('Expected a page reorder')
   const before = h.session.read()
   await act(async () => { expect((await store().reorderCourseSurfaces(plan.surfaceIds)).ok).toBe(true) })
-  expect(store().courseView.project!.surfaces.map(surface => surface.id)).toEqual(plan.surfaceIds)
+  expect(componentSurfaces(store().courseView.project!).map(surface => surface.id)).toEqual(plan.surfaceIds)
   expect(h.session.read().undoDepth).toBe(before.undoDepth + 1)
   await act(async () => { await store().courseBridge.undo(h.documentId) })
   expect(h.session.read().model).toMatchObject({ project: { ...course(before), revision: h.session.read().revision }, resources: before.model.resources })
@@ -45,13 +46,13 @@ it('keeps page and camera tree targets separate and makes same-owner reorders on
 })
 
 it('deletes a real page only after confirmation, restores it with one Undo, and guards the last page', async () => {
-  const h = await fixture(), slide = store().courseView.project!.surfaces[0]
+  const h = await fixture(), slide = componentSurfaces(store().courseView.project!)[0]
   render(<ScenePanel />)
   const before = h.session.read()
   fireEvent.click(screen.getByRole('button', { name: `删除页面“${slide.title}”` }))
   expect(h.session.read()).toEqual(before)
   await act(async () => { fireEvent.click(screen.getByRole('button', { name: '删除页面' })); await store().courseBridge.drain() })
-  expect(store().courseView.project!.surfaces.some(surface => surface.id === slide.id)).toBe(false)
+  expect(componentSurfaces(store().courseView.project!).some(surface => surface.id === slide.id)).toBe(false)
   expect(h.session.read().undoDepth).toBe(before.undoDepth + 1)
   await act(async () => { await store().courseBridge.undo(h.documentId) })
   expect(h.session.read().model).toMatchObject({ project: { ...course(before), revision: h.session.read().revision }, resources: before.model.resources })
@@ -62,7 +63,7 @@ it('deletes a real page only after confirmation, restores it with one Undo, and 
 })
 
 it.each(['page', 'camera'] as const)('rejects a delayed %s delete after its author target changes', async kind => {
-  const h = await fixture(), page = store().courseView.project!.surfaces.find(surface => surface.id === h.spatialId)!
+  const h = await fixture(), page = componentSurfaces(store().courseView.project!).find(surface => surface.id === h.spatialId)!
   render(<ScenePanel />)
   fireEvent.click(screen.getByRole('button', { name: kind === 'camera' ? `删除镜头“${h.cameraTitle}”` : `删除页面“${page.title}”` }))
   await act(async () => {
@@ -76,7 +77,7 @@ it.each(['page', 'camera'] as const)('rejects a delayed %s delete after its auth
 })
 
 it.each(['page', 'camera'] as const)('rejects the delayed %s delete when an unacknowledged content draft opens after the dialog', async kind => {
-  const h = await fixture(), page = store().courseView.project!.surfaces.find(surface => surface.id === h.spatialId)!
+  const h = await fixture(), page = componentSurfaces(store().courseView.project!).find(surface => surface.id === h.spatialId)!
   render(<ScenePanel />)
   fireEvent.click(screen.getByRole('button', { name: kind === 'camera' ? `删除镜头“${h.cameraTitle}”` : `删除页面“${page.title}”` }))
   act(() => {

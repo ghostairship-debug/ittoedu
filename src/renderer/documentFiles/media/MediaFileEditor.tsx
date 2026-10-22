@@ -31,6 +31,7 @@ export const MediaFileEditor = forwardRef<MediaFileEditorHandle, MediaFileEditor
   const currentPort = useRef(port); currentPort.current = port
   const closeSuspended = useRef(false)
   const draft = useMemo(() => new MediaFileDraft(snapshot, {
+    release: binding => currentPort.current.release?.(binding),
     preview: (...args) => currentPort.current.preview(...args), save: (...args) => currentPort.current.save(...args), reload: (...args) => currentPort.current.reload(...args),
   }), [])
   const state = useSyncExternalStore(draft.subscribe, draft.read)
@@ -41,6 +42,9 @@ export const MediaFileEditor = forwardRef<MediaFileEditorHandle, MediaFileEditor
   const [pdfReady, setPdfReady] = useState(false)
   const gesture = useRef<MediaPoint[]>([])
   const activePointer = useRef<number | null>(null)
+  const inkPreview = useRef<SVGPolylineElement>(null)
+  const drawnPoints = useRef(0)
+  const gestureFrame = useRef<number | null>(null)
   const [imageUrl, setImageUrl] = useState<string | null>(null)
   const [savedMessage, setSavedMessage] = useState('')
   const content = state.preview.content
@@ -48,6 +52,7 @@ export const MediaFileEditor = forwardRef<MediaFileEditorHandle, MediaFileEditor
   const currentPage = Math.min(page, Math.max(0, lastPage))
   const disabled = Boolean(state.busy) || !state.previewReady || !content.editable || content.kind === 'pdf' && !pdfReady
   useEffect(() => () => draft.dispose(), [draft])
+  useEffect(() => () => { if (gestureFrame.current !== null) cancelAnimationFrame(gestureFrame.current) }, [])
   useEffect(() => { draft.rebind(snapshot.binding) }, [draft, snapshot.binding])
   useEffect(() => { onDirtyChange?.(state.operations.length > 0) }, [state.operations.length, onDirtyChange])
   useEffect(() => {
@@ -57,6 +62,26 @@ export const MediaFileEditor = forwardRef<MediaFileEditorHandle, MediaFileEditor
     return () => URL.revokeObjectURL(url)
   }, [content])
   const apply = (operation: MediaFileOperation) => { if (!closeSuspended.current) { setSavedMessage(''); void draft.apply(operation) } }
+  const clearGesture = () => {
+    if (gestureFrame.current !== null) cancelAnimationFrame(gestureFrame.current)
+    gestureFrame.current = null; drawnPoints.current = 0
+    activePointer.current = null; gesture.current = []; setPoints([])
+    inkPreview.current?.points.clear()
+  }
+  const drawGesture = () => {
+    if (gestureFrame.current !== null) return
+    gestureFrame.current = requestAnimationFrame(() => {
+      gestureFrame.current = null
+      if (mode !== 'ink') { setPoints([...gesture.current]); return }
+      const polyline = inkPreview.current, svg = polyline?.ownerSVGElement
+      if (!polyline || !svg) return
+      while (drawnPoints.current < gesture.current.length) {
+        const sample = gesture.current[drawnPoints.current++]!, point = svg.createSVGPoint()
+        point.x = sample.x; point.y = sample.y
+        polyline.points.appendItem(point)
+      }
+    })
+  }
   const drain = async () => {
     if (draft.read().busy) await new Promise<void>(resolve => {
       const unsubscribe = draft.subscribe(() => { if (!draft.read().busy) { unsubscribe(); resolve() } })
@@ -81,7 +106,7 @@ export const MediaFileEditor = forwardRef<MediaFileEditorHandle, MediaFileEditor
       if (activePointer.current !== null || gesture.current.length) throw new Error('请完成当前媒体手势后再复制当前稿')
       return draft.captureCopyDraft()
     },
-    suspendForClose: () => { closeSuspended.current = true; activePointer.current = null; gesture.current = []; setPoints([]) },
+    suspendForClose: () => { closeSuspended.current = true; clearGesture() },
     resumeAfterCloseCancelled: () => { closeSuspended.current = false },
     close: async () => {
       if (!await drain()) return false
@@ -95,14 +120,14 @@ export const MediaFileEditor = forwardRef<MediaFileEditorHandle, MediaFileEditor
       return false
     },
   }))
-  const pointAt = (event: PointerEvent<SVGSVGElement>): MediaPoint => {
-    const bounds = event.currentTarget.getBoundingClientRect()
+  const pointAt = (event: Pick<PointerEvent, 'clientX' | 'clientY'>, bounds: DOMRect): MediaPoint => {
     return { x: Math.max(0, Math.min(1, (event.clientX - bounds.left) / bounds.width)), y: Math.max(0, Math.min(1, (event.clientY - bounds.top) / bounds.height)) }
   }
   const finish = (event: PointerEvent<SVGSVGElement>) => {
     if (activePointer.current !== event.pointerId) return
-    const next = [...gesture.current, pointAt(event)]
-    activePointer.current = null; gesture.current = []; setPoints([])
+    const next = gesture.current
+    next.push(pointAt(event, event.currentTarget.getBoundingClientRect()))
+    clearGesture()
     event.currentTarget.releasePointerCapture(event.pointerId)
     if (disabled || next.length < 2) return
     if (mode === 'ink') {
@@ -165,15 +190,20 @@ export const MediaFileEditor = forwardRef<MediaFileEditorHandle, MediaFileEditor
           style={{ pointerEvents: mode === 'select' || disabled ? 'none' : 'auto' }}
           onPointerDown={event => {
             if (disabled || mode === 'select' || event.button !== 0) return
-            event.preventDefault(); activePointer.current = event.pointerId; gesture.current = [pointAt(event)]; setPoints(gesture.current)
+            event.preventDefault(); clearGesture(); activePointer.current = event.pointerId
+            gesture.current = [pointAt(event, event.currentTarget.getBoundingClientRect())]; drawGesture()
             event.currentTarget.setPointerCapture(event.pointerId)
           }}
           onPointerMove={event => {
             if (activePointer.current !== event.pointerId) return
-            gesture.current = mode === 'ink' ? [...gesture.current, pointAt(event)] : [gesture.current[0]!, pointAt(event)]
-            setPoints(gesture.current)
-          }} onPointerUp={finish} onPointerCancel={() => { activePointer.current = null; gesture.current = []; setPoints([]) }}>
-          {mode === 'ink' && points.length > 1 ? <polyline points={points.map(point => `${point.x},${point.y}`).join(' ')} fill="none" stroke={color} strokeWidth="0.006" />
+            const bounds = event.currentTarget.getBoundingClientRect()
+            if (mode === 'ink') {
+              const samples = event.nativeEvent.getCoalescedEvents?.()
+              for (const sample of samples?.length ? samples : [event]) gesture.current.push(pointAt(sample, bounds))
+            } else gesture.current = [gesture.current[0]!, pointAt(event, bounds)]
+            drawGesture()
+          }} onPointerUp={finish} onPointerCancel={clearGesture}>
+          {mode === 'ink' ? <polyline ref={inkPreview} fill="none" stroke={color} strokeWidth="0.006" />
             : pendingRect && <rect {...pendingRect} fill={mode === 'highlight' ? color : 'rgba(68,130,245,.12)'} fillOpacity={0.35} stroke={color} strokeWidth="0.003" />}
         </svg>
       </div>

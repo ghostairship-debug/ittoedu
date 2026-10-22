@@ -1,8 +1,8 @@
-import { Document as WordDocument, HeadingLevel, Packer, Paragraph, Table, TableCell, TableRow, TextRun, WidthType } from 'docx'
 import { children, descendants, NS, OfficePackage, replaceTextRange, textOf } from './officePackage'
 import type { OfficeContentInspection, OfficeRequest } from '../../../shared/workbench/officeFiles'
 
 export async function createDocx(request: OfficeRequest<'docx', 'create'>): Promise<Uint8Array> {
+  const { Document: WordDocument, HeadingLevel, Packer, Paragraph, Table, TableCell, TableRow, TextRun, WidthType } = await import('docx')
   const headings = { title: HeadingLevel.TITLE, heading1: HeadingLevel.HEADING_1, heading2: HeadingLevel.HEADING_2, heading3: HeadingLevel.HEADING_3 }
   const blocks = request.blocks.map(block => block.type === 'paragraph'
     ? new Paragraph({

@@ -1,9 +1,12 @@
 import { useEffect, useState } from 'react'
 import type { DocumentHostAPI } from '../../../shared/workbench/desktop'
 import type { DocumentSnapshot } from '../../../shared/workbench/document'
+import type { DocumentFileSession } from '../../documentFiles/documentFileSession'
 import './workspaceDocumentStatus.css'
 
-export function documentSaveLabel(snapshot: DocumentSnapshot): string {
+type DocumentSaveStatus = Pick<DocumentSnapshot, 'documentId' | 'epoch' | 'saving' | 'saveError' | 'recovered' | 'dirty' | 'binding'>
+
+export function documentSaveLabel(snapshot: DocumentSaveStatus): string {
   if (snapshot.saving) return '保存中'
   if (snapshot.saveError) return '保存失败'
   if (snapshot.recovered && snapshot.dirty) return '恢复稿 · 原文件未保存'
@@ -18,23 +21,43 @@ function saveFailureMessage(error: string): string {
 }
 
 /** A projection of the formal document; never estimates save completion from dirty alone. */
-export function WorkspaceDocumentStatus({ api, documentId }: { api?: DocumentHostAPI; documentId?: string }) {
-  const [current, setCurrent] = useState<DocumentSnapshot | null>(null)
+export function WorkspaceDocumentStatus({ api, documentId, session }: {
+  api?: DocumentHostAPI
+  documentId?: string
+  session?: Pick<DocumentFileSession, 'committedDocument' | 'subscribe'>
+}) {
+  const [current, setCurrent] = useState<DocumentSaveStatus | null>(null)
   useEffect(() => {
     setCurrent(null)
+    if (session && documentId) {
+      let closed = false
+      const refresh = () => {
+        const snapshot = session.committedDocument
+        setCurrent(!closed && snapshot?.documentId === documentId ? snapshot : null)
+      }
+      const stop = session.subscribe(refresh)
+      const stopClosed = api?.subscribe(event => {
+        if (event.type === 'closed' && event.documentId === documentId
+          && event.epoch === session.committedDocument?.epoch) { closed = true; setCurrent(null) }
+      })
+      refresh()
+      return () => { stop(); stopClosed?.() }
+    }
     if (!api || !documentId) return
     let active = true, observed = false
     const stop = api.subscribe(event => {
       if (!active) return
-      if (event.type === 'changed' && event.snapshot.documentId === documentId) {
-        observed = true; setCurrent(event.snapshot)
+      if (event.type !== 'closed') {
+        const facts = event.type === 'changed' ? event.head ?? event.snapshot : event.head
+        if (facts.documentId !== documentId) return
+        observed = true; setCurrent(facts)
       } else if (event.type === 'closed' && event.documentId === documentId) {
         observed = true; setCurrent(null)
       }
     })
     void api.read(documentId).then(snapshot => { if (active && !observed) setCurrent(snapshot) }).catch(() => {})
     return () => { active = false; stop() }
-  }, [api, documentId])
+  }, [api, documentId, session])
   if (!current || current.documentId !== documentId) return null
   return <span className="workspace-document-status" role="status" data-save-state={current.saving ? 'saving' : current.saveError ? 'failed' : current.dirty ? 'dirty' : current.binding.kind === 'file' ? 'saved' : 'untitled'}>
     {documentSaveLabel(current)}

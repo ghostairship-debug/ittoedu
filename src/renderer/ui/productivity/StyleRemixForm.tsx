@@ -1,3 +1,4 @@
+import { componentSurfaces } from '../../../shared/contracts/component-platform/project'
 import { useMemo, useRef, useState } from 'react'
 import { applyStyleRemix, previewStyleRemix, type StyleRemixPreview } from '../../authoring/productivity/styleRemix'
 import type { ProductivityDialogProps } from './ProductivityDialog'
@@ -36,7 +37,7 @@ export function StyleRemixForm({ getContext, getAssetFiles, onCommit, onClose, o
     <p>保留参考页的可编辑布局，逐项填写替换文字。保持原文本框大小；副本创建后可继续调整文本框或文字。确认后新增独立副本，可整体撤销。</p>
     <label>样板来源 <select aria-label="样板来源" value={surfaceId} disabled={busy} onChange={e => { setSurfaceId(e.target.value); setSlots({}); setPreview(null); setMessage('') }}>
       <option value="">选择参考页</option>
-      {context.document.surfaces.filter(surface => surface.kind === 'slide').map(surface => <option key={surface.id} value={surface.id}>{surface.title}</option>)}
+      {componentSurfaces(context.document).filter(surface => surface.kind === 'slide').map(surface => <option key={surface.id} value={surface.id}>{surface.title}</option>)}
     </select></label>
     {source?.slots.map(slot => <label key={slot.id} style={{ display: 'block', marginBlock: 12 }}>
       {slot.label} · 原文：{slot.original}

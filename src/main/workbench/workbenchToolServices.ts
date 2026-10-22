@@ -11,7 +11,7 @@ import { AgentFileOutcomeUnknown } from '../../core/tools/AgentFileTools'
 import { materialListSchema } from '../../core/tools/MaterialTools'
 import { dispatchMaterialTool, readMaterialImageSource } from './execution/MaterialReadTools'
 import { attachmentsDesktopService } from './attachments/attachmentsDesktopService'
-import type { ExportBuildReply, ExportBuildProgress } from '../../shared/workbench/toolPorts'
+import type { ExportBuildReply, ExportBuildProgress, ExportBuildRequest } from '../../shared/workbench/toolPorts'
 import type { ModelConnectionSnapshot } from '../../shared/workbench/modelProvider'
 import type { SpeechSelectionSnapshot } from '../../shared/workbench/speechSettings'
 import { IPC_CHANNELS } from '../../shared/ipcTypes'
@@ -67,6 +67,8 @@ import { renderPdfFromHtml } from '../pdfExport'
 import { createHtmlActionServices } from './observation/TaskHtmlPreview'
 import type { HtmlPreviewService } from './htmlPreview/HtmlPreviewService'
 import { PptxCourseImportProducer } from './pptxImport/PptxCourseImportProducer'
+import { createDocumentArchive } from './documentArchiveWorker'
+import type { PptxImportBuildInput, PptxImportBuildResult } from '../../shared/workbench/pptxImport'
 import { mediaFileInput } from './admittedMediaResource'
 
 let installed = false
@@ -78,10 +80,18 @@ let browserService: ManagedBrowserMcpService | undefined
 let exportPort: DocumentExportPort | undefined
 let exportOwnerId: number | undefined
 let headlessExportWorker: HeadlessDocumentExportWorker | undefined
+let isolatedExportBuild: ((request: ExportBuildRequest, signal?: AbortSignal) => Promise<ExportBuildReply>) | undefined
 let htmlActionServices: ReturnType<typeof createHtmlActionServices> | undefined
 let publishedViewService: ViewObservationDesktopService | undefined
 let htmlActionOptions: Parameters<typeof createHtmlActionServices>[0] | undefined
 let pptxImportProducer: PptxCourseImportProducer | undefined
+/** Manual and tool conversion share the existing isolated PPTX producer. */
+export async function buildWorkbenchPptxImport(input: PptxImportBuildInput, signal?: AbortSignal, rendererEntry = resolveRendererEntryUrl()): Promise<PptxImportBuildResult> {
+  const producer = pptxImportProducer ??= new PptxCourseImportProducer(rendererEntry)
+  return input.mode === 'course'
+    ? { mode: 'course', course: await producer.prepare(input, signal) }
+    : { mode: 'draft', draft: await producer.parse(input, signal) }
+}
 let computeBackend: PyodideComputeBackend | undefined
 let nativeExecutionEngine: NativeExecutionEnginePort | undefined
 let delegationService: DelegationJobService | undefined
@@ -109,6 +119,11 @@ export function acceptWorkbenchExportBuildReply(reply: ExportBuildReply, senderI
 }
 export function acceptWorkbenchExportBuildProgress(progress: ExportBuildProgress, senderId: number): boolean {
   return exportPort?.progress(progress, senderId) ?? false
+}
+/** GUI and tool build requests share the existing isolated producer. Draft drain stays in the App. */
+export function buildWorkbenchDocumentExport(request: ExportBuildRequest, signal?: AbortSignal): Promise<ExportBuildReply> {
+  if (!isolatedExportBuild) return Promise.reject(new Error('隔离导出服务尚未安装'))
+  return isolatedExportBuild(request, signal)
 }
 export function disposeWorkbenchExportPort(): void {
   exportPort?.dispose(); exportPort = undefined; exportOwnerId = undefined
@@ -198,7 +213,8 @@ export function installWorkbenchToolServices(context: { getMainWindow(): Browser
       const entry = context.getRendererEntryUrl()
       if (!entry) throw new Error('当前没有可用的页面观察入口')
       publishedViewService = new ViewObservationDesktopService({ rendererEntryUrl: entry, compilation: host.compilation,
-        snapshot: documentId => host.registry.get(documentId).drain() })
+        snapshot: documentId => host.registry.get(documentId).drain(),
+        currentIdentity: documentId => host.registry.get(documentId).drainIdentity() })
     }
     return publishedViewService
   }
@@ -210,10 +226,11 @@ export function installWorkbenchToolServices(context: { getMainWindow(): Browser
     releaseRun: runId => publishedViewService?.releaseRun(runId),
   }
   htmlActionServices = createHtmlActionServices(htmlActionOptions, { images: observationImages, published })
-  if (context.headless) {
+  isolatedExportBuild = (request, signal) => {
     const entry = context.getRendererEntryUrl()
-    if (!entry) throw new Error('后台导出资源入口不可用')
-    headlessExportWorker = new HeadlessDocumentExportWorker(entry, host.compilation)
+    if (!entry) return Promise.reject(new Error('隔离导出资源入口不可用'))
+    headlessExportWorker ??= new HeadlessDocumentExportWorker(entry, host.compilation)
+    return headlessExportWorker.build(request, signal)
   }
   const roles = frozenImageRoles(async role => (await executionSettingsStore()).snapshot(role))
   const oauthImages = new ChatGPTImageProvider({ credentialResolver: resolveOAuthCredential })
@@ -278,6 +295,7 @@ export function installWorkbenchToolServices(context: { getMainWindow(): Browser
   const media = new MediaCapabilityService([speech])
   const observations = new ViewObservationService({
     snapshot: documentId => host.registry.get(documentId).drain(),
+    currentIdentity: documentId => host.registry.get(documentId).drainIdentity(),
     observeInteractive: ({ runId, identity, snapshot, projectId, signal }) =>
       htmlActionServices!.actions.observePublished(runId, { identity: { ...identity, projectId }, snapshot, signal }),
     captureIsolated: input => {
@@ -346,8 +364,7 @@ export function installWorkbenchToolServices(context: { getMainWindow(): Browser
     resolveSaveDestination: ({ runId, snapshot, requested }) => resolveSaveDestination(runId, snapshot, requested, id => host.tools.runFileAccess(id)),
     resolveExportDestination: ({ runId, snapshot, requested, format, suggestedName }) =>
       resolveExportDestination(runId, snapshot, requested, suggestedName, format, id => host.tools.runFileAccess(id)),
-    build: { build: (request, signal) => context.headless
-      ? headlessExportWorker!.build(request, signal) : currentExportPort().build(request, signal) },
+    build: { build: (request, signal) => buildWorkbenchDocumentExport(request, signal) },
     renderPdf: async (html, signal) => {
       signal?.throwIfAborted()
       const bytes = await renderPdfFromHtml(html, context.getMainWindow() ?? undefined)
@@ -359,7 +376,7 @@ export function installWorkbenchToolServices(context: { getMainWindow(): Browser
     assertExportTarget: async filename => {
       await host.assertFileAvailable(filename)
       const key = (value: string) => process.platform === 'win32' ? path.resolve(value).toLowerCase() : path.resolve(value)
-      for (const snapshot of host.registry.list()) if (snapshot.binding.kind === 'file' && key(snapshot.binding.path) === key(filename)
+      for (const snapshot of host.registry.listIdentities()) if (snapshot.binding.kind === 'file' && key(snapshot.binding.path) === key(filename)
         && (await host.registry.get(snapshot.documentId).drain()).dirty) throw new Error('导出目标存在尚未保存的修改；请选择新文件名')
     },
     signalForRun: runId => deliverySignals.get(runId)?.signal,
@@ -377,13 +394,19 @@ export function installWorkbenchToolServices(context: { getMainWindow(): Browser
       if (!/\.pptx$/i.test(source.name)) throw new Error('此导入入口需要 PPTX 文件')
       const entry = context.getRendererEntryUrl()
       if (!entry) throw new Error('PowerPoint 导入宿主尚未准备好')
-      const prepared = await (pptxImportProducer ??= new PptxCourseImportProducer(entry)).prepare({ bytes: source.bytes, filename: source.name },
-        deliverySignals.get(grant.runId)?.signal)
+      const signal = deliverySignals.get(grant.runId)?.signal
+      const result = await buildWorkbenchPptxImport({ mode: 'course', requestId: randomUUID(), bytes: source.bytes, filename: source.name }, signal, entry)
+      if (result.mode !== 'course') throw new Error('PowerPoint 转换没有产生工程')
+      const prepared = result.course
       assertActive()
+      // The final physical file needs an archive. GUI new-work and draft
+      // consumers use the model directly and never manufacture this ZIP.
+      const archiveBytes = await createDocumentArchive({ project: prepared.model.project, resources: prepared.model.resources }, signal)
+      signal?.throwIfAborted(); assertActive()
       const filename = destination ? path.resolve(access.workspaceRoot, destination) : undefined
       try {
         const outcome = await host.agentFiles.createPreparedCourse(access, { ...(filename ? { path: path.dirname(filename) } : {}),
-          name: filename ? path.basename(filename) : prepared.suggestedName, bytes: prepared.archiveBytes }, operationId,
+          name: filename ? path.basename(filename) : prepared.suggestedName, bytes: archiveBytes }, operationId,
           { requestDigest, issues: prepared.issues })
         const data = outcome.data as Record<string, unknown>
         if (data.historical === true) return { kind: 'read', data }

@@ -3,7 +3,8 @@ import { AttachmentError } from './AttachmentService'
 import { randomUUID } from 'node:crypto'
 import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
-import type { AttachmentExtractor, AttachmentExtractionInput, AttachmentExtractionResult } from '../../../shared/workbench/attachments'
+import type { StreamingAttachmentExtractor, AttachmentExtractionInput, AttachmentExtractionResult, AttachmentExtractionJobInput, AttachmentExtractionJobResult, AttachmentExtractionJobOptions, PdfPageSinkOptions } from '../../../shared/workbench/attachments'
+import type { PdfMaterialPage, PdfMaterialSummary } from '../../../shared/materialExtraction'
 import { diagnosticLog } from '../../diagnosticLog'
 import { diagnosticFailureDetails } from '../../diagnosticPrivacy'
 
@@ -14,12 +15,12 @@ export interface SandboxedAttachmentExtractionOptions {
   rendererFile?: string
 }
 
-export function createSandboxedAttachmentExtractor(options: SandboxedAttachmentExtractionOptions): AttachmentExtractor {
+export function createSandboxedAttachmentExtractor(options: SandboxedAttachmentExtractionOptions): StreamingAttachmentExtractor {
   if (!!options.rendererURL === !!options.rendererFile) throw new Error('Specify exactly one extraction entry')
   const entry = new URL(options.rendererURL ?? pathToFileURL(path.resolve(options.rendererFile!)).href)
   if (entry.pathname.split('/').pop() !== 'attachment-extraction.html' || entry.search || entry.hash) throw new Error('Invalid extraction entry')
   if (options.rendererURL && (entry.protocol !== 'http:' || !['127.0.0.1', 'localhost', '[::1]'].includes(entry.hostname))) throw new Error('Development extraction entry must be loopback HTTP')
-  return { async extract(input: AttachmentExtractionInput, callOptions = {}): Promise<AttachmentExtractionResult> {
+  async function run(input: AttachmentExtractionJobInput, callOptions: AttachmentExtractionJobOptions & { signal?: AbortSignal }): Promise<AttachmentExtractionJobResult> {
     const frozen = structuredClone(input)
     const cancelled = () => callOptions.signal?.reason instanceof AttachmentError && callOptions.signal.reason.code === 'operation-cancelled'
       ? callOptions.signal.reason
@@ -52,7 +53,8 @@ export function createSandboxedAttachmentExtractor(options: SandboxedAttachmentE
     window.webContents.on('will-frame-navigate', event => event.preventDefault())
     return new Promise((resolve, reject) => {
       let settled = false, sent = false
-      const finish = (error?: Error, result?: AttachmentExtractionResult) => {
+      let pageWrite: Promise<void> = Promise.resolve()
+      const finish = (error?: Error, result?: AttachmentExtractionJobResult) => {
         if (settled) return
         settled = true; callOptions.signal?.removeEventListener('abort', onAbort)
         if (!window.isDestroyed()) window.destroy()
@@ -60,8 +62,9 @@ export function createSandboxedAttachmentExtractor(options: SandboxedAttachmentE
         if (error) {
           void diagnosticLog.append({ source: 'main', message: error.message, stack: error.stack,
             details: { ...diagnosticFailureDetails(error), operation: 'attachment-extraction', phase: sent ? 'extract' : 'load' } }).catch(() => undefined)
-          reject(error)
-        } else resolve(result!)
+        }
+        // Stop the producer immediately, then let its one disk sink settle before rollback.
+        void pageWrite.catch(() => undefined).then(() => { if (error) reject(error); else resolve(result!) })
       }
       const onAbort = () => finish(cancelled())
       callOptions.signal?.addEventListener('abort', onAbort, { once: true })
@@ -76,7 +79,18 @@ export function createSandboxedAttachmentExtractor(options: SandboxedAttachmentE
         if (event.senderFrame !== window.webContents.mainFrame || sent || settled) return
         sent = true; window.webContents.send('attachment-extraction:input', frozen)
       })
-      window.webContents.ipc.on('attachment-extraction:result', (event, payload: { ok?: boolean; error?: string; result?: AttachmentExtractionResult }) => {
+      window.webContents.ipc.on('attachment-extraction:progress', (event, value: { page: number; total: number }) => {
+        if (event.senderFrame !== window.webContents.mainFrame || !sent || settled) return
+        callOptions.onProgress?.(value.page, value.total)
+      })
+      window.webContents.ipc.on('attachment-extraction:page', (event, page: PdfMaterialPage) => {
+        if (event.senderFrame !== window.webContents.mainFrame || !sent || settled || !input.streamPdfPages || !callOptions.onPage) return
+        pageWrite = Promise.resolve().then(() => callOptions.onPage!(page))
+        void pageWrite.then(() => {
+          if (!settled && !window.isDestroyed()) window.webContents.send('attachment-extraction:page-saved')
+        }, error => finish(error instanceof Error ? error : new Error(String(error))))
+      })
+      window.webContents.ipc.on('attachment-extraction:result', (event, payload: { ok?: boolean; error?: string; result?: AttachmentExtractionJobResult }) => {
         if (event.senderFrame !== window.webContents.mainFrame || !sent || settled) return
         if (payload?.ok === true && payload.result) finish(undefined, payload.result)
         else finish(new AttachmentError('extraction-failed', '附件提取未完成', { cause: payload?.error }))
@@ -84,5 +98,9 @@ export function createSandboxedAttachmentExtractor(options: SandboxedAttachmentE
       if (callOptions.signal?.aborted) { onAbort(); return }
       void window.loadURL(entry.href).catch(error => { console.error('附件提取窗口载入失败', error); finish(new AttachmentError('extraction-start-failed', '附件提取窗口载入失败', { cause: error })) })
     })
-  } }
+  }
+  return {
+    extract: (input: AttachmentExtractionInput, callOptions = {}) => run(input, callOptions) as Promise<AttachmentExtractionResult>,
+    streamPdfPages: (input: AttachmentExtractionInput, callOptions: PdfPageSinkOptions) => run({ ...input, streamPdfPages: true }, callOptions) as Promise<PdfMaterialSummary>,
+  }
 }

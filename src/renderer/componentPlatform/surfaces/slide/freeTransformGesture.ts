@@ -59,6 +59,8 @@ export class FreeTransformGesture {
   private readonly pointerToSurface: AffineMatrix
   private readonly initial: GeometryPoint
   private readonly bounds: FreeBounds
+  private readonly snapAxes = { x: [] as number[], y: [] as number[] }
+  private readonly snapTolerance: number
   constructor(start: FreeGestureStart) {
     if (!start.targets.length) throw new Error('请先选择自由对象')
     this.start = structuredClone(start)
@@ -66,6 +68,19 @@ export class FreeTransformGesture {
     this.pointerToSurface = invertMatrix(start.surfaceToPointer)
     this.initial = transformPoint(this.pointerToSurface, start.pointer)
     this.bounds = freeSelectionBounds(this.targets)!
+    const zoom = Math.hypot(this.start.surfaceToPointer[0], this.start.surfaceToPointer[1])
+    this.snapTolerance = (this.start.snapTolerance ?? 6) / zoom
+    if (this.start.mode === 'drag') {
+      const moving = new Set(this.targets.map(target => target.instanceId))
+      const boxes = (this.start.snapTargets ?? []).filter(target => !moving.has(target.instanceId)
+        && !target.ancestors.some(id => moving.has(id))).map(freeTargetBounds)
+      this.snapAxes.x = boxes.flatMap(box => [box.left, (box.left + box.right) / 2, box.right])
+      this.snapAxes.y = boxes.flatMap(box => [box.top, (box.top + box.bottom) / 2, box.bottom])
+      if (this.start.designSize) {
+        this.snapAxes.x.push(0, this.start.designSize.width / 2, this.start.designSize.width)
+        this.snapAxes.y.push(0, this.start.designSize.height / 2, this.start.designSize.height)
+      }
+    }
     if (start.mode === 'resize' && !start.handle) throw new Error('缺少缩放手柄')
   }
   update(pointer: GeometryPoint, modifiers: { shift?: boolean; alt?: boolean } = {}): FreeGestureUpdate {
@@ -77,16 +92,8 @@ export class FreeTransformGesture {
       if (dragAxis === 'x') dy = 0
       else if (dragAxis === 'y') dx = 0
       if (!modifiers.alt) {
-        const moving = new Set(this.targets.map(target => target.instanceId))
-        const boxes = (this.start.snapTargets ?? []).filter(target => !moving.has(target.instanceId)
-          && !target.ancestors.some(id => moving.has(id))).map(freeTargetBounds)
-        const xs = boxes.flatMap(box => [box.left, (box.left + box.right) / 2, box.right])
-        const ys = boxes.flatMap(box => [box.top, (box.top + box.bottom) / 2, box.bottom])
-        if (this.start.designSize) { xs.push(0, this.start.designSize.width / 2, this.start.designSize.width); ys.push(0, this.start.designSize.height / 2, this.start.designSize.height) }
-        const zoom = Math.hypot(this.start.surfaceToPointer[0], this.start.surfaceToPointer[1])
-        const tolerance = (this.start.snapTolerance ?? 6) / zoom
-        const x = nearestSnap([this.bounds.left + dx, (this.bounds.left + this.bounds.right) / 2 + dx, this.bounds.right + dx], xs, tolerance)
-        const y = nearestSnap([this.bounds.top + dy, (this.bounds.top + this.bounds.bottom) / 2 + dy, this.bounds.bottom + dy], ys, tolerance)
+        const x = nearestSnap([this.bounds.left + dx, (this.bounds.left + this.bounds.right) / 2 + dx, this.bounds.right + dx], this.snapAxes.x, this.snapTolerance)
+        const y = nearestSnap([this.bounds.top + dy, (this.bounds.top + this.bounds.bottom) / 2 + dy, this.bounds.bottom + dy], this.snapAxes.y, this.snapTolerance)
         if (x && dragAxis !== 'y') { dx += x.delta; guides.push({ axis: 'x', value: x.value }) }
         if (y && dragAxis !== 'x') { dy += y.delta; guides.push({ axis: 'y', value: y.value }) }
       }

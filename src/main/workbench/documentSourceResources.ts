@@ -7,6 +7,9 @@ import { validateDocumentResources } from '../../core/drivers/resources'
 import type { DocumentBinding, DocumentModel, DocumentResources } from '../../shared/workbench/document'
 import type { DocumentSourcePublication, PreparedDocumentSave } from '../../shared/workbench/documentSave'
 import { captureHtmlClosure, readHtmlMediaDirectory } from './htmlImport/readHtmlClosure'
+import { analyzeHtmlResources } from './htmlImport/htmlResourceAnalysis'
+import { htmlResourceSources } from './htmlImport/extractHtmlResources'
+import type { HtmlResourceSource } from './htmlImport/types'
 
 const digest = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex')
 const missing = (error: unknown) => (error as NodeJS.ErrnoException).code === 'ENOENT'
@@ -113,6 +116,10 @@ export interface CaptureDocumentSourceOptions {
   currentSource?(filename: string): Promise<string | undefined>
   /** The caller selects the source format once, before any temporary path exists. */
   format?: DocumentSourcePublication['format']
+  /** The disk observer cannot reuse a closure that discovers files by directory membership. */
+  onDependencyDirectory?(relative: string): void
+  /** Passive consumers proven by this same source/dependency analysis. */
+  onHtmlResourceSources?(sources: HtmlResourceSource[]): void
 }
 
 /** The source binding is only a fallback location. No source file or directory is
@@ -161,8 +168,9 @@ export async function prepareDocumentSave(model: DocumentModel, binding: Documen
       const current = await options.currentSource(path.resolve(path.dirname(binding.path), relative))
       if (current !== undefined) held.set(relative, new TextEncoder().encode(current))
     }
-    const closure = await captureHtmlClosure({ html: model.source, siblingFiles: held,
+    const closure = await captureHtmlClosure({ html: model.source, siblingFiles: held, extractResources: analyzeHtmlResources,
       readRelativeDirectory: binding.kind === 'file' ? async relative => {
+        options.onDependencyDirectory?.(relative)
         const root = await fs.realpath(path.dirname(binding.path))
         return readHtmlMediaDirectory(root, root, relative)
       } : undefined,
@@ -170,6 +178,7 @@ export async function prepareDocumentSave(model: DocumentModel, binding: Documen
         const resource = await read(relative)
         return resource?.kind === 'file' ? resource.bytes : undefined
       } })
+    options.onHtmlResourceSources?.(htmlResourceSources(closure.remoteReferences))
     diagnostics.push(...closure.diagnostics)
     references = closure.localReferences
     for (const diagnostic of closure.diagnostics) if (diagnostic.code === 'missing-relative-resource' && diagnostic.reference

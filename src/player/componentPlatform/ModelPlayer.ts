@@ -3,6 +3,7 @@ import type { DocumentModel } from '../../shared/workbench/document'
 import { createComponentModelProjection } from './modelProjection'
 import type { ComponentSpatialCameraPort } from '../surfaces/spatial/componentSpatialAdapter'
 import type { TeacherControllerDisplayPort } from '../../shared/teacherControllerViewportGeometry'
+import { componentContainers, resolveComponentPresentation, type CourseProjectV10, type TeacherControllerPort, type ComponentFlowReading } from '../../shared/contracts/component-platform'
 
 export type ComponentPlayerModel = Extract<DocumentModel, { kind: 'course-v10' }>
 export type ComponentPlayerRuntimeOptions = NonNullable<ConstructorParameters<typeof ComponentPlatformRuntime>[1]>
@@ -12,6 +13,7 @@ export interface ComponentPlayerObservation {
   setZoom(zoom: number): void
   reset(): void
   goToInstance?(instanceId: string | null, signal?: AbortSignal): boolean | Promise<boolean>
+  readReading?(targetIds: readonly string[]): Omit<ComponentFlowReading, 'containerId'> | null
   subscribe?(listener: () => void): () => void
 }
 
@@ -46,6 +48,8 @@ export interface ComponentPlayerMountOptions extends ComponentPlayerRuntimeOptio
 
 interface ComponentModelHostOptions extends ComponentPlayerRuntimeOptions {
   runScopeId: string
+  /** React already renders states plus transient drafts; keep that final value for World. */
+  presentationPrepared?: boolean
   onObservation?: ComponentPlayerMountOptions['onObservation']
   createProjection?(runtime: ComponentPlatformRuntime, signal: AbortSignal): ComponentPlayerProjection
   onDispose?(): void
@@ -61,8 +65,61 @@ export interface ComponentProjectionCommit {
 }
 
 const projectionTopology = (model: ComponentPlayerModel) => JSON.stringify([model.project.global,
-  model.project.surfaces.map(surface => [surface.id, surface.kind, surface.childIds]),
-  Object.values(model.project.instances).map(instance => [instance.id, instance.childIds])])
+  model.project.rootIds, model.project.entry?.rootInstanceId,
+  Object.values(model.project.instances).map(instance => [instance.id, instance.container?.kind, instance.childIds])])
+
+/** The stored topology already snapshots the old placement relation. On a real
+ * structural mutation, park only roots below ancestors whose projection can
+ * move, preserving unrelated pages' connected browsing contexts. */
+function mutatedProjectionInstances(before: string, after: string): ReadonlySet<string> {
+  type Topology = [{ underlay: string[]; overlay: string[] }, string[], string | undefined, Array<[string, string | null, string[] | null]>]
+  const old = JSON.parse(before) as Topology, next = JSON.parse(after) as Topology
+  const oldNodes = new Map(old[3].map(node => [node[0], node])), nextNodes = new Map(next[3].map(node => [node[0], node]))
+  const dirty = new Set<string>()
+  const same = (a: readonly string[] | null | undefined, b: readonly string[] | null | undefined) =>
+    (a?.length ?? 0) === (b?.length ?? 0) && (a ?? []).every((id, index) => id === b?.[index])
+  for (const id of new Set([...oldNodes.keys(), ...nextNodes.keys()])) {
+    const a = oldNodes.get(id), b = nextNodes.get(id)
+    if (!a || !b || a[1] !== b[1] || !same(a[2], b[2])) dirty.add(id)
+  }
+  const changedList = (a: readonly string[], b: readonly string[]) => {
+    const oldIds = new Set(a), nextIds = new Set(b)
+    for (const id of a) if (!nextIds.has(id)) dirty.add(id)
+    for (const id of b) if (!oldIds.has(id)) dirty.add(id)
+    const retainedOld = a.filter(id => nextIds.has(id)), retainedNext = b.filter(id => oldIds.has(id))
+    if (!same(retainedOld, retainedNext)) retainedOld.forEach(id => dirty.add(id))
+  }
+  changedList(old[0].underlay, next[0].underlay); changedList(old[0].overlay, next[0].overlay); changedList(old[1], next[1])
+  if (old[2] !== next[2]) { if (old[2]) dirty.add(old[2]); if (next[2]) dirty.add(next[2]) }
+  const visit = (id: string, nodes: typeof oldNodes, visited: Set<string>) => {
+    if (visited.has(id)) return
+    visited.add(id); dirty.add(id)
+    nodes.get(id)?.[2]?.forEach(child => visit(child, nodes, visited))
+  }
+  const roots = [...dirty]
+  for (const nodes of [oldNodes, nextNodes]) { const visited = new Set<string>(); for (const id of roots) visit(id, nodes, visited) }
+  return dirty
+}
+
+/** One disposable parent-before-child projection for native and compiled players. */
+export function resolveModelPlayerPresentation(source: CourseProjectV10, navigation?: TeacherControllerPort): CourseProjectV10 {
+  let project = source
+  const visited = new Set<string>()
+  const present = (id: string) => {
+    if (visited.has(id)) return
+    visited.add(id)
+    const instance = source.instances[id]
+    if (instance?.container) {
+      const port = navigation?.forContainer?.(id) ?? (navigation?.readLocation() === id ? navigation : undefined)
+      const stateId = port?.currentStateId?.()
+      if (stateId !== undefined) project = resolveComponentPresentation(project, id, stateId)
+    }
+    instance?.childIds?.forEach(present)
+  }
+  for (const id of [...source.rootIds, ...source.global.underlay, ...source.global.overlay]) present(id)
+  componentContainers(source).forEach(container => present(container.id))
+  return project
+}
 
 /** The one runtime lifetime/commit owner; React and DOM only supply their actual projection commit. */
 export function createV10ModelPlayer(options: ComponentModelHostOptions) {
@@ -85,11 +142,17 @@ export function createV10ModelPlayer(options: ComponentModelHostOptions) {
   let retention: object | undefined
   const prepareProjection = (model: ComponentPlayerModel, key?: string): ComponentProjectionCommit => {
     projecting = true
-    const nextTopology = projectionTopology(model)
-    runtime.prepareResources(model.project, model.resources)
+    // Derive from this caller's latest author/draft projection, never the last
+    // committed effective model: leaving a state must restore unoverridden data.
+    const project = options.presentationPrepared ? model.project
+      : resolveModelPlayerPresentation(model.project, options.studentNavigation ?? options.teacherController)
+    const effectiveModel = project === model.project ? model : { ...model, project }
+    const nextTopology = projectionTopology(effectiveModel)
+    runtime.prepareResources(effectiveModel.project, effectiveModel.resources)
     const parked = topology !== nextTopology || projectionKey !== key
-    if (parked && !controller.signal.aborted) runtime.beforeProjectionMutation()
-    return { model, key, topology: nextTopology, parked }
+    if (parked && !controller.signal.aborted) runtime.beforeProjectionMutation(
+      topology !== undefined && projectionKey === key ? mutatedProjectionInstances(topology, nextTopology) : undefined)
+    return { model: effectiveModel, key, topology: nextTopology, parked }
   }
   const finishProjection = (receipt: ComponentProjectionCommit) => {
     if (receipt.parked) runtime.afterProjectionMutation()
@@ -112,13 +175,14 @@ export function createV10ModelPlayer(options: ComponentModelHostOptions) {
     if (controller.signal.aborted) return
     await runtime.sync(model.project, model.resources)
     if (!controller.signal.aborted && committedModel === model && options.onObservation && projection) {
-      for (const [id, binding] of observationBindings) if (projection.observation?.(id) !== binding.observation) {
+      const observationIds = new Set([...model.project.rootIds, ...componentContainers(model.project).map(container => container.id)])
+      for (const [id, binding] of observationBindings) if (!observationIds.has(id) || projection.observation?.(id) !== binding.observation) {
         binding.off(); observationBindings.delete(id)
       }
-      for (const surface of model.project.surfaces) {
-        const observation = projection.observation?.(surface.id)
-        if (observation && !observationBindings.has(surface.id)) observationBindings.set(surface.id,
-          { observation, off: options.onObservation(surface.id, observation) })
+      for (const id of observationIds) {
+        const observation = projection.observation?.(id)
+        if (observation && !observationBindings.has(id)) observationBindings.set(id,
+          { observation, off: options.onObservation(id, observation) })
       }
     }
   }
@@ -138,7 +202,7 @@ export function createV10ModelPlayer(options: ComponentModelHostOptions) {
     const projected = projectionQueue.catch(() => {}).then(async () => {
       if (controller.signal.aborted) return
       const receipt = prepareProjection(model)
-      try { await projection.sync(model) } finally { finishProjection(receipt) }
+      try { await projection.sync(receipt.model) } finally { finishProjection(receipt) }
       completion = enqueueCommittedProjection()
     })
     projectionQueue = projected

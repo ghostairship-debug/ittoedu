@@ -1,4 +1,6 @@
 // @vitest-environment node
+import { componentSurfaces } from '../../src/shared/contracts/component-platform/project'
+import { testContainerInstance } from '../helpers/glxWorkFixture'
 import { randomUUID } from 'node:crypto'
 import { expect, it } from 'vitest'
 import { DocumentRegistry } from '../../src/core/documents/DocumentRegistry'
@@ -71,10 +73,10 @@ it('audio settings and sound CRUD share manual semantics, one History, original 
 
 it('referenced sounds and invalid batch inputs preserve audio settings, resource bytes and page-only grants', async () => {
   const model = fixture()
-  model.project.surfaces[0].presentation = { states: [{ id: 'answer', title: 'Answer', overrides: {} }] }
+  testContainerInstance(model.project, 0).container.presentation = { states: [{ id: 'answer', title: 'Answer', overrides: {} }] }
   const f = await harness(model)
   applied(await f.invoke('import', 'course.media', { target: await f.issue(), change: { kind: 'import-sounds', assets: ['audio-one'] } }))
-  const soundId = Object.keys(courseAudioSettings(f.project()).sounds)[0], surfaceId = f.project().surfaces[0].id
+  const soundId = Object.keys(courseAudioSettings(f.project()).sounds)[0], surfaceId = componentSurfaces(f.project())[0].id
   applied(await f.invoke('audio-rule', 'interaction.update', { target: await f.issue({ kind: 'course-surface', surfaceId }), change: { kind: 'add', rule: {
     name: 'audio-rule', enabled: true, trigger: { type: 'scene.enter' }, conditions: [],
     actions: [{ start: 'after-previous', delayMs: 0, action: { type: 'audio.play', soundId } }],
@@ -120,7 +122,7 @@ it('rejects conflicting bytes under an existing asset identity and preserves the
   const page = (children.data as { target: string; kind: string }[]).find(child => child.kind === 'course-surface')!
   expect(await f.invoke('readonly-child', 'surface.configure', { target: page.target, settings: { title: 'Forbidden' } })).toMatchObject({ kind: 'error', code: 'not-authorized' })
   expect(await f.invoke('readonly-audio', 'course.media', { target: readonly, change: { kind: 'audio', settings: { masterVolume: .8 } } })).toMatchObject({ kind: 'error', code: 'not-authorized' })
-  applied(await f.invoke('page-rename', 'surface.configure', { target: await f.issue({ kind: 'course-surface', surfaceId: model.project.surfaces[0].id }), settings: { title: 'Independent page change' } }))
+  applied(await f.invoke('page-rename', 'surface.configure', { target: await f.issue({ kind: 'course-surface', surfaceId: componentSurfaces(model.project)[0].id }), settings: { title: 'Independent page change' } }))
   applied(await f.invoke('audio-after-page', 'course.media', { target: await f.issue(), change: { kind: 'audio', settings: { masterVolume: .8 } } }))
   expect(courseAudioSettings(f.project()).masterVolume).toBe(.8)
   expect(f.session.read().model.resources).toEqual(model.resources)

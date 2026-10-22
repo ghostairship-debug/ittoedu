@@ -1,7 +1,7 @@
 import { documentTextLength, sliceDocumentText, type FlowTextContent } from '../../../shared/document/content'
 import { isSourceDocumentModel, type DocumentModel } from '../../../shared/workbench/document'
 import type { ExecutionSelectionTarget } from '../../../shared/workbench/executionDesktop'
-import { resolveComponentPresentation, type ComponentPresentationState, type CourseProjectV10, type JsonValue } from '../../../shared/contracts/component-platform/project'
+import { componentSurface, resolveComponentPresentation, type ComponentPresentationState, type CourseProjectV10, type JsonValue } from '../../../shared/contracts/component-platform/project'
 import type { ComponentEdit } from '../../../shared/contracts/component-platform/operations'
 import { isCourseInstanceRange, readCourseInstanceText, readHtmlAuthorField, sliceCourseInstanceText } from '../../tools/ToolTargets'
 
@@ -14,7 +14,7 @@ export function readComponentElementFields(project: CourseProjectV10, instanceId
 }
 /** State frame/visibility are authored slots; data/style retain field-level card inverses. */
 export function readComponentStateElementFields(project: CourseProjectV10, surfaceId: string, stateId: string, instanceId: string): ElementFields | null {
-  const state = project.surfaces.find(surface => surface.id === surfaceId)?.presentation?.states.find(value => value.id === stateId)
+  const state = componentSurface(project, surfaceId)?.presentation?.states.find(value => value.id === stateId)
   if (!state) return null
   return componentElementFields(project, instanceId, state, resolveComponentPresentation(project, surfaceId, stateId))
 }
@@ -53,7 +53,7 @@ function componentElementFields(project: CourseProjectV10, instanceId: string, s
 
 /** Exact data/style author slots used only to decide whether an inverse can restore inheritance. */
 export function readComponentStateOverrideRoots(project: CourseProjectV10, surfaceId: string, stateId: string, instanceId: string): ElementFields {
-  const state = project.surfaces.find(surface => surface.id === surfaceId)?.presentation?.states.find(value => value.id === stateId)
+  const state = componentSurface(project, surfaceId)?.presentation?.states.find(value => value.id === stateId)
   if (!state || !project.instances[instanceId]) throw new Error('捕获的展示状态或对象已不存在。')
   const roots: Record<string, unknown> = {}
   const visit = (id: string) => {
@@ -66,7 +66,7 @@ export function readComponentStateOverrideRoots(project: CourseProjectV10, surfa
 /** Restore only this card's fields in a copy of the current presentation, preserving every other slot. */
 export function restoreComponentStateElementEdits(project: CourseProjectV10, surfaceId: string, stateId: string, instanceId: string,
   fields: ElementFields, inheritRoots: ReadonlySet<string> = new Set()): ComponentEdit[] {
-  const original = project.surfaces.find(surface => surface.id === surfaceId)?.presentation
+  const original = componentSurface(project, surfaceId)?.presentation
   if (!original?.states.some(value => value.id === stateId)) throw new Error('捕获的展示状态已不存在。')
   const presentation = structuredClone(original), state = presentation.states.find(value => value.id === stateId)!
   const effective = resolveComponentPresentation(project, surfaceId, stateId), edits: ComponentEdit[] = []

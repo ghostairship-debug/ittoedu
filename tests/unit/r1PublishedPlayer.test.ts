@@ -1,3 +1,4 @@
+import { testContainerInstance, createTestPublishedFromLegacy } from '../helpers/glxWorkFixture'
 import { afterEach, expect, it, vi } from 'vitest'
 import { mountPublishedCourseV3, publishedComponentModel } from '../../src/player/componentPlatform/publishedPlayer'
 import { prepareComponentOutputRegion } from '../../src/player/componentPlatform/outputCapture'
@@ -10,7 +11,7 @@ import { DOCUMENT_BLOCK_DEFINITION } from '../../src/components/document-block'
 import { createInputData, INPUT_DEFINITION } from '../../src/components/input'
 
 const microtasks = async () => { for (let i = 0; i < 25; i++) await Promise.resolve() }
-const payload = (): PublishedCourseV3 => ({ schemaVersion: 3, id: 'r1', title: 'Player navigation',
+const payload = (): PublishedCourseV3 => createTestPublishedFromLegacy({ schemaVersion: 3, id: 'r1', title: 'Player navigation',
   definitions: {}, instances: {}, assets: {}, global: { underlay: [], overlay: [] }, surfaces: [
     { id: 'slide', title: 'Slide', kind: 'slide', childIds: [], presentation: { states: [{ id: 'reveal', title: 'Reveal', overrides: {} }] } },
     { id: 'flow', title: 'Flow', kind: 'flow', childIds: [] },
@@ -28,7 +29,7 @@ it('consumes section defaults and keeps child input alive through ordinary discl
   input.instances.answer = { id: 'answer', definitionId: INPUT_DEFINITION.id, data: createInputData({ initialValue: '85' }) }
   input.instances.heading = { id: 'heading', definitionId: DOCUMENT_BLOCK_DEFINITION.id,
     data: { type: 'heading', level: 2, content: { inlines: [{ type: 'text', text: 'Next topic' }] } } }
-  input.surfaces[1].childIds = ['section', 'heading']
+  testContainerInstance(input, 1).childIds = ['section', 'heading']
   const before = structuredClone(input), root = document.createElement('section'); document.body.append(root)
   const player = await mountPublishedCourseV3(input, root, { initialSurfaceId: 'flow' })
   try {
@@ -117,7 +118,7 @@ it('initializes spatial fragments before a step and keeps one instance/state thr
   const input = payload()
   input.definitions.web = { id: 'web', role: 'content', implementation: { kind: 'builtin', key: 'guoling.web' } }
   input.instances.web = { id: 'web', definitionId: 'web', data: { html: '<p class="fragment">First</p><p class="fragment">Second</p>' }, frame: { width: 200, height: 100, transform: [1, 0, 0, 1, 0, 0] } }
-  input.surfaces[2].childIds = ['web']; input.surfaces[2].spatial!.frames[0].targetInstanceId = 'web'
+  testContainerInstance(input, 2).childIds = ['web']; testContainerInstance(input, 2).container.spatial!.frames[0].targetInstanceId = 'web'
   const before = structuredClone(input), root = document.createElement('section'); document.body.append(root)
   const player = await mountPublishedCourseV3(input, root, { initialSurfaceId: 'spatial' })
   try {
@@ -170,8 +171,8 @@ it('observes Slide and Flow content through their view owner while Teacher remai
   for (const id of ['slideBody', 'flowBody', 'decoration']) input.instances[id] = { id, definitionId: 'group', data: {}, frame }
   input.instances.teacher = { id: 'teacher', definitionId: 'teacher', data: JSON.parse(JSON.stringify(createTeacherControllerData())), frame }
   input.global = { underlay: ['decoration'], overlay: ['teacher'] }
-  input.surfaces[0].childIds = ['slideBody']; input.surfaces[0].designSize = { width: 640, height: 360 }
-  input.surfaces[1].childIds = ['flowBody']
+  testContainerInstance(input, 0).childIds = ['slideBody']; testContainerInstance(input, 0).container.designSize = { width: 640, height: 360 }
+  testContainerInstance(input, 1).childIds = ['flowBody']
   const before = structuredClone(input), root = document.createElement('section'); document.body.append(root)
   const player = await mountPublishedCourseV3(input, root)
   const shell = root.querySelector<HTMLElement>('[data-component-model-player]')!, teacher = player.runtime.targetElement('teacher')!

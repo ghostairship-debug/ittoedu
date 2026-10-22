@@ -1,4 +1,6 @@
 // @vitest-environment node
+import { componentSurfaces } from '../../../../src/shared/contracts/component-platform/project'
+import { appendRootContainers, testContainerInstance } from '../../../helpers/glxWorkFixture'
 import { promises as fs } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -66,8 +68,8 @@ it.each(['existing-chart-update', 'table-conversion'] as const)('a real %s and n
   project.instances.table = { id: 'table', definitionId: TABLE_DEFINITION.id, data: tableDataEdit('table', table).value, frame, style: { opacity: 0.75 }, name: '源数据' }
   project.instances.chart = { id: 'chart', definitionId: CHART_DEFINITION.id, data: createChartData(), frame: { ...frame, transform: [1, 0, 0, 1, 400, 70] } }
   project.instances.existing = { id: 'existing', definitionId: TEXT_DEFINITION.id, data: textDataEdit('fixture', createTextComponentData('原有说明')).value }
-  project.surfaces[0].childIds = ['table', 'chart']
-  project.surfaces.push({ id: 'flow', kind: 'flow', title: '任务说明', childIds: ['existing'] })
+  testContainerInstance(project, 0).childIds = ['table', 'chart']
+  appendRootContainers(project, { id: 'flow', kind: 'flow', title: '任务说明', childIds: ['existing'] })
   const initial = await host.internalAPI.create({ kind: 'course-v10', project, resources: { assets: {}, components: {} } }, 'composite.h5lesson')
   const bytes = await sharp({ create: { width: 12, height: 9, channels: 4, background: '#2d7ab8' } }).png().toBuffer()
   let generated = 0
@@ -162,7 +164,7 @@ it.each(['existing-chart-update', 'table-conversion'] as const)('a real %s and n
   const input: ExecutionStart = { conversationId: 'composite', taskId: 'combined-task', instruction: chartAction === 'table-conversion'
       ? '读取源数据表，将原表格转为柱状图；保留它的人工位置、样式和其他对象。新增一段说明，生成图片并嵌入当前演示页面。'
       : '读取源数据表，更新现有图表，新增一段说明，生成图片并嵌入当前演示页面。', selection: textSelection,
-    documents: [{ documentId: initial.documentId, writable: [{ kind: 'document' }, { kind: 'course-surface', surfaceId: project.surfaces[0].id }] }], workspaceRoot: directory, permission: 'workspace' }
+    documents: [{ documentId: initial.documentId, writable: [{ kind: 'document' }, { kind: 'course-surface', surfaceId: componentSurfaces(project)[0].id }] }], workspaceRoot: directory, permission: 'workspace' }
   let activeRunId: string | undefined
   try {
     const started = await engine.start(input), ending = engine.wait(started.runId)
@@ -186,10 +188,10 @@ it.each(['existing-chart-update', 'table-conversion'] as const)('a real %s and n
       expect((derived.data as ChartData).categories.map(value => value.label)).toEqual(['甲', '乙'])
       expect((derived.data as ChartData).series[0].name).toBe('人数')
       expect(derived).toMatchObject({ id: 'table', frame, style: project.instances.table.style })
-      expect(before.model.project.surfaces[0].childIds).toEqual(project.surfaces[0].childIds)
+      expect(componentSurfaces(before.model.project)[0].childIds).toEqual(componentSurfaces(project)[0].childIds)
       expect(before.model.project.instances.chart).toEqual(project.instances.chart)
     }
-    const flowIds = before.model.project.surfaces.find(value => value.id === 'flow')!.childIds
+    const flowIds = componentSurfaces(before.model.project).find(value => value.id === 'flow')!.childIds
     expect(flowIds).toHaveLength(2)
     expect(Object.values(before.model.project.instances).filter(value => value.definitionId === 'guoling.image')).toHaveLength(0)
     if (chartAction === 'table-conversion') {
@@ -223,7 +225,7 @@ it.each(['existing-chart-update', 'table-conversion'] as const)('a real %s and n
     expect(current.model.project.instances.table.frame).toEqual(moved)
     expect(current.model.project.instances.chart).toEqual(before.model.project.instances.chart)
     expect(current.model.project.instances.table.data).toEqual(before.model.project.instances.table.data)
-    expect(current.model.project.surfaces.find(value => value.id === 'flow')!.childIds).toEqual(flowIds)
+    expect(componentSurfaces(current.model.project).find(value => value.id === 'flow')!.childIds).toEqual(flowIds)
     const inserted = Object.values(current.model.project.instances).filter(value => value.definitionId === 'guoling.image')
     expect(inserted).toHaveLength(1)
     const filename = path.join(directory, 'saved.h5lesson')
@@ -232,7 +234,7 @@ it.each(['existing-chart-update', 'table-conversion'] as const)('a real %s and n
     expect(reopened).toMatchObject({ model: { kind: 'course-v10', project: { instances: { [inserted[0].id]: inserted[0], table: { frame: moved }, chart: { data: current.model.project.instances.chart.data } } } } })
     if (reopened.model.kind !== 'course-v10') throw new Error('V10 required')
     expect(reopened.model.project.instances.table.data).toEqual(current.model.project.instances.table.data)
-    expect(reopened.model.project.surfaces.find(value => value.id === 'flow')!.childIds).toEqual(flowIds)
+    expect(componentSurfaces(reopened.model.project).find(value => value.id === 'flow')!.childIds).toEqual(flowIds)
     const imageData = inserted[0].data as { assetId: string }
     const decoded = await sharp(reopened.model.resources.assets[imageData.assetId]).metadata()
     expect(decoded).toMatchObject({ width: 12, height: 9 })

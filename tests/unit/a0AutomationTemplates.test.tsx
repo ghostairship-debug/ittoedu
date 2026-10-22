@@ -1,5 +1,9 @@
-import { documentHostAPI } from '../helpers/documentHostAPI'
 // @vitest-environment jsdom
+import { withTestTeacherController } from '../helpers/glxWorkFixture'
+import { setRootContainers } from '../helpers/glxWorkFixture'
+import { componentSurfaces } from '../../src/shared/contracts/component-platform/project'
+import { testContainerInstance } from '../helpers/glxWorkFixture'
+import { documentHostAPI } from '../helpers/documentHostAPI'
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import { afterEach, expect, it, vi } from 'vitest'
 import { promises as fs } from 'node:fs'
@@ -30,14 +34,14 @@ afterEach(async () => {
 
 async function fixture(scope: 'scene' | 'global' = 'scene', teacherSource?: boolean, withoutTeacher = false) {
   let serial = 0
-  const project = createBlankCourseProjectV10('自动化成熟入口', () => `fixture-${++serial}`)
-  const surface = project.surfaces[0], teacherId = project.global.overlay[0]
+  const project = withTestTeacherController(createBlankCourseProjectV10('自动化成熟入口', () => `fixture-${++serial}`))
+  const surface = componentSurfaces(project)[0], teacherId = project.global.overlay[0]
   project.instances[teacherId].visible = false
   if (withoutTeacher) {
     delete project.instances[teacherId]; project.global.overlay = []
-    surface.designSize = { width: 960, height: 540 }
+    testContainerInstance(project, 0).container.designSize = { width: 960, height: 540 }
     // Creation must use the actual current page rather than the first entry.
-    project.surfaces.unshift({ id: 'unrelated-first', kind: 'slide', title: '非当前页', designSize: { width: 1600, height: 900 }, childIds: [] })
+    setRootContainers(project, [{ id: 'unrelated-first', kind: 'slide', title: '非当前页', designSize: { width: 1600, height: 900 }, childIds: [] }, ...componentSurfaces(project)])
   }
   if (teacherSource !== undefined) {
     const alias: ComponentDefinition = { id: 'library-teacher', role: 'mixed', professionalBuiltinKey: 'guoling.navigation',
@@ -49,9 +53,9 @@ async function fixture(scope: 'scene' | 'global' = 'scene', teacherSource?: bool
   project.definitions.lesson = { id: 'lesson', role: 'content', implementation: { kind: 'source', language: 'javascript', source: 'export default {}' } }
   for (const id of ['first', 'second']) {
     project.instances[id] = { id, definitionId: 'lesson', name: id, data: {}, frame: { width: 100, height: 40, transform: [1, 0, 0, 1, 0, 0] } }
-    surface.childIds.push(id)
+    testContainerInstance(project, 0).childIds.push(id)
   }
-  surface.presentation = { states: [{ id: 'question', title: '问题', overrides: {} }, { id: 'answer', title: '答案', overrides: {} }] }
+  testContainerInstance(project, 0).container.presentation = { states: [{ id: 'question', title: '问题', overrides: {} }, { id: 'answer', title: '答案', overrides: {} }] }
   for (const [id, target] of [['local', { kind: 'surface', surfaceId: surface.id }], ['global', { kind: 'project' }]] as const) {
     const definitionId = `library-${id}-rules`
     project.definitions[definitionId] = { id: definitionId, role: 'behavior', professionalBuiltinKey: 'guoling.interactions',
@@ -60,7 +64,7 @@ async function fixture(scope: 'scene' | 'global' = 'scene', teacherSource?: bool
       id: `existing-${id}`, enabled: true, trigger: { type: 'scene.enter' }, conditions: [],
       actions: [{ id: `existing-action-${id}`, start: 'after-previous', delayMs: 0, action: { type: 'node.enter', nodeId: 'first', effect: 'fade', durationMs: 240, easing: 'ease-out' } }],
     }] } }
-    if (id === 'local') surface.childIds.push(id)
+    if (id === 'local') testContainerInstance(project, 0).childIds.push(id)
     else project.global.underlay.push(id)
   }
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'guoling-a0-automation-'))
@@ -95,7 +99,7 @@ it('creates and cold reopens the teacher HUD reference in the same instance tran
   const reopened = await new DocumentHostService(current.directory).internalAPI.open(filename)
   if (reopened.model.kind !== 'course-v10') throw new Error('Expected V10 reader')
   expect(reopened.model.project.instances[controller.id]).toEqual(controller)
-  expect(reopened.model.project.surfaces[0].id).toBe('unrelated-first')
+  expect(componentSurfaces(reopened.model.project)[0].id).toBe('unrelated-first')
   expect(current.setError).not.toHaveBeenCalled()
 })
 

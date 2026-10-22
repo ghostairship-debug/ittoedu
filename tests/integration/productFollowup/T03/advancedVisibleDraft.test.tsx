@@ -1,4 +1,5 @@
 // @vitest-environment node
+import { createTestProjectFromLegacy } from '../../../helpers/glxWorkFixture'
 import { useSyncExternalStore } from 'react'
 import { afterEach, expect, it, vi } from 'vitest'
 import { createRequire } from 'node:module'
@@ -22,11 +23,11 @@ const bytes = (value: string) => new TextEncoder().encode(value)
 const decode = (value: Uint8Array) => new TextDecoder().decode(value)
 const original = 'export const value = 42;'
 function project(): CourseProjectV10 {
-  return { schemaVersion: 10, id: 'T03-project', revision: 0, title: 'Teacher draft', definitions: {
+  return createTestProjectFromLegacy({ schemaVersion: 10, id: 'T03-project', revision: 0, title: 'Teacher draft', definitions: {
     custom: { id: 'custom', role: 'content', implementation: { kind: 'source', language: 'javascript', workspace: { ownerId: 'code', entry: 'main.js' } } },
   }, instances: { a: { id: 'a', definitionId: 'custom', name: 'A', data: { label: 'A' }, frame: { width: 180, height: 90, transform: [1, 0, 0, 1, 23, 41] } },
     b: { id: 'b', definitionId: 'custom', name: 'B', data: { label: 'B' } } },
-  surfaces: [{ id: 'page', kind: 'slide', title: 'Page', childIds: ['a', 'b'] }], global: { underlay: [], overlay: [] }, assets: {} }
+  surfaces: [{ id: 'page', kind: 'slide', title: 'Page', childIds: ['a', 'b'] }], global: { underlay: [], overlay: [] }, assets: {} })
 }
 function api(host: DocumentHostService, initial: DocumentSnapshot): DocumentHostAPI {
   const unavailable = async (): Promise<never> => { throw new Error('No fixture dialog') }

@@ -199,10 +199,11 @@ export type NodeMotionAction = (
 
 /** Payload family used by both sequential and parallel Project V8 action steps. */
 export type InteractionActionPayload =
-  | { type: 'step.next'; transition?: ComponentNavigationTransition }
-  | { type: 'step.previous'; transition?: ComponentNavigationTransition }
+  | { type: 'step.next'; containerId?: string; transition?: ComponentNavigationTransition }
+  | { type: 'step.previous'; containerId?: string; transition?: ComponentNavigationTransition }
   | {
       type: 'presentation.set'
+      containerId?: string
       stateId: string
       transition?: RuntimePresentationTransition
     }
@@ -214,7 +215,7 @@ export type InteractionActionPayload =
       transition?: ComponentNavigationTransition
     }
   | { type: 'scene.next'; transition?: ComponentNavigationTransition }
-  | { type: 'location.go'; locationId: string; transition?: ComponentNavigationTransition }
+  | { type: 'location.go'; locationId: string; containerId?: string; transition?: ComponentNavigationTransition }
   | { type: 'scene.previous'; transition?: ComponentNavigationTransition }
   | { type: 'scene.replay'; transition?: ComponentNavigationTransition }
   | { type: 'course.restart'; transition?: ComponentNavigationTransition }

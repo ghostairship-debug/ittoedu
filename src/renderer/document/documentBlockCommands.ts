@@ -1,5 +1,5 @@
 import type { DocumentBlock, DocumentContent, FlowTextContent } from '../../shared/document/content'
-import { documentContentSchema, plainDocumentText } from '../../shared/document/content'
+import { documentBlockChildren, documentContentSchema, plainDocumentText } from '../../shared/document/content'
 import { fromEditorDocument, renewEditorIdentities, toEditorDocument } from './documentAdapter'
 import type { MenuCommand } from '../editing/commands/CommandMenu'
 
@@ -37,8 +37,9 @@ function locate(blocks: DocumentBlock[], id: string): { blocks: DocumentBlock[];
   for (let index = 0; index < blocks.length; index++) {
     const block = blocks[index]!
     if (block.id === id) return { blocks, index, block }
-    if (block.type === 'section') {
-      const child = locate(block.blocks, id)
+    const children = documentBlockChildren(block)
+    if (children) {
+      const child = locate(children, id)
       if (child) return child
     }
   }

@@ -1,4 +1,5 @@
 // @vitest-environment node
+import { setRootContainers } from '../helpers/glxWorkFixture'
 import { promises as fs } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -21,7 +22,7 @@ describe('Flow adapter with the real document recovery owner', () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), 'flow-owner-')); roots.push(root)
     const host = new DocumentHostService(path.join(root, 'documents'), {}, { legacyFlowRecoveryDirectory: path.join(root, 'legacy-flow') })
     const project = createBlankCourseProjectV10('Flow recovery')
-    project.surfaces = [{ id: 'flow', kind: 'flow', title: 'Flow', childIds: [] }]
+    setRootContainers(project, [{ id: 'flow', kind: 'flow', title: 'Flow', childIds: [] }])
     const snapshot = await host.internalAPI.create({ kind: 'course-v10', project, resources: { assets: {}, components: {} } }, 'flow.glx')
     const target = { documentId: snapshot.documentId, projectId: project.id, projectPath: null, surfaceId: 'flow', revision: project.revision,
       epoch: 'first-provider', documentEpoch: snapshot.epoch }

@@ -123,7 +123,7 @@ async function run() {
     await host.saveToPath(initial.documentId, path.join(root, `${name}.glx`))
     const cold = await new DocumentHostService(path.join(root, 'cold-recovery')).open(path.join(root, `${name}.glx`))
     const coldReopened = cold.model.kind === 'course-v10' && JSON.stringify(cold.model.project.instances) === JSON.stringify(model.project.instances)
-    facts[name] = { applied, next, edits, runtime, revision: snapshot.revision, undoDepth: snapshot.undoDepth, roots: model.project.surfaces[0]!.childIds,
+    facts[name] = { applied, next, edits, runtime, revision: snapshot.revision, undoDepth: snapshot.undoDepth, roots: model.project.instances[model.project.rootIds[0]!]!.childIds,
       coldReopened,
       instances: Object.values(model.project.instances).map(instance => ({ id: instance.id, implementation: instance.implementationOverride ?? model.project.definitions[instance.definitionId]?.implementation,
         children: instance.childIds, frame: instance.frame, data: instance.data })) }

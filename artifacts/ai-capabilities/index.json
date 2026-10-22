@@ -13,16 +13,16 @@
       "version": 5
     },
     "project": {
-      "schema": "schemas/course-project-v10.json",
-      "version": 10
+      "schema": "schemas/course-project-v11.json",
+      "version": 11
     },
     "published": {
-      "schema": "schemas/published-course-v3.json",
-      "version": 3
+      "schema": "schemas/published-course-v4.json",
+      "version": 4
     }
   },
   "scope": "静态目录只说明已登记接口；当前运行是否可调用、文档范围、写权限、短句柄和服务配置，以宿主本轮发现与实际回执为准。",
-  "semanticVersion": "2a4c0a05fa39a7d498cfd92ad416985652b1925a3f62ece2e01aed710f85b5a8",
+  "semanticVersion": "fcd1d86f7978fc31dd55917ee686f73675c02cadbcb62a892ef38f8cc4179f9a",
   "skills": "skills/manifest.json",
   "surfaces": [
     "slide",

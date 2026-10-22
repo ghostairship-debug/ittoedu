@@ -1,4 +1,6 @@
 // @vitest-environment node
+import { componentSurfaces } from '../../src/shared/contracts/component-platform/project'
+import { appendRootContainers, testContainerInstance } from '../helpers/glxWorkFixture'
 import { readFileSync, promises as fs } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -16,9 +18,8 @@ import type { ToolResult, ToolTarget } from '../../src/shared/workbench/tools'
 const driver = new CourseV10Driver(), roots: string[] = []
 afterEach(async () => { for (const root of roots.splice(0)) await fs.rm(root, { recursive: true, force: true }) })
 function fixture() {
-  const project = createBlankCourseProjectV10('Existing media'), slideId = project.surfaces[0].id
-  project.surfaces.push({ id: 'flow', kind: 'flow', title: 'Flow', childIds: [], flow: { layout: { widthMode: 'fluid', readingWidth: 860, wideContentWidth: 1100 } } },
-    { id: 'space', kind: 'spatial', title: 'Spatial', childIds: [] })
+  const project = createBlankCourseProjectV10('Existing media'), slideId = componentSurfaces(project)[0].id
+  appendRootContainers(project, { id: 'flow', kind: 'flow', title: 'Flow', childIds: [], flow: { layout: { widthMode: 'fluid', readingWidth: 860, wideContentWidth: 1100 } } }, { id: 'space', kind: 'spatial', title: 'Spatial', childIds: [] })
   for (const key of ['image', 'video', 'audio']) project.definitions[key] = { id: key, role: 'content', implementation: { kind: 'builtin', key: `guoling.${key}` } }
   const image = new TextEncoder().encode('<svg xmlns="http://www.w3.org/2000/svg" width="4" height="3"><rect width="4" height="3" fill="#22aa88"/></svg>')
   const video = new Uint8Array(readFileSync('tests/fixtures/r18CommonTasks/materials/motion.webm'))
@@ -36,7 +37,7 @@ function fixture() {
       : kind === 'video' ? { ...createVideoData('video', `Authored ${id}`), loop: true, volume: .4, fit: 'cover' as const }
       : { ...createAudioData('audio', 'Authored narration'), loop: true, volume: .3 }
     project.instances[id] = { id, definitionId: kind, data, frame: { width: 220, height: 130, transform: [1, 0, 0, 1, 50 + index * 240, 70] } }
-    project.surfaces.find(surface => surface.id === surfaceId)!.childIds.push(id)
+    testContainerInstance(project, surfaceId).childIds.push(id)
   }
   return { model: { kind: 'course-v10' as const, project, resources: { assets, components: {} } }, objects, slideId }
 }
@@ -73,7 +74,7 @@ it('reuses existing image/video/audio assets through component duplication acros
   expect(f.session.read().undoDepth).toBe(1)
   expect(after.project.assets).toEqual(f.model.project.assets); expect(after.resources).toEqual(before.model.resources)
   for (const [id, surfaceId] of f.objects) {
-    const surface = after.project.surfaces.find(value => value.id === surfaceId)!
+    const surface = componentSurfaces(after.project).find(value => value.id === surfaceId)!
     const copy = surface.childIds.map(copyId => after.project.instances[copyId]).find(instance => !f.model.project.instances[instance.id] && instance.data && (instance.data as { title?: string }).title === (f.model.project.instances[id].data as { title?: string }).title && instance.definitionId === f.model.project.instances[id].definitionId)!
     expect(copy).toBeDefined(); expect(copy.id).not.toBe(id)
     expect(copy.data).toEqual(f.model.project.instances[id].data)
@@ -96,7 +97,7 @@ it('replaces admitted media and a background with original bytes while retaining
     expect(next).toEqual({ ...prior, data: { ...(prior.data as object), assetId, ...(kind === 'image' ? { originalAssetId: assetId } : {}) } })
     expect(after.resources.assets[assetId]).toEqual(f.replacement[kind])
   }
-  const background = after.project.surfaces.find(surface => surface.id === f.slideId)!.background!
+  const background = componentSurfaces(after.project).find(surface => surface.id === f.slideId)!.background!
   expect(background.mode).toBe('own'); expect(after.resources.assets[background.assetId!]).toEqual(f.replacement.image)
   for (const id of Object.keys(f.model.project.assets)) { expect(after.project.assets[id]).toEqual(f.model.project.assets[id]); expect(after.resources.assets[id]).toEqual(f.model.resources.assets[id]) }
   expect(await f.reopen()).toEqual(after)

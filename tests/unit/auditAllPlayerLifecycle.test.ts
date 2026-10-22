@@ -1,4 +1,6 @@
 // @vitest-environment jsdom
+import { componentSurfaces } from '../../src/shared/contracts/component-platform/project'
+import { setRootContainers, testContainerInstance } from '../helpers/glxWorkFixture'
 import { afterEach, expect, it, vi } from 'vitest'
 import { createBlankCourseProjectV10 } from '../../src/core/course/createCourseProjectV10'
 import { ComponentNavigationOwner } from '../../src/renderer/components/ComponentNavigationOwner'
@@ -14,8 +16,8 @@ afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.useRealTimers(
 function fixture() {
   const project = createBlankCourseProjectV10('audit player')
   project.global = { underlay: [], overlay: [] }; project.instances = {}; project.definitions = {}
-  project.surfaces = [{ id: 'A', kind: 'slide', title: 'A', childIds: [], designSize: { width: 640, height: 360 } },
-    { id: 'B', kind: 'slide', title: 'B', childIds: [], designSize: { width: 640, height: 360 } }]
+  setRootContainers(project, [{ id: 'A', kind: 'slide', title: 'A', childIds: [], designSize: { width: 640, height: 360 } },
+    { id: 'B', kind: 'slide', title: 'B', childIds: [], designSize: { width: 640, height: 360 } }])
   return project
 }
 function context(project: CourseProjectV10, id = 'behavior') {
@@ -32,7 +34,7 @@ function context(project: CourseProjectV10, id = 'behavior') {
 function rule(id: string, trigger: InteractionTrigger, key: string, value: string | number | boolean | null, delayMs = 0): InteractionRule {
   return { id, name: id, enabled: true, trigger, conditions: [], actions: [{ id: `${id}-action`, start: 'after-previous', delayMs, action: { type: 'course-state.set', key, value } }] }
 }
-function published(project: CourseProjectV10) { const { revision: _revision, ...payload } = project; return { ...payload, schemaVersion: 3 } }
+function published(project: CourseProjectV10) { const { revision: _revision, ...payload } = project; return { ...payload, schemaVersion: 4 } }
 function root() { const node = document.createElement('div'); document.body.append(node); return node }
 
 it('CA077 snapshots all input branch conditions before the correct action clears the answer', async () => {
@@ -101,7 +103,7 @@ it('CA079 keys presentation entry by surface and state; CA137 dispatches crossed
 
 it('CA025 traverses current surface descendants and counts the effective loaded Web runtime; CA186 camera capture changes no fragment state', () => {
   let project = fixture()
-  project.surfaces[0] = { ...project.surfaces[0], kind: 'spatial', childIds: ['group'], spatial: { home: { x: 0, y: 0, zoom: 1 }, frames: [{ id: 'frame', title: 'one', targetInstanceId: 'web', pose: { x: 0, y: 0, zoom: 1 } }] } }
+  setRootContainers(project, [...componentSurfaces(project).slice(0, 0), { ...componentSurfaces(project)[0], kind: 'spatial', childIds: ['group'], spatial: { home: { x: 0, y: 0, zoom: 1 }, frames: [{ id: 'frame', title: 'one', targetInstanceId: 'web', pose: { x: 0, y: 0, zoom: 1 } }] } }, ...componentSurfaces(project).slice(0 + 1)])
   project.definitions.group = { id: 'group', role: 'content', implementation: { kind: 'builtin', key: 'guoling.group' } }
   project.definitions.web = { id: 'web', role: 'content', implementation: { kind: 'source', language: 'javascript', source: 'export default {}' } }
   project.instances.group = { id: 'group', definitionId: 'group', data: {}, childIds: ['web'] }
@@ -124,7 +126,7 @@ it('CA025 traverses current surface descendants and counts the effective loaded 
 
 it('CA289 allows same-surface state changes while preserving cross-surface guards; CA111 forwards rule abort to the navigation owner', async () => {
   const project = fixture(), h = context(project)
-  project.surfaces[0].presentation = { initialStateId: 'first', states: [{ id: 'first', title: 'first', overrides: {} }, { id: 'second', title: 'second', overrides: {} }] }
+  testContainerInstance(project, 0).container.presentation = { initialStateId: 'first', states: [{ id: 'first', title: 'first', overrides: {} }, { id: 'second', title: 'second', overrides: {} }] }
   project.logic = { courseState: [], navigationGuards: [{ id: 'guard', toSurfaceIds: ['A', 'B'], effect: 'block', match: 'all', conditions: [{ type: 'compare', key: 'blocked', operator: 'eq', value: true }], message: 'blocked' }] }
   let stateId: string | null = 'first', received!: AbortSignal
   const nav = new ComponentNavigationOwner({ project: () => project, surfaceId: () => 'A', stateId: () => stateId, select() {}, courseState: { get: () => true as never }, selectState(id, _surface, signal) { received = signal!; if (id === 'second') { stateId = id; return true }; return new Promise(resolve => { signal?.addEventListener('abort', () => resolve(false), { once: true }) }) } })
@@ -138,10 +140,10 @@ it('CA289 allows same-surface state changes while preserving cross-surface guard
 
 it('CA088 reveal starts the target presentation and CA087 restarts at the first surface before rebuilding entry subscriptions', async () => {
   const project = fixture()
-  project.surfaces[0].presentation = { initialStateId: 'a-on', states: [{ id: 'a-on', title: 'a', overrides: {} }] }
-  project.surfaces[1].presentation = { initialStateId: 'b-on', states: [{ id: 'b-on', title: 'b', overrides: {} }] }
+  testContainerInstance(project, 0).container.presentation = { initialStateId: 'a-on', states: [{ id: 'a-on', title: 'a', overrides: {} }] }
+  testContainerInstance(project, 1).container.presentation = { initialStateId: 'b-on', states: [{ id: 'b-on', title: 'b', overrides: {} }] }
   project.logic = { courseState: [{ key: 'visitedB', valueType: 'boolean', defaultValue: false }], navigationGuards: [] }
-  const h = context(project, 'B-entry'); project.global.underlay = []; project.surfaces[1].childIds.push('B-entry')
+  const h = context(project, 'B-entry'); project.global.underlay = []; testContainerInstance(project, 1).childIds.push('B-entry')
   h.instance.attachments = [{ instanceId: 'B-entry', target: { kind: 'surface', surfaceId: 'B' } }]
   h.instance.data = { rules: [rule('enterB', { type: 'scene.enter' }, 'visitedB', true)] } as unknown as JsonValue
   const player = await mountPublishedCourseV3(published(project), root(), { keyboardNavigation: false })
@@ -154,12 +156,12 @@ it('CA088 reveal starts the target presentation and CA087 restarts at the first 
 })
 
 it('CA130 a healthy target capture ignores a failed or pending sibling asset, while full surface capture still waits and reports it', async () => {
-  const project = fixture(); project.surfaces.pop(); project.assets.other = { id: 'other', path: 'assets/other', mimeType: 'image/png' }
+  const project = fixture(); setRootContainers(project, componentSurfaces(project).slice(0, -1)); project.assets.other = { id: 'other', path: 'assets/other', mimeType: 'image/png' }
   project.definitions.text = { id: 'text', role: 'content', implementation: { kind: 'builtin', key: 'guoling.document-block' } }
   project.definitions.image = { id: 'image', role: 'content', implementation: { kind: 'builtin', key: 'guoling.image' } }
   project.instances.text = { id: 'text', definitionId: 'text', data: { type: 'heading', level: 1, content: { inlines: [{ type: 'text', text: 'Healthy' }] } } }
   project.instances.image = { id: 'image', definitionId: 'image', data: { originalAssetId: 'other', assetId: 'other', alt: '', fit: 'contain' } }
-  project.surfaces[0].childIds = ['text', 'image']
+  testContainerInstance(project, 0).childIds = ['text', 'image']
   const payload = { ...published(project), assets: { other: { id: 'other', mimeType: 'image/png', url: 'https://assets.example/other.png' } } }
   vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, status: 404 })))
   const host = root(), player = await mountPublishedCourseV3(payload, host, { capture: true, keyboardNavigation: false })
@@ -169,7 +171,7 @@ it('CA130 a healthy target capture ignores a failed or pending sibling asset, wh
 
 it('CA181 reveal recipes keep progress by instance, reset it consistently, and only the owning surface consumes entry', async () => {
   const project = fixture(), a = context(project, 'recipeA'), b = context(project, 'recipeB')
-  project.global.underlay = []; project.surfaces[0].childIds.push('recipeA'); project.surfaces[1].childIds.push('recipeB')
+  project.global.underlay = []; testContainerInstance(project, 0).childIds.push('recipeA'); testContainerInstance(project, 1).childIds.push('recipeB')
   project.definitions.recipeA.role = project.definitions.recipeB.role = 'content'
   a.instance.data = { mode: 'reveal', initialStep: 0, steps: ['one', 'two'], items: [] }; b.instance.data = { mode: 'reveal', initialStep: 2, steps: ['one', 'two'], items: [] }
   let surfaceId = 'A'; const nav = new ComponentNavigationOwner({ project: () => project, surfaceId: () => surfaceId, select() {} })
@@ -190,17 +192,17 @@ it('CA181 reveal recipes keep progress by instance, reset it consistently, and o
 it('CA074 Published consumes a selected formal path and CA076 navigation rebases the existing stable frame after structural edits', async () => {
   let project = fixture()
   const frame = (id: string, x: number) => ({ id, title: id, pose: { x, y: 0, zoom: 1 } })
-  project.surfaces[0] = { ...project.surfaces[0], kind: 'spatial', spatial: { home: { x: 0, y: 0, zoom: 1 }, frames: [frame('one', 1), frame('two', 2), frame('three', 3)], defaultPathId: 'reverse', paths: [{ id: 'reverse', title: 'reverse', frameIds: ['two', 'one'] }] } }
+  setRootContainers(project, [...componentSurfaces(project).slice(0, 0), { ...componentSurfaces(project)[0], kind: 'spatial', spatial: { home: { x: 0, y: 0, zoom: 1 }, frames: [frame('one', 1), frame('two', 2), frame('three', 3)], defaultPathId: 'reverse', paths: [{ id: 'reverse', title: 'reverse', frameIds: ['two', 'one'] }] } }, ...componentSurfaces(project).slice(0 + 1)])
   const player = await mountPublishedCourseV3(published(project), root(), { keyboardNavigation: false })
   try { expect(player.camera('A')!.read().x).toBe(2); expect(await player.next()).toBe(true); expect(player.camera('A')!.read().x).toBe(1); expect(player.selectSpatialPath(null)).toBe(true); expect(await player.next()).toBe(true); expect(player.camera('A')!.read().x).toBe(1) }
   finally { await player.dispose() }
-  project = { ...project, surfaces: [{ ...project.surfaces[0], spatial: { ...project.surfaces[0].spatial!, paths: [] } }, project.surfaces[1]] }
+  project = { ...project, instances: { ...project.instances }, definitions: { ...project.definitions } }; setRootContainers(project, [{ ...componentSurfaces(project)[0], spatial: { ...componentSurfaces(project)[0].spatial!, paths: [] } }, componentSurfaces(project)[1]])
   let frameId: string | null = null, index: number | null = null
   const owner = new ComponentNavigationOwner({ project: () => project, surfaceId: () => 'A', select() {} }), camera = createComponentSpatialCameraPort({ x: 0, y: 0, zoom: 1 })
   owner.registerCamera('A', camera, { frameId: () => frameId, selectFrame: value => { frameId = value }, stepIndex: () => index, selectStep: value => { index = value } })
   try {
     await owner.execute({ type: 'step.next' }); await owner.execute({ type: 'step.next' }); expect(frameId).toBe('two'); expect(index).toBe(1)
-    project = { ...project, surfaces: [{ ...project.surfaces[0], spatial: { ...project.surfaces[0].spatial!, frames: [frame('two', 2), frame('three', 3)] } }, project.surfaces[1]] }
+    project = { ...project, instances: { ...project.instances }, definitions: { ...project.definitions } }; setRootContainers(project, [{ ...componentSurfaces(project)[0], spatial: { ...componentSurfaces(project)[0].spatial!, frames: [frame('two', 2), frame('three', 3)] } }, componentSurfaces(project)[1]])
     owner.changed(); expect(index).toBe(0); expect(await owner.execute({ type: 'step.next' })).toBe(true); expect(frameId).toBe('three')
   } finally { owner.dispose(); camera.dispose() }
 })

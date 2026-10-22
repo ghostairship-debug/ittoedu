@@ -1,3 +1,4 @@
+import { createTestProjectFromLegacy } from '../helpers/glxWorkFixture'
 import { expect, it, vi } from 'vitest'
 import { buildSpatialPropertiesOwner } from '../../src/renderer/ui/properties/SpatialPropertiesContextBuilder'
 import type { PropertiesOwnerReadModel } from '../../src/renderer/composition/properties/PropertiesAuthoringReadModel'
@@ -5,7 +6,7 @@ import type { CapturedCourseTarget } from '../../src/renderer/documents/CourseV1
 import type { ComponentSurface, CourseProjectV10 } from '../../src/shared/contracts/component-platform/project'
 it('P0 sends frame follow, camera session edits and exclusive path sources through captured Spatial actions',async()=>{
   const surface:ComponentSurface={id:'world',title:'世界',kind:'spatial',childIds:[],spatial:{home:{x:0,y:0,zoom:1},frames:[{id:'frame',pose:{x:0,y:0,zoom:1}}]}}
-  const project:CourseProjectV10={id:'project',schemaVersion:10,revision:0,title:'世界',definitions:{},instances:{},assets:{},global:{underlay:[],overlay:[]},surfaces:[surface]}
+  const project:CourseProjectV10=createTestProjectFromLegacy({id:'project',schemaVersion:10,revision:0,title:'世界',definitions:{},instances:{},assets:{},global:{underlay:[],overlay:[]},surfaces:[surface]})
   const target={documentId:'doc-a',epoch:'epoch-a',project,surfaceId:'world'} as CapturedCourseTarget
   const read:PropertiesOwnerReadModel={documentId:'doc-a',epoch:'epoch-a',activeStateId:null,editingGlobal:false,project,baseProject:project,surface,
     selectedInstanceIds:[],selectedInstances:[],selectedViews:[],selectedInstance:null,selectedView:null,selectedIsGlobal:false,resources:{assets:{},components:{}},error:null}

@@ -1,6 +1,7 @@
 import { strFromU8, unzipSync } from 'fflate'
 
-export interface PptxImportIssue { page?: number; type: string; message: string }
+import type { PptxImportIssue } from '../../shared/workbench/pptxImport'
+export type { PptxImportIssue } from '../../shared/workbench/pptxImport'
 export class PptxImportError extends Error {
   constructor(readonly issues: PptxImportIssue[]) { super(issues.map(i => `${i.page ? `第 ${i.page} 页：` : ''}${i.type} — ${i.message}`).join('\n')) }
 }

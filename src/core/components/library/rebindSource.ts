@@ -4,9 +4,9 @@ import { sourceModuleBindings } from './references'
 
 /** Rebind software identities. Source text, logical file paths and import specifiers remain authored content. */
 export function rebindComponentLibraryImplementation(original: Extract<ComponentImplementation, { kind: 'source' }>,
-  identities: LibraryIdentityMap, _assetIds: readonly string[]): Extract<ComponentImplementation, { kind: 'source' }> {
+  identities: LibraryIdentityMap, _assetIds: readonly string[], options: { retainUnmappedReferences?: boolean } = {}): Extract<ComponentImplementation, { kind: 'source' }> {
   const moduleBindings = Object.fromEntries(Object.entries(sourceModuleBindings(original)).map(([specifier, id]) => {
-    const mapped = identities.definitions.get(id)
+    const mapped = identities.definitions.get(id) ?? (options.retainUnmappedReferences ? id : undefined)
     if (!mapped) throw new Error(`库条目缺少源码依赖定义：${id}`)
     return [specifier, mapped]
   }))
@@ -17,7 +17,7 @@ export function rebindComponentLibraryImplementation(original: Extract<Component
   implementation.moduleBindings = moduleBindings
   implementation.resourceBindings = resourceBindings
   if (implementation.workspace) {
-    const ownerId = identities.components.get(implementation.workspace.ownerId)
+    const ownerId = identities.components.get(implementation.workspace.ownerId) ?? (options.retainUnmappedReferences ? implementation.workspace.ownerId : undefined)
     if (!ownerId) throw new Error(`库条目缺少源码文件：${implementation.workspace.ownerId}`)
     implementation.workspace = { ...implementation.workspace, ownerId }
   }

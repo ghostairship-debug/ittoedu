@@ -1,4 +1,6 @@
 // @vitest-environment node
+import { appendRootContainers, testContainerInstance } from '../helpers/glxWorkFixture'
+import { componentSurfaces } from '../../src/shared/contracts/component-platform/project'
 import { expect, it } from 'vitest'
 import { createBlankCourseProjectV10 } from '../../src/core/course/createCourseProjectV10'
 import { DocumentSession } from '../../src/core/documents/DocumentSession'
@@ -10,7 +12,7 @@ import { WEB_DEFINITION } from '../../src/components/web/data'
 import type { ComponentFrame } from '../../src/shared/contracts/component-platform'
 
 it('freezes current target geometry, refreshes manual layout by observed identity, and isolates the target page', async () => {
-  const project = createBlankCourseProjectV10('Target context'), surface = project.surfaces[0]!
+  const project = createBlankCourseProjectV10('Target context'), surface = componentSurfaces(project)[0]!
   project.definitions[WEB_DEFINITION.id] = WEB_DEFINITION
   const initialFrame: ComponentFrame = { width: 640, height: 360, transform: [1, 0, 0, 1, 300, 180] }
   project.instances.a = { id: 'a', definitionId: WEB_DEFINITION.id, frame: initialFrame,
@@ -18,8 +20,8 @@ it('freezes current target geometry, refreshes manual layout by observed identit
   project.instances.b = { id: 'b', definitionId: WEB_DEFINITION.id, frame: { width: 1100, height: 120, transform: [1, 0, 0, 1, 50, 0] },
     data: { html: '<h1>Keep native heading</h1><nav><a href="#next">Continue</a></nav>' } }
   project.instances.other = { id: 'other', definitionId: WEB_DEFINITION.id, frame: initialFrame, data: { html: '<h1>OTHER_PAGE</h1>' } }
-  surface.childIds = ['a', 'b']
-  project.surfaces.push({ id: 'other-page', kind: 'slide', title: 'Other page', childIds: ['other'], designSize: { width: 1280, height: 720 } })
+  testContainerInstance(project, surface.id).childIds = ['a', 'b']
+  appendRootContainers(project, { id: 'other-page', kind: 'slide', title: 'Other page', childIds: ['other'], designSize: { width: 1280, height: 720 } })
   const session = await DocumentSession.create({ documentId: 'task-target', epoch: 'epoch',
     binding: { kind: 'file', path: 'task-target.glx', version: null, bindingVersion: 0 },
     model: { kind: 'course-v10', project, resources: { assets: {}, components: {} } } }, new CourseV10Driver(),

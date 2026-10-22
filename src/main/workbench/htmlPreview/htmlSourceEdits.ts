@@ -6,7 +6,7 @@ import { escapeHtmlAttribute, escapeHtmlText } from './htmlSourceLocator'
 
 type Splice = { from: number; to: number; text: string }
 export type HtmlSourceEditResult =
-  | { ok: true; source: string; changed: boolean }
+  | { ok: true; source: string; changed: boolean; changes: Array<{ from: number; to: number; inserted: number }> }
   | { ok: false; reason: 'source-changed' | 'not-editable'; message: string }
 
 function applySplices(source: string, edits: Splice[]): string {
@@ -68,12 +68,14 @@ function changeJson(value: unknown, path: readonly (string | number)[], replacem
 export function applyHtmlSourceEdit(source: string, command: HtmlSourceEditCommand): HtmlSourceEditResult {
   if (command.type === 'batch') {
     let updated = source
+    const changes: Array<{ from: number; to: number; inserted: number }> = []
     const remaining = command.commands.map(leaf => structuredClone(leaf))
     for (let i = 0; i < remaining.length; i++) {
       const before = updated
       const result = applyHtmlSourceEdit(before, remaining[i]!)
       if (!result.ok) return result
       updated = result.source
+      changes.push(...result.changes)
       let from = 0, tail = 0
       while (from < before.length && from < updated.length && before[from] === updated[from]) from++
       while (tail < before.length - from && tail < updated.length - from && before[before.length - tail - 1] === updated[updated.length - tail - 1]) tail++
@@ -86,7 +88,7 @@ export function applyHtmlSourceEdit(source: string, command: HtmlSourceEditComma
         }
       }
     }
-    return { ok: true, source: updated, changed: updated !== source }
+    return { ok: true, source: updated, changed: updated !== source, changes }
   }
   const structure = inspectHtmlSource(source)
   const nodes = flattenHtmlSourceNodes(structure.roots)
@@ -138,12 +140,13 @@ export function applyHtmlSourceEdit(source: string, command: HtmlSourceEditComma
         const siblings = parent.children.filter(node => node.key !== target.key)
         if (command.index > siblings.length) return fail('移动位置超出容器范围')
         const insertion = siblings[command.index]?.address?.from ?? parent.contentSpan.to
-        if (insertion >= target.address.from && insertion <= target.address.to) return { ok: true, source, changed: false }
+        if (insertion >= target.address.from && insertion <= target.address.to) return { ok: true, source, changed: false, changes: [] }
         const original = source.slice(target.address.from, target.address.to)
         edits = [{ from: target.address.from, to: target.address.to, text: '' }, { from: insertion, to: insertion, text: original }]
       }
     }
     const updated = applySplices(source, edits)
-    return { ok: true, source: updated, changed: updated !== source }
+    return { ok: true, source: updated, changed: updated !== source,
+      changes: [...edits].sort((a, b) => b.from - a.from || b.to - a.to).map(edit => ({ from: edit.from, to: edit.to, inserted: edit.text.length })) }
   } catch (error) { return fail(error instanceof Error ? error.message : String(error)) }
 }

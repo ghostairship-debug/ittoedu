@@ -1,7 +1,7 @@
 import { CellSelection } from 'prosemirror-tables'
 import { NodeSelection, TextSelection, type Transaction } from 'prosemirror-state'
 import type { Node as PMNode } from 'prosemirror-model'
-import type { DocumentContent } from '../../shared/document/content'
+import { documentBlockChildren, type DocumentContent } from '../../shared/document/content'
 import type { FlowTableBlock } from '../../shared/courseProjectTypes'
 import type { DocumentTableEditorTarget } from './documentTableEditorPort'
 
@@ -16,8 +16,9 @@ type Slot = NonNullable<DocumentTableEditorTarget['anchor']>
 function findTable(blocks: DocumentContent['blocks'], id: string): FlowTableBlock | null {
   for (const block of blocks) {
     if (block.id === id) return block.type === 'table' ? block : null
-    if (block.type === 'section') {
-      const nested = findTable(block.blocks, id)
+    const children = documentBlockChildren(block)
+    if (children) {
+      const nested = findTable(children, id)
       if (nested) return nested
     }
   }

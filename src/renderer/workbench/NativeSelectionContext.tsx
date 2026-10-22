@@ -5,7 +5,7 @@ import { useCourseEditorActions } from '../documents/CourseEditorActionsContext'
 import { selectionObjectCommands } from '../composition/selection/selectionObjectCommands'
 import { useContextMenu, type MenuCommand } from '../editing/commands/CommandMenu'
 import { IMAGE_FIT_LABEL, multiObjectCommands, singleObjectCommands, type SingleObjectState } from '../editing/commands/objectCommands'
-import { OBJECT_CONTEXT_MENU_EVENT, requestObjectEdit, type ObjectContextMenuRequest } from '../editing/commands/objectContextMenu'
+import { OBJECT_CONTEXT_MENU_EVENT, requestAuthorFieldAction, requestObjectEdit, type ObjectContextMenuRequest } from '../editing/commands/objectContextMenu'
 import { ImageCropOverlay } from '../editing/crop/ImageCropOverlay'
 import { SlideLightActions, slideLightMenuItems } from '../editing/quickbar/SlideLightActions'
 import type { SlideLightCommand } from '../editing/commands/slideLightCommands'
@@ -19,6 +19,7 @@ import type { FlowPropertiesContext } from '../ui/properties/FlowPropertiesPanel
 import type { PropertiesItemView, PropertiesPatch } from '../ui/properties/SlideNativePropertiesPanel'
 import { captureCourseInstanceSelection, captureCourseAuthorField, usePinnedSelection, workbenchSelection } from './SelectionContextController'
 import type { ComponentAuthorSpot } from '../../shared/contracts/component-platform/runtime'
+import { authorFieldIdentity, interactionSelectionIdentity, selectionMatchesSpot } from '../documents/interactionSelection'
 import { courseAuthorFieldTarget } from '../../core/tools/ToolTargets'
 import { useRuntimeLightEditView } from '../composition/runtime/runtimeLightEditCommands'
 import { RuntimePageTextList } from './RuntimePageText'
@@ -28,7 +29,7 @@ import { useEditorStore } from '../store/editorStore'
 import { proEditorRailController } from '../ui/proEditorRailController'
 import { frameCorners, multiplyMatrices, type AffineMatrix } from '../../core/components/geometry'
 import { componentParentMatrix } from '../composition/crossSurfaceCommands'
-import { owningContainer } from '../../shared/contracts/component-platform/project'
+import { componentIsLocked, owningContainer } from '../../shared/contracts/component-platform/project'
 import { TextFormatActions } from '../editing/quickbar/TextFormatActions'
 import { authorSpotFormatView, authorSpotStylePatch } from '../componentPlatform/surfaces/slide/authorSpotFormatting'
 import { authorSpotStyleEdits } from '../../core/components/authoring/componentAuthorEdits'
@@ -111,9 +112,11 @@ function ObjectActions({ view, patch, replaceImage, editText, extra = {} }: { vi
 const MULTI_ALIGN = [['left', '左对齐'], ['center', '水平居中'], ['right', '右对齐'], ['top', '顶对齐'], ['middle', '垂直居中'], ['bottom', '底对齐']] as const
 const sortedIds = (ids: readonly string[]) => JSON.stringify([...ids].sort())
 
-export function NativeSelectionContext({ documentId, revision, surfaceId, locationId: legacyLocationId, itemIds, stateId, sceneItemIds = [], enabled, bounds, textEditing = false, ownsDocumentSelection = true, authorSpot }: {
+export function NativeSelectionContext({ documentId, revision, surfaceId, locationId: legacyLocationId, itemIds, stateId, sceneItemIds = [], enabled, bounds, authorBounds, textEditing = false, ownsDocumentSelection = true, authorSpot }: {
   documentId?: string | null; revision: number; surfaceId?: string | null; locationId?: string | null; itemIds: readonly string[]; stateId?: string | null; sceneItemIds?: readonly string[]; enabled: boolean
   bounds?(itemId: string): Box | null
+  /** Current field geometry, resolved by the owning workspace; never the enclosing object's frame. */
+  authorBounds?(): Box | null
   authorSpot?: ComponentAuthorSpot
   /** The text editing toolbar owns the selection while its text is edited. */
   textEditing?: boolean
@@ -122,8 +125,12 @@ export function NativeSelectionContext({ documentId, revision, surfaceId, locati
 }) {
   const locationId = surfaceId ?? legacyLocationId
   const pageText = useRuntimeLightEditView(itemIds.length === 1 ? itemIds[0]! : '')
-  const selectedAuthor = itemIds.length === 1 && authorSpot?.instanceId === itemIds[0] ? authorSpot : undefined
-  const authorIdentity = JSON.stringify(selectedAuthor)
+  const courseView = useEditorStore(state => state.courseView)
+  const interaction = courseView.activeDocumentId === documentId ? courseView.interactionSelection : null
+  const selectedField = interaction?.kind === 'author-field' ? { ...interaction.field, instanceId: interaction.instanceId } : undefined
+  const selectedAuthor = authorSpot && selectionMatchesSpot(interaction, authorSpot) ? authorSpot : undefined
+  const authorIdentity = selectedField ? authorFieldIdentity(selectedField.instanceId, selectedField) : ''
+  const selectedFieldValue = selectedAuthor ?? selectedField
   const chrome = useCourseEditorChrome()
   const marker = useRef<HTMLSpanElement>(null)
   const [root, setRoot] = useState<HTMLElement | null>(null)
@@ -152,13 +159,14 @@ export function NativeSelectionContext({ documentId, revision, surfaceId, locati
   useLayoutEffect(() => { setRoot(marker.current?.closest('main') ?? null) }, [])
   // Right-click: the workspace selects what is under the pointer and asks for that selection's menu (M21).
   const contextMenu = useContextMenu()
-  const menuRequestState = useRef<{ ids: string; items: MenuCommand[] }>({ ids: '[]', items: [] })
+  const menuRequestState = useRef<{ ids: string; identity: string; items: MenuCommand[] }>({ ids: '[]', identity: '', items: [] })
   useEffect(() => {
     if (!root) return
     const request = (event: Event) => {
       const detail = (event as CustomEvent<ObjectContextMenuRequest>).detail
       const current = menuRequestState.current
       if (!detail || sortedIds(detail.itemIds) !== current.ids || !current.items.length) return
+      if ((detail.selectionIdentity ?? '') !== current.identity) return
       event.preventDefault()
       contextMenu.open({ x: detail.x, y: detail.y }, '对象操作', [...(detail.extra ?? []), ...current.items])
     }
@@ -170,21 +178,30 @@ export function NativeSelectionContext({ documentId, revision, surfaceId, locati
     // selection change or tab/state switch ends that menu before it can run.
     contextMenu.close()
     setNotice(''); setCropping(null)
-  }, [documentId, locationId, ids, stateId, enabled, contextMenu.close])
+  }, [documentId, locationId, ids, stateId, enabled, authorIdentity, contextMenu.close])
   useEffect(() => {
     if (!documentId || !ownsDocumentSelection || !enabled) return
-    return workbenchSelection.registerSelectionClearer(documentId, targets => { const owner = useEditorStore.getState(); const removed = targets?.flatMap(target => target.kind === 'course-instance' ? [target.instanceId] : target.kind === 'course-object' ? [target.itemId] : []) ?? []; owner.selectNodes(targets ? owner.courseView.selectedInstanceIds.filter(id => !removed.includes(id)) : []) })
+    return workbenchSelection.registerSelectionClearer(documentId, targets => {
+      const owner = useEditorStore.getState(), current = owner.courseView.interactionSelection
+      if (owner.courseView.activeDocumentId !== documentId) return
+      if (current?.kind === 'author-field') {
+        let target: ReturnType<typeof courseAuthorFieldTarget> | undefined
+        try { if (owner.courseView.surfaceId) target = courseAuthorFieldTarget(owner.courseView.surfaceId, { ...current.field, instanceId: current.instanceId }, owner.courseView.activeStateId) } catch { return }
+        if (!targets || target && targets.some(value => JSON.stringify(value) === JSON.stringify(target))) owner.courseBridge.selectInteraction(documentId, null)
+        return
+      }
+      const removed = targets?.flatMap(target => target.kind === 'course-instance' && !target.authorField && !target.dataPath && target.from === undefined && target.to === undefined ? [target.instanceId] : target.kind === 'course-object' ? [target.itemId] : []) ?? []
+      owner.selectNodes(targets ? owner.courseView.selectedInstanceIds.filter(id => !removed.includes(id)) : [])
+    })
   }, [documentId, ownsDocumentSelection, enabled])
   useEffect(() => {
     if (!documentId || !ownsDocumentSelection) return
-    let active = true
-    void workbenchSelection.observe(documentId, revision, snapshot => enabled && locationId && itemIds.length
-      ? selectedAuthor ? captureCourseAuthorField(snapshot, locationId, selectedAuthor, stateId) : captureCourseInstanceSelection(snapshot, locationId, itemIds, undefined, stateId) : null, () => active)
-    return () => { active = false }
-  }, [documentId, revision, locationId, ids, stateId, enabled, ownsDocumentSelection, authorIdentity])
+    workbenchSelection.observeSnapshot(documentId, revision, courseView.snapshot, snapshot => enabled && locationId && itemIds.length
+      ? selectedFieldValue ? captureCourseAuthorField(snapshot, locationId, selectedFieldValue, stateId) : captureCourseInstanceSelection(snapshot, locationId, itemIds, undefined, stateId) : null)
+  }, [documentId, revision, locationId, ids, stateId, enabled, ownsDocumentSelection, authorIdentity, interaction, courseView.snapshot])
   useLayoutEffect(() => {
     if (!root) return
-    const selectedPinned = pinned?.targets.flatMap(t => t.kind === 'course-instance' && t.surfaceId === locationId && (t.stateId ?? null) === (stateId ?? null) ? [t.instanceId] : []) ?? []
+    const selectedPinned = pinned?.targets.filter(t => t.kind === 'course-instance' && t.surfaceId === locationId && (t.stateId ?? null) === (stateId ?? null)) ?? []
     const locate = (id: string): Box | null => {
       const explicit = bounds?.(id)
       if (explicit) return explicit
@@ -195,12 +212,25 @@ export function NativeSelectionContext({ documentId, revision, surfaceId, locati
       const rect = element?.getBoundingClientRect()
       return rect ? { left: rect.left, top: rect.top, width: rect.width, height: rect.height } : null
     }
+    const locateField = (identity: string): Box | null => {
+      const element = [...root.querySelectorAll<HTMLElement>('[data-author-field-identity]')].find(value => value.dataset.authorFieldIdentity === identity)
+      const rect = element?.getBoundingClientRect()
+      return rect ? { left: rect.left, top: rect.top, width: rect.width, height: rect.height } : null
+    }
     const paint = () => {
       const nextView = visibleBounds(root)
       setView(previous => JSON.stringify(previous) === JSON.stringify(nextView) ? previous : nextView)
-      const nextPinned = selectedPinned.flatMap(id => { const box = locate(id); return box ? [box] : [] })
+      const nextPinned = selectedPinned.flatMap(target => {
+        if (target.kind !== 'course-instance') return []
+        const precise = target.authorField || target.dataPath || target.from !== undefined || target.to !== undefined
+        const identity = target.authorField ? authorFieldIdentity(target.instanceId, target.authorField)
+          : target.dataPath && target.fieldScope !== 'flowLayout' && target.from === undefined && target.to === undefined ? authorFieldIdentity(target.instanceId, { kind: 'text', dataPath: target.dataPath, fieldScope: target.fieldScope ?? 'data', initialValue: '' }) : ''
+        const box = precise ? identity ? (identity === authorIdentity ? authorBounds?.() : null) ?? locateField(identity) : null : locate(target.instanceId)
+        return box ? [box] : []
+      })
       setPinnedBoxes(previous => JSON.stringify(previous) === JSON.stringify(nextPinned) ? previous : nextPinned)
-      const nextAnchor = unionBoxes(itemIds.flatMap(id => { const box = locate(id); return box ? [rotatedBoundingBox(box)] : [] }))
+      const fieldBox = selectedField ? authorBounds?.() ?? locateField(authorIdentity) : null
+      const nextAnchor = selectedField ? fieldBox ? rotatedBoundingBox(fieldBox) : null : unionBoxes(itemIds.flatMap(id => { const box = locate(id); return box ? [rotatedBoundingBox(box)] : [] }))
       setAnchor(previous => JSON.stringify(previous) === JSON.stringify(nextAnchor) ? previous : nextAnchor)
     }
     paint(); window.addEventListener('resize', paint); window.addEventListener('scroll', paint, true); root.addEventListener('playback-view-change', paint)
@@ -208,10 +238,10 @@ export function NativeSelectionContext({ documentId, revision, surfaceId, locati
     const resized = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(paint)
     resized?.observe(root)
     return () => { observer.disconnect(); resized?.disconnect(); window.removeEventListener('resize', paint); window.removeEventListener('scroll', paint, true); root.removeEventListener('playback-view-change', paint) }
-  }, [root, pinned, locationId, stateId, sceneIds, ids, bounds])
-  const selection = enabled && itemIds.length && matchesObjectProperties(context, itemIds) ? context : null
-  const overlay = enabled && matchesFlowOverlay(context, itemIds) ? context : null
-  const global = enabled && !overlay && matchesGlobalObject(context, itemIds) ? context : null
+  }, [root, pinned, locationId, stateId, sceneIds, ids, bounds, authorBounds, authorIdentity])
+  const selection = enabled && !selectedField && itemIds.length && matchesObjectProperties(context, itemIds) ? context : null
+  const overlay = enabled && !selectedField && matchesFlowOverlay(context, itemIds) ? context : null
+  const global = enabled && !selectedField && !overlay && matchesGlobalObject(context, itemIds) ? context : null
   const report = (message: string) => setNotice(message)
   let single: SingleObject | null = null
   if (selection?.kind === 'slide-native') single = { view: selection.view, disabledReason: selection.disabledReason,
@@ -239,42 +269,59 @@ export function NativeSelectionContext({ documentId, revision, surfaceId, locati
     if (!documentId || !locationId) throw new Error('文档尚未就绪，请重新选择。')
     const selectedIds = [...itemIds]
     const snapshot = await workbenchSelection.prepare(documentId)
-    return selectedAuthor ? captureCourseAuthorField(snapshot, locationId, selectedAuthor, stateId)
+    return selectedFieldValue ? captureCourseAuthorField(snapshot, locationId, selectedFieldValue, stateId)
       : captureCourseInstanceSelection(snapshot, locationId, selectedIds, undefined, stateId)
   }
   // One object has its own AI card (M15); several objects still go to the assistant as one request.
   let authorTarget: ReturnType<typeof courseAuthorFieldTarget> | undefined
-  try { if (selectedAuthor && locationId) authorTarget = courseAuthorFieldTarget(locationId, selectedAuthor, stateId) } catch { /* Report the unavailable local address without widening to the object. */ }
-  const ai = selectedAuthor && !authorTarget ? <QuickBarButton label="此处没有可编辑的精确作者地址" text="AI" disabled onClick={() => {}} /> : single && documentId && locationId && itemIds.length === 1
-    ? <ElementAiButton documentId={documentId} target={authorTarget ?? { kind: 'course-instance', surfaceId: locationId, instanceId: itemIds[0]!, stateId: stateId ?? null }} label={selectedAuthor ? selectedAuthor.kind === 'text' ? '所选内部文字' : '所选内部图片' : elementLabel(single.view)} capture={captureSelected} />
+  try { if (selectedFieldValue && locationId) authorTarget = courseAuthorFieldTarget(locationId, selectedFieldValue, stateId) } catch { /* Report the unavailable local address without widening to the object. */ }
+  const ai = selectedField && !authorTarget ? <QuickBarButton label="此处没有可编辑的精确作者地址" text="AI" disabled onClick={() => {}} /> : (selectedField || single) && documentId && locationId && itemIds.length === 1
+    ? <ElementAiButton documentId={documentId} target={authorTarget ?? { kind: 'course-instance', surfaceId: locationId, instanceId: itemIds[0]!, stateId: stateId ?? null }} label={selectedField ? selectedField.kind === 'text' ? '所选内部文字' : '所选内部图片' : elementLabel(single!.view)} capture={captureSelected} />
     : <QuickBarAiButton targetLabel={itemIds.length > 1 ? `所选 ${itemIds.length} 个对象` : '所选对象'}
       onSubmit={async instruction => { await workbenchSelection.request(await captureSelected(), instruction) }} />
   let content: ReactNode = null
   // The selection's right-click menu: the whole list, from the same definitions as the bar's "⋯".
   let contextItems: MenuCommand[] = []
-  const professionalText = single?.view.type === 'text' && selectedAuthor?.kind === 'text' && !selectedAuthor.sourceRegion
-    && selectedAuthor.fieldScope !== 'authoring' && selectedAuthor.dataPath?.length === 1 && selectedAuthor.dataPath[0] === 'content'
-  if (single && selectedAuthor?.kind === 'text' && !professionalText) {
-    const localView = (editingProject ?? project) && authorSpotFormatView((editingProject ?? project)!, selectedAuthor)
+  if (selectedField) {
+    const fieldProject = editingProject ?? project
+    const locked = Boolean(fieldProject && componentIsLocked(fieldProject, selectedField.instanceId))
+    const disabledReason = locked ? '对象已锁定' : !selectedAuthor ? '此处字段尚未显示，请定位到原位置后编辑' : null
+    const fieldAction = () => run(() => {
+      if (disabledReason) throw new Error(disabledReason)
+      if (!documentId || !courseView.snapshot || !requestAuthorFieldAction({ documentId, epoch: courseView.snapshot.epoch,
+        selectionIdentity: authorIdentity, action: selectedField.kind === 'text' ? 'edit' : 'replace-image' })) throw new Error('此处字段暂时无法打开，请重新选择')
+    }, report)
+    const selectWhole = () => {
+      if (documentId) useEditorStore.getState().courseBridge.selectInstances(documentId, [selectedField.instanceId], locationId)
+    }
+    contextItems = guarded([
+      { id: 'author-field.edit', label: selectedField.kind === 'text' ? '编辑此处文字' : '替换此处图片', group: 'content', run: fieldAction, disabledReason },
+      { id: 'author-field.select-owner', label: '选择整个组件', group: 'selection', run: selectWhole },
+    ])
+    const localView = selectedAuthor?.kind === 'text' && fieldProject ? authorSpotFormatView(fieldProject, selectedAuthor) : null
     const patchLocal = (patch: PropertiesPatch) => run(async () => {
       const owner = useEditorStore.getState(), target = owner.courseKernel.captureTarget(documentId!)
-      if (target.surfaceId !== locationId || target.activeStateId !== (stateId ?? null) || target.instanceId !== selectedAuthor.instanceId)
+      if (!selectedAuthor || target.surfaceId !== locationId || target.activeStateId !== (stateId ?? null) || target.instanceId !== selectedAuthor.instanceId
+        || target.selectionIdentity !== authorIdentity || interactionSelectionIdentity(owner.courseView.interactionSelection) !== authorIdentity)
         throw new Error('当前文字选择已改变，请重新选择')
-      if (single!.disabledReason || single!.view.locked) throw new Error(single!.disabledReason ?? '对象已锁定')
+      if (componentIsLocked(target.editingProject, selectedAuthor.instanceId)) throw new Error('对象已锁定')
       const currentView = authorSpotFormatView(target.editingProject, selectedAuthor)
       if (!currentView) throw new Error('此片段由程序共享排版，请在组件源码中修改格式')
       const edits = authorSpotStyleEdits(target.editingProject, selectedAuthor, authorSpotStylePatch(selectedAuthor, currentView, patch))
       await owner.courseKernel.editCaptured(owner.courseKernel.capture(edits, target))
     }, report)
-    const localCommands = slideLightObjectCommands({ isText: true, locked: single.view.locked || Boolean(single.disabledReason), clickBindable: false, sounds: [], locations: [] })
+    const localCommands = slideLightObjectCommands({ isText: true, locked, clickBindable: false, sounds: [], locations: [] })
       .filter(command => command.kind === 'font' || command.kind === 'line-spacing' && localView?.lineSpacing)
     content = <>
-      {localView && !single.disabledReason && !single.view.locked ? <>
-        <TextFormatActions view={localView} patch={patchLocal} alignment={localView.alignment} highlight={localView.highlight} editText={() => run(() => useEditorStore.getState().beginSlideSpotEdit(selectedAuthor), report)} />
+      {localView && !disabledReason ? <>
+        <TextFormatActions view={localView} patch={patchLocal} alignment={localView.alignment} highlight={localView.highlight} editText={fieldAction} />
         <SlideLightActions commands={localCommands} fontFamily={localView.style.fontFamily} lineSpacing={localView.style.lineSpacing}
           backgroundColor={null} onRun={command => patchLocal({ style: command.kind === 'font' ? { fontFamily: String(command.value) } : { lineSpacing: Number(command.value) } })} onError={report} />
-      </> : <QuickBarLabel>{single.disabledReason ?? (single.view.locked ? '对象已锁定' : '此片段格式由组件源码控制')}</QuickBarLabel>}
-      <QuickBarSeparator />{ai}
+      </> : <>
+        <QuickBarLabel>{disabledReason ?? (selectedField.kind === 'text' ? '所选内部文字' : '所选内部图片')}</QuickBarLabel>
+        <QuickBarButton label={selectedField.kind === 'text' ? '编辑此处文字' : '替换此处图片'} text={selectedField.kind === 'text' ? '编辑' : '替换'} disabled={Boolean(disabledReason)} onClick={fieldAction} />
+      </>}
+      <QuickBarSeparator />{ai}<QuickBarMenu items={contextItems} />
     </>
   } else if (single) {
     const node = single.view, patch = single.patch
@@ -375,7 +422,7 @@ export function NativeSelectionContext({ documentId, revision, surfaceId, locati
       <QuickBarSeparator />{ai}<QuickBarMenu items={items} />
     </>
   }
-  menuRequestState.current = { ids: sortedIds(itemIds), items: contextItems }
+  menuRequestState.current = { ids: sortedIds(itemIds), identity: authorIdentity, items: contextItems }
   if (!enabled) return null
   // The in-place crop of the selected image, drawn over the canvas while it runs (M21).
   const cropView = cropping && single?.view.type === 'image' && single.view.id === cropping ? single.view : null
@@ -401,7 +448,7 @@ export function NativeSelectionContext({ documentId, revision, surfaceId, locati
   return <span ref={marker} className="native-selection-context" aria-hidden="true">
     {pinnedBoxes.map((box, index) => <span key={index} aria-hidden="true" data-pinned-object="true" className="native-selection-context__pinned"
       style={{ left: box.left, top: box.top, width: box.width, height: box.height, transform: box.rotation ? `rotate(${box.rotation}deg)` : undefined }} />)}
-    {content && <SelectionQuickBar label="选中对象快捷工具" anchor={anchor} bounds={view} suspended={gesture || textEditing || cropping !== null} selectionKey={`${documentId}:${locationId}:${stateId}:${ids}`} aboveOffset={ROTATION_HANDLE_CLEARANCE}>
+    {content && <SelectionQuickBar label="选中对象快捷工具" anchor={anchor} bounds={view} suspended={gesture || textEditing || cropping !== null} selectionKey={`${documentId}:${locationId}:${stateId}:${ids}:${authorIdentity}`} aboveOffset={ROTATION_HANDLE_CLEARANCE}>
       {globalNotice && <><QuickBarLabel>{globalNotice}</QuickBarLabel><QuickBarSeparator /></>}
       {content}
       <QuickBarButton label="属性" icon={<SlidersHorizontal size={14} />} onClick={() => {

@@ -1,3 +1,5 @@
+import { testContainerInstance } from '../helpers/glxWorkFixture'
+import { componentSurfaces } from '../../src/shared/contracts/component-platform/project'
 // @vitest-environment node
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createBlankCourseProjectV10 } from '../../src/core/course/createCourseProjectV10'
@@ -26,7 +28,7 @@ async function fixture(readOnly = false) {
   const project = createBlankCourseProjectV10('公开页面操作')
   project.definitions.text = { id: 'text', role: 'mixed', implementation: { kind: 'builtin', key: 'guoling.text' } }
   project.instances.body = { id: 'body', definitionId: 'text', data: JSON.parse(JSON.stringify(createTextComponentData('作者正文'))) as JsonValue }
-  project.surfaces[0].childIds = ['body']
+  testContainerInstance(project, 0).childIds = ['body']
   const session = await registry.create({ kind: 'course-v10', project, resources: { assets: {}, components: {} } }, 'view-actions.h5lesson')
   const images = new ObservationImageStore()
   cleanups.push(() => images.clearRun('run'))
@@ -68,7 +70,7 @@ async function fixture(readOnly = false) {
   const gateway = new DocumentToolGateway(registry, [driver], () => crypto.randomUUID(), { services: { observations } })
   await gateway.beginRun({ runId: 'run', actor: 'agent', documents: [{ documentId: session.documentId,
     writable: readOnly ? [] : [{ kind: 'document' }] }], ...(readOnly ? { fileAccess: { permission: 'read-only' as const } } : {}) })
-  const target = await gateway.issueTarget('run', session.documentId, { kind: 'course-surface', surfaceId: project.surfaces[0].id })
+  const target = await gateway.issueTarget('run', session.documentId, { kind: 'course-surface', surfaceId: componentSurfaces(project)[0].id })
   const execute = (name: string, input: unknown) => gateway.execute('run', crypto.randomUUID(), { name, input })
   const observe = () => execute('view.observe', { target })
   return { registry, session, gateway, target, execute, observe, click, input, readResource, stopRun, observeInteractive,

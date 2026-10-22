@@ -103,6 +103,8 @@ interface RuntimeSlot {
   preparing?: Preparation
   failed?: boolean
   retiring: Promise<void>
+  signatureInput?: { metadata: string; source?: string; html?: string; signature: string }
+  queuedRequest?: ComponentRuntimeRequest
 }
 
 function webSource(request: ComponentRuntimeRequest, preparing = true, sourceWeb = false): unknown {
@@ -142,6 +144,31 @@ function contentSignature(instance: ComponentInstance): string {
   // Implementation input is consumed by preparation; unchanged loaded code does not reset author data.
   const { frame: _frame, implementationOverride: _implementation, ...content } = instance
   return JSON.stringify(content)
+}
+
+function sameContentFields(before: ComponentInstance, after: ComponentInstance): boolean {
+  const keys = Object.keys(before).filter(key => key !== 'frame' && key !== 'implementationOverride') as Array<keyof ComponentInstance>
+  return keys.length === Object.keys(after).filter(key => key !== 'frame' && key !== 'implementationOverride').length
+    && keys.every(key => Object.is(before[key], after[key]))
+}
+
+/** Keep large source strings out of repeated signatures, while still observing
+ * in-place edits to the small declaration maps. Module graphs retain their
+ * existing complete signature because their authored structure can vary. */
+function requestSignature(request: ComponentRuntimeRequest, slot: RuntimeSlot): string {
+  const implementation = request.instance.implementationOverride ?? request.definition.implementation
+  const data = request.instance.data
+  if (hasWebContentData(data) && (data.modules !== undefined || data.moduleGraph !== undefined)) return implementationSignature(request)
+  const source = implementation.kind === 'source' ? implementation.source : undefined
+  const html = hasWebContentData(data) ? data.html : undefined
+  const metadata = JSON.stringify([request.definition.id, request.definition.version,
+    implementation.kind === 'source' ? { ...implementation, source: undefined } : implementation,
+    request.environmentSignature, request.preparationSignature])
+  const previous = slot.signatureInput
+  if (previous?.metadata === metadata && previous.source === source && previous.html === html) return previous.signature
+  const signature = implementationSignature(request)
+  slot.signatureInput = { metadata, source, html, signature }
+  return signature
 }
 
 /** Runtime state only; DocumentSession remains the sole author-data writer. */
@@ -190,7 +217,7 @@ export class ComponentRuntimeHost {
       slot = { retiring: Promise.resolve() }
       instances.set(request.instance.id, slot)
     }
-    const signature = implementationSignature(request)
+    const signature = requestSignature(request, slot)
     const previous = slot.active
     // Known permissions/bindings/root changes revoke immediately, even before preparation settles.
     if (previous && (environmentIdentity(previous.request) !== environmentIdentity(request) || previous.request.root !== request.root)) {
@@ -209,13 +236,21 @@ export class ComponentRuntimeHost {
     slot.preparing = undefined
     if (slot.active?.signature === signature && slot.active.request.root === request.root) {
       const active = slot.active
+      // Exact duplicate observations cannot invoke update in the original
+      // content comparison either. Share their wait instead of adding another
+      // link to the active queue; distinct author updates remain ordered.
+      if ((slot.queuedRequest ?? active.request).instance === request.instance) return active.updates.then(() => active.scope.isActive() ? active : null)
+      slot.queuedRequest = request
       // A failed update is reported to its caller without poisoning subsequent corrected data.
-      active.updates = active.updates.catch(() => {}).then(() => this.update(active, request))
+      active.updates = active.updates.catch(() => {}).then(() => this.update(active, request)).finally(() => {
+        if (slot!.queuedRequest === request) slot!.queuedRequest = undefined
+      })
       return active.updates.then(() => active.scope.isActive() ? active : null)
     }
     const preparation: Preparation = {
       request, signature, controller: new AbortController(), promise: Promise.resolve(null),
     }
+    slot.queuedRequest = undefined
     slot.failed = false
     slot.preparing = preparation
     preparation.promise = this.prepare(slot, preparation)
@@ -441,11 +476,13 @@ export class ComponentRuntimeHost {
   private async update(record: RuntimeRecord, request: ComponentRuntimeRequest, preparedInstance = request.instance): Promise<void> {
     if (!record.scope.isActive() || !record.mounted || request.canProject?.() === false) return
     try {
-      if (contentSignature(record.request.instance) !== contentSignature(request.instance)) {
+      if (!sameContentFields(record.request.instance, request.instance)
+        && contentSignature(record.request.instance) !== contentSignature(request.instance)) {
         await record.mounted.update(preparedInstance)
       }
       if (!record.scope.isActive()) return
-      if (JSON.stringify(record.request.instance.frame) !== JSON.stringify(request.instance.frame)) {
+      if (record.request.instance.frame !== request.instance.frame
+        && JSON.stringify(record.request.instance.frame) !== JSON.stringify(request.instance.frame)) {
         record.mounted.updatePlacement?.(request.instance.frame)
       }
       const oldHtml = record.webDocument && hasWebContentData(record.request.instance.data) ? record.request.instance.data.html : undefined

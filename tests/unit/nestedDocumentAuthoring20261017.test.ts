@@ -1,8 +1,9 @@
+import { testContainerInstance } from '../helpers/glxWorkFixture'
 // @vitest-environment node
 import { chromium, type FrameLocator, type Page } from '@playwright/test'
 import { parse, parseFragment, serialize, type DefaultTreeAdapterTypes } from 'parse5'
 import { expect, it } from 'vitest'
-import { createDomAuthoring } from '../../src/components/web/authoringDom'
+import { domAuthoringFactorySource, createDomAuthoring } from '../../src/components/web/authoringDom'
 import { authoredDocumentBootstrap, authoredDocumentProgramsSource } from '../../src/components/web/authoredDocumentBootstrap'
 import { installOwnedDocumentAuthoring } from '../../src/components/web/ownedDocumentAuthoring'
 import { createBlankCourseProjectV10 } from '../../src/core/course/createCourseProjectV10'
@@ -42,7 +43,7 @@ function modelFixture() {
   project.definitions.web = { id: 'web', role: 'content', implementation: { kind: 'builtin', key: 'guoling.web' } }
   project.instances.web = { id: 'web', definitionId: 'web', authoring: { records: {} }, data: { html, resourceBindings: bindings,
     textOverrides: [{ original: sameTitle, text: pageCopyTitle }] } }
-  project.surfaces[0].childIds = ['web']
+  testContainerInstance(project, 0).childIds = ['web']
   const resources: DocumentResources = { assets: {}, components: {} }
   for (const [id, source] of Object.entries(media)) {
     project.assets[id] = { id, path: `assets/${id}.svg`, mimeType: 'image/svg+xml' }
@@ -57,7 +58,7 @@ async function mount(page: Page, html: string, records: Record<string, Component
     nonce: 'nested-authoring', instanceId: 'web', resources: resourceUrls,
     bridge: programs => `${authoredDocumentProgramsSource(programs)};
       const q=window.__nestedFixture={records:${JSON.stringify(records)},resources:${JSON.stringify(resourceUrls)},bindings:${JSON.stringify(bindings)},doubleClicks:[]};
-      q.owner=(${installOwnedDocumentAuthoring.toString()})(${JSON.stringify(programs.property)},'',(${createDomAuthoring.toString()}),{
+      q.owner=(${installOwnedDocumentAuthoring.toString()})(${JSON.stringify(programs.property)},'',${domAuthoringFactorySource()},{
         records:()=>q.records,resources:()=>q.resources,bindings:()=>q.bindings,observe:true,
         onDoubleClick:point=>q.doubleClicks.push(point)
       });`,

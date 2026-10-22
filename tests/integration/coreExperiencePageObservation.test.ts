@@ -1,4 +1,6 @@
 // @vitest-environment node
+import { componentSurfaces } from '../../src/shared/contracts/component-platform/project'
+import { testContainerInstance } from '../helpers/glxWorkFixture'
 import { randomUUID } from 'node:crypto'
 import sharp from 'sharp'
 import { expect, it, vi } from 'vitest'
@@ -20,7 +22,7 @@ it('observes the current formal page through its listed HTML path after insertin
   const driver = createCourseV10Driver(), project = createBlankCourseProjectV10('Observe mixed content')
   project.definitions[WEB_DEFINITION.id] = WEB_DEFINITION
   project.instances.web = { id: 'web', definitionId: WEB_DEFINITION.id, data: { html: '<h1>原内容</h1>' } }
-  project.surfaces[0].childIds = ['web']
+  testContainerInstance(project, 0).childIds = ['web']
   const registry = new DocumentRegistry({ drivers: [driver], createId: randomUUID, bindingKey: binding => binding.path,
     persistence: { async append() {}, async save() { throw new Error('Unused physical save') } } })
   const session = await registry.create({ kind: 'course-v10', project, resources: { assets: {}, components: {} } }, 'observe.h5lesson')
@@ -38,7 +40,7 @@ it('observes the current formal page through its listed HTML path after insertin
   try {
     const listed = data<{ files: { path: string; type: string }[] }>(await call('project.list', {}))
     const pagePath = listed.files.find(file => file.type === 'page')!.path
-    const surface = await gateway.issueTarget('author', session.documentId, { kind: 'course-surface', surfaceId: project.surfaces[0].id })
+    const surface = await gateway.issueTarget('author', session.documentId, { kind: 'course-surface', surfaceId: componentSurfaces(project)[0].id })
     const bytes = await sharp({ create: { width: 32, height: 24, channels: 4, background: '#347d68' } }).png().toBuffer()
     const resource = await gateway.provideImage('author', session.documentId, { bytes, filename: 'ready.png', mimeType: 'image/png' })
     expect(await call('media.insert', { target: surface, resource, fit: 'contain' }))
@@ -46,14 +48,14 @@ it('observes the current formal page through its listed HTML path after insertin
     const current = session.read()
     if (current.model.kind !== 'course-v10') throw new Error('Expected V10')
     expect(current.model.project.instances.web).toEqual(project.instances.web)
-    expect(current.model.project.surfaces[0].childIds).toHaveLength(2)
+    expect(componentSurfaces(current.model.project)[0].childIds).toHaveLength(2)
     const next = data<{ files: { path: string; type: string }[] }>(await call('project.list', {}))
     expect(next.files).toContainEqual(expect.objectContaining({ path: pagePath, type: 'page' }))
     expect(next.files).toContainEqual(expect.objectContaining({ path: pagePath.replace(/\.html$/, '.json'), type: 'structure' }))
     for (const projectSelector of [undefined, 'observe.h5lesson']) {
       expect(await call('view.observe', { path: pagePath, ...(projectSelector ? { project: projectSelector } : {}) }))
         .toMatchObject({ kind: 'read', data: { identity: { documentId: current.documentId, epoch: current.epoch,
-          revision: current.revision, locationId: project.surfaces[0].id } } })
+          revision: current.revision, locationId: componentSurfaces(project)[0].id } } })
     }
     expect(observe).toHaveBeenCalledTimes(2)
     expect(observe).toHaveBeenLastCalledWith(expect.objectContaining({ projectId: project.id, stateId: null }))

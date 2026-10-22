@@ -1,5 +1,7 @@
-import { documentHostAPI } from '../helpers/documentHostAPI'
 // @vitest-environment node
+import { componentSurfaces } from '../../src/shared/contracts/component-platform/project'
+import { testContainerInstance } from '../helpers/glxWorkFixture'
+import { documentHostAPI } from '../helpers/documentHostAPI'
 import { afterEach, expect, it, vi } from 'vitest'
 import { promises as fs } from 'node:fs'
 import os from 'node:os'
@@ -23,12 +25,12 @@ function fixture() {
     project.definitions[definitionId] = { id: definitionId, role: 'behavior', professionalBuiltinKey: 'guoling.interactions',
       implementation: source ? { kind: 'source', language: 'javascript', source: 'export default {}' } : { kind: 'builtin', key: 'guoling.interactions' } }
     project.instances[id] = { id, definitionId, attachments: [{ instanceId: id,
-      target: id === 'local' ? { kind: 'surface', surfaceId: project.surfaces[0].id } : { kind: 'project' } }], data: { rules: [{
+      target: id === 'local' ? { kind: 'surface', surfaceId: componentSurfaces(project)[0].id } : { kind: 'project' } }], data: { rules: [{
       id: `rule-${id}`, enabled: true, trigger: { type: 'scene.enter' },
       conditions: [{ type: 'course-state.compare', key: 'score', operator: 'gte', value: 1 }, { type: 'course-state.exists', key: 'score', exists: true }],
       actions: [{ id: `action-${id}`, start: 'after-previous', delayMs: 0, action: { type: 'course-state.set', key: 'score', value: 2 } }],
     }] } }
-    if (id === 'local') project.surfaces[0].childIds.push(id)
+    if (id === 'local') testContainerInstance(project, 0).childIds.push(id)
     else project.global.underlay.push(id)
   }
   return project
@@ -74,9 +76,9 @@ afterEach(async () => {
 })
 
 it('updates course logic from a named presentation state across base/question/answer and restores the whole edit with one undo', async () => {
-  const project = fixture(), surfaceId = project.surfaces[0].id
+  const project = fixture(), surfaceId = componentSurfaces(project)[0].id
   project.logic!.courseState.push({ key: 'stateOnly', valueType: 'boolean', defaultValue: true })
-  project.surfaces[0].presentation = { initialStateId: 'question', thumbnailStateId: 'answer', states: [
+  testContainerInstance(project, 0).container.presentation = { initialStateId: 'question', thumbnailStateId: 'answer', states: [
     { id: 'question', title: '问题', overrides: { local: { style: { label: '保留问题样式' } } } },
     { id: 'answer', title: '答案', overrides: { local: { visible: false, style: { label: '保留答案样式' } } } },
   ] }
@@ -111,7 +113,7 @@ it('updates course logic from a named presentation state across base/question/an
   expect(renamed.edits.filter(edit => edit.type === 'surface.presentation.set')).toHaveLength(1)
   expect(bridge.read().snapshot!.undoDepth).toBe(undoDepth + 1)
   expect(bridge.read().activeStateId).toBe('question')
-  const after = bridge.read().project!, presentation = after.surfaces[0].presentation!
+  const after = bridge.read().project!, presentation = componentSurfaces(after)[0].presentation!
   expect(after.logic!.courseState.map(state => state.key)).toEqual(['mastery', 'stateOnly'])
   const ruleSlots = [interactionRules(after.instances.local), interactionRules(after.instances.global),
     ...presentation.states.map(state => interactionRules({ ...after.instances.local, data: state.overrides.local.data! }))]
@@ -120,7 +122,7 @@ it('updates course logic from a named presentation state across base/question/an
     for (const rule of rules) expect(rule.actions[0].action).toMatchObject({ type: 'course-state.set', key: 'mastery' })
   }
   for (let index = 0; index < presentation.states.length; index++) {
-    const state = presentation.states[index], original = before.surfaces[0].presentation!.states[index]
+    const state = presentation.states[index], original = componentSurfaces(before)[0].presentation!.states[index]
     expect(state.overrides.local.style).toEqual(original.overrides.local.style)
     expect(state.overrides.local.visible).toBe(original.overrides.local.visible)
     expect(interactionRules({ ...after.instances.local, data: state.overrides.local.data! })[1].conditions).toEqual([{ type: 'course-state.exists', key: 'stateOnly', exists: true }])
@@ -130,6 +132,6 @@ it('updates course logic from a named presentation state across base/question/an
   await bridge.undo(documentId)
   expect(bridge.read().project!.logic).toEqual(before.logic)
   expect(bridge.read().project!.instances).toEqual(before.instances)
-  expect(bridge.read().project!.surfaces).toEqual(before.surfaces)
+  expect(componentSurfaces(bridge.read().project!)).toEqual(componentSurfaces(before))
   expect(bridge.read().snapshot!.undoDepth).toBe(undoDepth)
 })

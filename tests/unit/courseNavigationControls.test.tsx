@@ -1,3 +1,5 @@
+import { componentSurfaces } from '../../src/shared/contracts/component-platform/project'
+import { appendRootContainers, testContainerInstance } from '../helpers/glxWorkFixture'
 import { afterEach, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { useState } from 'react'
@@ -10,9 +12,9 @@ import { createCrossSurfaceCommands, type CrossSurfaceCommandPorts } from '../..
 afterEach(cleanup)
 
 it('keeps five controls in edit/run, advances actual steps before pages, and resets only the current paused page', async () => {
-  const project = createBlankCourseProjectV10('共同导航'), first = project.surfaces[0]
-  first.presentation = { states: [{ id: 'first-step', title: '第一步', overrides: {} }, { id: 'last-step', title: '第二步', overrides: {} }] }
-  project.surfaces.push({ ...first, id: 'next-page', title: '下一页', childIds: [], presentation: undefined })
+  const project = createBlankCourseProjectV10('共同导航'), first = componentSurfaces(project)[0]
+  testContainerInstance(project, 0).container!.presentation = { states: [{ id: 'first-step', title: '第一步', overrides: {} }, { id: 'last-step', title: '第二步', overrides: {} }] }
+  appendRootContainers(project, { ...first, id: 'next-page', title: '下一页', childIds: [], presentation: undefined })
   const before = structuredClone(project), restart = vi.fn(), replay = vi.fn(), report = vi.fn(), applyDraft = vi.fn(async () => {})
   let current = first.id, playing = false
   const owner = new ComponentNavigationOwner({ project: () => project, surfaceId: () => current,
@@ -52,8 +54,8 @@ it('keeps five controls in edit/run, advances actual steps before pages, and res
 })
 
 it('moves the same live navigation to the active toolbar without duplicating controls or losing the current state', async () => {
-  const project = createBlankCourseProjectV10('工具栏导航'), first = project.surfaces[0]
-  first.presentation = { states: [{ id: 'first', title: '第一步', overrides: {} }, { id: 'second', title: '第二步', overrides: {} }] }
+  const project = createBlankCourseProjectV10('工具栏导航'), first = componentSurfaces(project)[0]
+  testContainerInstance(project, 0).container!.presentation = { states: [{ id: 'first', title: '第一步', overrides: {} }, { id: 'second', title: '第二步', overrides: {} }] }
   const owner = new ComponentNavigationOwner({ project: () => project, surfaceId: () => first.id, interactive: () => false, select: () => {} })
   const report = vi.fn()
   function Frame() {
@@ -87,8 +89,8 @@ it('moves the same live navigation to the active toolbar without duplicating con
 })
 
 it('leaves the current author location unchanged when its draft cannot be applied', async () => {
-  const project = createBlankCourseProjectV10('未完成编辑'), first = project.surfaces[0]
-  first.presentation = { states: [{ id: 'next', title: '下一步', overrides: {} }] }
+  const project = createBlankCourseProjectV10('未完成编辑'), first = componentSurfaces(project)[0]
+  testContainerInstance(project, 0).container!.presentation = { states: [{ id: 'next', title: '下一步', overrides: {} }] }
   const select = vi.fn(), report = vi.fn()
   const owner = new ComponentNavigationOwner({ project: () => project, surfaceId: () => first.id, interactive: () => false, select })
   try {
@@ -102,11 +104,11 @@ it('leaves the current author location unchanged when its draft cannot be applie
 
 it('propagates a Flow owner refusal through the public command adapter before changing playback mode', async () => {
   const project = createBlankCourseProjectV10('保留未完成 Flow 草稿')
-  project.surfaces[0].kind = 'flow'
-  project.surfaces[0].presentation = { states: [{ id: 'next', title: '下一步', overrides: {} }] }
+  testContainerInstance(project, 0).container!.kind = 'flow'
+  testContainerInstance(project, 0).container!.presentation = { states: [{ id: 'next', title: '下一步', overrides: {} }] }
   const patch = vi.fn(), feedback = vi.fn()
   const ports = {
-    kernel: { readEditingDocument: () => project, readView: () => ({ activeDocumentId: 'doc', surfaceId: project.surfaces[0].id }), setFeedback: feedback },
+    kernel: { readEditingDocument: () => project, readView: () => ({ activeDocumentId: 'doc', surfaceId: componentSurfaces(project)[0].id }), setFeedback: feedback },
     slide: {}, spatial: {}, flow: { commitTextEdit: async () => false },
     shell: { read: () => ({ canvasMode: 'edit', editingTextNodeId: null }), patch },
     structure: {}, lifecycle: {},
@@ -116,7 +118,7 @@ it('propagates a Flow owner refusal through the public command adapter before ch
   commands.setCanvasMode('run')
   await waitFor(() => expect(feedback).toHaveBeenCalledWith(expect.objectContaining({ errorMessage: '当前编辑未能应用，请完成编辑后重试' })))
   expect(patch).not.toHaveBeenCalled()
-  const report = vi.fn(), owner = new ComponentNavigationOwner({ project: () => project, surfaceId: () => project.surfaces[0].id,
+  const report = vi.fn(), owner = new ComponentNavigationOwner({ project: () => project, surfaceId: () => componentSurfaces(project)[0].id,
     interactive: () => false, select: () => {} })
   try {
     render(<CourseNavigationControls canvasMode="edit" navigation={owner.editorPort()} beforeNavigate={commands.commitTextEdit}

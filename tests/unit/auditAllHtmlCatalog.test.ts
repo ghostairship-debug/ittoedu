@@ -10,7 +10,7 @@ import { tmpdir } from 'node:os'
 import type { ComponentLibraryEntry } from '../../src/shared/contracts/component-platform/library'
 
 function entry(title: string): ComponentLibraryEntry {
-  return { schemaVersion: 1, id: 'demo.component', title,
+  return { schemaVersion: 2, id: 'demo.component', title,
     definitions: { demo: { id: 'demo', role: 'content', implementation: { kind: 'source', language: 'javascript', source: 'export default {mount(){}}' } } },
     example: { rootIds: ['example'], instances: { example: { id: 'example', definitionId: 'demo', data: {} } } }, assets: {}, resources: { assets: {}, components: {} } }
 }

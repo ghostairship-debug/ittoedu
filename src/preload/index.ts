@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type { DesktopAPI } from '../shared/ipcTypes'
+import type { LessonMaterialImportProgress } from '../shared/lessonMaterialDesktop'
 import type { AttachmentReadProgress } from '../shared/workbench/attachmentsDesktop'
 import type { SpatialViewportRequest } from '../shared/workbench/spatialViewport'
 
@@ -24,6 +25,7 @@ const IPC_CHANNELS = {
   workspaceFiles: 'workspace-files:operate',
   skillCatalog: 'skills:catalog',
   mediaFiles: 'media-files:operate',
+  mediaFileRelease: 'media-files:release-draft',
   workspaceFilesChanged: 'workspace-files:changed',
   documents: 'documents:operate',
   documentEvent: 'documents:event',
@@ -71,6 +73,10 @@ const IPC_CHANNELS = {
   exportPdf: 'export:write-pdf',
   documentExportBuildRequest: 'document-export:build-request',
   documentExportBuildReply: 'document-export:build-reply',
+  frozenDeliveryBuild: 'document-export:frozen-build',
+  frozenDeliveryCancel: 'document-export:frozen-cancel',
+  pptxImportBuild: 'pptx-import:build',
+  pptxImportCancel: 'pptx-import:cancel',
   documentExportBuildCancel: 'document-export:build-cancel',
   documentExportBuildProgress: 'document-export:build-progress',
   previewNetworkDocumentToken: 'preview-network:document-token',
@@ -198,6 +204,7 @@ const desktopAPI = Object.freeze<DesktopAPI>({
     receive: input => invoke(IPC_CHANNELS.attachments, { type: 'receive', ...input }),
     snapshot: attachmentId => invoke(IPC_CHANNELS.attachments, { type: 'snapshot', attachmentId }),
     readRepresentation: (attachmentId, representationId) => invoke(IPC_CHANNELS.attachments, { type: 'representation', attachmentId, representationId }),
+    readThumbnail: (attachmentId, representationId) => invoke(IPC_CHANNELS.attachments, { type: 'thumbnail', attachmentId, representationId }),
     extract: input => invoke(IPC_CHANNELS.attachments, { type: 'extract', ...input }),
     cancel: requestId => invoke(IPC_CHANNELS.attachments, { type: 'cancel', requestId }),
   },
@@ -253,7 +260,11 @@ const desktopAPI = Object.freeze<DesktopAPI>({
     revertElement: input => invoke(IPC_CHANNELS.execution, { type: 'element-revert', ...input }),
     events: (conversationId, after, limit) => invoke(IPC_CHANNELS.execution, { type: 'events', conversationId, after, limit }),
     searchEvents: input => invoke(IPC_CHANNELS.execution, { type: 'search-events', ...input }),
-    timeline: conversationId => invoke(IPC_CHANNELS.execution, { type: 'timeline', conversationId }),
+    timeline: (conversationId, consumerId) => invoke(IPC_CHANNELS.execution, { type: 'timeline', conversationId, consumerId }),
+    timelineWindow: input => invoke(IPC_CHANNELS.execution, { ...input, type: 'timeline-window' }),
+    timelineGroup: input => invoke(IPC_CHANNELS.execution, { ...input, type: 'timeline-group' }),
+    timelineBody: input => invoke(IPC_CHANNELS.execution, { ...input, type: 'timeline-body' }),
+    releaseTimeline: (conversationId, consumerId) => invoke(IPC_CHANNELS.execution, { type: 'release-timeline', conversationId, consumerId }),
     blob: (conversationId, ref) => invoke(IPC_CHANNELS.execution, { type: 'blob', conversationId, ref }),
     edits: documentId => invoke(IPC_CHANNELS.execution, { type: 'edits', documentId }),
     subscribe: listener => {
@@ -297,21 +308,23 @@ const desktopAPI = Object.freeze<DesktopAPI>({
     writeAuthoringDrafts: (documentId, drafts, epoch) => invoke(IPC_CHANNELS.documents, { type: 'write-authoring-drafts', documentId, drafts, ...(epoch ? { epoch } : {}) }),
     claimAuthoringDrafts: (documentId, epoch, records) => invoke(IPC_CHANNELS.documents, { type: 'claim-authoring-drafts', documentId, epoch, records }),
     clearAuthoringDrafts: documentId => invoke(IPC_CHANNELS.documents, { type: 'clear-authoring-drafts', documentId }),
-    dispatch: operation => invoke(IPC_CHANNELS.documents, { type: 'dispatch', operation }),
+    dispatch: (operation, options) => invoke(IPC_CHANNELS.documents, { type: 'dispatch', operation,
+      ...(options?.sourceChangeHints ? { sourceChangeHints: options.sourceChangeHints } : {}) }),
     lookup: (documentId, operationId) => invoke(IPC_CHANNELS.documents, { type: 'lookup', documentId, operationId }),
     save: (documentId, path) => invoke(IPC_CHANNELS.documents, { type: 'save', documentId, ...(path ? { path } : {}) }),
     saveWithDialog: (documentId, saveAs, suggestedDirectory) => invoke(IPC_CHANNELS.documents, { type: 'save-dialog', documentId,
       ...(saveAs === undefined ? {} : { saveAs }), ...(suggestedDirectory ? { suggestedDirectory } : {}) }),
-    observeFile: documentId => invoke(IPC_CHANNELS.documents, { type: 'observe-file', documentId }),
+    observeFile: (documentId, knownVersion) => invoke(IPC_CHANNELS.documents, { type: 'observe-file', documentId, ...(knownVersion === undefined ? {} : { knownVersion }) }),
     reconcileFile: input => invoke(IPC_CHANNELS.documents, { type: 'reconcile-file', ...input }),
     close: (documentId, discardDirty) => invoke(IPC_CHANNELS.documents, { type: 'close', documentId, ...(discardDirty === undefined ? {} : { discardDirty }) }),
     closeWithDialog: (documentId, suggestedDirectory, discardOnly) => invoke(IPC_CHANNELS.documents, { type: 'close-dialog', documentId, ...(discardOnly === undefined ? {} : { discardOnly }),
       ...(suggestedDirectory ? { suggestedDirectory } : {}) }),
     recoverable: () => invoke(IPC_CHANNELS.documents, { type: 'recoverable' }),
+    recoverySummaries: () => invoke(IPC_CHANNELS.documents, { type: 'recovery-summaries' }),
     restore: (documentId, mode) => invoke(IPC_CHANNELS.documents, { type: 'restore', documentId, ...(mode ? { mode } : {}) }),
     discardRecovery: documentId => invoke(IPC_CHANNELS.documents, { type: 'discard-recovery', documentId }),
     subscribe: listener => {
-      const receive = (_event: Electron.IpcRendererEvent, event: import('../shared/workbench/document').DocumentEvent) => listener(event)
+      const receive = (_event: Electron.IpcRendererEvent, event: import('../shared/workbench/document').DocumentHostEvent) => listener(event)
       ipcRenderer.on(IPC_CHANNELS.documentEvent, receive)
       return () => { ipcRenderer.removeListener(IPC_CHANNELS.documentEvent, receive) }
     },
@@ -319,6 +332,13 @@ const desktopAPI = Object.freeze<DesktopAPI>({
   lessonMaterials: {
     selectSource: input => invoke(IPC_CHANNELS.lessonMaterial, { operation: 'select', ...input }),
     importMaterial: (target, input) => invoke(IPC_CHANNELS.lessonMaterial, { operation: 'import', target, input }),
+    importPdf: (target, input) => invoke(IPC_CHANNELS.lessonMaterial, { operation: 'import-pdf', target, input }),
+    cancelImport: requestId => invoke(IPC_CHANNELS.lessonMaterial, { operation: 'cancel-import', requestId }),
+    subscribeImportProgress(listener) {
+      const receive = (_event: Electron.IpcRendererEvent, progress: LessonMaterialImportProgress) => listener(progress)
+      ipcRenderer.on(`${IPC_CHANNELS.lessonMaterial}:progress`, receive)
+      return () => ipcRenderer.removeListener(`${IPC_CHANNELS.lessonMaterial}:progress`, receive)
+    },
     list: target => invoke(IPC_CHANNELS.lessonMaterial, { operation: 'list', target }),
     read: (target, input) => invoke(IPC_CHANNELS.lessonMaterial, { operation: 'read', target, input }),
   },
@@ -332,6 +352,7 @@ const desktopAPI = Object.freeze<DesktopAPI>({
   workspaceFiles: input => invoke(IPC_CHANNELS.workspaceFiles, input),
   skillCatalog: input => invoke(IPC_CHANNELS.skillCatalog, input),
   mediaFiles: input => invoke(IPC_CHANNELS.mediaFiles, input),
+  releaseMediaFileDraft: binding => invoke(IPC_CHANNELS.mediaFileRelease, binding),
   onWorkspaceFilesChanged: listener => {
     const receive = (_event: Electron.IpcRendererEvent, event: import('../shared/workbench/workspaceFiles').WorkspaceFilesChange) => listener(event)
     ipcRenderer.on(IPC_CHANNELS.workspaceFilesChanged, receive)
@@ -340,6 +361,10 @@ const desktopAPI = Object.freeze<DesktopAPI>({
   lesson: (input) => invoke(IPC_CHANNELS.lesson, input),
   legacyPpt: (input) => invoke(IPC_CHANNELS.legacyPpt, input),
   captureAuthoringObservation: (input) => invoke(IPC_CHANNELS.captureAuthoringObservation, input),
+  buildFrozenDelivery: input => invoke(IPC_CHANNELS.frozenDeliveryBuild, input),
+  cancelFrozenDelivery: input => invoke(IPC_CHANNELS.frozenDeliveryCancel, input),
+  buildPptxImport: input => invoke(IPC_CHANNELS.pptxImportBuild, input),
+  cancelPptxImport: input => invoke(IPC_CHANNELS.pptxImportCancel, input),
   dynamicAdmission: (input) => invoke(IPC_CHANNELS.dynamicAdmission, input),
   materials: (input) => invoke(IPC_CHANNELS.materials, input),
   openProject: () => invoke(IPC_CHANNELS.openProject),

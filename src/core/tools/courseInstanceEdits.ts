@@ -1,3 +1,4 @@
+import { componentContainers } from '../../shared/contracts/component-platform/project'
 import type { DocumentModel } from '../../shared/workbench/document'
 import type { ComponentEdit } from '../../shared/contracts/component-platform/operations'
 import { componentDefinitionBuiltinKey, type JsonValue } from '../../shared/contracts/component-platform/project'
@@ -11,6 +12,7 @@ import { changeChartType, replaceChartTableData } from '../../components/chart/c
 import { chartDataEdit } from '../../components/chart/edit'
 import { plainDocumentText } from '../../shared/document/content'
 import { componentDataEdits } from '../course/componentDataEdits'
+import { textAppearanceSchema } from '../../components/text/data'
 import { z } from 'zod'
 import { documentTextStyleSchema } from '../../shared/document/content'
 export { componentDataPropertyFields } from '../course/componentDataEdits'
@@ -54,7 +56,10 @@ export function courseInstanceAppearanceEdits(model: DocumentModel, target: Cour
       if (!equalComponentValue(instance.style?.textShadow, value)) edits.push({ type: 'style.set', instanceId: instance.id, path: ['textShadow'], value })
       delete fields.shadows
     }
-    if (Object.keys(fields).length) edits.push(...componentDataEdits(project, target, { kind: 'patch', data: { appearance: fields } }))
+    if (Object.keys(fields).length) {
+      textAppearanceSchema.partial().parse(fields)
+      edits.push(...componentDataEdits(project, target, { kind: 'patch', data: { appearance: fields } }))
+    }
   } else if (['guoling.table', 'guoling.chart', 'guoling.shape'].includes(builtin ?? '')) {
     edits.push(...componentDataEdits(project, target, { kind: 'patch', data: { style: fields } }))
   } else if (builtin === 'guoling.image') {
@@ -120,7 +125,7 @@ export function courseInstanceConversionEdits(model: DocumentModel, target: Cour
   const { project, instance } = courseInstanceContext(model, target)
   if (instance.locked) throw new Error('所选对象已锁定，请先解锁')
   if (componentDefinitionBuiltinKey(project.definitions[instance.definitionId]) !== 'guoling.table') throw new Error('当前转换入口需要一个表格对象')
-  if (target.stateId || project.surfaces.some(surface => surface.presentation?.states.some(state => state.overrides[instance.id]?.data !== undefined)))
+  if (target.stateId || componentContainers(project).some(surface => surface.presentation?.states.some(state => state.overrides[instance.id]?.data !== undefined)))
     throw new Error('当前表格存在展示状态数据，不能仅转换基础对象；请先处理该状态的数据')
   if (instance.childIds?.length) throw new Error('当前表格包含子对象，不能在转换时丢弃其内容')
 

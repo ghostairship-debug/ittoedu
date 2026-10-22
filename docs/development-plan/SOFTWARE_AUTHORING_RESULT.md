@@ -1,8 +1,102 @@
 # 果铃软件与创作修复结果
 
-更新：2026-10-20。原两份方案及启动提示词已于2026-10-13按原目标完成规定实施、Skill/协议/分发同步和最小验收，原goal已标记complete，现作为[已执行历史依据](../archive/README.md#已执行软件与创作方案)归档；本文件是结果/后续跟踪记录，不是待执行方案。2026-10-12—17详细实施、失败、勘误、费用及具体输入边界见[阶段全文](../archive/20261017-软件与创作修复阶段记录.md)。
+更新：2026-10-22。原两份方案及启动提示词已于2026-10-13按原目标完成规定实施、Skill/协议/分发同步和最小验收，原goal已标记complete，现作为[已执行历史依据](../archive/README.md#已执行软件与创作方案)归档；本文件是结果/后续跟踪记录，不是待执行方案。2026-10-12—17详细实施、失败、勘误、费用及具体输入边界见[阶段全文](../archive/20261017-软件与创作修复阶段记录.md)。
 
 **此前10月20日 A—G 可实施软件项及修后真实副本验收通过；“质量不低于基线且作者耗时下降”未通过，原goal 未完成。** 保存、冷开、实际互动、公开HTML、模型采用分别按已有证据判断，旧局部PASS不扩大为完整产品通过。当前主树含有效未提交成果，不能只用HEAD或旧包代表。Owner整体接受及发行仍未签收。
+
+<a id="result-responsiveness-editing-20261022"></a>
+## 关闭、Markdown 与 HTML／GLX 编辑最终修复
+
+同版本 Main 准备复用、恢复稿串行和 ACK 去重、Markdown 局部容错与保真编辑，以及 HTML／GLX 原位文字、手柄、缩放和试运行隔离已完成。相关检查、类型、必要构建、独审与真实 Electron 编辑／UndoRedo／保存／新 profile 冷开通过；最终字形误差小于 0.005px、无叠影、0 页面错误。旧 V10 副本打开约 3.0 秒、干净关闭约 1.5 秒，改字另存后关闭约 4.1 秒，条件各自保留。详细范围、原失败与有效证据见[本批结果](20261022-responsiveness-editing/RESULT.md)，不签所有大文件秒开秒存或整体产品接受。
+
+<a id="result-unified-edit-repair-20261022"></a>
+## 统一编辑与性能独立复核后的闭环
+
+R1／R2／R3／R4／R6、属性 ACK、拒绝／未知操作恢复和旧文字范围残留均已修；定向 24 文件／150 项、三套类型、相关生产构建及独审通过。真实 GUI 新 Web、最终单 HTML 导出、图文与间距 UndoRedo／保存／新进程冷开，以及 1440／390px 断网三段互动和 21 图解码通过。大 HTML 同样本单次未失焦保存 8.697→7.130 秒；旧 14.499 秒不是这一对照基线。以[最终修复报告](20261022-unified-edit-performance/REPAIR_RESULT.md)承接[先期实施](20261022-unified-edit-performance/IMPLEMENTATION_RESULT.md)与[原独立复核](20261022-unified-edit-performance/INDEPENDENT_REVIEW_20261022.md)，保留条件性能债、物理 IME、历史 queued 和 Owner 接受等边界。
+
+<a id="result-slide-state-scope-20261022"></a>
+## 场景状态与三表面导航层级修复
+
+Owner先要求只读核实、后明确授权修复。本批恢复 Slide 场景状态／Flow 章节标题／Spatial 镜头的对应层级，保留 Project 11 容器化、嵌套、共同执行者和独立容器作用域。
+
+- 正式容器校验、状态选择与投影仅允许 Slide；专业状态条不再出现在 Flow／Spatial。轻量模式继续显示各自实际子位置，专业模式复用左侧章节／镜头树。
+- Flow 的前后步进与目录复用真实标题集合和当前阅读位置。显式定位保留在原阅读 owner，解决整篇不足一屏、文末相邻标题同处一个滚动位置时的重复步进；滚动、目标移除／隐藏和重置释放定位。首标题尚未进入视口时可先步进到该标题。编辑器、ModelPlayer、compiled player 使用同一小型阅读实现，不进作者工程或 History。
+- 程序与原生的 `presentation.set` 只作用于 Slide，不能因状态与镜头同名而移动 Spatial 相机。普通镜头导航、兄弟容器隔离、取消和程序根仍保留。状态对象片段不能把覆盖并入 Flow／Spatial；明确提示粘贴到 Slide 或整体复制原容器，原有 Slide 状态重映射与带状态容器整体复制保留。
+- 旧10读入语义不变。旧实验V11非Slide状态没有唯一保真映射，文件和恢复历史读入均返回含具体容器的既有 UserFacingError，原包／恢复稿／覆盖不变，当前不能直接打开这些样本；没有静默丢弃、静态化或自动迁移。10月20日V3等原件与旧证据保留，不重写为本轮通过。
+
+验证：新增场景域／原子拒写／读取诊断、短文／文末／手动滚动／首标题反例，相关导航、编辑保存重开、状态复制、资源闭包、库、静态输出和真实两类交付检查均通过。旧将状态放在 Flow／Spatial 的夹具已按本轮产品决定改为 Slide；需要同时验证镜头时使用独立 Spatial 容器，保留具体断言和原基线副本。Renderer与E2E类型、Player／Renderer／Main必要开发构建通过；独立review发现的几何夹取、专属状态动作及横滚通知问题已修并增量复核可收口，未跑全仓矩阵。
+
+隔离真实Electron通过agent-browser实际点击：light的Slide状态／Flow章节／Spatial镜头、deep仅Slide状态条、章节与镜头树、Slide揭示正文；导航前后model不变、revision=0、undoDepth=0、dirty=false。真实ModelPlayer及compiled player均在短文scroll range=0时完成heading→section→heading，未产生presentation状态，compiled无诊断。[GUI事实](../../output/slide-state-scope-repair-20261021/gui-facts.json)、[Flow专业界面](../../output/slide-state-scope-repair-20261021/deep-flow.png)、[Spatial专业界面](../../output/slide-state-scope-repair-20261021/deep-spatial.png)、[Slide状态界面](../../output/slide-state-scope-repair-20261021/deep-slide.png)保留。启动探针的原生进程存活及首个夹具误用document-block paragraph问题已修正后通过，不算产品故障。
+
+当前目录的默认开发构建已更新，旧构建保留于`output/slide-state-scope-repair-20261021/pre-switch-build`。用户当前窗口、原作品、真实profile、恢复稿与本批前dirty保全；只操作本批隔离验证窗口，无模型或付费请求，不commit／push／打Portable／发行。技术修复不签作品质量、模型效率或Owner整体接受。
+
+<a id="result-global-editing-scope-20261021"></a>
+## 全局层显示与编辑范围修复
+
+Owner本次要求修复全局层混入非全局对象。Slide／Spatial原点击已过滤但本地画布仍渲染，Flow正文及本地浮层也未隔离。现仅在编辑全局层时隐藏本地内容及背景；全局Underlay／Overlay和组内子对象保留。Slide／Spatial排除本地编辑浮层与选择框，Spatial同时隐藏本地关系和镜头辅助；Flow保留原正文编辑器挂载，停用输入、工具栏、目录及正文焦点／选区入口。普通页面和试运行保原完整合成，未改Schema、正式writer、History、保存或导出。
+
+4文件15项聚焦、`npx tsc --noEmit`、独立输出目录的Renderer构建通过。真实Electron独立profile／自建工程中三画布全局层均仅显示全局对象及组内文字；Flow正文hidden、contenteditable=false、无正文工具栏；切回及试运行恢复本地正文／浮层，原Flow编辑器DOM保持；Spatial全局对象实际点击选中并显示全局修改提示。未覆盖正在运行的用户窗口或默认dist构建，无收费／提交／推送／发行。证据与本轮基线见[报告](../../output/global-layer-scope-fix-20261021/REPORT.md)。
+
+<a id="result-coffee-host-layout-20261021"></a>
+## 咖啡确定性宿主、画幅与Flow尺度修复
+
+Owner本轮B01/B02/Q01/V01已完成。Flow NodeView清理恢复可复用host、容器React root采用独立target；InstanceView按此前DOM退役，复用World现有expectedDefault，修复新容器被旧子树清空。共用布局输入消费effective implementation及正式程序frame，synthetic fragment接回后解析的默认style并包含margin，保普通Web自然增高。V01实证真Flow在390px被整体fit到约6.7px字形，现恢复基准CSS像素/响应纸宽，并修compiled局部group按外框重算比例。
+
+聚焦红绿、独立review、必要三套构建/类型通过；副本同会话局改/继续操作/UndoRedo、原生group两向移动后作者修改、UI另存/新PID新profile冷开、公共离线导出及真实输入通过。最终1440/390正文glyph均22px、段落904×85.78→262×257.34，group实际内部/外框286px一致，程序内部1120×810保持；HTTP请求及页面错误均0。固定构图内小字仍随局部比例缩小，本批未新增手机版布局能力或改原作品。671项原dirty、原profile/恢复稿、原构建与全部失败保留；无模型调用、commit/push/发行。不签整作质量或所有输入，完整逐项根因、源码位置、证据及停止边界见[本批报告](../../output/coffee-host-layout-repair-20261021/run-112329/REPORT.md)。
+
+<a id="result-html-edit-responsiveness-20261021"></a>
+## 通用 HTML 图文编辑接通与大文件响应修复
+
+本轮已接通自家导出及第三方 HTML 的同一 DOM 图文编辑、Session/History、保存回放链。25.58MB 实际大文件与第三方双层隔离 iframe、动态 Blob 均有真实图文保存及独立重开证据；首开和其他文件开关明显改善，**大文件保存约20.4秒仍慢，不签整体流畅或秒开秒存**。桌面英语素材、真实 profile、原643项dirty及所有失败副本保留；无付费创作、commit、push或发行。
+
+前次仅验证大文件未变观察，没有验证其实际编辑，不能据此认定大文件已恢复。此次实际断点为：导出运行时把正文装在不含allow-same-origin的隔离iframe，普通外层DOM扫描接不到；原有作者桥未启用。现将同一DOM adapter通过普通页面权限的早期桥接到本地子页、srcdoc、HTML Blob及Shadow DOM，稳定scope归外层源HTML的软件记录，不改原子文件，不取消沙箱，不新增writer/History。图片资源别名在App短URL与普通浏览器data URL间保持一致，旧记录和人工修改继续保留。
+
+性能沿原owner修复：Main纯资源分析移到两个可复用worker；AST闭包证明复用既有索引；预览复用同一来源/真实依赖分析；只展示文件状态/引用时沿当前Session读投影；关闭复用输入确认且暂停目标轮询，实际准备、IME、未知结果和CAS保持。自家compiled-course-v1仅预览响应将被动内嵌资源投影为同租约短URL，原HTML和旧内嵌运行时不改写，实际25.58MB响应降至约2.54MB，避免旧运行时反复解析巨型图片属性。
+
+实际改字又揭示并修复三处遗漏：保存consumer曾用正则误命中作者JS里的`'</body>'`，现按真实HTML结束token插入，剥离软件包装后原源文完整恢复；提交后多批请求对同修订并发复制整份25MB快照，现同租约/身份共享在途读取，新修订、保存binding变化、释放及旧请求返回均正确失效；预览模式原仍挂载并更新隐藏CodeMirror，现按源码视图需要创建，切换前保末稿，IME未完成时保当前输入。
+
+第三方普通文件回放还实测发现：沙箱srcdoc的基址虽正确，浏览器仍拒读file: CSS及图片。现只将所需静态子页的被动资源，经既有readSourceResource/realpath闭包携入软件记录；CSS的@import/url复用现有解析，原html/base/已存资源不改，仅补缺项。软件srcdoc投影data CSS/图像并保持原引用绑定，保media/级联、移除转换后失效SRI，不放宽iframe权限。旧软件sources与当前实际served sources合并后，仍在同一canonical transaction保存。
+
+真实built Electron与普通Chromium的最终证据分层如下，未因新小增量重跑不受影响的大文件：
+
+- [大文件实际编辑运行](../../output/html-lag-diagnosis-20261020/acceptance-ciatRv/facts.json)：改字、文字Undo/Redo、换图、图片Undo/Redo均已越过真实断言；UI保存实际ACK约20.394秒。驱动20秒等待刚好超时，原失败保留；阶段日志确认资源分析仅一次7.468秒、Journal约6.117秒，不把超时误写成重复分析或保存失败。
+- [保存副本的新进程/新profile及开关文件事实](../../output/html-lag-diagnosis-20261020/acceptance-huFfcF/facts.json)与[截图](../../output/html-lag-diagnosis-20261020/acceptance-huFfcF/large-edited.png)：图文保留且已保存；大文件打开15.051秒，它打开时小文件打开133.7ms/关闭922.9ms，大文件正常关闭1395.2ms。此前同样本代表数据为首开45.6—49.7秒、小文件打开546ms/关闭1513ms、大文件关闭4941ms；这是单机样本，未签稳定倍率。修后未编辑原样本另测首开14.245秒、改字应用4.026秒。
+- 同一huFfcF运行中，大文件另在普通浏览器file:打开，改字与换图保持、页面错误0；该运行后续第三方CSS失败按原事实保留，没有把整轮标为通过。
+- [最终第三方小型GUI](../../output/html-lag-diagnosis-20261020/acceptance-22GePB/facts.json)为complete=true：双层opaque iframe＋query＋作者base、动态Blob均实际改字/换图/UI保存；普通浏览器独立重开图文、CSS背景与原按钮互动通过，页面错误0。两种小HTML打开约314/217ms、保存934/871ms；不据此承诺所有HTML关闭均低于1秒。
+
+相关类型、必要Main/Renderer/Player构建、针对实际断点的聚焦检查及各结构增量独审通过；最后被动资源2项/shared14项、并发读取3反例、源码视图真实CM2项均已执行。复用未变有效证据，没有运行完整矩阵或模型创作。通用图文能力以实际DOM载体为准，不承诺Canvas像素反推原生工程；首次分析与保存的剩余成本明确保留。本批图文修复与响应改善至此收口，不自动扩为存储格式/新缓存平台或发行。
+
+<a id="result-html-edit-performance-20261020"></a>
+## 大 HTML 重复解析、嵌套显示编辑修复及 Claude 报告核查
+
+Owner 本次授权的软件修复已完成。保全主目录原有625项dirty与桌面英语素材原件；只对隔离副本实机编辑。未commit、push、付费创作或发行。
+
+未变 HTML 的磁盘观察现沿原Session复用最近磁盘投影，正文及实际依赖发生变化才重新分析；未保存的人工作业与磁盘事实分离，缺失附件出现、CSS变化及动态图片目录新增仍走原路径。预览的资源分析按原租约复用，打开与同源GET共享结果，CSS依赖变化正常失效。目标定位按一批报告共享一次惰性解析，结构与定位沿既有parse5 TreeAdapter解除长文本链保留；首次全文解析的临时堆峰仍可能较大，不声称其被消除。
+
+同一授权租约内的子HTML导航现经原protocol/realpath资源根加载，跨租约与外来文件仍被拒绝。可访问iframe的作者观察与坐标接入原DOM adapter，嵌套记录按frame scope归外层HTML的既有Session/History，子文件不被改写。保存consumer同步升级旧软件包装并回放嵌套记录；没有新增writer或源文格式。独审发现的外层同字路径误绑、子文档后台媒体暂停及图片entry相对路径三项接线缺口均已修正。
+
+最低成本聚焦行为、Renderer/Main类型、必要Player/Renderer/Main开发构建及独立结构复核通过；复用未受影响的既有证据，没有运行完整测试矩阵。真实built Electron隔离副本的[事实](../../output/html-lag-diagnosis-20261020/repair-wIleOA/facts.json)与[冷开截图](../../output/html-lag-diagnosis-20261020/repair-wIleOA/nested-cold-reopen.png)确认：
+
+- `Unit1-Friendship.html`本地子页实际显示、改字、Undo/Redo、UI保存及新进程/新profile冷开通过；外层dirty=false，子HTML源文保持。
+- `Unit1-You-and-Me.html`的srcdoc正文实际显示并改字通过；未把此项扩大为第二份保存冷开证据。
+- 同一25.58MB HTML的真实Main未变观察为321.3ms、341.8ms；原诊断观察为6729ms。修后副本带完整素材目录，环境不完全相同，不作严格百分比/首次打开提速承诺。该次首次打开仍需15033ms；首次资源分析与结构解析仍有成本。
+- 产品pageerror和失败HTTP响应均为0，自有进程已关闭。准备副本时Node原生cpSync退出未到产品断言，改用逐文件复制；srcdoc未保存副本的关闭提示曾等待，保留其恢复稿后仅结束本轮隔离进程，再完成独立大HTML计时，未终止真实用户进程或修改原件。该维护不替代正常关闭/保存验收；Friendship正常保存和独立冷开证据单独成立。
+
+原`Unit1-Studio.html`自身重复声明`$`的脚本错误仍保留，不以修改素材掩盖软件修复。新建嵌套helper的兄弟隔离、重载释放、图像基址与序列化反例，以及实际patch→records顺序的集成反例均通过。
+
+Claude 报告已按实际差异和消费者核查：
+
+| 报告判断 | 当前核查结论 |
+|---|---|
+| validateProject删除1478行覆盖 | 换行差异误判。13个it/58个expect保留；忽略行尾差异实际7增5删，调整11/4及container字段路径。 |
+| batch API被删除 | `tools/batch.json`仍在；此前提交压缩的是模型披露，正式union解析、授权及operations/name/input形状保留。 |
+| Engine/Delegation未经集成验证 | 变动对应此前`1af578e5`；有预算/结算、容量集成、Windows发布反例，以及真实Gateway最大批次/Session/Undo证据。原全库旧红例仍保留，不能说全仓全绿。 |
+| modelProjection必须重跑指定旧E2E | 结构变化真实，但已有针对容器/World检查及V1/V2/V3实际编辑、保存冷开与离线互动；旧文件名不是唯一验收门。 |
+| 生成器736行重构、目录可能不全 | 主要为行尾差异；实际8增8删。只读能力一致性检查通过，101工具/144资源及batch在列。 |
+| v10别名与schema删除冲突 | 当前alias指11；旧10只在读入边界转换，写出按11验证，current/saved/past/future/操作记录有恢复迁移证据。 |
+| 恢复ENTRYPOINTS及补迁移文档 | 旧入口按Owner要求并入现开发导航，迁移说明已存在；不恢复第二入口。 |
+
+报告中`test:unit`、`test:integration`脚本并不存在；不能据建议直接启动矩阵。实际低影响残留是`docs/README.md`机器索引标签仍写10/3，索引及同页正文已为11/4，本轮仅记录，不扩为产品阻断。原迁移与真实载体事实见[GLX实施结果](20261020-glx-work-containers/IMPLEMENTATION_RESULT.md)；原核心旧红例及最大批次边界见[创作边界结果](20261020-creation-boundary-repair/IMPLEMENTATION_RESULT.md)。本批至此收口。
 
 <a id="result-creation-boundary-20261020"></a>
 ## 创作边界修复实施与能力交接

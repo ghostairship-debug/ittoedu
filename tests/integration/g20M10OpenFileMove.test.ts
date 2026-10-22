@@ -1,4 +1,6 @@
 // @vitest-environment node
+import { componentSurfaces } from '../../src/shared/contracts/component-platform/project'
+import { testContainerInstance } from '../helpers/glxWorkFixture'
 import { promises as fs } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -104,7 +106,7 @@ it('M10-T02 keeps a dirty V10 course, embedded resources and History through tre
   try {
     const original = path.join(workspace, 'course.glx'), moved = path.join(target, 'course.glx')
     const project = createBlankCourseProjectV10('文件移动')
-    const surfaceId = project.surfaces[0].id
+    const surfaceId = componentSurfaces(project)[0].id
     project.definitions[TEXT_DEFINITION.id] = structuredClone(TEXT_DEFINITION)
     project.definitions[IMAGE_DEFINITION.id] = structuredClone(IMAGE_DEFINITION)
     project.definitions.note = { id: 'note', role: 'content', implementation: { kind: 'source', language: 'javascript', workspace: { ownerId: 'note', entry: 'main.js' } } }
@@ -114,7 +116,7 @@ it('M10-T02 keeps a dirty V10 course, embedded resources and History through tre
     project.instances.image = { id: 'image', definitionId: IMAGE_DEFINITION.id, data: JSON.parse(JSON.stringify(createImageData('image', '素材'))),
       frame: { width: 10, height: 10, transform: [1, 0, 0, 1, 40, 140] } }
     project.instances.note = { id: 'note', definitionId: 'note', data: {}, frame: { width: 100, height: 70, transform: [1, 0, 0, 1, 200, 140] } }
-    project.surfaces[0].childIds = ['slide-title', 'image', 'note']
+    testContainerInstance(project, 0).childIds = ['slide-title', 'image', 'note']
     await fs.writeFile(original, createCourseProjectV10Archive({ project, resources: {
       assets: { image: new TextEncoder().encode('<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"/>') },
       components: { note: { 'main.js': new TextEncoder().encode('export default {mount({root}) {const note=document.createElement("span"); note.textContent="附注"; root.append(note); return {dispose(){note.remove()}}}}') } },

@@ -1,3 +1,4 @@
+import { setRootContainers } from '../../../helpers/glxWorkFixture'
 import { jsonValueSchema } from '../../../../src/shared/contracts/component-platform/schema'
 import { expect, test, type FrameLocator, type ElectronApplication, type Locator, type Page } from '@playwright/test'
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
@@ -110,8 +111,8 @@ test('one real HTML import keeps painted pseudo clip and alpha semantics in Play
   project.instances['nested-control'] = { id: 'nested-control', definitionId: WEB_DEFINITION.id,
     frame: { width: 360, height: 120, transform: [1, 0, 0, 1, 35, 40] },
     data: { html: '<details id="nested-answer"><summary>真实嵌套子对象互动</summary><p>子对象仍能接收真实鼠标点击。</p></details>' } }
-  project.surfaces = [{ id: 'flow', title: '讲义', kind: 'flow', childIds: ['body', 'human'] },
-    { id: 'nested-slide', title: '嵌套交互', kind: 'slide', childIds: ['nested-group'], designSize: { width: 1000, height: 650 } }]
+  setRootContainers(project, [{ id: 'flow', title: '讲义', kind: 'flow', childIds: ['body', 'human'] },
+    { id: 'nested-slide', title: '嵌套交互', kind: 'slide', childIds: ['nested-group'], designSize: { width: 1000, height: 650 } }])
   const name = '绘制对照.h5lesson'
   writeFileSync(join(workspace, name), new CourseV10Driver().serialize({ kind: 'course-v10', project, resources: { assets: {}, components: {} } }))
   let app: ElectronApplication | undefined, ownedProcess: ChildProcess | undefined

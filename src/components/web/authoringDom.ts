@@ -1,4 +1,5 @@
 import type { ComponentAuthorBinding, ComponentAuthorRecord, ComponentAuthorScope, ComponentAuthorGeometryObservation, ComponentAuthorGeometry, ComponentAuthorSpotInput } from '../../shared/contracts/component-platform/runtime'
+import { componentPaintStack } from './paintHit'
 
 export interface DomAuthorObservation {
   node: Text | HTMLImageElement
@@ -25,16 +26,19 @@ export function createDomAuthoring(root: HTMLElement, options: {
   originalText?(node: Text): string | undefined
   claimText?(node: Text, text: string | null): void
   onChange?(): void
+  /** Early HTML bootstrap may retain closed roots without changing their mode. */
+  shadowRoot?(host: Element): ShadowRoot | null | undefined
   report?(authorKey: string, status: 'bound' | 'unmounted' | 'unresolved'): void
-}) {
+}, paintStack: typeof componentPaintStack = componentPaintStack) {
   type Target = Text | HTMLImageElement
+  type Container = Element | ShadowRoot
   type Path = ComponentAuthorBinding['path']
   type Property = { original: string | null; applied: string | null; priority?: string; computed?: string }
   type Applied = { node: Target; content?: Property; attributes: Map<Element, Map<string, Property>>; styles: Map<string, Property> }
   type ValueIndex = Map<string, Target[]>
-  type ScanLookup = { elements: Map<string, Element[]>; scopes: WeakMap<Element, ComponentAuthorScope>;
-    paths: WeakMap<Element, Path>; indices: WeakMap<Element, number>; indexedParents: WeakSet<Element>;
-    values: Map<string, ValueIndex>; nodeIndexes: WeakMap<Target, Set<ValueIndex>>; contexts: WeakMap<Element, string | null> }
+  type ScanLookup = { elements: Map<string, Container[]>; scopes: WeakMap<Element, ComponentAuthorScope>;
+    paths: WeakMap<Container, Path>; indices: WeakMap<Element, number>; indexedParents: WeakSet<Container>;
+    values: Map<string, ValueIndex>; nodeIndexes: WeakMap<Target, Set<ValueIndex>>; contexts: WeakMap<Container, string | null> }
   let lookup: ScanLookup | undefined
   const withLookup = <Value,>(work: () => Value): Value => {
     if (lookup) return work()
@@ -47,9 +51,30 @@ export function createDomAuthoring(root: HTMLElement, options: {
   const observedNodes = new Map<string, Target>()
   const previews = new Map<string, { node: Target; record: ComponentAuthorRecord; geometry: ComponentAuthorGeometry }>()
   const active = new Map<string, Applied>(), statuses = new Map<string, string>()
-  let disposed = false, queued = false, refreshing = false
+  let disposed = false, queued = false, refreshing = false, observationActive = true, dirty = false
+  let explicitActive = true, runtimeActive = true
   let reactScopes = new WeakMap<Element, ComponentAuthorScope>()
-  const elementOf = (node: Target) => node.nodeType === 3 ? node.parentElement! : node as HTMLImageElement
+  const shadowOf = (host: Element) => options.shadowRoot?.(host) ?? host.shadowRoot
+  const hostOf = (node: Node | null): Element | undefined => node?.nodeType === 11 && 'host' in node ? (node as ShadowRoot).host : undefined
+  const parentOf = (element: Element): Element | null => element.parentElement ?? hostOf(element.parentNode) ?? null
+  const within = (node: Node): boolean => {
+    for (let current: Node | undefined = node; current; current = hostOf(current.getRootNode())) if (root.contains(current)) return true
+    return false
+  }
+  const containerOf = (node: Target): Container => node.nodeType === 3 ? node.parentNode as Container : node as HTMLImageElement
+  const elementOf = (node: Target) => node.nodeType === 3 ? node.parentElement ?? hostOf(node.parentNode)! : node as HTMLImageElement
+  const nodesWithin = (start: Node) => {
+    const result: Node[] = [], stack: Node[] = [...start.childNodes].reverse()
+    if (start.nodeType === 1) { const shadow = shadowOf(start as Element); if (shadow) stack.push(shadow) }
+    while (stack.length) {
+      const node = stack.pop()!
+      result.push(node)
+      stack.push(...[...node.childNodes].reverse())
+      if (node.nodeType === 1) { const shadow = shadowOf(node as Element); if (shadow) stack.push(shadow) }
+    }
+    return result
+  }
+  const contentRoots = (): Array<HTMLElement | ShadowRoot> => [root, ...nodesWithin(root).filter(node => node.nodeType === 11 && 'host' in node) as ShadowRoot[]]
   const valueOf = (node: Target) => node.nodeType === 3 ? node.nodeValue ?? '' : (node as HTMLImageElement).getAttribute('src') ?? ''
   const authorValueOf = (node: Target) => node.nodeType === 3 ? options.originalText?.(node as Text) ?? valueOf(node)
     : options.resourceReference?.(valueOf(node)) ?? valueOf(node)
@@ -69,25 +94,23 @@ export function createDomAuthoring(root: HTMLElement, options: {
     const style = win.getComputedStyle(elementOf(node))
     return style.visibility !== 'hidden' && style.visibility !== 'collapse' && style.display !== 'none'
   }
-  const contextValueOf = (element: Element) => {
+  const contextValueOf = (element: Container) => {
     if (lookup?.contexts.has(element)) return lookup.contexts.get(element)!
     const value = readContextValue(element)
     lookup?.contexts.set(element, value)
     return value
   }
-  const readContextValue = (element: Element) => {
+  const readContextValue = (element: Container) => {
     if (!options.originalText) return element.textContent
     const walker = doc.createTreeWalker(element, 4), values: string[] = []
     for (let node = walker.nextNode(); node; node = walker.nextNode()) values.push(authorValueOf(node as Text))
     return values.join('')
   }
   const eligible = (node: Node): node is Target => node.nodeType === 1 && (node as Element).localName === 'img'
-    || node.nodeType === 3 && Boolean(node.nodeValue?.trim()) && Boolean(node.parentElement)
-      && !node.parentElement!.closest('script,style,noscript,template,textarea,title,option,[contenteditable],[data-html-preview-edit-markers]')
+    || node.nodeType === 3 && Boolean(node.nodeValue?.trim()) && Boolean(node.parentElement ?? hostOf(node.parentNode))
+      && !elementOf(node as Text).closest('script,style,noscript,template,textarea,title,option,[contenteditable],[data-html-preview-edit-markers]')
   const targets = () => {
-    const nodes: Target[] = [], walker = doc.createTreeWalker(root, 1 | 4)
-    for (let node = walker.nextNode(); node; node = walker.nextNode()) if (eligible(node)) nodes.push(node)
-    return nodes
+    return nodesWithin(root).filter(eligible)
   }
   const ordered = (scope: ComponentAuthorScope) => JSON.stringify(Object.entries(scope).sort(([a], [b]) => a.localeCompare(b)))
   const newKey = () => {
@@ -105,7 +128,7 @@ export function createDomAuthoring(root: HTMLElement, options: {
   const readReactScopes = () => {
     reactScopes = new WeakMap()
     const roots = new Set<any>()
-    for (const element of [root, ...root.querySelectorAll('*')]) {
+    for (const element of [root, ...nodesWithin(root).filter(node => node.nodeType === 1) as Element[]]) {
       const name = Object.keys(element).find(key => key.startsWith('__reactFiber$'))
       if (!name) continue
       let fiber = (element as unknown as Record<string, any>)[name]
@@ -137,7 +160,7 @@ export function createDomAuthoring(root: HTMLElement, options: {
     if (cached) return cached
     const scope = { ...reactScopes.get(element), ...options.scope }
     let depth = 0
-    for (let current: Element | null = element; current && root.contains(current); current = current.parentElement) {
+    for (let current: Element | null = element; current && within(current); current = parentOf(current)) {
       for (const attribute of [...current.attributes]) {
         if (/^data-(?:(?:item|record|entity|author|state|scene|view)-)?(?:id|key|state)$/.test(attribute.name))
           scope[`dom:${depth}:${attribute.name}`] = attribute.value
@@ -160,26 +183,28 @@ export function createDomAuthoring(root: HTMLElement, options: {
     if (classes.length) attributes.class = classes.join(' ')
     return attributes
   }
-  const pathFor = (element: Element): Path => {
+  const pathFor = (element: Container): Path => {
     const cached = lookup?.paths.get(element)
     if (cached) return cached
     if (lookup) {
       if (element === root) return []
-      const parent = element.parentElement
+      if (element.nodeType === 11) return [...pathFor((element as ShadowRoot).host), { tag: '#shadow-root', index: 0 }]
+      const parent = element.parentNode as Container | null
       if (parent && !lookup.indexedParents.has(parent)) {
         [...parent.children].forEach((child, index) => lookup!.indices.set(child, index))
         lookup.indexedParents.add(parent)
       }
-      const attributes = attributesOf(element)
-      const path = [...(parent && root.contains(parent) ? pathFor(parent) : []), { tag: element.localName, index: lookup.indices.get(element) ?? 0,
+      const attributes = attributesOf(element as Element)
+      const path = [...(parent && within(parent) ? pathFor(parent) : []), { tag: (element as Element).localName, index: lookup.indices.get(element as Element) ?? 0,
         ...(Object.keys(attributes).length ? { attributes } : {}) }]
       lookup.paths.set(element, path)
       return path
     }
     const path: Path = []
-    for (let current: Element | null = element; current && current !== root; current = current.parentElement) {
-      const attributes = attributesOf(current)
-      path.unshift({ tag: current.localName, index: current.parentElement ? [...current.parentElement.children].indexOf(current) : 0,
+    for (let current: Container | null = element; current && current !== root; current = current.nodeType === 11 ? (current as ShadowRoot).host : current.parentNode as Container | null) {
+      if (current.nodeType === 11) { path.unshift({ tag: '#shadow-root', index: 0 }); continue }
+      const attributes = attributesOf(current as Element)
+      path.unshift({ tag: (current as Element).localName, index: current.parentNode && 'children' in current.parentNode ? [...(current.parentNode as Container).children].indexOf(current as Element) : 0,
         ...(Object.keys(attributes).length ? { attributes } : {}) })
     }
     return path
@@ -187,16 +212,18 @@ export function createDomAuthoring(root: HTMLElement, options: {
   const matches = (element: Element, step: Path[number]) => element.localName === step.tag
     && Object.entries(step.attributes ?? {}).every(([name, value]) => name === 'class'
       ? value.split(/\s+/).every(token => element.classList.contains(token)) : element.getAttribute(name) === value)
-  const elementsAt = (path: Path): Element[] => {
+  const elementsAt = (path: Path): Container[] => {
     const key = JSON.stringify(path.map(({ tag, attributes }) => ({ tag, attributes })))
     const cached = lookup?.elements.get(key)
     if (cached) return cached
-    let candidates: Element[] = [root]
-    for (const step of path) candidates = candidates.flatMap(parent => [...parent.children].filter(child => matches(child, step)))
+    let candidates: Container[] = [root]
+    for (const step of path) candidates = step.tag === '#shadow-root'
+      ? candidates.flatMap(parent => parent.nodeType === 1 ? shadowOf(parent as Element) ?? [] : [])
+      : candidates.flatMap(parent => [...parent.children].filter(child => matches(child, step)))
     lookup?.elements.set(key, candidates)
     return candidates
   }
-  const sameScope = (element: Element, scope?: ComponentAuthorScope) => ordered(scopeOf(element)) === ordered(scope ?? {})
+  const sameScope = (element: Container, scope?: ComponentAuthorScope) => ordered(scopeOf(element.nodeType === 11 ? (element as ShadowRoot).host : element as Element)) === ordered(scope ?? {})
   const resolve = (key: string, record: ComponentAuthorRecord, previous?: Applied): { node?: Target; status: 'bound' | 'unmounted' | 'unresolved' } => {
     if (lookup) {
       const path = record.binding.path.map(({ tag, attributes }) => ({ tag, attributes }))
@@ -207,7 +234,7 @@ export function createDomAuthoring(root: HTMLElement, options: {
         if (!candidates.length) return { status: 'unmounted' }
         values = new Map()
         for (const element of candidates) {
-          const node = record.kind === 'image' ? element.localName === 'img' ? element as HTMLImageElement : undefined
+          const node = record.kind === 'image' ? (element as Element).localName === 'img' ? element as HTMLImageElement : undefined
             : [...element.childNodes].filter(node => node.nodeType === 3)[record.binding.textIndex ?? 0] as Text | undefined
           if (!node) continue
           const value = node.nodeType === 3 ? authorValueOf(node) : valueOf(node)
@@ -231,7 +258,7 @@ export function createDomAuthoring(root: HTMLElement, options: {
     const candidates = elementsAt(record.binding.path).filter(element => sameScope(element, record.scope))
     if (!candidates.length) return { status: 'unmounted' }
     const nodes = candidates.flatMap(element => {
-      const node = record.kind === 'image' ? element.localName === 'img' ? element as HTMLImageElement : undefined
+      const node = record.kind === 'image' ? (element as Element).localName === 'img' ? element as HTMLImageElement : undefined
         : [...element.childNodes].filter(node => node.nodeType === 3)[record.binding.textIndex ?? 0] as Text | undefined
       if (!node) return []
       const value = node.nodeType === 3 ? authorValueOf(node) : valueOf(node), override = record.kind === 'text' ? record.overrides.text : record.overrides.src
@@ -371,17 +398,18 @@ export function createDomAuthoring(root: HTMLElement, options: {
     if (disposed || refreshing) return
     refreshing = true
     try {
+      syncObservedRoots()
       readReactScopes()
       const records = { ...options.records() }
       for (const [key, preview] of previews) {
         const formal = records[key] ?? preview.record
         records[key] = { ...formal, overrides: { ...formal.overrides, geometry: preview.geometry } }
       }
-      for (const [key, node] of observedNodes) if (!root.contains(node)) observedNodes.delete(key)
+      for (const [key, node] of observedNodes) if (!within(node)) observedNodes.delete(key)
       for (const [key, state] of active) if (!records[key]) { restore(state); active.delete(key); statuses.delete(key) }
       for (const [key, record] of Object.entries(records)) {
         const previous = active.get(key), preview = previews.get(key)
-        const result = preview && root.contains(preview.node) && sameScope(elementOf(preview.node), preview.record.scope)
+        const result = preview && within(preview.node) && sameScope(elementOf(preview.node), preview.record.scope)
           ? { node: preview.node, status: 'bound' as const } : resolve(key, record, previous)
         if (previous && result.node !== previous.node) { restore(previous); active.delete(key) }
         if (result.node) {
@@ -394,7 +422,7 @@ export function createDomAuthoring(root: HTMLElement, options: {
             if (old.length) index.set(oldValue, old); else index.delete(oldValue)
             index.set(nextValue, [...index.get(nextValue) ?? [], result.node])
           }
-          if (oldValue !== nextValue) for (let parent: Element | null = elementOf(result.node); parent && root.contains(parent); parent = parent.parentElement) lookup?.contexts.delete(parent)
+          if (oldValue !== nextValue) for (let parent: Element | null = elementOf(result.node); parent && within(parent); parent = parentOf(parent)) lookup?.contexts.delete(parent)
           observedNodes.set(key, result.node)
           descriptions.set(result.node, { scope: ordered(record.scope ?? {}), observation: {
             node: result.node, authorKey: key, record, initialValue: record.kind === 'image' ? record.overrides.src ?? authorValueOf(result.node) : valueOf(result.node),
@@ -403,10 +431,10 @@ export function createDomAuthoring(root: HTMLElement, options: {
         }
         status(key, result.status)
       }
-    } finally { refreshing = false }
+    } finally { refreshing = false; if (inputPaintTarget !== undefined) refreshInputPaint() }
   })
   const describe = (node: Node): DomAuthorObservation | null => {
-    if (!eligible(node) || !root.contains(node)) return null
+    if (!eligible(node) || !within(node)) return null
     const element = elementOf(node), scope = scopeOf(element), scopeKey = ordered(scope)
     const previous = descriptions.get(node)
     if (previous?.scope === scopeKey) {
@@ -417,8 +445,9 @@ export function createDomAuthoring(root: HTMLElement, options: {
         initialValue: record?.kind === 'image' ? record.overrides.src ?? authorValueOf(node)
           : record?.overrides.text ?? authorValueOf(node) }
     }
-    const binding: ComponentAuthorBinding = { kind: 'dom', path: pathFor(element), baseline: authorValueOf(node),
-      ...(node.nodeType === 3 ? { textIndex: [...element.childNodes].filter(child => child.nodeType === 3).indexOf(node) } : {}) }
+    const container = containerOf(node)
+    const binding: ComponentAuthorBinding = { kind: 'dom', path: pathFor(container), baseline: authorValueOf(node),
+      ...(node.nodeType === 3 ? { textIndex: [...container.childNodes].filter(child => child.nodeType === 3).indexOf(node) } : {}) }
     const observation: DomAuthorObservation = { node, authorKey: newKey(),
       record: { kind: node.nodeType === 3 ? 'text' : 'image', binding, ...(Object.keys(scope).length ? { scope } : {}), overrides: {} },
       initialValue: authorValueOf(node), bindingStatus: 'bound' }
@@ -427,16 +456,39 @@ export function createDomAuthoring(root: HTMLElement, options: {
     observedNodes.set(observation.authorKey, node)
     return observation
   }
+  type Matrix = ComponentAuthorGeometryObservation['parentToInstance']
+  const multiply = (a: Matrix, b: Matrix): Matrix => [a[0] * b[0] + a[2] * b[1], a[1] * b[0] + a[3] * b[1],
+    a[0] * b[2] + a[2] * b[3], a[1] * b[2] + a[3] * b[3], a[0] * b[4] + a[2] * b[5] + a[4], a[1] * b[4] + a[3] * b[5] + a[5]]
+  const linearTransform = (target: HTMLElement): Matrix | undefined => {
+    if (!win.DOMMatrix) return undefined
+    let linear: Matrix = [1, 0, 0, 1, 0, 0]
+    for (let current: HTMLElement | null = target; current; current = parentOf(current) as HTMLElement | null) {
+      const style = win.getComputedStyle(current)
+      const transform = new win.DOMMatrix(style.transform === 'none' ? undefined : style.transform)
+      if (!transform.is2D) return undefined
+      let rotation = 0
+      if (style.rotate && style.rotate !== 'none') {
+        const match = /^(?:z\s+)?(-?[\d.]+)(deg|rad|turn)$/.exec(style.rotate)
+        if (!match) return undefined
+        rotation = Number(match[1]) * (match[2] === 'deg' ? Math.PI / 180 : match[2] === 'turn' ? Math.PI * 2 : 1)
+      }
+      const scale = style.scale && style.scale !== 'none' ? style.scale.split(/\s+/).map(Number) : [1, 1]
+      if (scale.some(value => !Number.isFinite(value)) || scale.length > 2) return undefined
+      const zoom = parseFloat(style.zoom) || 1, x = scale[0]! * zoom, y = (scale[1] ?? scale[0])! * zoom
+      const cosine = Math.cos(rotation), sine = Math.sin(rotation)
+      const local = multiply([cosine * x, sine * x, -sine * y, cosine * y, 0, 0], [transform.a, transform.b, transform.c, transform.d, 0, 0])
+      linear = multiply(local, linear)
+    }
+    return linear
+  }
   const geometry = (node: Node): ComponentAuthorGeometryObservation | undefined => {
-    if (!eligible(node) || !root.contains(node) || !win.DOMMatrix) return undefined
+    if (!eligible(node) || !within(node) || !win.DOMMatrix) return undefined
     const element = elementOf(node)
-    if (!(element instanceof win.HTMLElement) || !element.parentElement) return undefined
+    const parentElement = parentOf(element)
+    if (!(element instanceof win.HTMLElement) || !(parentElement instanceof win.HTMLElement) || node.parentNode?.nodeType === 11) return undefined
     // A text run with siblings is part of its parent's rich content, not an
     // independently resizable element. Its content is still directly editable.
     if (node.nodeType === 3 && [...element.childNodes].filter(child => child.nodeType === 1 || child.textContent?.trim()).length !== 1) return undefined
-    type Matrix = ComponentAuthorGeometryObservation['parentToInstance']
-    const multiply = (a: Matrix, b: Matrix): Matrix => [a[0] * b[0] + a[2] * b[1], a[1] * b[0] + a[3] * b[1],
-      a[0] * b[2] + a[2] * b[3], a[1] * b[2] + a[3] * b[3], a[0] * b[4] + a[2] * b[5] + a[4], a[1] * b[4] + a[3] * b[5] + a[5]]
     const invert = (m: Matrix): Matrix | undefined => {
       const determinant = m[0] * m[3] - m[1] * m[2]
       return Math.abs(determinant) < 1e-10 ? undefined : [m[3] / determinant, -m[1] / determinant, -m[2] / determinant, m[0] / determinant,
@@ -452,31 +504,15 @@ export function createDomAuthoring(root: HTMLElement, options: {
       const height = computed.display === 'inline' || !Number.isFinite(parseFloat(computed.height)) ? target.offsetHeight
         : number(computed.height) + (computed.boxSizing === 'border-box' ? 0 : vertical)
       if (!(width > 0 && height > 0 && rect.width > 0 && rect.height > 0)) return undefined
-      let linear: Matrix = [1, 0, 0, 1, 0, 0]
-      for (let current: HTMLElement | null = target; current; current = current.parentElement) {
-        const style = win.getComputedStyle(current)
-        const transform = new win.DOMMatrix(style.transform === 'none' ? undefined : style.transform)
-        if (!transform.is2D) return undefined
-        let rotation = 0
-        if (style.rotate && style.rotate !== 'none') {
-          const match = /^(?:z\s+)?(-?[\d.]+)(deg|rad|turn)$/.exec(style.rotate)
-          if (!match) return undefined
-          rotation = Number(match[1]) * (match[2] === 'deg' ? Math.PI / 180 : match[2] === 'turn' ? Math.PI * 2 : 1)
-        }
-        const scale = style.scale && style.scale !== 'none' ? style.scale.split(/\s+/).map(Number) : [1, 1]
-        if (scale.some(value => !Number.isFinite(value)) || scale.length > 2) return undefined
-        const zoom = parseFloat(style.zoom) || 1, x = scale[0]! * zoom, y = (scale[1] ?? scale[0])! * zoom
-        const cosine = Math.cos(rotation), sine = Math.sin(rotation)
-        const local = multiply([cosine * x, sine * x, -sine * y, cosine * y, 0, 0], [transform.a, transform.b, transform.c, transform.d, 0, 0])
-        linear = multiply(local, linear)
-      }
+      const linear = linearTransform(target)
+      if (!linear) return undefined
       const xs = [0, linear[0] * width, linear[2] * height, linear[0] * width + linear[2] * height]
       const ys = [0, linear[1] * width, linear[3] * height, linear[1] * width + linear[3] * height]
       const matrix: Matrix = [...linear.slice(0, 4), rect.x - Math.min(...xs), rect.y - Math.min(...ys)] as Matrix
       return { width, height, matrix, boxInsets: { width: computed.boxSizing === 'border-box' ? 0 : horizontal, height: computed.boxSizing === 'border-box' ? 0 : vertical } }
     }
     try {
-      const measured = box(element), parent = box(element.parentElement)
+      const measured = box(element), parent = box(parentElement)
       if (!measured || !parent) return undefined
       const inverseParent = invert(parent.matrix)
       const documentRoot = root === doc.body || root === doc.documentElement
@@ -549,17 +585,86 @@ export function createDomAuthoring(root: HTMLElement, options: {
     } catch { return undefined }
   }
   const enqueue = () => {
-    if (queued || disposed) return
+    dirty = true
+    if (queued || disposed || !observationActive) return
     queued = true
-    queueMicrotask(() => { queued = false; if (!disposed) { refresh(); options.onChange?.() } })
+    queueMicrotask(() => {
+      queued = false
+      if (!disposed && observationActive && dirty) { dirty = false; refresh(); options.onChange?.() }
+    })
   }
+  const updateActive = () => {
+    const value = explicitActive && runtimeActive
+    if (observationActive === value || disposed) return
+    observationActive = value
+    if (value && dirty) enqueue()
+  }
+  const setActive = (value: boolean) => { explicitActive = value; updateActive() }
+  const activity = (event: Event) => {
+    const value = (event as CustomEvent<{ active: boolean; visible: boolean }>).detail
+    if (value && typeof value.active === 'boolean' && typeof value.visible === 'boolean') { runtimeActive = value.active && value.visible; updateActive() }
+  }
+  win.addEventListener('__runtime.activity', activity)
+  const initialActivity = (win as Window & { __guolingRuntimeActivity?: { active: boolean; visible: boolean } }).__guolingRuntimeActivity
+  if (initialActivity) { runtimeActive = initialActivity.active && initialActivity.visible; updateActive() }
   const observer = new win.MutationObserver(enqueue)
-  observer.observe(root, { subtree: true, childList: true, characterData: true, attributes: true })
+  const observedRoots = new Set<HTMLElement | ShadowRoot>()
+  function syncObservedRoots(): void {
+    const current = new Set(contentRoots())
+    if ([...observedRoots].some(value => !current.has(value))) { observer.disconnect(); observedRoots.clear() }
+    for (const value of current) if (!observedRoots.has(value)) {
+      observer.observe(value, { subtree: true, childList: true, characterData: true, attributes: true }); observedRoots.add(value)
+    }
+  }
+  const inputPaintName = `cw-author-input-${Math.random().toString(36).slice(2)}`
+  let inputPaintStyle: CSSStyleSheet | undefined, inputPaintRoot: Document | ShadowRoot | undefined
+  let inputPaintTarget: string | Node | undefined
+  const highlightRegistry = (win as unknown as { CSS?: { highlights?: { set(name: string, value: unknown): void; delete(name: string): void } } }).CSS?.highlights
+  const HighlightType = Reflect.get(win, 'Highlight') as (new (...ranges: Range[]) => unknown) | undefined
+  const refreshInputPaint = () => {
+    highlightRegistry?.delete(inputPaintName)
+    const node = typeof inputPaintTarget === 'string' ? observedNodes.get(inputPaintTarget) : inputPaintTarget
+    if (!node || node.nodeType !== 3 || !within(node) || !HighlightType || !highlightRegistry) return
+    const paintRoot = node.getRootNode() as Document | ShadowRoot
+    if (!('adoptedStyleSheets' in paintRoot)) return
+    if (!inputPaintStyle) { inputPaintStyle = new win.CSSStyleSheet(); inputPaintStyle.replaceSync(`::highlight(${inputPaintName}){color:transparent!important;text-shadow:none!important}`) }
+    if (inputPaintRoot !== paintRoot) { if (inputPaintRoot) inputPaintRoot.adoptedStyleSheets = inputPaintRoot.adoptedStyleSheets.filter(sheet => sheet !== inputPaintStyle); paintRoot.adoptedStyleSheets = [...paintRoot.adoptedStyleSheets, inputPaintStyle]; inputPaintRoot = paintRoot }
+    const range = doc.createRange(); range.selectNodeContents(node)
+    highlightRegistry.set(inputPaintName, new HighlightType(range))
+  }
+  const suppressText = (target?: string | Node) => { inputPaintTarget = target; refreshInputPaint() }
+  const textStyle = (node: Node) => {
+    if (node.nodeType !== 3) return undefined
+    const element = elementOf(node as Text), style = win.getComputedStyle(element)
+    const result = Object.fromEntries(['font-family', 'font-size', 'color', 'font-weight', 'font-style', 'text-decoration-line',
+      'background-color', 'text-align', 'line-height', 'letter-spacing', 'word-spacing', 'text-transform', 'fill'].map(name => [name, style.getPropertyValue(name)]))
+    const linear = element instanceof win.HTMLElement ? linearTransform(element) : undefined
+    if (linear) { result.transform = `matrix(${linear.join(',')})`; result['transform-origin'] = '0 0' }
+    const siblings = [...element.childNodes].filter(child => child.nodeType === 1 || child.textContent?.trim())
+    if (element instanceof win.HTMLElement && siblings.length === 1 && style.display !== 'inline' && style.display !== 'contents') {
+      const width = element.clientWidth - (parseFloat(style.paddingLeft) || 0) - (parseFloat(style.paddingRight) || 0)
+      if (width > 0) result.width = `${width}px`
+    } else {
+      const range = doc.createRange(); range.selectNodeContents(node)
+      if (range.getClientRects?.().length === 1) result.width = 'max-content'
+    }
+    return result
+  }
   refresh()
   return {
     refresh,
+    /** Pause observation only. Explicit reads/record application retain their existing semantics. */
+    setActive,
+    roots: contentRoots,
+    /** Discovery enumerates content only; callers request binding and geometry for consumed targets. */
+    targets(scope: Node = root): Array<Text | HTMLImageElement> {
+      if (scope === doc) scope = root
+      if (!within(scope)) return []
+      return (scope === root ? nodesWithin(root) : [scope, ...nodesWithin(scope)]).filter(eligible)
+    },
     describe,
     geometry,
+    suppressText,
     previewGeometry(authorKey: string, value: ComponentAuthorGeometry | null) {
       if (disposed) return
       if (value === null) previews.delete(authorKey)
@@ -570,17 +675,16 @@ export function createDomAuthoring(root: HTMLElement, options: {
       }
       refresh()
     },
+    textStyle,
     scan(): DomAuthorObservation[] { refresh(); return withLookup(() => targets().filter(visible).flatMap(node => {
       const value = describe(node)
       if (!value) return []
-      const style = node.nodeType === 3 ? win.getComputedStyle(elementOf(node)) : undefined
-      const textStyle = style ? Object.fromEntries(['font-family', 'font-size', 'color', 'font-weight', 'font-style', 'text-decoration-line',
-        'background-color', 'text-align', 'line-height', 'fill'].map(name => [name, style.getPropertyValue(name)])) : undefined
-      return [{ ...value, geometry: geometry(node), ...(textStyle ? { textStyle } : {}) }]
+      const style = textStyle(node)
+      return [{ ...value, geometry: geometry(node), ...(style ? { textStyle: style } : {}) }]
     })) },
     hit(x: number, y: number): DomAuthorObservation | undefined {
-      const element = doc.elementsFromPoint(x, y)[0]
-      if (!element || !root.contains(element)) return undefined
+      const element = paintStack(root, x, y, '', shadowOf)[0]
+      if (!element || !within(element)) return undefined
       for (const node of targets()) {
         if (elementOf(node) !== element || !visible(node)) continue
         const rect = node.nodeType === 3 ? (() => { const range = doc.createRange(); range.selectNodeContents(node); return range.getBoundingClientRect() })() : element.getBoundingClientRect()
@@ -589,6 +693,12 @@ export function createDomAuthoring(root: HTMLElement, options: {
       }
       return undefined
     },
-    dispose() { if (disposed) return; disposed = true; observer.disconnect(); for (const state of active.values()) restore(state); active.clear(); previews.clear(); observedNodes.clear() },
+    paintedElementAt(x: number, y: number): Element | undefined { return paintStack(root, x, y, '', shadowOf)[0] },
+    dispose() { if (disposed) return; disposed = true; highlightRegistry?.delete(inputPaintName); if (inputPaintRoot) inputPaintRoot.adoptedStyleSheets = inputPaintRoot.adoptedStyleSheets.filter(sheet => sheet !== inputPaintStyle); observer.disconnect(); win.removeEventListener('__runtime.activity', activity); for (const state of active.values()) restore(state); active.clear(); previews.clear(); observedNodes.clear() },
   }
+}
+
+/** Keep the embedded and in-process consumers on the same paint reader. */
+export function domAuthoringFactorySource(): string {
+  return `((root,options)=>(${createDomAuthoring.toString()})(root,options,(${componentPaintStack.toString()})))`
 }

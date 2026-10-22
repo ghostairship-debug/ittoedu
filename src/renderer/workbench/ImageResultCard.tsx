@@ -1,6 +1,8 @@
+import { componentContainers } from '../../shared/contracts/component-platform/project'
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import type { DocumentHostAPI } from '../../shared/workbench/desktop'
 import type { DocumentSnapshot } from '../../shared/workbench/document'
+import { applyDocumentModelUpdate } from '../../core/documents/documentStateEffects'
 import { componentDefinitionBuiltinKey, resolveComponentPresentation, type ComponentSurface } from '../../shared/contracts/component-platform/project'
 import { readTarget } from '../../core/tools/ToolTargets'
 import type { ImageResourceReference } from '../../shared/workbench/images'
@@ -10,9 +12,10 @@ import './imageResultCard.css'
 
 const labels = { preparing: '准备中', running: '图片请求进行中', ready: '图片已生成', unapplied: '已生成，停止后尚未应用', stopped: '已停止', unknown: '结果未知；不会自动重发', failed: '图片请求失败' }
 const billingLabels = { metered: '按量付费', 'token-plan': 'Token Plan', subscription: '订阅', prepaid: '预付费', unknown: '未知' }
-function suggestedFrame(surface: ComponentSurface, resource: ImageResourceReference): ImageInsertionFrame {
+function suggestedFrame(surface: Readonly<ComponentSurface> | undefined, resource: ImageResourceReference): ImageInsertionFrame {
   const scale = Math.min(480 / resource.width, 320 / resource.height, 1)
   const width = Math.max(1, Math.round(resource.width * scale)), height = Math.max(1, Math.round(resource.height * scale))
+  if (!surface) return { x: 80, y: 80, width, height }
   if (surface.kind === 'slide') {
     const canvas = surface.designSize ?? { width: 1280, height: 720 }
     return { x: canvas.width - width - 48, y: canvas.height - height - 48, width, height }
@@ -47,10 +50,56 @@ export function ImageResultCard({ api, owner, refreshVersion, documents = window
   useEffect(() => {
     if (!documents) return
     let alive = true
-    void documents.list().then(values => { if (alive) setAvailable(values.filter(value => value.model.kind === 'course-v10')) })
+    const available = new Map<string, DocumentSnapshot>(), observed = new Map<string, { epoch: string; sequence: number }>()
+    const closed = new Set<string>(), reading = new Set<string>(), readAgain = new Set<string>()
+    const epochKey = (id: string, epoch: string) => JSON.stringify([id, epoch])
+    const publish = () => { if (alive) setAvailable([...available.values()]) }
+    const accept = (snapshot: DocumentSnapshot) => {
+      if (!alive || snapshot.model.kind !== 'course-v10' || closed.has(epochKey(snapshot.documentId, snapshot.epoch))) return
+      const seen = observed.get(snapshot.documentId), previous = available.get(snapshot.documentId)
+      if (seen && seen.epoch !== snapshot.epoch && !closed.has(epochKey(snapshot.documentId, seen.epoch))) return
+      if (snapshot.sequence !== undefined && previous?.epoch === snapshot.epoch && previous.sequence !== undefined && snapshot.sequence < previous.sequence) return
+      if (snapshot.sequence !== undefined && seen?.epoch === snapshot.epoch && snapshot.sequence < seen.sequence) { refresh(snapshot.documentId); return }
+      available.set(snapshot.documentId, snapshot)
+      if (!seen || seen.epoch !== snapshot.epoch || snapshot.sequence !== undefined && snapshot.sequence > seen.sequence)
+        observed.set(snapshot.documentId, { epoch: snapshot.epoch, sequence: snapshot.sequence ?? -1 })
+      publish()
+    }
+    const refresh = (id: string) => {
+      if (reading.has(id)) { readAgain.add(id); return }
+      reading.add(id)
+      void documents.read(id).then(accept).catch(() => {}).finally(() => {
+        reading.delete(id)
+        if (alive && readAgain.delete(id)) refresh(id)
+      })
+    }
+    void documents.list().then(values => { for (const value of values) accept(value) }).catch(() => {})
     const stop = documents.subscribe(event => {
-      if (event.type === 'closed') setAvailable(values => values.filter(value => value.documentId !== event.documentId))
-      else if (event.snapshot.model.kind === 'course-v10') setAvailable(values => [...values.filter(value => value.documentId !== event.snapshot.documentId), event.snapshot])
+      if (!alive) return
+      if (event.type === 'closed') {
+        closed.add(epochKey(event.documentId, event.epoch)); readAgain.delete(event.documentId)
+        if (available.get(event.documentId)?.epoch === event.epoch) { available.delete(event.documentId); publish() }
+        return
+      }
+      if (event.type === 'changed') { accept(event.snapshot); return }
+      const head = event.head, previous = available.get(head.documentId), seen = observed.get(head.documentId)
+      if (closed.has(epochKey(head.documentId, head.epoch)) || seen?.epoch === head.epoch && head.sequence < seen.sequence
+        || previous && previous.epoch !== head.epoch) return
+      observed.set(head.documentId, { epoch: head.epoch, sequence: head.sequence })
+      if (head.kind !== 'course-v10') { if (previous) { available.delete(head.documentId); publish() }; return }
+      if (!previous || previous.model.kind !== 'course-v10' || head.projectId !== previous.model.project.id) { refresh(head.documentId); return }
+      const { kind: _kind, projectId: _projectId, ...facts } = head
+      if (event.type === 'state') {
+        if (previous.revision !== head.revision || previous.sequence === undefined || head.sequence > previous.sequence + 1) { refresh(head.documentId); return }
+        accept({ ...previous, ...facts })
+      } else {
+        if (previous.revision !== event.baseRevision || previous.sequence !== event.baseSequence) {
+          if (previous.sequence === undefined || head.sequence > previous.sequence) refresh(head.documentId)
+          return
+        }
+        try { accept({ ...facts, model: applyDocumentModelUpdate(previous.model, event.model) }) }
+        catch { refresh(head.documentId) }
+      }
     })
     return () => { alive = false; stop() }
   }, [documents])
@@ -58,17 +107,22 @@ export function ImageResultCard({ api, owner, refreshVersion, documents = window
   useEffect(() => () => { if (preview) URL.revokeObjectURL(preview) }, [preview])
   const selected = available.find(value => value.documentId === documentId)
   const project = selected?.model.kind === 'course-v10' ? selected.model.project : null
-  const surface = project?.surfaces.find(value => value.id === locationId)
+  const surface = (project == null ? undefined : componentContainers(project).find(value => value.id === locationId))
+  const programRoots = project ? project.rootIds.flatMap(id => {
+    const instance = project.instances[id], implementation = instance?.implementationOverride ?? project.definitions[instance?.definitionId ?? '']?.implementation
+    return instance && !instance.container && implementation?.kind === 'source' ? [instance] : []
+  }) : []
+  const programRoot = programRoots.find(instance => instance.id === locationId)
   const resource = view?.job.resources.find(value => value.resourceId === resourceId)
   const frame = parseFrame(frameValues)
   useEffect(() => {
-    if (!surface || !resource) { setFrameValues({ x: '', y: '', width: '', height: '' }); return }
+    if (!surface && !programRoot || !resource) { setFrameValues({ x: '', y: '', width: '', height: '' }); return }
     const suggested = suggestedFrame(surface, resource)
     setFrameValues(Object.fromEntries(Object.entries(suggested).map(([key, value]) => [key, String(value)])) as typeof frameValues)
-  }, [documentId, locationId, resourceId, surface?.id, resource?.width, resource?.height])
+  }, [documentId, locationId, resourceId, surface?.id, programRoot?.id, resource?.width, resource?.height])
   const selection = documentId ? workbenchSelection.getManual(documentId) : null
   const replacementTarget = selection?.targets.length === 1 && selection.targets[0]?.kind === 'course-instance' ? selection.targets[0] : null
-  const replacementInstance = project && replacementTarget ? resolveComponentPresentation(project, replacementTarget.surfaceId, replacementTarget.stateId ?? null).instances[replacementTarget.instanceId] : null
+  const replacementInstance = project && replacementTarget ? resolveComponentPresentation(project, replacementTarget.surfaceId ?? null, replacementTarget.stateId ?? null).instances[replacementTarget.instanceId] : null
   const replacement = replacementTarget && replacementTarget.dataPath === undefined && replacementTarget.from === undefined
     && replacementTarget.to === undefined && replacementTarget.fieldScope !== 'flowLayout' && replacementInstance
     && project && componentDefinitionBuiltinKey(project.definitions[replacementInstance.definitionId]) === 'guoling.image' ? selection : null
@@ -88,8 +142,14 @@ export function ImageResultCard({ api, owner, refreshVersion, documents = window
       return { documentId: targetDocument, epoch: current.epoch, revision: current.revision,
         address: { kind: 'course-instance', surfaceId: address.surfaceId, instanceId: address.instanceId, stateId: address.stateId ?? null }, label: exact!.label }
     }
-    const surface = current.model.project.surfaces.find(value => value.id === targetSurface)
-    if (!surface) throw new Error('请选择明确的插入页面')
+    const surface = componentContainers(current.model.project).find(value => value.id === targetSurface)
+    if (!surface) {
+      const project = current.model.project, root = project.rootIds.includes(targetSurface) ? project.instances[targetSurface] : undefined
+      const implementation = root?.implementationOverride ?? project.definitions[root?.definitionId ?? '']?.implementation
+      if (!root || root.container || implementation?.kind !== 'source') throw new Error('请选择明确的插入位置')
+      return { documentId: targetDocument, epoch: current.epoch, revision: current.revision,
+        address: { kind: 'course-instance', instanceId: root.id }, label: root.name || project.definitions[root.definitionId]?.title || root.id }
+    }
     return { documentId: targetDocument, epoch: current.epoch, revision: current.revision,
       address: { kind: 'course-surface', surfaceId: surface.id }, label: surface.title || surface.id }
   }
@@ -119,8 +179,8 @@ export function ImageResultCard({ api, owner, refreshVersion, documents = window
       <button type="button" disabled={busy} onClick={() => void act(async () => { const ticket = previewGeneration.current, result = await api.preview({ ...owner, resourceId }); if (ticket === previewGeneration.current) setPreview(URL.createObjectURL(new Blob([Uint8Array.from(result.bytes).buffer], { type: result.mimeType }))) })}>预览图片</button>
       {preview && <img className="image-result-card__preview" src={preview} alt="生成的图片预览" />}
       <label>应用到 果铃工程<select value={documentId} onChange={event => { setDocumentId(event.target.value); setLocationId('') }}><option value="">请选择 果铃工程</option>{available.map(document => <option key={document.documentId} value={document.documentId}>{document.binding.kind === 'untitled' ? document.binding.suggestedName : document.binding.path.split(/[\\/]/).pop()}</option>)}</select></label>
-      <label>插入位置<select value={locationId} onChange={event => setLocationId(event.target.value)}><option value="">请选择位置</option>{project?.surfaces.map(surface => <option key={surface.id} value={surface.id}>{surface.title || surface.id}</option>)}</select></label>
-      {surface && resource && <details className="image-result-card__placement">
+      <label>插入位置<select value={locationId} onChange={event => setLocationId(event.target.value)}><option value="">请选择位置</option>{(project == null ? undefined : componentContainers(project).map(surface => <option key={surface.id} value={surface.id}>{surface.title || surface.id}</option>))}{programRoots.map(root => <option key={root.id} value={root.id}>{root.name || project?.definitions[root.definitionId]?.title || root.id}</option>)}</select></label>
+      {(surface || programRoot) && resource && <details className="image-result-card__placement">
         <summary>画布位置与尺寸：{frame ? `X ${frame.x} · Y ${frame.y} · ${frame.width}×${frame.height}` : '请填写有效数值'}</summary>
         <div className="image-result-card__frame-fields">
           {([['x', 'X'], ['y', 'Y'], ['width', '宽'], ['height', '高']] as const).map(([key, label]) => <label key={key}>{label}<input type="number" step="any" min={key === 'width' || key === 'height' ? '0.01' : undefined} value={frameValues[key]} onChange={event => setFrameValues(current => ({ ...current, [key]: event.target.value }))} /></label>)}

@@ -1,3 +1,4 @@
+import { componentSurfaces } from '../../../shared/contracts/component-platform/project'
 import { isNativeProjectFilename, nativeProjectFilename, nativeProjectStem } from '../../../shared/nativeProjectFile'
 import { FileBrowsePages } from './FileBrowsePages'
 import { FileGrepPages } from './FileGrepPages'
@@ -202,7 +203,7 @@ export class AgentFileService implements AgentFilePort {
     const summary = (model: DocumentSnapshot['model'] | null) => !model ? null : isSourceDocumentModel(model)
       ? { kind: model.kind, source: model.source.slice(0, input.limit ?? 8000), total: model.source.length,
         truncated: model.source.length > (input.limit ?? 8000) }
-      : { kind: model.kind, title: model.project.title, surfaces: model.project.surfaces.length }
+      : { kind: model.kind, title: model.project.title, surfaces: model.kind === 'course-v10' ? componentSurfaces(model.project).length : model.project.surfaces.length }
     return { data: { path: filename, current: { ...summary(current.model), revision: current.revision, dirty: current.dirty },
       disk: { ...summary(disk.model), version: disk.version, exists: !!disk.model },
       changed: current.binding.kind === 'file' && current.binding.version !== disk.version,
@@ -421,8 +422,8 @@ export class AgentFileService implements AgentFilePort {
     const snapshot = await this.host.open(created.targetPath).catch(() => null)
     if (!snapshot) return { data: { operation: receipt, path: created.targetPath, homeMissingFallback: fallback,
       openError: '文件已创建，但暂时无法打开；请检查目录后用 file.open 重试' } }
-    const course = snapshot.model.kind === 'course-v10' ? { surfaceCount: snapshot.model.project.surfaces.length,
-      surfaces: snapshot.model.project.surfaces.map(surface => ({ title: surface.title, kind: surface.kind, childCount: surface.childIds.length })),
+    const course = snapshot.model.kind === 'course-v10' ? { surfaceCount: componentSurfaces(snapshot.model.project).length,
+      surfaces: componentSurfaces(snapshot.model.project).map(surface => ({ title: surface.title, kind: surface.kind, childCount: surface.childIds.length })),
       note: '这些页面已在新建工程内；用 project.list/read 接续其实际内容，已有空白页可以命名和填入框架。教师控制台由宿主管理。' } : undefined
     return { data: { operation: receipt, path: created.targetPath, homeMissingFallback: fallback, documentId: snapshot.documentId,
       ...(course ? { course } : {}) }, opened: {

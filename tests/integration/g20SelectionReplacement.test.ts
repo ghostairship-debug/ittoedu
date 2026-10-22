@@ -1,4 +1,6 @@
 // @vitest-environment node
+import { componentSurfaces } from '../../src/shared/contracts/component-platform/project'
+import { testContainerInstance } from '../helpers/glxWorkFixture'
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import os from 'node:os'
@@ -31,8 +33,8 @@ async function harness(prepare?: PrepareImageResourcePort, pauseValidation?: () 
   let project = fixture.project
   project.definitions[SHAPE_DEFINITION.id] = structuredClone(SHAPE_DEFINITION)
   project.instances.shape = { id: 'shape', definitionId: SHAPE_DEFINITION.id, name: '保留身份的形状', playbackInitialVisibility: 'hidden', visibility: { mode: 'include', surfaceIds: [surfaceId] }, data: defaultShapeData(), frame: { width: 80, height: 40, transform: [1, 0, 0, 1, 20, 30] } }
-  project.surfaces[0].childIds.splice(0, 0, 'shape')
-  project.surfaces[0].presentation!.states[0].overrides.shape = { frame: { width: 80, height: 40, transform: [1, 0, 0, 1, 75, 30] } }
+  testContainerInstance(project, 0).childIds.splice(0, 0, 'shape')
+  testContainerInstance(project, 0).container.presentation!.states[0].overrides.shape = { frame: { width: 80, height: 40, transform: [1, 0, 0, 1, 75, 30] } }
   project = applyComponentOperation(project, captureComponentOperation(project, componentRuleEdits(project, { kind: 'surface', surfaceId }, [
     { id: 'click-shape', enabled: true, trigger: { type: 'node.click', nodeId: 'shape' }, conditions: [{ type: 'scene.in', sceneIds: [surfaceId] }],
       actions: [{ id: 'exit-shape', start: 'after-previous', delayMs: 0, action: { type: 'node.exit', nodeId: 'shape', durationMs: 100, easing: 'linear', effect: 'fade' } }] },
@@ -76,10 +78,10 @@ it('replaces a plain shape with Ready image bytes at its original identity, geom
   const after = f.current(), image = after.project.instances.shape
   expect(componentDefinitionBuiltinKey(after.project.definitions[image.definitionId])).toBe('guoling.image')
   expect(image).toMatchObject({ id: original.id, name: original.name, frame: original.frame })
-  expect(after.project.surfaces[0].childIds).toEqual(f.project.surfaces[0].childIds)
+  expect(componentSurfaces(after.project)[0].childIds).toEqual(componentSurfaces(f.project)[0].childIds)
   expect(after.project.instances['scene-other']).toEqual(neighbor)
   expect(interactionRules(interactionBehavior(after.project, { kind: 'surface', surfaceId: f.surfaceId }))).toEqual(interactionRules(interactionBehavior(f.project, { kind: 'surface', surfaceId: f.surfaceId })))
-  expect(after.project.surfaces[0].presentation).toEqual(f.project.surfaces[0].presentation)
+  expect(componentSurfaces(after.project)[0].presentation).toEqual(componentSurfaces(f.project)[0].presentation)
   expect(Object.keys(after.resources.assets)).toHaveLength(2)
   expect(after.resources.assets.original).toEqual(before.model.resources.assets.original); expect(after.project.assets.original).toEqual(f.project.assets.original)
   expect(Object.entries(after.resources.assets).find(([id]) => id !== 'original')![1]).toEqual(f.bytes)
@@ -98,14 +100,14 @@ it('replaces only effective named A geometry and declared click/action/completio
   expect(image.frame).toEqual(resolveComponentPresentation(before.project, f.surfaceId, 'named-a').instances.shape.frame)
   expect(image.playbackInitialVisibility).toBe('hidden'); expect(image.visibility).toEqual(before.project.instances.shape.visibility); expect(image.name).toBe(before.project.instances.shape.name); expect(image.visible).toBe(true); expect(a.instances.shape.visible).toBe(false)
   expect(after.project.instances.shape).toEqual(before.project.instances.shape); expect(after.project.instances[image.id].visible).toBe(false); expect(b.instances[image.id].visible).toBe(false)
-  for (const id of Object.keys(before.project.instances)) expect(after.project.instances[id]).toEqual(before.project.instances[id])
-  expect(after.project.surfaces[0].presentation!.states[1]).toEqual(before.project.surfaces[0].presentation!.states[1])
-  expect(after.project.surfaces.slice(1)).toEqual(before.project.surfaces.slice(1)); expect(after.project.global).toEqual(before.project.global)
+  for (const id of Object.keys(before.project.instances).filter(id => id !== f.surfaceId)) expect(after.project.instances[id]).toEqual(before.project.instances[id])
+  expect(componentSurfaces(after.project)[0].presentation!.states[1]).toEqual(componentSurfaces(before.project)[0].presentation!.states[1])
+  expect(componentSurfaces(after.project).slice(1)).toEqual(componentSurfaces(before.project).slice(1)); expect(after.project.global).toEqual(before.project.global)
   const rules = interactionRules(interactionBehavior(a, { kind: 'surface', surfaceId: f.surfaceId })), originalRules = interactionRules(interactionBehavior(before.project, { kind: 'surface', surfaceId: f.surfaceId }))
   expect(rules[0]).toEqual({ ...originalRules[0], trigger: { type: 'node.click', nodeId: image.id }, actions: [{ ...originalRules[0].actions[0], action: { ...originalRules[0].actions[0].action, nodeId: image.id } }] })
   expect(rules[1]).toEqual({ ...originalRules[1], actions: [{ ...originalRules[1].actions[0], action: { ...originalRules[1].actions[0].action, nodeId: image.id } }] })
   expect(interactionRules(interactionBehavior(b, { kind: 'surface', surfaceId: f.surfaceId }))).toEqual(originalRules)
-  expect(a.surfaces[0].childIds.indexOf(image.id)).toBe(before.project.surfaces[0].childIds.indexOf('shape'))
+  expect(componentSurfaces(a)[0].childIds.indexOf(image.id)).toBe(componentSurfaces(before.project)[0].childIds.indexOf('shape'))
   expect(after.resources.assets.original).toEqual(before.resources.assets.original); expect(after.project.assets.original).toEqual(before.project.assets.original); expect(Object.entries(after.resources.assets).find(([id]) => id !== 'original')![1]).toEqual(f.bytes); expect(f.session.read().undoDepth).toBe(1)
   applied(await f.replace(selector, f.resource, 'named-ready')); expect(f.session.read().undoDepth).toBe(1)
   expect(await f.reopen()).toEqual(after)
@@ -124,7 +126,7 @@ it('replaces only effective named A geometry and declared click/action/completio
   applied(await paper.invoke('project.apply', { path: paperPath, project: paperSelector, from: paper.resource, intent: 'redo' }))
   const paperAfter = paper.current(), paperImage = paperAfter.project.instances.shape
   expect(paperImage).toMatchObject({ frame: paperBefore.project.instances.shape.frame, flowPlacement: paperBefore.project.instances.shape.flowPlacement, flowLayout: paperBefore.project.instances.shape.flowLayout, playbackInitialVisibility: 'hidden', visibility: { mode: 'include', surfaceIds: ['flow'] } })
-  expect(paperAfter.project.surfaces).toEqual(paperBefore.project.surfaces); expect(interactionRules(interactionBehavior(paperAfter.project, { kind: 'surface', surfaceId: 'flow' }))).toEqual(interactionRules(interactionBehavior(paperBefore.project, { kind: 'surface', surfaceId: 'flow' })))
+  expect(componentSurfaces(paperAfter.project)).toEqual(componentSurfaces(paperBefore.project)); expect(interactionRules(interactionBehavior(paperAfter.project, { kind: 'surface', surfaceId: 'flow' }))).toEqual(interactionRules(interactionBehavior(paperBefore.project, { kind: 'surface', surfaceId: 'flow' })))
   expect(paper.session.read().undoDepth).toBe(2); expect(await paper.reopen()).toEqual(paperAfter); await paper.history('undo'); equivalent(paper.current(), paperBefore)
 })
 
@@ -148,7 +150,7 @@ it('rejects unready/foreign/private resources, nonwhole/read-only/old observatio
   await f.human([{ type: 'frame.set', instanceId: 'shape', frame: { ...f.project.instances.shape.frame!, width: 200 } }])
   const human = f.session.read(); rejected(await f.replace()); expect(f.session.read()).toEqual(human)
   const overridden = await harness()
-  await overridden.human([{ type: 'surface.presentation.set', surfaceId: overridden.surfaceId, presentation: { ...overridden.project.surfaces[0].presentation!, states: overridden.project.surfaces[0].presentation!.states.map((state, index) => index ? state : { ...state, overrides: { ...state.overrides, shape: { data: defaultShapeData() } } }) } }])
+  await overridden.human([{ type: 'surface.presentation.set', surfaceId: overridden.surfaceId, presentation: { ...componentSurfaces(overridden.project)[0].presentation!, states: componentSurfaces(overridden.project)[0].presentation!.states.map((state, index) => index ? state : { ...state, overrides: { ...state.overrides, shape: { data: defaultShapeData() } } }) } }])
   await overridden.observe(); const guarded = overridden.session.read(); expect(await overridden.replace()).toMatchObject({ kind: 'error', code: 'state-placement-unsupported' }); expect(overridden.session.read()).toEqual(guarded)
   const unscoped = await harness()
   await unscoped.human(componentRuleEdits(unscoped.current().project, { kind: 'project' }, interactionRules(interactionBehavior(unscoped.current().project, { kind: 'surface', surfaceId: unscoped.surfaceId }))))
@@ -174,7 +176,7 @@ it('rejects unready/foreign/private resources, nonwhole/read-only/old observatio
 })
 
 it('uses current Flow component structure and source for existing heading and new heading content replacement at the original parent, while retaining neighbors, navigation surface, resources and one atomic History', async () => {
-  const f = await harness(), flow = f.current().project.surfaces.find(surface => surface.id === 'flow')!, before = f.current()
+  const f = await harness(), flow = componentSurfaces(f.current().project).find(surface => surface.id === 'flow')!, before = f.current()
   await f.human([{ type: 'definition.set', definition: DOCUMENT_BLOCK_DEFINITION }, { type: 'instance.insert', container: { kind: 'surface', surfaceId: 'flow' }, index: 0, rootIds: ['old-heading', 'new-heading'], instances: [
     { id: 'old-heading', definitionId: DOCUMENT_BLOCK_DEFINITION.id, data: documentBlockData({ id: 'old-heading', type: 'heading', level: 1, content: { inlines: [{ type: 'text', text: 'Old' }] } }) },
     { id: 'new-heading', definitionId: DOCUMENT_BLOCK_DEFINITION.id, data: documentBlockData({ id: 'new-heading', type: 'heading', level: 2, content: { inlines: [{ type: 'text', text: 'New' }] } }) },
@@ -185,7 +187,7 @@ it('uses current Flow component structure and source for existing heading and ne
   }
   const depth = f.session.read().undoDepth
   applied(await f.invoke('batch', { operations: [{ name: 'object.structure', input: { target: replacement, action: 'move', destination: await f.issue({ kind: 'course-surface', surfaceId: 'flow' }), index: 0 } }, { name: 'object.structure', input: { target: old, action: 'remove' } }] }))
-  expect(f.current().project.surfaces.find(surface => surface.id === flow.id)!.childIds).toEqual(['new-heading', ...flow.childIds])
+  expect(componentSurfaces(f.current().project).find(surface => surface.id === flow.id)!.childIds).toEqual(['new-heading', ...flow.childIds])
   expect(f.current().project.instances['new-heading']).toEqual(initial.project.instances['new-heading']); expect(f.current().project.instances['old-heading']).toBeUndefined()
   expect(f.current().project.instances['flow-neighbor']).toEqual(before.project.instances['flow-neighbor']); expect(f.current().resources).toEqual(initial.resources); expect(f.session.read().undoDepth).toBe(depth + 1)
   expect(await f.reopen()).toEqual(f.current()); await f.history('undo'); equivalent(f.current(), initial)
@@ -196,7 +198,7 @@ it('uses current Flow component structure and source for existing heading and ne
   const replaced = await f.invoke('project.apply', { path: flowFile.path, content })
   expect(replaced, JSON.stringify(replaced)).toMatchObject({ kind: 'read', data: { commit: 'committed', receipt: { status: 'applied' } } })
   expect(f.current().project.instances['old-heading'].data).toMatchObject({ type: 'heading', level: 2, content: { inlines: [{ type: 'text', text: 'Created' }] } })
-  expect(f.current().project.surfaces.find(surface => surface.id === 'flow')!.childIds).toEqual(initial.project.surfaces.find(surface => surface.id === 'flow')!.childIds)
+  expect(componentSurfaces(f.current().project).find(surface => surface.id === 'flow')!.childIds).toEqual(componentSurfaces(initial.project).find(surface => surface.id === 'flow')!.childIds)
   expect(f.current().project.instances['flow-neighbor']).toEqual(initial.project.instances['flow-neighbor']); expect(f.current().resources).toEqual(initial.resources)
   expect(f.session.read().undoDepth).toBe(depth + 1); await f.history('undo'); equivalent(f.current(), initial)
 })

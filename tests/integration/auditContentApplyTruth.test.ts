@@ -1,4 +1,5 @@
 // @vitest-environment node
+import { componentSurfaces } from '../../src/shared/contracts/component-platform/project'
 import { randomUUID } from 'node:crypto'
 import { promises as fs } from 'node:fs'
 import os from 'node:os'
@@ -79,7 +80,7 @@ it.each(['content', 'from'] as const)('fills an observed empty page through %s, 
     expect(inserted.diagnostics.every(item => item.level === 'info')).toBe(true)
     const current = await host.internalAPI.read(initial.documentId), model = course(current)
     expect(current.undoDepth).toBe(1)
-    expect(model.project.surfaces[0]!.childIds).toEqual(inserted.insertedIds)
+    expect(componentSurfaces(model.project)[0]!.childIds).toEqual(inserted.insertedIds)
     expect(model.project.global).toEqual(course(initial).project.global)
     const instance = model.project.instances[inserted.insertedIds[0]!]!
     expect(model.project.definitions[instance.definitionId]!.implementation).toEqual({ kind: 'builtin', key: 'guoling.html-program' })
@@ -111,7 +112,7 @@ it.each(['content', 'from'] as const)('fills an observed empty page through %s, 
       baseRevision: current.revision, operationId: randomUUID(), actor: 'human', mutation: { type: 'undo' } })).status).toBe('applied')
     const undone = await host.internalAPI.read(initial.documentId)
     expect(undone.undoDepth).toBe(0)
-    expect(course(undone).project.surfaces[0]!.childIds).toEqual([])
+    expect(componentSurfaces(course(undone).project)[0]!.childIds).toEqual([])
     expect(course(undone).project.instances).toEqual(course(initial).project.instances)
     expect(course(undone).project.assets).toEqual(course(initial).project.assets)
     expect(course(undone).resources).toEqual(course(initial).resources)
@@ -155,7 +156,7 @@ it('keeps a populated page content edit on its existing object and human frame',
     const edited = await apply({ path: page.path, content: source })
     expect(edited).toMatchObject({ commit: 'committed', insertedIds: [] })
     const after = await host.internalAPI.read(initial.documentId), model = course(after)
-    expect(model.project.surfaces).toEqual(course(before).project.surfaces)
+    expect(componentSurfaces(model.project)).toEqual(componentSurfaces(course(before).project))
     expect(Object.keys(model.project.instances)).toEqual(Object.keys(course(before).project.instances))
     expect(model.project.instances[instanceId]!.frame).toEqual(frame)
     expect(model.project.instances[instanceId]!.data).toMatchObject({ html: expect.stringContaining('Observe carefully') })
@@ -168,7 +169,7 @@ it('rejects an empty-page fill if a human populated that observed surface meanwh
   const context = await fixture(), { host, initial, page, call, apply, human } = context
   try {
     await call('project.read', { path: page.path })
-    const surfaceId = course(initial).project.surfaces[0]!.id
+    const surfaceId = componentSurfaces(course(initial).project)[0]!.id
     expect((await human([
       { type: 'definition.set', definition: { id: 'human-web', role: 'content', implementation: { kind: 'builtin', key: 'guoling.web' } } },
       { type: 'instance.insert', container: { kind: 'surface', surfaceId }, index: 0, rootIds: ['human-object'],

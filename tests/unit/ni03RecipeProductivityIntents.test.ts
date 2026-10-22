@@ -1,3 +1,5 @@
+import { appendRootContainers, testContainerInstance } from '../helpers/glxWorkFixture'
+import { componentSurfaces } from '../../src/shared/contracts/component-platform/project'
 // @vitest-environment node
 import { expect, it } from 'vitest'
 import { createBlankCourseProjectV10 } from '../../src/core/course/createCourseProjectV10'
@@ -8,6 +10,7 @@ import { DocumentSession } from '../../src/core/documents/DocumentSession'
 import { captureComponentOperation } from '../../src/core/drivers/courseV10Operations'
 import { TEXT_DEFINITION, createTextComponentData, textComponentDataSchema } from '../../src/components/text'
 import { INPUT_DEFINITION, createInputData, inputDataSchema } from '../../src/components/input/data'
+import { TEACHER_CONTROLLER_DEFINITION } from '../../src/components/teacher-controller/data'
 import { INTERACTIONS_DEFINITION, interactionRules } from '../../src/shared/componentInteractionData'
 import type { ComponentEdit } from '../../src/shared/contracts/component-platform/operations'
 import type { CourseProjectV10, JsonValue } from '../../src/shared/contracts/component-platform/project'
@@ -27,7 +30,7 @@ async function sessionPlan(project: CourseProjectV10, edits: ComponentEdit[], re
   expect(await session.execute({ documentId: 'doc', epoch: 'epoch', operationId: 'undo-intent', baseRevision: saved.revision, actor: 'human', mutation: { type: 'undo' } })).toMatchObject({ status: 'applied' })
   const undone = session.read().model
   expect(undone.kind === 'course-v10' && undone.project.instances).toEqual(project.instances)
-  expect(undone.kind === 'course-v10' && undone.project.surfaces).toEqual(project.surfaces)
+  expect(undone.kind === 'course-v10' && componentSurfaces(undone.project)).toEqual(componentSurfaces(project))
   expect(undone.resources).toEqual(resources)
   return saved.model
 }
@@ -35,11 +38,11 @@ async function sessionPlan(project: CourseProjectV10, edits: ComponentEdit[], re
 it('generates recipe item identities from content and resolves authored correct order before one saved Session operation', async () => {
   const project = createBlankCourseProjectV10('内容排序'), original = structuredClone(project)
   let serial = 0
-  const plan = planCourseRecipeEdits(project, { recipeId: 'classify-sort-v1', surfaceId: project.surfaces[0].id,
+  const plan = planCourseRecipeEdits(project, { recipeId: 'classify-sort-v1', surfaceId: componentSurfaces(project)[0].id,
     slots: { ...recipeDefaults('classify-sort-v1'), mode: 'sort', items: '观察\n比较\n解释', correctOrder: '解释\n观察\n比较' } }, { createId: () => `prepared-${++serial}` })
   if (!plan.ok) throw new Error(plan.reason)
   const model = await sessionPlan(project, plan.edits)
-  const surface = model.project.surfaces.find(surface => surface.id === plan.createdLocationId)!
+  const surface = componentSurfaces(model.project).find(surface => surface.id === plan.createdLocationId)!
   const interactive = surface.childIds.map(id => model.project.instances[id]).find(item => item.name === '教学互动')!
   const data = interactive.data as { items: { id: string; text: string }[]; correctOrder: string[] }
   expect(data.items.map(item => item.text)).toEqual(['观察', '比较', '解释'])
@@ -50,7 +53,7 @@ it('generates recipe item identities from content and resolves authored correct 
 })
 
 it('accepts classification text and ordinals for repeated sort text, while retiring the stable-ID input format', () => {
-  const project = createBlankCourseProjectV10(), surfaceId = project.surfaces[0].id, defaults = recipeDefaults('classify-sort-v1')
+  const project = createBlankCourseProjectV10(), surfaceId = componentSurfaces(project)[0].id, defaults = recipeDefaults('classify-sort-v1')
   const classification = planCourseRecipeEdits(project, { recipeId: 'classify-sort-v1', surfaceId, slots: defaults })
   expect(classification.ok).toBe(true)
   const ordered = planCourseRecipeEdits(project, { recipeId: 'classify-sort-v1', surfaceId, slots: { ...defaults, mode: 'sort', items: '相同\n不同\n相同', correctOrder: '3,2,1' } })
@@ -66,11 +69,11 @@ it.each([
   { items: '2\n1', order: '序号：1,2', expected: ['2', '1'] },
 ])('resolves numeric recipe content and explicit ordinal intent: $items / $order', async ({ items, order, expected }) => {
   const project = createBlankCourseProjectV10('数字排序语义')
-  const plan = planCourseRecipeEdits(project, { recipeId: 'classify-sort-v1', surfaceId: project.surfaces[0].id,
+  const plan = planCourseRecipeEdits(project, { recipeId: 'classify-sort-v1', surfaceId: componentSurfaces(project)[0].id,
     slots: { ...recipeDefaults('classify-sort-v1'), mode: 'sort', items, correctOrder: order } })
   if (!plan.ok) throw new Error(plan.reason)
   const model = await sessionPlan(project, plan.edits)
-  const surface = model.project.surfaces.find(value => value.id === plan.createdLocationId)!
+  const surface = componentSurfaces(model.project).find(value => value.id === plan.createdLocationId)!
   const interactive = surface.childIds.map(id => model.project.instances[id]).find(item => item.name === '教学互动')!
   const data = interactive.data as { items: { id: string; text: string }[]; correctOrder: string[] }
   expect(data.correctOrder.map(id => data.items.find(item => item.id === id)!.text)).toEqual(expected)
@@ -79,17 +82,18 @@ it.each([
 
 it('rejects partially matching numeric recipe text instead of silently guessing ordinals', () => {
   const project = createBlankCourseProjectV10('混合数字排序'), before = structuredClone(project)
-  const plan = planCourseRecipeEdits(project, { recipeId: 'classify-sort-v1', surfaceId: project.surfaces[0].id,
+  const plan = planCourseRecipeEdits(project, { recipeId: 'classify-sort-v1', surfaceId: componentSurfaces(project)[0].id,
     slots: { ...recipeDefaults('classify-sort-v1'), mode: 'sort', items: '2\n3\n4', correctOrder: '1,2,3' } })
   expect(plan).toMatchObject({ ok: false, kind: 'invalid', reason: expect.stringContaining('序号：') })
   expect(project).toEqual(before)
 })
 
 function reference() {
-  const project = createBlankCourseProjectV10('完整参考页'), surface = project.surfaces[0]
+  const project = createBlankCourseProjectV10('完整参考页'), surface = testContainerInstance(project, 0)
   project.definitions[TEXT_DEFINITION.id] = TEXT_DEFINITION
   project.definitions[INPUT_DEFINITION.id] = INPUT_DEFINITION
   project.definitions[INTERACTIONS_DEFINITION.id] = INTERACTIONS_DEFINITION
+  project.definitions[TEACHER_CONTROLLER_DEFINITION.id] = TEACHER_CONTROLLER_DEFINITION
   project.definitions.custom = { id: 'custom', role: 'content', implementation: { kind: 'source', language: 'javascript', source: 'export default {}' } }
   project.instances.text = { id: 'text', definitionId: TEXT_DEFINITION.id, name: '课题', data: json(createTextComponentData({ inlines: [{ type: 'text', text: '旧头' }, { type: 'text', text: '强调', style: { bold: true } }, { type: 'text', text: '旧尾' }] })), frame: { width: 340, height: 70, transform: [1, .2, .3, 1, 25, 42] } }
   project.instances.input = { id: 'input', definitionId: INPUT_DEFINITION.id, data: json(createInputData({ stateKey: 'interaction:input', answer: { type: 'text', stateKey: 'input:input:value', validityKey: 'input:input:valid', ruleFamilyRuleIds: ['rule'] } })) }
@@ -98,10 +102,10 @@ function reference() {
     actions: [{ id: 'step-state', start: 'after-previous', delayMs: 0, action: { type: 'presentation.set', stateId: 'answer' } }, { id: 'step-variable', start: 'after-previous', delayMs: 0, action: { type: 'course-state.set', key: 'author-variable', value: 'answer' } }, { id: 'step-self', start: 'after-previous', delayMs: 0, action: { type: 'scene.go', sceneId: surface.id, targetStateId: 'answer' } }] },
     { id: 'external-rule', enabled: true, trigger: { type: 'node.click', nodeId: 'text' }, conditions: [], actions: [{ id: 'step-external', start: 'after-previous', delayMs: 0, action: { type: 'scene.go', sceneId: 'external', targetStateId: 'answer' } }] }] }) }
   project.instances.program = { id: 'program', definitionId: 'custom', data: { assetId: 'logo', stateId: 'answer', caption: 'answer' } }
-  project.instances.nav = { ...structuredClone(project.instances[project.global.overlay[0]]), id: 'nav', data: { buttons: [{ id: 'button', label: 'answer', action: { type: 'scene.go', sceneId: surface.id, targetStateId: 'answer' } }] } }
+  project.instances.nav = { id: 'nav', definitionId: TEACHER_CONTROLLER_DEFINITION.id, data: { buttons: [{ id: 'button', label: 'answer', action: { type: 'scene.go', sceneId: surface.id, targetStateId: 'answer' } }] } }
   surface.childIds = ['text', 'input', 'behavior', 'program', 'nav']
-  surface.presentation = { initialStateId: 'answer', thumbnailStateId: 'answer', states: [{ id: 'answer', title: '答案', overrides: { text: { visible: false }, behavior: { data: project.instances.behavior.data } }, order: ['program', 'text', 'input', 'behavior', 'nav'] }] }
-  project.surfaces.push({ id: 'external', kind: 'slide', title: '外部页面', childIds: [], presentation: { states: [{ id: 'answer', title: '同名但外部状态', overrides: {} }] } })
+  surface.container.presentation = { initialStateId: 'answer', thumbnailStateId: 'answer', states: [{ id: 'answer', title: '答案', overrides: { text: { visible: false }, behavior: { data: project.instances.behavior.data } }, order: ['program', 'text', 'input', 'behavior', 'nav'] }] }
+  appendRootContainers(project, { id: 'external', kind: 'slide', title: '外部页面', childIds: [], presentation: { states: [{ id: 'answer', title: '同名但外部状态', overrides: {} }] } })
   project.instances.decoration = { id: 'decoration', definitionId: TEXT_DEFINITION.id, data: json(createTextComponentData('共享装饰')), visibility: { mode: 'include', surfaceIds: [surface.id] } }
   project.global.overlay.push('decoration')
   project.assets.logo = { id: 'logo', path: 'assets/logo.svg', mimeType: 'image/svg+xml' }
@@ -117,7 +121,7 @@ it('uses the full formal copy for reference and remix: named states, rule famili
   expect(cloned.edits.some(edit => edit.type === 'instance.patch' && edit.instanceId === 'decoration')).toBe(true)
   const plan = planCourseStyleRemixEdits(project, surface.id, { [slots.slots[0].id]: '新头强调新尾' })
   const model = await sessionPlan(project, plan.edits, resources)
-  const copy = model.project.surfaces.find(value => value.id === plan.createdSurfaceId)!, state = copy.presentation!.states[0]
+  const copy = componentSurfaces(model.project).find(value => value.id === plan.createdSurfaceId)!, state = copy.presentation!.states[0]
   const id = (sourceId: string) => plan.instanceIds.get(sourceId)!
   expect(state.id).not.toBe('answer')
   expect(copy.presentation).toMatchObject({ initialStateId: state.id, thumbnailStateId: state.id })
@@ -156,7 +160,7 @@ it('lets ordinary batch intent reuse the human scan without assembling field pat
   const model = await sessionPlan(project, plan.edits, resources)
   expect(textComponentDataSchema.parse(model.project.instances.text.data).content.inlines.map(item => item.type === 'text' ? item.text : '').join('')).toBe('新头强调新尾')
   expect(model.project.instances.program).toEqual(project.instances.program)
-  expect(model.project.surfaces).toEqual(project.surfaces)
+  expect(componentSurfaces(model.project)).toEqual(componentSurfaces(project))
 })
 
 

@@ -1,3 +1,4 @@
+import { testContainerInstance } from '../helpers/glxWorkFixture'
 // @vitest-environment jsdom
 import { expect, it } from 'vitest'
 import { createBlankCourseProjectV10 } from '../../src/core/course/createCourseProjectV10'
@@ -12,13 +13,13 @@ it('selects a native carrier before author code runs, including effective Web st
   project.definitions.source = { id: 'source', role: 'content', implementation: { kind: 'source', language: 'javascript', source } }
   project.instances.web = { id: 'web', definitionId: 'web', data: { html: '<p>静态卡片</p>' }, frame: { width: 420, height: 240, transform: [1, 0, 0, 1, 0, 0] } }
   project.instances.source = { id: 'source', definitionId: 'source', data: {}, frame: { width: 420, height: 240, transform: [1, 0, 0, 1, 440, 0] } }
-  project.surfaces[0].childIds = ['web', 'source']
-  project.surfaces[0].presentation = { initialStateId: 'static', states: [
+  testContainerInstance(project, 0).childIds = ['web', 'source']
+  testContainerInstance(project, 0).container!.presentation = { initialStateId: 'static', states: [
     { id: 'static', title: '静态', overrides: {} },
     { id: 'program', title: '程序', overrides: { web: { data: { html } } } },
   ] }
   const { revision: _revision, ...author } = project
-  const published = { ...author, schemaVersion: 3, definitions: {
+  const published = { ...author, schemaVersion: 4, definitions: {
     ...author.definitions, source: { ...author.definitions.source, implementation: { ...author.definitions.source.implementation, compiled: { code: source } } },
   } } as PublishedCourseV3
   const before = structuredClone(published)
@@ -31,5 +32,5 @@ it('selects a native carrier before author code runs, including effective Web st
   expect(artifact.nativeSources?.['definition:source'].code).toBe(source)
   expect(artifact.sourceFactories).toEqual({})
   expect(artifact.course.instances.web.data).toEqual({ html: 'compiled-web:0', css: undefined, moduleGraph: undefined, modules: undefined, publishedModuleBundle: undefined, publishedDocumentBundles: undefined })
-  expect(artifact.course.surfaces[0].presentation?.states[1].overrides.web.data).toMatchObject({ html: 'compiled-web:1' })
+  expect(testContainerInstance(artifact.course, 0).container!.presentation?.states[1].overrides.web.data).toMatchObject({ html: 'compiled-web:1' })
 })

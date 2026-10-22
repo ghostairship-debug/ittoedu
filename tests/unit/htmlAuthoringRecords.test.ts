@@ -36,7 +36,7 @@ it('saves an inert author data region plus the shared consumer and strips it onc
   expect(saved).toContain('type="application/json"')
   expect(saved).not.toContain('changed </script>')
   expect(readHtmlAuthoringRecords(saved)).toEqual(records)
-  expect(extractHtmlAuthoringRecords(saved)).toEqual({ source, authoringRecords: records })
+  expect(extractHtmlAuthoringRecords(saved)).toEqual({ source, authoringRecords: records, frameSources: {} })
   const frame = document.createElement('iframe'); document.body.append(frame)
   const doc = frame.contentDocument!
   doc.open(); doc.write(saved); doc.close()
@@ -229,7 +229,7 @@ it('applies the first static anchor ACK to the same live handle without rerunnin
   const action = vi.fn(); target.onclick = action
   const rangeRect = Object.getOwnPropertyDescriptor(Range.prototype, 'getBoundingClientRect')
   Object.defineProperty(Range.prototype, 'getBoundingClientRect', { configurable: true,
-    value: () => ({ x: 0, y: 0, width: 20, height: 10 }) })
+    value: () => ({ x: 0, y: 0, width: 20, height: 10, left: 0, top: 0, right: 20, bottom: 10, toJSON: () => ({}) }) })
   Object.defineProperty(document, 'caretPositionFromPoint', { configurable: true, value: () => ({ offsetNode: target.firstChild, offset: 0 }) })
   const posted = vi.spyOn(window.parent, 'postMessage').mockImplementation(() => {})
   const dispose = mountHtmlPreviewAgent(document)
@@ -355,7 +355,10 @@ it('compiles one real HTML pointer stream through the iframe and parent matrices
     const saved = session.read().model
     if (saved.kind !== 'text') throw new Error('text')
     expect(readHtmlAuthoringRecords(saved.source)['title-key'].overrides.geometry).toMatchObject({ translateX: 20, translateY: 10 })
-    expect(posted.mock.calls.map(call => call[0]).filter(item => item.type === 'html-preview.authoring-preview')).toHaveLength(3)
+    const previews = posted.mock.calls.map(call => call[0]).filter(item => item.type === 'html-preview.authoring-preview')
+    expect(previews).toHaveLength(2)
+    expect(previews[0].geometry).toMatchObject({ translateX: 20, translateY: 10 })
+    expect(previews[1].geometry).toBeNull()
   } finally { view.unmount(); posted.mockRestore(); Reflect.set(window, 'desktopAPI', previous); vi.unstubAllGlobals() }
 })
 

@@ -22,6 +22,12 @@ const names = (group: PptxEditableGroup): string[] => group.children.flatMap(chi
 export function applyPptxEditableGroups(bytes: Uint8Array, slides: PptxSlideGroups): Uint8Array {
   if (!slides.size) return bytes
   const files = unzipSync(bytes)
+  applyPptxEditableGroupsToParts(files, slides)
+  return zipSync(files)
+}
+
+/** Mutate only this export's decoded package, so adjacent output passes share it. */
+export function applyPptxEditableGroupsToParts(files: Record<string, Uint8Array>, slides: PptxSlideGroups): void {
   for (const [index, groups] of slides) {
     const path = `ppt/slides/slide${index}.xml`
     const dom = new DOMParser().parseFromString(strFromU8(files[path]!), 'application/xml')
@@ -69,5 +75,4 @@ export function applyPptxEditableGroups(bytes: Uint8Array, slides: PptxSlideGrou
     }
     files[path] = strToU8(new XMLSerializer().serializeToString(dom))
   }
-  return zipSync(files)
 }

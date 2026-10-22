@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron'
-import type { PptxImportConversionInput, PptxImportConversionReply } from '../main/workbench/pptxImport/PptxCourseImportProducer'
+import type { PptxImportConversionInput, PptxImportConversionReply } from '../shared/workbench/pptxImport'
 
 // One conversion job; no workbench file, document or generic IPC access.
 let started = false

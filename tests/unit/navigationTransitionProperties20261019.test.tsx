@@ -1,3 +1,5 @@
+import { appendRootContainers, testContainerInstance } from '../helpers/glxWorkFixture'
+import { componentSurfaces } from '../../src/shared/contracts/component-platform/project'
 import { expect, it, vi } from 'vitest'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { ComponentClickNavigationProperties, type ComponentClickNavigationPropertiesContext } from '../../src/renderer/ui/properties/ComponentClickNavigationProperties'
@@ -22,14 +24,14 @@ it('edits ordinary page presets and retains advanced tracks when changing the ta
 })
 
 it('keeps location.go transition in the current click property projection', () => {
-  const project = createBlankCourseProjectV10(), surfaceId = project.surfaces[0].id
+  const project = createBlankCourseProjectV10(), surfaceId = componentSurfaces(project)[0].id
   project.definitions.node = { id: 'node', role: 'content', implementation: { kind: 'builtin', key: 'guoling.group' } }
   project.definitions[INTERACTIONS_DEFINITION.id] = INTERACTIONS_DEFINITION
-  project.instances.node = { id: 'node', definitionId: 'node', data: {} }; project.surfaces[0].childIds.push('node')
+  project.instances.node = { id: 'node', definitionId: 'node', data: {} }; testContainerInstance(project, 0).childIds.push('node')
   project.instances.rules = { id: 'rules', definitionId: INTERACTIONS_DEFINITION.id, attachments: [{ instanceId: 'rules', target: { kind: 'surface', surfaceId } }],
     data: { rules: [{ id: 'r', name: 'r', enabled: true, trigger: { type: 'node.click', nodeId: 'node' }, conditions: [], actions: [{ id: 'a', start: 'after-previous', delayMs: 0,
       action: { type: 'location.go', locationId: surfaceId, transition: { effect: 'fade', durationMs: 320 } } }] }] } }
-  project.surfaces[0].childIds.push('rules')
+  testContainerInstance(project, 0).childIds.push('rules')
   const target = { project, surfaceId, instanceId: 'node', activeStateId: null }
   const view = componentClickNavigationView(target)
   expect(view.action).toEqual({ type: 'scene.go', sceneId: surfaceId, transition: { effect: 'fade', durationMs: 320 } })
@@ -45,8 +47,8 @@ it('shows the existing implicit fade and its original defaults for a short trans
 })
 
 it('disables transitions without requiring a presentation root, and falls back in a browser without snapshots', async () => {
-  const project = createBlankCourseProjectV10(), first = project.surfaces[0].id
-  project.surfaces.push({ id: 'B', kind: 'slide', title: 'B', childIds: [], designSize: { width: 800, height: 600 } })
+  const project = createBlankCourseProjectV10(), first = componentSurfaces(project)[0].id
+  appendRootContainers(project, { id: 'B', kind: 'slide', title: 'B', childIds: [], designSize: { width: 800, height: 600 } })
   let current = first
   const owner = new ComponentNavigationOwner({ project: () => project, surfaceId: () => current, select(id) { current = id } })
   expect(await owner.execute({ type: 'scene.next', transition: { effect: 'none' } })).toBe(true)

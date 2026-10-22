@@ -1,3 +1,4 @@
+import { createTestProjectFromLegacy, testContainerInstance } from '../helpers/glxWorkFixture'
 import { act, cleanup, renderHook } from '@testing-library/react'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { TextEncoder as NodeTextEncoder } from 'node:util'
@@ -40,9 +41,9 @@ beforeEach(() => { vi.stubGlobal('Uint8Array', new NodeTextEncoder().encode('').
 afterEach(() => { cleanup(); for (const action of dispose.splice(0)) action(); decode.calls = 0; decode.gate = null; vi.unstubAllGlobals() })
 
 async function harness() {
-  const project: CourseProjectV10 = { schemaVersion: 10, id: 'media-original', revision: 0, title: '原工程', definitions: {}, instances: {},
+  const project: CourseProjectV10 = createTestProjectFromLegacy({ schemaVersion: 10, id: 'media-original', revision: 0, title: '原工程', definitions: {}, instances: {},
     surfaces: [{ id: 'slide', kind: 'slide', title: '第一页', childIds: [], designSize: { width: 1280, height: 720 } }],
-    global: { underlay: [], overlay: [] }, assets: {} }
+    global: { underlay: [], overlay: [] }, assets: {} })
   const host = await createV10StoreHost(project)
   dispose.push(() => host.bridge.dispose())
   await host.bridge.create({ kind: 'course-v10', project: { ...project, id: 'media-other' }, resources: { assets: {}, components: {} } })
@@ -109,7 +110,7 @@ it('drops an audio batch into the frozen original document after switching tabs,
   const snapshot = h.first.read()
   if (snapshot.model.kind !== 'course-v10') throw new Error('Expected V10')
   expect(snapshot.undoDepth).toBe(1)
-  const roots = snapshot.model.project.surfaces[0].childIds
+  const roots = testContainerInstance(snapshot.model.project, 0).childIds
   expect(roots).toHaveLength(2)
   roots.forEach((id, index) => {
     const instance = snapshot.model.kind === 'course-v10' ? snapshot.model.project.instances[id] : undefined

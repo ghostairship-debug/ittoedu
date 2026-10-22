@@ -1,3 +1,6 @@
+import { createTestProjectFromLegacy } from '../helpers/glxWorkFixture'
+import { componentSurfaces } from '../../src/shared/contracts/component-platform/project'
+import { setRootContainers, testContainerInstance, appendRootContainers } from '../helpers/glxWorkFixture'
 import { afterEach, expect, it, vi } from 'vitest'
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { mkdtemp, readFile, rm } from 'node:fs/promises'
@@ -39,13 +42,14 @@ import { usePropertiesContext } from '../../src/renderer/ui/properties/Propertie
 import { createV10StoreHost, deferred } from '../helpers/courseV10StoreHost'
 const dispose: Array<() => Promise<void>> = []
 afterEach(async () => { cleanup(); for (const action of dispose.splice(0).reverse()) await action() })
+const contentInstances = (project: CourseProjectV10) => Object.fromEntries(Object.entries(project.instances).filter(([, instance]) => !instance.container))
 const frame = { width: 220, height: 90, transform: [1.5, .4, .7, 1.2, 35, 42] as [number,number,number,number,number,number] }
-const fixture = (): CourseProjectV10 => ({ schemaVersion:10,id:'properties',revision:0,title:'属性',definitions:{text: {...TEXT_DEFINITION,id:'text'}, shape:{...SHAPE_DEFINITION,id:'shape'}, group:{id:'group',role:'content',implementation:{kind:'builtin',key:'guoling.group'}}},
+const fixture = (): CourseProjectV10 => (createTestProjectFromLegacy({ schemaVersion:10,id:'properties',revision:0,title:'属性',definitions:{text: {...TEXT_DEFINITION,id:'text'}, shape:{...SHAPE_DEFINITION,id:'shape'}, group:{id:'group',role:'content',implementation:{kind:'builtin',key:'guoling.group'}}},
   instances:{ group:{id:'group',definitionId:'group',data:{},childIds:['text','shape'],frame:{...frame,transform:[1,.2,.1,1,10,15]}},
     text:{id:'text',definitionId:'text',data:JSON.parse(JSON.stringify(createTextData('原文'))),frame:structuredClone(frame)},
     shape:{id:'shape',definitionId:'shape',data:defaultShapeData(),frame:structuredClone(frame)},
     neighbor:{id:'neighbor',definitionId:'text',data:JSON.parse(JSON.stringify(createTextData('邻居'))),frame:structuredClone(frame)} },
-  surfaces:[{id:'slide',kind:'slide',title:'第1页',childIds:['group','neighbor']}],global:{underlay:[],overlay:[]},assets:{} })
+  surfaces:[{id:'slide',kind:'slide',title:'第1页',childIds:['group','neighbor']}],global:{underlay:[],overlay:[]},assets:{} }))
 it('R4 exposes unset navigation colors without writing defaults and can return a color to its inherited value',()=>{
   const commit=vi.fn(),initial=JSON.parse(JSON.stringify(createTeacherControllerData()))
   function Form(){
@@ -95,7 +99,7 @@ it('shows only consumed Flow body frame controls while retaining opacity and flo
   project.instances.formula={id:'formula',definitionId:'formula',data:JSON.parse(JSON.stringify(createFormulaData('formula','x'))),frame:structuredClone(frame)}
   project.instances.floating={...project.instances.shape,id:'floating',flowPlacement:{space:'paper',plane:'overlay'}}
   project.assets['image-asset']={id:'image-asset',path:'assets/image.png',mimeType:'image/png'}
-  project.surfaces=[{id:'flow',kind:'flow',title:'正文',childIds:['group','image','formula','floating']}]
+  setRootContainers(project, [{id:'flow',kind:'flow',title:'正文',childIds:['group','image','formula','floating']}])
   const controls=(id:string)=>{
     const read=selectPropertiesAuthoringReadModel({...state,slideContentEdit:null,editingScope:'scene',courseView:{...state.courseView,
       activeDocumentId:'flow-doc',surfaceId:'flow',activeStateId:null,snapshot:null,project,editingProject:project,selectedInstanceIds:[id],selectedInstanceId:id,error:null}})
@@ -119,8 +123,8 @@ it('shows only consumed Flow body frame controls while retaining opacity and flo
 it('uses the actual Flow page controls and preserves custom reading widths through History',async()=>{
   const directory=await mkdtemp(path.join(tmpdir(),'guoling-flow-settings-'));dispose.push(()=>rm(directory,{recursive:true,force:true}))
   const service=new DocumentHostService(path.join(directory,'recovery')),project=fixture()
-  project.surfaces=[{id:'flow',kind:'flow',title:'原讲义',childIds:['group','neighbor'],
-    background:{mode:'own',color:'#eeeeee',fit:'contain'},flow:{layout:{widthMode:'reading',readingWidth:720,wideContentWidth:980,paperBackgroundColor:'#fafafa'}}}]
+  setRootContainers(project, [{id:'flow',kind:'flow',title:'原讲义',childIds:['group','neighbor'],
+    background:{mode:'own',color:'#eeeeee',fit:'contain'},flow:{layout:{widthMode:'reading',readingWidth:720,wideContentWidth:980}}}])
   const first=await service.internalAPI.create({kind:'course-v10',project,resources:{assets:{},components:{}}},'讲义')
   const unavailable=async():Promise<never>=>{throw new Error('fixture no dialog')}
   const api:DocumentHostAPI={...service.internalAPI,bootstrapCourse:()=>service.bootstrapCourse(),saveWithDialog:unavailable,close:unavailable,closeWithDialog:unavailable,discardRecovery:unavailable,subscribe:listener=>service.subscribeEvents(listener)}
@@ -129,21 +133,22 @@ it('uses the actual Flow page controls and preserves custom reading widths throu
   useEditorStore.getState().selectNodes([])
   render(<PropertiesTab onReplaceImage={()=>{}}/>)
   fireEvent.change(screen.getByLabelText('讲义宽度'),{target:{value:'fluid'}})
-  await waitFor(()=>expect(useEditorStore.getState().courseKernel.readDocument().surfaces[0].flow?.layout.widthMode).toBe('fluid'))
+  await waitFor(()=>expect(testContainerInstance(useEditorStore.getState().courseKernel.readDocument(), 0).container!.flow?.layout.widthMode).toBe('fluid'))
   const changed=useEditorStore.getState().courseKernel.readDocument()
-  expect(changed.surfaces[0].flow?.layout).toEqual({...project.surfaces[0].flow!.layout,widthMode:'fluid'})
-  expect(changed.surfaces[0].background).toEqual(project.surfaces[0].background)
-  expect(changed.instances).toEqual(project.instances)
+  expect(testContainerInstance(changed, 0).container!.flow?.layout).toEqual({...testContainerInstance(project, 0).container!.flow!.layout,widthMode:'fluid'})
+  expect(testContainerInstance(changed, 0).container!.background).toEqual(testContainerInstance(project, 0).container!.background)
+  expect(contentInstances(changed)).toEqual(contentInstances(project))
+  expect({ ...changed.instances.flow, container: undefined }).toEqual({ ...project.instances.flow, container: undefined })
   expect((await service.internalAPI.read(first.documentId)).undoDepth).toBe(1)
   await act(async()=>useEditorStore.getState().courseBridge.undo(first.documentId))
-  expect(useEditorStore.getState().courseKernel.readDocument().surfaces[0].flow).toEqual(project.surfaces[0].flow)
+  expect(testContainerInstance(useEditorStore.getState().courseKernel.readDocument(), 0).container!.flow).toEqual(testContainerInstance(project, 0).container!.flow)
   await act(async()=>useEditorStore.getState().courseBridge.redo(first.documentId))
-  expect(useEditorStore.getState().courseKernel.readDocument().surfaces[0].flow).toEqual(changed.surfaces[0].flow)
+  expect(testContainerInstance(useEditorStore.getState().courseKernel.readDocument(), 0).container!.flow).toEqual(testContainerInstance(changed, 0).container!.flow)
 })
 it('opens Flow page settings from an object and persists numeric paper width through History and archive reload',async()=>{
   const directory=await mkdtemp(path.join(tmpdir(),'guoling-flow-page-width-'));dispose.push(()=>rm(directory,{recursive:true,force:true}))
   const service=new DocumentHostService(path.join(directory,'recovery')),project=fixture()
-  project.surfaces=[{id:'flow',kind:'flow',title:'宽度讲义',childIds:['group','neighbor'],flow:{layout:{widthMode:'reading',readingWidth:900,wideContentWidth:1100}}}]
+  setRootContainers(project, [{id:'flow',kind:'flow',title:'宽度讲义',childIds:['group','neighbor'],flow:{layout:{widthMode:'reading',readingWidth:900,wideContentWidth:1100}}}])
   const first=await service.internalAPI.create({kind:'course-v10',project,resources:{assets:{},components:{}}},'讲义')
   const unavailable=async():Promise<never>=>{throw new Error('fixture no dialog')}
   const api:DocumentHostAPI={...service.internalAPI,bootstrapCourse:()=>service.bootstrapCourse(),saveWithDialog:unavailable,close:unavailable,closeWithDialog:unavailable,discardRecovery:unavailable,subscribe:listener=>service.subscribeEvents(listener)}
@@ -164,26 +169,27 @@ it('opens Flow page settings from an object and persists numeric paper width thr
   expect(useEditorStore.getState().courseView.selectedInstanceIds).toEqual([])
   const width=screen.getByRole('spinbutton',{name:'纸面宽度'})
   fireEvent.change(width,{target:{value:'1024'}});fireEvent.keyDown(width,{key:'Enter'})
-  await waitFor(()=>expect(useEditorStore.getState().courseKernel.readDocument().surfaces[0].flow!.layout.readingWidth).toBe(1024))
-  expect(useEditorStore.getState().courseKernel.readDocument().surfaces[0].flow!.layout.wideContentWidth).toBe(1100)
-  expect(useEditorStore.getState().courseKernel.readDocument().instances).toEqual(project.instances)
+  await waitFor(()=>expect(testContainerInstance(useEditorStore.getState().courseKernel.readDocument(), 0).container!.flow!.layout.readingWidth).toBe(1024))
+  expect(testContainerInstance(useEditorStore.getState().courseKernel.readDocument(), 0).container!.flow!.layout.wideContentWidth).toBe(1100)
+  expect(contentInstances(useEditorStore.getState().courseKernel.readDocument())).toEqual(contentInstances(project))
+  expect({ ...useEditorStore.getState().courseKernel.readDocument().instances.flow, container: undefined }).toEqual({ ...project.instances.flow, container: undefined })
   expect((await service.internalAPI.read(first.documentId)).undoDepth).toBe(1)
   await act(async()=>useEditorStore.getState().courseBridge.undo(first.documentId))
-  expect(useEditorStore.getState().courseKernel.readDocument().surfaces[0].flow!.layout.readingWidth).toBe(900)
+  expect(testContainerInstance(useEditorStore.getState().courseKernel.readDocument(), 0).container!.flow!.layout.readingWidth).toBe(900)
   await act(async()=>useEditorStore.getState().courseBridge.redo(first.documentId))
   fireEvent.change(screen.getByLabelText('讲义宽度'),{target:{value:'fluid'}})
   await waitFor(()=>expect(screen.getByRole('spinbutton',{name:'纸面宽度'})).toHaveValue('1100'))
   const wide=screen.getByRole('spinbutton',{name:'纸面宽度'})
   fireEvent.change(wide,{target:{value:'1200'}});fireEvent.keyDown(wide,{key:'Enter'})
-  await waitFor(()=>expect(useEditorStore.getState().courseKernel.readDocument().surfaces[0].flow!.layout.wideContentWidth).toBe(1200))
-  expect(useEditorStore.getState().courseKernel.readDocument().surfaces[0].flow!.layout.readingWidth).toBe(1024)
+  await waitFor(()=>expect(testContainerInstance(useEditorStore.getState().courseKernel.readDocument(), 0).container!.flow!.layout.wideContentWidth).toBe(1200))
+  expect(testContainerInstance(useEditorStore.getState().courseKernel.readDocument(), 0).container!.flow!.layout.readingWidth).toBe(1024)
   const saved=path.join(directory,'width.glx');await service.internalAPI.save(first.documentId,saved)
   const cold=await new CourseV10Driver().load(await readFile(saved))
   if(cold.kind!=='course-v10')throw new Error('Expected course archive')
-  expect(cold.project.surfaces[0].flow!.layout).toMatchObject({widthMode:'fluid',readingWidth:1024,wideContentWidth:1200})
+  expect(testContainerInstance(cold.project, 0).container!.flow!.layout).toMatchObject({widthMode:'fluid',readingWidth:1024,wideContentWidth:1200})
 })
 it('keeps a later page selection when opening Flow settings is still committing input',async()=>{
-  const project=fixture();project.surfaces=[{id:'flow',kind:'flow',title:'原讲义',childIds:['group','neighbor']},{id:'other',kind:'flow',title:'另一讲义',childIds:[]}]
+  const project=fixture();setRootContainers(project, [{id:'flow',kind:'flow',title:'原讲义',childIds:['group','neighbor']},{id:'other',kind:'flow',title:'另一讲义',childIds:[]}])
   const host=await createV10StoreHost(project),gate=deferred(),opened=vi.fn();dispose.push(async()=>host.bridge.dispose())
   host.kernel.selectInstances(['neighbor'],'flow')
   const pending=openCoursePageProperties({kernel:host.kernel,drain:async id=>{await gate.promise;return host.api.read(id)},open:opened})
@@ -194,9 +200,9 @@ it('keeps a later page selection when opening Flow settings is still committing 
 it.each(['slide','flow','spatial'] as const)('opens %s page properties from a selected object and returns to normal object editing',async kind=>{
   const directory=await mkdtemp(path.join(tmpdir(),'guoling-page-properties-'));dispose.push(()=>rm(directory,{recursive:true,force:true}))
   const service=new DocumentHostService(path.join(directory,'recovery')),project=fixture()
-  project.surfaces=[{id:'page',kind,title:'当前页面',childIds:['group','neighbor'],
+  setRootContainers(project, [{id:'page',kind,title:'当前页面',childIds:['group','neighbor'],
     ...(kind==='flow'?{flow:{layout:{widthMode:'reading' as const,readingWidth:900,wideContentWidth:1100}}}:{}),
-    ...(kind==='spatial'?{spatial:{home:{x:10,y:20,zoom:1},frames:[],paths:[{id:'path-one',title:'原路径',instanceIds:['neighbor'],frameIds:[]}]}}:{})}]
+    ...(kind==='spatial'?{spatial:{home:{x:10,y:20,zoom:1},frames:[],paths:[{id:'path-one',title:'原路径',instanceIds:['neighbor'],frameIds:[]}]}}:{})}])
   const first=await service.internalAPI.create({kind:'course-v10',project,resources:{assets:{},components:{}}},'页面属性')
   const unavailable=async():Promise<never>=>{throw new Error('fixture no dialog')}
   const api:DocumentHostAPI={...service.internalAPI,bootstrapCourse:()=>service.bootstrapCourse(),saveWithDialog:unavailable,close:unavailable,closeWithDialog:unavailable,discardRecovery:unavailable,subscribe:listener=>service.subscribeEvents(listener)}
@@ -214,7 +220,7 @@ it.each(['slide','flow','spatial'] as const)('opens %s page properties from a se
       reportError={message=>{throw new Error(message)}} onOpenPageProperties={()=>{void openCoursePageProperties({kernel:useEditorStore.getState().courseKernel,
         drain:id=>useEditorStore.getState().drainCourseDocument(id),open:surfaceId=>{
           const current=useEditorStore.getState();current.setEditingScope('scene')
-          if(current.courseView.project?.surfaces.find(surface=>surface.id===surfaceId)?.kind==='spatial')current.setSpatialGraphSelection(null,surfaceId)
+          if(componentSurfaces(current.courseView.project!).find(surface=>surface.id===surfaceId)?.kind==='spatial')current.setSpatialGraphSelection(null,surfaceId)
           current.setActiveTab('properties')
         }})}} />
     <ContextKind/><PropertiesTab onReplaceImage={()=>{}} />
@@ -247,7 +253,7 @@ it.each(['slide','flow','spatial'] as const)('opens %s page properties from a se
   expect(confirmed.revision).toBe(first.revision+1);expect(confirmed.undoDepth).toBe(1)
 })
 it('does not open a replacement session of the same Flow document after an older settings request',async()=>{
-  const project=fixture();project.surfaces=[{id:'flow',kind:'flow',title:'讲义',childIds:['group','neighbor']}]
+  const project=fixture();setRootContainers(project, [{id:'flow',kind:'flow',title:'讲义',childIds:['group','neighbor']}])
   const host=await createV10StoreHost(project),gate=deferred(),opened=vi.fn();dispose.push(async()=>host.bridge.dispose())
   const documentId=host.first.documentId,originalEpoch=host.first.read().epoch,recovery=structuredClone(host.durable.get(documentId)!)
   host.kernel.selectInstances(['neighbor'],'flow')
@@ -267,7 +273,7 @@ it('uses the actual Flow destination control and preserves identity and world fr
       data:documentBlockData({id:'section',type:'section',title:{inlines:[]},collapsedByDefault:false,blocks:[]}),
       frame:{width:600,height:400,transform:[1,0,0,1,100,200]}},
     floating:{...project.instances.shape,id:'floating',flowPlacement:{space:'paper',plane:'overlay'}}}
-  project.surfaces=[{id:'flow',kind:'flow',title:'正文',childIds:['neighbor','section','floating']}]
+  setRootContainers(project, [{id:'flow',kind:'flow',title:'正文',childIds:['neighbor','section','floating']}])
   const first=await service.internalAPI.create({kind:'course-v10',project,resources:{assets:{},components:{}}},'讲义')
   const unavailable=async():Promise<never>=>{throw new Error('fixture no dialog')}
   const api:DocumentHostAPI={...service.internalAPI,bootstrapCourse:()=>service.bootstrapCourse(),saveWithDialog:unavailable,close:unavailable,closeWithDialog:unavailable,discardRecovery:unavailable,subscribe:listener=>service.subscribeEvents(listener)}
@@ -346,10 +352,10 @@ it('projects only the matching preview target without mutating the formal projec
   expect(projectWithBackgroundPreview(project,preview,'other-doc','slide',null,'epoch')).toBe(project)
   const retiredInstance={...project,instances:{...project.instances}};delete retiredInstance.instances.shape
   expect(projectWithBackgroundPreview(retiredInstance,preview,'doc','slide',null,'epoch')).toBe(retiredInstance)
-  const retiredSurface={...project,surfaces:[]}
+  const retiredSurface={...project,rootIds:[],entry:undefined,instances:{...project.instances}};delete retiredSurface.instances.slide
   expect(projectWithBackgroundPreview(retiredSurface,preview,'doc','slide',null,'epoch')).toBe(retiredSurface)
 
-  project.surfaces[0].presentation={states:[{id:'state',title:'人工状态',overrides:{shape:{frame:{...frame,width:333}}}}]}
+  testContainerInstance(project, 0).container!.presentation={states:[{id:'state',title:'人工状态',overrides:{shape:{frame:{...frame,width:333}}}}]}
   const resolved=resolveComponentPresentation(project,'slide','state')
   const statePreview={...preview,target:{...preview.target,stateId:'state'},edits:componentPropertiesEdits(resolved.instances.shape,project.definitions.shape,{style:{fillColor:'#abcdef'}})}
   expect(projectWithBackgroundPreview(resolved,statePreview,'doc','slide','state','epoch').instances.shape.frame).toEqual(resolved.instances.shape.frame)
@@ -460,7 +466,7 @@ it('edits formal formula source in the original control without flattening matri
   const data=createFormulaData('math-1',source)
   data.formula.style={fontSize:42,color:'#123456'}
   project.instances.formula={id:'formula',definitionId:'formula',data:JSON.parse(JSON.stringify(data)),frame:structuredClone(frame)}
-  project.surfaces[0].childIds.push('formula')
+  testContainerInstance(project, 0).childIds.push('formula')
   const view=componentPropertiesView(project.instances.formula,project.definitions.formula)
   if(view.type!=='formula')throw new Error('formula view')
   expect(view.latex).toBe(source);expect(view.ast).toBeNull();expect(view.style).toMatchObject({fontSize:42,color:'#123456'})
@@ -491,7 +497,7 @@ it('preserves a dirty formula source on target change and refuses to save it int
   project.definitions.formula={...FORMULA_DEFINITION,id:'formula'}
   for(const id of ['formula','otherFormula'])project.instances[id]={id,definitionId:'formula',
     data:JSON.parse(JSON.stringify(createFormulaData(id,'x'))),frame:structuredClone(frame)}
-  project.surfaces[0].childIds.push('formula','otherFormula')
+  testContainerInstance(project, 0).childIds.push('formula','otherFormula')
   const directory=await mkdtemp(path.join(tmpdir(),'guoling-properties-formula-target-'));dispose.push(()=>rm(directory,{recursive:true,force:true}))
   const service=new DocumentHostService(path.join(directory,'recovery'))
   const first=await service.internalAPI.create({kind:'course-v10',project,resources:{assets:{},components:{}}},'公式目标.h5lesson')
@@ -520,8 +526,8 @@ it('offers mounted feedback targets from the current surface and global subtrees
   project.instances.globalGroup={...project.instances.group,id:'globalGroup',childIds:['globalText']}
   project.instances.globalText={...project.instances.neighbor,id:'globalText',visible:false}
   project.instances.scopedGlobal={...project.instances.neighbor,id:'scopedGlobal',visibility:{mode:'include',surfaceIds:['other-page']}}
-  project.surfaces[0].childIds.push('behavior')
-  project.surfaces.push({id:'other-page',kind:'slide',title:'另一页',childIds:['other']})
+  testContainerInstance(project, 0).childIds.push('behavior')
+  appendRootContainers(project, {id:'other-page',kind:'slide',title:'另一页',childIds:['other']})
   project.global.overlay=['globalGroup','scopedGlobal']
   expect(propertiesFeedbackTargets(project,'slide','text').map(value=>value.id).sort()).toEqual(['globalGroup','globalText','group','neighbor','shape'])
 })
@@ -550,13 +556,13 @@ it('keeps an IME property draft on target change and cancels its original canvas
 })
 it('previews a Flow caption range through the shared planner while retaining formula atoms and formal content',()=>{
   const project=fixture()
-  project.surfaces[0].kind='flow'
+  testContainerInstance(project, 0).container!.kind='flow'
   const math=createFormulaData('caption-math','x^2').formula
   project.definitions.image={...IMAGE_DEFINITION,id:'image'}
   project.assets['caption-image']={id:'caption-image',path:'assets/caption-image.png',mimeType:'image/png'}
   project.instances.media={id:'media',definitionId:'image',data:JSON.parse(JSON.stringify(createImageData('caption-image'))),frame:structuredClone(frame),
     flowLayout:{width:'wide',wrap:'left',caption:{inlines:[{type:'text',text:'甲乙',style:{bold:true}},math,{type:'text',text:'丁',style:{italic:true}}]}}}
-  project.surfaces[0].childIds.push('media')
+  testContainerInstance(project, 0).childIds.push('media')
   const before=structuredClone(project)
   const edits=flowTextStyleEdits(project,{kind:'text',revision:'0',anchor:{blockId:'media',slot:{kind:'field',field:'caption'},offset:1,affinity:'before'},head:{blockId:'media',slot:{kind:'field',field:'caption'},offset:3,affinity:'after'}},{color:'#abcdef'})
   const preview={target:{documentId:'doc',epoch:'epoch',surfaceId:'slide',stateId:null,owner:'instance' as const,instanceId:'media'},edits}

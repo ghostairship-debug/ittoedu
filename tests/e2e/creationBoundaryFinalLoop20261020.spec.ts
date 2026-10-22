@@ -205,8 +205,10 @@ test('F03 final built app preserves a mixed project through edit Undo, save, a n
       const { componentProjectFiles } = requireProduct('./dist-electron/core/projectFiles/componentPlatform/index.js')
       const fs = requireProduct('node:fs/promises'), path = requireProduct('node:path'), host = documentHost()
       const project = createBlankCourseProjectV10('Creation boundary final loop')
-      project.surfaces[0].title = 'Mixed page'
-      project.surfaces.push({ id: 'arrival-page', kind: 'slide', title: 'Arrival', childIds: [], designSize: { width: 1280, height: 720 } })
+      const firstRoot = project.instances[project.rootIds[0]]
+      firstRoot.name = 'Mixed page'
+      project.instances['arrival-page'] = { id: 'arrival-page', name: 'Arrival', definitionId: firstRoot.definitionId, data: {}, childIds: [], container: { kind: 'slide', designSize: { width: 1280, height: 720 } } }
+      project.rootIds.push('arrival-page')
       const initial = await host.internalAPI.create({ kind: 'course-v10', project, resources: { assets: {}, components: {} } }, 'mixed-initial.glx')
       await host.tools.beginRun({ runId: 'f03-operator', actor: 'human', documents: [{ documentId: initial.documentId, writable: [{ kind: 'document' }] }], fileAccess: { permission: 'workspace', workspaceRoot: input.workspace } })
       await host.tools.loadToolFamilies('f03-operator', ['content'])

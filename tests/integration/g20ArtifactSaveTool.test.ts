@@ -1,3 +1,4 @@
+import { componentSurfaces } from '../../src/shared/contracts/component-platform/project'
 import { imageDataSchema } from '../../src/components/image/data'
 import { requireWorkspaceRoot } from '../helpers/workspaceGrant'
 // @vitest-environment node
@@ -151,14 +152,14 @@ it('cold opens a saved document and saves its ready image through public artifac
     const current = await host.internalAPI.read(currentDocumentId)
     if (current.model.kind !== 'course-v10') throw new Error('Expected course')
     expect(current.model.project.title).toBe('Ready image delivery')
-    const surfaceId = current.model.project.surfaces[0]!.id
+    const surfaceId = componentSurfaces(current.model.project)[0]!.id
     const surface = await host.tools.issueTarget('current', currentDocumentId, { kind: 'course-surface', surfaceId })
     expect(await host.tools.execute('current', 'apply-ready', { name: 'media.insert',
       input: { target: surface, resource: recovered.resources[0].resource } }))
       .toMatchObject({ kind: 'document-operation', result: { status: 'applied' } })
     const applied = await host.internalAPI.read(currentDocumentId)
     if (applied.model.kind !== 'course-v10') throw new Error('Expected course')
-    const instanceId = applied.model.project.surfaces[0]!.childIds[0]!
+    const instanceId = componentSurfaces(applied.model.project)[0]!.childIds[0]!
     const assetId = imageDataSchema.parse(applied.model.project.instances[instanceId]!.data).assetId
     expect(await sharp(applied.model.resources.assets[assetId]).raw().toBuffer({ resolveWithObject: true })).toEqual(pixels)
 

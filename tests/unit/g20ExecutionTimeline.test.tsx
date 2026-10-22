@@ -8,6 +8,29 @@ afterEach(cleanup)
 const item = (index: number, type: ExecutionItem['type'] = 'text', data: ExecutionItem['data'] = {}): ExecutionItem => ({ taskId: 'task', runId: 'run', itemId: `item-${index}`, source: 'builtin', type, time: index, sequence: index + 1, data, content: [] })
 function expand(card: HTMLElement) { const details = card.querySelector('details')!; act(() => { details.open = true; fireEvent(details, new Event('toggle')) }); return details }
 
+it('updates saved, ended and parent facts for an unchanged tool item without replacing its mounted card', () => {
+  const parent = { ...item(0), itemId: 'parent', data: { label: '原父项' } }
+  const tool = { ...item(1, 'tool', { toolName: 'inspect', status: 'running', operationId: 'operation' }), parentItemId: 'parent' }
+  const commit = item(2, 'document.commit', { operationId: 'operation', documentId: 'document', revision: 3, applicationStatus: 'applied' })
+  let projection: ExecutionProjection = { conversationId: 'specific-facts', cursor: 3, items: [parent, tool, commit] }
+  const { container, rerender } = render(<ExecutionTimeline projection={projection} />)
+  const group = container.querySelector('.execution-timeline__tool-group > details') as HTMLDetailsElement
+  act(() => { group.open = true; fireEvent(group, new Event('toggle')) })
+  const card = screen.getByRole('article', { name: '工具执行' }); expand(card)
+  expect(card).toHaveTextContent('已应用')
+  expect(card).toHaveTextContent('原父项')
+  projection = { ...projection, cursor: 4, items: [{ ...parent, data: { label: '新父项' } }, tool, commit,
+    item(3, 'document.save', { documentId: 'document', revision: 3, saveStatus: 'saved' })] }
+  rerender(<ExecutionTimeline projection={projection} />)
+  expect(screen.getByRole('article', { name: '工具执行' })).toBe(card)
+  expect(card).toHaveTextContent('已保存')
+  expect(card).toHaveTextContent('新父项')
+  projection = { ...projection, cursor: 5, items: [...projection.items, item(4, 'run.end', { status: 'partial' })] }
+  rerender(<ExecutionTimeline projection={projection} />)
+  expect(screen.getByRole('article', { name: '工具执行' })).toBe(card)
+  expect(card).toHaveTextContent('任务已结束')
+})
+
 it('keeps reply text free of terminal badges and retains the run result in expandable process details', () => {
   const reply = { ...item(0, 'text', { status: 'completed' }), content: [{ kind: 'text' as const, text: '文件已经保存。' }] }
   render(<ExecutionTimeline projection={{ conversationId: 'plain-reply', cursor: 2, items: [reply, item(1, 'run.end', { status: 'partial' })] }} />)

@@ -1,3 +1,4 @@
+import { testContainerInstance } from '../helpers/glxWorkFixture'
 // @vitest-environment node
 import { expect, it } from 'vitest'
 import { createBlankCourseProjectV10 } from '../../src/core/course/createCourseProjectV10'
@@ -13,7 +14,7 @@ function fixture() {
   project.definitions.web = { id: 'web', role: 'content', implementation: { kind: 'builtin', key: 'guoling.web' } }
   project.instances.web = { id: 'web', definitionId: 'web', data: { html: '<p>Original</p>' },
     implementationOverride: { kind: 'source', language: 'javascript', workspace: { ownerId: 'owner', entry: 'main.js' } } }
-  project.surfaces[0].childIds = ['web']
+  testContainerInstance(project, 0).childIds = ['web']
   return { kind: 'course-v10' as const, project, resources: { assets: {}, components: { owner: { 'main.js': bytes('export default { mount() { return { dispose() {} } } }') } } } }
 }
 

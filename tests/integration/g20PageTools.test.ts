@@ -1,4 +1,6 @@
 // @vitest-environment node
+import { componentSurfaces } from '../../src/shared/contracts/component-platform/project'
+import { testContainerInstance } from '../helpers/glxWorkFixture'
 import { promises as fs } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -23,11 +25,11 @@ const driver = new CourseV10Driver(), roots: string[] = []
 afterEach(async () => { for (const root of roots.splice(0)) await fs.rm(root, { recursive: true, force: true }) })
 async function harness(scope?: ToolTarget[]) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'g20-pages-')); roots.push(root)
-  const project = createBlankCourseProjectV10('Pages'), surfaceId = project.surfaces[0].id
+  const project = createBlankCourseProjectV10('Pages'), surfaceId = componentSurfaces(project)[0].id
   for (const key of ['shape', 'table', 'chart', 'input']) project.definitions[key] = { id: key, role: 'content', implementation: { kind: 'builtin', key: `guoling.${key}` } }
   for (const [id, data] of [['table', createTableData()], ['chart', createChartData()], ['input', createInputData({ acceptedAnswers: ['42'] })], ['feedback', defaultShapeData()]] as const) {
     project.instances[id] = { id, definitionId: id === 'feedback' ? 'shape' : id, data: JSON.parse(JSON.stringify(data)), frame: { width: 200, height: 120, transform: [1, 0, 0, 1, 100, 200] } }
-    project.surfaces[0].childIds.push(id)
+    testContainerInstance(project, 0).childIds.push(id)
   }
   const bytes = new TextEncoder().encode('<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"/>')
   project.assets.original = { id: 'original', path: 'assets/original.svg', mimeType: 'image/svg+xml', byteLength: bytes.length }
@@ -52,23 +54,23 @@ it('creates all three formal page kinds and batches page settings with original 
   const f = await harness(), before = f.session.read()
   await f.list()
   for (const kind of ['slide', 'flow', 'spatial']) { committed(await f.invoke('project.apply', { path: 'pages', intent: 'surface.add', kind, title: `New ${kind}` })); await f.list() }
-  expect(f.current().project.surfaces.map(surface => surface.kind)).toEqual(['slide', 'slide', 'flow', 'spatial'])
+  expect(componentSurfaces(f.current().project).map(surface => surface.kind)).toEqual(['slide', 'slide', 'flow', 'spatial'])
   expect(f.session.read().undoDepth).toBe(3)
-  const created = f.current().project.surfaces.slice(1), settingsBefore = f.session.read()
+  const created = componentSurfaces(f.current().project).slice(1), settingsBefore = f.session.read()
   applied(await f.invoke('batch', { operations: await Promise.all(created.map(async surface => ({ name: 'surface.configure', input: { target: await f.page(surface.id), settings: { title: `Edited ${surface.kind}` } } }))) }))
   expect(f.session.read().undoDepth).toBe(4); expect(f.current().resources).toEqual(before.model.resources)
   expect(await f.reopen()).toEqual(f.current())
-  await f.undo(); expect(f.current().project.surfaces).toEqual(settingsBefore.model.kind === 'course-v10' ? settingsBefore.model.project.surfaces : [])
+  await f.undo(); expect(componentSurfaces(f.current().project)).toEqual(settingsBefore.model.kind === 'course-v10' ? componentSurfaces(settingsBefore.model.project) : [])
   for (let n = 0; n < 3; n++) await f.undo()
-  expect(f.current().project.surfaces).toEqual(f.model.project.surfaces); expect(f.current().project.instances).toEqual(f.model.project.instances); expect(f.current().resources).toEqual(f.model.resources)
+  expect(componentSurfaces(f.current().project)).toEqual(componentSurfaces(f.model.project)); expect(f.current().project.instances).toEqual(f.model.project.instances); expect(f.current().resources).toEqual(f.model.resources)
 })
 
 it('duplicates a page with independent managed input/rule identities and functioning Published judgement in one History while preserving professional data', async () => {
   const f = await harness(), motion = (show: boolean) => ({ type: show ? 'node.enter' as const : 'node.exit' as const, nodeId: 'feedback', effect: 'none' as const, durationMs: 0, easing: 'linear' as const })
   applied(await f.invoke('object.author', { target: await f.issue({ kind: 'course-instance', surfaceId: f.surfaceId, instanceId: 'input' }), change: { kind: 'input-rules', request: { mode: 'apply', config: { answerType: 'text', answers: ['42'], correct: [motion(true)], error: [motion(false)] } } } }))
-  const before = f.session.read(), prior = f.current(), source = prior.project.surfaces[0]
+  const before = f.session.read(), prior = f.current(), source = componentSurfaces(prior.project)[0]
   applied(await f.invoke('surface.duplicate', { target: await f.page() }))
-  const after = f.current(), copy = after.project.surfaces[1]
+  const after = f.current(), copy = componentSurfaces(after.project)[1]
   expect(copy.id).not.toBe(source.id); expect(copy.childIds.every(id => !source.childIds.includes(id))).toBe(true)
   for (const key of ['table', 'chart']) {
     const instance = copy.childIds.map(id => after.project.instances[id]).find(instance => instance.definitionId === key)!
@@ -90,7 +92,7 @@ it('duplicates a page with independent managed input/rule identities and functio
   try { expect(submit).toBeTypeOf('function'); submit!('wrong'); await vi.waitFor(() => expect(motions).toEqual(family.error.map(action => expect.objectContaining(action))))
     expect(state.get(data.answer!.validityKey)).toBe(true); expect(state.get(data.answer!.stateKey)).toBe('wrong'); expect(state.get(original.answer!.stateKey)).toBeUndefined() } finally { controller.destroy() }
   expect(f.session.read().undoDepth).toBe(before.undoDepth + 1); expect(after.resources).toEqual(prior.resources); expect(await f.reopen()).toEqual(after)
-  await f.undo(); expect(f.current().project.surfaces).toEqual(prior.project.surfaces); expect(f.current().project.instances).toEqual(prior.project.instances); expect(f.current().project.logic).toEqual(prior.project.logic)
+  await f.undo(); expect(componentSurfaces(f.current().project)).toEqual(componentSurfaces(prior.project)); expect(f.current().project.instances).toEqual(prior.project.instances); expect(f.current().project.logic).toEqual(prior.project.logic)
 })
 
 it('moves and renames exact pages with stable identities, deletes the selected page and reverses order/content/resource changes', async () => {
@@ -99,18 +101,18 @@ it('moves and renames exact pages with stable identities, deletes the selected p
   committed(await f.invoke('project.apply', { path: 'pages', intent: 'surface.add', kind: 'spatial', title: 'Unrelated' }))
   const before = f.current(), paths = await pagePaths(f), title = '命名'.repeat(100)
   committed(await f.invoke('project.apply', { path: paths[0], intent: 'surface.move' }))
-  expect(f.current().project.surfaces.map(surface => surface.id)).toEqual([before.project.surfaces[1].id, before.project.surfaces[2].id, f.surfaceId])
+  expect(componentSurfaces(f.current().project).map(surface => surface.id)).toEqual([componentSurfaces(before.project)[1].id, componentSurfaces(before.project)[2].id, f.surfaceId])
   const reordered = await pagePaths(f), sourcePath = reordered[2]
   committed(await f.invoke('project.apply', { path: sourcePath, intent: 'surface.title', title: ` ${title} ` }))
-  expect(f.current().project.surfaces[2].title).toBe(title)
-  expect(f.current().project.surfaces[2].id).toBe(f.surfaceId); expect(f.current().project.instances).toEqual(before.project.instances); expect(f.current().resources).toEqual(before.resources)
+  expect(componentSurfaces(f.current().project)[2].title).toBe(title)
+  expect(componentSurfaces(f.current().project)[2].id).toBe(f.surfaceId); expect(f.current().project.instances).toEqual(before.project.instances); expect(f.current().resources).toEqual(before.resources)
   await pagePaths(f)
   const titled = f.current(), fresh = (await pagePaths(f))[2]
   committed(await f.invoke('project.apply', { path: fresh, intent: 'surface.remove' }))
-  expect(f.current().project.surfaces.map(surface => surface.id)).toEqual(before.project.surfaces.slice(1).map(surface => surface.id))
+  expect(componentSurfaces(f.current().project).map(surface => surface.id)).toEqual(componentSurfaces(before.project).slice(1).map(surface => surface.id))
   expect(f.current().project.instances.table).toBeUndefined(); expect(f.current().resources).toEqual(before.resources); expect(await f.reopen()).toEqual(f.current())
-  await f.undo(); expect(f.current().project.surfaces).toEqual(titled.project.surfaces); expect(f.current().project.instances).toEqual(titled.project.instances)
-  await f.undo(); await f.undo(); expect(f.current().project.surfaces).toEqual(before.project.surfaces); expect(f.current().project.instances).toEqual(before.project.instances)
+  await f.undo(); expect(componentSurfaces(f.current().project)).toEqual(componentSurfaces(titled.project)); expect(f.current().project.instances).toEqual(titled.project.instances)
+  await f.undo(); await f.undo(); expect(componentSurfaces(f.current().project)).toEqual(componentSurfaces(before.project)); expect(f.current().project.instances).toEqual(before.project.instances)
 })
 
 it('rejects last-page removal, readonly destinations, stale destructive targets and failed batches without widening authority or partial writes', async () => {

@@ -1,5 +1,5 @@
-import { strFromU8, strToU8, unzipSync, zipSync } from 'fflate'
-import { buildFlowDocxFromPlan, wordDrawingAnchorXml, wordContentGraphicXml, type WordDrawingAnchor, type FlowDocxAsset, type FlowDocxOptions, type FlowDocxBlockReportItem } from '../../docxAssembly'
+import { strFromU8, strToU8, zipSync } from 'fflate'
+import { buildFlowDocxPartsFromPlan, wordDrawingAnchorXml, wordContentGraphicXml, type WordDrawingAnchor, type FlowDocxAsset, type FlowDocxOptions, type FlowDocxBlockReportItem } from '../../docxAssembly'
 import { resolveFlowDocxPageBox } from '../../flowPageBox'
 import type { FlowPrintNode, FlowPrintPlan } from '../../course/flowPrintPlan'
 import { textOutputAdapter } from '../../../../components/text/adapters'
@@ -7,14 +7,14 @@ import { chartOutputAdapter } from '../../../../components/chart/output'
 import { buildComponentReadingProjection, type ComponentExportDocument, type ComponentDocumentOutputOptions, type ComponentStaticCapture, type ComponentReadingBlock } from './reading'
 import { wordChartDrawing, wordChartParts, wordShapeDrawing, wordTable } from './wordProfessional'
 import { resolveFlowParagraphPresentation } from '../../../../shared/flowBodyPresentation'
-import { resolveComponentBackground } from '../../../../shared/contracts/component-platform/project'
+import { componentBackgroundChain, resolveComponentBackground, resolveComponentSurfaceBackground } from '../../../../shared/contracts/component-platform/project'
 import { collectComponentAssetCredits } from '../../course/courseCredits'
 import { transformPoint } from '../../../../core/components/geometry'
 import { outputImageDimensions, outputImageGeometry, affineOutputPicture, isShearedOutputMatrix } from '../../outputImage'
 import { bytesToDataUrl } from '../../base64'
 import { flowCompositionPictureSlices } from '../../course/flowCompositionPictures'
 import { hasUnsupportedXmlText } from '../../xmlText'
-import { parseDocumentColor } from '../../../../shared/document/color'
+import { documentColorChannels, parseDocumentColor } from '../../../../shared/document/color'
 import type { ComponentFrame } from '../../../../shared/contracts/component-platform/frame'
 
 export type { ComponentExportDocument, ComponentOutputDiagnostic, ComponentOutputAsset, ComponentStaticCapture, ComponentCaptureRequest, ComponentDocumentOutputOptions } from './reading'
@@ -232,13 +232,21 @@ export async function buildComponentDocx(document: ComponentExportDocument, opti
     boundary(span.end)
   }
   const background = resolveComponentBackground(document, projection.surface)
+  const ownBackground = resolveComponentSurfaceBackground(document, projection.surface)
+  const backgroundLayers = componentBackgroundChain(document, projection.surface)
+  let staticPaper = [255, 255, 255]
+  for (const layer of backgroundLayers) {
+    const color = layer && documentColorChannels(layer.color ?? 'transparent')
+    if (color) staticPaper = [color.red, color.green, color.blue].map((channel, index) => Math.round(channel * color.alpha + staticPaper[index]! * (1 - color.alpha)))
+  }
+  const paperColor = '#' + staticPaper.map(channel => channel.toString(16).padStart(2, '0')).join('')
   if (background.paint) diagnostics.push({ surfaceId: options.surfaceId, instanceId: '', code: 'word-background-paint', message: 'Word 语义分页尚不映射复杂 CSS 背景；背景声明和资源保留在工程中。' })
   if (background.assetId) diagnostics.push({ surfaceId: options.surfaceId, instanceId: '', code: 'word-background-image', message: 'Word 语义分页尚不映射背景图片；背景引用保留在工程中。', assetId: background.assetId })
-  const plan: FlowPrintPlan = { surfaceId: options.surfaceId, title: projection.title, backgroundColor: projection.surface.flow?.layout.paperBackgroundColor ?? background.color, pageSize, orientation, nodes,
+  const plan: FlowPrintPlan = { surfaceId: options.surfaceId, title: projection.title, backgroundColor: paperColor, pageSize, orientation, nodes,
     includesRuntimeToc: false, includesFloatingLayers: false, omittedFloatingLayerCount: 0 }
   const baseOptions: FlowDocxOptions = { resolveAsset: id => assets.get(id), credits: collectComponentAssetCredits(document.assets), ...(options.author ? { author: options.author } : {}), ...(options.createdAt ? { createdAt: options.createdAt } : {}) }
-  const base = buildFlowDocxFromPlan(plan, baseOptions)
-  const files = unzipSync(base.bytes)
+  const base = buildFlowDocxPartsFromPlan(plan, baseOptions)
+  const files = base.files
   let word = strFromU8(files['word/document.xml']!)
   for (const cell of tableParagraphs) {
     const index = word.indexOf(cell.marker)
@@ -283,7 +291,13 @@ export async function buildComponentDocx(document: ComponentExportDocument, opti
   }
   const footerDrawings: string[] = []
   const bodySpans = new Map(blockSpans.filter(span => !span.block.floatingPlacement).map(span => [span.block.instance.id, span]))
+  if (ownBackground && !ownBackground.paint && (parseDocumentColor(ownBackground.color)?.alpha ?? 1) < 1
+    && ownBackground.color !== 'transparent') diagnostics.push({ surfaceId: options.surfaceId, instanceId: '', code: 'word-background-alpha',
+      message: 'Word 语义纸张不合成半透明背景；静态纸色与底层对象分别保留，完整合成请使用 PDF 或 HTML。' })
+  const coversGlobalUnderlay = backgroundLayers.slice(1).some(layer => !layer.paint && parseDocumentColor(layer.color ?? 'transparent')?.alpha === 1)
   for (const span of blockSpans.filter(span => span.block.floatingPlacement)) {
+    // A solid paper covers these in the source too; retain their author data only in GLX.
+    if (coversGlobalUnderlay && span.block.globalPlane === 'underlay') { span.xml = ''; continue }
     const block = span.block, placement = block.floatingPlacement!
     // A native image's shown rectangle positions a bare image. A caption or
     // additional professional paragraphs still belong to the full author box.
@@ -351,5 +365,5 @@ export async function buildComponentDocx(document: ComponentExportDocument, opti
   }
   return { bytes: zipSync(files), diagnostics, warnings: base.warnings,
     report: [...base.report.filter(item => !('blockId' in item) || !(item.blockId ?? '').startsWith(markerPrefix)), ...professionalReport],
-    fidelity: diagnostics.some(value => ['asset-missing', 'asset-read-failed', 'asset-decode-failed', 'word-xml-text-substitution', 'word-color-limitation', 'word-table-alpha-limitation', 'word-table-alpha-capture', 'word-affine-capture', 'word-opacity-capture', 'asset-format-not-supported', 'capture-missing', 'capture-failed', 'mermaid-capture-missing', 'custom-visual-missing', 'shape-output-missing', 'professional-data-invalid', 'image-display-limitation', 'floating-frame-missing', 'floating-anchor-unresolved', 'global-reading-placement', 'word-background-image', 'word-background-paint', 'word-text-wrap', 'word-media-playback', 'video-frame-missing'].includes(value.code)) ? 'partial' as const : 'complete' as const }
+    fidelity: diagnostics.some(value => ['asset-missing', 'asset-read-failed', 'asset-decode-failed', 'word-xml-text-substitution', 'word-color-limitation', 'word-table-alpha-limitation', 'word-table-alpha-capture', 'word-affine-capture', 'word-opacity-capture', 'asset-format-not-supported', 'capture-missing', 'capture-failed', 'mermaid-capture-missing', 'custom-visual-missing', 'shape-output-missing', 'professional-data-invalid', 'image-display-limitation', 'floating-frame-missing', 'floating-anchor-unresolved', 'global-reading-placement', 'word-background-image', 'word-background-paint', 'word-background-alpha', 'word-text-wrap', 'word-media-playback', 'video-frame-missing'].includes(value.code)) ? 'partial' as const : 'complete' as const }
 }

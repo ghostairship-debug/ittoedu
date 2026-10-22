@@ -1,7 +1,8 @@
+import { componentSurface, componentSurfaces } from '../../../shared/contracts/component-platform/project'
 import { componentDataEdits } from '../../../core/course/componentDataEdits'
 import { randomUUID } from 'node:crypto'
 import path from 'node:path'
-import { captureComponentOperation, componentValueAt, equalComponentValue } from '../../../core/drivers/courseV10Operations'
+import { applyComponentOperation, captureComponentOperation, componentValueAt, equalComponentValue } from '../../../core/drivers/courseV10Operations'
 import { assertCourseSurfaceRemoval, createCourseSurface } from '../../../core/course/courseSurfaceStructure'
 import type { InMemoryComponentCompilation } from '../../../core/components/compilation/InMemoryComponentCompilation'
 import { componentCompilationInput } from '../../../core/components/compilation/componentCompilationInput'
@@ -157,6 +158,17 @@ function hasSourceProgram(draft: ContentObjectDraft, definitions: Readonly<Recor
     || implementation?.kind === 'source' || (draft.children ?? []).some(child => hasSourceProgram(child, definitions))
 }
 
+/** A container instance and the legacy surface address resolve to the same author scope. */
+function contentContainerId(project: CourseProjectV10, target: ContentChangeRequest['target']): string | undefined {
+  let owner: ComponentContainer | null = target.kind === 'container' ? target.container : owningContainer(project, target.instanceId)
+  while (owner?.kind === 'instance') {
+    const parent = project.instances[owner.instanceId]
+    if (parent?.container) return parent.id
+    owner = owningContainer(project, owner.instanceId)
+  }
+  return owner?.kind === 'surface' ? owner.surfaceId : undefined
+}
+
 /** All callers share this preparation service. Only its Session port can change formal state. */
 export class ContentApplyService {
   private readonly createId: () => string
@@ -170,12 +182,11 @@ export class ContentApplyService {
     const context = request.editingContext
     const project = context ? resolveComponentPresentation(baseProject, context.surfaceId, context.stateId) : baseProject
     const originalRequest = request
-    const surfaceId = request.target.kind === 'container' && request.target.container.kind === 'surface'
-      ? request.target.container.surfaceId : undefined
+    const surfaceId = contentContainerId(project, request.target)
     // An observed empty page has no existing object to overwrite. Its first
     // content uses the normal assembly/insert owner and captured container CAS.
     if (request.intent === 'content' && request.source.kind === 'html' && surfaceId
-      && project.surfaces.some(surface => surface.id === surfaceId && surface.childIds.length === 0)) {
+      && componentSurface(project, surfaceId)?.childIds.length === 0) {
       request = { ...request, intent: 'insert' }
     }
     signal?.throwIfAborted()
@@ -416,13 +427,12 @@ export class ContentApplyService {
           } as ContentApplyDiagnostic])
         }
         diagnostics.push(...assembly.diagnostics)
-        const pageSurfaceId = request.target.kind === 'container' && request.target.container.kind === 'surface'
-          && ['insert', 'redo'].includes(request.intent) ? request.target.container.surfaceId : undefined
-        const pageSurface = pageSurfaceId ? project.surfaces.find(value => value.id === pageSurfaceId) : undefined
+        const pageSurfaceId = request.target.kind === 'container' && ['insert', 'redo'].includes(request.intent) ? surfaceId : undefined
+        const pageSurface = pageSurfaceId ? componentSurface(project, pageSurfaceId) : undefined
         const assembled = assemblyContentDraft(assembly, resources.bindings, {
           admittedResourceBindings: Object.fromEntries(Object.keys(resources.urls).map(reference => [reference, resources.bindings[reference]!])),
           modules: prepared.modules, createFormulaId: this.createId, definitions: project.definitions, flow: this.flowBodyTarget(project, request),
-          flowPage: !contentPlacementRegion(request) && request.intent === 'redo' && request.target.kind === 'container' && request.target.container.kind === 'surface',
+          flowPage: !contentPlacementRegion(request) && request.intent === 'redo' && request.target.kind === 'container' && !!pageSurface,
           ...(pageSurface && pageSurface.kind !== 'flow' && !contentPlacementRegion(request) ? { page: {
             ...(pageSurface.designSize ?? viewport),
             adoptBackground: request.intent === 'redo' || pageSurface.childIds.length === 0 && !pageSurface.background && !project.background,
@@ -441,13 +451,11 @@ export class ContentApplyService {
           draft.children?.forEach(persistSources)
         }
         drafts.forEach(persistSources)
-        if (assembled.flowBackgroundColor && request.target.kind === 'container' && request.target.container.kind === 'surface') {
-          const surfaceId = request.target.container.surfaceId
-          const surface = project.surfaces.find(value => value.id === surfaceId)
-          if (surface?.kind === 'flow' && surface.flow?.layout.paperBackgroundColor !== assembled.flowBackgroundColor) {
-            const layout = surface.flow?.layout ?? { widthMode: 'fluid' as const, readingWidth: 860, wideContentWidth: 1100 }
-            edits.push({ type: 'flow.set', surfaceId: surface.id, flow: { ...surface.flow,
-              layout: { ...layout, paperBackgroundColor: assembled.flowBackgroundColor } } })
+        if (assembled.flowBackgroundColor && request.target.kind === 'container' && surfaceId) {
+          const surface = componentSurface(project, surfaceId)
+          if (surface?.kind === 'flow' && !assembled.pageBackground) {
+            edits.push({ type: 'surface.background.set', surfaceId: surface.id,
+              background: { mode: 'own', color: assembled.flowBackgroundColor } })
           }
         }
         if (assembled.pageBackground && pageSurface) {
@@ -469,11 +477,6 @@ export class ContentApplyService {
     }
     const sourceImplementations: Extract<ComponentImplementation, { kind: 'source' }>[] = []
     let compilationProject = project
-    const compilationResources = structuredClone(this.options.session.resources?.() ?? { assets: {}, components: {} })
-    if (request.source.kind === 'data' || request.source.kind === 'objects') for (const edit of request.source.componentFiles ?? []) {
-      if (edit.files === null) delete compilationResources.components[edit.ownerId]
-      else compilationResources.components[edit.ownerId] = structuredClone(edit.files)
-    }
     if (request.source.kind === 'data' && request.source.implementation?.kind === 'source') sourceImplementations.push(request.source.implementation)
     if (request.source.kind === 'objects') {
       const definitions = { ...project.definitions, ...Object.fromEntries((request.source.definitions ?? []).map(definition => [definition.id, definition])) }
@@ -484,6 +487,15 @@ export class ContentApplyService {
         draft.children?.forEach(visit)
       }
       request.source.objects.forEach(visit)
+    }
+    // Native/content-only plans do not consume compilation resources. Source
+    // preparation reads immutable existing bytes and copies only edited owners.
+    const currentResources = sourceImplementations.length ? this.options.session.resources?.() : undefined
+    const compilationResources: DocumentResources = currentResources
+      ? { assets: currentResources.assets, components: { ...currentResources.components } } : { assets: {}, components: {} }
+    if (sourceImplementations.length && (request.source.kind === 'data' || request.source.kind === 'objects')) for (const edit of request.source.componentFiles ?? []) {
+      if (edit.files === null) delete compilationResources.components[edit.ownerId]
+      else compilationResources.components[edit.ownerId] = edit.files
     }
     const compiled = await this.compileSources(compilationProject, compilationResources, sourceImplementations, signal)
     diagnostics.push(...compiled.diagnostics)
@@ -606,30 +618,33 @@ export class ContentApplyService {
     if (request.intent === 'surface.add') {
       const pages = 'pages' in request ? request.pages : [request]
       if (!pages.length) throw new Error('批量建页需要至少一个页面')
-      const planning = structuredClone(project)
+      let planning = structuredClone(project)
       for (const page of pages) {
-        const index = page.beforeSurfaceId === undefined ? planning.surfaces.length
-          : planning.surfaces.findIndex(surface => surface.id === page.beforeSurfaceId)
+        const roots = componentSurfaces(planning)
+        const index = page.beforeSurfaceId === undefined ? roots.length
+          : roots.findIndex(surface => surface.id === page.beforeSurfaceId)
         if (index < 0) throw new Error('插入位置的页面已不存在')
         const surface = createCourseSurface(planning, { kind: page.kind, title: page.title,
           referenceSurfaceId: page.beforeSurfaceId }, this.createId)
-        edits.push({ type: 'surface.insert', surface, index }); insertedIds.push(surface.id)
-        planning.surfaces.splice(index, 0, surface)
+        const edit: ComponentEdit = { type: 'surface.insert', surface, index }
+        edits.push(edit); insertedIds.push(surface.id)
+        planning = applyComponentOperation(planning, captureComponentOperation(planning, [edit]))
       }
     } else {
-      const index = project.surfaces.findIndex(surface => surface.id === request.surfaceId)
-      const surface = project.surfaces[index]
+      const roots = componentSurfaces(project), index = roots.findIndex(surface => surface.id === request.surfaceId)
+      const surface = componentSurface(project, request.surfaceId)
       if (!surface) throw new Error('目标页面已不存在')
       if (request.intent === 'surface.remove') {
-        assertCourseSurfaceRemoval(project)
+        assertCourseSurfaceRemoval(project, request.surfaceId)
         edits.push({ type: 'surface.remove', surfaceId: surface.id })
       } else if (request.intent === 'surface.title') {
         const title = request.title.trim()
         if (surface.title !== title) edits.push({ type: 'surface.title.set', surfaceId: surface.id, title })
       } else if (request.beforeSurfaceId !== surface.id) {
-        const order = project.surfaces.filter(value => value.id !== surface.id)
+        if (index < 0) throw new Error('页面顺序只适用于作品根容器；嵌套容器沿所在对象顺序移动')
+        const order = roots.filter(value => value.id !== surface.id).map(value => value.id)
         const nextIndex = request.beforeSurfaceId === undefined ? order.length
-          : order.findIndex(value => value.id === request.beforeSurfaceId)
+          : order.indexOf(request.beforeSurfaceId)
         if (nextIndex < 0) throw new Error('移动位置的页面已不存在')
         if (nextIndex !== index) edits.push({ type: 'surface.move', surfaceId: surface.id, index: nextIndex })
       }
@@ -649,8 +664,8 @@ export class ContentApplyService {
       const frame = project.instances[request.target.container.instanceId]?.frame
       if (frame) return { width: Math.ceil(frame.width), height: Math.ceil(frame.height) }
     }
-    const surfaceId = request.target.kind === 'container' && request.target.container.kind === 'surface' ? request.target.container.surfaceId : undefined
-    const surface = project.surfaces.find(surface => surface.id === surfaceId)
+    const surfaceId = contentContainerId(project, request.target)
+    const surface = surfaceId ? componentSurface(project, surfaceId) : undefined
     if (surface?.kind === 'flow') {
       const layout = surface.flow?.layout
       // A file application has no observed browser viewport. Measure at the authored
@@ -671,9 +686,10 @@ export class ContentApplyService {
       ? owningContainer(project, request.target.instanceId) ?? undefined : request.target.container
     while (container?.kind === 'instance') {
       const parent = project.instances[container.instanceId], definition = parent && project.definitions[parent.definitionId]
+      if (parent?.container) return parent.container.kind === 'flow'
       if (definition?.implementation.kind !== 'builtin' || definition.implementation.key !== 'guoling.document-block') return false
       container = owningContainer(project, container.instanceId) ?? undefined
     }
-    return container?.kind === 'surface' && project.surfaces.some(surface => surface.id === container.surfaceId && surface.kind === 'flow')
+    return container?.kind === 'surface' && componentSurface(project, container.surfaceId)?.kind === 'flow'
   }
 }

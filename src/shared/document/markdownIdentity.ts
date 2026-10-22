@@ -38,9 +38,13 @@ export function retainMarkdownIdentities(next: MarkdownProjection, previous: Mar
     || Number(a.from < newEnd && a.to > from) - Number(b.from < newEnd && b.to > from))
   for (const map of maps) {
     let block = next.document.content.blocks.find(value => value.id === map.blockId)!
-    const old = oldView.sourceMap.blocks.find(value => !used.has(value.blockId) && explicit.has(map.blockId) && value.blockId === map.blockId)
-      ?? oldView.sourceMap.blocks.find(value => !used.has(value.blockId) && !explicit.has(value.blockId) && value.from === oldAt(map.from))
-      ?? oldView.sourceMap.blocks.find(value => !used.has(value.blockId) && !explicit.has(value.blockId) && value.from <= from && value.to >= oldEnd && map.from <= from && map.to >= newEnd)
+    // A formal instance reference declares its canonical identity. Source
+    // position can recover receiver-owned paragraph IDs, never choose another instance.
+    const old = block.type === 'course-instance'
+      ? oldView.sourceMap.blocks.find(value => !used.has(value.blockId) && value.blockId === map.blockId)
+      : oldView.sourceMap.blocks.find(value => !used.has(value.blockId) && explicit.has(map.blockId) && value.blockId === map.blockId)
+        ?? oldView.sourceMap.blocks.find(value => !used.has(value.blockId) && !explicit.has(value.blockId) && value.from === oldAt(map.from))
+        ?? oldView.sourceMap.blocks.find(value => !used.has(value.blockId) && !explicit.has(value.blockId) && value.from <= from && value.to >= oldEnd && map.from <= from && map.to >= newEnd)
     const prior = old && previous.document.content.blocks.find(value => value.id === old.blockId)
     if (!old || !prior) continue
     if (prior.type !== block.type) {

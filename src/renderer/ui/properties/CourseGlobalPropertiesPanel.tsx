@@ -581,6 +581,7 @@ function CourseGlobalEmptyPanel({
         assetId={empty.background.assetId}
         assets={empty.background.assets}
         effective={empty.background.effective}
+        onTransparent={() => commands.updateCourseBackground({ backgroundColor: 'transparent', backgroundAssetId: null })}
         onColorChange={(backgroundColor) => commands.updateCourseBackground({ backgroundColor })}
         onPreviewColorChange={commands.previewCourseBackground ? (backgroundColor) => commands.previewCourseBackground!({ backgroundColor }) : undefined}
         onAssetChange={(backgroundAssetId) => commands.updateCourseBackground({ backgroundAssetId })}

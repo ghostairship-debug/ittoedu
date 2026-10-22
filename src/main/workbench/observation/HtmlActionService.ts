@@ -339,8 +339,10 @@ export class HtmlActionService {
   private async observeCurrent(session: ActionSession, input?: HtmlObservationInput): Promise<PageActionObservation> {
     session.lastObservation = undefined
     await this.assertCurrent(session)
-    const state: HtmlPageState = await this.waitForRun(session.runId, () => this.options.frames.observe(session.context, session.frameToken))
-    const capture: HtmlActionCapture = await this.waitForRun(session.runId, () => this.options.frames.capture(session.context, session.frameToken))
+    const combined = this.options.frames.observeAndCapture
+      ? await this.waitForRun(session.runId, signal => this.options.frames.observeAndCapture!(session.context, session.frameToken, signal)) : undefined
+    const state: HtmlPageState = combined?.state ?? await this.waitForRun(session.runId, () => this.options.frames.observe(session.context, session.frameToken))
+    const capture: HtmlActionCapture = combined?.capture ?? await this.waitForRun(session.runId, () => this.options.frames.capture(session.context, session.frameToken))
     await this.assertCurrent(session)
     if (!sameHtmlPreviewDocumentUrl(state.url, session.kind === 'html' ? session.identity.url : session.context.url))
       throw new Error('HTML 页面来源已变化，请重新打开预览')

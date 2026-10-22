@@ -1,3 +1,4 @@
+import { componentSurface } from '../../../shared/contracts/component-platform/project'
 import { useEffect, useLayoutEffect, useState, type CSSProperties } from 'react'
 import type { FlowWorkspaceProps } from '../FlowWorkspace'
 import { FlowWorkspace } from '../FlowWorkspace'
@@ -30,13 +31,19 @@ export function FlowLocationWorkspace(props: FlowLocationWorkspaceProps) {
     observer.observe(toolbarContainer)
     return () => observer.disconnect()
   }, [toolbarContainer])
-  const surface = props.project.surfaces.find(value => value.id === props.surfaceId)
+  const surface = componentSurface(props.project, props.surfaceId)
+  const nested = !props.project.rootIds.includes(props.surfaceId)
+  const editorNavigation = runtime.navigation.editorPort()
+  const navigation = nested ? editorNavigation.forContainer?.(props.surfaceId) ?? editorNavigation : editorNavigation
   return <main className={`workspace workspace--${props.canvasMode} workspace--flow`} data-testid="flow-workspace-shell"
     data-flow-not-slide-stage="true" style={{ '--flow-workspace-header-height': `${headerHeight}px` } as CSSProperties}>
     <div ref={setToolbarContainer} className="flow-workspace-toolbar-host" data-testid="flow-workspace-toolbar-host" style={{ height: 'auto' }} />
     <CourseNavigationControls canvasMode={props.canvasMode} onCanvasModeChange={props.onCanvasModeChange}
-      navigation={runtime.navigation.editorPort()} beforeNavigate={props.beforeNavigate}
-      resetPlayback={async playing => { await props.beforeNavigate?.(); await runtime.resetPlayback(playing) }}
+      navigation={navigation} beforeNavigate={props.beforeNavigate}
+      resetPlayback={async playing => {
+        await props.beforeNavigate?.()
+        await runtime.resetPlayback(playing, nested ? props.surfaceId : undefined)
+      }}
       report={message => props.onStatus?.(message)} />
     <div className={`canvas-label${props.editingScope === 'global' ? ' canvas-label--global' : ''}`}>{props.editingScope === 'global' ? '全局层 · 视口浮层' : surface?.title}</div>
     <div className="canvas-viewport"><FlowWorkspace {...props} toolbarContainer={toolbarContainer} readOnly={props.canvasMode === 'run'} /></div>

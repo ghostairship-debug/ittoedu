@@ -7,8 +7,9 @@ import type { LightEditTextOverride } from '../../shared/contracts/runtime/light
 import { splitInstalledBundledFontFaceCss } from '../../shared/fonts/installedBundledFontFaceCss'
 import { createPreparedJavaScriptImportOptionsValidator, preparedJavaScriptNativeImportBody } from '../../shared/browser/validatePreparedJavaScriptImportOptions'
 import { projectPublishedNativeImportOptions } from '../../core/publish/componentPlatform/compiledScript'
-import { createDomAuthoring } from './authoringDom'
-import { installOwnedDocumentAuthoring } from './ownedDocumentAuthoring'
+import { createDomAuthoring, domAuthoringFactorySource } from './authoringDom'
+import { installOwnedDocumentAuthoring, installOwnedDocumentBlobCarriers, installAuthoringInputArbitration, authoringCaretOffset } from './ownedDocumentAuthoring'
+import { installHtmlBlobCapture } from './htmlBlobCapture'
 import { ownedDocumentKeyAttribute } from './ownedDocumentIdentity'
 import { createBrowserUuid } from '../../shared/browser/createBrowserUuid'
 import { createWebResourceUrlLease, webRuntimeResourceAddress } from './resourceUrlLease'
@@ -25,11 +26,13 @@ export interface AuthoredDocumentPrograms {
   textOverrides?: readonly LightEditTextOverride[]
   published?: { code: string; helper: string; contexts?: Readonly<Record<string, WebModuleResolutionContext>> }
   transportFragment?: boolean
+  /** Source-known non-srcdoc frames; runtime-created arbitrary frames are not promoted. */
+  blobFrames?: Record<string, string>
 }
 
 /** Explicit function inputs keep the serialized parser bootstrap self-contained. */
 export function authoredDocumentProgramsSource(input: AuthoredDocumentPrograms): string {
-  return `(${installAuthoredDocumentPrograms.toString()})(${JSON.stringify(input)},${input.published ? `{options:(${createPreparedJavaScriptImportOptionsValidator.toString()}),resolver:(${webModuleResolverSource()}),nativeImport:function(url,options){${preparedJavaScriptNativeImportBody}}}` : 'undefined'},${createWebResourceUrlLease.toString()},${createLocalStageLayout.toString()})`
+  return `(${installAuthoredDocumentPrograms.toString()})(${JSON.stringify(input)},${input.published ? `{options:(${createPreparedJavaScriptImportOptionsValidator.toString()}),resolver:(${webModuleResolverSource()}),nativeImport:function(url,options){${preparedJavaScriptNativeImportBody}}}` : 'undefined'},${createWebResourceUrlLease.toString()},${createLocalStageLayout.toString()},${input.blobFrames ? installOwnedDocumentBlobCarriers.toString() : 'undefined'},${input.blobFrames ? installHtmlBlobCapture.toString() : 'undefined'})`
 }
 
 /** Runs synchronously in the child's parser, before any authored script. */
@@ -37,10 +40,12 @@ export function installAuthoredDocumentPrograms(input: AuthoredDocumentPrograms,
   options: typeof createPreparedJavaScriptImportOptionsValidator
   resolver: (native: { URL: typeof URL; decodeURI: typeof decodeURI }) => (specifier: string, importer: string, dynamic?: boolean, context?: WebModuleResolutionContext) => string | undefined
   nativeImport(url: string, options: unknown): Promise<unknown>
-}, resourceFactory = createWebResourceUrlLease, layoutFactory = createLocalStageLayout) {
+}, resourceFactory = createWebResourceUrlLease, layoutFactory = createLocalStageLayout,
+blobFactory?: typeof installOwnedDocumentBlobCarriers, captureFactory?: typeof installHtmlBlobCapture) {
   const native = window, originalDocument = document, NativePromise = native.Promise, NativeTypeError = native.TypeError
   const resourceLease = resourceFactory(native)
   resourceLease.update(input.resources)
+  const blobCarriers = input.blobFrames && blobFactory && captureFactory ? blobFactory(native, input.blobFrames, captureFactory) : undefined
   const createUrl = native.URL.createObjectURL.bind(native.URL), revokeUrl = native.URL.revokeObjectURL.bind(native.URL), NativeBlob = native.Blob
   const urls: string[] = []
   let stageLayout: ReturnType<typeof createLocalStageLayout> | undefined
@@ -90,9 +95,9 @@ export function installAuthoredDocumentPrograms(input: AuthoredDocumentPrograms,
     map.textContent = JSON.stringify({ imports }); document.head.append(map)
   }
   if (input.moduleProperty) Object.defineProperty(window, input.moduleProperty, { configurable: true, value: moduleUrls })
-  Object.defineProperty(window, input.property, { configurable: true, value: { ...classic, moduleUrls, publishedUrl, project: resourceLease.project, resourceLease } })
+  Object.defineProperty(window, input.property, { configurable: true, value: { ...classic, moduleUrls, publishedUrl, project: resourceLease.project, resourceLease, blobCarriers } })
   const release = () => {
-    ended = true; validator?.dispose()
+    ended = true; validator?.dispose(); blobCarriers?.dispose()
     stageLayout?.dispose(); originalDocument.removeEventListener('DOMContentLoaded', installLayout)
     resourceLease.release()
     for (const url of urls.splice(0)) revokeUrl(url)
@@ -101,7 +106,7 @@ export function installAuthoredDocumentPrograms(input: AuthoredDocumentPrograms,
     Reflect.deleteProperty(window, input.property); window.removeEventListener('pagehide', release)
   }
   window.addEventListener('pagehide', release, { once: true })
-  return { release, resourceLease, transportFragment: input.transportFragment,
+  return { release, resourceLease, blobCarriers, transportFragment: input.transportFragment,
     setActivity(value: { active: boolean; visible: boolean; playing: boolean }) {
       if (!ended) window.dispatchEvent(new CustomEvent('__runtime.activity', { detail: { ...value } }))
     }, onDiagnostic(listener: (message: string) => void) {
@@ -117,6 +122,8 @@ export function authoredDocumentBootstrap(data: WebRuntimeData, options: {
   instanceId: string
   bridge(programs: AuthoredDocumentPrograms): string
   resources: Record<string, string>
+  /** The existing trusted editor observation fact; activity alone does not grant editing. */
+  authoring?: boolean
   themeCss?: string
   resourceCss?: string
   /** Internal projection of child documents inside a fragment carrier. */
@@ -163,7 +170,7 @@ export function authoredDocumentBootstrap(data: WebRuntimeData, options: {
     if ('tagName' in node && node.tagName === 'iframe') {
       const current = iframeIndex++, srcdoc = node.attrs.find(attribute => attribute.name === 'srcdoc')
       const location = node.sourceCodeLocation?.attrs?.srcdoc
-      if (srcdoc && location) {
+      if (node.sourceCodeLocation?.startTag) {
         const childPath = documentPath ? `${documentPath}/${current}` : String(current)
         const key = node.attrs.find(attribute => attribute.name === ownedDocumentKeyAttribute)?.value || undefined
         const pendingKeys = options.pendingDocumentKeys
@@ -174,6 +181,7 @@ export function authoredDocumentBootstrap(data: WebRuntimeData, options: {
         const childAuthoringPath = authoringPath ? `${authoringPath}/${authorSegment}` : authorSegment
         const pendingSegment = `pending:${current}:${encodeURIComponent(softwareKey)}`
         const childPendingPath = authoringPendingPath ? `${authoringPendingPath}/${pendingSegment}` : pendingSegment
+        if (srcdoc && location) {
         const child = authoredDocumentBootstrap({ ...data, html: srcdoc.value, css: undefined }, {
           ...options, nestedOnly: false, documentPath: childPath, authoringPath: childAuthoringPath, authoringPendingPath: childPendingPath, resourceCss: undefined,
           bridge: authoredDocumentProgramsSource,
@@ -181,6 +189,18 @@ export function authoredDocumentBootstrap(data: WebRuntimeData, options: {
         // The outer parser decodes this attribute before the child's parser
         // starts. Its resource addresses must stay unprojected until then.
         edits.push({ start: location.startOffset, end: location.endOffset, value: `srcdoc="${quote(child).replace(/guoling-resource:/g, 'guoling&#45;resource:')}"` })
+        } else if (!srcdoc) {
+          // The source owns this frame start tag, while its Blob program remains authored code.
+          if (!key) {
+            const end = node.sourceCodeLocation.startTag.endOffset, at = end - (source.slice(end - 2, end) === '/>' ? 2 : 1)
+            edits.push({ start: at, end: at, value: ` ${ownedDocumentKeyAttribute}="${quote(softwareKey)}"` })
+          }
+          const childPrograms: AuthoredDocumentPrograms = { prefix: `${prefix}${current}/`, property, classic: {},
+            resources: options.resources, resourceBindings: data.resourceBindings, textOverrides: data.textOverrides }
+          const runtimeResources = `resources=>{const lease=window[${JSON.stringify(property)}]?.resourceLease;return lease?(Object.keys(resources).length?lease.update(resources):lease.urls):resources}`
+          const bootstrap = `function(channel,activity){${authoredDocumentProgramsSource(childPrograms)};${domTextOverrideRealmSource()}(${installParsedPageTextOverrides.toString()})(${JSON.stringify(programs.textOverrides ?? [])},${JSON.stringify(property)},createPageTextOverrides);(${installOwnedDocumentBridge.toString()})(${JSON.stringify(property)},true,${refreshWebResourceReferences.toString()},channel);if(activity)window.dispatchEvent(new CustomEvent("__runtime.activity",{detail:activity}));(${installOwnedDocumentAuthoring.toString()})(${JSON.stringify(property)},${JSON.stringify(childAuthoringPath)},${domAuthoringFactorySource()},{channel,observe:${options.authoring === true}&&!!activity?.active&&!activity?.playing,input:(${installAuthoringInputArbitration.toString()}),caret:(${authoringCaretOffset.toString()}),pendingPath:${JSON.stringify(childAuthoringPath.includes('ambiguous:') ? undefined : childPendingPath)},refreshResources:${refreshWebResourceReferences.toString()},resolveResource:(reference,bindings)=>window[${JSON.stringify(property)}]?.resourceLease?.resolve(reference,bindings),matchesResource:(reference,liveUrl,bindings)=>window[${JSON.stringify(property)}]?.resourceLease?.matches(reference,liveUrl,bindings)??false,runtimeResources:${runtimeResources}});}`
+          ;(programs.blobFrames ??= {})[softwareKey] = bootstrap
+        }
       }
     }
     if ('tagName' in node && node.tagName === 'script' && !options.nestedOnly) {
@@ -239,7 +259,7 @@ export function authoredDocumentBootstrap(data: WebRuntimeData, options: {
   const fonts = splitInstalledBundledFontFaceCss(options.themeCss ?? '')
   const style = [fonts.faces ? `<style data-component-bundled-faces>${fonts.faces.replace(/<\/style/gi, '<\\/style')}</style>` : '',
     fonts.theme ? `<style data-component-initial-theme>${fonts.theme.replace(/<\/style/gi, '<\\/style')}</style>` : '', data.css ? `<style${marker ? ` data-component-resource-bindings="${quote(marker)}"` : ''}>${data.css.replace(/<\/style/gi, '<\\/style')}</style>` : ''].join('')
-  const textBootstrap = `${domTextOverrideRealmSource()}(${installParsedPageTextOverrides.toString()})(${JSON.stringify(programs.textOverrides ?? [])},${JSON.stringify(property)},createPageTextOverrides);(${installOwnedDocumentBridge.toString()})(${JSON.stringify(property)},${Boolean(documentPath)},${refreshWebResourceReferences.toString()});${documentPath ? `(${installOwnedDocumentAuthoring.toString()})(${JSON.stringify(property)},${JSON.stringify(authoringPath)},${createDomAuthoring.toString()},{pendingPath:${JSON.stringify(authoringPath.includes('ambiguous:') ? undefined : authoringPendingPath)},refreshResources:${refreshWebResourceReferences.toString()},resolveResource:(reference,bindings)=>window[${JSON.stringify(property)}]?.resourceLease?.resolve(reference,bindings),matchesResource:(reference,liveUrl,bindings)=>window[${JSON.stringify(property)}]?.resourceLease?.matches(reference,liveUrl,bindings)??false,runtimeResources:resources=>{const lease=window[${JSON.stringify(property)}]?.resourceLease;return lease?(Object.keys(resources).length?lease.update(resources):lease.urls):resources}});` : ''}`
+  const textBootstrap = `${domTextOverrideRealmSource()}(${installParsedPageTextOverrides.toString()})(${JSON.stringify(programs.textOverrides ?? [])},${JSON.stringify(property)},createPageTextOverrides);(${installOwnedDocumentBridge.toString()})(${JSON.stringify(property)},${Boolean(documentPath)},${refreshWebResourceReferences.toString()});${documentPath ? `(${installOwnedDocumentAuthoring.toString()})(${JSON.stringify(property)},${JSON.stringify(authoringPath)},${domAuthoringFactorySource()},{input:(${installAuthoringInputArbitration.toString()}),caret:(${authoringCaretOffset.toString()}),pendingPath:${JSON.stringify(authoringPath.includes('ambiguous:') ? undefined : authoringPendingPath)},blobCarriers:()=>window[${JSON.stringify(property)}]?.blobCarriers,refreshResources:${refreshWebResourceReferences.toString()},resolveResource:(reference,bindings)=>window[${JSON.stringify(property)}]?.resourceLease?.resolve(reference,bindings),matchesResource:(reference,liveUrl,bindings)=>window[${JSON.stringify(property)}]?.resourceLease?.matches(reference,liveUrl,bindings)??false,runtimeResources:resources=>{const lease=window[${JSON.stringify(property)}]?.resourceLease;return lease?(Object.keys(resources).length?lease.update(resources):lease.urls):resources}});` : ''}`
   const bootstrap = `<meta charset="utf-8"><script>${(textBootstrap + options.bridge(programs)
     + `;document.write(window[${JSON.stringify(property)}].project(${JSON.stringify(style)}));`).replace(/<\/script/gi, '<\\/script')}</script>`
   // The opaque document first obtains its own short URLs, then the native
@@ -256,34 +276,41 @@ export function authoredDocumentBootstrap(data: WebRuntimeData, options: {
 }
 
 /** Messages remain between owned srcdoc realms; authors keep their parser and state. */
-export function installOwnedDocumentBridge(token: string, nested: boolean, refresh: typeof refreshWebResourceReferences) {
+export function installOwnedDocumentBridge(token: string, nested: boolean, refresh: typeof refreshWebResourceReferences, channel?: string) {
   let activity: { active: boolean; visible: boolean; playing: boolean } | undefined
+  const carriers = () => (window as unknown as Record<string, { blobCarriers?: ReturnType<typeof installOwnedDocumentBlobCarriers> }>)[token]?.blobCarriers
+  const frames = () => [...new Set([...document.querySelectorAll<HTMLIFrameElement>('iframe[srcdoc]'), ...(carriers()?.frames() ?? [])])]
   const activitySnapshot = () => activity && { ...activity }
   Object.defineProperty(window, '__guolingRuntimeActivity', { configurable: true, get: activitySnapshot })
   const postActivity = (frame: HTMLIFrameElement) => {
-    if (activity) frame.contentWindow?.postMessage({ type: 'guoling.runtime.activity', token, value: activitySnapshot() }, '*')
+    const childChannel = carriers()?.channel(frame)
+    if (activity) frame.contentWindow?.postMessage({ type: 'guoling.runtime.activity', token, value: activitySnapshot(), ...(childChannel ? { channel: childChannel } : {}) }, '*')
   }
   const activityEvent = (event: Event) => {
     const value = (event as CustomEvent).detail
     if (!value || typeof value.active !== 'boolean' || typeof value.visible !== 'boolean' || typeof value.playing !== 'boolean') return
     activity = { active: value.active, visible: value.visible, playing: value.playing }
-    for (const frame of document.querySelectorAll<HTMLIFrameElement>('iframe[srcdoc]')) postActivity(frame)
+    for (const frame of frames()) postActivity(frame)
   }
   const loaded = (event: Event) => {
-    if (event.target instanceof HTMLIFrameElement && event.target.hasAttribute('srcdoc')) postActivity(event.target)
+    if (event.target instanceof HTMLIFrameElement && frames().includes(event.target)) postActivity(event.target)
   }
   const receive = (event: MessageEvent) => {
     const data = event.data
+    if (event.source === parent && channel && data?.channel !== channel) return
     if (event.source === parent && data?.type === 'guoling.runtime.activity' && data.token === token) {
       window.dispatchEvent(new CustomEvent('__runtime.activity', { detail: data.value }))
     } else if (event.source === parent && data?.type === 'guoling.resources.refresh' && data.token === token && data.resources) {
       const lease = (window as unknown as Record<string, { resourceLease?: ReturnType<typeof createWebResourceUrlLease> }>)[token]?.resourceLease
       refresh(document, lease?.update(data.resources) ?? data.resources)
-      for (const frame of document.querySelectorAll<HTMLIFrameElement>('iframe[srcdoc]')) frame.contentWindow?.postMessage(data, '*')
+      for (const frame of frames()) {
+        const childChannel = carriers()?.channel(frame)
+        frame.contentWindow?.postMessage({ ...data, ...(childChannel ? { channel: childChannel } : {}) }, '*')
+      }
     } else if (nested && data?.type === 'guoling.owned-document.click' && data.token === token
-      && [...document.querySelectorAll<HTMLIFrameElement>('iframe[srcdoc]')].some(frame => frame.contentWindow === event.source)) parent.postMessage(data, '*')
+      && frames().some(frame => frame.contentWindow === event.source && (!carriers()?.channel(frame) || data.channel === carriers()?.channel(frame)))) click()
   }
-  const click = () => parent.postMessage({ type: 'guoling.owned-document.click', token }, '*')
+  const click = () => parent.postMessage({ type: 'guoling.owned-document.click', token, ...(channel ? { channel } : {}) }, '*')
   const release = () => {
     window.removeEventListener('message', receive)
     window.removeEventListener('__runtime.activity', activityEvent)

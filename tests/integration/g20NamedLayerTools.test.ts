@@ -1,4 +1,6 @@
 // @vitest-environment node
+import { componentSurfaces } from '../../src/shared/contracts/component-platform/project'
+import { testContainerInstance, appendRootContainers } from '../helpers/glxWorkFixture'
 import { randomUUID } from 'node:crypto'
 import { expect, it } from 'vitest'
 import { DocumentRegistry } from '../../src/core/documents/DocumentRegistry'
@@ -16,7 +18,7 @@ import type { ToolResult } from '../../src/shared/workbench/tools'
 
 const driver = new CourseV10Driver()
 async function harness() {
-  let project = createBlankCourseProjectV10('Named layers'), surfaceId = project.surfaces[0].id
+  let project = createBlankCourseProjectV10('Named layers'), surfaceId = componentSurfaces(project)[0].id
   for (const key of ['shape', 'text', 'image']) project.definitions[key] = { id: key, role: 'content', implementation: { kind: 'builtin', key: `guoling.${key}` } }
   const frame = (x: number, y: number) => ({ width: 80, height: 40, transform: [1, 0, 0, 1, x, y] as [number, number, number, number, number, number] })
   for (const [id, x, y] of [['a', 20, 30], ['b', 250, 100], ['c', 630, 200]] as const) project.instances[id] = { id, definitionId: 'shape', data: defaultShapeData(), frame: frame(x, y) }
@@ -26,14 +28,14 @@ async function harness() {
   const bytes = new TextEncoder().encode('<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"/>')
   project.assets.image = { id: 'image', path: 'assets/image.svg', mimeType: 'image/svg+xml', byteLength: bytes.length }
   project.instances.picture = { id: 'picture', definitionId: 'image', data: createImageData('image'), frame: frame(700, 300) }
-  project.surfaces[0].childIds = ['a', 'b', 'c', 'fixed-text', 'auto-text', 'picture']
-  project.surfaces[0].presentation = { initialStateId: 'state-a', states: [
+  testContainerInstance(project, 0).childIds = ['a', 'b', 'c', 'fixed-text', 'auto-text', 'picture']
+  testContainerInstance(project, 0).container.presentation = { initialStateId: 'state-a', states: [
     { id: 'state-a', title: 'A', overrides: { a: { frame: frame(60, 30) }, 'fixed-text': { data: { ...fixed, content: { inlines: [{ type: 'text', text: 'state A text' }] } } } } },
     { id: 'state-b', title: 'B', overrides: { a: { frame: frame(500, 30) } } },
   ] }
-  project.surfaces[0].presentation!.states[0].overrides.picture = { data: { ...createImageData('image'), alt: 'A picture' }, frame: frame(760, 300) }
-  project.surfaces[0].presentation!.states[1].overrides.picture = { data: { ...createImageData('image'), alt: 'B picture' }, frame: frame(920, 300) }
-  project.surfaces.push({ id: 'foreign-page', kind: 'slide', title: 'Foreign page', childIds: [] })
+  testContainerInstance(project, 0).container.presentation!.states[0].overrides.picture = { data: { ...createImageData('image'), alt: 'A picture' }, frame: frame(760, 300) }
+  testContainerInstance(project, 0).container.presentation!.states[1].overrides.picture = { data: { ...createImageData('image'), alt: 'B picture' }, frame: frame(920, 300) }
+  appendRootContainers(project, { id: 'foreign-page', kind: 'slide', title: 'Foreign page', childIds: [] })
   project = applyComponentOperation(project, captureComponentOperation(project, componentRuleEdits(project, { kind: 'surface', surfaceId }, [{ id: 'picture-click', enabled: true,
     name: 'Picture click', trigger: { type: 'node.click', nodeId: 'picture' }, conditions: [], actions: [{ id: 'next', start: 'after-previous', delayMs: 0, action: { type: 'scene.next' } }] }])))
   const model = { kind: 'course-v10' as const, project, resources: { assets: { image: bytes }, components: {} } }
@@ -71,13 +73,13 @@ it('duplicates a local interaction graph and lays out/reorders/hides only the na
   const frames = ['a', 'b', 'c'].map(id => f.view('state-a').instances[id].frame!)
   expect(new Set(frames.map(frame => frame.transform[5])).size).toBe(1)
   expect(frames[1].transform[4] - frames[0].transform[4] - frames[0].width).toBe(frames[2].transform[4] - frames[1].transform[4] - frames[1].width)
-  expect(after.project.surfaces[0].presentation!.states[1]).toEqual(f.model.project.surfaces[0].presentation!.states[1])
-  for (const [id, instance] of Object.entries(f.model.project.instances)) expect(after.project.instances[id]).toEqual(instance)
+  expect(componentSurfaces(after.project)[0].presentation!.states[1]).toEqual(componentSurfaces(f.model.project)[0].presentation!.states[1])
+  for (const [id, instance] of Object.entries(f.model.project.instances).filter(([id]) => id !== f.surfaceId)) expect(after.project.instances[id]).toEqual(instance)
   expect(f.session.read().undoDepth).toBe(1); expect(after.resources).toEqual(before.model.resources); expect(driver.load(driver.serialize(after))).toEqual(after)
   applied(await f.invoke('remove-copy', 'object.structure', { target: await f.object(copy.id), action: 'remove' }))
   expect(f.current().project.instances[copy.id]).toBeUndefined(); expect(JSON.stringify(f.current().project)).not.toContain(copy.id)
   await f.undo('undo-copy-delete'); expect(f.view('state-a').instances[copy.id].visible).toBe(true)
-  await f.undo(); expect(f.current().project.surfaces).toEqual(f.model.project.surfaces); expect(f.current().project.instances).toEqual(f.model.project.instances)
+  await f.undo(); expect(componentSurfaces(f.current().project)).toEqual(componentSurfaces(f.model.project)); expect(f.current().project.instances).toEqual(f.model.project.instances)
 })
 
 it('routes text, display, image and new component writes through named-state overrides without altering base or another state', async () => {
@@ -97,7 +99,7 @@ it('routes text, display, image and new component writes through named-state ove
   const newObject = Object.values(f.current().project.instances).find(instance => !f.model.project.instances[instance.id])!
   expect(f.view('state-a').instances[newObject.id].visible).toBe(true); expect(f.view(null).instances[newObject.id].visible).toBe(false)
   expect(f.session.read().undoDepth).toBe(1); expect(Object.keys(f.current().resources.assets)).toHaveLength(2); expect(driver.load(driver.serialize(f.current()))).toEqual(f.current())
-  await f.undo(); expect(f.current().project.surfaces).toEqual(f.model.project.surfaces); expect(f.current().project.instances).toEqual(f.model.project.instances); expect(f.current().resources).toEqual(before.model.resources)
+  await f.undo(); expect(componentSurfaces(f.current().project)).toEqual(componentSurfaces(f.model.project)); expect(f.current().project.instances).toEqual(f.model.project.instances); expect(f.current().resources).toEqual(before.model.resources)
 })
 
 it('rejects base/other-state authority and stale concurrent overrides with zero partial writes while preserving a disjoint state edit', async () => {
@@ -120,13 +122,13 @@ it('rejects base/other-state authority and stale concurrent overrides with zero 
     { name: 'object.update', input: { target: await f.object('picture', 'state-b'), properties: { visible: false } } },
   ] })).toMatchObject({ kind: 'error' })
   expect(f.session.read()).toEqual(before)
-  const presentation = structuredClone(f.current().project.surfaces[0].presentation!)
+  const presentation = structuredClone(componentSurfaces(f.current().project)[0].presentation!)
   presentation.states[1].overrides['fixed-text'] = { style: { opacity: .7 } }
   expect(await f.session.execute({ documentId: before.documentId, epoch: before.epoch, operationId: 'human-B', actor: 'human', baseRevision: before.revision,
     mutation: { type: 'command', command: captureComponentOperation(f.current().project, [{ type: 'surface.presentation.set', surfaceId: f.surfaceId, presentation }]) } })).toMatchObject({ status: 'applied' })
   applied(await f.invoke('disjoint', 'text.replace', { target: text, content: 'A after human B' }))
   expect(f.view('state-b').instances['fixed-text'].style).toEqual({ opacity: .7 })
-  const current = f.session.read(), state = structuredClone(f.current().project.surfaces[0].presentation!)
+  const current = f.session.read(), state = structuredClone(componentSurfaces(f.current().project)[0].presentation!)
   state.states[0].overrides['fixed-text'].data = JSON.parse(JSON.stringify({ ...createTextComponentData('Concurrent human A'), sizing: { mode: 'fixed', minHeight: 0, overflow: 'clip' } }))
   expect(await f.session.execute({ documentId: current.documentId, epoch: current.epoch, operationId: 'human-A', actor: 'human', baseRevision: current.revision,
     mutation: { type: 'command', command: captureComponentOperation(f.current().project, [{ type: 'surface.presentation.set', surfaceId: f.surfaceId, presentation: state }]) } })).toMatchObject({ status: 'applied' })

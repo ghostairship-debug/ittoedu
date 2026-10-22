@@ -1,3 +1,5 @@
+import { testContainerInstance } from '../helpers/glxWorkFixture'
+import { componentSurfaces } from '../../src/shared/contracts/component-platform/project'
 // @vitest-environment node
 import { expect, it } from 'vitest'
 import { createBlankCourseProjectV10 } from '../../src/core/course/createCourseProjectV10'
@@ -11,7 +13,7 @@ it('keeps professional authoring identity through shared source and library defi
   const project = createBlankCourseProjectV10('自定义专业组件')
   project.definitions.text = { id: 'text', role: 'content', implementation: { kind: 'builtin', key: 'guoling.text' } }
   project.instances.text = { id: 'text', definitionId: 'text', data: { content: { inlines: [{ type: 'text', text: '可编辑' }] } } }
-  project.surfaces[0].childIds = ['text']
+  testContainerInstance(project, 0).childIds = ['text']
   const implementation: ComponentImplementation = { kind: 'source', language: 'javascript', source: 'export default { mount() {} }' }
   const edited = applyComponentOperation(project, captureComponentOperation(project,
     componentSourceAuthoringEdits({ kind: 'definition', definition: project.definitions.text }, implementation)))
@@ -19,7 +21,7 @@ it('keeps professional authoring identity through shared source and library defi
   const insertion = prepareComponentLibraryInsertion(project, { schemaVersion: 1, id: 'reusable', title: '保留源码',
     definitions: { text: edited.definitions.text }, example: { instances: { text: edited.instances.text }, rootIds: ['text'] },
     assets: {}, resources: { assets: {}, components: {} } },
-  { container: { kind: 'surface', surfaceId: project.surfaces[0].id }, index: 1 })
+  { container: { kind: 'surface', surfaceId: componentSurfaces(project)[0].id }, index: 1 })
   const inserted = applyComponentOperation(project, insertion.command), id = insertion.identities.definitions.get('text')!
   expect(id).not.toBe('text')
   expect(componentDefinitionBuiltinKey(inserted.definitions[id])).toBe('guoling.text')

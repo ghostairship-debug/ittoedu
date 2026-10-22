@@ -243,11 +243,9 @@ export function useCourseProjectLifecycle<TDraftToken>(ports: CourseProjectLifec
   }, [watch.dirty, watch.projectTitle])
   const prepareBeforeClose = useCallback(async (mode: 'save' | 'preserve', documentIds?: readonly string[]): Promise<boolean> => {
     try {
-      if (await ref.current.prepareBeforeClose?.(mode, documentIds) === false) return false
-      // Preserve may retain invalid raw input. Only Save requires every visible
-      // input to be a formal edit; the preserve owner settles admitted operations.
-      if (!documentIds && mode === 'save' && service().snapshot()) await service().drain()
       if (!(await (ref.current.preserveBeforeClose?.(mode, documentIds) ?? Promise.resolve(true)))) return false
+      // Sidecar/card inputs settle first; then their course owner prepares the
+      // resulting input once. Main reads authority and performs the final CAS.
       return await ref.current.prepareBeforeClose?.(mode, documentIds) !== false
     }
     catch (error) { ref.current.reportError(error instanceof Error ? error.message : '输入未确认，已取消关闭'); return false }

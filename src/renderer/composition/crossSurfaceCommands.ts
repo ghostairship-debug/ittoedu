@@ -1,3 +1,4 @@
+import { componentContainers } from '../../shared/contracts/component-platform/project'
 import type { EditorStoreKernel } from '../store/editorStoreKernel'
 import type { ComponentEdit } from '../../shared/contracts/component-platform/operations'
 import { componentDefinitionBuiltinKey, componentIsLocked, containerChildIds, owningContainer, resolveComponentPresentation, type ComponentContainer, type ComponentDefinition, type ComponentPresentation, type CourseProjectV10, type JsonValue } from '../../shared/contracts/component-platform/project'
@@ -53,10 +54,12 @@ import { prepareCourseObjectPaste, selectedRoots, courseObjectDescendants as des
 import { courseSettingsEdits } from '../../core/course/courseSemanticEdits'
 import { componentDataEdits } from '../../core/course/componentDataEdits'
 import { courseGeometryEdits } from '../../core/course/courseGeometryEdits'
+import { insertionContainer } from '../../core/course/courseElementInsertion'
 import { requestMixedGlobalGeometry } from '../ui/workspaces/mixedGlobalGeometry'
 export { prepareCourseObjectPaste, type CourseObjectClipboardSource, type CourseObjectPasteDestination, type CourseObjectPastePlan } from '../../core/course/courseObjectEdits'
 export { componentIsLocked } from '../../shared/contracts/component-platform/project'
 import { capturedCourseViewIsCurrent } from '../documents/CourseV10DocumentBridge'
+import { interactionSelectionIdentity } from '../documents/interactionSelection'
 interface ObjectClipboard extends CourseObjectClipboardSource {
   matrices: Record<string, AffineMatrix>
   moveAvailable?: boolean
@@ -70,7 +73,11 @@ export function createCrossSurfaceCommands(ports: CrossSurfaceCommandPorts) {
   let clipboardToken: string | null = null
   const report = (error: unknown) => kernel.setFeedback({ errorMessage: error instanceof Error ? error.message : String(error), statusMessage: null })
   const current = () => kernel.readEditingDocument()
-  const surface = () => current().surfaces.find(value => value.id === kernel.readView().surfaceId)
+  const objectSelection = () => {
+    const target = kernel.readView().interactionSelection
+    if (target && target.kind !== 'objects') throw new Error('当前选择是内容范围，不能作为独立对象执行此操作；请编辑内容或明确选择包含它的整体。')
+  }
+  const surface = () => componentContainers(current()).find(value => value.id === kernel.readView().surfaceId)
   const content = () => surface()?.kind === 'flow' ? ports.flow : surface()?.kind === 'spatial' ? ports.spatial : ports.slide
   const scope = () => surface()?.kind==='spatial' && ports.spatial.readSpatialView ? ports.spatial.readSpatialView().scope==='global'?'global':'scene' : ports.shell.read().editingScope??'scene'
   const delegate = <K extends keyof CrossSurfaceContentPorts>(name: K, ...args: Parameters<NonNullable<CrossSurfaceContentPorts[K]>>) => {
@@ -103,6 +110,13 @@ export function createCrossSurfaceCommands(ports: CrossSurfaceCommandPorts) {
     } catch (error) { report(error); return false }
   }
   const requestClipboard = (command: 'copy' | 'cut' | 'paste') => run(async () => {
+    const active = document.activeElement
+    if (ports.shell.read().editingTextNodeId || active instanceof HTMLElement && active.closest('input,textarea,[contenteditable="true"],.cm-editor')) {
+      if (ports.requestClipboard) await ports.requestClipboard(command)
+      else if (!document.execCommand(command)) throw new Error('当前输入区域无法执行系统剪贴板命令')
+      return
+    }
+    objectSelection()
     if (command === 'paste') {
       await flush()
       if (ports.requestClipboard) await ports.requestClipboard(command)
@@ -114,6 +128,7 @@ export function createCrossSurfaceCommands(ports: CrossSurfaceCommandPorts) {
       const view = kernel.readView()
       return view.activeDocumentId === requested.documentId && view.snapshot?.epoch === requested.epoch
         && view.activation === activation && view.surfaceId === requested.surfaceId && view.activeStateId === requested.activeStateId
+        && (requested.selectionIdentity === undefined || requested.selectionIdentity === interactionSelectionIdentity(view.interactionSelection))
         && scope() === requestedScope && view.selectedInstanceIds.length === requested.instanceIds.length
         && view.selectedInstanceIds.every((id, index) => id === requested.instanceIds[index])
     }
@@ -161,7 +176,7 @@ export function createCrossSurfaceCommands(ports: CrossSurfaceCommandPorts) {
     const target = kernel.captureTarget(), project = target.editingProject
     const sourceOwner=owningContainer(source.project,source.roots[0])
     const selectedOwner=target.instanceId?owningContainer(project,target.instanceId):null
-    const destination: ComponentContainer = scope()==='global' ? {kind:'global',plane:selectedOwner?.kind==='global'?selectedOwner.plane:sourceOwner?.kind==='global'?sourceOwner.plane:'overlay'} : { kind: 'surface', surfaceId: target.surfaceId ?? project.surfaces[0]?.id ?? '' }
+    const destination: ComponentContainer = scope()==='global' ? {kind:'global',plane:selectedOwner?.kind==='global'?selectedOwner.plane:sourceOwner?.kind==='global'?sourceOwner.plane:'overlay'} : insertionContainer(target)
     const moving = Boolean(source.moveAvailable)
     if (moving) source.moveAvailable = false
     try {
@@ -208,12 +223,22 @@ export function createCrossSurfaceCommands(ports: CrossSurfaceCommandPorts) {
     addChartNode(chart: 'bar' | 'line' | 'area' | 'pie' | 'donut', x?: number, y?: number) { return delegate('addChartNode', chart, x, y) },
     ensureTeacherController() { return delegate('ensureTeacherController') },
     selectNode(id: string | null, additive = false) {
+      // Choosing an object ends the old Flow text-range intent, including a range in that same object.
+      ports.shell.patch({ flowContextSelection: null })
       const ids = kernel.readView().selectedInstanceIds
       kernel.selectInstances(id === null ? [] : additive ? ids.includes(id) ? ids.filter(value => value !== id) : [...ids, id] : [id])
       if (id) ports.shell.patch({ activeTab: 'properties' })
     },
-    selectNodes(ids: string[]) { kernel.selectInstances(ids); if (ids.length) ports.shell.patch({ activeTab: 'properties' }) },
-    selectAllNodes() { commands.selectNodes(scope()==='global'?[...current().global.underlay,...current().global.overlay]:surface()?.childIds??[]) },
+    selectNodes(ids: string[]) { ports.shell.patch({ flowContextSelection: null }); kernel.selectInstances(ids); if (ids.length) ports.shell.patch({ activeTab: 'properties' }) },
+    selectAllNodes() {
+      const active = document.activeElement
+      if (ports.shell.read().editingTextNodeId || active instanceof HTMLElement && active.closest('input,textarea,[contenteditable="true"],.cm-editor')) {
+        if (!document.execCommand('selectAll')) report(new Error('请在当前输入区域使用全选快捷键'))
+        return
+      }
+      const project = current(), view = kernel.readView(), root = view.rootInstanceId ? project.instances[view.rootInstanceId] : undefined
+      commands.selectNodes(scope()==='global' ? [...project.global.underlay,...project.global.overlay] : surface()?.childIds ?? root?.childIds ?? (root ? [root.id] : []))
+    },
     updateNodes(patches: Array<{ nodeId: string; patch: EditorCanvasNodePatch }>) { run(async () => {
       const target = kernel.captureTarget(), edits: ComponentEdit[] = []
       for (const { nodeId, patch } of patches) {
@@ -253,6 +278,10 @@ export function createCrossSurfaceCommands(ports: CrossSurfaceCommandPorts) {
     pasteNodes() { requestClipboard('paste') },
     copyCourseClipboard(data: DataTransfer | null, cut = false, target = kernel.captureTarget()): boolean {
       if (!data) return false
+      if (kernel.readView().interactionSelection && kernel.readView().interactionSelection?.kind !== 'objects') {
+        report(new Error('当前内容不能作为独立对象复制或剪切，请进入文字编辑或明确选择整体。'))
+        return true
+      }
       const ids = target.instanceIds
       if (!ids.length) return false
       if (cut && ids.some(id => componentIsLocked(target.editingProject, id))) { report(new Error('锁定元素不能剪切')); return true }
@@ -275,12 +304,13 @@ export function createCrossSurfaceCommands(ports: CrossSurfaceCommandPorts) {
     },
     pasteCourseClipboard(data: DataTransfer | null): boolean {
       if (!data || !clipboard || !clipboardToken || data.getData(COURSE_OBJECT_CLIPBOARD_MIME) !== clipboardToken) return false
+      try { objectSelection() } catch (error) { report(error); return true }
       run(() => paste(clipboard!, false))
       return true
     },
-    duplicateSelectedNodes() { run(() => paste(captureClipboard(kernel.readView().selectedInstanceIds), true)) },
+    duplicateSelectedNodes() { run(() => { objectSelection(); return paste(captureClipboard(kernel.readView().selectedInstanceIds), true) }) },
     duplicateNode(id: string) { run(() => paste(captureClipboard([id]), true)) },
-    deleteNode(id: string) { run(() => remove([id])) }, deleteSelectedNodes() { run(() => remove(kernel.readView().selectedInstanceIds)) },
+    deleteNode(id: string) { run(() => remove([id])) }, deleteSelectedNodes() { run(() => { objectSelection(); return remove(kernel.readView().selectedInstanceIds) }) },
     reorderNodes(ids: string[]) { run(async () => {
       const target = kernel.captureTarget()
       await write(courseObjectOrderEdits(target.editingProject, ids), target)
@@ -293,14 +323,18 @@ export function createCrossSurfaceCommands(ports: CrossSurfaceCommandPorts) {
         reparent ? { ...target, activeStateId: null, editingProject: target.project } : target)
     }) },
     createLiveEditorSelectionSnapshot(focus?: EditorFocusKind | EventTarget | null): EditorSelectionSnapshot | null {
-      const view=kernel.readView(), project=view.editingProject, active=project?.surfaces.find(value=>value.id===view.surfaceId)
-      if (!project || !active) return null
-      return { locationId:active.id,revision:project.revision,sessionGeneration:view.activation,documentId:view.activeDocumentId ?? undefined,epoch:view.snapshot?.epoch,surfaceId:active.id,surfaceKind:active.kind,stateId:view.activeStateId,scope:scope()==='global'?'global':'location', focus:typeof focus==='string'?focus:ports.shell.read().editingTextNodeId?'text':view.selectedInstanceIds.length?'layer':'none', itemIds:[...view.selectedInstanceIds],items:view.selectedInstanceIds.map(itemId=>({itemId,locked:componentIsLocked(project,itemId)})) }
+      const view=kernel.readView(), project=view.editingProject, active=(project == null ? undefined : componentContainers(project).find(value=>value.id===view.surfaceId))
+      const rootId = view.rootInstanceId
+      if (!project || !active && (!rootId || !project.instances[rootId])) return null
+      return { locationId:active?.id ?? rootId!,revision:project.revision,sessionGeneration:view.activation,documentId:view.activeDocumentId ?? undefined,epoch:view.snapshot?.epoch,surfaceId:active?.id,surfaceKind:active?.kind ?? 'program',stateId:view.activeStateId,
+        ...(view.interactionSelection && view.interactionSelection.kind !== 'objects' ? { preciseTargetKey: interactionSelectionIdentity(view.interactionSelection) } : {}),
+        scope:scope()==='global'?'global':'location', focus:typeof focus==='string'?focus:ports.shell.read().editingTextNodeId?'text':view.selectedInstanceIds.length?'layer':'none', itemIds:[...view.selectedInstanceIds],items:view.selectedInstanceIds.map(itemId=>({itemId,locked:componentIsLocked(project,itemId)})) }
     },
     routeEditorAction(actionId: EditorActionId, snapshot?: EditorSelectionSnapshot | null) {
       const live=commands.createLiveEditorSelectionSnapshot()
-      if (!live || (snapshot && (snapshot.documentId!==live.documentId || snapshot.epoch!==live.epoch || snapshot.locationId!==live.locationId || snapshot.revision!==live.revision || snapshot.sessionGeneration!==live.sessionGeneration || snapshot.stateId!==live.stateId || snapshot.scope!==live.scope || JSON.stringify(snapshot.itemIds)!==JSON.stringify(live.itemIds)))) return {actionId,ok:false,reason:'选择或文档已改变',adapter:'none' as const}
+      if (!live || (snapshot && (snapshot.documentId!==live.documentId || snapshot.epoch!==live.epoch || snapshot.locationId!==live.locationId || snapshot.revision!==live.revision || snapshot.sessionGeneration!==live.sessionGeneration || snapshot.stateId!==live.stateId || snapshot.preciseTargetKey!==live.preciseTargetKey || snapshot.scope!==live.scope || JSON.stringify(snapshot.itemIds)!==JSON.stringify(live.itemIds)))) return {actionId,ok:false,reason:'选择或文档已改变',adapter:'none' as const}
       if (live.focus==='text') return {actionId,ok:false,reason:'文字编辑中由正文处理此操作',adapter:'none' as const}
+      if (live.preciseTargetKey && ['copy','cut','paste','duplicate','delete'].includes(actionId)) return { actionId, ok: false, reason: '当前内容没有独立对象操作，请编辑内容或选择整体', adapter: 'none' as const }
       if (['cut','delete'].includes(actionId) && live.items?.some(item=>item.locked)) return {actionId,ok:false,reason:'锁定元素不能删除，请先解锁',adapter:'none' as const}
       switch(actionId) {
         case 'select-all': commands.selectAllNodes();break

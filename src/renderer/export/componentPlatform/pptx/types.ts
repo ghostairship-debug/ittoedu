@@ -30,7 +30,7 @@ export interface BuildComponentPptxOptions extends ExportPageOptions {
   /** Spatial pages require the actual Player camera view, including global planes. */
   captureSurface?(context: { input: ComponentPptxInput; surface: ComponentSurface; page: ComponentPptxPage }): string | undefined | Promise<string | undefined>
   /** Capture only the formal background; foreground and global objects stay native. */
-  captureBackground?(context: { input: ComponentPptxInput; surface: ComponentSurface }): string | undefined | Promise<string | undefined>
+  captureBackground?(context: { input: ComponentPptxInput; surface: ComponentSurface; layer?: 'project' | 'surface' }): string | undefined | Promise<string | undefined>
   onDiagnostic?(diagnostic: ComponentPptxDiagnostic): void
 }
 export interface ComponentPptxResult {

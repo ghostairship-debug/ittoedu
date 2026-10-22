@@ -1,4 +1,6 @@
 // @vitest-environment node
+import { testContainerInstance, appendRootContainers } from '../helpers/glxWorkFixture'
+import { componentSurfaces } from '../../src/shared/contracts/component-platform/project'
 import { expect, it } from 'vitest'
 import { randomUUID } from 'node:crypto'
 import { promises as fs } from 'node:fs'
@@ -34,13 +36,13 @@ import { TEACHER_CONTROLLER_DEFINITION } from '../../src/components/teacher-cont
 
 async function fixture(kind: 'text' | 'table' | 'web', path: string[], from: number, to: number, scope: 'range' | 'field' | 'object' = 'range', initialText = '前OLD后',
   setup?: (project: CourseProjectV10, resources: DocumentResources) => void) {
-  const project = createBlankCourseProjectV10('安全正文'), surfaceId = project.surfaces[0].id
+  const project = createBlankCourseProjectV10('安全正文'), surfaceId = componentSurfaces(project)[0].id
   const definitionId = `guoling.${kind}`
   project.definitions[definitionId] = kind === 'web' ? WEB_DEFINITION : { id: definitionId, role: 'mixed', title: kind, implementation: { kind: 'builtin', key: definitionId } }
   const data = kind === 'text' ? createTextComponentData(initialText) : kind === 'web' ? { html: '<p>OLD</p>' } : createTableData({ rows: 1, columns: 1 })
   if (kind === 'table') (data as ReturnType<typeof createTableData>).rows[0].cells[0].text = initialText
   project.instances.a = { id: 'a', definitionId, data: JSON.parse(JSON.stringify(data)), frame: { width: 400, height: 120, transform: [1, 0, 0, 1, 30, 40] } }
-  project.surfaces[0].childIds.push('a')
+  testContainerInstance(project, 0).childIds.push('a')
   const resources: DocumentResources = { assets: {}, components: {} }
   setup?.(project, resources)
   const driver = new CourseV10Driver(), registry = new DocumentRegistry({ drivers: [driver], createId: randomUUID, bindingKey: binding => binding.path,
@@ -191,8 +193,8 @@ it.each([
   { content: '新', firstText: '未选', secondText: '新未选' },
   { content: '', firstText: '未选', secondText: '未选' },
 ])('captures Flow visible order and rewrites both partial object ranges in one canonical History entry: $content', async ({ content, firstText, secondText }) => {
-  const project = createBlankCourseProjectV10('Flow连续正文'), surface = project.surfaces[0]
-  surface.kind = 'flow'
+  const project = createBlankCourseProjectV10('Flow连续正文'), surface = testContainerInstance(project, 0)
+  surface.container.kind = 'flow'
   project.definitions['guoling.text'] = { id: 'guoling.text', title: '正文', role: 'mixed', implementation: { kind: 'builtin', key: 'guoling.text' } }
   for (const [id, text] of [['first', '未选甲'], ['second', '乙未选']]) project.instances[id] = { id, definitionId: 'guoling.text', data: JSON.parse(JSON.stringify(createTextComponentData(text))) }
   surface.childIds = ['first', 'second']
@@ -229,7 +231,7 @@ it('accepts ordinary source text and forks its observed workspace while preservi
     project.definitions['guoling.text'].implementation = { kind: 'source', language: 'javascript', workspace: { ownerId: 'shared', entry: 'entry.js' },
       moduleBindings: { './helper.js': 'helper' }, dependencies: ['helper'] }
     project.definitions.helper = { id: 'helper', role: 'content', implementation: { kind: 'source', language: 'javascript', source: 'export const helper = 1' } }
-    project.instances.b = { ...structuredClone(project.instances.a), id: 'b' }; project.surfaces[0].childIds.push('b')
+    project.instances.b = { ...structuredClone(project.instances.a), id: 'b' }; testContainerInstance(project, 0).childIds.push('b')
     resources.components.shared = { 'entry.js': new TextEncoder().encode(original), 'notes.txt': new TextEncoder().encode('保留附件') }
   })
   expect(await h.gateway.execute('safe', randomUUID(), { name: 'object.update', input: { target: h.handle,
@@ -342,12 +344,12 @@ it('adopts a delegated source group through public source.from and preserves rep
 
 it('captures the editor table caption before its visible cells and never rewrites the unselected cell suffix', async () => {
   const h = await fixture('table', [], 0, 0, 'object', '甲乙', project => {
-    project.surfaces[0].kind = 'flow'
+    testContainerInstance(project, 0).container.kind = 'flow'
     const table = parseTableData(project.instances.a.data)
     table.caption = { inlines: [{ type: 'text', text: '标题' }] }
     project.instances.a.data = JSON.parse(JSON.stringify(table))
   })
-  const surfaceId = h.project.surfaces[0].id
+  const surfaceId = componentSurfaces(h.project)[0].id
   const pm = toEditorDocument(projectFlowDocument(h.model().project, surfaceId).content)
   const visible: { key: string; position: number; text: string }[] = []
   pm.descendants((node, position) => { if (node.type.name === 'slot') visible.push({ key: node.attrs.key, position: position + 1, text: node.textContent }) })
@@ -368,14 +370,14 @@ it('captures the editor table caption before its visible cells and never rewrite
 it('uses public recipe, remix and productivity intents without model generated component identities', async () => {
   const h = await fixture('text', [], 0, 0, 'object')
   await h.gateway.beginRun({ runId: 'recipe-public', actor: 'agent', documents: [{ documentId: h.session.documentId, writable: [{ kind: 'document' }] }] })
-  const page = await h.gateway.issueTarget('recipe-public', h.session.documentId, { kind: 'course-surface', surfaceId: h.project.surfaces[0].id })
+  const page = await h.gateway.issueTarget('recipe-public', h.session.documentId, { kind: 'course-surface', surfaceId: componentSurfaces(h.project)[0].id })
   expect(await h.gateway.execute('recipe-public', randomUUID(), { name: 'course.recipes', input: {} }))
     .toMatchObject({ kind: 'read', data: { recipes: expect.arrayContaining([expect.objectContaining({ id: 'classify-sort-v1' })]) } })
   expect(await h.gateway.execute('recipe-public', randomUUID(), { name: 'surface.recipe', input: { target: page, recipeId: 'classify-sort-v1',
     slots: { title: '排序题', mode: 'sort', items: '甲\n乙', correctOrder: '乙,甲', success: '正确', failure: '再试' } } }))
     .toMatchObject({ kind: 'document-operation', result: { status: 'applied' } })
-  expect(h.model().project.surfaces).toHaveLength(2)
-  const created = h.model().project.surfaces[1]
+  expect(componentSurfaces(h.model().project)).toHaveLength(2)
+  const created = componentSurfaces(h.model().project)[1]
   const interaction = created.childIds.map(id => h.model().project.instances[id]).find(instance => (instance.data as any).mode === 'sort')!
   const data = interaction.data as any
   expect(data.correctOrder).toEqual([data.items[1].id, data.items[0].id])
@@ -386,7 +388,7 @@ it('uses public recipe, remix and productivity intents without model generated c
   expect(view.slots[0]).not.toHaveProperty('instanceId')
   expect(await h.gateway.execute('recipe-public', randomUUID(), { name: 'surface.remix', input: { target: view.target,
     replacements: { [view.slots[0].id]: '新例子' } } })).toMatchObject({ kind: 'document-operation', result: { status: 'applied' } })
-  expect(h.model().project.surfaces).toHaveLength(3)
+  expect(componentSurfaces(h.model().project)).toHaveLength(3)
   expect(await h.gateway.execute('recipe-public', randomUUID(), { name: 'course.productivity', input: { target: page,
     request: { kind: 'text', scope: 'page', find: 'OLD', replacement: 'NEW' } } })).toMatchObject({ kind: 'document-operation', result: { status: 'applied' } })
   expect(plainDocumentText((h.model().project.instances.a.data as any).content)).toBe('前NEW后')
@@ -394,37 +396,37 @@ it('uses public recipe, remix and productivity intents without model generated c
   const current = h.session.read()
   await h.session.execute({ documentId: current.documentId, epoch: current.epoch, baseRevision: current.revision, operationId: randomUUID(), actor: 'human', mutation: { type: 'undo' } })
   expect(plainDocumentText((h.model().project.instances.a.data as any).content)).toBe('前OLD后')
-  expect(h.model().project.surfaces).toHaveLength(3)
+  expect(componentSurfaces(h.model().project)).toHaveLength(3)
 })
 
 it('routes productivity background changes into the observed presentation state without changing the base page', async () => {
   const h = await fixture('text', [], 0, 0, 'object', '甲', project => {
     project.designTokens = { fonts: [], colors: [{ id: 'accent', label: '强调', color: '#123456' }] }
-    project.surfaces[0].background = { mode: 'own', color: '#ffffff' }
-    project.surfaces[0].presentation = { states: [{ id: 'selected-state', title: '讲解', overrides: {}, background: { color: '#eeeeee' } }] }
+    testContainerInstance(project, 0).container.background = { mode: 'own', color: '#ffffff' }
+    testContainerInstance(project, 0).container.presentation = { states: [{ id: 'selected-state', title: '讲解', overrides: {}, background: { color: '#eeeeee' } }] }
   })
-  const target: ToolTarget = { kind: 'course-surface', surfaceId: h.project.surfaces[0].id, stateId: 'selected-state' }
+  const target: ToolTarget = { kind: 'course-surface', surfaceId: componentSurfaces(h.project)[0].id, stateId: 'selected-state' }
   await h.gateway.beginRun({ runId: 'state-productivity', actor: 'agent', documents: [{ documentId: h.session.documentId, writable: [target] }] })
   const page = await h.gateway.issueTarget('state-productivity', h.session.documentId, target)
   expect(await h.gateway.execute('state-productivity', randomUUID(), { name: 'course.productivity', input: { target: page,
     request: { kind: 'color', scope: 'page', property: 'background', tokenId: 'accent' } } }))
     .toMatchObject({ kind: 'document-operation', result: { status: 'applied' } })
-  expect(h.model().project.surfaces[0].background).toEqual(h.project.surfaces[0].background)
-  expect(h.model().project.surfaces[0].presentation?.states[0].background?.color).toBe('#123456')
+  expect(componentSurfaces(h.model().project)[0].background).toEqual(componentSurfaces(h.project)[0].background)
+  expect(componentSurfaces(h.model().project)[0].presentation?.states[0].background?.color).toBe('#123456')
   expect(h.session.read().undoDepth).toBe(1)
   const current = h.session.read()
   await h.session.execute({ documentId: current.documentId, epoch: current.epoch, baseRevision: current.revision, operationId: randomUUID(), actor: 'human', mutation: { type: 'undo' } })
-  expect(h.model().project.surfaces).toEqual(h.project.surfaces)
+  expect(componentSurfaces(h.model().project)).toEqual(componentSurfaces(h.project))
 })
 
 it('remixes only provided observed slots and permits explicit clearing while preserving omitted content and the original page', async () => {
   const h = await fixture('text', [], 0, 0, 'object', '甲清空', project => {
     project.instances.b = { ...structuredClone(project.instances.a), id: 'b', data: JSON.parse(JSON.stringify(createTextComponentData('乙保留'))) }
     project.instances.b.frame!.transform[4] = 500
-    project.surfaces[0].childIds.push('b')
+    testContainerInstance(project, 0).childIds.push('b')
   })
   await h.gateway.beginRun({ runId: 'partial-remix', actor: 'agent', documents: [{ documentId: h.session.documentId, writable: [{ kind: 'document' }] }] })
-  const page = await h.gateway.issueTarget('partial-remix', h.session.documentId, { kind: 'course-surface', surfaceId: h.project.surfaces[0].id })
+  const page = await h.gateway.issueTarget('partial-remix', h.session.documentId, { kind: 'course-surface', surfaceId: componentSurfaces(h.project)[0].id })
   const inspected = await h.gateway.execute('partial-remix', randomUUID(), { name: 'surface.remix.inspect', input: { target: page } })
   if (inspected.kind !== 'read') throw new Error('Expected observed remix slots')
   const view = inspected.data as { target: string; slots: { id: string; original: string }[] }
@@ -432,7 +434,7 @@ it('remixes only provided observed slots and permits explicit clearing while pre
   expect(slot).not.toHaveProperty('issue')
   expect(await h.gateway.execute('partial-remix', randomUUID(), { name: 'surface.remix', input: { target: view.target, replacements: { [slot.id]: '' } } }))
     .toMatchObject({ kind: 'document-operation', result: { status: 'applied' } })
-  const clone = h.model().project.surfaces[1]
+  const clone = componentSurfaces(h.model().project)[1]
   const values = clone.childIds.map(id => h.model().project.instances[id])
   expect(values.map(instance => plainDocumentText((instance.data as any).content))).toEqual(['', '乙保留'])
   expect(values[1].frame).toEqual(h.project.instances.b.frame)
@@ -441,7 +443,7 @@ it('remixes only provided observed slots and permits explicit clearing while pre
   expect(h.session.read().undoDepth).toBe(1)
   const current = h.session.read()
   await h.session.execute({ documentId: current.documentId, epoch: current.epoch, baseRevision: current.revision, operationId: randomUUID(), actor: 'human', mutation: { type: 'undo' } })
-  expect(h.model().project.surfaces).toEqual(h.project.surfaces)
+  expect(componentSurfaces(h.model().project)).toEqual(componentSurfaces(h.project))
   expect(h.model().project.instances).toEqual(h.project.instances)
 })
 
@@ -453,7 +455,7 @@ it('uses observed geometry targets and controller defaults in one public batch w
     for (const [id, x, y, width, height] of [['a', 10, 20, 40, 20], ['b', 100, 60, 60, 30], ['locked', 220, 30, 60, 30]] as const)
       project.instances[id] = { id, definitionId: 'guoling.text', data: JSON.parse(JSON.stringify(createTextComponentData(id))),
         ...(id === 'locked' ? { locked: true } : {}), frame: { width, height, transform: [1, 0, 0, 1, x, y] } }
-    project.surfaces[0].childIds = ['group']
+    testContainerInstance(project, 0).childIds = ['group']
     for (const instance of Object.values(project.instances)) if (instance.definitionId === TEACHER_CONTROLLER_DEFINITION.id) {
       delete project.instances[instance.id]; project.global.overlay = project.global.overlay.filter(id => id !== instance.id)
     }
@@ -464,7 +466,7 @@ it('uses observed geometry targets and controller defaults in one public batch w
   expect(h.session.read().undoDepth).toBe(0)
   await h.gateway.beginRun({ runId: 'geometry', actor: 'agent', documents: [{ documentId: h.session.documentId, writable: [{ kind: 'document' }] }] })
   await h.gateway.loadToolFamilies('geometry', ['navigation'])
-  const surfaceId = h.project.surfaces[0].id
+  const surfaceId = componentSurfaces(h.project)[0].id
   const targets = await Promise.all(['a', 'b', 'locked'].map(instanceId => h.gateway.issueTarget('geometry', h.session.documentId, { kind: 'course-instance', surfaceId, instanceId })))
   const page = await h.gateway.issueTarget('geometry', h.session.documentId, { kind: 'course-surface', surfaceId })
   const layout = { name: 'object.layout', input: { targets, intent: { kind: 'align', alignment: 'left' } } }
@@ -488,7 +490,7 @@ it('uses observed geometry targets and controller defaults in one public batch w
 
 it('inserts a professional table into an observed Flow container using host defaults and one undoable command', async () => {
   const h = await fixture('text', [], 0, 0, 'object', '容器', project => {
-    project.surfaces[0].kind = 'flow'; project.instances.a.childIds = []
+    testContainerInstance(project, 0).container.kind = 'flow'; project.instances.a.childIds = []
     project.definitions[DOCUMENT_BLOCK_DEFINITION.id] = DOCUMENT_BLOCK_DEFINITION
     project.instances.a.definitionId = DOCUMENT_BLOCK_DEFINITION.id
     project.instances.a.data = { type: 'section', title: { inlines: [{ type: 'text', text: '容器' }] }, collapsedByDefault: false }
@@ -499,7 +501,7 @@ it('inserts a professional table into an observed Flow container using host defa
   expect(instance.definitionId).toBe('guoling.table')
   expect(parseTableData(instance.data).rows.length).toBeGreaterThan(0)
   expect(instance.frame).toMatchObject({ width: 600, height: 220 })
-  expect(h.model().project.surfaces[0].childIds).toEqual(['a'])
+  expect(componentSurfaces(h.model().project)[0].childIds).toEqual(['a'])
   expect(h.session.read().undoDepth).toBe(1)
   const current = h.session.read()
   await h.session.execute({ documentId: current.documentId, epoch: current.epoch, baseRevision: current.revision, operationId: randomUUID(), actor: 'human', mutation: { type: 'undo' } })
@@ -567,7 +569,7 @@ it('compiles the declared TypeScript entry after public source replacement and k
       moduleBindings: { helper: 'helper' } }
     project.definitions.helper = { id: 'helper', role: 'content', implementation: { kind: 'source', language: 'typescript',
       workspace: { ownerId: 'helper-source', entry: 'dependency.js' } } }
-    project.instances.b = { ...structuredClone(project.instances.a), id: 'b' }; project.surfaces[0].childIds.push('b')
+    project.instances.b = { ...structuredClone(project.instances.a), id: 'b' }; testContainerInstance(project, 0).childIds.push('b')
     resources.components['original-source'] = { 'entry.js': new TextEncoder().encode('export const count = 0'), 'note.txt': new TextEncoder().encode('保留') }
     resources.components['helper-source'] = { 'dependency.js': new TextEncoder().encode('export const start:number = 2') }
   })
@@ -594,14 +596,14 @@ it('compiles the declared TypeScript entry after public source replacement and k
 
 it('resolves public observed references only in declared fields and delivers its Flow anchor to the actual placement consumer', async () => {
   const h = await fixture('text', [], 0, 0, 'object', '浮层', project => {
-    const surface = project.surfaces[0]
-    surface.kind = 'flow'
-    project.surfaces.push({ id: 'destination', kind: 'slide', title: '讲解页', childIds: [],
+    const surface = testContainerInstance(project, 0)
+    surface.container.kind = 'flow'
+    appendRootContainers(project, { id: 'destination', kind: 'slide', title: '讲解页', childIds: [],
       presentation: { states: [{ id: 'teaching-state', title: '讲解', overrides: {} }] } })
     project.instances.b = { ...structuredClone(project.instances.a), id: 'b', data: JSON.parse(JSON.stringify(createTextComponentData('正文段落'))) }
     surface.childIds.push('b')
   })
-  const runId = 'public-refs', surfaceId = h.project.surfaces[0].id
+  const runId = 'public-refs', surfaceId = componentSurfaces(h.project)[0].id
   await h.gateway.beginRun({ runId, actor: 'agent', documents: [{ documentId: h.session.documentId, writable: [{ kind: 'document' }] }] })
   await h.gateway.loadToolFamilies(runId, ['interaction', 'layout'])
   const page = await h.gateway.issueTarget(runId, h.session.documentId, { kind: 'course-surface', surfaceId })

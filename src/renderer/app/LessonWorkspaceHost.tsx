@@ -4,6 +4,7 @@ import type { CourseDocumentsPort } from '../lessonWorkspace/controller/useDocum
 import { forwardRef, useEffect, useMemo, useRef, useImperativeHandle, useState, type ReactNode } from 'react'
 import type { LessonWorkspace } from '../../shared/lessonWorkspace'
 import { LessonWorkspaceShell, type LessonWorkspaceShellHandle } from '../lessonWorkspace/LessonWorkspaceShell'
+import { importLessonMaterialPdf } from '../lessonMaterials/lessonMaterialPdfImport'
 import { LessonMaterialBrowser } from '../lessonMaterials/LessonMaterialBrowser'
 import type { LessonAuthoringMaterialSelection } from '../../shared/lessonAuthoring'
 import { createDesktopDocumentPort } from './lessonDocumentPort'
@@ -63,8 +64,10 @@ export const LessonWorkspaceHost = forwardRef<LessonWorkspaceShellHandle, Lesson
       if (props.courseDocuments?.documents.some(document => document.documentId === id)) await props.prepareCourseDocuments?.([id])
       if (!api?.documents) throw new Error('文档服务尚未就绪')
     }
-    return workbenchSelection.setFallback(async id => { await flushInput(id); return api!.documents!.read(id) }, flushInput)
-  }, [api?.documents, props.courseDocuments?.documents, props.prepareCourseDocuments])
+    const stopFallback = workbenchSelection.setFallback(async id => { await flushInput(id); return api!.documents!.read(id) }, flushInput)
+    const stopClosed = documents?.subscribe(event => { if (event.type === 'closed') workbenchSelection.closeDocument(event.documentId, event.epoch) })
+    return () => { stopClosed?.(); stopFallback() }
+  }, [api?.documents, documents, props.courseDocuments?.documents, props.prepareCourseDocuments])
   if (!api?.lesson || !api.workspaceFiles || !port) return <><p role="alert">工作台服务不可用，请重新打开应用。</p>{props.children}</>
   const material = (sourcePath: string | undefined, lesson: LessonWorkspace | null) => {
     const service = api.lessonMaterials
@@ -74,6 +77,7 @@ export const LessonWorkspaceHost = forwardRef<LessonWorkspaceShellHandle, Lesson
     return <LessonMaterialBrowser targetKey={JSON.stringify(target)} selections={selections[key] ?? []}
       onSelect={(record, fragmentIds) => setSelections(current => ({ ...current, [key]: [...(current[key] ?? []).filter(item => item.id !== record.id), ...(fragmentIds.length ? [{ id: record.id, extractionVersion: record.extractionVersion, fragmentIds }] : [])] }))}
       selectSource={() => service.selectSource(sourcePath ? { path: sourcePath } : undefined)}
+      importPdf={(input, options) => importLessonMaterialPdf(service, target, input, options)}
       list={() => service.list(target)} importMaterial={input => service.importMaterial(target, input)} read={input => service.read(target, input)} />
   }
   return <><LessonWorkspaceShell ref={shell} {...props} onBeforeWorkspaceChange={async () => { await assistant.current?.preserveDraft() }} lessonOperation={api.lesson} workspaceFiles={api.workspaceFiles} documentPort={port}
@@ -110,7 +114,11 @@ export const LessonWorkspaceHost = forwardRef<LessonWorkspaceShellHandle, Lesson
           if (prepare && !await editor.session.drain()) throw new Error('当前输入尚未提交，请先完成输入或处理冲突')
           const documentId = editor.session.documentId
           if (!documentId) throw new Error('文档会话尚未就绪')
-          const snapshot = await api.documents!.read(documentId)
+          // Automatic references only display the already committed editor view.
+          // Fetching the complete document on every host render copies large
+          // HTML over IPC while switching or closing an unrelated tab.
+          const snapshot = prepare ? await api.documents!.read(documentId) : editor.session.committedDocument
+          if (!snapshot) return []
           return [captureDocumentReference(snapshot, writable)]
         }
         return isCourse ? props.captureCourseDocument?.(writable, prepare) ?? [] : []

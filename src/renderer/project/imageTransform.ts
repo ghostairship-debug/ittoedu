@@ -28,7 +28,7 @@ async function decodeOriginal(bytes: Uint8Array, mimeType: string): Promise<Deco
   finally { URL.revokeObjectURL(url) }
 }
 
-async function readImageTransformSource(bytes: Uint8Array, mimeType: string, signal?: AbortSignal): Promise<DecodedImage> {
+export async function readImageTransformSource(bytes: Uint8Array, mimeType: string, signal?: AbortSignal): Promise<DecodedImage> {
   abort(signal)
   try {
     if (!bytes.length) throw new Error('原图为空')
@@ -109,11 +109,8 @@ export function transformImagePixels(source: ImagePixels, input: ImageTransformI
   return { ...image, changed, effects }
 }
 
-export async function transformImageAsset(bytes: Uint8Array, mimeType: string, rawInput: unknown, signal?: AbortSignal) {
-  const input = imageTransformInputSchema.parse(rawInput)
-  const source = await readImageTransformSource(bytes, mimeType, signal)
-  await new Promise<void>(resolve => setTimeout(resolve, 0))
-  abort(signal)
+/** The existing pure processing stage can also run on an isolated working copy. */
+export function transformDecodedImage(source: DecodedImage, bytes: Uint8Array, input: ImageTransformInput, signal?: AbortSignal) {
   const result = transformImagePixels(source, input, signal)
   const output = result.changed ? encodeImageTransformPng(result, source.metadata) : bytes.slice()
   if (result.changed) {
@@ -121,8 +118,17 @@ export async function transformImageAsset(bytes: Uint8Array, mimeType: string, r
     if (verified.width !== result.width || verified.height !== result.height
       || verified.data.some((byte, i) => byte !== result.data[i])) throw new Error('输出 PNG 解码校验失败')
   }
+  return { bytes: output, width: result.width, height: result.height, changed: result.changed, effects: result.effects }
+}
+
+export async function transformImageAsset(bytes: Uint8Array, mimeType: string, rawInput: unknown, signal?: AbortSignal) {
+  const input = imageTransformInputSchema.parse(rawInput)
+  const source = await readImageTransformSource(bytes, mimeType, signal)
+  await new Promise<void>(resolve => setTimeout(resolve, 0))
+  abort(signal)
+  const result = transformDecodedImage(source, bytes, input, signal)
   // Let Stop / session changes reach the existing transaction owner before commit.
   await new Promise<void>(resolve => setTimeout(resolve, 0))
   abort(signal)
-  return { bytes: output, width: result.width, height: result.height, changed: result.changed, effects: result.effects }
+  return result
 }

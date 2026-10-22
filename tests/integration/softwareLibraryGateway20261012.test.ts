@@ -1,4 +1,6 @@
 // @vitest-environment node
+import { componentSurfaces } from '../../src/shared/contracts/component-platform/project'
+import { appendRootContainers, testContainerInstance } from '../helpers/glxWorkFixture'
 import { promises as fs } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -57,16 +59,16 @@ async function fixture(source: CourseProjectV10, resources: DocumentResources, d
   destination.theme = { css: '.manual{color:#6b21a8}' }
   destination.instances.manual = { id: 'manual', definitionId: WEB_DEFINITION.id, data: { html: '<div class="manual">保留人工布局</div>' },
     frame: { width: 250, height: 100, transform: [1, 0, 0, 1, 600, 120] } }
-  destination.surfaces[0].childIds = ['manual']
+  testContainerInstance(destination, 0).childIds = ['manual']
   if (destinationAssets) for (const [id, bytes] of Object.entries(destinationAssets)) destination.assets[id] = {
     id, path: `assets/${id}.png`, mimeType: 'image/png', width: 4, height: 3, byteLength: bytes.byteLength,
   }
   const targetSnapshot = await targetHost.internalAPI.create({ kind: 'course-v10', project: destination,
     resources: { assets: destinationAssets ?? {}, components: {} } }, '目标B.glx')
   const begin = async (host: DocumentHostService, runId: string, snapshot: DocumentSnapshot, selected: string[] = []) => host.tools.beginRun({ runId, actor: 'agent',
-    documents: [{ documentId: snapshot.documentId, writable: [{ kind: 'document' }], selection: selected.map(instanceId => ({ kind: 'course-instance', surfaceId: source.surfaces[0].id, instanceId })) }],
+    documents: [{ documentId: snapshot.documentId, writable: [{ kind: 'document' }], selection: selected.map(instanceId => ({ kind: 'course-instance', surfaceId: componentSurfaces(source)[0].id, instanceId })) }],
     fileAccess: { permission: 'workspace', workspaceRoot: root } })
-  await begin(sourceHost, 'source', sourceSnapshot, source.surfaces[0].childIds)
+  await begin(sourceHost, 'source', sourceSnapshot, componentSurfaces(source)[0].childIds)
   await begin(targetHost, 'target', targetSnapshot)
   let seq = 0
   const sourceCall = (name: string, input: unknown) => sourceHost.tools.execute('source', `source-${++seq}`, { name, input })
@@ -109,8 +111,8 @@ async function png(color: string, width = 160, height = 100) {
 }
 
 it('public page and two-page structure save/use keep source state, remap internal navigation, preserve the destination, and retain resources after source close and cold open', async () => {
-  const source = createBlankCourseProjectV10('来源A'), first = source.surfaces[0], second = createCourseSurface(source, { kind: 'slide', title: '第二页' })
-  first.title = '第一页'; source.surfaces.push(second)
+  const source = createBlankCourseProjectV10('来源A'), first = componentSurfaces(source)[0], second = createCourseSurface(source, { kind: 'slide', title: '第二页' })
+  testContainerInstance(source, first.id).name = '第一页'
   source.theme = { css: '.evidence{color:#2563eb}' }
   source.definitions[WEB_DEFINITION.id] = WEB_DEFINITION; source.definitions[INTERACTIONS_DEFINITION.id] = INTERACTIONS_DEFINITION
   source.instances.card = { id: 'card', definitionId: WEB_DEFINITION.id, data: { html: '<button>进入第二页</button>' }, frame: { width: 200, height: 100, transform: [1, 0, 0, 1, 90, 110] } }
@@ -121,8 +123,9 @@ it('public page and two-page structure save/use keep source state, remap interna
   source.instances.nav = { id: 'nav', definitionId: INTERACTIONS_DEFINITION.id, data: { rules: [{ id: 'rule', name: '跳转', enabled: true,
     trigger: { type: 'node.click', nodeId: 'card' }, conditions: [], actions: [{ id: 'action', start: 'after-previous', delayMs: 0,
       action: { type: 'scene.go', sceneId: second.id, targetStateId: 'second-state' } }] }] } }
-  first.childIds = ['card', 'nav']; second.childIds = ['branch']
+  testContainerInstance(source, first.id).childIds = ['card', 'nav']; second.childIds = ['branch']
   second.presentation = { initialStateId: 'second-state', states: [{ id: 'second-state', title: '分支', overrides: { branch: { visible: true } }, order: ['branch'] }] }
+  appendRootContainers(source, second)
   const bytes = await png('#2563eb')
   source.assets.branchAsset = { id: 'branchAsset', path: 'assets/branch.png', mimeType: 'image/png', width: 160, height: 100, byteLength: bytes.byteLength }
   const f = await fixture(source, { assets: { branchAsset: bytes }, components: {} })
@@ -143,20 +146,21 @@ it('public page and two-page structure save/use keep source state, remap interna
     await f.closeSource()
     const targetPath = (await f.pages(f.targetCall))[0].path
     expect(await f.targetCall('asset.use', { packageId: pageSave.packageId, path: targetPath })).toMatchObject({ kind: 'document-operation', result: { status: 'applied' } })
-    const pageApplied = await f.current(), pageModel = model(pageApplied), template = pageModel.project.surfaces[1]
-    expect(pageApplied.undoDepth).toBe(1); expect(pageModel.project.surfaces).toHaveLength(2)
+    const pageApplied = await f.current(), pageModel = model(pageApplied), template = componentSurfaces(pageModel.project)[1]
+    expect(pageApplied.undoDepth).toBe(1); expect(componentSurfaces(pageModel.project)).toHaveLength(2)
     expect(template.presentation?.states[0].order).toEqual(template.childIds)
-    expect(template.presentation?.initialStateId).not.toBe('second-state')
+    expect([template.id, template.presentation?.initialStateId]).not.toEqual([second.id, second.presentation?.initialStateId])
+    expect(template.presentation?.states.some(state => state.id === template.presentation?.initialStateId)).toBe(true)
     expect(pageModel.project.instances.manual).toEqual(f.destination.instances.manual)
-    expect(pageModel.project.surfaces[0]).toEqual(f.destination.surfaces[0]); expect(pageModel.project.theme).toEqual(f.destination.theme)
+    expect(componentSurfaces(pageModel.project)[0]).toEqual(componentSurfaces(f.destination)[0]); expect(pageModel.project.theme).toEqual(f.destination.theme)
     // Refresh the real page path after the first insertion; no handwritten ids or disk-project edits.
-    const refreshedPath = (await f.pages(f.targetCall)).find(page => page.title === f.destination.surfaces[0].title)!.path
+    const refreshedPath = (await f.pages(f.targetCall)).find(page => page.title === componentSurfaces(f.destination)[0].title)!.path
     expect(await f.targetCall('asset.use', { packageId: structureSave.packageId, path: refreshedPath })).toMatchObject({ kind: 'document-operation', result: { status: 'applied' } })
     const applied = await f.current(), project = model(applied).project
-    expect(applied.undoDepth).toBe(2); expect(project.surfaces).toHaveLength(4)
-    expect(project.instances.manual).toEqual(f.destination.instances.manual); expect(project.surfaces[0]).toEqual(f.destination.surfaces[0]); expect(project.theme).toEqual(f.destination.theme)
-    expect(project.surfaces.filter(surface => pageModel.project.surfaces.some(existing => existing.id === surface.id))).toEqual(pageModel.project.surfaces)
-    const inserted = project.surfaces.filter(surface => !pageModel.project.surfaces.some(existing => existing.id === surface.id))
+    expect(applied.undoDepth).toBe(2); expect(componentSurfaces(project)).toHaveLength(4)
+    expect(project.instances.manual).toEqual(f.destination.instances.manual); expect(componentSurfaces(project)[0]).toEqual(componentSurfaces(f.destination)[0]); expect(project.theme).toEqual(f.destination.theme)
+    expect(componentSurfaces(project).filter(surface => componentSurfaces(pageModel.project).some(existing => existing.id === surface.id))).toEqual(componentSurfaces(pageModel.project))
+    const inserted = componentSurfaces(project).filter(surface => !componentSurfaces(pageModel.project).some(existing => existing.id === surface.id))
     expect(inserted.map(surface => surface.title)).toEqual(['第一页', '第二页'])
     const [insertedFirst, insertedSecond] = inserted
     const card = insertedFirst.childIds.find(id => project.instances[id].definitionId !== INTERACTIONS_DEFINITION.id &&
@@ -170,7 +174,7 @@ it('public page and two-page structure save/use keep source state, remap interna
     expect([insertedFirst.id, insertedSecond.id]).not.toContain(first.id); expect([insertedFirst.id, insertedSecond.id]).not.toContain(second.id)
     for (const id of project.global.underlay) {
       const background = project.instances[id]
-      expect(isComponentVisibleAtSurface(background, project.surfaces[0].id)).toBe(false)
+      expect(isComponentVisibleAtSurface(background, componentSurfaces(project)[0].id)).toBe(false)
       expect(isComponentVisibleAtSurface(background, insertedFirst.id)).toBe(false)
     }
     expect(project.global.underlay.some(id => isComponentVisibleAtSurface(project.instances[id], insertedSecond.id))).toBe(true)
@@ -197,7 +201,7 @@ it('public entry discovery and rootIds selection insert only the chosen object w
   source.definitions[WEB_DEFINITION.id] = WEB_DEFINITION
   source.instances.code = { id: 'code', definitionId: 'code', name: '需要选择的程序', data: {}, frame: { width: 320, height: 200, transform: [1, 0, 0, 1, 80, 100] } }
   source.instances.other = { id: 'other', definitionId: WEB_DEFINITION.id, name: '不要插入的对象', data: { html: '<img src="cw-resource:other">', resourceBindings: { 'cw-resource:other': 'unrelated' } } }
-  source.surfaces[0].childIds = ['code', 'other']
+  testContainerInstance(source, 0).childIds = ['code', 'other']
   const assets = { used: await png('#e6a02b', 8, 6), branch: await png('#2563eb', 8, 6), unrelated: await png('#999999', 8, 6) }
   for (const [id, bytes] of Object.entries(assets)) source.assets[id] = { id, path: `assets/${id}.png`, mimeType: 'image/png', width: 8, height: 6, byteLength: bytes.byteLength }
   const destinationOnly = await png('#008844', 4, 3), f = await fixture(source, { assets, components: {} }, { destinationOnly })
@@ -212,9 +216,9 @@ it('public entry discovery and rootIds selection insert only the chosen object w
     const targetPath = (await f.pages(f.targetCall))[0].path
     expect(await f.targetCall('asset.use', { packageId: saved.packageId, path: targetPath, rootIds: [selected.id] })).toMatchObject({ kind: 'document-operation', result: { status: 'applied' } })
     const applied = await f.current(), current = model(applied)
-    expect(applied.undoDepth).toBe(1); expect(current.project.surfaces[0].childIds).toHaveLength(2)
+    expect(applied.undoDepth).toBe(1); expect(componentSurfaces(current.project)[0].childIds).toHaveLength(2)
     expect(current.project.instances.manual).toEqual(f.destination.instances.manual)
-    const copied = current.project.instances[current.project.surfaces[0].childIds[1]]
+    const copied = current.project.instances[componentSurfaces(current.project)[0].childIds[1]]
     expect(copied.name).toBe('需要选择的程序'); expect(copied.id).not.toBe(selected.id); expect(copied.frame).toEqual(source.instances.code.frame)
     expect(Object.values(current.project.instances).some(instance => instance.name === '不要插入的对象')).toBe(false)
     const implementation = current.project.definitions[copied.definitionId].implementation

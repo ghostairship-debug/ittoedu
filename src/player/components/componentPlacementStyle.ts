@@ -2,6 +2,7 @@ import type { ComponentDefinition, ComponentInstance } from '../../shared/contra
 import { documentColorChannels } from '../../shared/document/color'
 import { htmlDocumentKind } from '../../shared/html/documentKind'
 import { isMeasuredWebFragmentBox } from '../../components/web/measuredFragmentBox'
+import { isNativeFlowLayoutGroup, isNativeFlowContainerStyle } from '../../shared/flowNativeLayout'
 
 /** Visual CSS may paint the wrapper; affine placement remains the frame owner's field. */
 export function componentPaintStyle(instance: ComponentInstance, definition?: ComponentDefinition): Record<string, string | number> {
@@ -37,7 +38,8 @@ export function componentPaintStyle(instance: ComponentInstance, definition?: Co
   const result: Record<string, string | number> = {}
   for (const [key, value] of Object.entries(instance.style ?? {})) {
     const cssKey = key.startsWith('--') ? key : key.replace(/[A-Z]/g, letter => `-${letter.toLowerCase()}`)
-    if (geometry.test(cssKey) || typeof value !== 'string' && typeof value !== 'number') continue
+    if (geometry.test(cssKey) || isNativeFlowLayoutGroup(instance, definition) && isNativeFlowContainerStyle(key)
+      || typeof value !== 'string' && typeof value !== 'number') continue
     // Captured text and group fills equal to captured color are derived. Keeping one
     // on a group would override every descendant's professional colors and ranges.
     // Preserve an authored distinct fill and other content implementations.
@@ -50,7 +52,7 @@ export function componentPaintStyle(instance: ComponentInstance, definition?: Co
       : cssKey.replace(/-([a-z])/g, (_match, letter: string) => letter.toUpperCase()).replace(/^Ms/, 'ms')
     result[reactKey] = value
   }
-  if (instance.frame) result.boxSizing = 'border-box'
+  if (instance.frame || isNativeFlowLayoutGroup(instance, definition)) result.boxSizing = 'border-box'
   return result
 }
 

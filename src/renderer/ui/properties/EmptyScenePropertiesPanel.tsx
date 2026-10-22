@@ -169,7 +169,8 @@ export function EmptyScenePropertiesPanel({
               value: slideSurface.backgroundMode,
               onChange: (backgroundMode) => context.commands.updateSlideSurfaceBackground({ backgroundMode }),
             }}
-            onColorChange={(backgroundColor) => context.commands.updateSlideSurfaceBackground({ backgroundColor })}
+            onTransparent={() => context.commands.updateSlideSurfaceBackground({ backgroundMode: 'own', backgroundColor: 'transparent', backgroundAssetId: null })}
+        onColorChange={(backgroundColor) => context.commands.updateSlideSurfaceBackground({ backgroundColor })}
             onPreviewColorChange={context.commands.previewSlideSurfaceBackground ? (backgroundColor) => context.commands.previewSlideSurfaceBackground!({ backgroundColor }) : undefined}
             onAssetChange={(backgroundAssetId) => context.commands.updateSlideSurfaceBackground({ backgroundAssetId })}
             onImportAsset={context.commands.importSlideSurfaceBackgroundAsset}
@@ -188,7 +189,8 @@ export function EmptyScenePropertiesPanel({
               value: scene.backgroundMode,
               onChange: (backgroundMode) => context.commands.updateSceneBackground({ backgroundMode }),
             }}
-            onColorChange={(backgroundColor) => context.commands.updateSceneBackground({ backgroundColor })}
+            onTransparent={() => context.commands.updateSceneBackground({ backgroundMode: 'own', backgroundColor: 'transparent', backgroundAssetId: null })}
+        onColorChange={(backgroundColor) => context.commands.updateSceneBackground({ backgroundColor })}
             onPreviewColorChange={context.commands.previewSceneBackground ? (backgroundColor) => context.commands.previewSceneBackground!({ backgroundColor }) : undefined}
             onAssetChange={(backgroundAssetId) => context.commands.updateSceneBackground({ backgroundAssetId })}
             onImportAsset={context.commands.importSceneBackgroundAsset}
@@ -213,7 +215,8 @@ export function EmptyScenePropertiesPanel({
                 onToggle: context.commands.inheritStateAsset,
               },
             }}
-            onColorChange={(backgroundColor) => context.commands.updateStateBackground({ backgroundColor })}
+            onTransparent={() => context.commands.updateStateBackground({ backgroundColor: 'transparent', backgroundAssetId: null })}
+        onColorChange={(backgroundColor) => context.commands.updateStateBackground({ backgroundColor })}
             onPreviewColorChange={context.commands.previewStateBackground ? (backgroundColor) => context.commands.previewStateBackground!({ backgroundColor }) : undefined}
             onAssetChange={(backgroundAssetId) => context.commands.updateStateBackground({ backgroundAssetId })}
             testId="state-background-properties"

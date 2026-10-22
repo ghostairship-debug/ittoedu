@@ -1,3 +1,4 @@
+import { testContainerInstance } from '../helpers/glxWorkFixture'
 // @vitest-environment node
 import { expect, it } from 'vitest'
 import { createBlankCourseProjectV10 } from '../../src/core/course/createCourseProjectV10'
@@ -11,7 +12,7 @@ it('replaces the same asset with metadata and bytes together, preserves referenc
   project.definitions.image = { id: 'image', role: 'content', implementation: { kind: 'builtin', key: 'guoling.image' } }
   project.assets.art = { id: 'art', path: 'assets/art.svg', mimeType: 'image/svg+xml', width: 40, height: 20 }
   project.instances.image = { id: 'image', definitionId: 'image', data: createImageData('art') }
-  project.surfaces[0].childIds.push('image')
+  testContainerInstance(project, 0).childIds.push('image')
   project.background = { assetId: 'art' }
   const before: DocumentModel = { kind: 'course-v10', project, resources: { assets: { art: new Uint8Array([1, 2, 3]) }, components: {} } }
   const replace = captureComponentOperation(project, [{ type: 'asset.replace', asset: { ...project.assets.art, width: 80 },

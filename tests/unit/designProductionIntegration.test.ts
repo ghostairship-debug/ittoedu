@@ -1,3 +1,5 @@
+import { testContainerInstance, setRootContainers } from '../helpers/glxWorkFixture'
+import { componentSurfaces } from '../../src/shared/contracts/component-platform/project'
 // @vitest-environment node
 import { afterEach, expect, it } from 'vitest'
 import { useEditorStore } from '../../src/renderer/store/editorStore'
@@ -32,8 +34,9 @@ it('commits a captured recipe through the active design action once, selects its
 
 it('applies a Flow batch preview in one History operation and rejects its delayed replay without touching the latest contents', async () => {
   const h = await createCourseDocumentHost(); await store().connectCourseDocuments(h.api)
-  const project = createBlankCourseProjectV10(), surface = project.surfaces[0]
-  surface.kind = 'flow'; delete surface.designSize
+  const project = createBlankCourseProjectV10()
+  setRootContainers(project, [{ ...componentSurfaces(project)[0], kind: 'flow', designSize: undefined }])
+  const surface = testContainerInstance(project, 0)
   project.definitions[TEXT_DEFINITION.id] = TEXT_DEFINITION
   for (const id of ['a', 'b']) project.instances[id] = { id, definitionId: TEXT_DEFINITION.id, data: JSON.parse(JSON.stringify(createTextComponentData({ inlines: [{ type: 'text', text: '旧内容 旧内容' }] }))) }
   surface.childIds = ['a', 'b']

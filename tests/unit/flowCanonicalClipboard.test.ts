@@ -8,17 +8,18 @@ import { createTextComponentData } from '../../src/components/text/data'
 import { projectFlowDocument } from '../../src/core/components/document/flowDocumentProjection'
 import { CourseV10DocumentBridge, type CapturedCourseTarget } from '../../src/renderer/documents/CourseV10DocumentBridge'
 import type { CourseProjectV10 } from '../../src/shared/contracts/component-platform/project'
+import { normalizeWorkProject } from '../../src/shared/contracts/component-platform/workProjectMigration'
 import { prepareDocumentClipboard } from '../../src/renderer/document/documentClipboard'
 import { createFlowDocumentResourcePort, captureFlowPreparedDocumentResources, prepareFlowDocumentResourceTransaction, type FlowPreparedDocumentResources } from '../../src/renderer/document/flowDocumentResources'
 
 const json = (value: unknown) => JSON.parse(JSON.stringify(value))
 it('copies a staged Flow object again with private files and asset bytes in one saved undoable operation', async () => {
-  const source: CourseProjectV10 = { schemaVersion: 10, id: 'source', revision: 0, title: '源正文',
+  const source: CourseProjectV10 = normalizeWorkProject({ schemaVersion: 10, id: 'source', revision: 0, title: '源正文',
     definitions: { [IMAGE_DEFINITION.id]: IMAGE_DEFINITION, custom: { id: 'custom', role: 'content', implementation: { kind: 'source', language: 'javascript', workspace: { ownerId: 'files', entry: 'main.js' } } } },
     instances: { image: { id: 'image', definitionId: IMAGE_DEFINITION.id, data: json(createImageData('logo')) }, custom: { id: 'custom', definitionId: 'custom', data: { message: '保留原内容' } } },
-    surfaces: [{ id: 'flow', kind: 'flow', title: '正文', childIds: ['image', 'custom'] }], global: { underlay: [], overlay: [] }, assets: { logo: { id: 'logo', path: 'assets/logo.svg', filename: 'logo.svg', mimeType: 'image/svg+xml' } } }
+    surfaces: [{ id: 'flow', kind: 'flow', title: '正文', childIds: ['image', 'custom'] }], global: { underlay: [], overlay: [] }, assets: { logo: { id: 'logo', path: 'assets/logo.svg', filename: 'logo.svg', mimeType: 'image/svg+xml' } } })
   const sourceResources = { assets: { logo: new TextEncoder().encode('<svg>source</svg>') }, components: { files: { 'main.js': new TextEncoder().encode("import './part.js'"), 'part.js': new TextEncoder().encode('export default 1') } } }
-  const project: CourseProjectV10 = { schemaVersion: 10, id: 'target', revision: 0, title: '目标', definitions: { [TEXT_DEFINITION.id]: TEXT_DEFINITION }, instances: { body: { id: 'body', definitionId: TEXT_DEFINITION.id, data: json(createTextComponentData('原正文')) } }, surfaces: [{ id: 'flow', kind: 'flow', title: '正文', childIds: ['body'] }], global: { underlay: [], overlay: [] }, assets: structuredClone(source.assets) }
+  const project: CourseProjectV10 = normalizeWorkProject({ schemaVersion: 10, id: 'target', revision: 0, title: '目标', definitions: { [TEXT_DEFINITION.id]: TEXT_DEFINITION }, instances: { body: { id: 'body', definitionId: TEXT_DEFINITION.id, data: json(createTextComponentData('原正文')) } }, surfaces: [{ id: 'flow', kind: 'flow', title: '正文', childIds: ['body'] }], global: { underlay: [], overlay: [] }, assets: structuredClone(source.assets) })
   const resources = { assets: { logo: new TextEncoder().encode('<svg>target</svg>') }, components: {} }
   const target: CapturedCourseTarget = { documentId: 'doc', epoch: 'epoch', project, editingProject: project, resources, surfaceId: 'flow', activeStateId: null, instanceId: 'body', instanceIds: ['body'] }
   const pending: FlowPreparedDocumentResources[] = []

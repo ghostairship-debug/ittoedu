@@ -1,5 +1,5 @@
 import type { ComponentEdit } from './contracts/component-platform/operations'
-import { componentDefinitionBuiltinKey, componentIsLocked } from './contracts/component-platform/project'
+import { componentDefinitionBuiltinKey, componentIsLocked, owningContainer } from './contracts/component-platform/project'
 import { componentInteractionDataSchema, componentInteractionOwner, componentRuleEdits,
   interactionBehavior, interactionRules, type ComponentInteractionAuthoringTarget } from './componentInteractionData'
 import { isNodeMotionAction, type InteractionRule, type MotionDirection, type MotionEasing, type MotionEffect, type NodeMotionAction } from './interactionTypes'
@@ -22,11 +22,24 @@ export interface ComponentMotionActionView {
 }
 
 function programs(target: ComponentInteractionAuthoringTarget) {
+  const scope = (instanceId: string | null): string | null => {
+    while (instanceId) {
+      const instance = target.project.instances[instanceId]
+      if (!instance) return null
+      if (instance.container || target.project.rootIds.includes(instanceId)) return instanceId
+      const parent = owningContainer(target.project, instanceId)
+      instanceId = parent?.kind === 'instance' ? parent.instanceId : null
+    }
+    return null
+  }
+  const currentScope = target.surfaceId ?? scope(target.instanceId)
   return Object.values(target.project.instances).flatMap(instance => {
     if (componentDefinitionBuiltinKey(target.project.definitions[instance.definitionId]) !== 'guoling.interactions') return []
     const parsed = componentInteractionDataSchema.safeParse(instance.data)
     const owner = componentInteractionOwner(target.project, instance)
-    return parsed.success && (owner.kind !== 'surface' || owner.surfaceId === target.surfaceId)
+    const ownerScope = owner.kind === 'surface' ? owner.surfaceId
+      : owner.kind === 'project' ? null : scope(owner.instanceId)
+    return parsed.success && (ownerScope === null || ownerScope === currentScope)
       ? [{ instance, owner, rules: parsed.data.rules }] : []
   })
 }

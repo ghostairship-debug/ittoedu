@@ -1,16 +1,16 @@
 # 文档导航
 
-当前事实和剩余范围集中在[当前状态](development-plan/CURRENT_STATUS.md)。当前代码采用 Project V10、Published V3、Component API 5，正式 DocumentHost 注册 V10 课件 driver；旧格式正文、旧计划与旧签收只按历史范围读取。
+当前事实和剩余范围集中在[当前状态](development-plan/CURRENT_STATUS.md)。当前代码采用 Project 11、Published 4、Component API 5；现行 10 文件及恢复记录只在读取边界统一转换，Session 与写出只有 11。内部 CourseV10Driver 名称沿用，不能据此推断 wire 版本。实际使用见[通用作品能力交接](development-plan/20261020-glx-work-containers/CAPABILITY_HANDOFF.md)。旧计划与旧签收按原日期和范围读取。
 
 | 需要了解什么 | 应读哪里 |
 |---|---|
 | 产品与启动 | [README](../README.md)、[用户指南](USER_GUIDE.md) |
 | 开发入口与实际状态 | [开发入口](development-plan/README.md)、[当前状态](development-plan/CURRENT_STATUS.md) |
 | 架构边界与开发规则 | [架构合同](development-plan/ARCHITECTURE_CONTRACT.md)、[工作协议](development-plan/WORKING_PROTOCOL.md) |
-| 正式工程 Schema 与操作 | [component-platform 源合同](../src/shared/contracts/component-platform/)、[V10 Schema](../src/shared/contracts/component-platform/schema.ts)、[operations](../src/shared/contracts/component-platform/operations.ts) |
+| 正式工程 Schema 与操作 | [component-platform 源合同](../src/shared/contracts/component-platform/)、[Project 11 Schema](../src/shared/contracts/component-platform/schema.ts)、[operations](../src/shared/contracts/component-platform/operations.ts) |
 | 组件与局部程序 | [组件指南](COMPONENT_AUTHORING.md)、[运行程序指南](RUNTIME_AUTHORING.md) |
-| Player 与输出 | [Published 指南](PUBLISHED_LESSON_V1.md)、[Published V3 合同](../src/shared/contracts/component-platform/published.ts) |
-| 机器能力发现 | [当前索引](../artifacts/ai-capabilities/index.json)：project 10 / published 3 / component 5 |
+| Player 与输出 | [Published 指南](PUBLISHED_LESSON_V1.md)、[Published 4 合同](../src/shared/contracts/component-platform/published.ts) |
+| 机器能力发现 | [当前索引](../artifacts/ai-capabilities/index.json)：project 11 / published 4 / component 5 |
 | 实际协调状态 | [生成的任务板](development-plan/TASK_BOARD.md)，只表示实际派发的协调任务 |
 | 教学与局部编辑方法 | [orchestrate-courseware](../.agents/skills/orchestrate-courseware/SKILL.md)、[edit-content](../.agents/skills/edit-content/SKILL.md)、[外来 HTML 导入](../.agents/skills/build-courseware-project/SKILL.md) |
 | 历史与审计意见 | [归档索引](archive/README.md)；不是当前授权或修复清单 |

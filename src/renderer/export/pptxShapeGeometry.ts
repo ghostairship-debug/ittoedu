@@ -15,6 +15,13 @@ function fragment(dom: XMLDocument, xml: string): Node {
 export function applyPptxShapeExtensions(bytes: Uint8Array, extensions: PptxShapeExtensions): Uint8Array {
   if (!extensions.size) return bytes
   const files = unzipSync(bytes)
+  applyPptxShapeExtensionsToParts(files, extensions)
+  return zipSync(files)
+}
+
+/** Reuse the output owner's decoded parts; no source document data is modified. */
+export function applyPptxShapeExtensionsToParts(files: Record<string, Uint8Array>, extensions: PptxShapeExtensions): void {
+  if (!extensions.size) return
   const found = new Set<string>()
   for (const [path, source] of Object.entries(files)) {
     if (!/^ppt\/(slides|slideMasters)\/[^/]+\.xml$/.test(path)) continue
@@ -55,5 +62,4 @@ export function applyPptxShapeExtensions(bytes: Uint8Array, extensions: PptxShap
     if (changed) files[path] = strToU8(new XMLSerializer().serializeToString(dom))
   }
   for (const key of extensions.keys()) if (!found.has(key)) throw new Error(`PPTX 形状 ${key} 未完成可编辑投影`)
-  return zipSync(files)
 }

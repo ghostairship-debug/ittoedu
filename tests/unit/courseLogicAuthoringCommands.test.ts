@@ -1,3 +1,5 @@
+import { componentSurfaces } from '../../src/shared/contracts/component-platform/project'
+import { appendRootContainers } from '../helpers/glxWorkFixture'
 // @vitest-environment node
 import { expect, it } from 'vitest'
 import { createBlankCourseProjectV10 } from '../../src/core/course/createCourseProjectV10'
@@ -8,21 +10,21 @@ type LogicChange = CourseLogicAuthoringCommand extends infer Command ? Command e
 
 it('commits current state and guard edits through the shared Session, preserves references and refuses invalid, stale or destructive commands with zero writes', async () => {
   const project = createBlankCourseProjectV10('logic')
-  project.surfaces.push({ id: 'flow', title: 'Flow', kind: 'flow', childIds: [] }, { id: 'spatial', title: 'Spatial', kind: 'spatial', childIds: [] })
+  appendRootContainers(project, { id: 'flow', title: 'Flow', kind: 'flow', childIds: [] }, { id: 'spatial', title: 'Spatial', kind: 'spatial', childIds: [] })
   const h = await createV10StoreHost(project)
   const apply = (change: LogicChange) => commitCourseLogicAuthoringCommand(h.kernel, h.first.documentId,
     { projectId: h.model().project.id, baseRevision: h.model().project.revision, ...change })
   try {
     // The same command owner follows all three editor projections; their histories never split.
-    for (const surface of project.surfaces) {
+    for (const surface of componentSurfaces(project)) {
       h.kernel.selectSurface(surface.id)
       expect(await apply({ kind: 'course-state.add', declaration: { key: surface.id, valueType: 'boolean', defaultValue: false } })).toMatchObject({ ok: true, historyEntry: true })
     }
     expect(h.first.read().undoDepth).toBe(3)
-    await h.bridge.undo(); expect(h.model().project.logic!.courseState.map(state => state.key)).toEqual([project.surfaces[0].id, 'flow'])
+    await h.bridge.undo(); expect(h.model().project.logic!.courseState.map(state => state.key)).toEqual([componentSurfaces(project)[0].id, 'flow'])
     await h.bridge.redo()
     expect(await apply({ kind: 'course-state.add', declaration: { key: 'score', valueType: 'number', defaultValue: 20 } })).toMatchObject({ ok: true })
-    const guard = { id: 'mastery-guard', effect: 'block' as const, fromSurfaceIds: [project.surfaces[0].id], toSurfaceIds: ['flow'], match: 'all' as const,
+    const guard = { id: 'mastery-guard', effect: 'block' as const, fromSurfaceIds: [componentSurfaces(project)[0].id], toSurfaceIds: ['flow'], match: 'all' as const,
       conditions: [{ type: 'compare' as const, key: 'score', operator: 'lt' as const, value: 80 }, { type: 'exists' as const, key: 'score', exists: true }], message: '请先练习' }
     expect(await apply({ kind: 'navigation-guard.add', guard })).toMatchObject({ ok: true })
     expect(await apply({ kind: 'course-state.update', key: 'score', declaration: { key: 'mastery', valueType: 'number', defaultValue: 10 } })).toMatchObject({ ok: true })

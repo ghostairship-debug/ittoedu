@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { testContainerInstance } from '../helpers/glxWorkFixture'
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, expect, it, vi } from 'vitest'
 import { promises as fs } from 'node:fs'
@@ -29,7 +30,7 @@ async function fixture() {
     initialValue: '同一文字', localBounds: { width: 200, height: 30, transform: [1, 0, 0, 1, 0, index * 40] } }))
   project.instances.web = { id: 'web', definitionId: WEB_DEFINITION.id, data: { html }, authoring: {
     records: Object.fromEntries(spots.map(spot => [spot.authorKey!, { kind: 'text' as const, binding: spot.binding!, overrides: { text: '同一文字' } }])) } }
-  project.surfaces[0].childIds = ['web']
+  testContainerInstance(project, 0).childIds = ['web']
   const snapshot = await host.internalAPI.create({ kind: 'course-v10', project, resources: { assets: {}, components: {} } }, 'text.h5lesson')
   let release = () => {}, entered = () => {}, delayed = false
   const unavailable = async (): Promise<never> => { throw new Error('Outside Runtime text fixture') }

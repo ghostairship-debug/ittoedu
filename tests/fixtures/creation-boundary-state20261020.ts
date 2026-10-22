@@ -1,5 +1,6 @@
 import { createBlankCourseProjectV10 } from '../../src/core/course/createCourseProjectV10'
 import type { DocumentModel } from '../../src/shared/workbench/document'
+import { setRootContainers } from '../helpers/glxWorkFixture'
 
 export const interviewInstanceId = 'interview-09'
 export const introductionInstanceId = 'introduction-10'
@@ -100,10 +101,10 @@ export function createCreationBoundaryStateFixture(): Extract<DocumentModel, { k
     frame: { width: 900, height: 600, transform: [1, 0, 0, 1, 0, 0] } }
   project.instances[introductionInstanceId] = { id: introductionInstanceId, definitionId: 'introduction',
     data: { sourceInstanceId: interviewInstanceId }, frame: { width: 900, height: 600, transform: [1, 0, 0, 1, 0, 0] } }
-  project.surfaces = [
+  setRootContainers(project,[
     { id: 'page-09', title: '09 Interview', kind: 'slide', childIds: [interviewInstanceId], designSize: { width: 1000, height: 700 } },
     { id: 'page-10', title: '10 Introduction', kind: 'slide', childIds: [introductionInstanceId], designSize: { width: 1000, height: 700 } },
-  ]
+  ])
   project.logic = { courseState: [{ key: 'class-prompt', valueType: 'string', defaultValue: 'listen' }], navigationGuards: [] }
   return { kind: 'course-v10', project, resources: { assets: {}, components: {} } }
 }

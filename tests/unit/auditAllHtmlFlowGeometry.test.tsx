@@ -1,3 +1,5 @@
+import { withTestTeacherController } from '../helpers/glxWorkFixture'
+import { setRootContainers } from '../helpers/glxWorkFixture'
 import { act, cleanup, render } from '@testing-library/react'
 import { afterEach, expect, it, vi } from 'vitest'
 import { createBlankCourseProjectV10 } from '../../src/core/course/createCourseProjectV10'
@@ -21,9 +23,9 @@ it('CA356 actual Flow workspace author command aligns global content with teache
   vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
     return this.hasAttribute('data-playback-content') ? new DOMRect(50, 70, 1280, 720) : new DOMRect(20, 30, 640, 360)
   })
-  let project = createBlankCourseProjectV10('Flow mixed alignment')
+  let project = withTestTeacherController(createBlankCourseProjectV10('Flow mixed alignment'))
   const teacher = project.global.overlay[0]
-  project.surfaces = [{ id: 'flow', kind: 'flow', title: 'Flow', childIds: [] }]
+  setRootContainers(project, [{ id: 'flow', kind: 'flow', title: 'Flow', childIds: [] }])
   project.instances[teacher].frame = { width: 200, height: 64, transform: [1, 0, 0, 1, 400, 500] }
   project.instances[teacher].data = { ...project.instances[teacher].data as object, defaultCollapsed: false } as any
   project.definitions[SHAPE_DEFINITION.id] = SHAPE_DEFINITION

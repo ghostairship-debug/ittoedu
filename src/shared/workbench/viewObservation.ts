@@ -1,3 +1,4 @@
+import { componentContainers } from '../contracts/component-platform/project'
 import { z } from 'zod'
 import type { DocumentModel, DocumentSnapshot } from './document'
 import type { ObservationResult } from './toolPorts'
@@ -43,6 +44,6 @@ export function observationSnapshotMatches(snapshot: DocumentSnapshot, identity:
   return snapshot.documentId === identity.documentId && snapshot.epoch === identity.epoch
     && snapshot.revision === identity.revision && snapshot.model.kind === 'course-v10'
     && snapshot.model.project.id === projectId
-    && snapshot.model.project.surfaces.some(surface => surface.id === identity.locationId
+    && componentContainers(snapshot.model.project).some(surface => surface.id === identity.locationId
       && (!identity.stateId || surface.presentation?.states.some(state => state.id === identity.stateId)))
 }

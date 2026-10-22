@@ -1,3 +1,5 @@
+import { testContainerInstance } from '../helpers/glxWorkFixture'
+import { componentSurfaces } from '../../src/shared/contracts/component-platform/project'
 // @vitest-environment node
 import { afterAll, beforeAll, expect, it } from 'vitest'
 import { chromium, type Browser, type Page } from 'playwright'
@@ -171,7 +173,7 @@ it.each(['sim', 'evidence', 'design', 'proposal'])('contains the software canvas
 it('keeps sibling program/data nodes and preserves the current formal frame when replacing a placed local program', async () => {
  const sample = await placementSample('evidence')
  const html = `${sample.html}<template id="program-data"><span>Preserve data</span></template><script>/* sibling program stays executable */</script>`
- const project = createBlankCourseProjectV10('Local program placement'), surface = project.surfaces[0]!
+ const project = createBlankCourseProjectV10('Local program placement'), surface = testContainerInstance(project, 0)
  project.definitions[TEXT_DEFINITION.id] = TEXT_DEFINITION
  project.instances.heading = { id: 'heading', definitionId: TEXT_DEFINITION.id, data: jsonValueSchema.parse(createTextComponentData('Keep this heading')),
    frame: { width: 1120, height: 165, transform: [1, 0, 0, 1, 56, 0] } }
@@ -214,7 +216,7 @@ it('keeps sibling program/data nodes and preserves the current formal frame when
  expect(edited.commit).toBe('committed')
  expect(snapshot().model.project.instances[id]?.frame).toEqual(manualFrame)
  expect(snapshot().model.project.instances.heading).toEqual(heading)
- expect(snapshot().model.project.surfaces[0]?.childIds).toEqual(['heading', id])
+ expect(componentSurfaces(snapshot().model.project)[0]?.childIds).toEqual(['heading', id])
  expect(measurements).toBe(1)
  const redone = await service.apply({ intent: 'redo', target: { kind: 'instance', instanceId: id }, region: unusedRegion, source: { kind: 'html', html: sample.html.replace('你的实验记录', '重做的实验记录') } })
  expect(redone.commit).toBe('committed')
@@ -252,7 +254,7 @@ it.each([
 })
 
 it('places the program beside existing content and hands current frame to the next same-object edit', async () => {
- const project = createBlankCourseProjectV10('Dimension handoff'), surface = project.surfaces[0]
+ const project = createBlankCourseProjectV10('Dimension handoff'), surface = testContainerInstance(project, 0)
  if (!surface) throw new Error('Initial surface required')
  project.definitions[TEXT_DEFINITION.id] = TEXT_DEFINITION
  project.instances.heading = { id: 'heading', definitionId: TEXT_DEFINITION.id, data: jsonValueSchema.parse(createTextComponentData('Keep this title')),
@@ -313,12 +315,12 @@ it('places the program beside existing content and hands current frame to the ne
  const after = snapshot().model.project
  expect(after.instances[id]?.frame).toEqual(resized)
  expect(after.instances.heading).toEqual(heading)
- expect(after.surfaces[0]?.childIds).toEqual(['heading', id])
+ expect(componentSurfaces(after)[0]?.childIds).toEqual(['heading', id])
  expect(measurements).toBe(1)
 })
 
 it('adopts a responsive program into one explicit local region with a usable action and feedback', async () => {
- const project = createBlankCourseProjectV10('Local responsive region'), surface = project.surfaces[0]!
+ const project = createBlankCourseProjectV10('Local responsive region'), surface = testContainerInstance(project, 0)
  project.definitions[TEXT_DEFINITION.id] = TEXT_DEFINITION
  project.instances.heading = { id: 'heading', definitionId: TEXT_DEFINITION.id, data: jsonValueSchema.parse(createTextComponentData('Native heading stays above')),
    frame: { width: 1120, height: 165, transform: [1, 0, 0, 1, 56, 0] } }
@@ -366,7 +368,7 @@ it('adopts a responsive program into one explicit local region with a usable act
  const current = snapshot(), instance = current.model.project.instances[id]!
  expect(instance.frame).toEqual(region)
  expect(current.model.project.instances.heading).toEqual(heading)
- expect(current.model.project.surfaces[0]?.childIds).toEqual(['heading', id])
+ expect(componentSurfaces(current.model.project)[0]?.childIds).toEqual(['heading', id])
  expect(current.undoDepth).toBe(before.undoDepth + 1)
  const reopened = driver.load(driver.serialize(current.model))
  if (reopened.kind !== 'course-v10') throw new Error('Saved course required')
@@ -387,11 +389,11 @@ it('adopts a responsive program into one explicit local region with a usable act
  } finally { await runtime.close() }
  expect(await session.execute({ documentId: current.documentId, epoch: current.epoch, baseRevision: current.revision,
    operationId: 'undo-local-region', actor: 'human', mutation: { type: 'undo' } })).toMatchObject({ status: 'applied' })
- expect(snapshot().model.project.instances).toEqual({ heading })
+ expect(snapshot().model.project.instances).toEqual(project.instances)
 })
 
 it('keeps explicit overlap and diagnoses actual region/container overflow without moving existing objects', () => {
- const project = createBlankCourseProjectV10('Explicit overlap'), surface = project.surfaces[0]!
+ const project = createBlankCourseProjectV10('Explicit overlap'), surface = testContainerInstance(project, 0)
  project.definitions[WEB_DEFINITION.id] = WEB_DEFINITION
  project.instances.neighbor = { id: 'neighbor', definitionId: WEB_DEFINITION.id, data: { html: 'Keep' },
    frame: { width: 300, height: 100, transform: [1, 0, 0, 1, 0, 0] } }
@@ -408,20 +410,20 @@ it('keeps explicit overlap and diagnoses actual region/container overflow withou
 })
 
 it.each(['resized', 'unframed', 'parent'] as const)('keeps %s presentation-state geometry consistent between source read and apply', async kind => {
- const project = createBlankCourseProjectV10('State frame'), surface = project.surfaces[0]
+ const project = createBlankCourseProjectV10('State frame'), surface = testContainerInstance(project, 0)
  if (!surface) throw new Error('Surface required')
  const source = 'export default { mount() {} };'
  project.definitions.local = { id: 'local', role: 'content', implementation: { kind: 'source', language: 'javascript', source } }
  project.instances.local = { id: 'local', definitionId: 'local', data: {}, frame: { width: 320, height: 180, transform: [1, 0, 0, 1, 0, 0] } }
  const frame = { width: 640, height: 360, transform: [0, 1, -1, 0, 100, 50] as [number, number, number, number, number, number] }
  surface.childIds = ['local']
- surface.presentation = { states: [{ id: 'state', title: 'Local', overrides: { local: { frame: kind === 'resized' ? frame : null } } }] }
+ surface.container.presentation = { states: [{ id: 'state', title: 'Local', overrides: { local: { frame: kind === 'resized' ? frame : null } } }] }
  if (kind === 'parent') {
    project.definitions[WEB_DEFINITION.id] = WEB_DEFINITION
    project.instances.parent = { id: 'parent', definitionId: WEB_DEFINITION.id, data: { html: '<div></div>' }, childIds: ['local'],
      frame: { width: 800, height: 500, transform: [1, 0, 0, 1, 0, 0] } }
    surface.childIds = ['parent']
-   surface.presentation.states[0].overrides.parent = { frame: { width: 1000, height: 600, transform: [1, 0, 0, 1, 0, 0] } }
+   surface.container.presentation.states[0].overrides.parent = { frame: { width: 1000, height: 600, transform: [1, 0, 0, 1, 0, 0] } }
  }
  const session = await DocumentSession.create({ documentId: `state-${kind}`, epoch: 'epoch',
    binding: { kind: 'file', path: 'state.glx', version: null, bindingVersion: 0 }, model: { kind: 'course-v10', project, resources: { assets: {}, components: {} } } },

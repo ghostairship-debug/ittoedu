@@ -1,3 +1,5 @@
+import { componentSurfaces } from '../../src/shared/contracts/component-platform/project'
+import { testContainerInstance } from '../helpers/glxWorkFixture'
 // @vitest-environment node
 import { compileFunction, constants } from 'node:vm'
 import { mkdir, writeFile } from 'node:fs/promises'
@@ -36,13 +38,13 @@ afterAll(() => { realm.window.close(); vi.unstubAllGlobals() })
 /** Real recipe -> one canonical operation -> production archive/World; only file I/O is in memory. */
 async function authoredFixture() {
   const project = createBlankCourseProjectV10('首批机制验证')
-  const origin = project.surfaces[0]
-  origin.title = '人工首页'
+  const origin = componentSurfaces(project)[0]
+  testContainerInstance(project, origin.id).name = '人工首页'
   project.definitions[TEXT_DEFINITION.id] = TEXT_DEFINITION
   project.instances.human = { id: 'human', definitionId: TEXT_DEFINITION.id, name: '人工保留文字',
     data: JSON.parse(JSON.stringify(createTextComponentData('保留人工内容'))),
     frame: { width: 240, height: 70, transform: [1, .1, .2, 1, 163, 421] } }
-  origin.childIds = ['human']
+  testContainerInstance(project, origin.id).childIds = ['human']
   const host = await createCourseDocumentHost()
   const initial = await host.api.create({ kind: 'course-v10', project, resources: { assets: {}, components: {} } }, 'presets.glx')
   let operation = 0
@@ -289,11 +291,11 @@ it('inserts one shared underlay with current/excluded visibility and preserves a
   const match = await fixture.add('classify-sort-v1', { mode: 'match', title: '拖拽匹配' })
   const sort = await fixture.add('classify-sort-v1', { mode: 'sort', title: '拖拽排序' })
   const variable = await fixture.add('continuous-variable-v1', { title: '变量关系' })
-  const foreground = structuredClone(fixture.read().project.instances), surfaces = structuredClone(fixture.read().project.surfaces)
+  const foreground = structuredClone(fixture.read().project.instances), surfaces = structuredClone(componentSurfaces(fixture.read().project))
   const fixed = await fixture.add('static-background-v1', { pattern: 'grid' })
   const moving = await fixture.add('dynamic-background-v1', { scope: 'exclude', pages: '选择反馈', eventName: 'variable.change' })
   const project = moving.model.project
-  expect(project.surfaces).toEqual(surfaces)
+  expect(componentSurfaces(project)).toEqual(surfaces)
   for (const [id, instance] of Object.entries(foreground)) expect(project.instances[id]).toEqual(instance)
   expect(project.global.underlay).toEqual([fixed.instanceId, moving.instanceId])
   expect(project.instances[fixed.instanceId]).toMatchObject({ visibility: { mode: 'include', surfaceIds: [fixture.originId] }, viewportPinned: true, style: { pointerEvents: 'none' } })
@@ -367,7 +369,7 @@ it('keeps nonimage presets resource-free and saves a background image as an edit
   const parent = background.model.project.instances[background.instanceId]
   const referenceSize = teacherControllerReferenceSize(background.model.project)
   expect(referenceSize).not.toEqual(localDesignSize)
-  expect(background.model.project.surfaces.find(surface => surface.id === fixture.originId)?.designSize).toEqual(localDesignSize)
+  expect(componentSurfaces(background.model.project).find(surface => surface.id === fixture.originId)?.designSize).toEqual(localDesignSize)
   expect(parent.frame).toEqual({ ...referenceSize, transform: [1, 0, 0, 1, 0, 0] })
   expect(parent.data).not.toHaveProperty('assetId')
   expect(parent.childIds).toHaveLength(1)

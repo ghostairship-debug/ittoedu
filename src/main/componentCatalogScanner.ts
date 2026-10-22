@@ -33,7 +33,7 @@ export async function readCatalogFile(file: string): Promise<Uint8Array> {
 export function libraryCatalogPackage(entry: ComponentLibraryEntry, version: string, packagePath: string, bytes: Uint8Array, metadata?: ComponentLibraryArchiveMetadata): ComponentCatalogPackage {
   return { packageId: entry.id, version, name: entry.title, description: metadata?.description ?? `可编辑组件 · ${entry.example.rootIds.length} 个根对象`,
     subject: [...(metadata?.subject ?? [])], schoolStage: [...(metadata?.schoolStage ?? [])], tags: [...(metadata?.tags ?? [])], packagePath, thumbnailPath: '', sha256: createHash('sha256').update(bytes).digest('hex'),
-    componentSchemaVersion: 1, runtimeApiVersion: 5, renderMode: 'dom', supportedScopes: ['scene', 'global'],
+    componentSchemaVersion: entry.schemaVersion, runtimeApiVersion: 5, renderMode: 'dom', supportedScopes: ['scene', 'global'],
     quality: 'experimental', maintainer: '本地组件作者', verifiedCases: [], ...(metadata?.sourceCourse ? { source: { kind: 'local', reference: metadata.sourceCourse } as const } : {}) }
 }
 

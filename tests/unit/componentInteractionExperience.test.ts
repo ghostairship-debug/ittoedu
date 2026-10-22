@@ -1,3 +1,5 @@
+import { componentSurfaces } from '../../src/shared/contracts/component-platform/project'
+import { testContainerInstance } from '../helpers/glxWorkFixture'
 // @vitest-environment jsdom
 import { afterEach, expect, it, vi } from 'vitest'
 import { createBlankCourseProjectV10 } from '../../src/core/course/createCourseProjectV10'
@@ -15,13 +17,13 @@ import type { InteractionRule, InteractionTrigger } from '../../src/shared/inter
 
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); document.body.replaceChildren() })
 function fixture() {
-  const project = createBlankCourseProjectV10('互动普通旅程'), surface = project.surfaces[0]
+  const project = createBlankCourseProjectV10('互动普通旅程'), surface = componentSurfaces(project)[0]
   project.media = { audio: { defaultMuted: false, masterVolume: 1,
     channelVolumes: { music: 1, narration: 1, sfx: 1, ui: 1, video: 1 }, narrationDucking: { enabled: false, musicVolume: .3, fadeMs: 0 },
     sounds: { ding: { id: 'ding', name: '提示', assetId: 'sound', channel: 'sfx', defaultVolume: 1, defaultLoop: false },
       ding2: { id: 'ding2', name: '提示2', assetId: 'sound', channel: 'sfx', defaultVolume: 1, defaultLoop: false } } } }
   project.definitions.content = { id: 'content', role: 'content', implementation: { kind: 'builtin', key: 'guoling.group' } }
-  project.instances.item = { id: 'item', definitionId: 'content', data: {} }; surface.childIds.push('item')
+  project.instances.item = { id: 'item', definitionId: 'content', data: {} }; testContainerInstance(project, 0).childIds.push('item')
   return { project, surface, target: { kind: 'surface' as const, surfaceId: surface.id } }
 }
 function apply(project: CourseProjectV10, edits: Parameters<typeof captureComponentOperation>[1]) {
@@ -161,7 +163,7 @@ it('keeps click action types and order, respects ancestor locks, and assembles r
   expect(after.actions.map(step => step.id)).toEqual(before.actions.map(step => step.id))
   expect(after.actions.map(step => step.action)).toEqual([{ type: 'audio.play', soundId: 'ding2' }, { type: 'location.go', locationId: base.surface.id }])
   project.instances.group = { id: 'group', definitionId: 'content', data: {}, locked: true, childIds: ['item'] }
-  project.surfaces[0].childIds = project.surfaces[0].childIds.filter(id => id !== 'item'); project.surfaces[0].childIds.push('group')
+  testContainerInstance(project, 0).childIds = testContainerInstance(project, 0).childIds.filter(id => id !== 'item'); testContainerInstance(project, 0).childIds.push('group')
   expect(() => componentClickInteractionEdits({ ...target, project }, 'audio-play', 'ding')).toThrow('锁定')
   const changed = structuredClone(interactionRules(interactionBehavior(project, base.target))); changed[0].name = '改名'
   expect(() => componentRuleEdits(project, base.target, changed)).toThrow('锁定')
@@ -176,7 +178,7 @@ it('renders the configured teacher buttons without restoring deleted step contro
   const { project } = fixture(), id = project.global.overlay[0], data = project.instances[id].data as Record<string, unknown>
   data.defaultCollapsed = false; data.buttons = []
   const root = document.createElement('div'); document.body.append(root)
-  const navigation = new ComponentNavigationOwner({ project: () => project, surfaceId: () => project.surfaces[0].id, select() {} })
+  const navigation = new ComponentNavigationOwner({ project: () => project, surfaceId: () => componentSurfaces(project)[0].id, select() {} })
   const world = new ComponentPlatformRuntime('configured-controller', { teacherController: navigation })
   world.bind(id, root)
   try {

@@ -1,7 +1,9 @@
+import { componentContainers } from '../../../shared/contracts/component-platform/project'
 import { useEffect, useRef, useState } from 'react'
 import type { ProductivityContext } from '../../authoring/productivity'
 import type { DesignProductionStep } from '../../authoring/productivity'
-import { parsePptxImport, type PptxImportDraft } from '../../project/pptxImport'
+import type { PptxImportDraft } from '../../../shared/workbench/pptxImport'
+import { parsePptxImportOffThread } from '../../project/pptxImportClient'
 import { planPptxImportTransaction } from '../../project/pptxImportTransaction'
 import type { ProductivityDialogProps } from './ProductivityDialog'
 
@@ -13,38 +15,49 @@ export function PptxImportForm({ getContext, onCommit, onClose }: ProductivityDi
   const [committing, setCommitting] = useState(false)
   const sequence = useRef(0)
   const legacyActive = useRef(false)
-  const cancel = () => {
-    sequence.current++; setBusy(false)
+  const activeRead = useRef<AbortController | null>(null)
+  const stopRead = () => {
+    activeRead.current?.abort(new Error('PPTX 导入已取消')); activeRead.current = null
     if (legacyActive.current) void window.desktopAPI?.legacyPpt({ operation: 'cancel' }).catch(() => {})
     legacyActive.current = false
   }
-  useEffect(() => () => { sequence.current++; if (legacyActive.current) void window.desktopAPI?.legacyPpt({ operation: 'cancel' }).catch(() => {}) }, [])
-  const stage = async (bytes: Uint8Array, filename: string, context: ProductivityContext, request: number) => {
-    const canvas = context.document.surfaces.find(surface => surface.id === context.target.surfaceId)?.designSize ?? { width: 1280, height: 720 }
-    const draft = await parsePptxImport(bytes, canvas)
+  const cancel = () => {
+    sequence.current++; setBusy(false)
+    stopRead()
+  }
+  useEffect(() => () => { sequence.current++; stopRead() }, [])
+  const stage = async (bytes: Uint8Array, filename: string, context: ProductivityContext, request: number, signal: AbortSignal) => {
+    const canvas = componentContainers(context.document).find(surface => surface.id === context.target.surfaceId)?.designSize ?? { width: 1280, height: 720 }
+    const draft = await parsePptxImportOffThread(bytes, filename, canvas, signal)
+    signal.throwIfAborted()
+    if (sequence.current !== request) return
     const name = filename.replace(/\.pptx$/i, '')
     const step = planPptxImportTransaction(context.target, draft, name, { canvas, source: { bytes, filename } })
     if (sequence.current === request) setPreview({ context, draft, name, step })
   }
   const read = async (file: File) => {
+    stopRead()
+    const controller = new AbortController(); activeRead.current = controller
     const request = ++sequence.current
     setPreview(null); setMessage(''); setBusy(true)
     try {
       const context = getContext()
-      await stage(new Uint8Array(await file.arrayBuffer()), file.name, context, request)
+      await stage(new Uint8Array(await file.arrayBuffer()), file.name, context, request, controller.signal)
     } catch (error) { if (sequence.current === request) setMessage(error instanceof Error ? error.message : 'PPTX 无法导入') }
-    finally { if (sequence.current === request) setBusy(false) }
+    finally { if (sequence.current === request) { setBusy(false); if (activeRead.current === controller) activeRead.current = null } }
   }
   const readLegacy = async () => {
+    stopRead()
+    const controller = new AbortController(); activeRead.current = controller
     const request = ++sequence.current
     setPreview(null); setMessage(''); setBusy(true); legacyActive.current = true
     try {
       const context = getContext()
       if (!window.desktopAPI) throw new Error('旧 PPT 转换需要桌面版及本机 Microsoft PowerPoint；请先另存为 .pptx')
       const converted = await window.desktopAPI.legacyPpt({ operation: 'select' })
-      if (converted && sequence.current === request) await stage(converted.bytes, converted.name, context, request)
+      if (converted && sequence.current === request) await stage(converted.bytes, converted.name, context, request, controller.signal)
     } catch (error) { if (sequence.current === request) setMessage(error instanceof Error ? error.message : '旧 PPT 转换失败') }
-    finally { if (sequence.current === request) { setBusy(false); legacyActive.current = false } }
+    finally { if (sequence.current === request) { setBusy(false); legacyActive.current = false; if (activeRead.current === controller) activeRead.current = null } }
   }
   const commit = async () => {
     if (!preview || busy) return

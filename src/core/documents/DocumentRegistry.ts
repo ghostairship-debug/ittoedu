@@ -1,6 +1,6 @@
 import type { DocumentBinding, DocumentDriver, DocumentModel, DocumentPersistence, DurableDocumentState } from '../../shared/workbench/document'
 import type { DocumentSaveIdentity } from '../../shared/workbench/documentSave'
-import { DocumentSession, type DocumentFileLease, type DocumentSaveObserver } from './DocumentSession'
+import { DocumentSession, type CreateDocumentSession, type DocumentFileLease, type DocumentSaveObserver } from './DocumentSession'
 
 export interface DocumentRegistryOptions {
   persistence: DocumentPersistence
@@ -37,6 +37,8 @@ export class DocumentRegistry {
   }
 
   list(): ReturnType<DocumentSession['read']>[] { return [...this.sessions.values()].map(session => session.read()) }
+  /** Locate an open owner before asking that owner to settle and capture its content. */
+  listIdentities(): ReturnType<DocumentSession['readIdentity']>[] { return [...this.sessions.values()].map(session => session.readIdentity()) }
   has(documentId: string): boolean { return this.sessions.has(documentId) }
   get size(): number { return this.sessions.size }
 
@@ -50,7 +52,7 @@ export class DocumentRegistry {
     return session
   }
 
-  open(binding: Extract<DocumentBinding, { kind: 'file' }>, load: () => Promise<DocumentModel>): Promise<DocumentSession> {
+  open(binding: Extract<DocumentBinding, { kind: 'file' }>, load: () => Promise<DocumentModel | Pick<CreateDocumentSession, 'model' | 'courseProjectMigrationIds'>>): Promise<DocumentSession> {
     const key = this.options.bindingKey(binding)
     const moving = this.fileBarriers.get(key)
     if (moving) return moving.then(() => this.open(binding, load))
@@ -61,10 +63,11 @@ export class DocumentRegistry {
     const pending = this.opening.get(key)
     if (pending) return pending
     const operation = (async () => {
-      const model = await load()
+      const loaded = await load()
+      const input = 'model' in loaded ? loaded : { model: loaded }
       const session = await DocumentSession.create({
-        documentId: this.options.createId(), epoch: this.options.createId(), model, binding, saved: true,
-      }, this.driver(model), this.options.persistence)
+        documentId: this.options.createId(), epoch: this.options.createId(), ...input, binding, saved: true,
+      }, this.driver(input.model), this.options.persistence)
       this.sessions.set(session.documentId, session)
       this.bindings.set(key, session.documentId)
       return session
@@ -108,7 +111,7 @@ export class DocumentRegistry {
 
   private async saveCurrent(documentId: string, binding?: Extract<DocumentBinding, { kind: 'file' }>, observer?: DocumentSaveObserver, saveIdentity?: DocumentSaveIdentity): Promise<ReturnType<DocumentSession['read']>> {
     const session = this.get(documentId)
-    const currentBinding = session.read().binding
+    const currentBinding = session.readIdentity().binding
     const sameBinding = binding && currentBinding.kind === 'file' && this.options.bindingKey(binding) === this.options.bindingKey(currentBinding)
     const actualBinding = !binding || sameBinding ? undefined : { ...binding, bindingVersion: currentBinding.kind === 'file' ? currentBinding.bindingVersion + 1 : 1 }
     const target = actualBinding ?? currentBinding

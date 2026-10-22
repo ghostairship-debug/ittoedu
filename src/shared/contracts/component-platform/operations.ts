@@ -1,5 +1,5 @@
 import type { ComponentFrame } from './frame'
-import type { CourseProjectV10, ComponentBackground, ComponentPresentation, ComponentFlowAuthoring, ComponentFlowPlacement, ComponentFlowBodyLayout } from './project'
+import type { CourseProjectV10, ComponentBackground, ComponentPresentation, ComponentFlowAuthoring, ComponentFlowPlacement, ComponentFlowBodyLayout, ComponentContainerPatch, WorkEntry } from './project'
 import type { BehaviorAttachment, ComponentAsset, ComponentContainer, ComponentDefinition, ComponentImplementation, ComponentInstance, ComponentSurface, ComponentSpatialAuthoring, JsonValue } from './project'
 
 /** Software captures actual values read by an operation, including structural dependencies. */
@@ -11,6 +11,8 @@ export interface ComponentExpectation {
 
 export type ComponentEdit =
   | { type: 'project.title.set'; title: string }
+  | { type: 'project.entry.set'; entry: WorkEntry | null }
+  | { type: 'container.patch'; instanceId: string; patch: ComponentContainerPatch }
   | { type: 'project.background.set'; background: ComponentBackground | null }
   | { type: 'project.designTokens.set'; designTokens: CourseProjectV10['designTokens'] | null }
   | { type: 'project.theme.set'; theme: CourseProjectV10['theme'] | null }

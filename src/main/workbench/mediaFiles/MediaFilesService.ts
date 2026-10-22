@@ -1,5 +1,5 @@
 import { mediaFileOperationSchema, type FileArtifactBinding, type MediaFileContent, type MediaFileOperation, type MediaFileSnapshot } from '../../../shared/workbench/mediaFiles'
-import { editImageFile, inspectImageFile } from './imageFileEditing'
+import { editImageFile, inspectImageFile, ImageFileEditSession } from './imageFileEditing'
 import { editPdfFile, inspectPdfFile } from './pdfFileEditing'
 
 /** The existing file owner supplies authorization, binding/version checks, stopped-run checks and atomic publication. */
@@ -19,7 +19,14 @@ export async function prepareMediaFileContent(bytes: Uint8Array, operations: rea
 
 /** Format mechanics have no filesystem writer and do not own another document history. */
 export class MediaFilesService {
+  private readonly images = new Map<string, ImageFileEditSession>()
   constructor(private readonly owner: MediaFileOwner) {}
+  private key(binding: FileArtifactBinding) { return JSON.stringify([binding.path, binding.fileVersion, binding.bindingVersion]) }
+  release(binding: FileArtifactBinding): void {
+    const key = this.key(binding)
+    this.images.get(key)?.dispose()
+    this.images.delete(key)
+  }
   async open(binding: FileArtifactBinding, signal?: AbortSignal): Promise<MediaFileSnapshot> {
     signal?.throwIfAborted()
     const content = await inspect(await this.owner.read(binding, signal))
@@ -29,7 +36,15 @@ export class MediaFilesService {
   async preview(binding: FileArtifactBinding, operations: readonly MediaFileOperation[], signal?: AbortSignal): Promise<MediaFileSnapshot> {
     signal?.throwIfAborted()
     const bytes = await this.owner.read(binding, signal)
-    const content = await prepareMediaFileContent(bytes, operations, signal)
+    const parsed = operations.map(operation => mediaFileOperationSchema.parse(operation))
+    let content: MediaFileContent
+    if (isPdf(bytes) || !parsed.length) content = await prepareMediaFileContent(bytes, parsed, signal)
+    else {
+      const key = this.key(binding)
+      let editor = this.images.get(key)
+      if (!editor) { editor = new ImageFileEditSession(bytes); this.images.set(key, editor) }
+      content = await editor.prepare(parsed, signal)
+    }
     signal?.throwIfAborted()
     return { binding, content }
   }
@@ -38,6 +53,7 @@ export class MediaFilesService {
     if (!operations.length) return prepared
     signal?.throwIfAborted()
     const saved = await this.owner.replace(prepared.binding, prepared.content.bytes, signal)
+    this.release(binding)
     // Reopen the actual published file. Preview bytes alone never count as a save.
     return this.open(saved, signal)
   }

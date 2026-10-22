@@ -1,4 +1,6 @@
 // @vitest-environment node
+import { componentSurfaces } from '../../src/shared/contracts/component-platform/project'
+import { testContainerInstance } from '../helpers/glxWorkFixture'
 import { afterEach, expect, it } from 'vitest'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -64,7 +66,7 @@ it('directly exposes object styling in the first wire request and preserves froz
     appearance: { color: '#0057B8' } })
   expect(title.frame).toEqual(original.project.instances['scene-text']!.frame)
   expect(current.model.project.instances['scene-other']).toEqual(original.project.instances['scene-other'])
-  expect(current.model.project.surfaces.find(surface => surface.kind === 'flow')).toEqual(original.project.surfaces.find(surface => surface.kind === 'flow'))
+  expect(componentSurfaces(current.model.project).find(surface => surface.kind === 'flow')).toEqual(componentSurfaces(original.project).find(surface => surface.kind === 'flow'))
 
   // A text-field grant permits its text edit, while object-style authority stays narrower.
   const textRange: ToolTarget = { kind: 'course-instance', surfaceId: 'flow', instanceId: 'flow-paragraph', dataPath: ['content'], from: 0, to: 2 }
@@ -83,9 +85,9 @@ it('directly exposes object styling in the first wire request and preserves froz
   expect(readonlyTools).not.toContain('object.update')
 
   // An existing graph grant exposes the current scoped project writer, without object authority.
-  const spatial = model.project.surfaces.find(surface => surface.id === 'spatial')!
+  const spatial = componentSurfaces(model.project).find(surface => surface.id === 'spatial')!
   if (spatial.kind !== 'spatial') throw new Error('Spatial fixture required')
-  spatial.spatial = { home: { x: 0, y: 0, zoom: 1 }, frames: [], paths: [{ id: 'route', title: 'Route', frameIds: [], instanceIds: ['spatial-label'] }] }
+  testContainerInstance(model.project, spatial.id).container.spatial = { home: { x: 0, y: 0, zoom: 1 }, frames: [], paths: [{ id: 'route', title: 'Route', frameIds: [], instanceIds: ['spatial-label'] }] }
   const graphDocument = await host.internalAPI.create(model, 'graph.glx')
   const graph: ToolTarget = { kind: 'spatial-graph', surfaceId: 'spatial', graph: 'path', graphId: 'route' }
   await host.tools.beginRun({ runId: 'graph-only', actor: 'agent', documents: [{ documentId: graphDocument.documentId, writable: [graph] }] })

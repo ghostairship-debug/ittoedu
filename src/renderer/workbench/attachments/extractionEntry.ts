@@ -1,9 +1,9 @@
-import { extractAttachmentMaterial } from './materialExtractionWorker'
-import type { AttachmentExtractionInput, AttachmentExtractionResult } from '../../../shared/workbench/attachments'
+import { runAttachmentExtractionJob } from './materialExtractionWorker'
+import type { AttachmentExtractionJobInput, AttachmentExtractionJobResult, AttachmentExtractionJobOptions } from '../../../shared/workbench/attachments'
 
 declare global {
   interface Window {
-    attachmentExtraction: { run(extract: (input: AttachmentExtractionInput, options?: { onProgress?: (page: number, total: number) => void }) => Promise<AttachmentExtractionResult>): void }
+    attachmentExtraction: { run(extract: (input: AttachmentExtractionJobInput, options?: AttachmentExtractionJobOptions) => Promise<AttachmentExtractionJobResult>): void }
   }
 }
-window.attachmentExtraction.run(extractAttachmentMaterial)
+window.attachmentExtraction.run(runAttachmentExtractionJob)

@@ -1,3 +1,5 @@
+import { testContainerInstance, setRootContainers } from '../helpers/glxWorkFixture'
+import { componentSurfaces } from '../../src/shared/contracts/component-platform/project'
 import { expect, it, vi } from 'vitest'
 import fs from 'node:fs/promises'
 import os from 'node:os'
@@ -14,18 +16,18 @@ import type { ComponentSpatialPose } from '../../src/shared/contracts/component-
 
 function project() {
   const blank = createBlankCourseProjectV10('Spatial sequence')
-  const value = applyComponentOperation(blank, captureComponentOperation(blank, prepareCourseTeacherControllerEdits(blank, blank.surfaces[0].id, 'slide-authoring').edits))
-  value.surfaces = [
+  const value = applyComponentOperation(blank, captureComponentOperation(blank, prepareCourseTeacherControllerEdits(blank, componentSurfaces(blank)[0].id, 'slide-authoring').edits))
+  setRootContainers(value, [
     { id: 'A', kind: 'slide', title: 'Before', childIds: [] },
     { id: 'B', kind: 'spatial', title: 'World', childIds: [], spatial: { home: { x: 0, y: 0, zoom: 1 }, frames: [
       { id: 'first', title: 'First', pose: { x: 100, y: 0, zoom: 1 } }, { id: 'last', title: 'Last', pose: { x: 200, y: 0, zoom: 1 } }] } },
     { id: 'C', kind: 'flow', title: 'After', childIds: [] },
-  ]
+  ])
   return value
 }
 function owner(value = project(), surfaceId = 'A') {
   let active = surfaceId, frameId: string | null = null, index: number | null = null
-  const camera = createComponentSpatialCameraPort(value.surfaces.find(surface => surface.id === 'B')!.spatial!.home)
+  const camera = createComponentSpatialCameraPort(componentSurfaces(value).find(surface => surface.id === 'B')!.spatial!.home)
   const navigation = new ComponentNavigationOwner({ project: () => value, surfaceId: () => active, select: id => { active = id } })
   navigation.registerCamera('B', camera, { frameId: () => frameId, selectFrame: id => { frameId = id }, stepIndex: () => index, selectStep: next => { index = next } })
   return { navigation, camera, active: () => active, frame: () => frameId, dispose: () => { navigation.dispose(); camera.dispose() } }
@@ -45,14 +47,14 @@ it('enters the first authored camera from either scene direction, crosses only r
     await h.navigation.execute({ type: 'scene.previous' }); expect(h.camera.read().x).toBe(100)
     h.camera.set({ x: 999, y: 9, zoom: 2 })
     h.navigation.forInstance(value.global.overlay[0]).moveBy(20, 30)
-    await h.navigation.replayCurrentSurface(); expect(h.camera.read()).toEqual(value.surfaces[1].spatial!.frames[0].pose)
+    await h.navigation.replayCurrentSurface(); expect(h.camera.read()).toEqual(testContainerInstance(value, 1).container.spatial!.frames[0].pose)
     expect(h.navigation.placement()).toEqual({ x: 0, y: 0, zoom: 1 })
     expect(h.navigation.read().progress).toMatchObject({ stepIndex: 0, stepCount: 2 })
     expect(value).toEqual(before)
   } finally { h.dispose() }
 })
 it('uses the selected formal path and keeps an explicit first panoramic home frame; no-frame spaces remain runnable at home', async () => {
-  const value = project(), spatial = value.surfaces[1].spatial!
+  const value = project(), spatial = testContainerInstance(value, 1).container.spatial!
   spatial.frames[0].pose = { ...spatial.home }
   const h = owner(value, 'B')
   try { await h.navigation.initializeSpatialPlayback(); expect(h.frame()).toBe('first'); expect(h.camera.read()).toEqual(spatial.home); expect(h.navigation.read().progress!.stepCount).toBe(2) }
@@ -63,10 +65,10 @@ it('uses the selected formal path and keeps an explicit first panoramic home fra
   finally { empty.dispose() }
 })
 it('starts on fragment zero, advances fragments without replacing current pan, and only crosses after the authored last stop', async () => {
-  const value = project(), surface = value.surfaces[1]
+  const value = project(), surface = componentSurfaces(value)[1]
   value.definitions.html = { id: 'html', role: 'content', implementation: { kind: 'builtin', key: 'guoling.web' } }
   value.instances.html = { id: 'html', definitionId: 'html', frame: { width: 80, height: 40, transform: [1, 0, 0, 1, 0, 0] }, data: { html: '<b class="fragment">one</b><b class="fragment">two</b>', css: '' } }
-  surface.childIds.push('html'); surface.spatial!.frames[0].targetInstanceId = 'html'
+  testContainerInstance(value, surface.id).childIds.push('html'); testContainerInstance(value, surface.id).container.spatial!.frames[0].targetInstanceId = 'html'
   const state = new Map<string, number>(), camera = createComponentSpatialCameraPort(surface.spatial!.home)
   let index: number | null = null, frame: string | null = null, active = 'B'
   const nav = new ComponentNavigationOwner({ project: () => value, surfaceId: () => active, select: id => { active = id },
@@ -140,6 +142,6 @@ it('specified-frame actions survive canonical Main save and cold open; navigatio
     try { expect(await nav.navigation.execute(action)).toBe(true); expect(nav.camera.read().x).toBe(200) } finally { nav.dispose() }
     const metadata = componentInteractionView(cold, 'B')
     expect(metadata.scenes[1].spatial!.frames.map(frame => frame.id)).toEqual(['first', 'last'])
-    expect(metadata.scene.presentation).toBeUndefined(); expect(componentNavigationScene(cold.surfaces[1]).spatial!.frames).toHaveLength(2)
+    expect(metadata.scene.presentation).toBeUndefined(); expect(componentNavigationScene(componentSurfaces(cold)[1]).spatial!.frames).toHaveLength(2)
   } finally { await fs.rm(folder, { recursive: true, force: true }) }
 })

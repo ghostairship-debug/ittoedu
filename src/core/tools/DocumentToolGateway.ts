@@ -1,3 +1,4 @@
+import { componentSurfaces, componentContainers } from '../../shared/contracts/component-platform/project'
 import { isNativeProjectFilename, nativeProjectStem } from '../../shared/nativeProjectFile'
 import { mapAcknowledgedComponentRange, mapAcknowledgedRange, type ComponentTextSplice, type SourceSplice } from './ToolReadCoverage'
 import { HostToolCoordinator, hostToolRegistration, imageInput, isHostToolName, type HostToolServices } from './HostToolServices'
@@ -23,7 +24,7 @@ import { DocumentRegistry } from '../documents/DocumentRegistry'
 import { documentDigest } from '../documents/documentDigest'
 import { batchInputSchema, batchInputSchemaFor, canonicalToolRegistration, describeToolFamily, describeTools, familyOfTool, gatewayToolRegistration, mutationCallSchema, mutationNamesIn, selectRunToolNames, toolCatalog, toolEffectTargets, toolFamilies, toolRegistration, visibleRunToolNames, type BatchMutationCall, type InitialToolProfile, type RunToolScope, type ToolFamily } from './ToolCatalog'
 import { viewObserveInputSchema } from '../../shared/workbench/viewObservation'
-import { childTargets, containsTarget, courseAuthorFieldReadPaths, replaceCourseAuthorField, courseInstanceContext, courseInstanceTextTarget, mapMarkdownRange, readTarget, readSemanticTarget, targetFootprint, replaceCourseInstanceText, readCourseInstanceText, sliceCourseInstanceText, isCourseInstanceRange, readEditableTargetContent, recoverEditableTargetAfterReplacement, prepareHtmlAuthorFieldEdit, mapHtmlAuthorFieldTarget, planTextSelectionReplacement, mapExternalCourseTextTarget } from './ToolTargets'
+import { childTargets, containsTarget, courseAuthorFieldReadPaths, replaceCourseAuthorField, courseInstanceContext, courseInstanceScopeId, instanceWithinScope, courseInstanceTextTarget, mapMarkdownRange, readTarget, readSemanticTarget, targetFootprint, replaceCourseInstanceText, readCourseInstanceText, sliceCourseInstanceText, isCourseInstanceRange, readEditableTargetContent, recoverEditableTargetAfterReplacement, prepareHtmlAuthorFieldEdit, mapHtmlAuthorFieldTarget, planTextSelectionReplacement, mapExternalCourseTextTarget } from './ToolTargets'
 import { courseInstancePropertyEdits, courseInstanceConversionEdits, courseInstanceAppearanceEdits, readCourseInstanceAppearance } from './courseInstanceEdits'
 import { formatCourseInstanceText } from './ToolTargets'
 import { formatMarkdownSource } from './textFormatting'
@@ -223,7 +224,7 @@ export class DocumentToolGateway implements ToolGateway {
         if (!this.canWrite(run, snapshot, target)) throw new ToolError('not-authorized', '图片目标不在本次任务的可写范围')
         return { snapshot, target }
       },
-      active: (runId, documentId, epoch) => { const run = this.run(runId); if (run.stopped) throw new ToolError('run-stopped', '任务已停止'); const current = this.registry.get(documentId).read(); this.authorizeDocument(run, current); if (current.epoch !== epoch) throw new ToolError('stale-epoch', '文档会话已改变') },
+      active: (runId, documentId, epoch) => { const run = this.run(runId); if (run.stopped) throw new ToolError('run-stopped', '任务已停止'); const current = this.registry.get(documentId).readIdentity(); this.authorizeDocument(run, current); if (current.epoch !== epoch) throw new ToolError('stale-epoch', '文档会话已改变') },
       ownsDocument: (runId, documentId) => this.run(runId).grant.documents.some(document => document.documentId === documentId),
       documentIds: runId => this.run(runId).grant.documents.map(document => document.documentId),
       taskTargetContext: (runId, target, resumeContext) => this.taskTargetContext(runId, target, resumeContext),
@@ -306,12 +307,17 @@ export class DocumentToolGateway implements ToolGateway {
           && isSpatialGraphScopedEdit(baseline.model.project, target, request.edits[0])) ?? [] : []
     const assertActive = () => {
       if (run.stopped) throw new ToolError('run-stopped', '任务已停止')
-      const current = this.registry.get(baseline.documentId).read()
-      this.authorizeDocument(run, current)
-      if (current.epoch !== baseline.epoch) throw new ToolError('not-authorized', '工程身份已变化')
+      const session = this.registry.get(baseline.documentId), identity = session.readIdentity()
+      this.authorizeDocument(run, identity)
+      if (identity.epoch !== baseline.epoch) throw new ToolError('not-authorized', '工程身份已变化')
+      if (run.grant.documents.find(document => document.documentId === baseline.documentId)?.writable.some(target => target.kind === 'document')) return
+      // Scoped grants still need current professional facts to prove their containment.
+      const current = session.read()
       if (!this.canWrite(run, current, { kind: 'document' })) {
         const project = current.model.kind === 'course-v10' ? current.model.project : null
-        if (!project || !graphScopes.some(scope => {
+        const contentTarget = project ? this.componentContentTarget(current as ComponentProjectSnapshot, request) : undefined
+        const contentWritable = contentTarget && this.canWrite(run, current, contentTarget)
+        if (!project || !contentWritable && !graphScopes.some(scope => {
           try { spatialGraphItem(project, scope); return this.canWrite(run, current, scope) }
           catch { return false }
         })) throw new ToolError('not-authorized', '工程修改不属于当前冻结的写入范围')
@@ -321,8 +327,9 @@ export class DocumentToolGateway implements ToolGateway {
     const readExpectations = this.contentReadExpectations(runId, this.registry.get(baseline.documentId).read())
     if (request.intent === 'canonical' && request.edits[0]?.type === 'spatial.set') {
       const edit = request.edits[0]
-      const proposed = { ...baseline.model.project, surfaces: baseline.model.project.surfaces.map(surface =>
-        surface.id === edit.surfaceId ? { ...surface, spatial: edit.spatial } : surface) }
+      const project = baseline.model.project, instance = project.instances[edit.surfaceId]
+      const proposed = { ...project, instances: { ...project.instances,
+        [instance.id]: { ...instance, container: { ...instance.container!, spatial: edit.spatial } } } }
       for (const scope of graphScopes) for (const path of spatialGraphDependencyPaths(proposed, scope))
         readExpectations.push({ path, ...componentValueAt(baseline.model.project, path) })
     }
@@ -347,11 +354,12 @@ export class DocumentToolGateway implements ToolGateway {
     if (current.model.kind !== 'course-v10') throw new ToolError('unsupported-document', '工程格式已变化')
     const assertActive = () => {
       if (run.stopped) throw new ToolError('run-stopped', '任务已停止，修改未提交')
-      const snapshot = session.read()
+      const snapshot = session.readIdentity()
       this.authorizeDocument(run, snapshot)
       if (operations.some(item => item.baseline.documentId !== documentId || item.baseline.epoch !== snapshot.epoch))
         throw new ToolError('cross-document-batch', '同批工程内容需要属于同一正式工程和会话')
-      if (!this.canWrite(run, snapshot, { kind: 'document' })) throw new ToolError('not-authorized', '同批工程修改需要整课写入授权')
+      if (!run.grant.documents.find(document => document.documentId === documentId)?.writable.some(target => target.kind === 'document'))
+        throw new ToolError('not-authorized', '同批工程修改需要整课写入授权')
     }
     assertActive()
     this.captureOperationLeases(runId, operationId)
@@ -379,6 +387,9 @@ export class DocumentToolGateway implements ToolGateway {
         assertActive()
         results.push({ commit: 'not_committed', usability: 'unusable', delivery: 'not_requested', input: operation.request, insertedIds: [],
           diagnostics: [{ level: 'error', code: 'content-apply-unresolved', message: error instanceof Error ? error.message : String(error), repairable: true }] })
+        // A complete program root and its admitted source form one authoring change.
+        // Ordinary file batches still preserve independently usable siblings.
+        if (operation.required) return results
       }
     }
     if (!usable.length) return results
@@ -591,6 +602,7 @@ export class DocumentToolGateway implements ToolGateway {
   async beginRun(input: ToolRunGrant): Promise<void> {
     if (!input.runId || this.runs.has(input.runId) || this.startingRuns.has(input.runId)) throw new Error('任务编号已存在或无效')
     this.startingRuns.add(input.runId)
+    let preparedRun: Run | undefined, hostAttempted = false
     try {
       const grant = structuredClone(input)
       this.assertWriteTasksAllowed(grant)
@@ -623,23 +635,37 @@ export class DocumentToolGateway implements ToolGateway {
         if (isSourceDocumentModel(snapshot.model)) sources.set(doc.documentId, snapshot.model.source)
       }
       if (this.runs.has(grant.runId)) throw new Error('任务编号已存在')
+      hostAttempted = true
       await this.hostTools.beginRun(grant)
-      this.assertWriteTasksAllowed(grant, generations)
       const run: Run = { grant, toolScopes, authorizedTargets: new Map(grant.documents.map(doc => [doc.documentId, structuredClone(doc.writable)])), loadedFamilies: new Set(), loadedNames: new Set(), epochs, sources, rangeFootprints, componentSubtrees,
         currentDocumentId: grant.documents.length === 1 ? grant.documents[0]!.documentId : undefined,
         currentCourseDocumentId: courses.length === 1 ? courses[0] : writableCourses.length === 1 ? writableCourses[0] : undefined,
         documentLeases: new Map(grant.documents.map(doc => [doc.documentId, grant.runId])),
         stopped: false, history: new Map(), watches: new Map(), contentReads: new Map() }
+      preparedRun = run
       if (grant.contentOutput) {
         const binding = grant.contentOutput
         const snapshot = await this.registry.get(binding.documentId).drain()
         this.authorizeDocument(run, snapshot)
         if (!this.canWrite(run, snapshot, binding.target)) throw new ToolError('not-authorized', '默认文字目标不属于本次已授权范围')
         readTarget(snapshot.model, binding.target)
-        run.contentTarget = this.capture(grant.runId, snapshot, binding.target, true)
+        run.contentTarget = this.capturePrepared(run, snapshot, binding.target, true)
       }
+      this.assertWriteTasksAllowed(grant, generations)
       this.runs.set(grant.runId, run)
       for (const doc of grant.documents) this.watchDocument(grant.runId, doc.documentId)
+    } catch (error) {
+      if (preparedRun) {
+        for (const unwatch of preparedRun.watches.values()) unwatch()
+        preparedRun.watches.clear()
+        if (this.runs.get(input.runId) === preparedRun) this.runs.delete(input.runId)
+      }
+      for (const [id, handle] of this.handles) if (handle.runId === input.runId) this.handles.delete(id)
+      if (hostAttempted) {
+        try { await this.hostTools.stop(input.runId) }
+        catch (cleanup) { throw new AggregateError([error, cleanup], '任务初始化失败，宿主清理也未完成', { cause: error }) }
+      }
+      throw error
     } finally { this.startingRuns.delete(input.runId) }
   }
 
@@ -1116,7 +1142,7 @@ export class DocumentToolGateway implements ToolGateway {
     for (const [id, cursor] of this.cursors) if (cursor.runId === runId) this.cursors.delete(id)
     this.componentProjectFiles.stopRun(runId)
     // Already queued canonical commits finish; later requests cannot cross the barrier.
-    const liveIds = new Set(this.registry.list().map(document => document.documentId))
+    const liveIds = new Set(this.registry.listIdentities().map(document => document.documentId))
     try {
       await Promise.all([this.hostTools.stop(runId), ...run.grant.documents.filter(doc => liveIds.has(doc.documentId)).map(doc => this.registry.get(doc.documentId).stopRun(run.documentLeases.get(doc.documentId) ?? runId))])
     } finally {
@@ -1281,7 +1307,7 @@ export class DocumentToolGateway implements ToolGateway {
     })
     run.watches.set(documentId, () => { unwatch(); unwatchCommits() })
   }
-  private authorizeDocument(run: Run, snapshot: DocumentSnapshot): void {
+  private authorizeDocument(run: Run, snapshot: Pick<DocumentSnapshot, 'documentId' | 'epoch'>): void {
     if (!run.epochs.has(snapshot.documentId)) throw new ToolError('not-authorized', '任务没有此文档的读取权限')
     if (run.epochs.get(snapshot.documentId) !== snapshot.epoch) throw new ToolError('stale-epoch', '文档会话已改变，请重新冻结任务')
   }
@@ -1300,7 +1326,13 @@ export class DocumentToolGateway implements ToolGateway {
     })
   }
   private capture(runId: string, snapshot: DocumentSnapshot, target: ToolTarget, writable: boolean, readOnly?: boolean): string {
-    if (this.run(runId).stopped) throw new ToolError('run-stopped', '任务已停止，不再分配新的读取句柄')
+    const run = this.run(runId)
+    if (run.stopped) throw new ToolError('run-stopped', '任务已停止，不再分配新的读取句柄')
+    return this.capturePrepared(run, snapshot, target, writable, readOnly)
+  }
+  /** beginRun captures its validated target before publishing any callable authority. */
+  private capturePrepared(run: Run, snapshot: DocumentSnapshot, target: ToolTarget, writable: boolean, readOnly?: boolean): string {
+    const runId = run.grant.runId
     const value = this.createId()
     // Encode every UUID byte; opaque references need not carry its verbose display format.
     const token = /^[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}$/i.test(value)
@@ -1361,8 +1393,10 @@ export class DocumentToolGateway implements ToolGateway {
       catch (error) { throw new ToolError('invalid-target', error instanceof Error ? error.message : String(error)) }
       const { snapshot, file } = captured
       if (mutation.name !== 'media.insert' && mutation.name !== 'object.insert' && file.target?.kind !== 'instance') throw new ToolError('invalid-target', '属性修改需要已观察的对象文件路径')
-      if ((mutation.name === 'media.insert' || mutation.name === 'object.insert') && (file.target?.kind !== 'container' || file.target.container.kind !== 'surface'))
-        throw new ToolError('invalid-target', '插入内容需要已观察的页面文件路径')
+      const fileContainer = file.target?.kind === 'container' && (file.target.container.kind === 'surface' || file.target.container.kind === 'instance')
+      const programRoot = mutation.name === 'media.insert' && file.target?.kind === 'instance' && this.isProgramRoot(snapshot.model.project, file.target.instanceId)
+      if ((mutation.name === 'media.insert' || mutation.name === 'object.insert') && !fileContainer && !programRoot)
+        throw new ToolError('invalid-target', '插入内容需要已观察的容器或程序根文件路径')
       const target = this.componentAssetPlacement(snapshot, file).target
       const readOnly = project && this.handles.has(project) ? this.handle(runId, project).readOnly : false
       return this.capturedHandle(runId, snapshot, target, !readOnly && this.canWrite(this.run(runId), current, target), readOnly || undefined)
@@ -1373,7 +1407,7 @@ export class DocumentToolGateway implements ToolGateway {
         if (click?.action !== 'location-go' || !click.value || this.handles.has(click.value)) continue
         const current = await this.registry.get(handles[index]!.documentId).drain()
         if (current.model.kind !== 'course-v10') throw new ToolError('invalid-target', '跳转需要课件页面')
-        if (current.model.project.surfaces.some(surface => surface.id === click.value)) continue
+        if (componentContainers(current.model.project).some(surface => surface.id === click.value)) continue
         const project = 'project' in mutation.input ? mutation.input.project : undefined
         const captured = this.componentProjectFiles.captureFile(runId, current as ComponentProjectSnapshot, click.value, true, project)
         const destination = captured.file.target
@@ -1757,6 +1791,12 @@ export class DocumentToolGateway implements ToolGateway {
   }
 
   /** Asset tools plan from the same observed paths as project.apply. */
+  private isProgramRoot(project: ComponentProjectSnapshot['model']['project'], instanceId: string): boolean {
+    const instance = project.instances[instanceId]
+    return project.rootIds.includes(instanceId) && Boolean(instance && !instance.container
+      && componentDefinitionBuiltinKey(project.definitions[instance.definitionId]) === 'guoling.html-program')
+  }
+
   private async prepareSettingsBackground(runId: string, input: z.output<typeof courseConfigureInputSchema>['settings']['background']) {
     const resources: ComponentEdit[] = []
     if (!input?.source) return { background: input, resources }
@@ -1771,31 +1811,36 @@ export class DocumentToolGateway implements ToolGateway {
   }
 
   /** Asset tools plan from the same observed paths as project.apply. */
+  private componentContentTarget(snapshot: ComponentProjectSnapshot, request: ContentApplyRequest): ToolTarget | undefined {
+    if (!('target' in request) || !request.target) return undefined
+    const target = request.target, context = 'editingContext' in request ? request.editingContext : undefined
+    const state = context ? { stateId: context.stateId } : {}
+    const instanceTarget = (instanceId: string): ToolTarget => ({ kind: 'course-instance', instanceId,
+      surfaceId: context?.surfaceId ?? courseInstanceScopeId(snapshot.model.project, instanceId)!, ...state })
+    const required: ToolTarget = target.kind === 'instance' ? instanceTarget(target.instanceId)
+      : target.container.kind === 'global' || target.container.kind === 'project' ? { kind: 'document' }
+        : target.container.kind === 'surface' ? { kind: 'course-surface', surfaceId: target.container.surfaceId, ...state }
+          : instanceTarget(target.container.instanceId)
+    readTarget(snapshot.model, required)
+    return required
+  }
+
   private componentAssetPlacement(snapshot: ComponentProjectSnapshot, file: ComponentProjectFile): { container: ComponentContainer; index: number; target: ToolTarget } {
     const project = file.observedState ? resolveComponentPresentation(snapshot.model.project, file.observedState.surfaceId, file.observedState.stateId) : snapshot.model.project, target = file.target
     if (!target) throw new ToolError('invalid-target', '请选择工程中的页面或对象路径')
     if (target.kind === 'container') {
-      let owner = target.container
-      while (owner.kind === 'instance') {
-        const next = owningContainer(project, owner.instanceId)
-        if (!next) throw new ToolError('invalid-target', '对象归属已不存在')
-        owner = next
-      }
-      const surfaceId = owner.kind === 'surface' ? owner.surfaceId : file.observedState?.surfaceId ?? project.surfaces[0]?.id
-      if (!surfaceId) throw new ToolError('invalid-target', '工程没有可用页面')
+      const container = target.container
+      const context: ToolTarget = container.kind === 'global' || container.kind === 'project' ? { kind: 'document' }
+        : container.kind === 'surface' ? { kind: 'course-surface', surfaceId: container.surfaceId, ...(file.observedState ? { stateId: file.observedState.stateId } : {}) }
+          : { kind: 'course-instance', surfaceId: file.observedState?.surfaceId ?? courseInstanceScopeId(project, container.instanceId)!,
+            instanceId: container.instanceId, ...(file.observedState ? { stateId: file.observedState.stateId } : {}) }
       return { container: target.container, index: containerChildIds(project, target.container).length,
-        target: { kind: 'course-surface', surfaceId, ...(file.observedState ? { stateId: file.observedState.stateId } : {}) } }
+        target: context }
     }
     const instance = project.instances[target.instanceId], container = owningContainer(project, target.instanceId)
     if (!instance || !container) throw new ToolError('invalid-target', '捕获的对象已不存在')
-    let owner = container
-    while (owner.kind === 'instance') {
-      const next = owningContainer(project, owner.instanceId)
-      if (!next) throw new ToolError('invalid-target', '对象归属已不存在')
-      owner = next
-    }
-    const surfaceId = owner.kind === 'surface' ? owner.surfaceId : file.observedState?.surfaceId ?? project.surfaces[0]?.id
-    if (!surfaceId) throw new ToolError('invalid-target', '工程没有可用页面')
+    const surfaceId = file.observedState?.surfaceId ?? courseInstanceScopeId(project, instance.id)
+    if (!surfaceId) throw new ToolError('invalid-target', '对象没有可用的所属容器或程序根')
     return { container, index: containerChildIds(project, container).indexOf(instance.id) + 1,
       target: { kind: 'course-instance', surfaceId, instanceId: instance.id, ...(file.observedState ? { stateId: file.observedState.stateId } : {}) } }
   }
@@ -1839,7 +1884,9 @@ export class DocumentToolGateway implements ToolGateway {
     if (!this.options.prepareImage) throw new ToolError('unsupported-resource-preparation', '当前宿主未配置图片解码能力')
     const prepared = await prepareComponentImageApplication({ snapshot, target: placement.target, image: fetched.file, mode,
       source: fetched.source, container: placement.container, index: placement.index }, { prepareImage: this.options.prepareImage, createId: this.createId })
-    return this.commitComponentAsset(runId, operationId, requestDigest, snapshot, prepared.command, [input.path])
+    const required = placement.target.kind === 'course-instance' && this.isProgramRoot(snapshot.model.project, placement.target.instanceId)
+      ? placement.target : undefined
+    return this.commitComponentAsset(runId, operationId, requestDigest, snapshot, prepared.command, [input.path], false, required)
   }
 
   /** Insert the same complete API 5 graph offered by the component panel as one undoable command. */
@@ -1872,7 +1919,9 @@ export class DocumentToolGateway implements ToolGateway {
     const command = removeIds.length ? captureComponentOperation(snapshot.model.project, [
       ...removeIds.map(instanceId => ({ type: 'instance.remove' as const, instanceId })), ...prepared.command.edits,
     ]) : prepared.command
-    return this.commitComponentAsset(runId, operationId, requestDigest, snapshot, command, [input.path])
+    const required = placement.target.kind === 'course-instance' && this.isProgramRoot(snapshot.model.project, placement.target.instanceId)
+      ? placement.target : undefined
+    return this.commitComponentAsset(runId, operationId, requestDigest, snapshot, command, [input.path], false, required)
   }
 
   /** Ready-image redo retains a plain carrier's geometry and declared interaction identity. */
@@ -1885,9 +1934,10 @@ export class DocumentToolGateway implements ToolGateway {
     const original = project.instances[file.target.instanceId], stateId = file.observedState?.stateId
     if (!original || original.childIds?.length || original.implementationOverride || original.attachments?.length)
       throw new ToolError('invalid-target', '图片重做仅支持没有子图或自定义实现的形状')
-    if (stateId && (placement.container.kind !== 'surface' || placement.container.surfaceId !== placement.target.surfaceId))
+    if (stateId && !(placement.container.kind === 'surface' && placement.container.surfaceId === placement.target.surfaceId
+      || placement.container.kind === 'instance' && placement.container.instanceId === placement.target.surfaceId))
       throw new ToolError('state-placement-unsupported', '状态内图片重做需要当前页面的直接形状对象')
-    if (!stateId && project.surfaces.some(surface => surface.presentation?.states.some(state => {
+    if (!stateId && componentContainers(project).some(surface => surface.presentation?.states.some(state => {
       const override = state.overrides[original.id]
       return override && (override.data !== undefined || override.style !== undefined)
     }))) throw new ToolError('state-placement-unsupported', '形状有专用状态内容或样式，不能将基础实现改为图片')
@@ -1906,7 +1956,7 @@ export class DocumentToolGateway implements ToolGateway {
       ...(selected.flowPlacement !== undefined ? { flowPlacement: structuredClone(selected.flowPlacement) } : {}),
       ...(selected.flowLayout !== undefined ? { flowLayout: structuredClone(selected.flowLayout) } : {}), visible: selected.visible !== false }
     const readPaths: string[][] = [['instances', original.id], ['@owner', original.id], ['definitions', original.definitionId]]
-    if (!stateId) project.surfaces.forEach((_surface, index) => readPaths.push(['@surface', project.surfaces[index].id, 'presentation']))
+    if (!stateId) componentContainers(project).forEach(surface => readPaths.push(['@surface', surface.id, 'presentation']))
     const edits: ComponentEdit[] = prepared.command.edits.filter(edit => edit.type !== 'instance.insert' && edit.type !== 'surface.presentation.set')
     if (!stateId) {
       edits.push({ type: 'instance.definition.set', instanceId: original.id, definitionId: replacement.definitionId },
@@ -1919,9 +1969,7 @@ export class DocumentToolGateway implements ToolGateway {
         const value = remapComponentInteractionData(behavior.data, { instances: new Map([[original.id, replacement.id]]), surfaces: new Map(),
           rules: new Map(rules.map(rule => [rule.id, rule.id])), actions: new Map(rules.flatMap(rule => rule.actions.map(step => [step.id, step.id]))) })
         if (equalComponentValue(value, behavior.data)) continue
-        let owner = owningContainer(effective, behavior.id)
-        while (owner?.kind === 'instance') owner = owningContainer(effective, owner.instanceId)
-        if (owner?.kind !== 'surface' || owner.surfaceId !== placement.target.surfaceId)
+        if (!instanceWithinScope(effective, behavior.id, placement.target.surfaceId))
           throw new ToolError('state-placement-unsupported', '形状有跨页面或全局互动引用，不能仅替换一个展示状态')
         readPaths.push(['instances', behavior.id, 'data'], ['instances', behavior.id, 'definitionId'], ['@owner', behavior.id])
         edits.push({ type: 'data.set', instanceId: behavior.id, path: [], value })
@@ -1988,9 +2036,9 @@ export class DocumentToolGateway implements ToolGateway {
       if (file.observedState || file.target?.kind !== 'container' || file.target.container.kind !== 'surface')
         throw new ToolError('invalid-target', '页面模板或结构需要基础页面路径')
       return file.target.container.surfaceId
-    }) ?? project.surfaces.map(surface => surface.id)
+    }) ?? componentSurfaces(project).map(surface => surface.id)
     const instance = roots?.length ? project.instances[roots[0]] : undefined
-    const title = input.title || (scope === 'page' ? project.surfaces.find(surface => surface.id === surfaceIds![0])!.title
+    const title = input.title || (scope === 'page' ? componentContainers(project).find(surface => surface.id === surfaceIds![0])!.title
       : scope === 'structure' ? '课程结构' : roots!.length > 1 ? '组合组件' : instance?.name || (instance && project.definitions[instance.definitionId]?.title) || '组件')
     const extracted = extractComponentLibraryApplication(project, resources, { rootIds: roots, surfaceIds,
       kind: scope === 'objects' ? 'objects' : scope, title })
@@ -2075,9 +2123,7 @@ export class DocumentToolGateway implements ToolGateway {
     if (snapshot.epoch !== frozen.epoch) throw new ToolError('stale-epoch', '原子任务的工程会话已重开；旧目标不能续接当前工程。')
     if (snapshot.model.kind !== 'course-v10') throw new ToolError('unsupported-document', '原子任务的工程格式已变化')
     const state = frozen.editingContext?.stateId ? { surfaceId: frozen.editingContext.surfaceId, stateId: frozen.editingContext.stateId } : undefined
-    let target: ToolTarget
-    if (frozen.target.kind === 'container' && frozen.target.container.kind !== 'surface') target = { kind: 'document' }
-    else target = this.componentAssetPlacement(snapshot as ComponentProjectSnapshot,
+    const target = this.componentAssetPlacement(snapshot as ComponentProjectSnapshot,
       { path: '', kind: 'structure', target: frozen.target, ...(state ? { observedState: state } : {}) }).target
     const project = this.capture(runId, snapshot, target, this.canWrite(run, snapshot, target))
     const region = frozen.regionStatus === 'explicit' || frozen.regionStatus === undefined ? componentFrameSchema.safeParse(frozen.region) : undefined
@@ -2088,8 +2134,8 @@ export class DocumentToolGateway implements ToolGateway {
   private async componentProjectDocument(runId: string, selector: string | undefined, access: 'read' | 'write', allowGraph = false): Promise<ComponentProjectSnapshot> {
     const run = this.run(runId)
     if (run.stopped) throw new ToolError('run-stopped', '任务已停止')
-    const snapshots = await Promise.all(run.grant.documents.map(document => this.registry.get(document.documentId).drain()))
-    const courses = snapshots.filter((snapshot): snapshot is ComponentProjectSnapshot => snapshot.model.kind === 'course-v10')
+    const authorized = new Set(run.grant.documents.map(document => document.documentId))
+    const courses = this.registry.listIdentities().filter(snapshot => authorized.has(snapshot.documentId) && snapshot.kind === 'course-v10')
     const normalize = (value: string) => value.replace(/\\/g, '/').toLowerCase()
     const wanted = selector === undefined ? undefined : normalize(selector)
     let found = wanted === undefined ? run.currentCourseDocumentId
@@ -2104,8 +2150,8 @@ export class DocumentToolGateway implements ToolGateway {
     if (!found.length && selector !== undefined && isNativeProjectFilename(selector) && openProject) {
       const opened = await openProject({ runId, path: selector, fileAccess: run.grant.fileAccess })
       await this.completeOpenedDocument(runId, opened, { selection: 'preserve' })
-      const snapshot = await this.registry.get(opened.documentId).drain()
-      if (snapshot.model.kind === 'course-v10') found = [snapshot as ComponentProjectSnapshot]
+      const identity = this.registry.get(opened.documentId).readIdentity()
+      if (identity.kind === 'course-v10') found = [identity]
     }
     if (found.length !== 1) throw new ToolError(found.length ? 'project-ambiguous' : 'project-not-found', found.length ? '本任务有多个课件，请指定project文件名' : '本任务没有可用的Project V10工程')
     await this.options.prepareInput?.(found[0]!.documentId)
@@ -2114,11 +2160,14 @@ export class DocumentToolGateway implements ToolGateway {
     if (prepared.model.kind !== 'course-v10') throw new ToolError('invalid-target', '课件文档已改变')
     const snapshot = prepared as ComponentProjectSnapshot
     this.authorizeDocument(run, snapshot)
-    let writableGraph = false
-    if (access === 'write' && allowGraph && selector && this.handles.get(selector)?.target.kind === 'spatial-graph')
-      writableGraph = this.resolve(this.handle(runId, selector), snapshot, true).kind === 'spatial-graph'
-    if (access === 'write' && !this.canWrite(run, snapshot, { kind: 'document' }) && !writableGraph)
-      throw new ToolError('not-authorized', '本次任务没有整份课件或所选图项的写权限')
+    let writableSelection = false
+    if (access === 'write' && selector && this.handles.has(selector)) {
+      const target = this.resolve(this.handle(runId, selector), snapshot, true)
+      writableSelection = target.kind === 'course-instance' || target.kind === 'course-surface'
+        || allowGraph && target.kind === 'spatial-graph'
+    }
+    if (access === 'write' && !this.canWrite(run, snapshot, { kind: 'document' }) && !writableSelection)
+      throw new ToolError('not-authorized', '本次任务没有整份作品或所选内容的写权限')
     return snapshot
   }
 
@@ -2175,7 +2224,7 @@ export class DocumentToolGateway implements ToolGateway {
       const snapshot = await this.registry.get(identity.documentId).drain()
       this.authorizeDocument(run, snapshot)
       if (snapshot.epoch !== identity.epoch || snapshot.revision !== identity.revision || snapshot.model.kind !== 'course-v10'
-        || !snapshot.model.project.surfaces.some(surface => surface.id === identity.locationId))
+        || !snapshot.model.project.rootIds.includes(identity.locationId) && !snapshot.model.project.instances[identity.locationId]?.container)
         throw new ToolError('observation-stale', '课件版本或页面已变化，请重新观察后操作')
       return this.hostTools.executeViewAction(runId, operationId, name, input)
     } }, call.input)
@@ -2236,7 +2285,7 @@ export class DocumentToolGateway implements ToolGateway {
         const parsed = componentProjectFileSchemas[name].parse(input)
         const current = await this.componentProjectDocument(runId, parsed.project, 'write', true)
         this.contentReadExpectations(runId, current)
-        if ('from' in parsed && parsed.from && parsed.intent !== 'surface.add' && parsed.intent !== 'enhance' && (this.images.has(parsed.from) || this.hostTools.isImageSource(parsed.from))) {
+        if ('from' in parsed && parsed.from && parsed.intent !== 'surface.add' && parsed.intent !== 'enhance' && parsed.intent !== 'program.set' && (this.images.has(parsed.from) || this.hostTools.isImageSource(parsed.from))) {
           const { file } = this.componentProjectFiles.captureFile(runId, current, parsed.path, false, parsed.project)
           // File-bound assets retain their identity through the existing file owner.
           // Only object/page targets use professional-image insertion or replacement.
@@ -2316,9 +2365,10 @@ export class DocumentToolGateway implements ToolGateway {
         if (!locationId) {
           const target = componentProjectFiles(project, snapshot.model.resources).find(file => file.path === path)?.target
           if (!target) return null
-          let owner = target.kind === 'container' ? target.container : owningContainer(project, target.instanceId)
-          while (owner?.kind === 'instance') owner = owningContainer(project, owner.instanceId)
-          locationId = owner?.kind === 'surface' ? owner.surfaceId : owner?.kind === 'global' ? project.surfaces[0]?.id : undefined
+          locationId = target.kind === 'instance' ? courseInstanceScopeId(project, target.instanceId)
+            : target.container.kind === 'surface' ? target.container.surfaceId
+              : target.container.kind === 'instance' ? courseInstanceScopeId(project, target.container.instanceId)
+                : project.entry?.rootInstanceId ?? project.rootIds[0]
         }
         if (!locationId) return null
         let stateId:string|null=null
@@ -2332,14 +2382,14 @@ export class DocumentToolGateway implements ToolGateway {
         if (snapshot.revision !== observed.revision) return null
         if (snapshot.model.kind === 'course-v10') {
           const project = snapshot.model.project, target = observed.target
-          const locationId = target.kind === 'document' ? project.surfaces[0]?.id
+          const locationId = target.kind === 'document' ? project.entry?.rootInstanceId ?? project.rootIds[0]
             : target.kind === 'course-surface' || target.kind === 'course-instance' ? target.surfaceId : undefined
-          const surface = project.surfaces.find(value => value.id === locationId)
-          if (!surface) return null
+          const surface = componentContainers(project).find(value => value.id === locationId)
+          if (!locationId || !project.instances[locationId]) return null
           const stateId = target.kind === 'course-instance' || target.kind==='course-surface' ? target.stateId ?? null : null
-          if (stateId && !surface.presentation?.states.some(state => state.id === stateId)) return null
+          if (stateId && !surface?.presentation?.states.some(state => state.id === stateId)) return null
           return { documentId: snapshot.documentId, epoch: snapshot.epoch, revision: snapshot.revision,
-            projectId: project.id, locationId: surface.id, stateId }
+            projectId: project.id, locationId, stateId }
         }
         return null
         } }, input)
@@ -2368,7 +2418,7 @@ export class DocumentToolGateway implements ToolGateway {
       if (parsed.application.mode === 'replace' && (target.kind !== 'course-instance'
         || componentDefinitionBuiltinKey(snapshot.model.project.definitions[snapshot.model.project.instances[target.instanceId]?.definitionId]) !== 'guoling.image'))
         throw new ToolError('invalid-target', '图片替换需要专业图片对象')
-      if (parsed.application.mode === 'insert' && target.kind === 'course-instance') {
+      if (parsed.application.mode === 'insert' && target.kind === 'course-instance' && !this.isProgramRoot(snapshot.model.project, target.instanceId)) {
         const owner = owningContainer(snapshot.model.project, target.instanceId)
         const parentTarget: ToolTarget = owner?.kind === 'surface' ? { kind: 'course-surface', surfaceId: owner.surfaceId }
           : owner?.kind === 'instance' ? { kind: 'course-instance', surfaceId: target.surfaceId, instanceId: owner.instanceId } : { kind: 'document' }
@@ -2408,10 +2458,11 @@ export class DocumentToolGateway implements ToolGateway {
           prepared.command.expected = [...prepared.command.expected, ...paths.map(path => ({ path, ...componentValueAt(capture.snapshot.model.project, path) }))]
           const latest = await this.registry.get(capture.snapshot.documentId).drain()
           this.resolve(capture.handle, latest, true)
-          const owner = capture.mode === 'insert' && capture.target.kind === 'course-instance' ? owningContainer(capture.snapshot.model.project, capture.target.instanceId) : undefined
+          const owner = capture.mode === 'insert' && capture.target.kind === 'course-instance' && !this.isProgramRoot(capture.snapshot.model.project, capture.target.instanceId)
+            ? owningContainer(capture.snapshot.model.project, capture.target.instanceId) : undefined
           const requiredTarget: ToolTarget = owner?.kind === 'surface' ? { kind: 'course-surface', surfaceId: owner.surfaceId }
             : owner?.kind === 'instance' ? { kind: 'course-instance', surfaceId: capture.target.surfaceId, instanceId: owner.instanceId }
-              : owner?.kind === 'global' ? { kind: 'document' } : capture.target
+              : owner?.kind === 'global' || owner?.kind === 'project' ? { kind: 'document' } : capture.target
           capture.result = await this.commitComponentAsset(runId, capture.operationId, capture.requestDigest, capture.snapshot,
             prepared.command, [prepared.instanceId], true, requiredTarget)
         }
@@ -2569,7 +2620,7 @@ export class DocumentToolGateway implements ToolGateway {
           const prepared = mutation.name === 'teacher.ensure' ? prepareCourseTeacherControllerEdits(project, target.surfaceId)
             : prepareCourseElementEdits(project, target.surfaceId, null, mutation.input.kind, { ...mutation.input, container })
           for (const edit of prepared.edits) if (edit.type === 'instance.insert') {
-            const owner: ToolTarget = edit.container.kind === 'global' ? { kind: 'document' } : edit.container.kind === 'surface'
+            const owner: ToolTarget = edit.container.kind === 'global' || edit.container.kind === 'project' ? { kind: 'document' } : edit.container.kind === 'surface'
               ? { kind: 'course-surface', surfaceId: edit.container.surfaceId, stateId: target.stateId }
               : { kind: 'course-instance', surfaceId: target.surfaceId, instanceId: edit.container.instanceId, stateId: target.stateId }
             if (!this.canWrite(run, snapshot, owner)) throw new ToolError('not-authorized', '插入容器不属于本次授权范围')
@@ -2739,14 +2790,20 @@ export class DocumentToolGateway implements ToolGateway {
           continue
         }
         if (mutation.name === 'media.insert') {
-          if (target.kind !== 'course-surface') throw new ToolError('invalid-target', '插入媒体需要已授权页面目标')
+          const instanceContainer = target.kind === 'course-instance' && !target.authorField && !target.dataPath
+            && target.from === undefined && target.to === undefined && Boolean(model.project.instances[target.instanceId]?.container)
+          const programRoot = target.kind === 'course-instance' && !target.authorField && !target.dataPath
+            && target.from === undefined && target.to === undefined && this.isProgramRoot(model.project, target.instanceId)
+          if (target.kind !== 'course-surface' && !instanceContainer && !programRoot) throw new ToolError('invalid-target', '插入媒体需要已授权容器或程序根目标')
           const prepareMedia = this.options.prepareMedia ?? this.options.prepareImage
           if (!prepareMedia) throw new ToolError('unsupported-resource-preparation', '当前宿主未配置媒体读取能力')
           const reference = 'source' in mutation.input ? mutation.input.source : mutation.input.resource
           const media = await this.hostTools.readMediaSource(runId, reference)
           const source = media.source ?? this.images.get(reference)?.source
           const prepared = await prepareComponentMediaApplication({ snapshot: { ...snapshot, model }, target, media,
-            mode: 'insert', fit: mutation.input.fit, frame: mutation.input.frame, source }, { prepareMedia, createId: this.createId })
+            mode: 'insert', fit: mutation.input.fit, frame: mutation.input.frame, source,
+            ...(instanceContainer && target.kind === 'course-instance' ? { container: { kind: 'instance' as const, instanceId: target.instanceId } } : {}) },
+          { prepareMedia, createId: this.createId })
           model = await applyPlanned(prepared.command)
           componentEdits.push(...prepared.command.edits)
           for (const expected of prepared.command.expected) componentReadPaths.set(JSON.stringify(expected.path), expected.path)
@@ -2834,9 +2891,10 @@ export class DocumentToolGateway implements ToolGateway {
           if (target.authorField || target.dataPath || target.from !== undefined) throw new ToolError('invalid-target', '结构与载体修改需要整对象目标')
           const { project } = courseInstanceContext(model, target), instanceId = target.instanceId, surfaceId = target.surfaceId, stateId = target.stateId
           const requireContainer = (container: ComponentContainer, containerStateId: string | null | undefined = stateId) => {
-            const required: ToolTarget = container.kind === 'global' ? { kind: 'document' }
+            const required: ToolTarget = container.kind === 'global' || container.kind === 'project' ? { kind: 'document' }
               : container.kind === 'surface' ? { kind: 'course-surface', surfaceId: container.surfaceId, stateId: containerStateId }
-                : { kind: 'course-instance', surfaceId, instanceId: container.instanceId, stateId }
+                : { kind: 'course-instance', surfaceId: courseInstanceScopeId(project, container.instanceId) ?? surfaceId,
+                    instanceId: container.instanceId, stateId: containerStateId }
             if (!this.canWrite(run, snapshot, required)) throw new ToolError('not-authorized', '目标容器不属于当前写入范围')
             return container
           }
@@ -2848,19 +2906,26 @@ export class DocumentToolGateway implements ToolGateway {
               && ((value.stateId ?? null) !== (stateId ?? null) || (stateId || value.stateId) && value.surfaceId !== surfaceId))
               throw new ToolError('invalid-target', '展示状态结构操作需要同一页面与展示状态的目标容器')
             if (value.kind === 'course-surface') return requireContainer({ kind: 'surface', surfaceId: value.surfaceId }, value.stateId ?? null)
-            if (value.kind === 'course-instance' && !value.authorField && !value.dataPath && project.instances[value.instanceId]?.childIds)
-              return requireContainer({ kind: 'instance', instanceId: value.instanceId })
+            if (value.kind === 'course-instance' && !value.authorField && !value.dataPath && value.from === undefined && value.to === undefined
+              && (project.instances[value.instanceId]?.childIds || this.isProgramRoot(project, value.instanceId)))
+              return requireContainer({ kind: 'instance', instanceId: value.instanceId }, value.stateId ?? null)
             throw new ToolError('invalid-target', '目标不是已观察的页面或容器')
           }
-          const topOwner = (container: ComponentContainer): ComponentContainer => container.kind === 'instance'
-            ? topOwner(owningContainer(project, container.instanceId)!) : container
+          const containerIdentity = (container: ComponentContainer): ComponentContainer => container.kind === 'surface'
+            ? { kind: 'instance', instanceId: container.surfaceId } : container
+          const topOwner = (container: ComponentContainer): ComponentContainer => {
+            container = containerIdentity(container)
+            if (container.kind !== 'instance') return container
+            const parent = owningContainer(project, container.instanceId)!
+            return project.instances[container.instanceId]?.container || parent.kind === 'project' ? container : topOwner(parent)
+          }
           if (mutation.name === 'object.structure') {
             const input = mutation.input, owner = owningContainer(project, instanceId)
             if (!owner) throw new ToolError('invalid-target', '对象归属已不存在')
             if (input.action === 'remove') edits = courseObjectRemovalEdits(project, [instanceId])
             else if (input.action === 'reorder') {
-              const root = topOwner(owner)
-              if (root.kind === 'surface' && project.surfaces.find(surface => surface.id === root.surfaceId)?.kind === 'flow')
+              const scopeId = courseInstanceScopeId(project, instanceId)
+              if (scopeId && componentContainers(project).find(surface => surface.id === scopeId)?.kind === 'flow')
                 edits = flowReadingOrderEdits(project, instanceId, input.direction === 'front' ? 'last' : input.direction === 'back' ? 'first' : input.direction === 'forward' ? 'down' : 'up')
               else {
                 const order = courseObjectOrder(project, instanceId, input.direction!)
@@ -2871,10 +2936,14 @@ export class DocumentToolGateway implements ToolGateway {
               if (input.action === 'move' && JSON.stringify(topOwner(container)) !== JSON.stringify(topOwner(owner)))
                 throw new ToolError('invalid-target', '移动仅调整当前页面或全局平面内的父子归属；跨页面请使用复制')
               const index = input.index ?? containerChildIds(project, container).filter(id => input.action !== 'move' || id !== instanceId).length
-              const reparent = JSON.stringify(owner) !== JSON.stringify(container)
+              const reparent = !equalComponentValue(containerIdentity(owner), containerIdentity(container))
               mapPresentation = input.action === 'move' && !reparent || input.action === 'duplicate' && !!stateId
               // A state-scoped duplicate copies only the observed effective graph, never other author states.
-              const copyProject = stateId ? { ...project, surfaces: project.surfaces.map(({ presentation: _presentation, ...surface }) => surface) } : model.project
+              const copyProject = stateId ? { ...project, instances: Object.fromEntries(Object.entries(project.instances).map(([id, instance]) => {
+                if (!instance.container?.presentation) return [id, instance]
+                const { presentation: _presentation, ...container } = instance.container
+                return [id, { ...instance, container }]
+              })) } : model.project
               if (input.action === 'move') edits = courseObjectMoveEdits(reparent ? model.project : project, instanceId, container, index)
               else {
                 const copy = pastePlanning.prepare({ documentId: snapshot.documentId, project: copyProject, resources: model.resources, roots: [instanceId] }, {
@@ -2889,14 +2958,14 @@ export class DocumentToolGateway implements ToolGateway {
               if (input.plane) requireContainer({ kind: 'global', plane: input.plane })
               edits = courseGlobalPlacementEdits(project, instanceId, input, references)
             } else {
-              if (project.surfaces.find(surface => surface.id === surfaceId)?.kind !== 'flow') throw new ToolError('invalid-target', '此排版操作需要讲义对象')
+              if (componentContainers(project).find(surface => surface.id === surfaceId)?.kind !== 'flow') throw new ToolError('invalid-target', '此排版操作需要讲义对象')
               let parentId: string | null | undefined
               if (input.kind === 'flow-body' && input.parent !== undefined) {
                 const container = input.parent ? resolveContainer(input.parent) : requireContainer({ kind: 'surface', surfaceId: target.surfaceId })
                 if (container.kind === 'global') throw new ToolError('invalid-target', '正文不能移入全局层')
                 const parentOwner = topOwner(container)
-                if (parentOwner.kind !== 'surface' || parentOwner.surfaceId !== surfaceId) throw new ToolError('invalid-target', '正文容器需要位于当前讲义页面')
-                parentId = container.kind === 'instance' ? container.instanceId : null
+                if (parentOwner.kind !== 'instance' || parentOwner.instanceId !== surfaceId) throw new ToolError('invalid-target', '正文容器需要位于当前讲义页面')
+                parentId = container.kind === 'instance' && container.instanceId !== surfaceId ? container.instanceId : null
               }
               edits = input.kind === 'flow-overlay'
                 ? flowPlacementEdits(project, instanceId, { kind: 'overlay', surfaceId: target.surfaceId, placement: input.placement, frame: input.frame, index: input.index }, references)
@@ -3085,7 +3154,7 @@ export class DocumentToolGateway implements ToolGateway {
     const fieldScope=target.fieldScope ?? 'data'
     let dataPath = ['instances', instance.id, fieldScope]
     if (target.stateId) {
-      const surface = project.surfaces.find(value => value.id === target.surfaceId)
+      const surface = componentContainers(project).find(value => value.id === target.surfaceId)
       const index = surface?.presentation?.states.findIndex(value => value.id === target.stateId) ?? -1
       if (index < 0) return
       const statePath = ['@surface', target.surfaceId, 'presentation', 'states', String(index)]
@@ -3155,7 +3224,7 @@ export class DocumentToolGateway implements ToolGateway {
       if (snapshot.model.kind !== 'course-v10' || target.kind !== 'course-surface' && target.kind !== 'course-instance')
         throw new ToolError('invalid-target', '展示状态需要页面或对象目标')
       const surfaceId = target.surfaceId
-      const surface = snapshot.model.project.surfaces.find(value => value.id === surfaceId)
+      const surface = componentContainers(snapshot.model.project).find(value => value.id === surfaceId)
       const exact = surface?.presentation?.states.find(value => value.id === input.state)
       const matches = exact ? [exact] : surface?.presentation?.states.filter(value => value.title === input.state) ?? []
       if (input.state !== null && matches.length !== 1) throw new ToolError('invalid-target', '展示状态不存在或同名，请从页面内容中选择')
@@ -3196,6 +3265,18 @@ export class DocumentToolGateway implements ToolGateway {
         || this.canWrite(this.run(runId), snapshot, child.target))
       return { target: this.capture(runId, snapshot, child.target, writable, refreshedHandle.readOnly), label: child.label, kind: child.target.kind }
     })
+    if (method === 'read' && !offset && snapshot.model.kind === 'course-v10'
+      && (target.kind === 'document' || target.kind === 'course-surface' || target.kind === 'spatial-graph'
+        || target.kind === 'course-instance' && !target.authorField && !target.dataPath && target.from === undefined)) {
+      // File reads capture the current owner independently of a stale mutation
+      // handle. Its existing grant and explicit read-only choice still apply.
+      const project = this.capture(runId, snapshot, target, !handle.readOnly && this.canWrite(this.run(runId), snapshot, target), handle.readOnly)
+      const scope = this.componentProjectScope(runId, project, snapshot as ComponentProjectSnapshot)
+      const listing = this.componentProjectFiles.listScope(runId, snapshot as ComponentProjectSnapshot, scope)
+      data = { ...data as Record<string, unknown>, authoring: { project, revision: listing.revision,
+        files: target.kind === 'spatial-graph' ? listing.files.filter(file => file.type !== 'reference') : listing.files,
+        ...(listing.nextOffset !== undefined ? { next: { tool: 'project.list', input: { project, offset: listing.nextOffset } } } : {}) } }
+    }
     if(method==='read')this.recordContentRead(runId,snapshot,target)
     if (end < content.length) {
       const nextCursor = `c${this.createId()}`

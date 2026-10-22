@@ -1,4 +1,4 @@
-import { useEffect, useSyncExternalStore } from 'react'
+import { useEffect, useRef, useSyncExternalStore } from 'react'
 import type { EditEvent, EditSessionSnapshot } from '../../shared/workbench/editSession'
 import type { ExecutionDesktopAPI } from '../../shared/workbench/executionDesktop'
 
@@ -11,6 +11,7 @@ export class EditPreviewProjection {
   private readonly terminal = new Set<string>()
   private readonly versions = new Map<string, number>()
   private readonly loading = new Map<string, Promise<void>>()
+  private readonly canonicalConsumers = new Map<string, Map<object, number | undefined>>()
   private readonly listeners = new Set<() => void>()
   private unsubscribe?: () => void
   private frame?: number
@@ -31,7 +32,7 @@ export class EditPreviewProjection {
       if (!this.listeners.size) {
         this.unsubscribe?.(); this.unsubscribe = undefined
         if (this.frame !== undefined) cancelAnimationFrame(this.frame)
-        this.frame = undefined; this.values.clear(); this.cached.clear(); this.loading.clear(); this.generation += 1
+        this.frame = undefined; this.values.clear(); this.cached.clear(); this.loading.clear(); this.canonicalConsumers.clear(); this.generation += 1
       }
     }
   }
@@ -54,13 +55,40 @@ export class EditPreviewProjection {
   read(documentId: string | null | undefined, revision?: number): EditSessionSnapshot | null {
     return this.readAll(documentId, revision)[0] ?? null
   }
+  /** Called by mounted consumers after render, never from getSnapshot/readAll. */
+  observeCanonical(documentId: string, consumer: object, revision?: number): void {
+    const consumers = this.canonicalConsumers.get(documentId) ?? new Map<object, number | undefined>()
+    consumers.set(consumer, revision); this.canonicalConsumers.set(documentId, consumers)
+    if (this.retireFinished(documentId, consumers)) this.notify(true)
+  }
+  releaseCanonical(documentId: string, consumer: object): void {
+    const consumers = this.canonicalConsumers.get(documentId)
+    if (!consumers) return
+    consumers.delete(consumer)
+    if (!consumers.size) this.canonicalConsumers.delete(documentId)
+    if (this.retireFinished(documentId, consumers)) this.notify(true)
+  }
+  private retireFinished(documentId: string, consumers: ReadonlyMap<object, number | undefined>): boolean {
+    let changed = false
+    const revisions = [...consumers.values()]
+    for (const [id, value] of this.values) if (value.documentId === documentId && value.status === 'finished'
+      && revisions.every(revision => revision === undefined || revision >= value.revision)) {
+      this.values.delete(id); changed = true
+    }
+    if (changed) this.cached.delete(documentId)
+    return changed
+  }
   receive(event: EditEvent) {
     const next = event.snapshot, current = this.values.get(next.editId)
     this.versions.set(next.editId, (this.versions.get(next.editId) ?? 0) + 1)
     this.cached.delete(next.documentId)
     if (event.type !== 'edit.changed') {
       this.terminal.add(next.editId)
-      if (event.type === 'edit.finished') this.values.set(next.editId, structuredClone(next))
+      if (event.type === 'edit.finished') {
+        this.values.set(next.editId, structuredClone(next))
+        const consumers = this.canonicalConsumers.get(next.documentId)
+        if (consumers) this.retireFinished(next.documentId, consumers)
+      }
       else this.values.delete(next.editId)
       this.notify(true); return
     }
@@ -90,6 +118,12 @@ export function useEditPreviews(documentId: string | null | undefined, canonical
   let client = host ? clients.get(host) : undefined
   if (host && !client) { client = new EditPreviewProjection(host); clients.set(host, client) }
   const value = useSyncExternalStore(client?.subscribe ?? emptySubscribe, () => client?.readAll(documentId, canonicalRevision) ?? EMPTY_PREVIEWS)
+  const consumer = useRef({})
+  useEffect(() => { if (documentId) client?.observeCanonical(documentId, consumer.current, canonicalRevision) }, [client, documentId, canonicalRevision])
+  useEffect(() => {
+    const identity = consumer.current
+    return () => { if (documentId) client?.releaseCanonical(documentId, identity) }
+  }, [client, documentId])
   useEffect(() => { if (documentId) void client?.attach(documentId).catch(() => { /* A disconnected host exposes no speculative preview. */ }) }, [client, documentId])
   return value
 }

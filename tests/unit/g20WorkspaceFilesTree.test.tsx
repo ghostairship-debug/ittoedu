@@ -1,3 +1,4 @@
+import { componentSurfaces } from '../../src/shared/contracts/component-platform/project'
 import { promises as fs } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -68,15 +69,19 @@ it('keeps a newer watcher listing when an earlier refresh returns after it', asy
   const a: WorkspaceListItem = { status: 'accessible', entryId: 'a', name: 'a.md', kind: 'file' }
   const b: WorkspaceListItem = { status: 'accessible', entryId: 'b', name: 'b.md', kind: 'file' }
   const listeners = new Set<(event: { workspaceId: string }) => void>()
-  let entries = [a], holdNext = false, heldStarted = false
+  let entries = [a], holdNext = false, heldStarted = false, listRequests = 0, activeLists = 0, maxActiveLists = 0
   let release!: (value: { entries: WorkspaceListItem[] }) => void
   const held = new Promise<{ entries: WorkspaceListItem[] }>(resolve => { release = resolve })
   const files = Object.assign(async (request: WorkspaceFilesRequest): Promise<unknown> => {
     if (request.type === 'root') return root
     if (request.type === 'watch') return { workspaceId: root.workspaceId, watching: true }
+    if (request.type === 'unwatch') return { workspaceId: root.workspaceId, watching: false }
     if (request.type === 'list') {
-      if (holdNext) { holdNext = false; heldStarted = true; return held }
-      return { entries }
+      ++listRequests; ++activeLists; maxActiveLists = Math.max(maxActiveLists, activeLists)
+      try {
+        if (holdNext) { holdNext = false; heldStarted = true; return await held }
+        return { entries }
+      } finally { --activeLists }
     }
     throw new Error(`Unexpected ${request.type}`)
   }, { subscribe(listener: (event: { workspaceId: string }) => void) { listeners.add(listener); return () => { listeners.delete(listener) } } }) as unknown as WorkspaceFilesAPI
@@ -86,10 +91,15 @@ it('keeps a newer watcher listing when an earlier refresh returns after it', asy
   holdNext = true
   fireEvent.click(screen.getByRole('button', { name: '刷新' }))
   await waitFor(() => expect(heldStarted).toBe(true))
+  const heldRequestCount = listRequests
   entries = [a, b]
   act(() => { for (const listener of listeners) listener({ workspaceId: root.workspaceId }) })
-  await screen.findByRole('button', { name: 'b.md' })
+  expect(listRequests).toBe(heldRequestCount)
+  expect(maxActiveLists).toBe(1)
   await act(async () => { release({ entries: [a] }); await held })
+  await screen.findByRole('button', { name: 'b.md' })
+  expect(listRequests).toBe(heldRequestCount + 1)
+  expect(maxActiveLists).toBe(1)
   expect(screen.getByRole('button', { name: 'b.md' })).toBeInTheDocument()
 })
 it('retains expansion and selection when a watcher sees an external directory rename', async () => {
@@ -199,8 +209,8 @@ it('keeps keyboard commands scoped to the tree and performs multi-file clipboard
   fireEvent.click(screen.getByRole('button', { name: 'child' })); fireEvent.keyDown(screen.getByRole('button', { name: 'child' }), { key: 'v', ctrlKey: true })
   await waitFor(async () => expect(await fs.readFile(path.join(directory, 'child', 'a.md'), 'utf8')).toBe('A'))
   await waitFor(async () => expect(await fs.readFile(path.join(directory, 'child', 'b.md'), 'utf8')).toBe('B'))
-  await waitFor(() => expect(screen.getByRole('menuitem', { name: '新建文本文档' })).not.toHaveAttribute('aria-disabled', 'true'))
-  fireEvent.click(screen.getByRole('menuitem', { name: '新建文本文档' }))
+  await waitFor(() => expect(screen.getByRole('menuitem', { name: '新建 TXT 文档' })).not.toHaveAttribute('aria-disabled', 'true'))
+  fireEvent.click(screen.getByRole('menuitem', { name: '新建 TXT 文档' }))
   const name = screen.getByLabelText('文件名称'); fireEvent.change(name, { target: { value: 'notes.txt' } })
   for (const key of ['F2', 'Delete']) fireEvent.keyDown(name, { key })
   for (const key of ['c', 'x', 'v']) fireEvent.keyDown(name, { key, ctrlKey: true })
@@ -211,7 +221,7 @@ it('keeps keyboard commands scoped to the tree and performs multi-file clipboard
   await fs.writeFile(path.join(directory, 'external.txt'), 'external')
   await screen.findByRole('button', { name: 'external.txt' })
   expect(screen.getByRole('button', { name: 'child' }).closest('li')).toHaveAttribute('data-open', 'true')
-  await waitFor(() => expect(screen.getByRole('menuitem', { name: '新建 Markdown 文档' })).not.toHaveAttribute('aria-disabled', 'true'))
+  await waitFor(() => expect(screen.getByRole('menuitem', { name: '新建 MD 文档' })).not.toHaveAttribute('aria-disabled', 'true'))
   const chat = screen.getByLabelText('聊天文字')
   for (const key of ['F2', 'Delete']) fireEvent.keyDown(chat, { key })
   for (const key of ['c', 'x', 'v']) fireEvent.keyDown(chat, { key, ctrlKey: true })
@@ -221,7 +231,7 @@ it('keeps keyboard commands scoped to the tree and performs multi-file clipboard
   fireEvent.click(screen.getByRole('button', { name: 'child' })); fireEvent.click(screen.getByRole('menuitem', { name: '新建 果铃工程' }))
   fireEvent.change(screen.getByLabelText('文件名称'), { target: { value: 'new-course' } }); fireEvent.click(screen.getByRole('button', { name: '确认' }))
   await waitFor(async () => { const model = await createCourseV10Driver().load(await fs.readFile(path.join(directory, 'child', 'new-course.glx'))); expect(model.kind).toBe('course-v10') })
-  await waitFor(() => expect(screen.getByRole('menuitem', { name: '新建 Markdown 文档' })).not.toHaveAttribute('aria-disabled', 'true'))
+  await waitFor(() => expect(screen.getByRole('menuitem', { name: '新建 MD 文档' })).not.toHaveAttribute('aria-disabled', 'true'))
   const dropped = Object.assign(new File(['payload'], 'photo.png'), { arrayBuffer: async () => new TextEncoder().encode('payload').buffer })
   let reads = 0
   const directoryEntry = { name: 'bundle', isFile: false, isDirectory: true, createReader: () => ({ readEntries: (resolve: (entries: unknown[]) => void) => resolve(reads++ ? [] : [{ name: 'photo.png', isFile: true, isDirectory: false, file: (resolveFile: (file: File) => void) => resolveFile(dropped) }]) }) }
@@ -254,7 +264,7 @@ it('prefills default names, numbers collisions with (2) and selects only the mai
   render(<LessonDirectoryTree directory={directory} files={service.operate} operation={async () => ({})} onFile={vi.fn()} onDirectory={vi.fn()} />)
   await screen.findByRole('button', { name: 'existing.txt' })
 
-  fireEvent.click(screen.getByRole('menuitem', { name: '新建 Markdown 文档' }))
+  fireEvent.click(screen.getByRole('menuitem', { name: '新建 MD 文档' }))
   let input = (await screen.findByLabelText('文件名称')) as HTMLInputElement
   expect(input.value).toBe('新建 Markdown 文档.md')
   fireEvent.focus(input)
@@ -270,7 +280,7 @@ it('prefills default names, numbers collisions with (2) and selects only the mai
   expect(input.selectionEnd).toBe('新建 果铃工程'.length)
   fireEvent.click(screen.getByRole('button', { name: '取消' }))
 
-  fireEvent.click(screen.getByRole('menuitem', { name: '新建文本文档' }))
+  fireEvent.click(screen.getByRole('menuitem', { name: '新建 TXT 文档' }))
   input = (await screen.findByLabelText('文件名称')) as HTMLInputElement
   expect(input.value).toBe('新建文本文档.txt')
   fireEvent.focus(input)
@@ -299,7 +309,7 @@ it('prefills default names, numbers collisions with (2) and selects only the mai
   await screen.findByRole('button', { name: '新建文本文档.txt' })
   await screen.findByRole('button', { name: '新建文本文档 (2).txt' })
 
-  fireEvent.click(screen.getByRole('menuitem', { name: '新建文本文档' }))
+  fireEvent.click(screen.getByRole('menuitem', { name: '新建 TXT 文档' }))
   input = (await screen.findByLabelText('文件名称')) as HTMLInputElement
   expect(input.value).toBe('新建文本文档 (3).txt')
   fireEvent.focus(input)
@@ -315,24 +325,24 @@ it('auto-appends .txt when missing extension, preserves other extensions, and ca
   const onFile = vi.fn()
   render(<LessonDirectoryTree directory={directory} files={service.operate} operation={async () => ({})} onFile={onFile} onDirectory={vi.fn()} />)
   await screen.findByRole('button', { name: '工作空间根目录' })
-  await waitFor(() => expect(screen.getByRole('menuitem', { name: '新建文本文档' })).not.toHaveAttribute('aria-disabled', 'true'))
+  await waitFor(() => expect(screen.getByRole('menuitem', { name: '新建 TXT 文档' })).not.toHaveAttribute('aria-disabled', 'true'))
 
-  fireEvent.click(screen.getByRole('menuitem', { name: '新建文本文档' }))
+  fireEvent.click(screen.getByRole('menuitem', { name: '新建 TXT 文档' }))
   fireEvent.change(await screen.findByLabelText('文件名称'), { target: { value: 'plain' } })
   fireEvent.click(screen.getByRole('button', { name: '确认' }))
   await waitFor(() => expect(onFile).toHaveBeenCalledWith({ name: 'plain.txt', kind: 'file', path: path.join(directory, 'plain.txt') }))
   expect(await fs.readFile(path.join(directory, 'plain.txt'), 'utf8')).toBe('')
 
   onFile.mockClear()
-  await waitFor(() => expect(screen.getByRole('menuitem', { name: '新建文本文档' })).not.toHaveAttribute('aria-disabled', 'true'))
-  fireEvent.click(screen.getByRole('menuitem', { name: '新建文本文档' }))
+  await waitFor(() => expect(screen.getByRole('menuitem', { name: '新建 TXT 文档' })).not.toHaveAttribute('aria-disabled', 'true'))
+  fireEvent.click(screen.getByRole('menuitem', { name: '新建 TXT 文档' }))
   fireEvent.change(await screen.findByLabelText('文件名称'), { target: { value: 'dotted.' } })
   fireEvent.click(screen.getByRole('button', { name: '确认' }))
   await waitFor(() => expect(onFile).toHaveBeenCalledWith({ name: 'dotted.txt', kind: 'file', path: path.join(directory, 'dotted.txt') }))
 
   onFile.mockClear()
-  await waitFor(() => expect(screen.getByRole('menuitem', { name: '新建文本文档' })).not.toHaveAttribute('aria-disabled', 'true'))
-  fireEvent.click(screen.getByRole('menuitem', { name: '新建文本文档' }))
+  await waitFor(() => expect(screen.getByRole('menuitem', { name: '新建 TXT 文档' })).not.toHaveAttribute('aria-disabled', 'true'))
+  fireEvent.click(screen.getByRole('menuitem', { name: '新建 TXT 文档' }))
   fireEvent.change(await screen.findByLabelText('文件名称'), { target: { value: 'data.csv' } })
   fireEvent.click(screen.getByRole('button', { name: '确认' }))
   await waitFor(() => expect(onFile).toHaveBeenCalledWith({ name: 'data.csv', kind: 'file', path: path.join(directory, 'data.csv') }))
@@ -415,5 +425,5 @@ it('M19 creates a course with the Slide canvas size chosen in the creation dialo
   await waitFor(() => fs.access(path.join(directory, 'tall.glx')))
   const archive = await createCourseV10Driver().load(new Uint8Array(await fs.readFile(path.join(directory, 'tall.glx'))))
   if (archive.kind !== 'course-v10') throw new Error('course fixture')
-  expect(archive.project.surfaces.find(surface => surface.kind === 'slide')).toMatchObject({ designSize: { width: 720, height: 1280 } })
+  expect(componentSurfaces(archive.project).find(surface => surface.kind === 'slide')).toMatchObject({ designSize: { width: 720, height: 1280 } })
 })

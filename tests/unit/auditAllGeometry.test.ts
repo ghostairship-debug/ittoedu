@@ -1,3 +1,7 @@
+import { withTestTeacherController } from '../helpers/glxWorkFixture'
+import { setRootContainers } from '../helpers/glxWorkFixture'
+import { componentSurfaces } from '../../src/shared/contracts/component-platform/project'
+import { testContainerInstance } from '../helpers/glxWorkFixture'
 import { expect, it } from 'vitest'
 import { defaultShapeData, SHAPE_DEFINITION } from '../../src/components/shape'
 import { createBlankCourseProjectV10 } from '../../src/core/course/createCourseProjectV10'
@@ -21,7 +25,7 @@ import { singleObjectCommands } from '../../src/renderer/editing/commands/object
 const frame = (width: number, height: number, x = 0, y = 0): ComponentFrame => ({ width, height, transform: [1, 0, 0, 1, x, y] })
 function shapes(): CourseProjectV10 {
   const project = createBlankCourseProjectV10('Geometry'); project.global = { underlay: [], overlay: [] }; project.instances = {}; project.definitions = { shape: { ...SHAPE_DEFINITION, id: 'shape' } }
-  project.surfaces[0] = { id: 'S', kind: 'slide', childIds: ['box', 'line', 'singular'], title: 'S' }
+  setRootContainers(project, [...componentSurfaces(project).slice(0, 0), { id: 'S', kind: 'slide', childIds: ['box', 'line', 'singular'], title: 'S' }, ...componentSurfaces(project).slice(0 + 1)])
   project.instances.box = { id: 'box', definitionId: 'shape', data: defaultShapeData(), frame: frame(60, 40, 150, 10) }
   project.instances.line = { id: 'line', definitionId: 'shape', data: defaultShapeData('line'), frame: frame(200, 200) }
   project.instances.singular = { id: 'singular', definitionId: 'shape', data: defaultShapeData(), frame: { ...frame(100, 100, 220, 220), transform: [0, 0, 0, 1, 220, 220] } }
@@ -34,7 +38,7 @@ it('CA159/350 actual formal shape targets skip far stroke and singular candidate
   expect(hitFreeObject(targets, { x: 190, y: 50 }, true, [2, 0, 0, 2, 0, 0])?.instanceId).toBe('box')
 })
 it('CA070 drag excludes itself and selected descendants from snapping and still snaps an unchanged neighbor', () => {
-  const project = shapes(); project.surfaces[0].childIds = ['box']; project.instances.box.frame = frame(100, 100)
+  const project = shapes(); testContainerInstance(project, 0).childIds = ['box']; project.instances.box.frame = frame(100, 100)
   const target = freeSurfaceTargets(project, 'S')[0]!
   const gesture = new FreeTransformGesture({ mode: 'drag', targets: [target], pointer: { x: 0, y: 0 }, surfaceToPointer: IDENTITY_MATRIX, snapTargets: [target] })
   expect(gesture.update({ x: 4, y: 3 }).edits).toMatchObject([{ frame: { transform: [1, 0, 0, 1, 4, 3] } }])
@@ -62,15 +66,15 @@ it('CA028/076 camera path uses the live followed center and an explicit empty pa
   expect(spatialTourStops(spatial, 'live', { width: 1280, height: 720 }, targets)).toHaveLength(1)
 })
 it('CA146 author graph rejects a deleted or headless endpoint before returning a formal edit', () => {
-  const project = shapes(); project.surfaces[0].kind = 'spatial'; project.definitions.behavior = { id: 'behavior', role: 'behavior', implementation: { kind: 'builtin', key: 'guoling.feedback' } }
-  project.instances.behavior = { id: 'behavior', definitionId: 'behavior', data: {}, frame: frame(20, 20) }; project.surfaces[0].childIds.push('behavior')
+  const project = shapes(); testContainerInstance(project, 0).container.kind = 'spatial'; project.definitions.behavior = { id: 'behavior', role: 'behavior', implementation: { kind: 'builtin', key: 'guoling.feedback' } }
+  project.instances.behavior = { id: 'behavior', definitionId: 'behavior', data: {}, frame: frame(20, 20) }; testContainerInstance(project, 0).childIds.push('behavior')
   expect(() => addSpatialGraphItemEdit(project, 'S', 'relations', { sourceInstanceId: 'box', targetInstanceId: 'missing', kind: 'arrow' })).toThrow('输入已保留')
   expect(() => addSpatialGraphItemEdit(project, 'S', 'paths', { title: 'bad', instanceIds: ['behavior'], frameIds: [] })).toThrow('输入已保留')
 })
 it('CA381 restore existing teacher reuses identity/frame/source and restores actual visibility and controls in one operation', () => {
-  const project = createBlankCourseProjectV10('Teacher'), id = project.global.overlay[0]!, instance = project.instances[id]!
+  const project = withTestTeacherController(createBlankCourseProjectV10('Teacher')), id = project.global.overlay[0]!, instance = project.instances[id]!
   instance.visible = false; instance.data = { ...(instance.data as object), enabled: false }; project.playback = { ...project.playback!, controls: 'none' }
-  const plan = prepareCourseTeacherControllerEdits(project, project.surfaces[0]!.id)
+  const plan = prepareCourseTeacherControllerEdits(project, componentSurfaces(project)[0]!.id)
   const next = applyComponentOperation(project, captureComponentOperation(project, plan.edits))
   expect(plan.instanceIds).toEqual([id]); expect(next.instances[id]!.frame).toEqual(instance.frame); expect(next.instances[id]!.visible).toBe(true)
   expect(next.instances[id]!.data).toMatchObject({ enabled: true }); expect(next.playback?.controls).toBe('canvas')
@@ -82,7 +86,7 @@ it('CA227 explicit quick fill removes the gradient while other color edits keep 
   expect(next.instances.box!.data).toMatchObject({ style: { fillColor: '#ff0000' } }); expect(Reflect.get(next.instances.box!.data as object, 'style').fillGradient).toBeUndefined()
 })
 it('CA356 mixed teacher and logo alignment is equal in the actual shared viewport after canonical inverse', () => {
-  const project = createBlankCourseProjectV10('Align'), id = project.global.overlay[0]!
+  const project = withTestTeacherController(createBlankCourseProjectV10('Align')), id = project.global.overlay[0]!
   project.instances.logo = { id: 'logo', definitionId: SHAPE_DEFINITION.id, data: defaultShapeData(), frame: frame(100, 40, 100, 50) }
   project.global.overlay.push('logo'); project.definitions[SHAPE_DEFINITION.id] = SHAPE_DEFINITION
   const hud = createTeacherControllerHudGeometry({ referenceSize: { width: 1280, height: 720 }, viewportRect: { x: 0, y: 0, width: 960, height: 640 } })
@@ -105,7 +109,7 @@ it('CA374 fixed text clipping and CA127 effective parent lock use actual canonic
   const project = shapes(); project.definitions[TEXT_DEFINITION.id] = TEXT_DEFINITION
   project.instances.parent = { id: 'parent', definitionId: 'shape', data: defaultShapeData(), frame: frame(200, 100), locked: true, childIds: ['text'] }
   project.instances.text = { id: 'text', definitionId: TEXT_DEFINITION.id, data: JSON.parse(JSON.stringify(createTextComponentData('Text'))), frame: frame(100, 50) }
-  project.surfaces[0].childIds.push('parent')
+  testContainerInstance(project, 0).childIds.push('parent')
   const state = useEditorStore.getState(), read = selectPropertiesAuthoringReadModel({ ...state, editingScope: 'scene', slideContentEdit: null,
     courseView: { ...state.courseView, activeDocumentId: 'geometry', project, editingProject: project, surfaceId: 'S', activeStateId: null, selectedInstanceIds: ['text'], views: [], error: null } })
   expect(read.selectedView).toMatchObject({ locked: true, ownLocked: false })
@@ -121,7 +125,7 @@ it('CA374 fixed text clipping and CA127 effective parent lock use actual canonic
   expect(next.instances.text!.data).toMatchObject({ sizing: { mode: 'fixed', overflow: 'clip' } })
 })
 it('CA288 source teacher collapse projects the actual compact frame instead of an invisible full controller box', () => {
-  const project = createBlankCourseProjectV10(), id = project.global.overlay[0]!
+  const project = withTestTeacherController(createBlankCourseProjectV10()), id = project.global.overlay[0]!
   project.instances[id]!.implementationOverride = { kind: 'source', language: 'typescript', source: 'export function mount() {}' }
   project.instances[id]!.data = { ...(project.instances[id]!.data as object), collapsible: true, defaultCollapsed: true }
   const hud = createTeacherControllerHudGeometry({ referenceSize: { width: 1280, height: 720 }, viewportRect: { x: 0, y: 0, width: 1280, height: 720 } })

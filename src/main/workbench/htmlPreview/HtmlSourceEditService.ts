@@ -7,12 +7,14 @@ import type { z } from 'zod'
 
 type HtmlPreviewTargetReport = z.infer<typeof htmlPreviewTargetReportSchema>
 import type { HtmlPreviewEditContext, HtmlPreviewEditPort } from './HtmlPreviewService'
-import { escapeHtmlAttribute, escapeHtmlText, locateHtmlSourceTarget, locateHtmlAuthorRecordSource } from './htmlSourceLocator'
+import { escapeHtmlAttribute, escapeHtmlText, createHtmlSourceLocator, locateHtmlSourceTarget } from './htmlSourceLocator'
 import { prepareHtmlImage } from './htmlImagePreparation'
 import { replaceSrcsetUrls } from '../../../shared/html/responsiveImage'
 import type { HtmlSourceEditCommand, HtmlSourceEditOutcome } from '../../../shared/html/sourceEditCommands'
 import { applyHtmlSourceEdit, type HtmlSourceEditResult } from './htmlSourceEdits'
-import { patchHtmlAuthoringRecords, readHtmlAuthoringRecords } from '../../../shared/html/htmlAuthoringRecords'
+import { patchHtmlAuthoringRecords, readHtmlAuthoringRecords, readHtmlFrameSources } from '../../../shared/html/htmlAuthoringRecords'
+import { neededHtmlFrameSources } from '../../../shared/html/htmlFrameAuthoring'
+import { prepareHtmlFramePassiveResources } from './htmlFramePassiveResources'
 import type { ComponentAuthorGeometry } from '../../../shared/contracts/component-platform/runtime'
 import { equalComponentValue } from '../../../core/drivers/courseV10Operations'
 
@@ -76,13 +78,14 @@ function imageResponsiveEdits(source: string, elementStart: number, url: string,
   return edits
 }
 
-function applySplices(source: string, edits: Splice[]): string | null {
+function applySplices(source: string, edits: Splice[], changes?: Array<{ from: number; to: number; inserted: number }>): string | null {
   const sorted = [...edits].sort((a, b) => b.from - a.from)
   for (let index = 0; index < sorted.length; index += 1) {
     const edit = sorted[index]!
     if (edit.from < 0 || edit.to > source.length || edit.from > edit.to
       || (index > 0 && edit.to > sorted[index - 1]!.from)) return null
     source = source.slice(0, edit.from) + edit.text + source.slice(edit.to)
+    changes?.push({ from: edit.from, to: edit.to, inserted: edit.text.length })
   }
   return source
 }
@@ -98,17 +101,25 @@ function exitGeometryStyleProperty(geometry: ComponentAuthorGeometry | undefined
 
 export class HtmlSourceEditService implements HtmlPreviewEditPort {
   private readonly records = new Map<string, EditRecord>()
+  private readonly sources = new Map<string, { source: string; revision: number; locator: ReturnType<typeof createHtmlSourceLocator> }>()
   constructor(private readonly dependencies: HtmlSourceEditDependencies) {}
 
+  /** These are observations of a loaded realm, not durable author identities. */
+  releaseLease(leaseId: string, loadId: string): void {
+    const prefix = `${leaseId}\0${loadId}\0`
+    for (const key of this.records.keys()) if (key.startsWith(prefix)) this.records.delete(key)
+    this.sources.delete(`${leaseId}\0${loadId}`)
+  }
 
   private prepareSourceEdit(source: string, command: HtmlSourceEditCommand): HtmlSourceEditResult {
     const edit = applyHtmlSourceEdit(source, command)
     if (!edit.ok || !edit.changed) return edit
       const records = readHtmlAuthoringRecords(source)
+      const beforeSource = createHtmlSourceLocator(source), afterSource = createHtmlSourceLocator(edit.source)
       const commands = command.type === 'batch' ? command.commands : [command]
       let changedRecords = false
       for (const [key, record] of Object.entries(records)) {
-        const before = locateHtmlAuthorRecordSource(source, record, key)
+        const before = beforeSource.locateAuthorRecord(record, key)
         if (!before) continue
         const content = commands.find(command => command.type === 'text' && before.valueSpan
           && command.target.from === before.valueSpan.start && command.target.to === before.valueSpan.end)
@@ -117,7 +128,7 @@ export class HtmlSourceEditService implements HtmlPreviewEditPort {
         const moved = commands.some(command => command.type === 'move'
           && command.target.from <= before.elementSpan.start && command.target.to >= before.elementSpan.end)
         if (!content && !styles.length && !moved) continue
-        const after = locateHtmlAuthorRecordSource(edit.source, record, key, true)
+        const after = afterSource.locateAuthorRecord(record, key, true)
         if (!after) continue
         const overrides = { ...record.overrides, ...(record.overrides.style ? { style: { ...record.overrides.style } } : {}),
           ...(record.overrides.geometry ? { geometry: { ...record.overrides.geometry } } : {}) }
@@ -152,8 +163,9 @@ export class HtmlSourceEditService implements HtmlPreviewEditPort {
           binding: { ...record.binding, path, baseline: after.value }, overrides }
         changedRecords = true
       }
-      const updated = changedRecords ? patchHtmlAuthoringRecords(edit.source, records) : edit.source
-    return { ok: true, source: updated, changed: updated !== source }
+      const changes = [...edit.changes]
+      const updated = changedRecords ? patchHtmlAuthoringRecords(edit.source, records, {}, changes) : edit.source
+    return { ok: true, source: updated, changed: updated !== source, changes }
   }
   /** Source remains the only formal HTML state; visual controls produce an ordinary canonical text transaction. */
   async editSource(request: SourceEditRequest, context: HtmlPreviewEditContext): Promise<HtmlSourceEditOutcome> {
@@ -168,6 +180,7 @@ export class HtmlSourceEditService implements HtmlPreviewEditPort {
       const updated = edit.source
       const result = await this.dependencies.execute({ documentId: snapshot.documentId, epoch: snapshot.epoch,
         operationId: request.operationId, baseRevision: snapshot.revision, actor: 'human',
+        textChanges: { source: edit.changes, flow: [] },
         mutation: { type: 'command', command: { type: 'markdown.replace', source: updated } } })
       if (result.status === 'unchanged') return { status: 'unchanged', revision: result.revision }
       if (result.status !== 'applied') return { status: 'rejected', reason: 'conflict' }
@@ -180,8 +193,16 @@ export class HtmlSourceEditService implements HtmlPreviewEditPort {
     if (model.kind !== 'text') throw new Error('HTML 文档已变化')
     const identity = { documentId: context.snapshot.documentId, epoch: context.snapshot.epoch,
       revision: context.snapshot.revision, bindingVersion: context.lease.bindingVersion }
+    const leaseKey = `${request.leaseId}\0${request.loadId}`
+    let retained = this.sources.get(leaseKey)
+    if (!retained || retained.source !== model.source || retained.revision !== context.snapshot.revision) {
+      this.releaseLease(request.leaseId, request.loadId)
+      retained = { source: model.source, revision: context.snapshot.revision, locator: createHtmlSourceLocator(model.source) }
+      this.sources.set(leaseKey, retained)
+    }
+    const source = retained.locator
     const targets = request.targets.map(report => {
-      let resolved = locateHtmlSourceTarget(model.source, report, identity)
+      let resolved = source.locateTarget(report, identity)
       if (resolved.status !== 'editable' && report.authoring?.record.kind === report.kind
         && report.bindingStatus !== 'unresolved' && report.bindingStatus !== 'source-required') {
         resolved = { handle: report.handle, status: 'editable', locator: { ...identity, targetKind: report.kind,
@@ -213,6 +234,7 @@ export class HtmlSourceEditService implements HtmlPreviewEditPort {
       let authoring = resolvedRecord.locator.authoring ?? ((request.change.kind === 'geometry' || ownsValue) ? described : undefined)
       if (authoring) {
         let authorSource = source
+        const changes: Array<{ from: number; to: number; inserted: number }> = []
         if (request.change.kind === 'geometry' && !resolvedRecord.locator.authoring) {
           const path = authoring.record.binding.path.map(step => ({ tag: step.tag, index: step.index, attributes: undefined as Record<string, string> | undefined }))
           const last = path.at(-1)
@@ -223,6 +245,7 @@ export class HtmlSourceEditService implements HtmlPreviewEditPort {
             to: locator.elementSpan.end }, patch: { 'data-cw-author-key': authoring.authorKey } })
           if (!patch.ok) return { status: 'rejected', reason: patch.reason }
           authorSource = patch.source
+          changes.push(...patch.changes)
           authoring = { ...authoring, record: { ...authoring.record, binding: { ...authoring.record.binding, path } } }
         }
         const records = readHtmlAuthoringRecords(source)
@@ -246,10 +269,14 @@ export class HtmlSourceEditService implements HtmlPreviewEditPort {
           overrides.style = style
         }
         records[authoring.authorKey] = { ...current, overrides }
-        const updated = patchHtmlAuthoringRecords(authorSource, records)
+        const updated = patchHtmlAuthoringRecords(authorSource, records, {
+          sources: await prepareHtmlFramePassiveResources(
+            neededHtmlFrameSources(authoring.record.scope, { ...readHtmlFrameSources(authorSource), ...context.frameSources }), context.rootRealPath),
+        }, changes)
         if (updated === source) return { status: 'unchanged', revision: snapshot.revision }
         const result = await this.dependencies.execute({ documentId: snapshot.documentId, epoch: snapshot.epoch,
           operationId: request.operationId, baseRevision: snapshot.revision, actor: 'human',
+          textChanges: { source: changes, flow: [] },
           mutation: { type: 'command', command: { type: 'markdown.replace', source: updated } } })
         if (result.status !== 'applied') return result.status === 'unchanged' ? { status: 'unchanged', revision: result.revision }
           : { status: 'rejected', reason: 'conflict' }
@@ -268,6 +295,7 @@ export class HtmlSourceEditService implements HtmlPreviewEditPort {
         if (!edit.ok) return { status: 'rejected', reason: edit.reason }
         const result = await this.dependencies.execute({ documentId: snapshot.documentId, epoch: snapshot.epoch,
           operationId: request.operationId, baseRevision: snapshot.revision, actor: 'human',
+          textChanges: { source: edit.changes, flow: [] },
           mutation: { type: 'command', command: { type: 'markdown.replace', source: edit.source } } })
         if (result.status !== 'applied') return result.status === 'unchanged' ? { status: 'unchanged', revision: result.revision } : { status: 'rejected', reason: 'conflict' }
         return { status: 'applied', revision: result.revision, savedRevision: null, dirty: true, patch: { handle: request.target, kind: record.report.kind, value: record.report.rawText } }
@@ -324,18 +352,20 @@ export class HtmlSourceEditService implements HtmlPreviewEditPort {
         const insertion = source[tag.span.end - 2] === '/' ? tag.span.end - 2 : tag.span.end - 1
         edits.push({ from: insertion, to: insertion, text: ` src="${replacement}"` })
       }
-      let updated = applySplices(source, edits)
+      const changes: Array<{ from: number; to: number; inserted: number }> = []
+      let updated = applySplices(source, edits, changes)
       if (updated === null) { await removeUnreferencedPreparedImage(); return { status: 'rejected', reason: 'not-editable' } }
       // An exact source edit retains this object's unrelated geometry/style owner.
       if (described && existing) {
         sourceRecords[described.authorKey] = { ...existing, binding: { ...existing.binding, baseline: patchValue } }
-        updated = patchHtmlAuthoringRecords(updated, sourceRecords)
+        updated = patchHtmlAuthoringRecords(updated, sourceRecords, {}, changes)
       }
       if (updated === source) { await removeUnreferencedPreparedImage(); return { status: 'unchanged', revision: snapshot.revision } }
       let result: DocumentOperationResult
       try {
         result = await this.dependencies.execute({ documentId: snapshot.documentId, epoch: snapshot.epoch,
           operationId: request.operationId, baseRevision: snapshot.revision, actor: 'human',
+          textChanges: { source: changes, flow: [] },
           mutation: { type: 'command', command: { type: 'markdown.replace', source: updated } } })
       } catch (error) { await removeUnreferencedPreparedImage(); throw error }
       if (result.status !== 'applied') {

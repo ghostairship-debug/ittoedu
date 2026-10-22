@@ -10,7 +10,7 @@ import { parseDocumentMarkdown, type MarkdownDocument } from '../../shared/docum
 import { documentRefLabel, type DocumentFileRef } from '../../shared/document/ports'
 import { DocumentFileSession, type RecoverableDocumentFilePort } from './documentFileSession'
 import { PlainTextDocumentEditor, type PlainTextDocumentEditorHandle } from './PlainTextDocumentEditor'
-import { HtmlDocumentEditor } from './html/HtmlDocumentEditor'
+import { HtmlDocumentEditor, type HtmlDocumentEditorHandle } from './html/HtmlDocumentEditor'
 import { type DocumentConflictHunk } from './documentSourceMerge'
 import './documentFileEditor.css'
 import { fileClipboardResourcePort, readFileClipboardContext, selectedFileClipboardContext, type FileClipboardContext } from './fileDocumentClipboard'
@@ -62,7 +62,7 @@ export const LessonDocumentEditor = forwardRef<LessonDocumentEditorHandle, Lesso
   const state = useSyncExternalStore(session.subscribe, session.getSnapshot)
   const editor = useRef<SharedDocumentEditorHandle>(null)
   const textEditor = useRef<PlainTextDocumentEditorHandle>(null)
-  const htmlEditor = useRef<PlainTextDocumentEditorHandle>(null)
+  const htmlEditor = useRef<HtmlDocumentEditorHandle>(null)
   const htmlTabId = useMemo(() => sessionKey ?? crypto.randomUUID(), [sessionKey])
   const [error, setError] = useState<string | null>(null)
   const [htmlPendingDraft, setHtmlPendingDraft] = useState(false)
@@ -78,7 +78,7 @@ export const LessonDocumentEditor = forwardRef<LessonDocumentEditorHandle, Lesso
     return workbenchSelection.register(session.documentId, async () => {
       const current = await activeDraft()
       if (current && !current.ready) throw new Error('请先完成当前输入。')
-      if (current) session.edit(current.source, operationGroup.current)
+      if (current) session.edit(current.source, operationGroup.current, current.sourceChangeHints)
       if (!await session.drain()) throw new Error('正文输入尚未确认。')
       const committed = session.committedDocument
       if (!committed || current && ((committed.model.kind !== 'markdown' && committed.model.kind !== 'text') || committed.model.source !== current.source)) throw new Error('正文输入尚未确认。')
@@ -111,7 +111,7 @@ export const LessonDocumentEditor = forwardRef<LessonDocumentEditorHandle, Lesso
   const isHtml = isText && /\.html?$/i.test(committed.binding.kind === 'file' ? committed.binding.path : committed.binding.suggestedName)
   const parsedSource = useMemo(() => {
     if (isText) return null
-    const parsed = parseDocumentMarkdown(state.source, { createId: () => crypto.randomUUID(), target: 'file', resolveImage, previous: lastProjection.current })
+    const parsed = parseDocumentMarkdown(state.source, { createId: () => crypto.randomUUID(), target: 'file', recoverUnsupportedBlocks: true, resolveImage, previous: lastProjection.current })
     if (parsed.status === 'valid') lastProjection.current = parsed
     return parsed
   }, [state.source, currentRef, isText])
@@ -126,6 +126,7 @@ export const LessonDocumentEditor = forwardRef<LessonDocumentEditorHandle, Lesso
     // a real unmount or identity change releases this specific session permanently.
     return () => { lifetime.leases--; queueMicrotask(() => { if (!lifetime.leases) session.dispose() }) }
   }, [session, lifetime])
+  useEffect(() => { session.setActive(active) }, [session, active])
   useEffect(() => { onDirtyChange?.(state.dirty || htmlPendingDraft) }, [state.dirty, htmlPendingDraft, onDirtyChange])
 
   const references = documentResourceReferences(document.content.blocks)
@@ -148,7 +149,7 @@ export const LessonDocumentEditor = forwardRef<LessonDocumentEditorHandle, Lesso
     }).then(context => { if (live) { resourceContext.current = { context, versions, mappings }; setClipboard(context) } }).catch(reason => { if (live) setError((reason as Error).message) })
     return () => { live = false }
   }, [session, resourceKey, attachmentKey, mediaKindKey, isText])
-  async function activeDraft() {
+  async function activeDraft(): Promise<{ ready: boolean; source: string; sourceChangeHints?: Array<{ from: number; to: number; inserted: number }> } | undefined> {
     const current = session.committedDocument
     const name = current?.binding.kind === 'file' ? current.binding.path : current?.binding.suggestedName
     const draft = current?.model.kind === 'text' ? (/\.html?$/i.test(name ?? '') ? htmlEditor.current : textEditor.current)?.flush() : await editor.current?.drainSource()
@@ -160,31 +161,32 @@ export const LessonDocumentEditor = forwardRef<LessonDocumentEditorHandle, Lesso
   async function flush() {
     const current = await activeDraft()
     if (current && !current.ready) return false
-    if (current) session.edit(current.source, operationGroup.current)
+    if (current) session.edit(current.source, operationGroup.current, current.sourceChangeHints)
     return session.flush()
   }
   async function saveAs() {
     const current = await activeDraft()
     if (current && !current.ready) return false
-    if (current) session.edit(current.source, operationGroup.current)
+    if (current) session.edit(current.source, operationGroup.current, current.sourceChangeHints)
     return session.saveAs()
   }
   async function preserveDraft() {
     const current = await activeDraft()
     if (current && !current.ready) return false
-    if (current) session.edit(current.source, operationGroup.current)
+    if (current) session.edit(current.source, operationGroup.current, current.sourceChangeHints)
     return session.preserveDraft()
   }
   async function preserveAndClose() {
     const current = await activeDraft()
     if (current && !current.ready) return false
-    if (current) session.edit(current.source, operationGroup.current)
+    if (current) session.edit(current.source, operationGroup.current, current.sourceChangeHints)
     return session.preserveAndClose()
   }
   function bindTarget(selection: DocumentContextSelection | null): ContextualEditTarget | null {
     const snapshot = session.getSnapshot()
-    if (!selection || !snapshot.disk || snapshot.source !== selection.source) return null
-    return { ...selection, ref: session.ref, baseVersion: snapshot.disk.version, epoch: session.epoch, scope: 'selection' }
+    if (!selection || typeof selection.source !== 'string' || selection.ranges === undefined || !snapshot.disk || snapshot.source !== selection.source) return null
+    return { ...selection, source: selection.source, ranges: selection.ranges,
+      ref: session.ref, baseVersion: snapshot.disk.version, epoch: session.epoch, scope: 'selection' }
   }
   function renderObject(block: DocumentBlock, container: HTMLElement) {
     if (block.type === 'chart') {
@@ -213,7 +215,7 @@ export const LessonDocumentEditor = forwardRef<LessonDocumentEditorHandle, Lesso
   useImperativeHandle(ref, () => ({ session, getContextualEditTarget: () => isText ? null : bindTarget(editor.current?.getContextualEditTarget() ?? null), flush, saveAs, preserveDraft, close: async () => {
     const current = await activeDraft()
     if (current && !current.ready) return false
-    if (current) session.edit(current.source, operationGroup.current)
+    if (current) session.edit(current.source, operationGroup.current, current.sourceChangeHints)
     return session.close()
   }, preserveAndClose }))
   const status = state.conflict ? '存在文件冲突' : committed ? documentSaveLabel({ ...committed, dirty: state.dirty || htmlPendingDraft, saving: state.saving }) : '正在打开'
@@ -245,8 +247,9 @@ export const LessonDocumentEditor = forwardRef<LessonDocumentEditorHandle, Lesso
       <button type="button" disabled={state.saving || state.composing || state.conflictHunks.length > 0} onClick={() => { void (state.conflict === 'deleted' ? saveAs() : session.resolveConflict('local')) }}>{state.conflict === 'deleted' ? '另存当前稿' : '保留当前稿并保存'}</button></>}
     </aside>}
     {isHtml && committed && <div className="lesson-document-editor__html-body" inert={state.conflictHunks.length > 0}><HtmlDocumentEditor ref={htmlEditor} active={active} tabId={htmlTabId} committed={committed} source={state.source} documentActions={documentActions} onPendingDraftChange={setHtmlPendingDraft} onDraft={source => { const ticket = ++draftTicket.current; queueMicrotask(() => { if (ticket === draftTicket.current) session.edit(source, operationGroup.current) }) }} onUndo={() => session.undo()} onRedo={() => session.redo()} onSave={() => { void flush() }} /></div>}
-    {isText && !isHtml && committed && <div inert={state.conflictHunks.length > 0}><PlainTextDocumentEditor documentEpoch={committed.epoch} documentId={session.documentId ?? undefined} active={active} ref={textEditor} source={state.source} revision={committed.revision} onDraft={source => { const ticket = ++draftTicket.current; queueMicrotask(() => { if (ticket === draftTicket.current) session.edit(source, operationGroup.current) }) }} onUndo={() => session.undo()} onRedo={() => session.redo()} /></div>}
+    {isText && !isHtml && committed && <div inert={state.conflictHunks.length > 0}><PlainTextDocumentEditor snapshot={committed} documentEpoch={committed.epoch} documentId={session.documentId ?? undefined} active={active} ref={textEditor} source={state.source} revision={committed.revision} onDraft={source => { const ticket = ++draftTicket.current; queueMicrotask(() => { if (ticket === draftTicket.current) session.edit(source, operationGroup.current) }) }} onUndo={() => session.undo()} onRedo={() => session.redo()} /></div>}
     {committed && committed.model.kind !== 'text' && parsedSource && <div inert={state.conflictHunks.length > 0}><SharedDocumentEditor ref={editor} cardDocumentId={session.documentId ?? undefined} active={active} document={document} revision={state.source} sourceDraft={state.source} target="file" initialMode={parsedSource.status === 'valid' ? 'layout' : 'source'} resolveImage={resolveImage}
+      projectionDiagnostics={parsedSource.diagnostics}
       sourceMap={parsedSource.status === 'valid' ? parsedSource.sourceMap : undefined}
       editPreviews={editPreviews}
       clipboardContext={(resources: MarkdownDocument['resources']) => selectedFileClipboardContext(clipboard, resources)} clipboardResourcePort={fileClipboardResourcePort}

@@ -119,6 +119,12 @@ export type PropertiesRuntimeView = PropertiesItemBase & {
   type: 'runtime'
 }
 
+export type PropertiesCompositionView = PropertiesItemBase & {
+  type: 'composition'
+  /** Existing native Flow layout declarations; never component data. */
+  layoutStyle?: { gap: string | number; padding: string | number }
+}
+
 export type PropertiesItemView = (
   | Exclude<NativeRenderableNode, FormulaNode | ImageNode>
   | PropertiesImageView
@@ -128,7 +134,7 @@ export type PropertiesItemView = (
   | SlideInputPropertiesView
   | PropertiesComponentView
   | PropertiesRuntimeView
-  | (PropertiesItemBase & { type: 'composition' })
+  | PropertiesCompositionView
 ) & { ownLocked?: boolean }
 
 export type PropertiesFormulaView = Omit<FormulaNode, 'ast'> & {
@@ -173,6 +179,7 @@ export interface SlideNativePropertiesContext {
   readonly editingScopeGlobal: boolean
   readonly frameEditingEnabled?: boolean
   readonly frameDimensionsEditingEnabled?: boolean
+  readonly flowLayoutEditingEnabled?: boolean
   readonly runtime?: RuntimePropertiesContext | null
   readonly notices: SlideNativeNoticesView
   readonly videoDiagnostics: readonly string[]
@@ -817,11 +824,24 @@ export function VideoProperties({
   )
 }
 
+function compositionSpacingValue(value: string): string | number {
+  return value !== '' && Number.isFinite(Number(value)) ? Number(value) : value
+}
+
+function compositionSpacingError(property: 'gap' | 'padding', value: string): string | null {
+  const spacing = compositionSpacingValue(value)
+  if (typeof spacing === 'number' && spacing < 0) return '间距不能小于 0；输入已保留。'
+  const cssValue = typeof spacing === 'number' ? `${spacing}px` : spacing
+  return cssValue && typeof CSS !== 'undefined' && typeof CSS.supports === 'function' && !CSS.supports(property, cssValue)
+    ? '请输入有效的间距，如 24px 或 12px 24px；输入已保留。' : null
+}
+
 export function SlideNativeTypeFields({
   node,
   update,
   contentEditingEnabled,
   spatialMode,
+  flowLayoutEditingEnabled = false,
   videoDiagnostics,
   onReplaceImage,
   onOpenAutomation,
@@ -838,6 +858,7 @@ export function SlideNativeTypeFields({
   update(patch: PropertiesPatch): void
   contentEditingEnabled: boolean
   spatialMode: boolean
+  flowLayoutEditingEnabled?: boolean
   videoDiagnostics: readonly string[]
   onReplaceImage(): void
   onTransformImage?: (operations: readonly ImageTransformOperation[]) => Promise<void>
@@ -848,12 +869,23 @@ export function SlideNativeTypeFields({
   tableCommands: NativeTablePropertiesCommands | null
   chartCommands: ChartPropertiesCommands | null
 }) {
-  if (node.type === 'composition') return (
+  if (node.type === 'composition') {
+    const layoutStyle = flowLayoutEditingEnabled ? node.layoutStyle : undefined
+    return (
     <section className="property-section">
-      <h3 className="property-title">组合内容</h3>
-      <p className="property-hint">这里调整组合的整体位置、尺寸与透明度；内部文字、图像和布局通过组合内容编辑入口修改。</p>
+      <h3 className="property-title">{layoutStyle ? '组合排版' : '组合内容'}</h3>
+      {layoutStyle ? <>
+        <BufferedInput label="子项间距" value={layoutStyle.gap} allowEmpty placeholder="如 24px"
+          validate={value => compositionSpacingError('gap', value)}
+          onCommit={value => update({ layoutStyle: { gap: compositionSpacingValue(value) } })} />
+        <BufferedInput label="内边距" value={layoutStyle.padding} allowEmpty placeholder="如 12px 24px"
+          validate={value => compositionSpacingError('padding', value)}
+          onCommit={value => update({ layoutStyle: { padding: compositionSpacingValue(value) } })} />
+        <p className="property-hint">数字按像素计算。也可保留 calc、clamp 等表达式；内边距支持上、右、下、左四边设置。</p>
+      </> : <p className="property-hint">这里调整组合的整体位置、尺寸与透明度；内部文字、图像和布局通过组合内容编辑入口修改。</p>}
     </section>
-  )
+    )
+  }
   return (
     <>
       {node.type === 'text' && (
@@ -994,6 +1026,7 @@ export function SlideNativePropertiesPanel({
         update={update}
         contentEditingEnabled={contentEditingEnabled}
         spatialMode={spatialMode}
+        flowLayoutEditingEnabled={context.flowLayoutEditingEnabled}
         videoDiagnostics={videoDiagnostics}
         onReplaceImage={commands.replaceImage}
         onTransformImage={commands.transformImage}

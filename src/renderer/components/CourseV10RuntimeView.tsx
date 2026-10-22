@@ -1,11 +1,11 @@
-import { Component, createContext, useCallback, useContext, useEffect, useMemo, useRef, type ReactNode } from 'react'
+import { Component, createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useSyncExternalStore, type ReactNode } from 'react'
 import type { DocumentModel } from '../../shared/workbench/document'
-import { componentCompilationInput } from '../../core/components/compilation/componentCompilationInput'
+import type { ComponentCompilationInput, ComponentCompilationResult } from '../../core/components/compilation/types'
 import type { ComponentPlatformRuntime } from '../../player/components/ComponentPlatformRuntime'
 import { createV10ModelPlayer, type ComponentModelPlayer, type ComponentProjectionCommit } from '../../player/componentPlatform/ModelPlayer'
 import { prepareSandboxComponent } from './SandboxComponentImplementation'
 import { CourseV10DocumentView, InstanceView } from '../documents/CourseV10DocumentView'
-import type { CourseV10DocumentBridge } from '../documents/CourseV10DocumentBridge'
+import { projectContainerPresentationStates, type CourseV10DocumentBridge } from '../documents/CourseV10DocumentBridge'
 import type { ComponentSpatialCameraPort } from '../../player/surfaces/spatial/componentSpatialAdapter'
 import type { ComponentAuthorGeometry, ComponentEdit, CourseProjectV10 } from '../../shared/contracts/component-platform'
 import type { DocumentOperation } from '../document/editorSession'
@@ -16,11 +16,22 @@ import { resolveWebResourceBindings } from '../../components/web/resources'
 import { webRuntimeResourceAddress } from '../../components/web/resourceUrlLease'
 import { ComponentNavigationOwner, type ComponentCameraBinding, type ComponentObservationBinding } from './ComponentNavigationOwner'
 import { installedBundledFontFaceCss } from '../../shared/fonts/installedBundledFontFaceCss'
-import { resolveComponentPresentation, componentDefinitionBuiltinKey } from '../../shared/contracts/component-platform'
+import { componentContainers, componentSurface, resolveComponentPresentation, componentDefinitionBuiltinKey } from '../../shared/contracts/component-platform'
 import { onComponentMotionPreview } from '../interactions/componentMotionPreview'
 import { registerRuntimeLightEditDocument } from '../composition/runtime/runtimeLightEditCommands'
 import { attachComponentPlatformNavigationKeys } from '../../player/behaviors/navigation/shortcuts'
 import { mountPlaybackNavigationChrome } from '../../player/componentPlatform/playbackNavigationChrome'
+import { createComponentModelProjection } from '../../player/componentPlatform/modelProjection'
+import type { ComponentPlayerProjection } from '../../player/componentPlatform/ModelPlayer'
+
+/** Temporary reading/observation state for an editor scope, never author content. */
+export interface ContainerEditorViewState {
+  scrollTop?: number
+  scrollLeft?: number
+  zoom?: number
+  pan?: { x: number; y: number }
+  observationContext?: string
+}
 
 export interface CourseV10RuntimePorts {
   documentId: string
@@ -40,18 +51,21 @@ export interface CourseV10RuntimePorts {
   selectInstances(ids: readonly string[], surfaceId?: string): void
   registerCamera(surfaceId: string, camera: ComponentSpatialCameraPort, binding?: ComponentCameraBinding): () => void
   registerObservation(surfaceId: string, binding: ComponentObservationBinding): () => void
+  containerViewState?(containerId: string): ContainerEditorViewState
   setPlaying(active: boolean): void
-  resetPlayback(playing?: boolean): Promise<void>
+  resetPlayback(playing?: boolean, containerId?: string): Promise<void>
   previewAuthorSpot(id: string, geometry: ComponentAuthorGeometry | null): boolean
+  /** A pre-laid-out host delegates a real container to the same local projection. */
+  renderContainer(containerId: string, projection?: CourseProjectV10): ReactNode
   /** Free placement includes authored frames; flow placement continues reading order through document sections. */
-  renderInstance(instanceId: string, projection?: CourseProjectV10, placement?: 'free' | 'flow'): ReactNode
+  renderInstance(instanceId: string, projection?: CourseProjectV10, placement?: 'free' | 'flow' | 'program'): ReactNode
 }
 
 const RuntimeContext = createContext<CourseV10RuntimePorts | null>(null)
-interface ProjectionView { surfaceId: string | null; stateId?: string | null }
+interface ProjectionView { surfaceId: string | null; stateId?: string | null; containerStates?: Readonly<Record<string, string | null>> }
 interface ProjectionNavigationCommit {
   view: ProjectionView | null
-  pending?: { target: ProjectionView; finish(accepted: boolean): void }
+  pending: Map<string, { target: ProjectionView; finish(accepted: boolean): void }>
 }
 export function useCourseV10Runtime(): CourseV10RuntimePorts {
   const ports = useContext(RuntimeContext)
@@ -65,8 +79,8 @@ export interface CourseV10RuntimeViewProps {
   selectedInstanceId: string | null; player: boolean; onSelect(id: string | null): void; report(message: string): void
   selectedInstanceIds?: readonly string[]
   activeStateId?: string | null
-  /** The original workspace's one pure state/draft projection, supplied by its owner. */
-  renderProject?: CourseProjectV10
+  /** An object is already prepared; a callback adds drafts after the shared navigation's state projection. */
+  renderProject?: CourseProjectV10 | ((effectiveProject: CourseProjectV10) => CourseProjectV10)
   onSurfaceSelect(id: string): void
   onSelectInstances?(ids: readonly string[], surfaceId?: string): void
   bridge?: CourseV10DocumentBridge
@@ -82,49 +96,97 @@ export function CourseV10RuntimeView(props: CourseV10RuntimeViewProps) {
   const activeState = useRef(props.activeStateId ?? null), runtimeRef = useRef<ComponentPlatformRuntime | null>(null)
   const callbacks = useRef(props), surface = useRef(surfaceId), wrapper = useRef<HTMLDivElement>(null)
   const playbackContent = useRef<HTMLDivElement>(null)
-  const projectionNavigation = useMemo<ProjectionNavigationCommit>(() => ({ view: null }), [documentId])
+  const projectionNavigation = useMemo<ProjectionNavigationCommit>(() => ({ view: null, pending: new Map() }), [documentId])
   const composing = useRef<string | null>(null)
   const compositionUpdate = useRef<Promise<void>>(Promise.resolve())
   current.current = model
-  callbacks.current = props; surface.current = surfaceId; activeState.current = props.activeStateId ?? null
+  callbacks.current = props
+  const bridgeView = props.bridge?.read().views.find(view => view.documentId === documentId)
+  const rootInstanceId = bridgeView?.rootInstanceId ?? (surfaceId && model.project.rootIds.includes(surfaceId) ? surfaceId : model.project.entry?.rootInstanceId ?? model.project.rootIds[0] ?? null)
+  // Local inspection may replace a workspace; ordinary work-root navigation still starts fresh.
+  const editorViews = useMemo(() => new Map<string, ContainerEditorViewState>(), [documentId, rootInstanceId])
+  const containerViewState = useCallback((id: string) => {
+    let view = editorViews.get(id)
+    if (!view) { view = {}; editorViews.set(id, view) }
+    return view
+  }, [editorViews])
+  surface.current = rootInstanceId
+  activeState.current = bridgeView?.presentationStates?.[rootInstanceId ?? ''] ?? (surfaceId === rootInstanceId ? props.activeStateId ?? null : null)
   const navigation = useMemo(() => new ComponentNavigationOwner({ project: () => current.current.project, surfaceId: () => surface.current,
     interactive: () => runtimeRef.current?.isPlaying() ?? Boolean(player),
-    presentationRoot: () => wrapper.current ?? undefined,
+    presentationRoot: id => id && id !== surface.current
+      ? Array.from(wrapper.current?.querySelectorAll<HTMLElement>('[data-component-container-preview]') ?? []).find(element => element.dataset.componentContainerPreview === id)
+        ?? (callbacks.current.surfaceId === id ? wrapper.current ?? undefined : undefined)
+      : wrapper.current ?? undefined,
     stateId: () => activeState.current,
+    containerStateId: id => {
+      const view = callbacks.current.bridge?.read().views.find(value => value.documentId === documentId)
+      return view?.presentationStates && Object.hasOwn(view.presentationStates, id) ? view.presentationStates[id]
+        : view?.surfaceId === id ? view.activeStateId : undefined
+    },
     select: (id, signal, onCommit) => selectProjection({ surfaceId: id }, () => { surface.current = id; onCommit?.(); callbacks.current.onSurfaceSelect(id) }, signal),
     selectState: (id, nextSurfaceId, signal, onCommit) => {
       if (!callbacks.current.bridge && id !== (callbacks.current.activeStateId ?? null)) return false
       return selectProjection({ surfaceId: nextSurfaceId, stateId: id }, () => {
-        activeState.current = id; onCommit?.(); callbacks.current.bridge?.selectPresentationState(documentId, id, nextSurfaceId)
+        if (nextSurfaceId === surface.current) activeState.current = id
+        onCommit?.(); callbacks.current.bridge?.selectPresentationState(documentId, id, nextSurfaceId)
       }, signal)
     },
     courseState: { get: <T,>(key: string) => runtimeRef.current?.getState(key) as T | undefined, set: (key, value) => runtimeRef.current?.setState(key, value) },
-    viewportBounds: () => (wrapper.current?.querySelector<HTMLElement>('.flow-workspace') ?? wrapper.current?.querySelector<HTMLElement>('.canvas-viewport') ?? wrapper.current)?.getBoundingClientRect(),
+    viewportBounds: id => {
+      const preview = id && id !== surface.current
+        ? Array.from(wrapper.current?.querySelectorAll<HTMLElement>('[data-component-container-preview]') ?? []).find(element => element.dataset.componentContainerPreview === id) : undefined
+      return (preview ?? wrapper.current?.querySelector<HTMLElement>('.flow-workspace')
+        ?? wrapper.current?.querySelector<HTMLElement>('.canvas-viewport')
+        ?? wrapper.current?.querySelector<HTMLElement>('[data-program-viewport]') ?? wrapper.current)?.getBoundingClientRect()
+    },
     restart: () => runtimeRef.current?.resetPlayback(true, { preserveNavigation: true }), audio: () => runtimeRef.current?.audio(), report: message => callbacks.current.report(message) }), [documentId])
   const host = useMemo(() => {
     const teacherController = navigation.teacherPort()
+    const compilations = new WeakMap<ComponentCompilationInput, { consumers: Set<AbortSignal>; promise: Promise<ComponentCompilationResult> }>()
+    const compileSource = async (input: ComponentCompilationInput, signal: AbortSignal) => {
+      signal.throwIfAborted()
+      let entry = compilations.get(input)
+      if (!entry) {
+        const consumers = new Set<AbortSignal>()
+        const promise = Promise.resolve().then(() => {
+          if (![...consumers].some(consumer => !consumer.aborted)) throw new Error('组件源码准备已取消')
+          return window.desktopAPI.compileComponent(input)
+        })
+        entry = { consumers, promise }; compilations.set(input, entry)
+        void promise.catch(() => { if (compilations.get(input) === entry) compilations.delete(input) })
+      }
+      entry.consumers.add(signal)
+      try {
+        const result = await entry.promise
+        if (result.status === 'failed' && compilations.get(input) === entry) compilations.delete(input)
+        return result
+      }
+      finally { entry.consumers.delete(signal) }
+    }
     const mounted = createV10ModelPlayer({ runScopeId: `document:${documentId}:${crypto.randomUUID()}`,
       fontFaceCss: installedBundledFontFaceCss(document),
       report: message => callbacks.current.report(message),
-      mode: player ? 'play' : 'edit',
+      mode: player ? 'play' : 'edit', presentationPrepared: true,
       teacherController, studentNavigation: navigation,
-      onDispose: () => { projectionNavigation.pending?.finish(false); navigation.dispose() },
+      onDispose: () => { for (const pending of projectionNavigation.pending.values()) pending.finish(false); navigation.dispose() },
       resolveBuiltin: async (_key, signal, instance) => {
         const projected = await projectWebModuleGraph(instance, input => window.desktopAPI.compileComponent(input), message => callbacks.current.report(message))
         const graph = (projected.data as unknown as WebRuntimeData).moduleGraph
         if (signal.aborted) throw new Error('组件源码准备已取消')
         const prepared = await prepareSandboxComponent({ format: 'esm', code: webContentRealmSource(), css: '', diagnostics: [] }, signal,
-        { builtinKey: _key, state: () => runtime.stateSnapshot(), targets: profile => runtime.targetSnapshots(profile), instance: async value => resolveWebResourceBindings((value.data as unknown as WebRuntimeData).moduleGraph ? value : await projectWebModuleGraph(value, input => window.desktopAPI.compileComponent(input), message => callbacks.current.report(message)), id => runtime.contentAssetUrl(id) ? webRuntimeResourceAddress(id) : undefined, message => callbacks.current.report(message)), htmlAuthoring: true, teacherController,
+        { builtinKey: _key, state: () => runtime.stateSnapshot(), targetChanges: true, targets: profile => runtime.targetSnapshots(profile), instance: async value => resolveWebResourceBindings((value.data as unknown as WebRuntimeData).moduleGraph ? value : await projectWebModuleGraph(value, input => window.desktopAPI.compileComponent(input), message => callbacks.current.report(message)), id => runtime.contentAssetUrl(id) ? webRuntimeResourceAddress(id) : undefined, message => callbacks.current.report(message)), htmlAuthoring: true, teacherController,
           connectOrigins: () => current.current.project.logic?.network?.connectOrigins ?? [], themeCss: () => runtime.themeCss(), resources: () => runtime.resourceUrls() })
         return { ...prepared, webModuleGraph: graph }
       },
       resolveSource: async (implementation, signal) => {
-        const input = componentCompilationInput(current.current.project, implementation, current.current.resources)
-        const compilation = await window.desktopAPI.compileComponent(input)
+        signal.throwIfAborted()
+        const input = runtime.sourceCompilationInput(implementation)
+        const compilation = await compileSource(input, signal)
         if (signal.aborted) throw new Error('组件源码准备已取消')
         if (compilation.status === 'failed') throw new Error(compilation.diagnostics.map(value => `${value.file ?? ''}:${value.line ?? ''} ${value.message}`).join('\n'))
         return prepareSandboxComponent(compilation.artifact, signal, { htmlAuthoring: true,
-          webInstance: async value => hasWebContentData(value.data) ? resolveWebResourceBindings(value.data.moduleGraph ? value : await projectWebModuleGraph(value, input => window.desktopAPI.compileComponent(input), message => callbacks.current.report(message)), id => runtime.contentAssetUrl(id) ? webRuntimeResourceAddress(id) : undefined, message => callbacks.current.report(message), implementation.resourceBindings) : value, state: () => runtime.stateSnapshot(), targets: () => runtime.targetSnapshots('full'), teacherController,
+          webInstance: async value => hasWebContentData(value.data) ? resolveWebResourceBindings(value.data.moduleGraph ? value : await projectWebModuleGraph(value, input => window.desktopAPI.compileComponent(input), message => callbacks.current.report(message)), id => runtime.contentAssetUrl(id) ? webRuntimeResourceAddress(id) : undefined, message => callbacks.current.report(message), implementation.resourceBindings) : value, state: () => runtime.stateSnapshot(), targetChanges: true, targets: profile => runtime.targetSnapshots(profile), teacherController,
           authorHtml: instance => {
             const key = componentDefinitionBuiltinKey(current.current.project.definitions[instance.definitionId]), data = instance.data
             return ['guoling.web', 'guoling.html-program'].includes(key ?? '') && data && typeof data === 'object' && !Array.isArray(data) && typeof data.html === 'string' ? data.html : undefined
@@ -137,25 +199,34 @@ export function CourseV10RuntimeView(props: CourseV10RuntimeViewProps) {
   }, [documentId, navigation])
   const world = host.runtime
   runtimeRef.current = world
-  const renderProject = props.renderProject ?? resolveComponentPresentation(model.project, surfaceId, props.activeStateId ?? null)
-  const matchesProjection = (target: ProjectionView) => projectionNavigation.view?.surfaceId === target.surfaceId
-    && (target.stateId === undefined || projectionNavigation.view.stateId === target.stateId)
+  const navigationStates = useSyncExternalStore(navigation.subscribe, () => JSON.stringify(Object.fromEntries(
+    Object.values(current.current.project.instances).filter(instance => instance.container).map(container => [container.id, navigation.currentStateId(container.id)]))))
+  const renderProject = useMemo(() => typeof props.renderProject === 'function'
+    ? props.renderProject(projectContainerPresentationStates(model.project, JSON.parse(navigationStates) as Record<string, string | null>))
+    : props.renderProject ?? projectContainerPresentationStates(model.project, JSON.parse(navigationStates) as Record<string, string | null>),
+  [model.project, props.renderProject, navigationStates])
+  const matchesProjection = (target: ProjectionView) => target.stateId === undefined
+    ? projectionNavigation.view?.surfaceId === target.surfaceId
+    : Boolean(target.surfaceId && projectionNavigation.view?.containerStates
+      && Object.hasOwn(projectionNavigation.view.containerStates, target.surfaceId)
+      && projectionNavigation.view.containerStates[target.surfaceId] === target.stateId)
   function selectProjection(target: ProjectionView, select: () => void, signal?: AbortSignal): Promise<boolean> {
     if (signal?.aborted) return Promise.resolve(false)
     return new Promise((resolve, reject) => {
-      projectionNavigation.pending?.finish(false)
+      const key = target.stateId === undefined ? '@work' : target.surfaceId ?? '@work'
+      projectionNavigation.pending.get(key)?.finish(false)
       const finish = (accepted: boolean) => {
         signal?.removeEventListener('abort', abort)
-        if (projectionNavigation.pending === pending) projectionNavigation.pending = undefined
+        if (projectionNavigation.pending.get(key) === pending) projectionNavigation.pending.delete(key)
         resolve(accepted)
       }
       const abort = () => finish(false), pending = { target, finish }
-      projectionNavigation.pending = pending
+      projectionNavigation.pending.set(key, pending)
       signal?.addEventListener('abort', abort, { once: true })
       try { select(); if (matchesProjection(target)) finish(true) }
       catch (error) {
         signal?.removeEventListener('abort', abort)
-        if (projectionNavigation.pending === pending) projectionNavigation.pending = undefined
+        if (projectionNavigation.pending.get(key) === pending) projectionNavigation.pending.delete(key)
         reject(error)
       }
     })
@@ -163,10 +234,9 @@ export function CourseV10RuntimeView(props: CourseV10RuntimeViewProps) {
   useEffect(() => {
     // Child camera/observation effects have installed their ports at this real React commit.
     // Navigation waits for this projection, not for arbitrary source mounts in the runtime queue.
-    projectionNavigation.view = { surfaceId, stateId: props.activeStateId ?? null }
-    const pending = projectionNavigation.pending
-    if (pending && matchesProjection(pending.target)) pending.finish(true)
-  }, [projectionNavigation, surfaceId, props.activeStateId])
+    projectionNavigation.view = { surfaceId: rootInstanceId, stateId: activeState.current, containerStates: JSON.parse(navigationStates) as Record<string, string | null> }
+    for (const pending of projectionNavigation.pending.values()) if (matchesProjection(pending.target)) pending.finish(true)
+  }, [projectionNavigation, rootInstanceId, navigationStates])
   useEffect(() => host.retain(), [host])
   useEffect(() => {
     const root = wrapper.current, content = playbackContent.current
@@ -212,7 +282,7 @@ export function CourseV10RuntimeView(props: CourseV10RuntimeViewProps) {
     })
     return () => { stop(); timers.forEach(timer => clearTimeout(timer)); pending.forEach(controller => controller.abort()) }
   }, [documentId, world])
-  useEffect(() => { navigation.changed() }, [navigation, surfaceId, model.project.surfaces])
+  useEffect(() => { navigation.changed() }, [navigation, rootInstanceId, surfaceId, model.project])
   const edit = useCallback((edits: ComponentEdit[], historyGroup?: string) => {
     const { bridge, report } = callbacks.current
     if (!bridge) return Promise.reject(new Error('文档编辑入口不可用'))
@@ -250,30 +320,80 @@ export function CourseV10RuntimeView(props: CourseV10RuntimeViewProps) {
   useEffect(() => {
     if (props.active === false) { navigation.cancel(); setPlaying(false) }
   }, [props.active, navigation, setPlaying])
-  const resetPlayback = useCallback(async (playing?: boolean) => {
+  const resetPlayback = useCallback(async (playing?: boolean, containerId?: string) => {
     const resetSurfaceId = navigation.readLocation()
     world.setPlaying(playing ?? false)
-    if (!await navigation.replayCurrentSurface()) throw new Error('当前页未能返回初始状态')
-    if (resetSurfaceId) await world.resetSurfacePrograms(resetSurfaceId)
+    const resetRoot = containerId ?? callbacks.current.bridge?.read().views.find(view => view.documentId === documentId)?.rootInstanceId
+      ?? current.current.project.entry?.rootInstanceId ?? resetSurfaceId
+    if (resetRoot && componentSurface(current.current.project, resetRoot)) {
+      const restored = containerId && !current.current.project.rootIds.includes(containerId)
+        ? await navigation.editorPort().forContainer!(containerId).execute({ type: 'scene.replay' }) : await navigation.replayCurrentSurface()
+      if (!restored) throw new Error('当前容器未能返回初始状态')
+    }
+    if (resetRoot) await world.resetSurfacePrograms(resetRoot)
     navigation.changed()
-  }, [world, navigation])
+  }, [world, navigation, documentId])
   const selectedInstanceIds = props.selectedInstanceIds ?? (selectedInstanceId ? [selectedInstanceId] : [])
+  const renderContainer = (containerId: string, project = renderProject) => <ContainerPreview containerId={containerId} model={{ ...model, project }} world={world} navigation={navigation} report={props.report} />
   const ports: CourseV10RuntimePorts = {
     documentId, project: renderProject, resources: model.resources, surfaceId, selectedInstanceId, selectedInstanceIds, player,
     world, navigation, onElement: world.bind, onTargetElement: world.bindTarget, edit, onEdits: flowEdit,
-    onComposition: compose, selectInstances, registerCamera, registerObservation,
-    setPlaying, resetPlayback, previewAuthorSpot: world.previewAuthorSpot,
-    renderInstance: (id, projection = renderProject, placement = 'free') => projection.instances[id] && <InstanceView key={id} instance={projection.instances[id]} project={projection} authorProject={model.project} surfaceId={surfaceId} placement={placement}
-      selectedInstanceId={selectedInstanceId} selectedInstanceIds={selectedInstanceIds} player={player} onSelect={onSelect} onElement={world.bind} onTargetElement={world.bindTarget} />,
+    onComposition: compose, selectInstances, registerCamera, registerObservation, containerViewState,
+    setPlaying, resetPlayback, previewAuthorSpot: world.previewAuthorSpot, renderContainer,
+    renderInstance: (id, projection = renderProject, placement = 'free') => projection.instances[id] && <InstanceView key={id} instance={projection.instances[id]} project={projection} authorProject={model.project} surfaceId={surfaceId ?? rootInstanceId} placement={placement}
+      selectedInstanceId={selectedInstanceId} selectedInstanceIds={selectedInstanceIds} player={player} isPlaying={() => world.isPlaying()} onSelect={onSelect} onElement={world.bind} onTargetElement={world.bindTarget}
+      renderContainer={renderContainer} />,
   }
-  const view = props.renderWorkspace ? props.renderWorkspace(ports) : props.children ?? <CourseV10DocumentView project={renderProject} authorProject={model.project} surfaceId={surfaceId}
-    selectedInstanceId={selectedInstanceId} selectedInstanceIds={selectedInstanceIds} player={player} onSelect={onSelect} onElement={world.bind} onTargetElement={world.bindTarget} />
+  const view = props.renderWorkspace ? props.renderWorkspace(ports) : props.children ?? <CourseV10DocumentView project={renderProject} authorProject={model.project} surfaceId={surfaceId} rootInstanceId={rootInstanceId}
+    selectedInstanceId={selectedInstanceId} selectedInstanceIds={selectedInstanceIds} player={player} isPlaying={() => world.isPlaying()} onSelect={onSelect} onElement={world.bind} onTargetElement={world.bindTarget}
+    renderContainer={renderContainer} />
   return <RuntimeContext.Provider value={ports}><ProjectionMutationBoundary model={{ ...model, project: renderProject }} host={host} projectionKey={projectionKey}
     report={error => callbacks.current.report(error instanceof Error ? error.message : '组件运行未完成')}>
     <div ref={wrapper} style={{ position: 'relative', display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gridTemplateRows: 'minmax(0, 1fr)', width: '100%', height: '100%', minWidth: 0, minHeight: 0 }}>
       {player ? <div ref={playbackContent} style={{ position: 'absolute', inset: 0, minWidth: 0, minHeight: 0 }}>{view}</div> : view}
     </div>
   </ProjectionMutationBoundary></RuntimeContext.Provider>
+}
+
+/** A local view supplies geometry only; its descendants keep this document's one runtime. */
+function ContainerPreview({ containerId, model, world, navigation, report }: {
+  containerId: string; model: Extract<DocumentModel, { kind: 'course-v10' }>; world: ComponentPlatformRuntime
+  navigation: ComponentNavigationOwner; report(message: string): void
+}) {
+  const root = useRef<HTMLDivElement>(null), mounted = useRef<ComponentPlayerProjection | null>(null)
+  const observationBindings = useRef(new Map<string, { observation: NonNullable<ReturnType<NonNullable<ComponentPlayerProjection['observation']>>>; release(): void }>())
+  useLayoutEffect(() => {
+    const element = root.current
+    if (!element) return
+    const controller = new AbortController()
+    const projection = createComponentModelProjection({ root: element, runtime: world, containerId, signal: controller.signal,
+      onCamera: (id, camera) => navigation.registerCamera(id, camera) })
+    mounted.current = projection
+    return () => {
+      controller.abort(); mounted.current = null
+      for (const binding of observationBindings.current.values()) binding.release()
+      observationBindings.current.clear()
+      void projection.dispose()
+    }
+  }, [containerId, world, navigation])
+  useLayoutEffect(() => {
+    const projection = mounted.current
+    if (!projection) return
+    try {
+      const synchronized = projection.sync(model)
+      void Promise.resolve(synchronized).then(() => {
+        if (mounted.current !== projection) return
+        const bindings = observationBindings.current
+        for (const [id, binding] of bindings) if (projection.observation?.(id) !== binding.observation) { binding.release(); bindings.delete(id) }
+        for (const container of componentContainers(model.project)) {
+          const observation = projection.observation?.(container.id)
+          if (observation && !bindings.has(container.id)) bindings.set(container.id,
+            { observation, release: navigation.registerObservation(container.id, observation) })
+        }
+      }).catch(error => report(error instanceof Error ? error.message : String(error)))
+    } catch (error) { report(error instanceof Error ? error.message : String(error)) }
+  }, [model, navigation, report])
+  return <div ref={root} data-component-container-preview={containerId} style={{ position: 'relative', width: '100%', height: '100%', minHeight: 120, minWidth: 0, overflow: 'hidden' }} />
 }
 
 /** React ancestor moves must not reload an already mounted source iframe. */
@@ -286,11 +406,13 @@ class ProjectionMutationBoundary extends Component<{ model: Extract<DocumentMode
   componentDidMount(): void {
     void this.props.host.commitProjection(this.initial).catch(this.props.report)
   }
-  getSnapshotBeforeUpdate(): ComponentProjectionCommit {
+  getSnapshotBeforeUpdate(previous: Readonly<ProjectionMutationBoundary['props']>): ComponentProjectionCommit | null {
+    if (previous.host === this.props.host && previous.model.project === this.props.model.project
+      && previous.model.resources === this.props.model.resources && previous.projectionKey === this.props.projectionKey) return null
     return this.props.host.prepareProjection(this.props.model, this.props.projectionKey)
   }
-  componentDidUpdate(_previous: Readonly<ProjectionMutationBoundary['props']>, _state: unknown, receipt: ComponentProjectionCommit): void {
-    void this.props.host.commitProjection(receipt).catch(this.props.report)
+  componentDidUpdate(_previous: Readonly<ProjectionMutationBoundary['props']>, _state: unknown, receipt: ComponentProjectionCommit | null): void {
+    if (receipt) void this.props.host.commitProjection(receipt).catch(this.props.report)
   }
   render() { return this.props.children }
 }

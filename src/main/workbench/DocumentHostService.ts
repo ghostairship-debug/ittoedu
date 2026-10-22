@@ -1,4 +1,5 @@
-import { DocumentSaveFailure, type DocumentSaveFact, type DocumentSaveIdentity, type SavedCourseIdentity } from '../../shared/workbench/documentSave'
+import { componentContainers } from '../../shared/contracts/component-platform/project'
+import { DocumentSaveFailure, type DocumentSaveFact, type DocumentSaveIdentity, type DocumentSourcePublication, type SavedCourseIdentity } from '../../shared/workbench/documentSave'
 import type { SaveReceipt } from '../../shared/workbench/toolPorts'
 import { documentDigest } from '../../core/documents/documentDigest'
 import { sourceFileKind } from '../../shared/workbench/sourceFileKind'
@@ -10,13 +11,14 @@ import { DocumentRegistry } from '../../core/documents/DocumentRegistry'
 import type { DocumentSession, DocumentSaveObserver } from '../../core/documents/DocumentSession'
 import { createMarkdownDriver } from '../../core/drivers/MarkdownDriver'
 import { createTextDriver, TextEncodingError } from '../../core/drivers/TextDriver'
-import { createCourseV10Driver } from '../../core/drivers/CourseV10Driver'
-import { checkComponentExpectations, ComponentOperationConflict } from '../../core/drivers/courseV10Operations'
-import { isSourceDocumentModel, type DocumentDriver, type DocumentEvent, type DocumentKind, type DocumentModel, type DocumentSnapshot, type DocumentOperation, type DocumentOperationResult } from '../../shared/workbench/document'
+import { createDocumentArchiveDriver, loadDocumentArchive } from './documentArchiveWorker'
+import type { WorkProjectMigrationMap } from '../../shared/contracts/component-platform/workProjectMigration'
+import { isSourceDocumentModel, type DocumentDispatchOptions, type DocumentDriver, type DocumentEvent, type DocumentKind, type DocumentModel, type DocumentSnapshot, type DocumentOperation, type DocumentOperationResult } from '../../shared/workbench/document'
 import { DesktopOperationError } from '../errors'
-import { authoringDraftRecoverySchema, documentHostRequestSchema, type AuthoringDraftRecovery, type AuthoringDraftWrite, type AuthoringRecoveryClaim, type DocumentHostRequest, type DocumentHostAPI, type DocumentFileObservation, type ReconcileDocumentFile } from '../../shared/workbench/desktop'
-import { createDocumentJournal, readDocumentFileVersion } from './documentJournal'
-import { captureDocumentSaveModel } from './documentSourceResources'
+import { authoringDraftRecoverySchema, documentHostRequestSchema, type AuthoringDraftRecovery, type AuthoringDraftWrite, type AuthoringRecoveryClaim, type DocumentHostRequest, type DocumentHostAPI, type DocumentFileObservation, type DocumentRecoverySummary, type ReconcileDocumentFile } from '../../shared/workbench/desktop'
+import { createDocumentJournal, readDocumentFileVersion, type PublishedSourceObservation } from './documentJournal'
+import { captureDocumentSaveModel, prepareDocumentSave, readSourceResource } from './documentSourceResources'
+import type { HtmlResourceSource } from './htmlImport/types'
 import { DocumentToolGateway } from '../../core/tools/DocumentToolGateway'
 import { WorkspaceFiles, type WorkspaceFilesDependencies } from './WorkspaceFiles'
 import { DocumentFileCoordinator } from './DocumentFileCoordinator'
@@ -41,8 +43,13 @@ function canonicalKey(filename: string): string {
   return process.platform === 'win32' ? filename.toLowerCase() : filename
 }
 
-async function loadDocumentModel(driver: DocumentDriver, bytes: Uint8Array): Promise<DocumentModel> {
-  try { return await driver.load(bytes) }
+async function loadDocumentModel(driver: DocumentDriver, bytes: Uint8Array, identities?: WorkProjectMigrationMap): Promise<{ model: DocumentModel; courseProjectMigrationIds?: WorkProjectMigrationMap }> {
+  try {
+    if (driver.kind === 'course-v10') {
+      return await loadDocumentArchive(bytes, { identities, includeMigrationIds: true })
+    }
+    return { model: await driver.load(bytes) }
+  }
   catch (error) {
     if (error instanceof TextEncodingError) throw new DesktopOperationError('TEXT_ENCODING_UNSUPPORTED', '无法打开文本', '不是 UTF-8 编码的文本文件', '请将文件转换为 UTF-8 编码后再打开。')
     throw error
@@ -50,6 +57,8 @@ async function loadDocumentModel(driver: DocumentDriver, bytes: Uint8Array): Pro
 }
 
 export type { DocumentSaveFact } from '../../shared/workbench/documentSave'
+
+type HtmlDiskObservation = { path: string; version: string; model: DocumentModel; dependencies: ReadonlyMap<string, string>; sources: HtmlResourceSource[]; physical?: ReadonlyMap<string, string> }
 
 /** App-owned singleton, independent of renderer lifetime and active surface. */
 export class DocumentHostService {
@@ -75,14 +84,26 @@ export class DocumentHostService {
   private mediaCopyPreparer?: (source: string, kind: 'file' | 'directory') => Promise<readonly MediaFileDraftInput[]>
   private bootstrapping?: Promise<DocumentSnapshot>
   private readonly inputs: DocumentInputRecovery
+  /** A projection of the last disk read, owned by the same session and never persisted. */
+  private readonly htmlDiskObservations = new WeakMap<DocumentSession, HtmlDiskObservation>()
+  /** A published candidate is reusable only after its own Session accepts the save. */
+  private readonly pendingSourceSaveObservations = new WeakMap<DocumentSession, PublishedSourceObservation & { epoch: string }>()
 
   constructor(directory: string, fileDependencies: Pick<WorkspaceFilesDependencies, 'trashItem' | 'showItemInFolder' | 'fileOperations'> = {},
     options: { artifactDeliveryDirectory?: string; legacyFlowRecoveryDirectory?: string } = {}) {
     this.inputs = new DocumentInputRecovery(path.join(directory, 'authoring-drafts'), options.legacyFlowRecoveryDirectory
       ?? (typeof app?.getPath === 'function' ? path.join(app.getPath('userData'), 'flow-document-recovery', 'v1') : undefined))
-    this.drivers = [createMarkdownDriver(), createTextDriver(), createCourseV10Driver()]
+    this.drivers = [createMarkdownDriver(), createTextDriver(), createDocumentArchiveDriver()]
     this.journal = createDocumentJournal({ directory, isLive: documentId => this.registry?.has(documentId) ?? false,
       currentSource: filename => this.currentSource(filename),
+      observeSourcePublication: documentId => {
+        if (!this.registry.has(documentId)) return
+        const session = this.registry.get(documentId), epoch = session.readIdentity().epoch
+        return observation => {
+          if (this.registry.has(documentId) && this.registry.get(documentId) === session)
+            this.pendingSourceSaveObservations.set(session, { ...observation, epoch })
+        }
+      },
       onBindingRecovered: state => this.inputs.refresh(state) })
     this.registry = new DocumentRegistry({ persistence: this.journal, drivers: this.drivers, createId: randomUUID, bindingKey: binding => canonicalKey(binding.path),
       onClosed: () => { if (this.registry.size === 0) this.compilation.clear() } })
@@ -231,17 +252,18 @@ export class DocumentHostService {
   }
 
   /** Trusted main consumers use the same sessions; UI envelopes remain human-only. */
-  readonly internalAPI: Pick<DocumentHostAPI, 'list' | 'create' | 'recoverable' | 'restore' | 'open' | 'read' | 'dispatch' | 'lookup' | 'save' | 'observeFile' | 'reconcileFile' | 'readAuthoringDrafts' | 'writeAuthoringDrafts' | 'clearAuthoringDrafts' | 'claimAuthoringDrafts'> & { stopRun(documentId: string, runId: string): Promise<unknown> } = {
+  readonly internalAPI: Pick<DocumentHostAPI, 'list' | 'create' | 'recoverable' | 'recoverySummaries' | 'restore' | 'open' | 'read' | 'dispatch' | 'lookup' | 'save' | 'observeFile' | 'reconcileFile' | 'readAuthoringDrafts' | 'writeAuthoringDrafts' | 'clearAuthoringDrafts' | 'claimAuthoringDrafts'> & { stopRun(documentId: string, runId: string): Promise<unknown> } = {
     list: async () => this.registry.list(),
     create: async (model, suggestedName) => this.attach(await this.registry.create(model, suggestedName)),
     recoverable: () => this.operate({ type: 'recoverable' }) as Promise<DocumentSnapshot[]>,
+    recoverySummaries: () => this.operate({ type: 'recovery-summaries' }) as Promise<DocumentRecoverySummary[]>,
     restore: documentId => this.operate({ type: 'restore', documentId }) as Promise<DocumentSnapshot>,
     open: filename => this.open(filename),
     read: documentId => this.registry.get(documentId).drain(),
-    dispatch: operation => this.dispatch(operation),
+    dispatch: (operation, options) => this.dispatch(operation, options),
     lookup: async (documentId, operationId) => this.registry.get(documentId).lookupOperation(operationId),
     save: (documentId, filename) => this.saveToPath(documentId, filename),
-    observeFile: documentId => this.observeFile(documentId),
+    observeFile: (documentId, knownVersion) => this.observeFile(documentId, knownVersion),
     reconcileFile: input => this.reconcileFile(input),
     readAuthoringDrafts: documentId => this.readAuthoringDrafts(documentId),
     writeAuthoringDrafts: (documentId, drafts, epoch) => this.writeAuthoringDrafts(documentId, drafts, epoch),
@@ -254,7 +276,13 @@ export class DocumentHostService {
     if (!this.subscribed.has(session.documentId)) {
       this.subscribed.add(session.documentId)
       session.subscribe(event => {
-        if (event.type === 'changed') void this.inputs.refresh(event.snapshot).catch(() => undefined)
+        if (event.type === 'changed' || event.type === 'state') {
+          const head = event.head
+          const owner = head ? { documentId: head.documentId, epoch: head.epoch, binding: head.binding,
+            model: head.kind === 'course-v10' ? { kind: head.kind, project: { id: head.projectId! } } : { kind: head.kind } }
+            : event.type === 'changed' ? event.snapshot : undefined
+          if (owner) void this.inputs.refresh(owner).catch(() => undefined)
+        }
         if (event.type === 'closed') {
           this.subscribed.delete(event.documentId)
           for (const listener of this.closeListeners) { try { listener(event.documentId) } catch { /* Closing never waits for its listeners. */ } }
@@ -278,13 +306,13 @@ export class DocumentHostService {
   async prepareSpatialViewport(documentId: string, surfaceId: string): Promise<SpatialViewportCapture> {
     await this.prepareDocumentInput(documentId)
     const before = this.registry.get(documentId).read()
-    if (before.model.kind !== 'course-v10' || !before.model.project.surfaces.some(surface => surface.id === surfaceId && surface.kind === 'spatial'))
+    if (before.model.kind !== 'course-v10' || !componentContainers(before.model.project).some(surface => surface.id === surfaceId && surface.kind === 'spatial'))
       throw new Error('原空间表面已不存在，请重新观察。')
     if (!this.spatialViewportPreparer) throw new Error('当前空间视口尚未运行，请打开原空间视口后重试。')
     const capture = spatialViewportCaptureSchema.parse(await this.spatialViewportPreparer({ documentId, epoch: before.epoch, surfaceId }))
     const after = this.registry.get(documentId).read()
     if (capture.documentId !== documentId || capture.epoch !== before.epoch || after.epoch !== before.epoch || capture.surfaceId !== surfaceId
-      || after.model.kind !== 'course-v10' || !after.model.project.surfaces.some(surface => surface.id === surfaceId && surface.kind === 'spatial'))
+      || after.model.kind !== 'course-v10' || !componentContainers(after.model.project).some(surface => surface.id === surfaceId && surface.kind === 'spatial'))
       throw new Error('原空间视口的文档身份或表面已变化，请重新观察。')
     return capture
   }
@@ -301,7 +329,7 @@ export class DocumentHostService {
 
   /** Authorization precedes this lookup; the current document remains usable when its disk path is absent. */
   async readOpenedTaskInput(filename: string): Promise<DocumentSnapshot | undefined> {
-    const observed = this.registry.list().find(snapshot => snapshot.binding.kind === 'file'
+    const observed = this.registry.listIdentities().find(snapshot => snapshot.binding.kind === 'file'
       && canonicalKey(snapshot.binding.path) === canonicalKey(filename))
     if (!observed) return undefined
     await this.prepareDocumentInput(observed.documentId)
@@ -317,26 +345,80 @@ export class DocumentHostService {
   }
 
   /** Replan only known local reads; Session still performs the final CAS and durable commit. */
-  private async dispatch(input: DocumentOperation): Promise<DocumentOperationResult> {
+  private async dispatch(input: DocumentOperation, options?: DocumentDispatchOptions): Promise<DocumentOperationResult> {
     const session = this.registry.get(input.documentId)
-    if (input.mutation.type !== 'command' || input.mutation.command.type !== 'component-platform.apply') return session.execute(input)
-    const requestDigest = input.requestDigest ?? documentDigest(input)
-    const known = session.lookupRequest({ ...input, requestDigest })
-    if (known) return known
-    const snapshot = await session.drain()
-    if (snapshot.epoch !== input.epoch || snapshot.model.kind !== 'course-v10' || input.baseRevision > snapshot.revision) return session.execute(input)
-    try { checkComponentExpectations(snapshot.model.project, input.mutation.command) }
-    catch (error) {
-      if (!(error instanceof ComponentOperationConflict)) throw error
-      return { status: 'conflict', documentId: input.documentId, operationId: input.operationId, code: error.code, message: error.message, applied: false }
-    }
-    return session.execute({ ...input, requestDigest, baseRevision: snapshot.revision })
+    if (input.mutation.type !== 'command' || input.mutation.command.type !== 'component-platform.apply') return session.execute(input, options)
+    return session.execute(input, { sourceChangeHints: options?.sourceChangeHints, rebaseComponentExpectations: true })
   }
   async assertFileAvailable(filename: string): Promise<void> { this.fileCoordinator.assertResolved([filename]); await this.journal.assertAvailable([filename]) }
 
   private kind(filename: string): DocumentKind { return sourceFileKind(filename) }
 
   open(filename: string): Promise<DocumentSnapshot> { return this.fileCoordinator.withFileAccess(() => this.openFile(filename)) }
+  private async captureDiskModel(model: DocumentModel, binding: Extract<DocumentSnapshot['binding'], { kind: 'file' }>): Promise<{ model: DocumentModel; observation?: HtmlDiskObservation }> {
+    if (!isSourceDocumentModel(model) || binding.version === null)
+      return { model: await captureDocumentSaveModel(model, binding) }
+    let directoryDependency = false
+    let sources: HtmlResourceSource[] = []
+    const captured = await prepareDocumentSave(model, binding, { onDependencyDirectory: () => { directoryDependency = true },
+      onHtmlResourceSources: value => { sources = value } })
+    return { model: captured.model, observation: this.sourceDiskObservation(captured.model, binding, captured.sourcePublication, sources, directoryDependency) }
+  }
+  private sourceDiskObservation(model: DocumentModel, binding: DocumentSnapshot['binding'], publication: DocumentSourcePublication | undefined,
+    sources: HtmlResourceSource[], directoryDependency: boolean): HtmlDiskObservation | undefined {
+    if (!isSourceDocumentModel(model) || binding.kind !== 'file' || binding.version === null
+      || directoryDependency || publication?.componentDirectories.length) return
+    const dependencies = new Map((publication?.references ?? []).map(reference => [reference, 'missing']))
+    for (const file of publication?.files ?? []) dependencies.set(file.path, file.version)
+    return { path: binding.path, version: binding.version, model, dependencies, sources }
+  }
+  private async unchangedHtmlDependencies(observation: HtmlDiskObservation): Promise<boolean> {
+    const root = path.dirname(observation.path)
+    for (const [relative, expected] of observation.dependencies) {
+      let actual: string
+      try { actual = (await readSourceResource(root, relative)).version }
+      catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') return false; actual = 'missing' }
+      if (actual !== expected) return false
+    }
+    return true
+  }
+  private async diskPhysicalFacts(observation: HtmlDiskObservation): Promise<ReadonlyMap<string, string>> {
+    const filenames = [observation.path, ...[...observation.dependencies.keys()].map(relative => path.resolve(path.dirname(observation.path), relative))]
+    const facts = new Map<string, string>()
+    for (const filename of filenames) {
+      try {
+        const real = await fs.realpath(filename), stat = await fs.stat(filename, { bigint: true })
+        facts.set(filename, `${real}:${stat.dev}:${stat.ino}:${stat.size}:${stat.mtimeNs}:${stat.ctimeNs}`)
+      } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; facts.set(filename, 'missing') }
+    }
+    return facts
+  }
+  private sameDiskFacts(left: ReadonlyMap<string, string>, right: ReadonlyMap<string, string>): boolean {
+    return left.size === right.size && [...left].every(([filename, value]) => right.get(filename) === value)
+  }
+  /** Establish the metadata baseline around one strong observation. Afterwards
+   * unchanged polling checks file identity/metadata, not every source byte. */
+  private async unchangedDiskObservation(observation: HtmlDiskObservation, strong: boolean): Promise<boolean> {
+    const before = await this.diskPhysicalFacts(observation)
+    if (!strong && observation.physical) return this.sameDiskFacts(observation.physical, before)
+    if (await readDocumentFileVersion(observation.path, observation.model.kind) !== observation.version
+      || !await this.unchangedHtmlDependencies(observation)) return false
+    const after = await this.diskPhysicalFacts(observation)
+    if (!this.sameDiskFacts(before, after)) return false
+    observation.physical = after
+    return true
+  }
+  /** Reuse the disk preparation already completed by this same Session. A new
+   * source or a changed/missing/reappearing dependency gets a fresh analysis. */
+  async readCapturedHtmlPreviewSources(documentId: string, source: string, rootRealPath: string): Promise<{
+    sources: HtmlResourceSource[]; dependencies: ReadonlyMap<string, string>
+  } | undefined> {
+    const session = this.registry.get(documentId), previous = this.htmlDiskObservations.get(session)
+    if (!previous || previous.model.kind !== 'text' || previous.model.source !== source
+      || canonicalKey(path.dirname(previous.path)) !== canonicalKey(rootRealPath)
+      || !await this.unchangedDiskObservation(previous, false)) return
+    return { sources: previous.sources.map(value => ({ ...value })), dependencies: new Map(previous.dependencies) }
+  }
   private async openFile(filename: string): Promise<DocumentSnapshot> {
     if (!path.isAbsolute(filename)) throw new Error('文档路径必须是绝对路径')
     const canonical = await fs.realpath(filename)
@@ -346,47 +428,65 @@ export class DocumentHostService {
     const kind = this.kind(canonical)
     const version = await readDocumentFileVersion(canonical, kind)
     if (version === null) throw new Error('文档已不存在')
+    let observation: HtmlDiskObservation | undefined
     const session = await this.registry.open({ kind: 'file', path: canonical, version, bindingVersion: 1 }, async () => {
       const driver = this.drivers.find(value => value.kind === kind)!
-      const model = await loadDocumentModel(driver, new Uint8Array(await fs.readFile(canonical)))
-      model.resources = (await captureDocumentSaveModel(model, { kind: 'file', path: canonical, version, bindingVersion: 1 })).resources
+      const loaded = await loadDocumentModel(driver, new Uint8Array(await fs.readFile(canonical)))
+      const { model } = loaded
+      const captured = await this.captureDiskModel(model, { kind: 'file', path: canonical, version, bindingVersion: 1 })
+      model.resources = captured.model.resources
       if (await readDocumentFileVersion(canonical, kind) !== version) throw new Error('读取期间文档已改变，请重新打开')
-      driver.validate(model)
-      return model
+      // Session.create validates once; the archive worker already checked this
+      // owned GLX model, including its resources and professional data.
+      observation = captured.observation
+      return loaded
     })
+    if (observation) this.htmlDiskObservations.set(session, observation)
     return this.attach(session)
   }
 
-  private async readDisk(filename: string, kind: DocumentKind): Promise<{ version: string | null; model: DocumentSnapshot['model'] | null }> {
+  private async readDisk(filename: string, kind: DocumentKind, identities?: WorkProjectMigrationMap, observed?: (value: HtmlDiskObservation | undefined) => void): Promise<{ version: string | null; model: DocumentSnapshot['model'] | null; courseProjectMigrationIds?: WorkProjectMigrationMap }> {
     const version = await readDocumentFileVersion(filename, kind)
     if (version === null) return { version, model: null }
     const driver = this.drivers.find(value => value.kind === kind)!
-    const model = await loadDocumentModel(driver, new Uint8Array(await fs.readFile(filename)))
-    model.resources = (await captureDocumentSaveModel(model, { kind: 'file', path: filename, version, bindingVersion: 1 })).resources
+    const loaded = await loadDocumentModel(driver, new Uint8Array(await fs.readFile(filename)), identities)
+    const { model } = loaded
+    const captured = await this.captureDiskModel(model, { kind: 'file', path: filename, version, bindingVersion: 1 })
+    model.resources = captured.model.resources
     if (await readDocumentFileVersion(filename, kind) !== version) throw new Error('读取期间文件已改变，请重新比较')
-    driver.validate(model)
-    return { version, model }
+    if (kind !== 'course-v10') driver.validate(model)
+    observed?.(captured.observation)
+    return { version, ...loaded }
   }
 
-  observeFile(documentId: string): Promise<DocumentFileObservation> { return this.fileCoordinator.withFileAccess(() => this.observeDisk(documentId)) }
-  private async observeDisk(documentId: string): Promise<DocumentFileObservation> {
-    const session = this.registry.get(documentId), snapshot = await session.drain()
+  observeFile(documentId: string, knownVersion?: string | null): Promise<DocumentFileObservation> { return this.fileCoordinator.withFileAccess(() => this.observeDisk(documentId, knownVersion)) }
+  private async observeDisk(documentId: string, knownVersion?: string | null): Promise<DocumentFileObservation> {
+    const session = this.registry.get(documentId), snapshot = await session.drainIdentity()
     if (snapshot.binding.kind !== 'file') throw new Error('未保存文档没有磁盘版本')
     const baseSource = session.readSavedSource()
-    return { bindingVersion: snapshot.binding.bindingVersion, ...(baseSource === undefined ? {} : { baseSource }), ...await this.readDisk(snapshot.binding.path, snapshot.model.kind) }
+    const previous = this.htmlDiskObservations.get(session)
+    if (previous && previous.path === snapshot.binding.path
+      && await this.unchangedDiskObservation(previous, knownVersion === undefined))
+      return { bindingVersion: snapshot.binding.bindingVersion, ...(baseSource === undefined ? {} : { baseSource }),
+        version: previous.version, model: knownVersion === previous.version && previous.version === snapshot.binding.version ? null : structuredClone(previous.model) }
+    const { version, model } = await this.readDisk(snapshot.binding.path, snapshot.kind, session.readCourseProjectMigrationIds(), observation => {
+      if (observation) this.htmlDiskObservations.set(session, observation)
+      else this.htmlDiskObservations.delete(session)
+    })
+    return { bindingVersion: snapshot.binding.bindingVersion, ...(baseSource === undefined ? {} : { baseSource }), version, model }
   }
 
   reconcileFile(input: ReconcileDocumentFile, assertActive?: () => void): Promise<DocumentSnapshot> {
     return this.fileCoordinator.withFileAccess(() => this.registry.get(input.documentId).reconcileFile(input, async current => {
       assertActive?.()
       if (current.binding.kind !== 'file') throw new Error('文件位置已改变')
-      const disk = await this.readDisk(current.binding.path, current.model.kind)
+      const disk = await this.readDisk(current.binding.path, current.model.kind, this.registry.get(input.documentId).readCourseProjectMigrationIds())
       assertActive?.()
       if (disk.version !== input.version) throw new Error('磁盘文件再次改变，请重新比较')
       if (!disk.model) throw new Error('磁盘文件已删除或移动，请另存当前稿或重新定位')
       if (input.choice === 'disk') {
         if (input.source !== undefined) throw new Error('采纳磁盘版本不能夹带其他正文')
-        return { model: disk.model, diskModel: disk.model, version: disk.version, matchesDisk: true }
+        return { model: disk.model, diskModel: disk.model, version: disk.version, matchesDisk: true, courseProjectMigrationIds: disk.courseProjectMigrationIds }
       }
       const model = structuredClone(current.model)
       if (input.source !== undefined) {
@@ -405,7 +505,7 @@ export class DocumentHostService {
             components: merge(model.resources.components, disk.model.resources.components, base?.components) }
         }
       }
-      return { model, diskModel: disk.model, version: disk.version, matchesDisk: false }
+      return { model, diskModel: disk.model, version: disk.version, matchesDisk: false, courseProjectMigrationIds: disk.courseProjectMigrationIds }
     }))
   }
 
@@ -450,7 +550,7 @@ export class DocumentHostService {
   }
 
   async saveToPath(documentId: string, filename?: string, overwriteConfirmed = false, onProgress?: DocumentSaveObserver, saveIdentity?: DocumentSaveIdentity): Promise<DocumentSnapshot> {
-    const initial = this.registry.get(documentId).read(), saveId = randomUUID()
+    const session = this.registry.get(documentId), initial = session.readIdentity(), saveId = randomUUID()
     const base = { saveId, documentId, epoch: initial.epoch }
     let observedRevision = initial.revision, terminal = false, enteredSession = false
     let savingProjectId: string | undefined
@@ -460,12 +560,26 @@ export class DocumentHostService {
       documentName = progress.binding.kind === 'file' ? path.basename(progress.binding.path) : progress.binding.suggestedName
       if (progress.status === 'saving') {
         enteredSession = true; observedRevision = progress.revision
-        // The observer runs synchronously inside the session's captured-save turn.
-        const captured = this.registry.get(documentId).read()
-        savingProjectId = captured.model.kind === 'course-v10' ? captured.model.project.id : undefined
+        // Course receipts need the captured project identity; source save facts
+        // use only the lightweight revision/binding facts already supplied here.
+        if (initial.kind === 'course-v10') {
+          // The observer runs synchronously inside the session's captured-save turn.
+          const captured = this.registry.get(documentId).read()
+          savingProjectId = captured.model.kind === 'course-v10' ? captured.model.project.id : undefined
+        }
         this.publishSave({ ...base, documentName, time: Date.now(), status: 'saving', revision: progress.revision })
       } else if (progress.status === 'saved') {
         terminal = true
+        const prepared = this.pendingSourceSaveObservations.get(session)
+        this.pendingSourceSaveObservations.delete(session)
+        if (prepared && prepared.epoch === initial.epoch && prepared.revision === progress.savedRevision
+          && progress.binding.kind === 'file' && prepared.binding.path === progress.binding.path
+          && prepared.binding.bindingVersion === progress.binding.bindingVersion && prepared.binding.version === progress.binding.version
+          && this.registry.has(documentId) && this.registry.get(documentId) === session) {
+          const observation = this.sourceDiskObservation(prepared.model, prepared.binding, prepared.publication, prepared.sources, prepared.directoryDependency)
+          if (observation) this.htmlDiskObservations.set(session, observation)
+          else this.htmlDiskObservations.delete(session)
+        }
         const savedBinding: SavedCourseIdentity | undefined = savingProjectId && progress.binding.kind === 'file'
           ? { kind: 'course-v10', path: progress.binding.path, projectId: savingProjectId, epoch: initial.epoch,
             savedRevision: progress.savedRevision, fileVersion: progress.binding.version } : undefined
@@ -480,6 +594,7 @@ export class DocumentHostService {
       await this.inputs.refresh(saved)
       return saved
     }).catch(error => {
+      this.pendingSourceSaveObservations.delete(session)
       error = error instanceof DocumentSaveFailure ? error : new DocumentSaveFailure(enteredSession ? 'unknown' : 'not-published', error)
       // Path/ownership preflight may fail before a session captures a save revision.
       if (!terminal) {
@@ -490,16 +605,16 @@ export class DocumentHostService {
     })
   }
   private async saveFile(documentId: string, filename?: string, overwriteConfirmed = false, observer?: DocumentSaveObserver, saveIdentity?: DocumentSaveIdentity): Promise<DocumentSnapshot> {
-    const current = this.registry.get(documentId).read()
+    const current = this.registry.get(documentId).readIdentity()
     const paths = [...(filename ? [filename] : []), ...(current.binding.kind === 'file' ? [current.binding.path] : [])]
     this.fileCoordinator.assertResolved(paths, [documentId])
     await this.journal.assertAvailable(paths, [documentId])
     if (!filename) return this.registry.save(documentId, undefined, observer, saveIdentity)
     if (!path.isAbsolute(filename)) throw new Error('保存路径必须是绝对路径')
     const canonical = path.join(await fs.realpath(path.dirname(filename)), path.basename(filename))
-    if (this.kind(canonical) !== current.model.kind) throw new Error('另存格式与文档不一致')
+    if (this.kind(canonical) !== current.kind) throw new Error('另存格式与文档不一致')
     if (current.binding.kind === 'file' && canonicalKey(canonical) === canonicalKey(current.binding.path)) return this.registry.save(documentId, undefined, observer, saveIdentity)
-    const version = await readDocumentFileVersion(canonical, current.model.kind)
+    const version = await readDocumentFileVersion(canonical, current.kind)
     if (version !== null && !overwriteConfirmed) throw new Error('另存目标已存在，请选择新文件名')
     return this.registry.save(documentId, { kind: 'file', path: canonical, version, bindingVersion: current.binding.kind === 'file' ? current.binding.bindingVersion + 1 : 1 }, observer, saveIdentity)
   }
@@ -549,12 +664,12 @@ export class DocumentHostService {
       case 'write-authoring-drafts': return this.writeAuthoringDrafts(input.documentId, input.drafts, input.epoch)
       case 'claim-authoring-drafts': return this.claimAuthoringDrafts(input.documentId, input.epoch, input.records)
       case 'clear-authoring-drafts': return this.clearAuthoringDrafts(input.documentId)
-      case 'dispatch': return this.dispatch(input.operation)
+      case 'dispatch': return this.dispatch(input.operation, { sourceChangeHints: input.sourceChangeHints })
       case 'lookup': return this.registry.get(input.documentId).lookupOperation(input.operationId)
       case 'save': return this.saveToPath(input.documentId, input.path)
       case 'save-dialog': throw new Error('保存对话框需要应用窗口')
       case 'close-dialog': throw new Error('关闭对话框需要应用窗口')
-      case 'observe-file': return this.observeFile(input.documentId)
+      case 'observe-file': return this.observeFile(input.documentId, input.knownVersion)
       case 'reconcile-file': return this.reconcileFile(input)
       case 'close': return this.fileCoordinator.withFileAccess(async () => {
         this.fileCoordinator.assertResolved([], [input.documentId])
@@ -564,6 +679,33 @@ export class DocumentHostService {
         // Raw inputs survive normal close and formal discard until individually adopted or explicitly resolved.
         await this.journal.discard(input.documentId)
         return
+      })
+      case 'recovery-summaries': return this.fileCoordinator.withFileAccess(async () => {
+        const summaries: DocumentRecoverySummary[] = []
+        const inputs = (await this.inputs.list()).filter(envelope => envelope.records.length)
+        const name = (binding: DocumentRecoverySummary['binding'], title?: string) => binding.kind === 'file'
+          ? path.basename(binding.path) : title || binding.suggestedName
+        for (const entry of await this.journal.listBindings()) {
+          if (this.registry.has(entry.documentId)) continue
+          if (entry.unavailable) {
+            if (entry.binding.kind === 'file') summaries.push({ documentId: entry.documentId, epoch: entry.epoch,
+              revision: entry.revision, binding: entry.binding, kind: entry.kind, name: name(entry.binding, entry.title),
+              dirty: false, recoverable: false,
+              recoveryUnavailable: '这份恢复记录损坏，未读取其中内容。可保留损坏记录后尝试打开已保存稿。' })
+            continue
+          }
+          let unresolved = false
+          try { this.fileCoordinator.assertResolved([], [entry.documentId]) } catch { unresolved = true }
+          if (entry.savedRevision === entry.revision && !unresolved && !inputs.some(envelope => envelope.documentId === entry.documentId)) continue
+          summaries.push({ documentId: entry.documentId, epoch: entry.epoch, revision: entry.revision,
+            binding: entry.binding, kind: entry.kind, name: name(entry.binding, entry.title), dirty: true, recoverable: true })
+        }
+        for (const envelope of inputs) {
+          if (this.registry.has(envelope.documentId) || summaries.some(item => item.documentId === envelope.documentId)) continue
+          summaries.push({ documentId: envelope.documentId, epoch: envelope.epoch, revision: 0, binding: envelope.binding,
+            kind: envelope.kind as DocumentKind, name: name(envelope.binding), dirty: false, recoverable: false, rawInputOnly: true })
+        }
+        return summaries
       })
       case 'recoverable': return this.fileCoordinator.withFileAccess(async () => {
         const snapshots: DocumentSnapshot[] = []

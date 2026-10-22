@@ -1,3 +1,4 @@
+import { createTestProjectFromLegacy } from '../helpers/glxWorkFixture'
 import { describe, expect, it } from 'vitest'
 import { ComponentRuntimeWorld } from '../../src/player/components/ComponentRuntimeWorld'
 import { popoverRuntimeImplementation } from '../../src/components/popover'
@@ -5,14 +6,14 @@ import type { CourseProjectV10 } from '../../src/shared/contracts/component-plat
 
 describe('runtime range attachment DOM readiness', () => {
   it('waits for the connected current author range and binds after its same-root paint', async () => {
-    const project: CourseProjectV10 = { schemaVersion: 10, revision: 0, id: 'range-ready', title: 'Range readiness',
+    const project: CourseProjectV10 = createTestProjectFromLegacy({ schemaVersion: 10, revision: 0, id: 'range-ready', title: 'Range readiness',
       definitions: { body: { id: 'body', role: 'content', implementation: { kind: 'builtin', key: 'test.body' } },
         popover: { id: 'popover', role: 'behavior', implementation: { kind: 'builtin', key: 'guoling.popover' } } },
       instances: { body: { id: 'body', definitionId: 'body', childIds: ['popover'], data: { content: { inlines: [
         { type: 'text', text: 'Current range', rangeIds: ['range'] }] } } },
         popover: { id: 'popover', definitionId: 'popover', data: { label: 'Details', content: 'Actual range details' },
           attachments: [{ instanceId: 'popover', target: { kind: 'text-range', instanceId: 'body', dataPath: ['content'], rangeId: 'range' } }] } },
-      surfaces: [{ id: 'surface', kind: 'flow', title: 'Flow', childIds: ['body'] }], global: { underlay: [], overlay: [] }, assets: {} }
+      surfaces: [{ id: 'surface', kind: 'flow', title: 'Flow', childIds: ['body'] }], global: { underlay: [], overlay: [] }, assets: {} })
     const diagnostics: string[] = [], authorRoot = document.createElement('div'), hiddenProjection = document.createElement('div')
     document.body.append(authorRoot, hiddenProjection)
     const world = new ComponentRuntimeWorld('range-ready', { mode: 'edit', report: message => diagnostics.push(message),

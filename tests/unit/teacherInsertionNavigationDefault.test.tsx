@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { componentSurfaces } from '../../src/shared/contracts/component-platform/project'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { expect, it, vi } from 'vitest'
 import { promises as fs } from 'node:fs'
@@ -23,7 +24,7 @@ vi.mock('../../src/renderer/store/editorStore', () => ({
 }))
 
 it('shows a teacher explicitly added from the new none default and preserves an existing disabled teacher when opening its editor', async () => {
-  const project = createBlankCourseProjectV10('显式添加教师台'), surface = project.surfaces[0]
+  const project = createBlankCourseProjectV10('显式添加教师台'), surface = componentSurfaces(project)[0]
   if (!surface || !project.playback) throw new Error('Expected new-course page and playback settings')
   expect(project.playback.controls).toBe('none')
   // teacher.ensure and both manual insertion variants share this exact planner.

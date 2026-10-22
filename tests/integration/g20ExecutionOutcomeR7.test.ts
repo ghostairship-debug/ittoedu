@@ -1,4 +1,5 @@
 // @vitest-environment node
+import { setRootContainers } from '../helpers/glxWorkFixture'
 import { describe, expect, it } from 'vitest'
 import { promises as fs } from 'node:fs'
 import os from 'node:os'
@@ -591,7 +592,7 @@ it('retains a failed field as a warning while an empty patch preserves content a
   const project = createBlankCourseProjectV10('恢复当前正文')
   project.definitions[TEXT_DEFINITION.id] = TEXT_DEFINITION
   project.instances.body = { id: 'body', definitionId: TEXT_DEFINITION.id, data: textDataEdit('body', createTextComponentData('原稿')).value }
-  project.surfaces = [{ id: 'flow', kind: 'flow', title: '讲义', childIds: ['body'] }]
+  setRootContainers(project, [{ id: 'flow', kind: 'flow', title: '讲义', childIds: ['body'] }])
   const initial = await host.internalAPI.create({ kind: 'course-v10', project, resources: { assets: {}, components: {} } }, 'lesson.h5lesson')
   try {
     await host.tools.beginRun({ runId: 'field-correction', actor: 'agent', documents: [

@@ -3,6 +3,7 @@ import type { ImageNode } from '../../shared/contracts/native-v1/types'
 import { renderImageNodeCanvas } from '../../shared/imageEffects'
 import { clampCrop, cropGeometry } from '../../shared/imageCrop'
 import { imageDataSchema, type ImageData } from './data'
+import { nativeFlowItemStyle } from '../../shared/flowNativeLayout'
 
 export interface ResolvedImageAsset {
   url: string
@@ -38,7 +39,10 @@ export function createImageRuntimeImplementation(
         if (!live() || !image.complete || !image.naturalWidth) return
         const data = current.data
         const width = frame?.width ?? (host.clientWidth || image.naturalWidth)
-        const height = frame?.height ?? (width * image.naturalHeight / image.naturalWidth)
+        const authoredStyle = nativeFlowItemStyle(current), cssHeight = authoredStyle.blockSize ?? authoredStyle.height
+        const authoredFlowHeight = !frame && cssHeight !== undefined && cssHeight !== 'auto' && root.clientHeight > 0
+          ? root.clientHeight : undefined
+        const height = frame?.height ?? authoredFlowHeight ?? (width * image.naturalHeight / image.naturalWidth)
         host.style.height = `${height}px`
         host.style.borderRadius = `${data.cornerRadius}px`
         const filters = data.filters

@@ -1,3 +1,4 @@
+import { componentSurfaces } from '../../shared/contracts/component-platform/project'
 import type { ComponentBackground, ComponentImplementation, CourseProjectV10 } from '../../shared/contracts/component-platform/project'
 import { componentDefinitionBuiltinKey } from '../../shared/contracts/component-platform/project'
 import { courseProjectV10Schema } from '../../shared/contracts/component-platform/schema'
@@ -28,7 +29,7 @@ export function collectComponentProjectHealth(project: CourseProjectV10, resourc
       add('background-asset-reference-missing', `背景引用的素材 ${id} 已不存在`, [...path, value?.assetId === id ? 'assetId' : 'paint'], target)
   }
   background(project.background, ['background'], { projectId: project.id, kind: 'project' })
-  project.surfaces.forEach((surface, index) => {
+  componentSurfaces(project).forEach((surface, index) => {
     const target: ComponentProjectDiagnosticTarget = { projectId: project.id, kind: 'surface', surfaceId: surface.id }
     background(surface.background, ['surfaces', index, 'background'], target)
     surface.presentation?.states.forEach((state, stateIndex) => background(state.background,

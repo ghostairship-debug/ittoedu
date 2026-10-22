@@ -3,7 +3,7 @@ import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import { attachmentSnapshotSchema, type AttachmentReader, type AttachmentSnapshot, type AttachmentRepresentation, type AttachmentExtractor, type AttachmentPageRange } from '../../../shared/workbench/attachments'
 import { prepareImageResource } from '../admittedImageResource'
-import { ImageDecoderUnavailableError } from '../imageDecoder'
+import { getImageDecoder, ImageDecoderUnavailableError } from '../imageDecoder'
 import { MATERIAL_EXTRACTION_LIMITS } from '../../../shared/materialExtraction'
 
 export class AttachmentError extends Error {
@@ -431,6 +431,15 @@ export class AttachmentService implements AttachmentReader {
     const bytes = await this.readFile(path.join(this.directory, 'blobs', representation.blobRef.digest))
     if (bytes.length !== representation.blobRef.byteLength || hash(bytes) !== representation.blobRef.digest) throw new AttachmentError('corrupt-blob', '附件快照内容已损坏')
     return { snapshot, representation, bytes: Uint8Array.from(bytes) }
+  }
+
+  /** UI-only derivative. Model references and the immutable original remain unchanged. */
+  async readThumbnail(attachmentId: string, representationId: string): Promise<{ bytes: Uint8Array; mediaType: string }> {
+    const { representation, bytes } = await this.readRepresentation(attachmentId, representationId)
+    if (representation.kind !== 'image') throw new AttachmentError('representation-unavailable', '此附件表示没有图像缩略图')
+    const image = await getImageDecoder()(bytes, { page: 0, pages: 1, failOn: 'warning', limitInputPixels: false })
+      .rotate().resize({ width: 128, height: 128, fit: 'inside', withoutEnlargement: true }).png().toBuffer()
+    return { bytes: Uint8Array.from(image), mediaType: 'image/png' }
   }
 
   private async ensureDirectories() {

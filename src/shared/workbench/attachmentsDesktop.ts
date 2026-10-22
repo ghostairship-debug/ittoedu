@@ -11,12 +11,14 @@ export const attachmentsDesktopRequestSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('receive'), requestId: id.optional(), name: z.string().min(1), bytes: z.instanceof(Uint8Array), source: z.enum(['paste', 'drop', 'file']), mediaType: z.string().optional() }).strict(),
   z.object({ type: z.literal('snapshot'), attachmentId: id }).strict(),
   z.object({ type: z.literal('representation'), attachmentId: id, representationId: z.string().min(1) }).strict(),
+  z.object({ type: z.literal('thumbnail'), attachmentId: id, representationId: z.string().min(1) }).strict(),
   z.object({ type: z.literal('extract'), attachmentId: id, requestId: id, images: z.enum(['auto', 'all']).optional(), pages: z.object({ from: z.number().int().positive(), to: z.number().int().positive() }).strict().refine(range => range.to >= range.from).optional() }).strict(),
   z.object({ type: z.literal('cancel'), requestId: id }).strict(),
 ])
 export interface AttachmentIntakeFile { authorizationId?: string; name: string; error?: string; workspace?: { workspaceId: string; entryId: string } }
 export interface AttachmentReadProgress { requestId: string; loaded: number; total: number; unit?: 'bytes' | 'pages' }
 export interface AttachmentsDesktopAPI extends AttachmentReader {
+  readThumbnail?(attachmentId: string, representationId: string): Promise<{ bytes: Uint8Array; mediaType: string }>
   select(): Promise<AttachmentIntakeFile[]>
   clipboardFiles(input: { gestureId: string }): Promise<AttachmentIntakeFile[]>
   workspaceFiles(input: { workspaceId: string; entryIds: string[] }): Promise<AttachmentIntakeFile[]>

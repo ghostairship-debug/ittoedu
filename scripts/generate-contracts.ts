@@ -43,8 +43,8 @@ export function generateContractArtifacts(
   const componentDefinitionFormatted = `${JSON.stringify(componentDefinitionSchemaJson, null, 2)}\n`
   const componentCatalogFormatted = `${JSON.stringify(z.toJSONSchema(componentCatalogSchema, { unrepresentable: 'any' }), null, 2)}\n`
 
-  files.set('course-project-v10.schema.json', courseProjectFormatted)
-  files.set('published-course-v3.schema.json', publishedCourseFormatted)
+  files.set('course-project-v11.schema.json', courseProjectFormatted)
+  files.set('published-course-v4.schema.json', publishedCourseFormatted)
   files.set('component-definition.schema.json', componentDefinitionFormatted)
   files.set('component-catalog.schema.json', componentCatalogFormatted)
 
@@ -52,20 +52,20 @@ export function generateContractArtifacts(
     manifestVersion: 1,
     generator: 'scripts/generate-contracts.ts',
     generationCommand: 'npm run generate:contracts',
-    protocols: { project: 10, publishedCourse: 3, componentRuntime: 5 },
+    protocols: { project: 11, publishedCourse: 4, componentRuntime: 5 },
     // JSON Schema describes wire structure. Source refinements and runtime behavior
     // remain authoritative in the production parsers and ComponentRuntimeImplementation.
     runtimeSourceOfTruth: 'src/shared/contracts/component-platform/runtime.ts',
     contracts: [
       {
         name: 'courseProjectV10Schema',
-        file: 'course-project-v10.schema.json',
+        file: 'course-project-v11.schema.json',
         sourceOfTruth: 'src/shared/contracts/component-platform/schema.ts',
         sha256: sha256(courseProjectFormatted),
       },
       {
         name: 'publishedCourseV3Schema',
-        file: 'published-course-v3.schema.json',
+        file: 'published-course-v4.schema.json',
         sourceOfTruth: 'src/shared/contracts/component-platform/published.ts',
         sha256: sha256(publishedCourseFormatted),
       },

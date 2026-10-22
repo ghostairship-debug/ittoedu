@@ -1,4 +1,5 @@
 // @vitest-environment node
+import { testContainerInstance } from '../helpers/glxWorkFixture'
 import { randomUUID } from 'node:crypto'
 import { expect, it } from 'vitest'
 import { DocumentRegistry } from '../../src/core/documents/DocumentRegistry'
@@ -30,7 +31,7 @@ it('deletes a nested current instance through Gateway, repairs declared behavior
   let project = fixture.project
   project.definitions.group = { id: 'group', role: 'content', implementation: { kind: 'builtin', key: 'guoling.group' } }
   project.instances.parent = { id: 'parent', definitionId: 'group', data: {}, childIds: ['scene-text', 'scene-other'] }
-  project.surfaces[0].childIds = ['parent']
+  testContainerInstance(project, 0).childIds = ['parent']
   const owner = { kind: 'instance' as const, instanceId: 'parent' }
   const step = (id: string, nodeId: string) => ({ id, start: 'after-previous' as const, delayMs: 0,
     action: { type: 'node.exit' as const, nodeId, durationMs: 0, easing: 'linear' as const, effect: 'none' as const } })

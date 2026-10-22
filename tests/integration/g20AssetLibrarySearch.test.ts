@@ -13,7 +13,7 @@ import type { ComponentLibraryEntry } from '../../src/shared/contracts/component
 const electronPaths = vi.hoisted(() => ({ userData: '', appPath: '' }))
 vi.mock('electron', () => ({ app: { getPath: () => electronPaths.userData, getAppPath: () => electronPaths.appPath }, dialog: {} }))
 function entry(id: string, title: string, version: string, label = title): ComponentLibraryEntry {
-  return { schemaVersion: 1, id, title, definitions: {
+  return { schemaVersion: 2, id, title, definitions: {
     [id]: { id, version, role: 'content', implementation: { kind: 'source', language: 'javascript', workspace: { ownerId: 'source', entry: 'main.js' } } },
   }, example: { rootIds: ['example'], instances: { example: { id: 'example', definitionId: id, data: { label } } } }, assets: {},
     resources: { assets: {}, components: { source: { 'main.js': new TextEncoder().encode('export default {mount(){return {update(){},dispose(){}}}}') } } } }
@@ -39,6 +39,7 @@ it('searches current archives across actual catalog directories, ranks the newes
     await saveHtmlComponent(managedComponentLibrary(electronPaths.userData), { name: '旧公转HTML', html: '<p>原文件保留</p>', assets: [] })
 
     const snapshot = await readComponentLibrary(catalog)
+    expect(snapshot.packages.every(value => value.componentSchemaVersion === 2)).toBe(true)
     expect(snapshot.packages.filter(value => value.packageId === current.id)).toHaveLength(3)
     expect(snapshot.htmlComponents?.map(value => value.name)).toContain('旧公转HTML')
     expect(snapshot.issues.some(value => value.code === 'package-unreadable')).toBe(true)

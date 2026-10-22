@@ -1,3 +1,5 @@
+import { createTestProjectFromLegacy } from '../helpers/glxWorkFixture'
+import { testContainerInstance } from '../helpers/glxWorkFixture'
 import { afterEach, expect, it, vi } from 'vitest'
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { DocumentSession } from '../../src/core/documents/DocumentSession'
@@ -19,12 +21,12 @@ import { SpatialCameraPanel } from '../../src/renderer/ui/SpatialCameraPanel'
 import { SpatialPathEditor } from '../../src/renderer/ui/SpatialPathEditor'
 
 afterEach(cleanup)
-const sample = (): CourseProjectV10 => ({ schemaVersion: 10, id: 'w0', revision: 0, title: '空间作者', assets: {},
+const sample = (): CourseProjectV10 => (createTestProjectFromLegacy({ schemaVersion: 10, id: 'w0', revision: 0, title: '空间作者', assets: {},
   definitions: { card: { id: 'card', role: 'content', implementation: { kind: 'builtin', key: 'test.card' } } },
   instances: { neighbor: { id: 'neighbor', definitionId: 'card', data: {},
     frame: { width: 80, height: 60, transform: [1, 0, 0, 1, 3000, 2000] } } },
   global: { underlay: [], overlay: [] }, surfaces: [{ id: 'world', title: '世界', kind: 'spatial', childIds: ['neighbor'],
-    designSize: { width: 800, height: 400 }, spatial: { home: { x: 0, y: 0, zoom: 1 }, frames: [] } }] })
+    designSize: { width: 800, height: 400 }, spatial: { home: { x: 0, y: 0, zoom: 1 }, frames: [] } }] }))
 const course = (model: DocumentModel) => { if (model.kind !== 'course-v10') throw new Error('V10 required'); return model.project }
 async function harness(seed: CourseProjectV10 = sample()) {
   const driver = new CourseV10Driver()
@@ -80,18 +82,18 @@ it('routes real generic creation into the observed world or HUD and preserves ca
   // This is the old composition root's actual Slide fallback, not a fabricated failure.
   const fallback = createCrossSurfaceCommands({ ...h.rootPorts, spatial: { ...h.slide, readSpatialView: h.spatial.readSpatialView } })
   await fallback.addTextNode()
-  const fallbackId = h.project().surfaces[0].childIds.at(-1)!
+  const fallbackId = testContainerInstance(h.project(), 0).childIds.at(-1)!
   expect(h.project().instances[fallbackId].frame!.transform.slice(4)).toEqual([80, 80])
   await h.undo()
   await h.commands.addTextNode()
-  const worldId = h.project().surfaces[0].childIds.at(-1)!, originalFrame = structuredClone(h.project().instances[worldId].frame!)
+  const worldId = testContainerInstance(h.project(), 0).childIds.at(-1)!, originalFrame = structuredClone(h.project().instances[worldId].frame!)
   expect(originalFrame.transform.slice(4)).toEqual([860, -2040])
   expect(h.selected).toHaveBeenLastCalledWith([worldId], 'world', 'a')
   h.spatial.setSpatialEditingScope('global')
   await h.commands.addTextNode()
   const hudId = h.project().global.overlay.at(-1)!
   expect(h.project().instances[hudId].frame!.transform.slice(4)).toEqual([240, 160])
-  expect(h.project().surfaces[0].childIds).not.toContain(hudId)
+  expect(testContainerInstance(h.project(), 0).childIds).not.toContain(hudId)
   h.spatial.setSpatialEditingScope('world')
   const frozen = h.captureTarget(), target = spatialWorldTargets(frozen.project, 'world').find(value => value.instanceId === worldId)!
   const matrix = componentSpatialCameraMatrix(camera, { x: 0, y: 0, width: 800, height: 400 })
@@ -103,7 +105,7 @@ it('routes real generic creation into the observed world or HUD and preserves ca
   expect(h.project().instances[worldId].frame!.transform[4]).toBeCloseTo(originalFrame.transform[4] + b.x - a.x)
   expect(h.project().instances[worldId].frame!.transform[5]).toBeCloseTo(originalFrame.transform[5] + b.y - a.y)
   expect(h.project().instances.neighbor).toEqual(originalNeighbor)
-  expect(h.project().surfaces[0].spatial!.home).toEqual({ x: 0, y: 0, zoom: 1 })
+  expect(testContainerInstance(h.project(), 0).container!.spatial!.home).toEqual({ x: 0, y: 0, zoom: 1 })
   await h.undo()
   expect(h.project().instances[worldId].frame).toEqual(originalFrame)
   const savedProject = structuredClone(h.project())
@@ -125,7 +127,7 @@ it('keeps the insertion target and placement captured while pending input is dra
   h.spatial.setSpatialSessionCamera({ x: -700, y: 800, zoom: 1 })
   h.spatial.setSpatialEditingScope('global')
   finish(); await operation
-  const id = h.project('a').surfaces[0].childIds.at(-1)!
+  const id = testContainerInstance(h.project('a'), 0).childIds.at(-1)!
   expect(h.project('a').instances[id].frame!.transform.slice(4)).toEqual([560, -540])
   expect(h.project('a').global.overlay).toEqual([])
   expect(h.project('b')).toEqual(sample())
@@ -137,35 +139,35 @@ it('fixes the free preview pose only on Add and preserves it through later view 
   h.spatial.setSpatialSessionCamera(pose)
   h.spatial.setSpatialViewport({ width: 800, height: 400 })
   expect(h.project()).toEqual(original)
-  expect(h.project().surfaces[0].spatial!.frames).toEqual([])
+  expect(testContainerInstance(h.project(), 0).container!.spatial!.frames).toEqual([])
   expect(h.sessions.get('a')!.read().undoDepth).toBe(0)
   await h.spatial.addSpatialCameraFrameFromSession('world')
-  const frame = structuredClone(h.project().surfaces[0].spatial!.frames[0])
+  const frame = structuredClone(testContainerInstance(h.project(), 0).container!.spatial!.frames[0])
   expect(frame.pose).toEqual(pose)
   expect(h.spatial.readSpatialView().activeCameraFrameId).toBe(frame.id)
   expect(h.sessions.get('a')!.read().undoDepth).toBe(1)
   h.spatial.setSpatialSessionCamera({ x: -600, y: 400, zoom: .6, rotation: -15 })
-  expect(h.project().surfaces[0].spatial!.frames).toEqual([frame])
-  expect(h.project().surfaces[0].spatial!.home).toEqual(original.surfaces[0].spatial!.home)
+  expect(testContainerInstance(h.project(), 0).container!.spatial!.frames).toEqual([frame])
+  expect(testContainerInstance(h.project(), 0).container!.spatial!.home).toEqual(testContainerInstance(original, 0).container!.spatial!.home)
   await h.sessions.get('a')!.save(h.binding)
   await h.sessions.get('a')!.close()
   const reopened = await DocumentSession.create({ documentId: 'saved-preview', epoch: 'fresh', binding: h.binding,
     model: h.driver.load(h.saved()) }, h.driver, h.persistence)
-  expect(course(reopened.read().model).surfaces[0].spatial!.frames).toEqual([frame])
+  expect(testContainerInstance(course(reopened.read().model), 0).container!.spatial!.frames).toEqual([frame])
   expect(course(reopened.read().model).instances).toEqual(original.instances)
 })
 
 it('uses camera follow and ordered frame paths from the mature forms, preserving author pose and station fragments in save data', async () => {
   const h = await harness()
   await h.commands.addTextNode(1000, 1000)
-  const instanceId = h.project().surfaces[0].childIds.at(-1)!
+  const instanceId = testContainerInstance(h.project(), 0).childIds.at(-1)!
   h.spatial.setSpatialSessionCamera({ x: 1, y: 2, zoom: 3 })
   await h.spatial.addSpatialCameraFrameFromSession('world')
   h.spatial.setSpatialSessionCamera({ x: 900, y: 500, zoom: 1 })
   await h.spatial.addSpatialCameraFrameFromSession('world')
-  const [first, second] = h.project().surfaces[0].spatial!.frames
+  const [first, second] = testContainerInstance(h.project(), 0).container!.spatial!.frames
   const updateTarget = vi.fn((frameId: string, id: string | null) => h.spatial.updateSpatialCameraFrameTarget('world', frameId, id))
-  const spatial = h.project().surfaces[0].spatial!
+  const spatial = testContainerInstance(h.project(), 0).container!.spatial!
   const panel = render(<SpatialCameraPanel surfaceTitle="世界" frames={spatial.frames} home={spatial.home}
     sessionCamera={h.spatial.readSpatialView().camera} activeCameraFrameId={null} showCameraFrames={false}
     worldInstances={Object.values(h.project().instances)} semanticZoomRules={[]}
@@ -174,7 +176,7 @@ it('uses camera follow and ordered frame paths from the mature forms, preserving
     onAddSemanticZoomRule={() => {}} onUpdateSemanticZoomRule={() => {}} onDeleteSemanticZoomRule={() => {}} />)
   fireEvent.change(screen.getByLabelText(`镜头跟随对象 ${first.title}`), { target: { value: instanceId } })
   await updateTarget.mock.results[0].value
-  expect(h.project().surfaces[0].spatial!.frames[0]).toEqual({ ...first, targetInstanceId: instanceId })
+  expect(testContainerInstance(h.project(), 0).container!.spatial!.frames[0]).toEqual({ ...first, targetInstanceId: instanceId })
   panel.unmount()
   const addPath = vi.fn((input: { title: string; instanceIds: string[]; frameIds?: string[] }) => h.spatial.addSpatialPath('world', input))
   const graph = render(<SpatialPathEditor surfaceTitle="世界" worldInstances={Object.values(h.project().instances)}
@@ -187,14 +189,14 @@ it('uses camera follow and ordered frame paths from the mature forms, preserving
   fireEvent.click(screen.getByLabelText(`路径镜头 ${second.title}`))
   fireEvent.click(screen.getByRole('button', { name: /添加路径/ }))
   await act(async () => { await addPath.mock.results[0].value })
-  const authored = h.project().surfaces[0].spatial!, path = authored.paths![0]
+  const authored = testContainerInstance(h.project(), 0).container!.spatial!, path = authored.paths![0]
   expect(path.frameIds).toEqual([first.id, second.id]); expect(path.instanceIds).toEqual([])
   expect(authored.frames[0].pose).toEqual({ x: 1, y: 2, zoom: 3 })
   const counts = new Map([[instanceId, 2]])
   const steps = spatialTourSteps(authored, path.id, { width: 800, height: 400 }, spatialWorldTargets(h.project(), 'world'), counts)
   expect(steps.map(step => [step.frameId, step.fragmentStep])).toEqual([[first.id, 0], [first.id, 1], [first.id, 2], [second.id, undefined]])
   const saved = course(h.driver.load(h.driver.serialize(h.sessions.get('a')!.read().model)))
-  expect(saved.surfaces[0].spatial).toEqual(authored)
+  expect(testContainerInstance(saved, 0).container!.spatial).toEqual(authored)
   graph.unmount()
   const reorder = vi.fn()
   render(<SpatialPathEditor surfaceTitle="世界" worldInstances={Object.values(h.project().instances)} paths={[path]}
@@ -239,13 +241,13 @@ it('saves the current camera as a fixed frame, keeps explicit following, and exp
   h.spatial.setSpatialShowCameraFrames(false)
   await h.spatial.addSpatialCameraFrameFromSession('world')
   expect(h.spatial.readSpatialView().showCameraFrames).toBe(true)
-  const frameId = h.project().surfaces[0].spatial!.frames[0].id
+  const frameId = testContainerInstance(h.project(), 0).container!.spatial!.frames[0].id
   await h.spatial.updateSpatialCameraFrameTarget('world', frameId, 'neighbor')
   h.spatial.activateSpatialCameraFrame('world', frameId)
   expect(h.spatial.readSpatialView().camera.x).toBe(3040)
   expect(h.spatial.readSpatialView().camera.zoom).toBe(400 / 60)
   h.spatial.setSpatialSessionCamera(pose)
-  const spatial = h.project().surfaces[0].spatial!, save = vi.fn(() => h.spatial.updateActiveSpatialCameraFrameFromSession('world')), fit = vi.fn()
+  const spatial = testContainerInstance(h.project(), 0).container!.spatial!, save = vi.fn(() => h.spatial.updateActiveSpatialCameraFrameFromSession('world')), fit = vi.fn()
   const before = h.sessions.get('a')!.read().undoDepth
   const panel = render(<SpatialCameraPanel surfaceTitle="世界" frames={spatial.frames} home={spatial.home}
     sessionCamera={pose} activeCameraFrameId={frameId} showCameraFrames={false}
@@ -261,19 +263,19 @@ it('saves the current camera as a fixed frame, keeps explicit following, and exp
   fireEvent.click(screen.getByRole('button', { name: '将当前画面保存为固定镜头' }))
   await act(async () => { await save.mock.results[0].value })
   expect(h.sessions.get('a')!.read().undoDepth).toBe(before + 1)
-  expect(h.project().surfaces[0].spatial!.frames[0]).toMatchObject({ pose })
-  expect(h.project().surfaces[0].spatial!.frames[0].targetInstanceId).toBeUndefined()
+  expect(testContainerInstance(h.project(), 0).container!.spatial!.frames[0]).toMatchObject({ pose })
+  expect(testContainerInstance(h.project(), 0).container!.spatial!.frames[0].targetInstanceId).toBeUndefined()
   const frozen = h.captureTarget()
   await h.kernel.editCaptured(h.kernel.capture([{ type: 'frame.set', instanceId: 'neighbor',
     frame: { ...frozen.project.instances.neighbor.frame!, transform: [1, 0, 0, 1, 6000, 2000] } }], frozen))
   h.spatial.activateSpatialCameraFrame('world', frameId)
   expect(h.spatial.readSpatialView().camera).toEqual(pose)
   const saved = course(h.driver.load(h.driver.serialize(h.sessions.get('a')!.read().model)))
-  expect(saved.surfaces[0].spatial!.frames[0]).toEqual(h.project().surfaces[0].spatial!.frames[0])
+  expect(testContainerInstance(saved, 0).container!.spatial!.frames[0]).toEqual(testContainerInstance(h.project(), 0).container!.spatial!.frames[0])
   await h.spatial.updateSpatialCameraFrameTarget('world', frameId, 'neighbor')
   h.spatial.activateSpatialCameraFrame('world', frameId)
   expect(h.spatial.readSpatialView().camera.x).toBe(6040)
-  expect(h.project().surfaces[0].spatial!.frames[0].pose).toEqual(pose)
+  expect(testContainerInstance(h.project(), 0).container!.spatial!.frames[0].pose).toEqual(pose)
   panel.unmount()
   render(<SpatialPathEditor surfaceTitle="世界" worldInstances={Object.values(h.project().instances)} paths={[]}
     frames={[]} relations={[]} pageSection onAddPath={() => {}} onRenamePath={() => {}} onUpdatePathStyle={() => {}}
@@ -285,17 +287,17 @@ it('saves the current camera as a fixed frame, keeps explicit following, and exp
 })
 
 it('fits all visible world content including offscreen objects while respecting effective hidden ancestors, scope and semantic zoom', async () => {
-  const seed = sample(); seed.instances = {}; seed.surfaces[0].childIds = []
+  const seed = sample(); seed.instances = { world: seed.instances.world }; testContainerInstance(seed, 0).childIds = []
   const add = (id: string, x: number) => {
     seed.instances[id] = { id, definitionId: 'card', data: {}, frame: { width: 100, height: 100, transform: [1, 0, 0, 1, x, 0] } }
-    seed.surfaces[0].childIds.push(id)
+    testContainerInstance(seed, 0).childIds.push(id)
   }
   add('near', 0); add('offscreen', 1000); add('hidden', 6000); add('hidden-group', 8000)
   seed.instances.hidden.visible = false
   seed.instances['hidden-group'].visible = false; seed.instances['hidden-group'].childIds = ['child']
   seed.instances.child = { id: 'child', definitionId: 'card', data: {}, frame: { width: 100, height: 100, transform: [1, 0, 0, 1, 3000, 0] } }
   add('excluded', 12000); seed.instances.excluded.visibility = { mode: 'exclude', surfaceIds: ['world'] }
-  add('semantic', 14000); seed.surfaces[0].spatial!.semanticZoom = [{ id: 'detail', instanceIds: ['semantic'], minZoom: 0, maxZoom: 2, visible: false }]
+  add('semantic', 14000); testContainerInstance(seed, 0).container!.spatial!.semanticZoom = [{ id: 'detail', instanceIds: ['semantic'], minZoom: 0, maxZoom: 2, visible: false }]
   add('state-only', 16000)
   seed.instances.hud = { id: 'hud', definitionId: 'card', data: {}, frame: { width: 100, height: 100, transform: [1, 0, 0, 1, 20000, 0] } }
   seed.global.overlay = ['hud']

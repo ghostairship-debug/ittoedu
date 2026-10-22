@@ -2,6 +2,7 @@ import { controllerPackages } from '../fixtures/teacherController'
 import { readFileSync, readdirSync } from 'node:fs'
 import { join, relative, resolve } from 'node:path'
 import { strFromU8 } from 'fflate'
+import { create as createFont } from 'fontkit'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { courseProjectDocumentSchema } from '@/shared/courseProjectSchema'
 import type {
@@ -170,6 +171,33 @@ function woff2Paths(files: Record<string, Uint8Array>): string[] {
   return Object.keys(files).filter((path) => path.endsWith('.woff2')).sort()
 }
 
+/** Inspect the emitted CSS and font bytes independently of the production face-selection helper. */
+function coversCodePoint(block: string, point: number): boolean {
+  const declared = /unicode-range:\s*([^;}]+)/i.exec(block)?.[1]
+  if (!declared) return true
+  return declared.split(',').some(value => {
+    const match = /^\s*U\+([\da-f?]+)(?:-([\da-f]+))?\s*$/i.exec(value)
+    if (!match) throw new Error(`输出字体包含不可识别的 unicode-range：${value}`)
+    const from = Number.parseInt(match[1]!.replace(/\?/g, '0'), 16)
+    const to = Number.parseInt(match[2] ?? match[1]!.replace(/\?/g, 'f'), 16)
+    return point >= from && point <= to
+  })
+}
+
+function missingOutputGlyphs(blocks: readonly string[], text: string, bytes: (block: string) => Uint8Array): string[] {
+  const fonts = blocks.map(block => ({ block, font: createFont(Buffer.from(bytes(block))) }))
+  return [...new Set(text)].filter(character => !fonts.some(({ block, font }) => {
+    const point = character.codePointAt(0)!
+    return coversCodePoint(block, point) && font.hasGlyphForCodePoint(point)
+  }))
+}
+
+function inlineFontBytes(block: string): Uint8Array {
+  const encoded = /src:\s*url\(data:font\/woff2;base64,([^)]+)\)/.exec(block)?.[1]
+  if (!encoded) throw new Error('输出的字体没有内联实际 WOFF2 字节')
+  return Buffer.from(encoded, 'base64')
+}
+
 describe('bundled font declaration scanning', () => {
   it('splits a CSS font stack without losing quoted names', () => {
     expect(parseCssFontStack(NOTO_STACK)).toEqual([
@@ -312,12 +340,17 @@ describe('font-free exports stay byte-identical', () => {
 })
 
 describe('offline single HTML embeds the declared family', () => {
-  it('carries every declared face as a data: URI plus its OFL notice', () => {
+  it('carries the glyphs used by declared text as data: URIs plus its OFL notice', () => {
     const course = courseSources(courseProject({ nodeFontFamily: NOTO_STACK }))
     const html = buildPublishedCourseStandaloneHtml(course, PLAYER_BUNDLE)
     const blocks = faceBlocks(html)
 
-    expect(blocks).toHaveLength(101)
+    expect(blocks.length).toBeGreaterThan(0)
+    expect(missingOutputGlyphs(blocks, '标题文字 ABC123', inlineFontBytes)).toEqual([])
+    // Removing the slice required by an authored character must expose missing
+    // offline coverage, even if other embedded faces can still be parsed.
+    const withoutTitleSlice = blocks.filter(block => !coversCodePoint(block, '标'.codePointAt(0)!))
+    expect(missingOutputGlyphs(withoutTitleSlice, '标', inlineFontBytes)).toEqual(['标'])
     for (const block of blocks) {
       expect(block).toContain(`font-family: '${BUNDLED_TEXT_FONT_FAMILY}'`)
       expect(block).toContain('src: url(data:font/woff2;base64,')
@@ -343,7 +376,9 @@ describe('offline single HTML embeds the declared family', () => {
       PLAYER_BUNDLE,
     )
 
-    expect(faceBlocks(html)).toHaveLength(101)
+    // The first two authored characters use the run-level bundled override;
+    // the remainder keeps its existing system-font fallback.
+    expect(missingOutputGlyphs(faceBlocks(html), '标题', inlineFontBytes)).toEqual([])
     expect(html).toContain('data:font/woff2;base64,')
     expect(html).toContain('SIL Open Font License, Version 1.1')
     expect(html).toContain('font-src data:')
@@ -378,15 +413,23 @@ describe('web package links the declared family as sibling files', () => {
     const css = strFromU8(files['player/player.css']!)
     const fontPaths = woff2Paths(files)
 
-    expect(fontPaths).toHaveLength(101)
+    expect(fontPaths.length).toBeGreaterThan(0)
     for (const path of fontPaths) {
       expect(path).toMatch(/^player\/fonts\/[A-Za-z0-9._-]+\.woff2$/)
       expect(files[path]!.byteLength).toBeGreaterThan(0)
     }
     // The stylesheet lives at player/player.css, so ./fonts/ is the sibling
     // directory the faces were written to.
-    expect(faceBlocks(css)).toHaveLength(101)
-    for (const block of faceBlocks(css)) {
+    const blocks = faceBlocks(css)
+    expect(blocks).toHaveLength(fontPaths.length)
+    const packageFontBytes = (block: string): Uint8Array => {
+      const relativePath = /src:\s*url\(\.\/([^\s)]+)\)/.exec(block)?.[1]
+      const bytes = relativePath && files[`player/${relativePath}`]
+      if (!bytes) throw new Error('输出字体 CSS 没有对应的包内 WOFF2 文件')
+      return bytes
+    }
+    expect(missingOutputGlyphs(blocks, '标题文字 ABC123', packageFontBytes)).toEqual([])
+    for (const block of blocks) {
       expect(block).toMatch(/src: url\(\.\/fonts\/[A-Za-z0-9._-]+\.woff2\)/)
     }
     expect(css).not.toContain('data:font/woff2')
@@ -594,15 +637,15 @@ describe('the editor renderer reads its own font bytes', () => {
     const main = readFileSync(join(repoRoot, 'src/renderer/main.tsx'), 'utf8')
     expect(main).toContain('installFetchBundledFontEmbedSource({ manifest: BUNDLED_FONT_MANIFEST })')
 
-    // The current V10 producers prepare bytes before publishing either delivery.
+    // The current producers prepare exactly the frozen payload's font bytes before building either delivery.
     const delivery = readFileSync(join(repoRoot, 'src/renderer/export/componentPlatform/buildHtml.ts'), 'utf8')
     const html = delivery.indexOf('export async function buildComponentHtml')
     const web = delivery.indexOf('export async function buildComponentWebPackage')
     expect(html).toBeGreaterThan(-1)
     expect(web).toBeGreaterThan(html)
-    expect(delivery.indexOf('await prepareBundledFontEmbedding()', html)).toBeGreaterThan(html)
-    expect(delivery.indexOf('await prepareBundledFontEmbedding()', html)).toBeLessThan(web)
-    expect(delivery.indexOf('await prepareBundledFontEmbedding()', web)).toBeGreaterThan(web)
+    expect(delivery.indexOf('await prepareBundledFontEmbedding(result.payload)', html)).toBeGreaterThan(delivery.indexOf('await buildComponentPublished(', html))
+    expect(delivery.indexOf('await prepareBundledFontEmbedding(result.payload)', html)).toBeLessThan(web)
+    expect(delivery.indexOf('await prepareBundledFontEmbedding(result.payload)', web)).toBeGreaterThan(delivery.indexOf('await buildComponentPublished(', web))
 
   })
 })

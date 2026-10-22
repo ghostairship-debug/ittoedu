@@ -6,14 +6,15 @@ import { captureComponentOperation } from '../../src/core/drivers/courseV10Opera
 import { buildPublishedCourseV3 } from '../../src/core/publish/componentPlatform/buildPublishedCourseV3'
 import { createEsbuildComponentCompiler } from '../../src/main/workbench/contentApply/compilation/esbuildComponentCompiler'
 import type { ComponentEdit } from '../../src/shared/contracts/component-platform'
+import { setRootContainers, testContainerInstance } from './glxWorkFixture'
 
 export async function createR08MixedSavedFixture() {
   const directory = path.resolve(`output/authoring-playback-repair-20261012/mixed-save/${Date.now()}`)
   await fs.mkdir(directory, { recursive: true })
   const project = createBlankCourseProjectV10('共编与独立导航')
-  project.surfaces = [{ id: 'slide', kind: 'slide', title: 'Slide', childIds: [], designSize: { width: 1280, height: 720 } },
+  setRootContainers(project,[{ id: 'slide', kind: 'slide', title: 'Slide', childIds: [], designSize: { width: 1280, height: 720 } },
     { id: 'flow', kind: 'flow', title: 'Flow', childIds: [], flow: { layout: { readingWidth: 800, wideContentWidth: 1000, toc: 'hidden' } } },
-    { id: 'spatial', kind: 'spatial', title: 'Spatial', childIds: [], spatial: { home: { x: 0, y: 0, zoom: 1 }, frames: [] } }]
+    { id: 'spatial', kind: 'spatial', title: 'Spatial', childIds: [], spatial: { home: { x: 0, y: 0, zoom: 1 }, frames: [] } }])
   const source = `export default { mount({root, instance, teacherController: host, scope}) {
     let clicks=0; const node=document.createElement('div'); root.append(node);
     const render=()=>{node.innerHTML='<button id="move">移动 '+instance.id+'</button><button id="fold">折叠 '+instance.id+'</button><button id="next">下一页 '+instance.id+'</button><output>'+instance.data.label+' / '+host.read().locationId+' / '+!!host.read().collapsed+' / '+clicks+'</output>';
@@ -51,6 +52,6 @@ export async function createR08MixedSavedFixture() {
   if (compiled.diagnostics.length) throw new Error(JSON.stringify(compiled.diagnostics))
   await fs.writeFile(path.join(directory, 'published.json'), JSON.stringify(compiled.payload))
   await fs.writeFile(path.join(directory, 'save-evidence.json'), JSON.stringify({ revision: cold.revision, manual: cold.model.project.instances.a.frame,
-    label: cold.model.project.instances.a.data, pinned: cold.model.project.instances.a.viewportPinned, flow: cold.model.project.surfaces[1].flow, sourcePreserved: cold.model.project.definitions.control.implementation.kind === 'source' }))
+    label: cold.model.project.instances.a.data, pinned: cold.model.project.instances.a.viewportPinned, flow: testContainerInstance(cold.model.project,'flow').container.flow, sourcePreserved: cold.model.project.definitions.control.implementation.kind === 'source' }))
   return compiled.payload
 }

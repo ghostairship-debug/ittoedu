@@ -266,6 +266,7 @@ export function useDocumentTabsController({ documentPort, courseDocuments, media
   }
   function removeTab(id: string) {
     mediaEditors.current.delete(id)
+    editorRefs.current.delete(id); mediaEditorRefs.current.delete(id)
     documents.current.delete(id); subscriptions.current.get(id)?.(); subscriptions.current.delete(id)
     const remaining = tabsRef.current.filter(item => item.id !== id)
     setTabs(remaining)
@@ -282,8 +283,9 @@ export function useDocumentTabsController({ documentPort, courseDocuments, media
     subscriptions.current.set(id, editor.session.subscribe(follow)); follow()
   }
   useEffect(() => documentPort.documents?.subscribe(event => {
-    if (event.type !== 'changed') return
-    const snapshot = event.snapshot, filename = snapshot.binding.kind === 'file' ? snapshot.binding.path : ''
+    if (event.type === 'closed') return
+    const snapshot = event.type === 'changed' ? event.head ?? event.snapshot : event.head
+    const filename = snapshot.binding.kind === 'file' ? snapshot.binding.path : ''
     const name = snapshot.binding.kind === 'file' ? filename.split(/[\\/]/).pop() ?? filename : snapshot.binding.suggestedName
     const tab = tabsRef.current.find(item => item.documentId === snapshot.documentId || documents.current.get(item.id)?.session.documentId === snapshot.documentId)
     if (!tab || tab.path === filename && tab.name === name) return

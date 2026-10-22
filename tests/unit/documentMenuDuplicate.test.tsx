@@ -1,3 +1,4 @@
+import { createTestProjectFromLegacy, testContainerInstance } from '../helpers/glxWorkFixture'
 import type { DocumentContent } from '../../src/shared/document/content'
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { expect, it, vi } from 'vitest'
@@ -12,12 +13,12 @@ import { CourseV10Driver } from '../../src/core/drivers/CourseV10Driver'
 import type { CourseProjectV10 } from '../../src/shared/contracts/component-platform'
 
 it('duplicates a real chapter menu through the clipboard owner with a new formal component and private files in one History', async () => {
-  const project: CourseProjectV10 = { schemaVersion: 10, id: 'menu-copy', revision: 0, title: '菜单复制',
+  const project: CourseProjectV10 = createTestProjectFromLegacy({ schemaVersion: 10, id: 'menu-copy', revision: 0, title: '菜单复制',
     definitions: { [DOCUMENT_BLOCK_DEFINITION.id]: DOCUMENT_BLOCK_DEFINITION,
       custom: { id: 'custom', role: 'content', implementation: { kind: 'source', language: 'javascript', workspace: { ownerId: 'files', entry: 'main.js' } } } },
     instances: { chapter: { id: 'chapter', definitionId: DOCUMENT_BLOCK_DEFINITION.id, data: { type: 'section', title: { inlines: [{ type: 'text', text: '章节' }] }, collapsedByDefault: false }, childIds: ['custom'] },
       custom: { id: 'custom', definitionId: 'custom', data: { message: '原互动' } } },
-    surfaces: [{ id: 'flow', kind: 'flow', title: '正文', childIds: ['chapter'] }], global: { underlay: [], overlay: [] }, assets: {} }
+    surfaces: [{ id: 'flow', kind: 'flow', title: '正文', childIds: ['chapter'] }], global: { underlay: [], overlay: [] }, assets: {} })
   const resources = { assets: {}, components: { files: { 'main.js': new TextEncoder().encode("import './part.js'"), 'part.js': new TextEncoder().encode('export default 1') } } }
   const target: CapturedCourseTarget = { documentId: 'doc', epoch: 'epoch', project, editingProject: project, resources, surfaceId: 'flow', activeStateId: null, instanceId: null, instanceIds: [] }
   const driver = new CourseV10Driver(), session = await DocumentSession.create({ documentId: 'doc', epoch: 'epoch', model: { kind: 'course-v10', project, resources }, binding: { kind: 'untitled', suggestedName: 'copy.h5lesson' } }, driver, { async append() {}, async save() { throw new Error('uses real Driver below') } })
@@ -41,7 +42,7 @@ it('duplicates a real chapter menu through the clipboard owner with a new formal
     expect(commit).toHaveBeenCalledOnce()
     const model = session.read().model
     if (model.kind !== 'course-v10') throw new Error('expected V10')
-    const duplicateId = model.project.surfaces[0].childIds[1], copied = model.project.instances[duplicateId]
+    const duplicateId = testContainerInstance(model.project, 0).childIds[1], copied = model.project.instances[duplicateId]
     expect(duplicateId).not.toBe('chapter')
     expect(copied.childIds).toHaveLength(1)
     const custom = model.project.instances[copied.childIds![0]]

@@ -1,4 +1,6 @@
 // @vitest-environment node
+import { appendRootContainers } from '../../../helpers/glxWorkFixture'
+import { componentSurfaces } from '../../../../src/shared/contracts/component-platform/project'
 import { promises as fs } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -19,7 +21,7 @@ it('a locally unsupported Markdown table retains the neighboring live Flow objec
     project.instances.paragraph = { id: 'paragraph', definitionId: TEXT_DEFINITION.id, data: textDataEdit('fixture', createTextComponentData('可用正文')).value }
     project.instances.interaction = { id: 'interaction', definitionId: 'web', data: { html: '<details><summary>问答</summary>答案</details>' },
       frame: { width: 300, height: 130, transform: [1, 0, 0, 1, 20, 30] } }
-    project.surfaces.push({ id: 'flow', kind: 'flow', title: '讲义', childIds: ['paragraph', 'interaction'] })
+    appendRootContainers(project, { id: 'flow', kind: 'flow', title: '讲义', childIds: ['paragraph', 'interaction'] })
     const initial = await host.internalAPI.create({ kind: 'course-v10', project, resources: { assets: {}, components: {} } }, 'local.h5lesson')
     await host.tools.beginRun({ runId: 'local', actor: 'agent', documents: [{ documentId: initial.documentId, writable: [{ kind: 'document' }] }] })
     await host.tools.loadToolFamilies('local', ['content'])
@@ -34,7 +36,7 @@ it('a locally unsupported Markdown table retains the neighboring live Flow objec
     if (reopened.model.kind !== 'course-v10') throw new Error('V10 required')
     expect(reopened.model.project.instances.interaction).toEqual(project.instances.interaction)
     expect(reopened.model.project.instances.paragraph).toEqual(project.instances.paragraph)
-    expect(reopened.model.project.surfaces.find(value => value.id === 'flow')?.childIds).toEqual(expect.arrayContaining(['paragraph', 'interaction']))
+    expect(componentSurfaces(reopened.model.project).find(value => value.id === 'flow')?.childIds).toEqual(expect.arrayContaining(['paragraph', 'interaction']))
     expect(Object.values(reopened.model.resources.assets).map(bytes => new TextDecoder().decode(bytes))).toContain(markdown)
   } finally { await host.tools.stop('local'); await fs.rm(directory, { recursive: true, force: true }) }
 })

@@ -1,4 +1,5 @@
 import { afterEach, expect, it, vi } from 'vitest'
+import { createTestPublishedFromLegacy } from '../helpers/glxWorkFixture'
 import { createTeacherControllerData, createTeacherControllerFrame } from '../../src/components/teacher-controller/data'
 import { mountPublishedCourseV3 } from '../../src/player/componentPlatform/publishedPlayer'
 import * as sandbox from '../../src/renderer/components/SandboxComponentImplementation'
@@ -13,7 +14,7 @@ it('moves custom Teacher implementations through the same view port after defini
   } } })
   const source: PublishedImplementation = { kind: 'source', language: 'javascript', source: 'export default {}', compiled: { code: 'export default {}' } }
   const data = JSON.parse(JSON.stringify(createTeacherControllerData())) as JsonValue
-  const input: PublishedCourseV3 = { schemaVersion: 3, id: 'teacher-placement', title: '专业角色', assets: {},
+  const input: PublishedCourseV3 = createTestPublishedFromLegacy({ schemaVersion: 3, id: 'teacher-placement', title: '专业角色', assets: {},
     definitions: {
       rebound: { id: 'rebound', role: 'content', professionalBuiltinKey: 'guoling.navigation', implementation: source },
       independent: { id: 'independent', role: 'content', implementation: { kind: 'builtin', key: 'guoling.navigation' } },
@@ -23,7 +24,7 @@ it('moves custom Teacher implementations through the same view port after defini
       local: { id: 'local', definitionId: 'independent', data: structuredClone(data), frame: createTeacherControllerFrame(), implementationOverride: source },
     },
     global: { underlay: [], overlay: ['shared', 'local'] }, surfaces: [{ id: 'page', title: 'Page', kind: 'slide', childIds: [] }],
-  }
+  })
   const before = structuredClone(input), root = document.createElement('section'); document.body.append(root)
   Object.defineProperties(root, { clientWidth: { value: 1280 }, clientHeight: { value: 720 } })
   root.getBoundingClientRect = () => new DOMRect(0, 0, 1280, 720)

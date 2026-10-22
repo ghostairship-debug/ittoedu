@@ -1,3 +1,4 @@
+import { setRootContainers, testContainerInstance } from '../../helpers/glxWorkFixture'
 import { app, BrowserWindow, nativeImage } from 'electron'
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
@@ -21,8 +22,8 @@ Reflect.set(globalThis, 'runPublishedViewActions', async () => {
   await app.whenReady()
   const baselineWindows = BrowserWindow.getAllWindows().length
   const project = createBlankCourseProjectV10('Published action fixture')
-  project.surfaces = ['first', 'second'].map(id => ({ id, kind: 'slide', title: id, childIds: [], designSize: { width: 800, height: 500 } }))
-  project.surfaces[1]!.designSize = { width: 960, height: 540 }
+  setRootContainers(project, ['first', 'second'].map(id => ({ id, kind: 'slide', title: id, childIds: [], designSize: { width: 800, height: 500 } })))
+  testContainerInstance(project, 1).container.designSize = { width: 960, height: 540 }
   project.definitions.lab = { id: 'lab', role: 'content', implementation: { kind: 'source', language: 'javascript', source: `
 export default { document: 'web', mount({ root }) {
   root.style.cssText = 'box-sizing:border-box;background:#f0f6ff;padding:32px;color:#132742;font:22px Arial;min-height:300px';
@@ -38,7 +39,7 @@ export default { document: 'web', mount({ root }) {
   return { update() {}, dispose() { button.removeEventListener('click',click);clearButton.removeEventListener('click',clear);text.removeEventListener('input',input);range.removeEventListener('input',slide);root.replaceChildren(); } };
 } };` } }
   project.instances.lab = { id: 'lab', definitionId: 'lab', data: {}, frame: { width: 730, height: 430, transform: [1, 0, 0, 1, 25, 25] } }
-  project.surfaces[0]!.childIds = ['lab']
+  testContainerInstance(project, 0).childIds = ['lab']
   const snapshot: ViewObservationSnapshot = { documentId: 'fixture', epoch: 'fixture-epoch', revision: 0,
     model: { kind: 'course-v10', project, resources: { assets: {}, components: {} } }, binding: { kind: 'untitled', suggestedName: 'fixture.h5lesson' },
     dirty: true, saving: false, recoverable: true, undoDepth: 0, redoDepth: 0 }
@@ -156,7 +157,7 @@ export default { document: 'web', mount({root,instance}) {
   project.definitions.lab = { id: 'lab', role: 'mixed', implementation: { kind: 'source', language: 'javascript', source: componentEnhancementWrapperSource,
     moduleBindings: { './implementation': 'base', './enhancement': 'logic', './enhancement-runtime': 'enhancement' } } }
   project.instances.lab = { id: 'lab', definitionId: 'lab', data: { html: rainRangeFixture.html }, frame: { width: 1168, height: 425, transform: [1, 0, 0, 1, 56, 177] } }
-  const surface = project.surfaces[0]!
+  const surface = testContainerInstance(project, 0)
   surface.childIds = ['lab']
   const snapshot: ViewObservationSnapshot = { documentId: 'rain-range-fixture', epoch: 'fixture-epoch', revision: project.revision,
     model: { kind: 'course-v10', project, resources: { assets: {}, components: {} } }, binding: { kind: 'untitled', suggestedName: 'fixture.h5lesson' },

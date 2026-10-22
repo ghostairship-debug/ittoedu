@@ -1,3 +1,4 @@
+import { componentContainers } from '../../../shared/contracts/component-platform/project'
 import type { FlowOwnedState, FlowAuthoringIntent, FlowAuthoringReceipt, FlowDocumentDraft } from './flowAuthoringTypes'
 export type { FlowOwnedState, FlowAuthoringIntent, FlowAuthoringReceipt, FlowDocumentDraft } from './flowAuthoringTypes'
 import type { EditorStoreKernel } from '../editorStoreKernel'
@@ -17,7 +18,7 @@ import { flowDocumentEdits, projectFlowDocument, flowDocumentBlock } from '../..
 import { applyFlowCaretStyle, drainFlowWorkspace, flushFlowWorkspace, requestFlowBlockSelection } from '../../document/flowWorkspaceRegistry'
 import { prepareFlowDocumentResourceTransaction, releaseFlowPreparedResources } from '../../document/flowDocumentResources'
 import { applyDocumentBlockCommand } from '../../document/documentBlockCommands'
-import { documentTextSlots } from '../../../shared/document/content'
+import { documentBlockChildren, documentTextSlots } from '../../../shared/document/content'
 import { createTextComponentData, formatTextComponentRange } from '../../../components/text/data'
 import { flowRangeDataPath,flowTextStyleEdits,flowProfessionalTextStyleEdits } from '../../componentPlatform/surfaces/flow/documentSelection'
 import { insertCourseElement, type CourseElementKind, type CourseInsertionOptions } from '../../media/commitCourseMediaAuthoring'
@@ -47,9 +48,9 @@ export function createFlowAuthoringSlice(kernel: EditorStoreKernel, flow: FlowV1
       const captured = kernel.capture(edits, target)
       await kernel.editCaptured(captured, historyGroup)
       return { ok: true, historyEntry: true }
-    } catch (error) { report(error); return { ok: false, reason: String(error), historyEntry: false } }
+    } catch (error) { report(error); return { ok: false, reason: String(error), error: error instanceof Error ? error : new Error(String(error)), historyEntry: false } }
   }
-  const active = () => { const target = kernel.captureTarget(); if (!target.surfaceId || target.project.surfaces.find(surface => surface.id === target.surfaceId)?.kind !== 'flow') throw new Error('当前表面不是讲义'); return target }
+  const active = () => { const target = kernel.captureTarget(); if (!target.surfaceId || componentContainers(target.project).find(surface => surface.id === target.surfaceId)?.kind !== 'flow') throw new Error('当前表面不是讲义'); return target }
   const flush = (documentId = kernel.readView().activeDocumentId ?? '') => {
     const result = flushFlowWorkspace(documentId)
     if (!result.ok) return { ok: false as const, reason: result.reason ?? '正文草稿尚未完成' }
@@ -79,7 +80,14 @@ export function createFlowAuthoringSlice(kernel: EditorStoreKernel, flow: FlowV1
   }
   const formatBlock = (target: CapturedCourseTarget, instanceId: string, spec: FlowBlockFormatSpec): Promise<FlowAuthoringReceipt> => {
     let content = projectFlowDocument(target.editingProject, target.surfaceId!).content
-    const find = (blocks: DocumentBlock[]): DocumentBlock | undefined => { for (const block of blocks) { if (block.id === instanceId) return block; if (block.type === 'section') { const child = find(block.blocks); if (child) return child } } }
+    const find = (blocks: readonly DocumentBlock[]): DocumentBlock | undefined => {
+      for (const block of blocks) {
+        if (block.id === instanceId) return block
+        const children = documentBlockChildren(block)
+        const found = children ? find(children) : undefined
+        if (found) return found
+      }
+    }
     const block = find(content.blocks)
     if (!block) throw new Error('请选择正文块')
     if(block.type==='course-instance' && spec.kind==='text-style')return commit(flowProfessionalTextStyleEdits(target.editingProject,instanceId,spec.style,spec.range),'flow-property-format',target)
@@ -131,10 +139,8 @@ export function createFlowAuthoringSlice(kernel: EditorStoreKernel, flow: FlowV1
         case 'update-document-draft': setDraft({ surfaceId: target.surfaceId!, revision: target.project.revision, source: intent.source, diagnostics: intent.diagnostics, composing: intent.composing },target.documentId); return { ok: true, historyEntry: false }
         case 'clear-document-draft': setDraft(null,target.documentId); return { ok: true, historyEntry: false }
         case 'rename-page': return commit(surfaceSettingsEdits(target.editingProject, target.surfaceId!, { title: intent.title }), undefined, target)
-        case 'set-width-mode': case 'set-paper-background': {
-          return commit(surfaceSettingsEdits(target.editingProject, target.surfaceId!, { flowLayout: intent.kind === 'set-width-mode'
-            ? { widthMode: intent.widthMode } : { paperBackgroundColor: intent.backgroundColor } }), undefined, target)
-        }
+        case 'set-width-mode': return commit(surfaceSettingsEdits(target.editingProject, target.surfaceId!,
+          { flowLayout: { widthMode: intent.widthMode } }), undefined, target)
         case 'delete-blocks': return commit(intent.blockIds.map(id => ({ type: 'instance.remove', instanceId: id })), undefined, target)
         case 'patch-block': case 'patch-overlay-properties': if (!instance) throw new Error('请选择讲义对象'); return commit(Object.entries(intent.patch).map(([key,value]) => ({ type: 'data.set', instanceId: instance.id, path: [key], value: JSON.parse(JSON.stringify(value)) as JsonValue })), undefined, target)
         case 'transform-overlay-frame': if (!instance?.frame) throw new Error('浮层没有自由frame'); return commit([{ type: 'frame.set', instanceId: instance.id, frame: { ...instance.frame, width: intent.frame.width, height: intent.frame.height, transform: [...instance.frame.transform.slice(0,4),intent.frame.x,intent.frame.y] as [number,number,number,number,number,number] } }], undefined, target)
@@ -157,7 +163,7 @@ export function createFlowAuthoringSlice(kernel: EditorStoreKernel, flow: FlowV1
         }
         default: throw new Error(`当前讲义操作需要对应专业编辑入口：${intent.kind}`)
       }
-    } catch (error) { report(error); return { ok: false, reason: error instanceof Error ? error.message : String(error), historyEntry: false } }
+    } catch (error) { report(error); return { ok: false, reason: error instanceof Error ? error.message : String(error), error: error instanceof Error ? error : new Error(String(error)), historyEntry: false } }
   }
   return {
     runFlowAuthoringIntent,

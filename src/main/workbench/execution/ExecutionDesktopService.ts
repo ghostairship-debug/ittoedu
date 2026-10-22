@@ -2,7 +2,9 @@ import { createHash, randomUUID } from 'node:crypto'
 import path from 'node:path'
 import { promises as fs } from 'node:fs'
 import { executionDesktopRequestSchema, executionDocumentReferenceSchema, executionContentOutputSchema, executionSelectionTargetSchema, matchesDisclosedSelection, type ConversationHomeInput, type ExecutionDocumentReference, type ExecutionSendInput, type ExecutionSendResult, type ExecutionSubmissionRecord, type RendererTimingStamp } from '../../../shared/workbench/executionDesktop'
-import type { ConversationRecord } from '../../../shared/workbench/conversations'
+import type { ConversationMessage, ConversationRecord } from '../../../shared/workbench/conversations'
+import { userMessageWindow } from '../../../shared/workbench/executionUserMessageWindow'
+import type { ExecutionTimelineViewInput } from '../../../shared/workbench/executionDesktop'
 import type { ToolTarget } from '../../../shared/workbench/tools'
 import type { DocumentSnapshot } from '../../../shared/workbench/document'
 import type { ExecutionEvent, ExecutionEventInput } from '../../../shared/workbench/executionEvents'
@@ -61,6 +63,10 @@ export interface ExecutionDesktopServiceOptions {
   attachments?: AttachmentService
   /** Same durable job owner; injectable for deterministic desktop behavior checks. */
   delegation?: DelegationJobService
+}
+interface TimelineView {
+  conversationId: string; owner: string
+  history?: { workspaceId: string; requestedRevision: number; requestedOffset: number; revision: number; offset: number; messages: ConversationMessage[] }
 }
 function conversationAttachmentIds(record: ConversationRecord): string[] {
   return [...new Set([...record.attachmentIds, ...record.inputAttachments.map(reference => reference.attachmentId),
@@ -123,6 +129,7 @@ export class ExecutionDesktopService {
   readonly changeReview: ExecutionChangeReviewService
   readonly artifacts: HostArtifactDeliveryService
   private readonly queues = new Map<string, Promise<unknown>>()
+  private readonly timelineViews = new Map<string, Map<string, TimelineView>>()
   private closing = false
   private shutdownPromise?: Promise<void>
   private readonly elementChanges = new Map<string, ElementChangeTracker>()
@@ -211,6 +218,54 @@ export class ExecutionDesktopService {
     this.edits.subscribe(event => this.editSink?.(event))
   }
   setSinks(events?: (event: ExecutionEvent) => void, edits?: (event: EditEvent) => void) { this.eventSink = events; this.editSink = edits }
+  async releaseTimelineClient(clientId: string): Promise<void> {
+    const views = this.timelineViews.get(clientId)
+    this.timelineViews.delete(clientId)
+    if (views) await Promise.all([...views.values()].map(view => this.events.release(view.conversationId, view.owner)))
+  }
+  private async releaseTimeline(clientId: string, consumerId: string, conversationId: string): Promise<void> {
+    const views = this.timelineViews.get(clientId), view = views?.get(consumerId)
+    if (!view || view.conversationId !== conversationId) return
+    views!.delete(consumerId)
+    if (!views!.size) this.timelineViews.delete(clientId)
+    await this.events.release(view.conversationId, view.owner)
+  }
+  private retainTimeline(clientId: string, consumerId: string, conversationId: string): TimelineView {
+    let views = this.timelineViews.get(clientId)
+    const previous = views?.get(consumerId)
+    if (previous?.conversationId === conversationId) return previous
+    if (previous) void this.events.release(previous.conversationId, previous.owner)
+    if (!views) { views = new Map(); this.timelineViews.set(clientId, views) }
+    const owner = `view:${JSON.stringify([clientId, consumerId])}`
+    const view = { conversationId, owner }
+    views.set(consumerId, view)
+    this.events.retain(conversationId, owner)
+    return view
+  }
+  private async readTimelineView<T>(input: ExecutionTimelineViewInput, client: { id: string; isCurrent(): boolean } | undefined,
+    read: (view: TimelineView, messages: readonly ConversationMessage[], revision: number, offset: number) => Promise<T>): Promise<T> {
+    if (!client?.isCurrent()) throw refused('任务过程视图已关闭')
+    const view = this.retainTimeline(client.id, input.consumerId, input.conversationId)
+    const current = () => client.isCurrent() && this.timelineViews.get(client.id)?.get(input.consumerId) === view
+    try {
+      const requestedOffset = input.userHistoryOffset ?? 0
+      let history = view.history
+      if (!history || history.workspaceId !== input.workspaceId || history.requestedRevision !== input.userHistoryRevision || history.requestedOffset !== requestedOffset) {
+        const conversation = await this.serial(input.conversationId, () => this.required(input.workspaceId, input.conversationId))
+        if (!current()) throw refused('任务过程视图已关闭')
+        const selected = userMessageWindow(conversation.messages, requestedOffset)
+        history = { workspaceId: input.workspaceId, requestedRevision: input.userHistoryRevision, requestedOffset,
+          revision: conversation.revision, offset: selected.offsetFromLatest, messages: selected.messages }
+        view.history = history
+      }
+      const result = await read(view, history.messages, history.revision, history.offset)
+      if (!current()) throw refused('任务过程视图已关闭')
+      return result
+    } finally {
+      if (!client.isCurrent() && this.timelineViews.get(client.id)?.get(input.consumerId) === view)
+        await this.releaseTimeline(client.id, input.consumerId, input.conversationId)
+    }
+  }
   /** Preserve queued input, stop live runs, then drain their ordinary result/conversation writes. */
   shutdown(): Promise<void> {
     if (this.shutdownPromise) return this.shutdownPromise
@@ -227,6 +282,7 @@ export class ExecutionDesktopService {
         await this.events.flushPending()
         // A stored terminal event can publish the ordinary final conversation write.
       } while (this.queues.size)
+      await Promise.all([...this.timelineViews.keys()].map(clientId => this.releaseTimelineClient(clientId)))
       this.releaseElementChanges()
     })()
     return this.shutdownPromise
@@ -1115,7 +1171,7 @@ export class ExecutionDesktopService {
     return this.elementChanges.get(input.submissionId)?.revert(input.submissionId, input.direction, input.force)
       ?? { status: 'unavailable', message: '没有可定位的卡片修改，请查看文档历史。' }
   }
-  async operate(raw: unknown): Promise<unknown> {
+  async operate(raw: unknown, timelineClient?: { id: string; isCurrent(): boolean }): Promise<unknown> {
     const received = captureMainTiming()
     try {
       if (this.closing) throw refused('应用正在关闭；当前输入与已应用修改已保留')
@@ -1304,7 +1360,32 @@ export class ExecutionDesktopService {
           catch (error) { throw new DesktopOperationError('execution-answer-rejected', '回答没有提交', error instanceof Error ? error.message : '这个问题暂时不能回答。', '问题仍在等待时可以重新选择；任务已停止或结束时，需要重新发送任务。', { cause: error }) }
         case 'events': return await this.events.readPage(input)
         case 'search-events': return await this.events.search(input)
-        case 'timeline': return await this.events.snapshot(input.conversationId)
+        case 'timeline': {
+          if (!input.consumerId || !timelineClient) return await this.events.snapshot(input.conversationId)
+          if (!timelineClient.isCurrent()) throw refused('任务过程视图已关闭')
+          this.retainTimeline(timelineClient.id, input.consumerId, input.conversationId)
+          try {
+            const projection = await this.events.snapshot(input.conversationId)
+            if (!timelineClient.isCurrent()) {
+              await this.releaseTimeline(timelineClient.id, input.consumerId, input.conversationId)
+              throw refused('任务过程视图已关闭')
+            }
+            return projection
+          } catch (error) {
+            await this.releaseTimeline(timelineClient.id, input.consumerId, input.conversationId)
+            throw error
+          }
+        }
+        case 'timeline-window': return await this.readTimelineView(input, timelineClient, async (view, messages, revision, offset) => ({
+          ...await this.events.timelinePage(input.conversationId, view.owner, messages, input), userHistoryRevision: revision, userHistoryOffset: offset,
+        }))
+        case 'timeline-group': return await this.readTimelineView(input, timelineClient,
+          (view, messages) => this.events.timelineGroup(input.conversationId, view.owner, messages, input))
+        case 'timeline-body': return await this.readTimelineView(input, timelineClient,
+          (view, messages) => this.events.timelineBody(input.conversationId, view.owner, messages, input))
+        case 'release-timeline':
+          if (timelineClient) await this.releaseTimeline(timelineClient.id, input.consumerId, input.conversationId)
+          return undefined
         case 'blob': return Buffer.from(await this.events.readBlob(input.conversationId, input.ref)).toString('utf8')
         case 'edits': return await this.edits.list(input.documentId)
         case 'element-change': return this.elementChangeView(input.submissionId)

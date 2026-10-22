@@ -1,3 +1,4 @@
+import { createTestProjectFromLegacy } from '../helpers/glxWorkFixture'
 // @vitest-environment jsdom
 import { expect, it, vi } from 'vitest'
 import { IDENTITY_MATRIX, composeMatrices, frameCorners, matrixAroundPoint, rotationMatrix, scaleMatrix, transformPoint, translationMatrix } from '../../src/core/components/geometry'
@@ -75,10 +76,10 @@ it('keeps the intended handle frame when the source rotates around its center an
 it('commits the completed local gesture once through canonical History and undoes the whole drag', async () => {
   const geometry = { frame: { width: 100, height: 30, transform: [1, 0, 0, 1, 20, 10] as [number, number, number, number, number, number] },
     parentToInstance: [1, 0, 0, 1, 0, 0] as [number, number, number, number, number, number], author: {}, boxInsets: { width: 0, height: 0 } }
-  const project: CourseProjectV10 = { schemaVersion: 10, id: 'local-drag', revision: 0, title: 'Local drag', assets: {},
+  const project: CourseProjectV10 = createTestProjectFromLegacy({ schemaVersion: 10, id: 'local-drag', revision: 0, title: 'Local drag', assets: {},
     definitions: { web: { id: 'web', role: 'content', implementation: { kind: 'builtin', key: 'guoling.web' } } },
     instances: { web: { id: 'web', definitionId: 'web', data: { html: '<p>Original</p>' }, frame: { width: 400, height: 300, transform: [1, 0, 0, 1, 0, 0] } } },
-    surfaces: [{ id: 'slide', kind: 'slide', title: 'Slide', childIds: ['web'], designSize: { width: 800, height: 600 } }], global: { underlay: [], overlay: [] } }
+    surfaces: [{ id: 'slide', kind: 'slide', title: 'Slide', childIds: ['web'], designSize: { width: 800, height: 600 } }], global: { underlay: [], overlay: [] } })
   const spot: ComponentAuthorSpot = { id: 'observed', instanceId: 'web', mountGeneration: 1, authorKey: 'local-text', kind: 'text',
     binding: { kind: 'dom', path: [{ tag: 'p', index: 0 }], baseline: 'Original' }, initialValue: 'Original', localBounds: geometry.frame, geometry }
   const gesture = new LocalAuthorTransformGesture({ geometry, kind: 'text', mode: 'drag', rootToSurface: IDENTITY_MATRIX, surfaceToPointer: IDENTITY_MATRIX, pointer: { x: 30, y: 20 } })
@@ -101,10 +102,10 @@ it('commits the completed local gesture once through canonical History and undoe
 
 it('anchors one static same-looking object in its source transaction and binds only that object after cold serialization', () => {
   const html = '<html><body><p>same</p><p>same</p></body></html>', from = html.lastIndexOf('same')
-  const project: CourseProjectV10 = { schemaVersion: 10, id: 'static-anchor', revision: 0, title: 'Static', assets: {},
+  const project: CourseProjectV10 = createTestProjectFromLegacy({ schemaVersion: 10, id: 'static-anchor', revision: 0, title: 'Static', assets: {},
     definitions: { web: { id: 'web', role: 'content', implementation: { kind: 'builtin', key: 'guoling.web' } } },
     instances: { web: { id: 'web', definitionId: 'web', data: { html }, frame: { width: 400, height: 300, transform: [1, 0, 0, 1, 0, 0] } } },
-    surfaces: [{ id: 'slide', kind: 'slide', title: 'Slide', childIds: ['web'] }], global: { underlay: [], overlay: [] } }
+    surfaces: [{ id: 'slide', kind: 'slide', title: 'Slide', childIds: ['web'] }], global: { underlay: [], overlay: [] } })
   const spot: ComponentAuthorSpot = { id: 'static-second', instanceId: 'web', mountGeneration: 1, authorKey: 'second-same', kind: 'text', bindingStatus: 'unresolved',
     binding: { kind: 'dom', path: [{ tag: 'body', index: 0 }, { tag: 'p', index: 1 }], textIndex: 0, baseline: 'same' }, initialValue: 'same',
     sourceRegion: { kind: 'data', path: ['html'], start: from, end: from + 4, encoding: 'html-text' },
@@ -148,13 +149,13 @@ it('anchors one static same-looking object in its source transaction and binds o
 
 it('prepares a frozen bound text reply from the current snapshot after remount without overwriting newer geometry or another object', async () => {
   const binding = { kind: 'dom' as const, path: [{ tag: 'p', index: 0, attributes: { id: 'title' } }], baseline: 'Original' }
-  const project: CourseProjectV10 = { schemaVersion: 10, id: 'reply', revision: 0, title: 'Reply', assets: {},
+  const project: CourseProjectV10 = createTestProjectFromLegacy({ schemaVersion: 10, id: 'reply', revision: 0, title: 'Reply', assets: {},
     definitions: { web: { id: 'web', role: 'content', implementation: { kind: 'builtin', key: 'guoling.web' } } },
     instances: { web: { id: 'web', definitionId: 'web', data: { html: '<p id="title">Original</p><p id="other">Other</p>' },
       authoring: { records: { title: { kind: 'text', binding, overrides: { text: 'Original', geometry: { translateX: 0 } } },
         other: { kind: 'text', binding: { kind: 'dom', path: [{ tag: 'p', index: 1, attributes: { id: 'other' } }], baseline: 'Other' }, overrides: { text: 'Other' } } } },
       frame: { width: 400, height: 300, transform: [1, 0, 0, 1, 0, 0] } } },
-    surfaces: [{ id: 'slide', kind: 'slide', title: 'Slide', childIds: ['web'] }], global: { underlay: [], overlay: [] } }
+    surfaces: [{ id: 'slide', kind: 'slide', title: 'Slide', childIds: ['web'] }], global: { underlay: [], overlay: [] } })
   const driver = new CourseV10Driver(), session = await DocumentSession.create({ documentId: 'doc', epoch: 'epoch', binding: { kind: 'untitled', suggestedName: 'reply' },
     model: { kind: 'course-v10', project, resources: { assets: {}, components: {} } } }, driver, { async append() {}, async save() { throw new Error('unused') } })
   const current = (): CapturedCourseTarget => {
@@ -187,10 +188,10 @@ it('prepares a frozen bound text reply from the current snapshot after remount w
 
 it('creates the first dynamic author record from the exact registered record path and saves one canonical edit', async () => {
   const key = 'dom-conversation-heading', html = '<div id="root"></div>'
-  const project: CourseProjectV10 = { schemaVersion: 10, id: 'first-record', revision: 0, title: 'React heading', assets: {},
+  const project: CourseProjectV10 = createTestProjectFromLegacy({ schemaVersion: 10, id: 'first-record', revision: 0, title: 'React heading', assets: {},
     definitions: { web: { id: 'web', role: 'content', implementation: { kind: 'builtin', key: 'guoling.web' } } },
     instances: { web: { id: 'web', definitionId: 'web', data: { html, resourceBindings: {} }, frame: { width: 1280, height: 720, transform: [1, 0, 0, 1, 0, 0] } } },
-    surfaces: [{ id: 'slide', kind: 'slide', title: 'Slide', childIds: ['web'] }], global: { underlay: [], overlay: [] } }
+    surfaces: [{ id: 'slide', kind: 'slide', title: 'Slide', childIds: ['web'] }], global: { underlay: [], overlay: [] } })
   const spot: ComponentAuthorSpot = { id: 'observed', instanceId: 'web', mountGeneration: 1, kind: 'text', initialValue: 'Conversation 1', authorKey: key,
     scope: { 'react:conversation.id': 'conversation-1' }, bindingStatus: 'bound',
     binding: { kind: 'dom', path: [{ tag: 'body', index: 1 }, { tag: 'div', index: 0, attributes: { id: 'root' } }, { tag: 'h2', index: 1 }], textIndex: 0, baseline: 'Conversation 1' },

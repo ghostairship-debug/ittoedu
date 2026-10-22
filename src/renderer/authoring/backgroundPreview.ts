@@ -1,3 +1,4 @@
+import { componentContainers } from '../../shared/contracts/component-platform/project'
 import type { CourseProjectV10 } from '../../shared/contracts/component-platform/project'
 import type { ComponentEdit } from '../../shared/contracts/component-platform/operations'
 import { applyComponentOperation, captureComponentOperation } from '../../core/drivers/courseV10Operations'
@@ -33,7 +34,7 @@ export function projectWithBackgroundPreview(
   if (!preview) return project
   const { target, edits } = preview
   if (target.documentId !== documentId || target.epoch !== epoch || target.surfaceId !== surfaceId || target.stateId !== stateId) return project
-  const surface = project.surfaces.find(value => value.id === surfaceId)
+  const surface = componentContainers(project).find(value => value.id === surfaceId)
   if (surfaceId !== null && !surface) return project
   if (stateId !== null && !surface?.presentation?.states.some(value => value.id === stateId)) return project
   if (target.owner === 'instance' && (!target.instanceId || !project.instances[target.instanceId])) return project

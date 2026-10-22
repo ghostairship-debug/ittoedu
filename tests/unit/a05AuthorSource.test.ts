@@ -1,10 +1,14 @@
 // @vitest-environment node
+import { testContainerInstance } from '../helpers/glxWorkFixture'
 import { expect, it } from 'vitest'
 import { transform } from 'esbuild'
 import { createBlankCourseProjectV10 } from '../../src/core/course/createCourseProjectV10'
 import { CourseV10Driver } from '../../src/core/drivers/CourseV10Driver'
 import { captureComponentOperation } from '../../src/core/drivers/courseV10Operations'
 import { prepareComponentAuthorSource, componentAuthorSourceEdits, componentAuthorSourceModules, componentAuthorSourceDependencyPaths, resolveComponentAuthorSourceDependencyPaths } from '../../src/core/components/source/componentAuthorSource'
+import { beforeAll as prepareAuthorSourceForTests } from 'vitest'
+import { loadBuiltinComponentSource } from '../../src/core/components/source/builtinSources'
+prepareAuthorSourceForTests(async () => { await loadBuiltinComponentSource('guoling.web') })
 import { componentProjectFiles } from '../../src/core/projectFiles/componentPlatform/projection'
 import { canonicalComponentFileEdits } from '../../src/core/projectFiles/componentPlatform/coordinator'
 import { componentCompilationInput } from '../../src/core/components/compilation/componentCompilationInput'
@@ -23,7 +27,7 @@ function model() {
   const project = createBlankCourseProjectV10('作者入口')
   project.definitions.web = { id: 'web', title: 'Web', role: 'content', implementation: { kind: 'builtin', key: 'guoling.web' } }
   for (const id of ['a', 'b']) project.instances[id] = { id, definitionId: 'web', data: { html: `<h1>${id}</h1>` } }
-  project.surfaces[0].childIds = ['a', 'b']
+  testContainerInstance(project, 0).childIds = ['a', 'b']
   return { kind: 'course-v10' as const, project, resources: { assets: {}, components: {} as Record<string, Record<string, Uint8Array>> } }
 }
 const snapshot = (current: ReturnType<typeof model>) => ({ model: current }) as ComponentProjectSnapshot

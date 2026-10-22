@@ -1,3 +1,4 @@
+import { componentContainers } from '../../../shared/contracts/component-platform/project'
 import { nanoid } from 'nanoid'
 import { materialRecordV1Schema, materialCitationText } from '../../../shared/materialContract'
 import { createTextComponentData } from '../../../components/text/data'
@@ -11,7 +12,7 @@ export async function insertMaterialCitation(kernel: EditorStoreKernel, request:
   if (material.workspace.projectId !== target.project.id) throw new Error('材料不属于捕获的原工程')
   const id = `material_${nanoid()}`, instanceId = `instance_${nanoid()}`
   const bytes = new TextEncoder().encode(JSON.stringify(material))
-  const surface = target.project.surfaces.find(value => value.id === target.surfaceId)
+  const surface = componentContainers(target.project).find(value => value.id === target.surfaceId)
   const instance = { id: instanceId, definitionId: TEXT_DEFINITION.id, name: material.title,
     data: courseAuthorData(createTextComponentData(materialCitationText(material))),
     ...(surface?.kind === 'flow' ? {} : { frame: { width: 600, height: 280, transform: [1, 0, 0, 1, 80, 80] as [number, number, number, number, number, number] } }) }

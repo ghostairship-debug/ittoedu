@@ -1,4 +1,5 @@
-import { parse, type DefaultTreeAdapterTypes } from 'parse5'
+import type { DefaultTreeAdapterTypes } from 'parse5'
+import { parseHtmlSourceDocument } from './htmlSourceParser'
 import {
   decodeHtmlEntities, indexHtmlElements, scanHtmlSource,
   type HtmlElementIndexEntry, type HtmlSourceToken,
@@ -37,7 +38,7 @@ function rendered(name: string, sourceIndex: number | null, parent: RenderedElem
 function renderedSourceTree(
   source: string, _tokens: readonly HtmlSourceToken[], elements: readonly HtmlElementIndexEntry[],
 ): RenderedElement | null {
-  const document = parse(source, { sourceCodeLocationInfo: true })
+  const document = parseHtmlSourceDocument(source)
   const byStart = new Map(elements.map((element, index) => [element.startTag.start, index]))
   const build = (element: DefaultTreeAdapterTypes.Element, parent: RenderedElement | null): RenderedElement => {
     const location = element.sourceCodeLocation
@@ -87,15 +88,39 @@ function directTextTokens(
     && !children.some(child => token.span.start >= child.full.start && token.span.end <= child.full.end))
 }
 
+function prepareSource(source: string) {
+  const scan = scanHtmlSource(source)
+  const index = indexHtmlElements(source, scan.tokens)
+  let tree: RenderedElement | null | undefined
+  return { scan, index, tree: () => {
+    if (tree === undefined) tree = renderedSourceTree(source, scan.tokens, index.elements)
+    return tree
+  } }
+}
+
+/** One immutable source, one lazily parsed tree for this request or source operation. */
+export function createHtmlSourceLocator(source: string) {
+  let prepared: ReturnType<typeof prepareSource> | undefined
+  const read = () => prepared ??= prepareSource(source)
+  return {
+    locateTarget: (report: HtmlPreviewTargetReport, identity: HtmlSourceIdentity) => locateTarget(source, report, identity, read),
+    locateAuthorRecord: (record: ComponentAuthorRecord, authorKey: string, afterEdit = false) => locateAuthorRecord(source, record, authorKey, afterEdit, read),
+  }
+}
+
 /** Locate an exact source span. DOM handles and DOM paths are evidence, never persistent identities. */
 export function locateHtmlSourceTarget(
   source: string, report: HtmlPreviewTargetReport, identity: HtmlSourceIdentity,
 ): HtmlPreviewResolvedTarget {
+  return createHtmlSourceLocator(source).locateTarget(report, identity)
+}
+
+function locateTarget(source: string, report: HtmlPreviewTargetReport, identity: HtmlSourceIdentity,
+  read: () => ReturnType<typeof prepareSource>): HtmlPreviewResolvedTarget {
   if (report.scriptCreated) return rejection(report.handle, 'script-created')
-  const scan = scanHtmlSource(source)
+  const parsed = read(), { scan, index } = parsed
   if (scan.diagnostics.length) return rejection(report.handle, 'not-unique')
-  const index = indexHtmlElements(source, scan.tokens)
-  const tree = renderedSourceTree(source, scan.tokens, index.elements)
+  const tree = parsed.tree()
   const target = tree && pathToSource(tree, report.domPath)
   if (!target || target.sourceIndex === null) return rejection(report.handle, 'not-unique')
   const selected = target.sourceIndex
@@ -141,8 +166,15 @@ export { escapeHtmlText, escapeHtmlAttribute } from './htmlSourceEscaping'
 
 /** Source-owned records can be relocated after an explicit local source operation. Dynamic bindings are untouched. */
 export function locateHtmlAuthorRecordSource(source: string, record: ComponentAuthorRecord, authorKey: string, afterEdit = false) {
-  const scan = scanHtmlSource(source), index = indexHtmlElements(source, scan.tokens)
-  const root = renderedSourceTree(source, scan.tokens, index.elements)
+  return createHtmlSourceLocator(source).locateAuthorRecord(record, authorKey, afterEdit)
+}
+
+function locateAuthorRecord(source: string, record: ComponentAuthorRecord, authorKey: string, afterEdit: boolean,
+  read: () => ReturnType<typeof prepareSource>) {
+  // A nested document's path describes its own DOM, never an equal-looking
+  // path in this source document. Its existing scoped record remains intact.
+  if (record.scope?.['html:frame']) return null
+  const parsed = read(), { scan, index } = parsed, root = parsed.tree()
   if (!root) return null
   const attrs = (node: RenderedElement) => node.sourceIndex === null ? {} : Object.fromEntries((scan.tokens.find(token =>
     token.kind === 'start-tag' && token.span.start === index.elements[node.sourceIndex!]!.startTag.start)?.attributes ?? [])

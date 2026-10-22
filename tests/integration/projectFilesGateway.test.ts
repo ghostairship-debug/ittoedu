@@ -1,4 +1,6 @@
 // @vitest-environment node
+import { componentSurfaces } from '../../src/shared/contracts/component-platform/project'
+import { testContainerInstance } from '../helpers/glxWorkFixture'
 import { promises as fs } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -16,7 +18,7 @@ it('adds, names, reorders and removes observed mixed pages through the public Ga
     const project = createBlankCourseProjectV10('页面文件'), frame = { width: 320, height: 180, transform: [1, 0, 0, 1, 40, 50] as [number, number, number, number, number, number] }
     project.definitions[TEXT_DEFINITION.id] = TEXT_DEFINITION
     project.instances.text = { id: 'text', definitionId: TEXT_DEFINITION.id, data: courseAuthorData(createTextData('保留人工内容')), frame }
-    project.surfaces[0].childIds.push('text')
+    testContainerInstance(project, 0).childIds.push('text')
     const initial = await host.internalAPI.create({ kind: 'course-v10', project, resources: { assets: {}, components: {} } }, 'pages.glx')
     await host.tools.beginRun({ runId: 'agent', actor: 'agent', documents: [{ documentId: initial.documentId, writable: [{ kind: 'document' }] }], fileAccess: { permission: 'workspace', workspaceRoot: root } })
     await host.tools.loadToolFamilies('agent', ['content'])
@@ -35,23 +37,23 @@ it('adds, names, reorders and removes observed mixed pages through the public Ga
     await tool('project.list', {}); await tool('project.read', { path: 'pages' })
     for (const kind of ['flow', 'spatial'] as const) committed(await tool('project.apply', { path: 'pages', intent: 'surface.add', kind, title: kind }))
     let model = await current()
-    expect(model.project.surfaces.map(surface => surface.kind)).toEqual(['slide', 'flow', 'spatial']); expect(model.snapshot.undoDepth).toBe(2)
-    const flowId = model.project.surfaces[1].id, spatialId = model.project.surfaces[2].id, firstId = model.project.surfaces[0].id
+    expect(componentSurfaces(model.project).map(surface => surface.kind)).toEqual(['slide', 'flow', 'spatial']); expect(model.snapshot.undoDepth).toBe(2)
+    const flowId = componentSurfaces(model.project)[1].id, spatialId = componentSurfaces(model.project)[2].id, firstId = componentSurfaces(model.project)[0].id
     let flowPath = await pagePath(flowId), spatialPath = await pagePath(spatialId)
     await tool('project.read', { path: flowPath }); committed(await tool('project.apply', { path: flowPath, intent: 'surface.title', title: '讲义改名' }))
-    expect((await current()).project.surfaces[1]).toMatchObject({ id: flowId, title: '讲义改名' })
+    expect(componentSurfaces((await current()).project)[1]).toMatchObject({ id: flowId, title: '讲义改名' })
     flowPath = await pagePath(flowId); spatialPath = await pagePath(spatialId)
     await tool('project.list', {}); await tool('project.read', { path: spatialPath })
     committed(await tool('project.apply', { path: spatialPath, intent: 'surface.move', before: flowPath }))
-    model = await current(); expect(model.project.surfaces.map(surface => surface.id)).toEqual([firstId, spatialId, flowId]); expect(model.snapshot.undoDepth).toBe(4)
+    model = await current(); expect(componentSurfaces(model.project).map(surface => surface.id)).toEqual([firstId, spatialId, flowId]); expect(model.snapshot.undoDepth).toBe(4)
     flowPath = await pagePath(flowId); await tool('project.read', { path: flowPath })
     const beforeRemove = await current()
     committed(await tool('project.apply', { path: flowPath, intent: 'surface.remove' }))
-    model = await current(); expect(model.project.surfaces.map(surface => surface.id)).toEqual([firstId, spatialId]); expect(model.snapshot.undoDepth).toBe(5)
+    model = await current(); expect(componentSurfaces(model.project).map(surface => surface.id)).toEqual([firstId, spatialId]); expect(model.snapshot.undoDepth).toBe(5)
     expect(model.project.instances.text).toEqual(project.instances.text); expect(model.project.global).toEqual(project.global)
     expect(await host.internalAPI.dispatch({ documentId: initial.documentId, epoch: model.snapshot.epoch, baseRevision: model.snapshot.revision,
       actor: 'human', operationId: 'undo-remove', mutation: { type: 'undo' } })).toMatchObject({ status: 'applied' })
-    model = await current(); expect(model.project.surfaces).toEqual(beforeRemove.project.surfaces)
+    model = await current(); expect(componentSurfaces(model.project)).toEqual(componentSurfaces(beforeRemove.project))
     await host.tools.beginRun({ runId: 'read-only', actor: 'agent', documents: [{ documentId: initial.documentId, writable: [] }], fileAccess: { permission: 'read-only', workspaceRoot: root } })
     await host.tools.loadToolFamilies('read-only', ['content'])
     expect(await tool('project.list', {}, 'read-only')).toMatchObject({ kind: 'read' })

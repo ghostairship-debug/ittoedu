@@ -1,4 +1,7 @@
 // @vitest-environment jsdom
+import { setRootContainers } from '../helpers/glxWorkFixture'
+import { componentSurfaces } from '../../src/shared/contracts/component-platform/project'
+import { testContainerInstance } from '../helpers/glxWorkFixture'
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, expect, it, vi } from 'vitest'
 import { createBlankCourseProjectV10 } from '../../src/core/course/createCourseProjectV10'
@@ -22,14 +25,14 @@ function BackgroundPanel() {
 }
 async function fixture(flow: boolean) {
   const project = createBlankCourseProjectV10()
-  if (flow) { project.surfaces[0].kind = 'flow'; delete project.surfaces[0].designSize }
+  if (flow) { testContainerInstance(project, 0).container.kind = 'flow'; delete testContainerInstance(project, 0).container.designSize }
   const host = await createV10StoreHost(project, undefined, false)
   await useEditorStore.getState().connectCourseDocuments(host.api)
   const otherProject = createBlankCourseProjectV10()
-  if (flow) { otherProject.surfaces[0].kind = 'flow'; delete otherProject.surfaces[0].designSize }
+  if (flow) { testContainerInstance(otherProject, 0).container.kind = 'flow'; delete testContainerInstance(otherProject, 0).container.designSize }
   // Copied/opened documents may share their scoped surface ID. This also keeps
   // the native file input mounted while the canonical document target changes.
-  otherProject.surfaces[0].id = project.surfaces[0].id
+  setRootContainers(otherProject, [{ ...componentSurfaces(otherProject)[0], id: componentSurfaces(project)[0].id }])
   const other = await host.api.create({ kind: 'course-v10', project: otherProject, resources: { assets: {}, components: {} } }, 'B.glx')
   documentIds.add(host.first.documentId); documentIds.add(other.documentId)
   const model = (id: string) => {
@@ -71,7 +74,7 @@ it.each([false, true])('CA266 %s freezes A before PNG reading, commits only A an
   await act(async () => { ack.resolve() })
   await waitFor(() => expect(selected.clear).toHaveBeenCalledExactlyOnceWith(''))
   expect(Array.from(Object.values(f.model(f.a).resources.assets)[0])).toEqual(Array.from(selected.bytes))
-  expect(f.model(f.b).project.surfaces[0].background?.assetId ?? null).toBeNull()
+  expect(componentSurfaces(f.model(f.b).project)[0].background?.assetId ?? null).toBeNull()
   expect(hasPropertiesDrafts(f.a)).toBe(false)
 })
 
@@ -107,7 +110,7 @@ it('CA266 early remount resumes the original pending PNG read and frozen A commi
   expect(hasPropertiesDrafts(f.a)).toBe(false)
   expect(screen.queryByText('A.png：正在读取并上传…')).not.toBeInTheDocument()
   expect(Array.from(Object.values(f.model(f.a).resources.assets)[0])).toEqual(Array.from(selected.bytes))
-  expect(f.model(f.b).project.surfaces[0].background?.assetId ?? null).toBeNull()
+  expect(componentSurfaces(f.model(f.b).project)[0].background?.assetId ?? null).toBeNull()
   expect(f.host.operations).toHaveLength(1)
 })
 
@@ -120,13 +123,13 @@ it('CA266 rejects a real A background CAS change and retains the original File a
     const current = f.host.registry.get(f.a).read()
     await f.host.api.dispatch({ documentId: f.a, epoch: current.epoch, baseRevision: current.revision, operationId: 'external-background', actor: 'human',
       mutation: { type: 'command', command: captureComponentOperation(f.model(f.a).project,
-        [{ type: 'surface.background.set', surfaceId: f.model(f.a).project.surfaces[0].id, background: { mode: 'own', color: '#123456' } }]) } })
+        [{ type: 'surface.background.set', surfaceId: componentSurfaces(f.model(f.a).project)[0].id, background: { mode: 'own', color: '#123456' } }]) } })
     selected.gate.resolve()
   })
   await screen.findByRole('button', { name: '重试上传' })
   expect(Object.keys(f.model(f.b).resources.assets)).toHaveLength(0)
   expect(Object.keys(f.model(f.a).resources.assets)).toHaveLength(0)
-  expect(f.model(f.a).project.surfaces[0].background).toEqual({ mode: 'own', color: '#123456' })
+  expect(componentSurfaces(f.model(f.a).project)[0].background).toEqual({ mode: 'own', color: '#123456' })
   expect(f.host.registry.get(f.a).read().revision).toBe(1)
   expect(input.files?.[0]).toBe(selected.file); expect(selected.clear).not.toHaveBeenCalled()
   const kept = preservePropertiesDrafts(f.a).find(record => record.label.endsWith(':图片上传'))!

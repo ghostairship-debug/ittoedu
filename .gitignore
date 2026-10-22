@@ -7,6 +7,13 @@ release-rebuild-*/
 artifacts/*
 !artifacts/ai-capabilities/
 !artifacts/ai-capabilities/**
+!artifacts/contracts/
+artifacts/contracts/*
+!artifacts/contracts/contract-manifest.json
+!artifacts/contracts/component-catalog.schema.json
+!artifacts/contracts/component-definition.schema.json
+!artifacts/contracts/course-project-v11.schema.json
+!artifacts/contracts/published-course-v4.schema.json
 output/
 test-results/
 tmp/

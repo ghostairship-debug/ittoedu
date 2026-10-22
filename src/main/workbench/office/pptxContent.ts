@@ -1,9 +1,13 @@
-import PptxGenJS from 'pptxgenjs'
+import type PptxGenJS from 'pptxgenjs'
 import { children, descendants, NS, OfficePackage, replaceTextRange, textOf } from './officePackage'
 import type { OfficeContentInspection, OfficeRequest } from '../../../shared/workbench/officeFiles'
 
+function isPptxConstructor(value: unknown): value is new () => PptxGenJS { return typeof value === 'function' }
+
 export async function createPptx(request: OfficeRequest<'pptx', 'create'>): Promise<Uint8Array> {
-  const pptx = new PptxGenJS()
+  const constructor: unknown = (await import('pptxgenjs')).default
+  if (!isPptxConstructor(constructor)) throw new TypeError('PowerPoint 生成库未提供可构造入口')
+  const pptx = new constructor()
   pptx.layout = 'LAYOUT_WIDE'; pptx.author = '果铃'; pptx.subject = request.title ?? ''; pptx.title = request.title ?? ''
   pptx.theme = { headFontFace: 'Arial', bodyFontFace: 'Arial' }
   for (const content of request.slides) {

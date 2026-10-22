@@ -1,3 +1,4 @@
+import { componentSurfaces } from '../../src/shared/contracts/component-platform/project'
 // @vitest-environment node
 import { expect, it } from 'vitest'
 import { build } from 'esbuild'
@@ -58,7 +59,7 @@ it.each(['cover', 'program'] as const)('preserves the frozen %s layout through r
     const assembly = assembleMeasuredHtml(capture, { html }, 'content')
     const draft = assemblyContentDraft(assembly, {}, { definitions: {}, createFormulaId: () => crypto.randomUUID() })
     const blank = createBlankCourseProjectV10(`Frozen ${name}`)
-    const plan = planContentApply({ project: blank, createId: () => crypto.randomUUID(), request: { intent: 'insert', target: { kind: 'container', container: { kind: 'surface', surfaceId: blank.surfaces[0]!.id } }, source: { kind: 'objects', objects: [draft.draft], definitions: draft.definitions } } })
+    const plan = planContentApply({ project: blank, createId: () => crypto.randomUUID(), request: { intent: 'insert', target: { kind: 'container', container: { kind: 'surface', surfaceId: componentSurfaces(blank)[0]!.id } }, source: { kind: 'objects', objects: [draft.draft], definitions: draft.definitions } } })
     let project = applyComponentOperation(blank, plan.command)
     facts.diagnostics = assembly.diagnostics
     facts.scopes = capture.sourceScopes?.map(scope => ({ path: capture.elements[scope.index]!.sourcePath, reason: scope.reason }))
@@ -88,7 +89,7 @@ it.each(['cover', 'program'] as const)('preserves the frozen %s layout through r
       await gateway.beginRun({ runId, actor: 'agent', documents: [{ documentId: session.documentId, writable: [{ kind: 'document' }] }] })
       const source = htmlOf(currentProject().instances[editable.id]), start = source.indexOf(before)
       if (start < 0) throw new Error('Original text field is absent')
-      const target = await gateway.issueTarget(runId, session.documentId, { kind: 'course-instance', surfaceId: project.surfaces[0]!.id, instanceId: editable.id,
+      const target = await gateway.issueTarget(runId, session.documentId, { kind: 'course-instance', surfaceId: componentSurfaces(project)[0]!.id, instanceId: editable.id,
         authorField: { kind: 'text', initialValue: before, sourceRegion: { kind: 'data', path: ['html'], start, end: start + before.length, encoding: 'html-text' } } })
       const result = await gateway.execute(runId, randomUUID(), { name: 'text.replace', input: { target, content: after } })
       expect(result).toMatchObject({ kind: 'document-operation', result: { status: 'applied' } })

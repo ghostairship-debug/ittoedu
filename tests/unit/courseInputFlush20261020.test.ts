@@ -1,3 +1,4 @@
+import { testContainerInstance } from '../helpers/glxWorkFixture'
 import { expect, it, vi } from 'vitest'
 import { createBlankCourseProjectV10 } from '../../src/core/course/createCourseProjectV10'
 import { useEditorStore } from '../../src/renderer/store/editorStore'
@@ -7,7 +8,7 @@ it('flushes real pending course input before Main reads, preserves active IME, a
   const project = createBlankCourseProjectV10('Input-only preparation')
   project.definitions.box = { id: 'box', role: 'content', implementation: { kind: 'source', language: 'javascript', source: 'export default {mount(){}}' } }
   project.instances.box = { id: 'box', definitionId: 'box', data: { html: 'before' }, frame: { width: 100, height: 100, transform: [1, 0, 0, 1, 0, 0] } }
-  project.surfaces[0]!.childIds = ['box']
+  testContainerInstance(project, 0).childIds = ['box']
   const h = await createV10StoreHost(project)
   await useEditorStore.getState().connectCourseDocuments(h.api)
   useEditorStore.getState().beginSlideDataEdit('box')

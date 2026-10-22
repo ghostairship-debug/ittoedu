@@ -1,11 +1,11 @@
 import { Copy, Image as ImageIcon, MoreHorizontal, Pencil, Plus, RotateCcw, Star, Trash2 } from 'lucide-react'
 import { useEffect, useState, type MouseEvent as ReactMouseEvent } from 'react'
 import type { CapturedCourseTarget } from '../documents/CourseV10DocumentBridge'
-import type { ComponentPresentationState } from '../../shared/contracts/component-platform/project'
+import { componentSurface, type ComponentPresentationState } from '../../shared/contracts/component-platform/project'
 import { useContextMenu } from '../editing/commands/CommandMenu'
 import { stateCommands } from '../editing/commands/pageCommands'
 import { interactionBehavior, interactionRules } from '../interactions/componentInteractionAuthoring'
-import { useEditorStore } from '../store/editorStore'
+import { selectEditingScope, useEditorStore } from '../store/editorStore'
 import { ConfirmDialog } from './ConfirmDialog'
 
 function countStateOverrides(state: ComponentPresentationState): number {
@@ -21,8 +21,8 @@ export function SceneStateStrip() {
 /** Both modes edit the same formal state on a captured document/surface. */
 export function SceneStateButtons({ documentId, surfaceId, compact = false }: { documentId: string; surfaceId: string; compact?: boolean }) {
   const view = useEditorStore(state => state.courseView)
-  const editingScope = useEditorStore(state => state.editingScope)
-  const surface = view.project?.surfaces.find(value => value.id === surfaceId)
+  const editingScope = useEditorStore(selectEditingScope)
+  const surface = view.project ? componentSurface(view.project, surfaceId) : undefined
   const presentation = surface?.presentation
   const states = presentation?.states ?? []
   const rules = view.project ? interactionRules(interactionBehavior(view.project, { kind: 'surface', surfaceId })) : []

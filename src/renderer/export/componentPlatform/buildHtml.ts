@@ -6,7 +6,7 @@ import { componentAssetDataUrl } from '../../../core/publish/componentPlatform/r
 import { loadCompiledPlayerBundle } from '../loadCompiledPlayerBundle'
 import {compileCoursePlayback} from '../../../core/publish/componentPlatform/compileCoursePlayback'
 import {renderCompiledBuiltin} from './renderCompiledBuiltin'
-import {encodeDeliveryImage} from './encodeDeliveryImage'
+import {beginDeliveryImageEncoding} from './encodeDeliveryImage'
 import { zipSync, strToU8 } from 'fflate'
 import type { SingleHtmlExportMode } from '../course/coursePackagePreflight'
 import { prepareBundledFontEmbedding, resolveEmbeddedBundledFonts, bundledFontDataUrlCss, bundledFontRelativeUrlCss,
@@ -21,18 +21,24 @@ const fontDiagnostics = (payload: unknown, fonts: ReturnType<typeof resolveEmbed
 /** Export from the captured Session snapshot; rendering never reads the live author store. */
 export async function buildComponentPublished(snapshot: DocumentSnapshot, compile: ComponentCompilePort, assetUrl?: import('../../../core/publish/componentPlatform').ComponentPublishOptions['assetUrl'], singleHtmlMode: SingleHtmlExportMode = 'offline-portable', signal?: AbortSignal, onProgress?: () => void,imageDelivery=false) {
   signal?.throwIfAborted()
-  if (snapshot.model.kind !== 'course-v10') throw new Error('此导出入口只支持 Project V10')
+  if (snapshot.model.kind !== 'course-v10') throw new Error('此导出入口只支持果铃作品工程')
   const model = snapshot.model
-  const result = await buildPublishedCourseV3({ project: model.project, assetBytes: model.resources.assets, componentFiles: model.resources.components }, {
-    compilation: { compile }, assetUrl, singleHtmlMode, signal, onProgress,
-    ...(imageDelivery?{deliveryAsset:(asset,bytes)=>encodeDeliveryImage(asset,bytes,document,signal)}:{}),
-  })
-  return result
+  const images = imageDelivery ? beginDeliveryImageEncoding(document, snapshot) : undefined
+  let success = false
+  try {
+    const result = await buildPublishedCourseV3({ project: model.project, assetBytes: model.resources.assets, componentFiles: model.resources.components }, {
+      compilation: { compile }, assetUrl, singleHtmlMode, signal, onProgress,
+      ...(images ? { deliveryAsset: (asset, bytes) => images.encode(asset, bytes, signal) } : {}),
+    })
+    success = true
+    return result
+  } finally { images?.finish(success) }
 }
 
 export async function buildComponentHtml(snapshot: DocumentSnapshot, compile: ComponentCompilePort, mode: SingleHtmlExportMode = 'offline-portable', signal?: AbortSignal, onProgress?: () => void) {
-  await prepareBundledFontEmbedding()
   const result = await buildComponentPublished(snapshot, compile, undefined, mode, signal, onProgress,true)
+  signal?.throwIfAborted()
+  await prepareBundledFontEmbedding(result.payload)
   signal?.throwIfAborted()
   const fonts = resolveEmbeddedBundledFonts(result.payload)
   const compiled=await compileCoursePlayback(result.payload,{document,signal,renderBuiltin:(instance,key,project)=>renderCompiledBuiltin(instance,key,project,document)})
@@ -46,7 +52,6 @@ export async function buildComponentHtml(snapshot: DocumentSnapshot, compile: Co
 
 /** Save the same P0 into a package; actual resource bytes are separate ZIP entries. */
 export async function buildComponentWebPackage(snapshot: DocumentSnapshot, compile: ComponentCompilePort, signal?: AbortSignal, onProgress?: () => void) {
-  await prepareBundledFontEmbedding()
   const files: Record<string, Uint8Array> = {}
   const preparedAssets: Record<string, string> = {}
   const result = await buildComponentPublished(snapshot, compile, (asset, bytes) => {
@@ -57,6 +62,8 @@ export async function buildComponentWebPackage(snapshot: DocumentSnapshot, compi
     preparedAssets[asset.id] = componentAssetDataUrl(bytes,asset.mimeType).split(',')[1]!
     return filename
   }, undefined, signal, onProgress,true)
+  signal?.throwIfAborted()
+  await prepareBundledFontEmbedding(result.payload)
   signal?.throwIfAborted()
   const fonts = resolveEmbeddedBundledFonts(result.payload)
   Object.assign(files, bundledFontPackageFiles(fonts, 'fonts'))

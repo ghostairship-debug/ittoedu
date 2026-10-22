@@ -4,9 +4,12 @@ import sharp from 'sharp'
 import { observationSnapshotMatches, sameObservationIdentity, sameObservationTarget,
   type ViewObservationCapture, type ViewObservationIdentity, type ViewObservationSnapshot } from '../../../shared/workbench/viewObservation'
 import { ObservationImageStore } from './ObservationImageStore'
+import { observationDocumentIdentityMatches, type ViewObservationDocumentIdentity } from './observationSourceIdentity'
 
 export interface ViewObservationServiceOptions {
   snapshot(documentId: string): Promise<DocumentSnapshot>
+  /** The first snapshot proves project and location; later checks only need the canonical head. */
+  currentIdentity?(documentId: string): Promise<ViewObservationDocumentIdentity>
   /** Return null unless the mounted host has the exact requested identity. */
   captureLive?(input: { identity: ViewObservationIdentity; signal?: AbortSignal }): Promise<ViewObservationCapture | null>
   captureIsolated(input: { identity: ViewObservationIdentity; snapshot: ViewObservationSnapshot;
@@ -27,6 +30,13 @@ export class ViewObservationService implements ObservationServicePort {
   constructor(private readonly options: ViewObservationServiceOptions) {}
   async stopRun(runId: string): Promise<void> { this.stopped.add(runId); await this.options.images.clearRun(runId) }
 
+  private async assertCurrent(identity: ViewObservationIdentity, projectId: string): Promise<void> {
+    if (this.options.currentIdentity) {
+      if (!observationDocumentIdentityMatches(await this.options.currentIdentity(identity.documentId), identity))
+        throw new Error('观察目标已改变，请重新读取页面目标')
+    } else assertFresh(await this.options.snapshot(identity.documentId), identity, projectId)
+  }
+
   async observe(input: Parameters<ObservationServicePort['observe']>[0]): Promise<ObservationResult> {
     const identity: ViewObservationIdentity = { documentId: input.documentId, epoch: input.epoch,
       revision: input.revision, locationId: input.locationId,
@@ -42,10 +52,10 @@ export class ViewObservationService implements ObservationServicePort {
       // Interactive playback has its own host generation, distinct from an editor view token.
       if (!sameObservationTarget(observation.identity, identity))
         throw new Error('操作会话的画面与请求目标不符')
-      assertFresh(await this.options.snapshot(input.documentId), identity, input.projectId)
+      await this.assertCurrent(identity, input.projectId)
       const result = await this.crop(input.runId, observation, input.clip, input.signal)
       if (input.signal?.aborted || this.stopped.has(input.runId)) throw new Error('观察已取消')
-      assertFresh(await this.options.snapshot(input.documentId), identity, input.projectId)
+      await this.assertCurrent(identity, input.projectId)
       return result
     }
     let capture: ViewObservationCapture | null = null
@@ -58,19 +68,20 @@ export class ViewObservationService implements ObservationServicePort {
     if (!capture) capture = await this.options.captureIsolated({ identity, snapshot: structuredClone(snapshot), signal: input.signal })
     if (input.signal?.aborted || this.stopped.has(input.runId)) throw new Error('观察已取消')
     if (!sameObservationIdentity(capture.identity, identity)) throw new Error('捕获画面的宿主身份与请求目标不符')
-    assertFresh(await this.options.snapshot(input.documentId), identity, input.projectId)
+    await this.assertCurrent(identity, input.projectId)
     if (input.signal?.aborted || this.stopped.has(input.runId)) throw new Error('观察已取消')
     const image = await this.options.images.put(input.runId, capture.png, capture.width, capture.height)
     if (input.signal?.aborted || this.stopped.has(input.runId)) throw new Error('观察已取消')
-    assertFresh(await this.options.snapshot(input.documentId), identity, input.projectId)
+    await this.assertCurrent(identity, input.projectId)
     const result = await this.crop(input.runId, { source, identity, coverage: { width: capture.width, height: capture.height },
-      structure: capture.structure, diagnostics: capture.diagnostics, image }, input.clip, input.signal)
+      structure: capture.structure, diagnostics: capture.diagnostics, image }, input.clip, input.signal, capture.png)
     if (input.signal?.aborted || this.stopped.has(input.runId)) throw new Error('观察已取消')
-    assertFresh(await this.options.snapshot(input.documentId), identity, input.projectId)
+    await this.assertCurrent(identity, input.projectId)
     return result
   }
 
-  private async crop(runId: string, observation: ObservationResult, requested?: ObservationClip, signal?: AbortSignal): Promise<ObservationResult> {
+  private async crop(runId: string, observation: ObservationResult, requested?: ObservationClip, signal?: AbortSignal,
+    capturedBytes?: Uint8Array): Promise<ObservationResult> {
     if (!requested) return observation
     const viewport = observation.coverage.viewport ?? { width: observation.coverage.width, height: observation.coverage.height }
     if (![requested.x, requested.y, requested.width, requested.height].every(Number.isFinite)
@@ -81,13 +92,13 @@ export class ViewObservationService implements ObservationServicePort {
     const clip = { x: leftEdge, y: topEdge, width: Math.min(requested.x + requested.width, viewport.width) - leftEdge,
       height: Math.min(requested.y + requested.height, viewport.height) - topEdge }
     const originalImage = observation.image
-    const original = await this.options.images.read(runId, originalImage.resourceId)
+    const originalBytes = capturedBytes ?? (await this.options.images.read(runId, originalImage.resourceId)).bytes
     const scale = { x: originalImage.width / viewport.width, y: originalImage.height / viewport.height }
     const left = Math.floor(clip.x * scale.x), top = Math.floor(clip.y * scale.y)
     const width = Math.min(originalImage.width, Math.ceil((clip.x + clip.width) * scale.x)) - left
     const height = Math.min(originalImage.height, Math.ceil((clip.y + clip.height) * scale.y)) - top
     const capturedClip = { x: left / scale.x, y: top / scale.y, width: width / scale.x, height: height / scale.y }
-    const bytes = await sharp(original.bytes).extract({ left, top, width, height }).png().toBuffer()
+    const bytes = await sharp(originalBytes).extract({ left, top, width, height }).png().toBuffer()
     if (signal?.aborted || this.stopped.has(runId)) throw new Error('观察已取消')
     const image = await this.options.images.put(runId, bytes, width, height)
     // Handles continue to address the original page. Cropping never remaps or
@@ -97,7 +108,7 @@ export class ViewObservationService implements ObservationServicePort {
     // Raw tool records retain this complete capture. The model projection omits
     // it and links context.read to the original tool record instead.
     const result = { ...observation,
-      fullObservation: { ...observation, imageDataUrl: `data:image/png;base64,${Buffer.from(original.bytes).toString('base64')}` },
+      fullObservation: { ...observation, imageDataUrl: `data:image/png;base64,${Buffer.from(originalBytes).toString('base64')}` },
       image, originalImage, ...(elements ? { elements } : {}),
       coverage: { width, height, viewport, clip: capturedClip, scale, coordinateSpace: 'preview-viewport-css-pixels' as const } }
     return result

@@ -1,7 +1,7 @@
 import type { ObjectCommandPorts } from '../../editing/commands/objectCommands'
 import type { LayerOrderMove } from '../../editing/quickbar/layerOrder'
 import { courseObjectOrder } from '../../../core/course/courseObjectEdits'
-import { selectEditingScope, useEditorStore } from '../../store/editorStore'
+import { useEditorStore } from '../../store/editorStore'
 
 function planOrder(itemId: string, move: LayerOrderMove): string[] | null {
   const project = useEditorStore.getState().courseView.editingProject
@@ -13,11 +13,7 @@ export const selectionObjectCommands = {
   paste(): void { useEditorStore.getState().pasteNodes() },
   duplicate(): void { useEditorStore.getState().duplicateSelectedNodes() },
   remove(): void { useEditorStore.getState().deleteSelectedNodes() },
-  selectAll(): void {
-    const state=useEditorStore.getState(), project=state.courseView.project
-    if (!project) return
-    state.selectNodes(selectEditingScope(state)==='global'?[...project.global.underlay,...project.global.overlay]:[...(project.surfaces.find(surface=>surface.id===state.courseView.surfaceId)?.childIds??[])])
-  },
+  selectAll(): void { useEditorStore.getState().selectAllNodes() },
   canReorder(itemId: string, move: LayerOrderMove): boolean { return Boolean(planOrder(itemId,move)) },
   reorder(itemId: string, move: LayerOrderMove): void { const ids=planOrder(itemId,move); if(ids) useEditorStore.getState().reorderNodes(ids) },
   imageSource(assetId: string): { width:number; height:number; mimeType:string; bytes:Uint8Array|null } | null {

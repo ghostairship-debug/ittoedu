@@ -3,8 +3,10 @@ import type { DocumentSaveIdentity, DocumentSourcePublication, PreparedDocumentS
 import type { CourseProjectDocument } from '../courseProjectTypes'
 import type { CompositionContentEdit } from '../composition/edit'
 import type { CourseProjectV10 } from '../contracts/component-platform/project'
+import type { WorkProjectMigrationMap } from '../contracts/component-platform/workProjectMigration'
 import type { ComponentAppliedChanges, ComponentOperationBatch } from '../contracts/component-platform/operations'
 import type { ToolTarget } from './tools'
+import type { SourceRangeChange } from '../document/sourceMerge'
 
 /** Document identity is independent of the file's project ID and its path. */
 export type DocumentId = string
@@ -45,6 +47,12 @@ export interface DocumentTextChanges {
   aggregateMappings?: Array<{ before: Extract<ToolTarget, { kind: 'text-selection' }>; after: Extract<ToolTarget, { kind: 'text-selection' }>;
     /** Indexes into source above, in its actual execution order; other batch groups are not owned. */
     sourceIndexes: number[] }>
+}
+
+/** Advisory source locations only. They never change command identity or grant
+ * authority; Session proves them against its actual accepted before/after. */
+export interface DocumentDispatchOptions {
+  sourceChangeHints?: SourceRangeChange[]
 }
 
 /** Actual source facts for range continuation; resources and Undo remain in the document History. */
@@ -89,6 +97,8 @@ export interface DocumentSnapshot {
   documentId: DocumentId
   epoch: string
   revision: number
+  /** Durable head order; old in-process adapters may omit it and receive a full refresh. */
+  sequence?: number
   binding: DocumentBinding
   model: DocumentModel
   dirty: boolean
@@ -106,6 +116,22 @@ export interface DocumentSnapshot {
   undoHead?: { operationId: string; actor?: DocumentOperation['actor'] }
 }
 
+/** Model-free facts for state notifications and existing host identity consumers. */
+export interface DocumentSnapshotHead extends Omit<DocumentSnapshot, 'model'> {
+  sequence: number
+  kind: DocumentKind
+  projectId?: string
+}
+
+/** Only changed resources cross the UI boundary; null removes the existing entry. */
+export interface DocumentResourceChanges {
+  assets: Record<string, Uint8Array | null>
+  components: Record<string, Record<string, Uint8Array | null> | null>
+}
+export type DocumentModelUpdate =
+  | { kind: 'source'; documentKind: 'markdown' | 'text'; edits: Array<{ from: number; removed: string; text: string }>; resources: DocumentResourceChanges }
+  | { kind: 'course-v10'; revision: number; changes: ComponentAppliedChanges; resources: DocumentResourceChanges }
+
 export interface DocumentHistoryEntry {
   operationId: string
   actor?: DocumentOperation['actor']
@@ -113,15 +139,51 @@ export interface DocumentHistoryEntry {
   historyGroup?: string
   beforeRevision?: number
   revision?: number
-  before: DocumentModel
-  after: DocumentModel
+  /** Legacy snapshots are read at the recovery boundary; new entries retain accepted effects. */
+  before?: DocumentModel
+  after?: DocumentModel
+  effects?: DocumentAcceptedChange[]
+}
+
+/** Session-owned, already accepted state. Applying it never runs an author command or side effect. */
+export type DocumentAcceptedChange =
+  | { kind: 'source'; documentKind: 'markdown' | 'text';
+      edits: Array<{ from: number; removed: string; text: string }>;
+      beforeResources: DocumentResources; afterResources: DocumentResources }
+  | { kind: 'course-v10'; beforeRevision: number; revision: number;
+      forward: ComponentAppliedChanges; inverse: ComponentAppliedChanges;
+      beforeResources: DocumentResources; afterResources: DocumentResources }
+  | { kind: 'replace'; before: DocumentModel; after: DocumentModel }
+
+export type DocumentHistoryAction =
+  | { type: 'push'; entry: DocumentHistoryEntry }
+  | { type: 'amend'; entry: Omit<DocumentHistoryEntry, 'effects' | 'before' | 'after'>; effects: DocumentAcceptedChange[] }
+  | { type: 'undo' | 'redo' }
+  | { type: 'replace'; past: DocumentHistoryEntry[]; future: DocumentHistoryEntry[] }
+
+/** Internal journal delta; the checkpoint remains the complete authoritative recovery state. */
+export interface DocumentStateTransition {
+  documentId: DocumentId
+  baseSequence: number
+  sequence: number
+  epoch: string
+  revision: number
+  savedRevision: number | null
+  disposition: DocumentDisposition
+  binding?: DocumentBinding
+  modelChange?: DocumentAcceptedChange
+  savedModel?: { model: DocumentModel } | { clear: true }
+  history?: DocumentHistoryAction
+  operation?: DurableDocumentState['operations'][number]
+  stoppedRuns?: string[]
+  courseProjectMigrationIds?: WorkProjectMigrationMap
 }
 
 /** Complete recovery state; binary resources and history share the commit boundary. */
 export type DocumentDisposition = 'active' | 'closed' | 'discarded'
 export interface DurableDocumentState {
-  /** Version 1 is a legacy active record. Version 2 requires disposition, so an old reader rejects terminal records. */
-  schemaVersion: 1 | 2
+  /** V1 is legacy active; V2 adds disposition; V3 stores already accepted History/receipt effects. */
+  schemaVersion: 1 | 2 | 3
   disposition?: DocumentDisposition
   documentId: DocumentId
   epoch: string
@@ -130,19 +192,26 @@ export interface DurableDocumentState {
   savedRevision: number | null
   /** Last acknowledged disk model, kept separate from later local edits. */
   savedModel?: DocumentModel
+  /** Read-boundary identity relation for this legacy work; internal recovery metadata, never author content. */
+  courseProjectMigrationIds?: WorkProjectMigrationMap
   binding: DocumentBinding
   model: DocumentModel
   past: DocumentHistoryEntry[]
   future: DocumentHistoryEntry[]
   operations: { operationId: string; digest: string; result: DocumentOperationResult; actor?: DocumentOperation['actor']; runId?: string;
     before?: DocumentModel; after?: DocumentModel;
-    textChanges?: DocumentTextChanges; sourceChange?: DocumentSourceChange }[]
+    textChanges?: DocumentTextChanges; sourceChange?: DocumentSourceChange; effect?: DocumentAcceptedChange }[]
   stoppedRuns: string[]
 }
 
 export type DocumentEvent =
-  | { type: 'changed'; snapshot: DocumentSnapshot; operationId?: string; appliedChanges?: ComponentAppliedChanges }
+  | { type: 'changed'; snapshot: DocumentSnapshot; head?: DocumentSnapshotHead; update?: { baseRevision: number; baseSequence: number; model: DocumentModelUpdate }; operationId?: string; appliedChanges?: ComponentAppliedChanges }
+  | { type: 'state'; head: DocumentSnapshotHead; operationId?: string }
   | { type: 'closed'; documentId: DocumentId; epoch: string }
+
+/** The same event stream can carry an accepted update when the view already owns its base. */
+export type DocumentHostEvent = DocumentEvent
+  | { type: 'updated'; head: DocumentSnapshotHead; baseRevision: number; baseSequence: number; model: DocumentModelUpdate; operationId?: string; appliedChanges?: ComponentAppliedChanges }
 
 export interface DocumentDriver {
   readonly kind: DocumentKind
@@ -155,6 +224,9 @@ export interface DocumentDriver {
   /** Session-only: input is an owned, validated snapshot. Do not mutate it; validate the candidate once.
    * Unchanged resource bytes may be shared because public snapshots remain detached. */
   applyValidated?(model: DocumentModel, command: DocumentCommand): DocumentModel | Promise<DocumentModel>
+  /** Same canonical apply, with its already computed change facts for History/ACK/views. */
+  applyValidatedWithChanges?(model: DocumentModel, command: DocumentCommand): { model: DocumentModel; appliedChanges: ComponentAppliedChanges }
+    | Promise<{ model: DocumentModel; appliedChanges: ComponentAppliedChanges }>
   /** Adjust only the revision of a validated model; retain the driver's revision constraints. */
   withRevision(model: DocumentModel, revision: number): DocumentModel
   load(bytes: Uint8Array): DocumentModel | Promise<DocumentModel>
@@ -165,10 +237,15 @@ export interface DocumentDriver {
 /** No filesystem, Electron, DOM or renderer dependency is permitted in the core. */
 export interface DocumentPersistence {
   append(state: DurableDocumentState): Promise<void>
+  /** Session-only immutable input. Codec writes this small transition;
+   * checkpoint is encoded only when a standalone record is required, never cloned per input. */
+  appendTransition?(transition: DocumentStateTransition, checkpoint: DurableDocumentState): Promise<void>
   /** Durably end the supplied active state at sequence + 1 before its Session closes. */
   finalize?(state: DurableDocumentState, disposition: Exclude<DocumentDisposition, 'active'>): Promise<void>
   /** File owner captures dependencies of the frozen source, before serialization/publication. */
   prepareSave?(input: { model: DocumentModel; sourceBinding: DocumentBinding; targetBinding: DocumentBinding }): Promise<PreparedDocumentSave>
   save(input: { documentId: DocumentId; revision: number; model: DocumentModel; binding: DocumentBinding; bytes: Uint8Array;
     sourcePublication?: DocumentSourcePublication; saveIdentity?: DocumentSaveIdentity }): Promise<Extract<DocumentBinding, { kind: 'file' }>>
+  /** Session's already detached fixed-revision input; no second whole-model freeze. */
+  savePrepared?(input: Parameters<DocumentPersistence['save']>[0]): ReturnType<DocumentPersistence['save']>
 }

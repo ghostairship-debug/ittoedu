@@ -1,3 +1,4 @@
+import { createTestProjectFromLegacy } from '../helpers/glxWorkFixture'
 import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/react'
 import { afterEach, expect, it, vi } from 'vitest'
 import { createTeacherControllerData, createTeacherControllerRuntimeImplementation, TEACHER_CONTROLLER_DEFINITION } from '../../src/components/teacher-controller'
@@ -29,16 +30,21 @@ it('selects, drags and resizes Flow through the shared affine handles while enab
   vi.stubGlobal('PointerEvent', MouseEvent)
   vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(800)
   vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(400)
-  const project: CourseProjectV10 = { schemaVersion: 10, id: 'flow-controller', revision: 0, title: 'Mixed',
+  const project: CourseProjectV10 = createTestProjectFromLegacy({ schemaVersion: 10, id: 'flow-controller', revision: 0, title: 'Mixed',
     definitions: { [TEACHER_CONTROLLER_DEFINITION.id]: TEACHER_CONTROLLER_DEFINITION },
     instances: { teacher: { id: 'teacher', definitionId: TEACHER_CONTROLLER_DEFINITION.id, data: JSON.parse(JSON.stringify({ ...createTeacherControllerData(), defaultCollapsed: false, hudReferenceSize: { width: 800, height: 400 } })),
       frame: { width: 880, height: 64, transform: [1, 0, 0, 1, 200, 638] } } }, global: { underlay: [], overlay: ['teacher'] }, assets: {},
-    surfaces: [{ id: 'slide', kind: 'slide', title: 'Slide', childIds: [] }, { id: 'flow', kind: 'flow', title: 'Flow', childIds: [] }, { id: 'spatial', kind: 'spatial', title: 'Spatial', childIds: [] }] }
-  const before = structuredClone(project), selected = vi.fn(), nextSurface = vi.fn(), write = vi.fn(async (_operation: { edits: ComponentEdit[]; target: CapturedCourseTarget }) => {})
+    surfaces: [{ id: 'slide', kind: 'slide', title: 'Slide', childIds: [] }, { id: 'flow', kind: 'flow', title: 'Flow', childIds: [] }, { id: 'spatial', kind: 'spatial', title: 'Spatial', childIds: [] }] })
+  let location = 'flow'
+  const nextSurface = vi.fn((id: string, signal?: AbortSignal, onCommit?: () => void) => {
+    if (signal?.aborted) return false
+    location = id; onCommit?.(); return true
+  })
+  const before = structuredClone(project), selected = vi.fn(), write = vi.fn(async (_operation: { edits: ComponentEdit[]; target: CapturedCourseTarget }) => {})
   const target = { documentId: 'doc', epoch: 'activation', project, editingProject: project, resources: { assets: {}, components: {} }, surfaceId: 'flow', activeStateId: null }
   const bridge = { captureTarget: () => target, capture: (edits: unknown) => ({ edits, target }), editCaptured: write }
   let playing = false, mounted: MountedComponent | undefined
-  const navigation = new ComponentNavigationOwner({ project: () => project, surfaceId: () => 'flow', interactive: () => playing, select: nextSurface })
+  const navigation = new ComponentNavigationOwner({ project: () => project, surfaceId: () => location, interactive: () => playing, select: nextSurface })
   const abort = new AbortController()
   const scope: ComponentRuntimeScope = { runScopeId: 'flow-ui', instanceId: 'teacher', generation: 1, signal: abort.signal,
     isActive: () => !abort.signal.aborted, cleanup() {}, target: () => null, events: { emit() {}, subscribe: () => () => {} },
@@ -90,7 +96,11 @@ it('selects, drags and resizes Flow through the shared affine handles while enab
   ui.rerender(<FlowLocationWorkspace {...props} canvasMode="run" />)
   await waitFor(() => expect(ui.container.querySelector<HTMLButtonElement>('[data-control="next-scene"]')).not.toBeDisabled())
   await act(async () => fireEvent.click(ui.container.querySelector<HTMLButtonElement>('[data-control="next-scene"]')!))
-  expect(nextSurface).toHaveBeenCalledWith('spatial', expect.any(AbortSignal))
+  expect(nextSurface).toHaveBeenCalledTimes(1)
+  expect(nextSurface).toHaveBeenCalledWith('spatial', expect.any(AbortSignal), expect.any(Function))
+  expect(navigation.readLocation()).toBe('spatial')
+  expect(navigation.read().progress).toMatchObject({ sceneIndex: 2 })
+  await waitFor(() => expect(ui.container.querySelector<HTMLButtonElement>('[data-control="next-scene"]')).toBeDisabled())
   expect(project).toEqual(before)
   ui.unmount(); abort.abort(); navigation.dispose()
   expect(probe.runtime.setPlaying).toHaveBeenLastCalledWith(false)

@@ -3,7 +3,7 @@ import type { NativeInputContent, NativeInputStyle } from '../../shared/contract
 import type { CapturedCourseTarget } from '../../renderer/documents/CourseV10DocumentBridge'
 import type { EditorStoreKernel } from '../../renderer/store/editorStoreKernel'
 import { buildInputRuleFamily, inspectInputRuleFamily, type InputRuleConfig } from '../../core/tools/inputRuleFamily'
-import { componentRuleEdits, interactionBehavior, interactionRules } from '../../shared/componentInteractionData'
+import { componentRuleEdits, interactionBehavior, interactionRules, componentInteractionOwner } from '../../shared/componentInteractionData'
 import { inputAnswerContent, inputDataSchema } from './data'
 import { equalComponentValue } from '../../core/drivers/courseV10Operations'
 import { normalizeShortAnswer } from '../../shared/assessmentEvaluators'
@@ -13,11 +13,9 @@ export function inputAuthoringContent(instance: ComponentInstance): NativeInputC
   return inputAnswerContent(instance.id, inputDataSchema.parse(instance.data))
 }
 function inputRuleOwner(project: CourseProjectV10, surfaceId: string | null, instanceId: string): ComponentTarget {
-  const seen = new Set<string>()
-  const contains = (id: string): boolean => { if (seen.has(id)) return false; seen.add(id); return id === instanceId || (project.instances[id]?.childIds ?? []).some(contains) }
-  if ([...project.global.underlay, ...project.global.overlay].some(contains)) return { kind: 'project' }
-  if (!surfaceId) throw new Error('填空目标页面已不存在')
-  return { kind: 'surface', surfaceId }
+  const instance = project.instances[instanceId]
+  if (!instance) throw new Error('填空对象已不存在')
+  return componentInteractionOwner(project, instance)
 }
 export function inspectComponentInputRules(project: CourseProjectV10, surfaceId: string | null, instanceId: string) {
   const instance = project.instances[instanceId]

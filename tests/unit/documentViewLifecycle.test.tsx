@@ -48,3 +48,25 @@ it('deactivates hits and portals while retaining unacknowledged input and its co
     expect(editor.view.state.doc.textContent).toBe('继续待确认原正文')
   } finally { cleanup(); host.remove(); geometry.mockRestore(); factory.mockRestore() }
 })
+
+
+it('reports the actual layout root through creation, revision updates, source switching and disposal', async () => {
+  const mounted = vi.fn(), document: MarkdownDocument = { content: { blocks: [
+    { id: 'body', type: 'paragraph', content: { inlines: [{ type: 'text', text: '可观察正文' }] } },
+  ] }, resources: emptyDocumentResources() }
+  const props = { document, revision: '1', target: 'file' as const, onLayoutMount: mounted,
+    onChange: () => true, onDraft() {}, onUndo() {}, onRedo() {} }
+  const ui = render(<SharedDocumentEditor {...props} />)
+  try {
+    const first = mounted.mock.calls.at(-1)?.[0] as HTMLElement
+    expect(first).toHaveClass('ProseMirror'); expect(first.isConnected).toBe(true)
+    ui.rerender(<SharedDocumentEditor {...props} revision="2" />)
+    expect(mounted).toHaveBeenCalledOnce(); expect(first.isConnected).toBe(true)
+    await act(async () => fireEvent.click(ui.getByRole('button', { name: '源码' })))
+    expect(mounted).toHaveBeenLastCalledWith(null); expect(first.isConnected).toBe(false)
+    await act(async () => fireEvent.click(ui.getByRole('button', { name: '正文' })))
+    const second = mounted.mock.calls.at(-1)?.[0] as HTMLElement
+    expect(second).toHaveClass('ProseMirror'); expect(second).not.toBe(first); expect(second.isConnected).toBe(true)
+    ui.unmount(); expect(mounted).toHaveBeenLastCalledWith(null); expect(second.isConnected).toBe(false)
+  } finally { cleanup() }
+})

@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import { createBlankCourseProjectV10 } from '../../src/core/course/createCourseProjectV10'
+import { componentContainerBuiltinKey, createComponentContainerInstance } from '../../src/shared/contracts/component-platform/project'
 import { TEXT_DEFINITION } from '../../src/components/text/adapters'
 import { createFormulaComponentData, createTextComponentData, textComponentDataSchema } from '../../src/components/text/data'
 import { documentTextLength, plainDocumentText } from '../../src/shared/document/content'
@@ -46,7 +47,13 @@ async function run() {
   ] })
   project.instances.body = { id: 'body', definitionId: TEXT_DEFINITION.id, data: jsonValueSchema.parse(original), style: { opacity: 0.9 } }
   project.instances.untouched = { id: 'untouched', definitionId: TEXT_DEFINITION.id, data: jsonValueSchema.parse(createTextComponentData('未选正文保持原样')) }
-  project.surfaces = [{ id: 'flow', kind: 'flow', title: '讲义', childIds: ['body', 'untouched'] }]
+  const starterId = project.rootIds[0], starterDefinitionId = project.instances[starterId].definitionId
+  delete project.instances[starterId]
+  delete project.definitions[starterDefinitionId]
+  const flowDefinitionId = componentContainerBuiltinKey('flow')
+  project.definitions[flowDefinitionId] = { id: flowDefinitionId, role: 'mixed', title: '流式容器', implementation: { kind: 'builtin', key: flowDefinitionId } }
+  project.instances.flow = createComponentContainerInstance({ id: 'flow', kind: 'flow', title: '讲义', childIds: ['body', 'untouched'] }, flowDefinitionId)
+  project.rootIds = ['flow']; project.entry = { rootInstanceId: 'flow' }
   const initial = await host.internalAPI.create({ kind: 'course-v10', project, resources: { assets: {}, components: {} } }, '代表课件.h5lesson')
   const target = { kind: 'course-instance' as const, surfaceId: 'flow', instanceId: 'body', dataPath: ['content'], from: 0, to: documentTextLength(original.content) }
   const contentOutput = prepareExecutionContentOutput(initial, target)
@@ -80,7 +87,7 @@ async function run() {
         ...(tool.result?.kind === 'document-operation' ? { receiptStatus: tool.result.result.status } : {}) })), undoDepth: current.undoDepth })
     assert.equal(ended.status, 'completed')
     assert.equal(current.model.kind, 'course-v10')
-    if (current.model.kind !== 'course-v10') throw new Error('V10 required')
+    if (current.model.kind !== 'course-v10') throw new Error('Component work document required')
     const content = textComponentDataSchema.parse(current.model.project.instances.body.data).content
     const body = plainDocumentText(content)
     assert(body.includes('3') && body.includes('9'), 'New prose must consume the material numbers')

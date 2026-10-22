@@ -1,3 +1,4 @@
+import { testContainerInstance } from '../../../helpers/glxWorkFixture'
 import { afterEach, expect, it } from 'vitest'
 import { readHtmlDocumentText } from '../../../../src/shared/document/htmlText'
 import { createBlankCourseProjectV10 } from '../../../../src/core/course/createCourseProjectV10'
@@ -17,7 +18,7 @@ it('half-transparent authored HTML text keeps alpha through V10 archive and the 
   const project = createBlankCourseProjectV10('透明色保真')
   project.definitions[TEXT_DEFINITION.id] = TEXT_DEFINITION
   project.instances.text = { id: 'text', definitionId: TEXT_DEFINITION.id, data: textDataEdit('fixture', createTextComponentData(parsed)).value, frame: { width: 320, height: 90, transform: [1, 0, 0, 1, 0, 0] } }
-  project.surfaces[0].childIds = ['text']
+  testContainerInstance(project, 0).childIds = ['text']
   const driver = new CourseV10Driver(), reopened = driver.load(driver.serialize({ kind: 'course-v10', project, resources: { assets: {}, components: {} } }))
   if (reopened.kind !== 'course-v10') throw new Error('V10 required')
   css.style.color = textComponentDataSchema.parse(reopened.project.instances.text.data).content.inlines[0].style?.color ?? ''

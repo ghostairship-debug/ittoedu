@@ -1,5 +1,6 @@
 import { strFromU8, strToU8 } from 'fflate'
 import { courseProjectV10Schema } from '../../../shared/contracts/component-platform/schema'
+import { createWorkProjectMigrationMap, normalizeWorkProject, type WorkProjectMigrationMap } from '../../../shared/contracts/component-platform/workProjectMigration'
 import type { CourseProjectV10 } from '../../../shared/contracts/component-platform/project'
 import type { DocumentResources } from '../../../shared/workbench/document'
 import { assertSafeArchivePath } from './archivePath'
@@ -45,13 +46,14 @@ export function createCourseProjectV10Archive(data: CourseProjectV10ArchiveData)
   return zipFlatArchive(files)
 }
 
-export function openCourseProjectV10Archive(bytes: Uint8Array): CourseProjectV10ArchiveData {
+export function openCourseProjectV10Archive(bytes: Uint8Array, options: { identities?: WorkProjectMigrationMap; includeMigrationIds?: boolean } = {}): CourseProjectV10ArchiveData & { courseProjectMigrationIds?: WorkProjectMigrationMap } {
   const files = unzipFlatArchive(bytes)
   for (const path of Object.keys(files)) assertSafeArchivePath(path, 'project', { allowDirectory: true })
   if (!files['project.json']) throw new Error('工程包缺少 project.json')
   const raw: unknown = JSON.parse(strFromU8(files['project.json']))
-  if (!raw || typeof raw !== 'object' || !('schemaVersion' in raw) || raw.schemaVersion !== 10) throw new Error('此入口仅支持独立 Project V10；旧工程原件未改变')
-  const project = normalizeWebAuthoring(courseProjectV10Schema.parse(raw))
+  if (!raw || typeof raw !== 'object' || !('schemaVersion' in raw) || raw.schemaVersion !== 10 && raw.schemaVersion !== 11) throw new Error('此入口支持 Project 11 及现行 V10 的单次读入转换；原件未改变')
+  const identities = raw.schemaVersion === 10 ? createWorkProjectMigrationMap([raw], options.identities) : undefined
+  const project = normalizeWebAuthoring(normalizeWorkProject(raw, identities))
   const resources: DocumentResources = { assets: Object.create(null), components: Object.create(null) }
   const consumed = new Set(['project.json'])
   for (const [id, asset] of Object.entries(project.assets)) {
@@ -69,5 +71,5 @@ export function openCourseProjectV10Archive(bytes: Uint8Array): CourseProjectV10
     resources.components[id][parts.join('/')] = content
   }
   validateCourseProjectV10Resources(project, resources)
-  return { project, resources }
+  return { project, resources, ...(options.includeMigrationIds && identities ? { courseProjectMigrationIds: identities } : {}) }
 }

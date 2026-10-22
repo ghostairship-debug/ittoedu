@@ -47,14 +47,14 @@ it('M05 edits only the second repeated paragraph and retains IDs, surrounding wh
   const list = parsed.document.content.blocks[3], nextList = after.document.content.blocks[3]
   expect(list.type === 'list' && nextList.type === 'list' && nextList.items[0].id).toBe(list.type === 'list' && list.items[0].id)
 })
-it('M05 real editor keeps source bytes on body input, retains an incomplete source draft and returns to the same mapped body', () => {
+it('M05 real editor keeps source bytes on body input and renders incomplete source as a repairable fragment', () => {
   const source = '# 标题\n\n原文😀\n\n[链接](https://e.com)\n', initial = parse(source), factory = vi.spyOn(sessions, 'createLayoutEditor')
   const handle = createRef<SharedDocumentEditorHandle>(), saved: string[] = []
   function View() {
     const [current, setCurrent] = useState(initial), [draft, setDraft] = useState(source)
     return <SharedDocumentEditor ref={handle} document={current.document} sourceMap={current.sourceMap} sourceDraft={draft} revision={draft} initialMode="layout" target="file"
       onChange={document => { setCurrent(value => ({ ...value, document })); return true }}
-      onDraft={text => { saved.push(text); setDraft(text); const parsed = parseDocumentMarkdown(text, { target: 'file', createId: () => crypto.randomUUID(), previous: current }); if (parsed.status === 'valid') setCurrent(parsed) }} onUndo={() => {}} onRedo={() => {}} />
+      onDraft={text => { saved.push(text); setDraft(text); const parsed = parseDocumentMarkdown(text, { target: 'file', recoverUnsupportedBlocks: true, createId: () => crypto.randomUUID(), previous: current }); if (parsed.status === 'valid') setCurrent(parsed) }} onUndo={() => {}} onRedo={() => {}} />
   }
   const ui = render(<View />), editor = factory.mock.results[0].value as ReturnType<typeof sessions.createLayoutEditor>
   let position = 0; editor.view.state.doc.descendants((node, at) => { if (node.isText && node.text === '原文😀') position = at })
@@ -65,9 +65,11 @@ it('M05 real editor keeps source bytes on body input, retains an incomplete sour
   act(() => cm.dispatch({ changes: { from: cm.state.doc.length, insert: '\n```js\nunfinished' } }))
   expect(handle.current?.flush().source).toContain('unfinished')
   fireEvent.click(screen.getByRole('button', { name: '正文' }))
-  expect(ui.container.querySelector('.cm-content')).toBeTruthy()
+  expect(screen.getByRole('textbox', { name: '正文编辑' })).toBeTruthy()
   expect(handle.current?.flush().source).toContain('unfinished')
-  act(() => cm.dispatch({ changes: { from: cm.state.doc.length, insert: '\n```' } }))
+  fireEvent.click(screen.getByRole('button', { name: '源码' }))
+  const repair = SourceView.findFromDOM(ui.container.querySelector('.cm-content')!)!
+  act(() => repair.dispatch({ changes: { from: repair.state.doc.length, insert: '\n```' } }))
   fireEvent.click(screen.getByRole('button', { name: '正文' }))
   expect(screen.getByRole('textbox', { name: '正文编辑' })).toBeTruthy()
   expect(handle.current?.flush().source).toContain('unfinished\n```')

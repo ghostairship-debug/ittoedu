@@ -1,3 +1,4 @@
+import { componentContainers } from '../../../shared/contracts/component-platform/project'
 import type { EditorStoreKernel } from '../../store/editorStoreKernel'
 import type { ComponentEdit } from '../../../shared/contracts/component-platform/operations'
 import { resolveComponentBackground, type ComponentAsset, type JsonObject } from '../../../shared/contracts/component-platform/project'
@@ -8,6 +9,7 @@ import { frameCorners, translateFrame, transformVector, invertMatrix } from '../
 import type { ComponentFrame } from '../../../shared/contracts/component-platform/frame'
 import { slideLightPageCommands, slideLightObjectCommands, type SlideLightCommand } from '../../editing/commands/slideLightCommands'
 import { componentPropertiesView, componentPropertiesEdits } from '../../ui/properties/componentProperties'
+import { componentWorkNavigationScenes } from '../../interactions/componentInteractionAuthoring'
 
 export interface SlideLightPageTarget extends CapturedCourseTarget { readonly kind: 'page' }
 export interface SlideLightObjectTarget extends CapturedCourseTarget { readonly kind: 'object'; readonly instanceId: string; readonly itemId: string }
@@ -36,16 +38,16 @@ export function createSlideLightEditingPort(owner: SlideLightEditingOwner) {
   const capturePage = (): SlideLightPageTarget | null => {
     if (!kernel.readView().project || kernel.readView().pending) return null
     const target = kernel.captureTarget()
-    return target.editingProject.surfaces.find(surface => surface.id === target.surfaceId)?.kind === 'slide' ? { ...target, kind: 'page' } : null
+    return componentContainers(target.editingProject).find(surface => surface.id === target.surfaceId)?.kind === 'slide' ? { ...target, kind: 'page' } : null
   }
   const captureObject = (): SlideLightObjectTarget | null => {
     const page = capturePage()
     return page?.instanceId && page.instanceIds.length === 1 ? { ...page, kind: 'object', instanceId: page.instanceId, itemId: page.instanceId } : null
   }
   const viewPage = (target: SlideLightPageTarget): SlideLightPageView => {
-    const surface = target.editingProject.surfaces.find(value => value.id === target.surfaceId)
+    const surface = componentContainers(target.editingProject).find(value => value.id === target.surfaceId)
     if (!surface) throw new Error('页面已不存在')
-    const base = target.project.surfaces.find(value => value.id === target.surfaceId)
+    const base = componentContainers(target.project).find(value => value.id === target.surfaceId)
     const state = base?.presentation?.states.find(value => value.id === target.activeStateId)
     return { target, backgroundColor: resolveComponentBackground(target.editingProject,surface).color,
       commands: slideLightPageCommands({stateBackgroundOverride:Boolean(state?.background)}).map(command => ({ ...command, disabledReason: command.kind === 'audio-import' ? owner.chooseAudio && owner.placeAudio ? null : '音频放置入口尚未接入' : command.disabledReason })) }
@@ -57,7 +59,7 @@ export function createSlideLightEditingPort(owner: SlideLightEditingOwner) {
     const appearance = data.appearance && typeof data.appearance === 'object' && !Array.isArray(data.appearance) ? data.appearance as JsonObject : {}
     const professional = componentPropertiesView(item, target.editingProject.definitions[item.definitionId])
     const commands = slideLightObjectCommands({ isText: professional.type === 'text', locked: componentIsLocked(target.editingProject,target.instanceId),
-      clickBindable: Boolean(owner.runInteraction), sounds: owner.readSounds?.(target) ?? [], locations: target.editingProject.surfaces.map(surface => ({ id: surface.id, label: surface.title })) })
+      clickBindable: Boolean(owner.runInteraction), sounds: owner.readSounds?.(target) ?? [], locations: componentWorkNavigationScenes(target.editingProject).map(scene => ({ id: scene.id, label: scene.name })) })
     return { target, commands, fontFamily: typeof appearance.fontFamily === 'string' ? appearance.fontFamily : null,
       lineSpacing: professional.type === 'text' ? professional.style.lineSpacing : null,
       opacity: typeof item.style?.opacity === 'number' ? item.style.opacity : 1 }
@@ -76,7 +78,7 @@ export function createSlideLightEditingPort(owner: SlideLightEditingOwner) {
     if (available.kind === 'audio-import') await placeAudio(target)
     else if (available.kind === 'scene-background') {
       if(owner.setBackground) await owner.setBackground(target,String(available.value))
-      else { const surface=target.project.surfaces.find(value=>value.id===target.surfaceId)!; await commit(target,[{type:'surface.background.set',surfaceId:surface.id,background:mergeComponentBackground(surface.background,{mode:'own',color:String(available.value)})}]) }
+      else { const surface=componentContainers(target.project).find(value=>value.id===target.surfaceId)!; await commit(target,[{type:'surface.background.set',surfaceId:surface.id,background:mergeComponentBackground(surface.background,{mode:'own',color:String(available.value)})}]) }
     }
   }
   const runObject = async (target: SlideLightObjectTarget, command: SlideLightCommand) => {
@@ -89,7 +91,7 @@ export function createSlideLightEditingPort(owner: SlideLightEditingOwner) {
       case 'font': return commit(target, componentPropertiesEdits(item, target.editingProject.definitions[item.definitionId], { style: { fontFamily: String(value) } }))
       case 'line-spacing': return commit(target, componentPropertiesEdits(item, target.editingProject.definitions[item.definitionId], { style: { lineSpacing: Number(value) } }))
       case 'page-align': {
-        const surface = target.editingProject.surfaces.find(value => value.id === target.surfaceId)
+        const surface = componentContainers(target.editingProject).find(value => value.id === target.surfaceId)
         if (!item.frame || !surface?.designSize) throw new Error('当前对象没有可对齐的页面 frame')
         const corners = frameCorners(item.frame, componentParentMatrix(target.editingProject,id)), xs = corners.map(point => point.x), ys = corners.map(point => point.y)
         const left = Math.min(...xs), right = Math.max(...xs), top = Math.min(...ys), bottom = Math.max(...ys)

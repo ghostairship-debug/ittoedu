@@ -25,32 +25,57 @@ function crop(rectangle: MediaRectangle, width: number, height: number) {
 
 /** Lossless intermediates avoid accumulating JPEG/WebP loss for each gesture. */
 export async function editImageFile(bytes: Uint8Array, operations: readonly MediaFileOperation[], signal?: AbortSignal): Promise<MediaFileContent> {
-  const initial = await inspectImageFile(bytes)
-  if (!operations.length) return initial
-  if (!initial.editable) throw new Error(initial.editReason)
-  const sharp = getImageDecoder()
-  let working = await sharp(bytes).autoOrient().keepMetadata().png().toBuffer()
-  let width = initial.width, height = initial.height
-  for (const operation of operations) {
+  const editor = new ImageFileEditSession(bytes)
+  try { return await editor.prepare(operations, signal) }
+  finally { editor.dispose() }
+}
+
+/** One live file draft keeps only its latest lossless prefix, not a second undo history. */
+export class ImageFileEditSession {
+  private initial?: ReturnType<typeof inspectImageFile>
+  private prefix?: { operations: readonly MediaFileOperation[]; working: Buffer; width: number; height: number; content: MediaFileContent }
+  private generation = 0
+  private disposed = false
+  constructor(private bytes: Uint8Array | undefined) {}
+  async prepare(operations: readonly MediaFileOperation[], signal?: AbortSignal): Promise<MediaFileContent> {
+    if (this.disposed || !this.bytes) throw new Error('图片编辑已结束')
+    const generation = ++this.generation
+    const bytes = this.bytes
+    const initial = await (this.initial ??= inspectImageFile(bytes))
+    if (!operations.length) return initial
+    if (!initial.editable) throw new Error(initial.editReason)
+    const sharp = getImageDecoder()
+    const prefix = this.prefix
+    const reusable = prefix && prefix.operations.length <= operations.length
+      && prefix.operations.every((operation, index) => JSON.stringify(operation) === JSON.stringify(operations[index])) ? prefix : undefined
+    if (reusable?.operations.length === operations.length) return reusable.content
+    let working = reusable?.working ?? await sharp(bytes).autoOrient().keepMetadata().png().toBuffer()
+    let width = reusable?.width ?? initial.width, height = reusable?.height ?? initial.height
+    for (const operation of operations.slice(reusable?.operations.length ?? 0)) {
+      signal?.throwIfAborted()
+      let pipeline = sharp(working).keepMetadata()
+      if (operation.type === 'image.crop') pipeline = pipeline.extract(crop(operation.rectangle, width, height))
+      else if (operation.type === 'image.rotate') pipeline = pipeline.rotate(operation.degrees)
+      else if (operation.type === 'image.rectangle' || operation.type === 'image.ink') {
+        const stroke = operation.strokeWidth * Math.min(width, height)
+        const shape = operation.type === 'image.rectangle'
+          ? `<rect x="${operation.rectangle.x * width}" y="${operation.rectangle.y * height}" width="${operation.rectangle.width * width}" height="${operation.rectangle.height * height}"/>`
+          : `<polyline points="${operation.points.map(point => `${point.x * width},${point.y * height}`).join(' ')}"/>`
+        const overlay = Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}"><g fill="none" stroke="${operation.color}" stroke-width="${stroke}" stroke-linejoin="round" stroke-linecap="round">${shape}</g></svg>`)
+        pipeline = pipeline.composite([{ input: overlay }])
+      } else throw new Error('图片不能应用 PDF 编辑操作')
+      const result = await pipeline.png().toBuffer({ resolveWithObject: true })
+      working = result.data; width = result.info.width; height = result.info.height
+    }
     signal?.throwIfAborted()
-    let pipeline = sharp(working).keepMetadata()
-    if (operation.type === 'image.crop') pipeline = pipeline.extract(crop(operation.rectangle, width, height))
-    else if (operation.type === 'image.rotate') pipeline = pipeline.rotate(operation.degrees)
-    else if (operation.type === 'image.rectangle' || operation.type === 'image.ink') {
-      const stroke = operation.strokeWidth * Math.min(width, height)
-      const shape = operation.type === 'image.rectangle'
-        ? `<rect x="${operation.rectangle.x * width}" y="${operation.rectangle.y * height}" width="${operation.rectangle.width * width}" height="${operation.rectangle.height * height}"/>`
-        : `<polyline points="${operation.points.map(point => `${point.x * width},${point.y * height}`).join(' ')}"/>`
-      const overlay = Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}"><g fill="none" stroke="${operation.color}" stroke-width="${stroke}" stroke-linejoin="round" stroke-linecap="round">${shape}</g></svg>`)
-      pipeline = pipeline.composite([{ input: overlay }])
-    } else throw new Error('图片不能应用 PDF 编辑操作')
-    const result = await pipeline.png().toBuffer({ resolveWithObject: true })
-    working = result.data; width = result.info.width; height = result.info.height
+    const output = sharp(working).keepMetadata()
+    const result = initial.mimeType === 'image/jpeg' ? await output.jpeg({ quality: 95 }).toBuffer()
+      : initial.mimeType === 'image/webp' ? await output.webp({ lossless: true }).toBuffer()
+        : initial.mimeType === 'image/avif' ? await output.avif({ lossless: true }).toBuffer() : await output.png().toBuffer()
+    const content = await inspectImageFile(result)
+    signal?.throwIfAborted()
+    if (!this.disposed && generation === this.generation) this.prefix = { operations: structuredClone(operations), working, width, height, content }
+    return content
   }
-  signal?.throwIfAborted()
-  const output = sharp(working).keepMetadata()
-  const result = initial.mimeType === 'image/jpeg' ? await output.jpeg({ quality: 95 }).toBuffer()
-    : initial.mimeType === 'image/webp' ? await output.webp({ lossless: true }).toBuffer()
-      : initial.mimeType === 'image/avif' ? await output.avif({ lossless: true }).toBuffer() : await output.png().toBuffer()
-  return inspectImageFile(result)
+  dispose() { this.disposed = true; ++this.generation; this.prefix = undefined; this.initial = undefined; this.bytes = undefined }
 }

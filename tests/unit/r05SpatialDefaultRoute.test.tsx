@@ -1,3 +1,5 @@
+import { createTestProjectFromLegacy, testContainerInstance } from '../helpers/glxWorkFixture'
+import { componentSurfaces } from '../../src/shared/contracts/component-platform/project'
 import { afterEach, expect, it } from 'vitest'
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { useState } from 'react'
@@ -17,7 +19,7 @@ import { DocumentHostService } from '../../src/main/workbench/DocumentHostServic
 import { SpatialPathEditor } from '../../src/renderer/ui/SpatialPathEditor'
 
 afterEach(cleanup)
-const sample = (): CourseProjectV10 => ({ schemaVersion: 10, id: 'routes', revision: 0, title: 'Different spatial routes', assets: {},
+const sample = (): CourseProjectV10 => (createTestProjectFromLegacy({ schemaVersion: 10, id: 'routes', revision: 0, title: 'Different spatial routes', assets: {},
   definitions: {}, instances: {}, global: { underlay: [], overlay: [] }, surfaces: [
     { id: 'before', kind: 'slide', title: 'Before', childIds: [] },
     { id: 'world', kind: 'spatial', title: 'World', childIds: [], designSize: { width: 800, height: 400 }, spatial: {
@@ -27,8 +29,8 @@ const sample = (): CourseProjectV10 => ({ schemaVersion: 10, id: 'routes', revis
         { id: 'C', title: 'C', pose: { x: 300, y: 0, zoom: 1 } },
       ], paths: [{ id: 'p', title: 'Route P', frameIds: ['B', 'A'] }, { id: 'q', title: 'Route Q', frameIds: ['C', 'B'] }],
     } }, { id: 'after', kind: 'slide', title: 'After', childIds: [] },
-  ] })
-const spatial = (project: CourseProjectV10) => project.surfaces[1].spatial!
+  ] }))
+const spatial = (project: CourseProjectV10) => testContainerInstance(project, 1).container.spatial!
 const apply = (project: CourseProjectV10, edits: ComponentEdit[]) => applyComponentOperation(project, captureComponentOperation(project, edits))
 const route = (project: CourseProjectV10, pathId?: string | null) => spatialTourStops(spatial(project), pathId, { width: 800, height: 400 }, []).map(stop => stop.frameId)
 
@@ -108,7 +110,7 @@ it('preserves independent frames/path order and default across Main save, cold o
     expect(route(project)).toEqual(['C', 'A'])
     expect(route(project, null)).toEqual(['B', 'A', 'C'])
     const copied = duplicateSurfaceEdits(project, 'world')
-    const copy = apply(project, copied.edits).surfaces.find(surface => surface.id === copied.surfaceId)!
+    const copy = componentSurfaces(apply(project, copied.edits)).find(surface => surface.id === copied.surfaceId)!
     expect(copy.spatial!.defaultPathId).toBe(copy.spatial!.paths![1].id)
     expect(copy.spatial!.defaultPathId).not.toBe('q')
     const { payload } = await buildPublishedCourseV3({ project, assetBytes: {} })
@@ -136,7 +138,7 @@ it('edits one existing path member at a time and changes its supported member ty
       const value = sample()
       value.definitions.card = { id: 'card', role: 'content', implementation: { kind: 'builtin', key: 'test.card' } }
       value.instances.X = { id: 'X', name: '对象 X', definitionId: 'card', data: {}, frame: { width: 80, height: 40, transform: [1, 0, 0, 1, 0, 0] } }
-      value.surfaces[1].childIds.push('X')
+      testContainerInstance(value, 1).childIds.push('X')
       return value
     })
     const value = spatial(project)

@@ -1,7 +1,9 @@
 import { promises as fs } from 'node:fs'
+import { createHash } from 'node:crypto'
 import path from 'node:path'
 import { scanHtmlSource } from '../../../shared/html/htmlSourceScanner'
-import { extractHtmlResources, htmlResourceSources } from '../htmlImport/extractHtmlResources'
+import { htmlResourceSources } from '../htmlImport/extractHtmlResources'
+import { analyzeHtmlResources } from '../htmlImport/htmlResourceAnalysis'
 import type { HtmlResourceSource } from '../htmlImport/types'
 import { isContainedPath } from './htmlPreviewProtocol'
 
@@ -78,27 +80,65 @@ export async function resolveHtmlPreviewResource(rootRealPath: string, relativeP
   } catch { return null }
 }
 
+const resourceDigest = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex')
+type ResourceCollection = { sources: HtmlResourceSource[]; dependencies: ReadonlyMap<string, string> }
+
 /** Follow the existing realpath-closed local CSS reads; never fetch remote stylesheets to guess their dependencies. */
-export async function collectHtmlPreviewResourceSources(source: string, rootRealPath: string): Promise<HtmlResourceSource[]> {
+async function collectResourceSources(source: string, rootRealPath: string): Promise<ResourceCollection> {
   const files = new Map<string, Uint8Array>()
-  let result = extractHtmlResources({ html: source, siblingFiles: files })
+  const dependencies = new Map<string, string>()
+  let result = await analyzeHtmlResources({ html: source, siblingFiles: files })
   for (;;) {
     let added = false
     for (const diagnostic of result.diagnostics) {
       if (diagnostic.code !== 'missing-relative-resource' || !diagnostic.reference || !/\.css$/i.test(diagnostic.reference)) continue
       const key = diagnostic.reference
       if (files.has(key)) continue
+      dependencies.set(key, 'missing')
       const target = await resolveHtmlPreviewResource(rootRealPath, key)
       if (!target) continue
       try {
-        files.set(key, new Uint8Array(await fs.readFile(target)))
+        const bytes = new Uint8Array(await fs.readFile(target))
+        files.set(key, bytes)
+        dependencies.set(key, resourceDigest(bytes))
         added = true
       } catch { /* A disappearing stylesheet cannot grant network access. */ }
     }
     if (!added) break
-    result = extractHtmlResources({ html: source, siblingFiles: files })
+    result = await analyzeHtmlResources({ html: source, siblingFiles: files })
   }
-  return htmlResourceSources(result.remoteReferences)
+  return { sources: htmlResourceSources(result.remoteReferences), dependencies }
+}
+
+export async function collectHtmlPreviewResourceSources(source: string, rootRealPath: string): Promise<HtmlResourceSource[]> {
+  return (await collectResourceSources(source, rootRealPath)).sources
+}
+
+/** One preview lease retains its source analysis while local stylesheets still follow disk changes. */
+export function createHtmlPreviewResourceCollector(
+  captured?: (source: string, rootRealPath: string) => Promise<ResourceCollection | undefined>,
+): typeof collectHtmlPreviewResourceSources {
+  let retained: { source: string; root: string; collection: ResourceCollection } | undefined
+  let running: { source: string; root: string; promise: Promise<HtmlResourceSource[]> } | undefined
+  return (source, root) => {
+    if (running?.source === source && running.root === root) return running.promise
+    const promise = Promise.resolve().then(async () => {
+      const previous = retained?.source === source && retained.root === root ? retained.collection : undefined
+      let unchanged = Boolean(previous)
+      if (previous) for (const [relative, expected] of previous.dependencies) {
+        const target = await resolveHtmlPreviewResource(root, relative)
+        let actual = 'missing'
+        try { if (target) actual = resourceDigest(await fs.readFile(target)) } catch { /* A removed stylesheet no longer grants its resources. */ }
+        if (actual !== expected) { unchanged = false; break }
+      }
+      const collection = unchanged && previous ? previous : await captured?.(source, root) ?? await collectResourceSources(source, root)
+      retained = { source, root, collection }
+      return collection.sources.map(value => ({ ...value }))
+    })
+    running = { source, root, promise }
+    void promise.finally(() => { if (running?.promise === promise) running = undefined }).catch(() => {})
+    return promise
+  }
 }
 
 /** Existing media-only callers keep the same grant scope. New consumers use the typed source declaration. */

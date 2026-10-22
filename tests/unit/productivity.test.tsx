@@ -1,3 +1,5 @@
+import { createTestProjectFromLegacy } from '../helpers/glxWorkFixture'
+import { componentSurfaces } from '../../src/shared/contracts/component-platform/project'
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { expect, it, vi } from 'vitest'
 import { createV10StoreHost } from '../helpers/courseV10StoreHost'
@@ -17,7 +19,7 @@ function fixture(): CourseProjectV10 {
     { type: 'text', text: '旧', style: { color: '#123456' } }, { type: 'text', text: '文', style: { underline: true } }, math[1],
     { type: 'text', text: '旧文', style: { fontSize: 24 } },
   ] }
-  return { schemaVersion: 10, id: 'productivity', revision: 0, title: '正文', definitions: {
+  return createTestProjectFromLegacy({ schemaVersion: 10, id: 'productivity', revision: 0, title: '正文', definitions: {
     [TEXT_DEFINITION.id]: TEXT_DEFINITION, custom: { id: 'custom', role: 'content', implementation: { kind: 'source', language: 'javascript', source: 'export const text = "旧代码"' } },
   }, instances: { mixed: { id: 'mixed', definitionId: TEXT_DEFINITION.id, data: json({ ...data, content }) },
     neighbor: { id: 'neighbor', definitionId: TEXT_DEFINITION.id, data: json(createTextData('旧文')) },
@@ -25,7 +27,7 @@ function fixture(): CourseProjectV10 {
     code: { id: 'code', definitionId: 'custom', data: { label: '旧文' } } },
     surfaces: [{ id: 'flow', kind: 'flow', title: '正文', childIds: ['mixed', 'neighbor', 'code'] }],
     global: { underlay: [], overlay: ['global'] }, assets: {}, background: { color: '#123456' },
-    designTokens: { colors: [{ id: 'accent', label: '强调色', color: '#2563eb' }], fonts: [] } }
+    designTokens: { colors: [{ id: 'accent', label: '强调色', color: '#2563eb' }], fonts: [] } })
 }
 
 it('replaces only checked rich-text segments across style boundaries, preserving math, shared content, code and one reversible saved transaction', async () => {
@@ -58,9 +60,10 @@ it('replaces only checked rich-text segments across style boundaries, preserving
     const recolor = applyProductivityPreview(context(), color, [background.id])
     if (!recolor.ok || !recolor.step) throw new Error('Expected inherited background change')
     expect(await commands.commitDesignProduction(recolor.step)).toBe(true)
-    expect(h.model().project.surfaces[0].background).toEqual({ mode: 'own', color: '#2563eb' })
+    expect(componentSurfaces(h.model().project)[0].background).toEqual({ mode: 'own', color: '#2563eb' })
     expect(h.model().project.background).toEqual(project.background)
-    expect(h.model().project.instances).toEqual(beforeColor)
+    expect(Object.values(h.model().project.instances).filter(instance => !instance.container))
+      .toEqual(Object.values(beforeColor).filter(instance => !instance.container))
     const fresh = createProductivityPreview(context(), { kind: 'text', scope: 'page', find: '新😀', replacement: '下一稿' }), before = structuredClone(h.first.read())
     const forged = structuredClone(fresh); forged.items[0].newValue = '伪造'
     expect(applyProductivityPreview(context(), forged, [forged.items[0].id])).toMatchObject({ ok: false })

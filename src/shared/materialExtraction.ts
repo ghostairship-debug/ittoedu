@@ -45,3 +45,7 @@ export interface LessonMaterialList {
   records: LessonMaterialRecord[]
   diagnostics: { id: string; code: string; message: string }[]
 }
+
+/** A page is consumed before the next PDF page is rasterized. Not a persisted format. */
+export interface PdfMaterialPage { page: number; total: number; material: MaterialExtraction }
+export interface PdfMaterialSummary { streamed: true; totalPages: number; selectedPages: { from: number; to: number } }

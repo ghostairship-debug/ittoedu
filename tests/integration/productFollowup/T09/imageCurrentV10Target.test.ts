@@ -1,4 +1,6 @@
 // @vitest-environment node
+import { componentSurfaces } from '../../../../src/shared/contracts/component-platform/project'
+import { appendRootContainers, testContainerInstance } from '../../../helpers/glxWorkFixture'
 import { promises as fs } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -27,15 +29,15 @@ it('local ready image applies to captured V10 image and surface despite neighbor
     const original = await sharp({ create: { width: 32, height: 24, channels: 4, background: '#ff0000' } }).png().toBuffer()
     const ready = await sharp({ create: { width: 32, height: 24, channels: 4, background: '#0000ff' } }).png().toBuffer()
     const project = createBlankCourseProjectV10('Current image target')
-    const surfaceId = project.surfaces[0].id
+    const surfaceId = componentSurfaces(project)[0].id
     project.definitions[IMAGE_DEFINITION.id] = IMAGE_DEFINITION
     project.assets.original = { id: 'original', path: 'assets/original.png', mimeType: 'image/png' }
     const frame = { width: 160, height: 110, transform: [1, .2, -.1, 1, 70, 45] as [number, number, number, number, number, number] }
     const data = { ...createImageData('original', 'Teacher alt'), fit: 'cover' as const, crop: { left: .1, top: .05, right: .15, bottom: .1 }, flipX: true }
     project.instances.picture = { id: 'picture', definitionId: IMAGE_DEFINITION.id, data, frame }
     project.instances.neighbor = { id: 'neighbor', definitionId: IMAGE_DEFINITION.id, data: createImageData('original', 'Keep neighbor'), frame: { ...frame, transform: [1, 0, 0, 1, 270, 45] } }
-    project.surfaces[0].childIds = ['picture', 'neighbor']
-    project.surfaces.push({ id: 'insert-page', kind: 'slide', title: 'Insert here', childIds: [] })
+    testContainerInstance(project, 0).childIds = ['picture', 'neighbor']
+    appendRootContainers(project, { id: 'insert-page', kind: 'slide', title: 'Insert here', childIds: [] })
     const initial = await documents.internalAPI.create({ kind: 'course-v10', project, resources: { assets: { original }, components: {} } }, 'images.h5lesson')
     const conversations = new ConversationStore({ directory: path.join(directory, 'conversations') })
     await conversations.registerWorkspace({ workspaceId: 'space', rootPath: directory, managed: false, authorization: 'user-selected' })
@@ -90,7 +92,7 @@ it('local ready image applies to captured V10 image and surface despite neighbor
     expect(await results.operate(insert)).toMatchObject({ status: 'applied' })
     current = await documents.internalAPI.read(initial.documentId)
     if (current.model.kind !== 'course-v10') throw new Error('Expected V10')
-    const insertedIds = current.model.project.surfaces.find(surface => surface.id === 'insert-page')!.childIds
+    const insertedIds = componentSurfaces(current.model.project).find(surface => surface.id === 'insert-page')!.childIds
     expect(insertedIds).toHaveLength(1)
     const inserted = current.model.project.instances[insertedIds[0]], insertedData = imageDataSchema.parse(inserted.data)
     expect(inserted.frame?.width).toBeGreaterThan(0); expect(inserted.frame?.height).toBeGreaterThan(0)

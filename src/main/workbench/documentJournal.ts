@@ -5,17 +5,18 @@ import path from 'node:path'
 import { deserialize, serialize } from 'node:v8'
 import { isDeepStrictEqual } from 'node:util'
 import { DocumentSaveFailure, type DocumentSaveIdentity, type DocumentSaveProof, type DocumentSourcePublication } from '../../shared/workbench/documentSave'
+import type { HtmlResourceSource } from './htmlImport/types'
 import { JournalBindingIndex, journalIdentity, type JournalBindingMetadata } from './JournalBindingIndex'
+import { DocumentJournalCodec, DocumentJournalDecoder } from './documentJournalCodec'
+import { applyDocumentStateTransition } from '../../core/documents/documentStateEffects'
 import { captureDocumentSaveModel, prepareDocumentSave, markdownReferences, readPublishedSourceResources, resourcePath, resourceVersion,
   sourceResourceFiles, sourceDocumentFormat, validateSourcePublication, type CaptureDocumentSourceOptions } from './documentSourceResources'
 import { createMarkdownDriver } from '../../core/drivers/MarkdownDriver'
 import { createTextDriver } from '../../core/drivers/TextDriver'
-import { createCourseV10Driver } from '../../core/drivers/CourseV10Driver'
-import type { DocumentBinding, DocumentKind, DocumentModel, DocumentPersistence, DurableDocumentState } from '../../shared/workbench/document'
+import { createDocumentArchiveDriver, createDocumentJournalCheckpoint } from './documentArchiveWorker'
+import { JOURNAL_MAGIC as MAGIC, JOURNAL_COMMIT as COMMIT, JOURNAL_HEADER_SIZE as HEADER_SIZE, recordDocumentJournalPayload as recordPayload } from './documentJournalRecord'
+import type { DocumentBinding, DocumentKind, DocumentModel, DocumentPersistence, DocumentStateTransition, DurableDocumentState } from '../../shared/workbench/document'
 
-const MAGIC = Buffer.from('G20JNL01')
-const COMMIT = Buffer.from('G20DONE!')
-const HEADER_SIZE = 48
 const digest = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex')
 const missing = (error: unknown) => (error as NodeJS.ErrnoException).code === 'ENOENT'
 const queues = new Map<string, Promise<unknown>>()
@@ -76,15 +77,19 @@ async function syncDirectory(directory: string): Promise<void> {
 }
 
 function checkState(state: DurableDocumentState, documentId: string): void {
-  if (!state || ![1, 2].includes(state.schemaVersion)
+  if (!state || ![1, 2, 3].includes(state.schemaVersion)
       || state.schemaVersion === 1 && state.disposition !== undefined
-      || state.schemaVersion === 2 && !['active', 'closed', 'discarded'].includes(state.disposition ?? '')
+      || state.schemaVersion >= 2 && !['active', 'closed', 'discarded'].includes(state.disposition ?? '')
       || state.documentId !== documentId || !state.epoch ||
       !Number.isSafeInteger(state.sequence) || state.sequence < 0 ||
       !Number.isSafeInteger(state.revision) || state.revision < 0 ||
       !Array.isArray(state.past) || !Array.isArray(state.future) ||
       !Array.isArray(state.operations) || !Array.isArray(state.stoppedRuns)) throw new Error('恢复日志状态无效')
-  const models = [state.model, ...state.past.flatMap(item => [item.before, item.after]), ...state.future.flatMap(item => [item.before, item.after])]
+  const models = [state.model, ...(state.savedModel ? [state.savedModel] : []),
+    ...state.past.flatMap(item => item.before && item.after ? [item.before, item.after] : []),
+    ...state.future.flatMap(item => item.before && item.after ? [item.before, item.after] : [])]
+  if ([...state.past, ...state.future].some(item => !item.effects && (!item.before || !item.after)
+    || item.effects && (!Array.isArray(item.effects) || !item.effects.length))) throw new Error('恢复历史记录无效')
   for (const model of models) {
     if (!model || !['markdown', 'text', 'course-v9', 'course-v10'].includes(model.kind) || !model.resources ||
         ((model.kind === 'markdown' || model.kind === 'text') && typeof model.source !== 'string')) throw new Error('恢复日志文档无效')
@@ -97,25 +102,18 @@ function checkState(state: DurableDocumentState, documentId: string): void {
   }
 }
 
-function record(state: DurableDocumentState): Buffer {
-  const payload = serialize(state)
-  if (payload.length > 0xffffffff) throw new Error('恢复记录超出支持大小')
-  const header = Buffer.alloc(HEADER_SIZE)
-  MAGIC.copy(header)
-  header.writeUInt32BE(payload.length, 8)
-  header.writeUInt32BE((~payload.length) >>> 0, 12)
-  createHash('sha256').update(payload).digest().copy(header, 16)
-  return Buffer.concat([header, payload, COMMIT])
-}
+function record(state: DurableDocumentState): Buffer { return recordPayload(serialize(state)) }
 
 /** Read one complete record at a time, so a long journal does not need a >2 GiB readFile buffer.
  * Only an incomplete final record is discarded; committed corruption still fails explicitly. */
-async function scan(filename: string, documentId?: string, options: { offset?: number; repairTail?: boolean; onRecord?(offset: number): void } = {}): Promise<DurableDocumentState | null> {
+async function scan(filename: string, documentId?: string, options: { offset?: number; repairTail?: boolean;
+  onRecord?(offset: number): void; onCheckpoint?(offset: number, length: number): void; onCodec?(codec: DocumentJournalCodec): void } = {}): Promise<DurableDocumentState | null> {
   let file: Awaited<ReturnType<typeof fs.open>>
   try { file = await fs.open(filename, 'r') } catch (error) { if (missing(error)) return null; throw error }
   let offset = options.offset ?? 0, fileSize = 0
   const initialIdentity = await journalIdentity(filename)
   let latest: DurableDocumentState | null = null
+  const decoder = new DocumentJournalDecoder()
   const read = async (position: number, size: number): Promise<Buffer> => {
     const bytes = Buffer.allocUnsafe(size)
     let received = 0
@@ -141,8 +139,15 @@ async function scan(filename: string, documentId?: string, options: { offset?: n
         throw new DocumentJournalError('journal-corrupt', '恢复日志完整记录校验失败')
       let state: DurableDocumentState
       try {
-        state = deserialize(payload) as DurableDocumentState
-        checkState(state, documentId ?? state.documentId)
+        const decoded = decoder.decode(payload)
+        if (decoded.type === 'transition') {
+          if (!latest) throw new Error('恢复增量缺少完整checkpoint')
+          state = applyDocumentStateTransition(latest, decoded.value)
+        } else {
+          state = decoded.value
+          checkState(state, documentId ?? state.documentId)
+          options.onCheckpoint?.(offset, end - offset)
+        }
       } catch { throw new DocumentJournalError('journal-corrupt', '恢复日志完整记录无法解码或状态无效') }
       if (path.basename(filename) !== `${digest(Buffer.from(state.documentId))}.journal`
         || latest && (state.documentId !== latest.documentId || state.sequence <= latest.sequence))
@@ -161,11 +166,13 @@ async function scan(filename: string, documentId?: string, options: { offset?: n
       await handle.truncate(offset); await handle.sync()
     } finally { await handle.close() }
   }
+  if (latest) checkState(latest, documentId ?? latest.documentId)
+  options.onCodec?.(decoder.writer())
   return latest
 }
 
 async function readSavedModel(filename: string, kind: DocumentKind, publication?: DocumentSourcePublication): Promise<DocumentModel> {
-  const driver = kind === 'markdown' ? createMarkdownDriver() : kind === 'text' ? createTextDriver() : createCourseV10Driver()
+  const driver = kind === 'markdown' ? createMarkdownDriver() : kind === 'text' ? createTextDriver() : createDocumentArchiveDriver()
   const model = await driver.load(new Uint8Array(await fs.readFile(filename)))
   if (publication) return { ...model, resources: await readPublishedSourceResources(path.dirname(filename), publication) }
   return captureDocumentSaveModel(model, { kind: 'file', path: filename, version: null, bindingVersion: 1 })
@@ -296,7 +303,8 @@ async function saveFile(input: Parameters<DocumentPersistence['save']>[0],
         await syncDirectory(path.dirname(bundle.target))
       }
     }
-    if (input.model.kind === 'text' && !Buffer.from(input.bytes).equals(Buffer.from(input.model.source, 'utf8'))) throw new Error('保存正文与固定文档版本不一致')
+    // Source publications already checked these same captured bytes before sidecar preparation.
+    if (input.model.kind === 'text' && !input.sourcePublication && !Buffer.from(input.bytes).equals(Buffer.from(input.model.source, 'utf8'))) throw new Error('保存正文与固定文档版本不一致')
     await writeFlushed(temporary, input.bytes)
     await assertCurrent()
     // The complete candidate version includes Markdown's referenced attachments.
@@ -348,22 +356,81 @@ export interface DocumentJournal extends DocumentPersistence {
   lookupSave(documentId: string, identity: DocumentSaveIdentity): Promise<DocumentSaveProof | null>
 }
 
+/** Transient facts of this exact prepared source publication, never recovery or IPC data. */
+export interface PublishedSourceObservation {
+  documentId: string
+  revision: number
+  binding: FileBinding
+  model: DocumentModel
+  publication: DocumentSourcePublication
+  sources: HtmlResourceSource[]
+  directoryDependency: boolean
+}
+
 /** Main-process persistence only. The DocumentSession remains the sole content/history writer. */
 export function createDocumentJournal(options: { directory: string; isLive?(documentId: string): boolean;
   currentSource?: CaptureDocumentSourceOptions['currentSource'];
+  observeSourcePublication?(documentId: string): ((observation: PublishedSourceObservation) => void) | undefined;
   onBindingRecovered?(state: DurableDocumentState, before: DocumentBinding): Promise<void> }): DocumentJournal {
   const directory = path.resolve(options.directory)
   const bindings = new JournalBindingIndex()
+  const checkedProjectInputs = new Set<string>()
   const unavailable = new Map<string, { documentId?: string; path?: string; message: string }>()
+  type DurableHead = Pick<DurableDocumentState, 'documentId' | 'epoch' | 'sequence' | 'revision' | 'savedRevision' | 'binding' | 'disposition'> & {
+    kind: DocumentKind; identity: string; checkpointOffset: number; checkpointLength: number; codec: DocumentJournalCodec
+  }
+  const heads = new Map<string, DurableHead>()
+  const pendingCheckpoints = new Map<string, DurableDocumentState>()
+  const preparingCheckpoints = new Set<string>()
+  const preparedSources = new WeakMap<DocumentModel, Omit<PublishedSourceObservation, 'documentId' | 'revision' | 'binding' | 'model'>>()
+  const rememberHead = async (target: string, state: DurableDocumentState, checkpointOffset: number,
+    checkpointLength: number, codec: DocumentJournalCodec): Promise<void> => {
+    const identity = await journalIdentity(target)
+    if (!identity) { heads.delete(target); return }
+    heads.set(target, { documentId: state.documentId, epoch: state.epoch, sequence: state.sequence,
+      revision: state.revision, savedRevision: state.savedRevision, binding: structuredClone(state.binding),
+      disposition: state.disposition ?? 'active', kind: state.model.kind, identity, checkpointOffset, checkpointLength, codec })
+  }
   const load = async (target: string, documentId?: string): Promise<DurableDocumentState | null> => {
     const known = await bindings.read(target)
     let offset = known?.offset ?? 0
-    const state = await scan(target, documentId, { offset, onRecord: value => { offset = value } })
-    if (state && !known) await bindings.update(target, state, offset)
+    let checkpointLength = 0, codec = new DocumentJournalCodec()
+    const state = await scan(target, documentId, { offset,
+      onCheckpoint: (value, length) => { offset = value; checkpointLength = length }, onCodec: value => { codec = value } })
+    if (state) {
+      await rememberHead(target, state, offset, checkpointLength, codec)
+      if (!known) await bindings.update(target, state, offset, heads.get(target)?.identity ?? null)
+    } else heads.delete(target)
     return state
+  }
+  const verifiedHead = async (target: string, documentId: string): Promise<DurableHead | undefined> => {
+    const known = heads.get(target)
+    if (known && await journalIdentity(target) === known.identity) return known
+    heads.delete(target)
+    await load(target, documentId)
+    return heads.get(target)
   }
   const filename = (documentId: string) => path.join(directory, `${digest(Buffer.from(documentId))}.journal`)
   const intentFilename = (documentId: string) => path.join(directory, `${digest(Buffer.from(documentId))}.save-intent.json`)
+  const preserveProjectV10Input = async (target: string): Promise<void> => {
+    const retainedDirectory = path.join(directory, 'project-v10-inputs', path.basename(target, '.journal'))
+    const retained = path.join(retainedDirectory, path.basename(target))
+    try { await fs.access(retained); return } catch (error) { if (!missing(error)) throw error }
+    await fs.mkdir(retainedDirectory, { recursive: true })
+    const temporary = `${retained}.${randomUUID()}.tmp`
+    const identity = await journalIdentity(target)
+    try {
+      await fs.copyFile(target, temporary)
+      if (await journalIdentity(target) !== identity) throw new DocumentJournalError('journal-sequence-conflict', '工程恢复原记录在保留期间改变，未转换或压缩')
+      const handle = await fs.open(temporary, 'r+')
+      try { await handle.sync() } finally { await handle.close() }
+      try { await publishNewFile(temporary, retained) }
+      catch (error) { if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error }
+      await syncDirectory(retainedDirectory)
+      await syncDirectory(path.dirname(retainedDirectory))
+      await syncDirectory(directory)
+    } finally { await fs.rm(temporary, { force: true }).catch(() => undefined) }
+  }
   const readIntent = async (documentId: string): Promise<SaveIntent | null> => {
     let bytes: string
     try { bytes = await fs.readFile(intentFilename(documentId), 'utf8') }
@@ -385,15 +452,43 @@ export function createDocumentJournal(options: { directory: string; isLive?(docu
     if (intent.sourcePublication) validateSourcePublication(intent.sourcePublication)
     return intent
   }
-  const appendWithinQueue = async (target: string, state: DurableDocumentState): Promise<void> => {
-    checkState(state, state.documentId)
-    state = { ...state, schemaVersion: 2, disposition: state.disposition ?? 'active' }
-    const encoded = record(state)
+  const preserveLegacyProject = async (target: string, state: DurableDocumentState, offset?: number): Promise<void> => {
+    if (state.model.kind !== 'course-v10' || state.model.project.schemaVersion !== 11 || checkedProjectInputs.has(target)) return
+    const original = await scan(target, state.documentId, { offset, repairTail: false })
+    const models = original ? [original.model, ...(original.savedModel ? [original.savedModel] : []),
+      ...[...original.past, ...original.future].flatMap(entry => entry.before && entry.after ? [entry.before, entry.after] : []),
+      ...original.operations.flatMap(operation => [...(operation.before ? [operation.before] : []), ...(operation.after ? [operation.after] : [])])] : []
+    // Decoded legacy input predates the current Project 11 static type.
+    const rawSchemaVersion = (project: object): unknown => Reflect.get(project, 'schemaVersion')
+    if (models.some(model => model.kind === 'course-v10' && rawSchemaVersion(model.project) === 10)) await preserveProjectV10Input(target)
+    checkedProjectInputs.add(target)
+  }
+  const appendBytes = async (target: string, encoded: Buffer): Promise<number> => {
     await fs.mkdir(directory, { recursive: true })
-    const known = await bindings.read(target)
-    const previous = !known || known.disposition !== 'active' || state.sequence <= known.sequence ? await load(target, state.documentId) : null
-    if (previous && state.sequence <= previous.sequence) {
-      if (state.sequence === previous.sequence && isDeepStrictEqual(previous, state)) {
+    const handle = await fs.open(target, 'a+')
+    const before = (await handle.stat()).size
+    try { await handle.writeFile(encoded); await handle.sync() }
+    catch (error) {
+      // Windows append handles cannot truncate. Roll back through the same journal
+      // owner with a writable handle; the failed append still rejects its caller.
+      const rollback = await fs.open(target, 'r+')
+      try { await rollback.truncate(before); await rollback.sync() } finally { await rollback.close() }
+      throw error
+    }
+    finally { await handle.close() }
+    await syncDirectory(directory)
+    return before
+  }
+  const appendWithinQueue = async (target: string, input: DurableDocumentState): Promise<void> => {
+    checkState(input, input.documentId)
+    const state: DurableDocumentState = { ...input, schemaVersion: input.schemaVersion === 3 ? 3 : 2, disposition: input.disposition ?? 'active' }
+    const indexed = await bindings.read(target)
+    // Preserve the actual old input before a recovery scan can repair its torn tail.
+    await preserveLegacyProject(target, state, indexed?.offset)
+    const head = await verifiedHead(target, state.documentId)
+    if (head && state.sequence <= head.sequence) {
+      const previous = await load(target, state.documentId)
+      if (state.sequence === previous?.sequence && isDeepStrictEqual(previous, state)) {
         const handle = await fs.open(target, 'r+')
         try { await handle.sync() } finally { await handle.close() }
         await syncDirectory(directory)
@@ -401,28 +496,81 @@ export function createDocumentJournal(options: { directory: string; isLive?(docu
       }
       throw new DocumentJournalError('journal-sequence-conflict', '恢复日志序号已用于其他状态')
     }
-    if (previous?.disposition && previous.disposition !== 'active') throw new DocumentJournalError('journal-sequence-conflict', '文档恢复记录已结束，不能重新激活')
-    const handle = await fs.open(target, 'a+')
-    const before = (await handle.stat()).size
+    if (head?.disposition && head.disposition !== 'active') throw new DocumentJournalError('journal-sequence-conflict', '文档恢复记录已结束，不能重新激活')
+    const codec = new DocumentJournalCodec()
+    const prepared = state.schemaVersion === 3 ? codec.prepare('checkpoint', state) : undefined
+    const encoded = prepared ? recordPayload(prepared.payload) : record(state)
+    const before = await appendBytes(target, encoded)
+    prepared?.commit()
     let recordOffset = before
-    try { await handle.writeFile(encoded); await handle.sync() }
-    catch (error) { await handle.truncate(before); await handle.sync(); throw error }
-    finally { await handle.close() }
-    await syncDirectory(directory)
-    // Every record already contains the complete current undo/redo history, receipts
-    // and resources. Compact duplicate historical snapshots, never the history within it.
-    // The append is durable first; a failed maintenance replacement cannot undo its ACK.
+    // Standalone checkpoints carry every promised effect/history/receipt/resource.
+    // Keeping the old compaction policy for direct legacy append does not affect normal deltas.
     if (before + encoded.length > Math.max(16 * 1024 * 1024, encoded.length * 3)) {
       const temporary = `${target}.checkpoint-${randomUUID()}.tmp`
       try {
         await writeFlushed(temporary, encoded)
-        await fs.rename(temporary, target)
-        recordOffset = 0
+        await fs.rename(temporary, target); recordOffset = 0
         await syncDirectory(directory)
-      } catch { /* Keep the already durable append if optional compaction is unavailable. */ }
+      } catch { /* A failed optional replacement cannot undo the durable append. */ }
       finally { await fs.rm(temporary, { force: true }).catch(() => undefined) }
     }
-    await bindings.update(target, state, recordOffset).catch(() => undefined)
+    await rememberHead(target, state, recordOffset, encoded.length, codec)
+    pendingCheckpoints.delete(target)
+    await bindings.update(target, state, recordOffset, heads.get(target)?.identity ?? null).catch(() => undefined)
+  }
+  const appendTransitionWithinQueue = async (target: string, transition: DocumentStateTransition, checkpoint: DurableDocumentState): Promise<void> => {
+    const head = await verifiedHead(target, transition.documentId)
+    if (!head || head.sequence !== transition.baseSequence || head.epoch !== transition.epoch
+      || transition.sequence !== head.sequence + 1 || head.disposition !== 'active')
+      throw new DocumentJournalError('journal-sequence-conflict', '恢复增量的基础身份或顺序已改变')
+    if (checkpoint.documentId !== transition.documentId || checkpoint.sequence !== transition.sequence
+      || checkpoint.epoch !== transition.epoch || checkpoint.revision !== transition.revision || checkpoint.schemaVersion !== 3)
+      throw new DocumentJournalError('journal-sequence-conflict', '恢复增量与当前checkpoint身份不一致')
+    const prepared = head.codec.prepare('transition', transition)
+    const encoded = recordPayload(prepared.payload)
+    const before = await appendBytes(target, encoded)
+    // No reference becomes reusable before its containing record is durable.
+    prepared.commit()
+    await rememberHead(target, checkpoint, head.checkpointOffset, head.checkpointLength, head.codec)
+    await bindings.update(target, checkpoint, head.checkpointOffset, heads.get(target)?.identity ?? null).catch(() => undefined)
+    // Maintenance is independent of the accepted ACK. Capture the immutable state now;
+    // if a newer suffix wins the queue, leave it in place rather than overwrite it.
+    const deltaBytes = before + encoded.length - head.checkpointOffset - head.checkpointLength
+    if (deltaBytes > Math.max(16 * 1024 * 1024, head.checkpointLength)) scheduleCheckpoint(target, checkpoint)
+  }
+  const scheduleCheckpoint = (target: string, checkpoint: DurableDocumentState): void => {
+    // One running job and one latest immutable state per journal. Encoding never
+    // owns the file queue, so new durable appends can overtake stale preparation.
+    pendingCheckpoints.set(target, checkpoint)
+    if (preparingCheckpoints.has(target)) return
+    preparingCheckpoints.add(target)
+    setImmediate(() => {
+      const checkpoint = pendingCheckpoints.get(target), head = heads.get(target)
+      pendingCheckpoints.delete(target)
+      const prepare = async () => {
+        if (!checkpoint || !head || head.sequence !== checkpoint.sequence || head.epoch !== checkpoint.epoch) return
+        const compacted = await createDocumentJournalCheckpoint(checkpoint)
+        await serial(fileKey(target), async () => {
+          const current = await verifiedHead(target, checkpoint.documentId)
+          if (!current || current.sequence !== checkpoint.sequence || current.epoch !== checkpoint.epoch || current.identity !== head.identity) return
+          const temporary = `${target}.checkpoint-${randomUUID()}.tmp`
+          try {
+            await writeFlushed(temporary, compacted)
+            if (await journalIdentity(target) !== current.identity) return
+            await fs.rename(temporary, target); await syncDirectory(directory)
+            const codec = new DocumentJournalCodec()
+            codec.adoptCheckpoint(checkpoint)
+            await rememberHead(target, checkpoint, 0, compacted.length, codec)
+            await bindings.update(target, checkpoint, 0, heads.get(target)?.identity ?? null).catch(() => undefined)
+          } finally { await fs.rm(temporary, { force: true }).catch(() => undefined) }
+        })
+      }
+      void prepare().catch(() => undefined).finally(() => {
+        preparingCheckpoints.delete(target)
+        const pending = pendingCheckpoints.get(target)
+        if (pending) scheduleCheckpoint(target, pending)
+      })
+    })
   }
   const reconcileSave = async (target: string, state: DurableDocumentState): Promise<DurableDocumentState> => {
     if (state.disposition && state.disposition !== 'active') return state
@@ -447,7 +595,7 @@ export function createDocumentJournal(options: { directory: string; isLive?(docu
     if (await readDocumentFileVersion(targetPath, intent.kind, intent.sourcePublication?.references) !== version || intent.fileIdentity && await publicationIdentity(targetPath) !== intent.fileIdentity) return state
     try { await assertPublishedResources(path.dirname(targetPath), intent.sourcePublication) }
     catch (error) { if (error instanceof DocumentJournalError || missing(error)) return state; throw error }
-    const repaired: DurableDocumentState = { ...state, schemaVersion: 2, disposition: 'active', sequence: state.sequence + 1,
+    const repaired: DurableDocumentState = { ...state, schemaVersion: state.schemaVersion === 3 ? 3 : 2, disposition: 'active', sequence: state.sequence + 1,
       savedRevision: intent.revision, savedModel: diskModel,
       binding: { ...intent.targetBinding, version } }
     await appendWithinQueue(target, repaired)
@@ -457,8 +605,8 @@ export function createDocumentJournal(options: { directory: string; isLive?(docu
   const recordSaveIntent = (input: Parameters<DocumentPersistence['save']>[0], targetBinding: FileBinding, expectedVersion: string, fileIdentity: string | null): Promise<void> => {
     const target = filename(input.documentId)
     return serial(fileKey(target), async () => {
-      const state = await load(target, input.documentId)
-      if (!state || state.disposition && state.disposition !== 'active' || state.revision < input.revision || state.model.kind !== input.model.kind) throw new Error('保存版本不属于当前文档恢复日志')
+      const state = await verifiedHead(target, input.documentId)
+      if (!state || state.disposition && state.disposition !== 'active' || state.revision < input.revision || state.kind !== input.model.kind) throw new Error('保存版本不属于当前文档恢复日志')
       const intent: SaveIntent = { schemaVersion: 1, documentId: input.documentId, epoch: state.epoch,
         revision: input.revision, kind: input.model.kind, sourceBinding: state.binding,
         targetBinding, expectedVersion, ...(input.saveIdentity ? { saveIdentity: input.saveIdentity } : {}), ...(fileIdentity ? { fileIdentity } : {}),
@@ -505,18 +653,58 @@ export function createDocumentJournal(options: { directory: string; isLive?(docu
     for (const filename of unavailable.keys()) if (!names.includes(path.basename(filename))) unavailable.delete(filename)
     return found
   }
+  const saveCaptured = (input: Parameters<DocumentPersistence['save']>[0], prepared: boolean): ReturnType<DocumentPersistence['save']> => {
+    const frozen = { ...input }
+    if (frozen.binding.kind !== 'file') return Promise.reject(new Error('保存需要已选择的文件路径'))
+    const binding = frozen.binding
+    let observeSourcePublication: ((observation: PublishedSourceObservation) => void) | undefined
+    try { observeSourcePublication = options.observeSourcePublication?.(frozen.documentId) }
+    catch { /* An optional observer cannot prevent the captured save. */ }
+    return serial(fileKey(binding.path), async () => {
+      try {
+        // Direct persistence consumers still get this same preparation owner,
+        // but cannot re-import arbitrary files from a publication target.
+        if (!prepared && !frozen.sourcePublication) {
+          const prepared = await prepareDocumentSave(frozen.model, { kind: 'untitled', suggestedName: path.basename(binding.path) })
+          frozen.model = prepared.model; frozen.sourcePublication = prepared.sourcePublication
+        }
+        if (frozen.sourcePublication) validateSourcePublication(frozen.sourcePublication)
+        const saved = await saveFile(frozen, (target, expectedVersion, fileIdentity) => recordSaveIntent(frozen, target, expectedVersion, fileIdentity))
+        const observation = preparedSources.get(frozen.model)
+        preparedSources.delete(frozen.model)
+        if (observation) {
+          try { observeSourcePublication?.({ ...observation, documentId: frozen.documentId, revision: frozen.revision, binding: saved, model: frozen.model }) }
+          catch { /* Passive preparation reuse cannot change an already-published save. */ }
+        }
+        return saved
+      } catch (error) { throw error instanceof DocumentSaveFailure ? error : new DocumentSaveFailure('not-published', error) }
+    })
+  }
   return {
-    prepareSave: input => prepareDocumentSave(input.model, input.sourceBinding, { currentSource: options.currentSource,
-      format: sourceDocumentFormat(input.model, input.sourceBinding) ?? sourceDocumentFormat(input.model, input.targetBinding) }),
+    async prepareSave(input) {
+      let directoryDependency = false
+      let sources: HtmlResourceSource[] = []
+      const prepared = await prepareDocumentSave(input.model, input.sourceBinding, { currentSource: options.currentSource,
+        format: sourceDocumentFormat(input.model, input.sourceBinding) ?? sourceDocumentFormat(input.model, input.targetBinding),
+        onDependencyDirectory: () => { directoryDependency = true }, onHtmlResourceSources: value => { sources = value } })
+      if (prepared.sourcePublication) preparedSources.set(prepared.model, { publication: prepared.sourcePublication, sources, directoryDependency })
+      return prepared
+    },
     append(state) {
       checkState(state, state.documentId)
-      const frozen = deserialize(serialize(state)) as DurableDocumentState // Freeze before yielding to the queue.
+      // V3 is the immutable Session-owned representation. Legacy direct callers still get a detached capture.
+      const frozen = state.schemaVersion === 3 ? state : deserialize(serialize(state)) as DurableDocumentState
       const target = filename(frozen.documentId)
       return serial(fileKey(target), () => appendWithinQueue(target, frozen))
     },
+    appendTransition(transition, checkpoint) {
+      // Both inputs are private immutable Session facts, not renderer/IPC payloads.
+      return serial(fileKey(filename(transition.documentId)), () => appendTransitionWithinQueue(filename(transition.documentId), transition, checkpoint))
+    },
     finalize(state, disposition) {
       checkState(state, state.documentId)
-      const frozen = deserialize(serialize({ ...state, schemaVersion: 2, disposition, sequence: state.sequence + 1 })) as DurableDocumentState
+      const terminal: DurableDocumentState = { ...state, schemaVersion: state.schemaVersion === 3 ? 3 : 2, disposition, sequence: state.sequence + 1 }
+      const frozen = state.schemaVersion === 3 ? terminal : deserialize(serialize(terminal)) as DurableDocumentState
       const target = filename(frozen.documentId)
       return serial(fileKey(target), () => appendWithinQueue(target, frozen))
     },
@@ -532,10 +720,12 @@ export function createDocumentJournal(options: { directory: string; isLive?(docu
       return serial(fileKey(target), async () => {
         const state = await load(target, documentId)
         if (state && (!state.disposition || state.disposition === 'active')) {
-          await appendWithinQueue(target, { ...state, schemaVersion: 2, disposition: 'discarded', sequence: state.sequence + 1 })
+          await appendWithinQueue(target, { ...state, schemaVersion: state.schemaVersion === 3 ? 3 : 2, disposition: 'discarded', sequence: state.sequence + 1 })
         }
         await Promise.all([target, intentFilename(documentId)].map(name => fs.rm(name, { force: true })))
         await bindings.discard(target)
+        heads.delete(target)
+        pendingCheckpoints.delete(target)
         await syncDirectory(directory)
       })
     },
@@ -548,7 +738,7 @@ export function createDocumentJournal(options: { directory: string; isLive?(docu
           try { await fs.rename(source, path.join(retained, path.basename(source))) }
           catch (error) { if (!missing(error)) throw error }
         }
-        await bindings.discard(target); unavailable.delete(target)
+        await bindings.discard(target); unavailable.delete(target); heads.delete(target); pendingCheckpoints.delete(target)
         await syncDirectory(directory)
       })
     },
@@ -588,23 +778,8 @@ export function createDocumentJournal(options: { directory: string; isLive?(docu
       const target = filename(documentId)
       return serial(fileKey(target), () => scan(target, documentId, { repairTail: false }))
     },
-    save(input) {
-      // The caller may commit r+1 while saving r. Capture everything synchronously.
-      const frozen = deserialize(serialize(input)) as typeof input
-      if (frozen.binding.kind !== 'file') return Promise.reject(new Error('保存需要已选择的文件路径'))
-      const binding = frozen.binding
-      return serial(fileKey(binding.path), async () => {
-        try {
-          // Direct persistence consumers still get this same preparation owner,
-          // but cannot re-import arbitrary files from a publication target.
-          if (!frozen.sourcePublication) {
-            const prepared = await prepareDocumentSave(frozen.model, { kind: 'untitled', suggestedName: path.basename(binding.path) })
-            frozen.model = prepared.model; frozen.sourcePublication = prepared.sourcePublication
-          }
-          if (frozen.sourcePublication) validateSourcePublication(frozen.sourcePublication)
-          return await saveFile(frozen, (target, expectedVersion, fileIdentity) => recordSaveIntent(frozen, target, expectedVersion, fileIdentity))
-        } catch (error) { throw error instanceof DocumentSaveFailure ? error : new DocumentSaveFailure('not-published', error) }
-      })
-    },
+    save(input) { return saveCaptured(deserialize(serialize(input)) as typeof input, false) },
+    savePrepared(input) { return saveCaptured(input, true) },
   }
 }
+

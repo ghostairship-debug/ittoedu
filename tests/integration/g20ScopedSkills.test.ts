@@ -1,4 +1,5 @@
 // @vitest-environment node
+import { componentSurfaces } from '../../src/shared/contracts/component-platform/project'
 import { afterEach, expect, it } from 'vitest'
 import { promises as fs } from 'node:fs'
 import os from 'node:os'
@@ -27,7 +28,7 @@ it('reading the course method retains the current project tools and their origin
   host.tools.configureHostServices({ skills, observations: {
     observe: async input => {
       observations++
-      expect(input.locationId).toBe(project.surfaces[0].id)
+      expect(input.locationId).toBe(componentSurfaces(project)[0].id)
       return { source: 'isolated-published', identity: { documentId: input.documentId, epoch: input.epoch,
         revision: input.revision, locationId: input.locationId }, coverage: { width: 1, height: 1 },
         structure: [], diagnostics: [], image: { resourceId: 'page-picture', mimeType: 'image/png', width: 1, height: 1, byteLength: 1 } }

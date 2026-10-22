@@ -32,7 +32,8 @@ export interface ComponentCatalogPackage {
   packagePath: string
   thumbnailPath: string
   sha256: string
-  componentSchemaVersion: 1
+  /** Current component-library entry schema, independent of the catalog envelope version. */
+  componentSchemaVersion: 2
   runtimeApiVersion: 5
   renderMode: 'dom' | 'phaser' | 'hybrid'
   supportedScopes: Array<'scene' | 'global'>
@@ -137,7 +138,7 @@ export const componentCatalogPackageSchema = z.object({
   packagePath: safeRelativePathSchema,
   thumbnailPath: safeRelativePathSchema,
   sha256: z.string().regex(/^[0-9a-f]{64}$/, '哈希必须是小写 SHA-256'),
-  componentSchemaVersion: z.literal(1),
+  componentSchemaVersion: z.literal(2),
   runtimeApiVersion: z.literal(5),
   renderMode: z.enum(['dom', 'phaser', 'hybrid']),
   supportedScopes: z.array(z.enum(['scene', 'global']))
@@ -231,6 +232,13 @@ export const componentCatalogSchema = z.object({
 })
 
 export function parseComponentCatalog(value: unknown): ComponentCatalogV1 {
+  // Catalog V1 is the unchanged metadata envelope. Its earlier library-entry
+  // version is adapted only while reading, just like the original archive.
+  if (value && typeof value === 'object' && !Array.isArray(value) && 'packages' in value && Array.isArray(value.packages)) {
+    value = { ...value, packages: value.packages.map((entry: unknown) => entry && typeof entry === 'object' && !Array.isArray(entry)
+      && 'componentSchemaVersion' in entry && entry.componentSchemaVersion === 1
+      ? { ...entry, componentSchemaVersion: 2 } : entry) }
+  }
   return componentCatalogSchema.parse(value)
 }
 

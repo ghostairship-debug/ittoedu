@@ -1,4 +1,6 @@
 // @vitest-environment node
+import { appendRootContainers, testContainerInstance } from '../helpers/glxWorkFixture'
+import { componentSurfaces } from '../../src/shared/contracts/component-platform/project'
 import { compileFunction, constants } from 'node:vm'
 import { JSDOM } from 'jsdom'
 import { expect, it, vi } from 'vitest'
@@ -14,14 +16,14 @@ import { recipeDefaults } from '../../src/renderer/recipes/recipeCatalog'
 import type { ComponentImplementation, ComponentRuntimeImplementation, ComponentRuntimeScope } from '../../src/shared/contracts/component-platform'
 
 it('replays the actual reveal recipe once in its retained scene while preserving course/global/other-scene state', async () => {
-  const original = createBlankCourseProjectV10('当前页重播'), originId = original.surfaces[0].id
+  const original = createBlankCourseProjectV10('当前页重播'), originId = testContainerInstance(original, 0).id
   const result = planRecipe(original, { recipeId: 'step-reveal-v1', slots: recipeDefaults('step-reveal-v1'),
     target: { documentId: 'r3-document', epoch: 'r3-epoch', project: original, editingProject: original,
       resources: { assets: {}, components: {} }, surfaceId: originId, instanceIds: [], instanceId: null, activeStateId: null } })
   if (!result.ok) throw new Error(result.reason)
   const model = new CourseV10Driver().apply({ kind: 'course-v10', project: original, resources: { assets: {}, components: {} } }, captureComponentOperation(original, result.edits))
   if (model.kind !== 'course-v10') throw new Error('Expected the formal recipe model')
-  const surface = model.project.surfaces.find(value => value.id === result.createdLocationId)!
+  const surface = componentSurfaces(model.project).find(value => value.id === result.createdLocationId)!
   const instance = surface.childIds.map(id => model.project.instances[id]).find(value => model.project.definitions[value.definitionId].implementation.kind === 'source')!
   model.project.logic = { courseState: [{ key: 'course-kept', valueType: 'number', defaultValue: 0 }], navigationGuards: [] }
   // Probes use the real scene.enter port; the current probe is nested inside the recipe owner.
@@ -29,7 +31,7 @@ it('replays the actual reveal recipe once in its retained scene while preserving
   for (const id of ['local-probe', 'global-probe', 'other-probe']) model.project.instances[id] = { id, definitionId: 'r3-probe', data: {} }
   instance.childIds = ['local-probe']
   model.project.global.overlay.push('global-probe')
-  model.project.surfaces.find(value => value.id === originId)!.childIds.push('other-probe')
+  testContainerInstance(model.project, originId).childIds.push('other-probe')
   const authorBefore = structuredClone(model)
   const dom = new JSDOM('<!doctype html><body><div id="recipe"></div></body>'), root = dom.window.document.getElementById('recipe')!
   let currentSurface = surface.id, cancelPresent: (() => void) | undefined
@@ -101,8 +103,8 @@ it('replays the actual reveal recipe once in its retained scene while preserving
 })
 
 it('restarts to the first scene after reset state blocks ordinary entry, retaining the ordinary guard', async () => {
-  const project = createBlankCourseProjectV10('课程重启'), first = project.surfaces[0].id
-  project.surfaces.push({ ...project.surfaces[0], id: 'later', title: '后页', childIds: [] })
+  const project = createBlankCourseProjectV10('课程重启'), first = testContainerInstance(project, 0).id
+  appendRootContainers(project, { ...componentSurfaces(project)[0], id: 'later', title: '后页', childIds: [] })
   project.logic = { courseState: [{ key: 'unlocked', valueType: 'boolean', defaultValue: false }], navigationGuards: [
     { id: 'locked-first', effect: 'block', toSurfaceIds: [first], match: 'all',
       conditions: [{ type: 'compare', key: 'unlocked', operator: 'eq', value: false }], message: '首页被普通访问规则锁定' },

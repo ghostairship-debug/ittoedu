@@ -966,8 +966,9 @@ export class HostToolCoordinator {
     return { kind: 'read', data: { status: 'entry', packageId: result.packageId, version: result.version, title: entry.title,
       kind: entry.kind ?? 'objects', rootIds: entry.example.rootIds, objects: Object.values(entry.example.instances).map(instance => ({
         id: instance.id, title: instance.name ?? entry.definitions[instance.definitionId]?.title, definitionId: instance.definitionId,
-        childIds: instance.childIds ?? [], data: instance.data })), pages: entry.surfaces?.map(surface => ({ id: surface.id, kind: surface.kind,
-          title: surface.title, childIds: surface.childIds })), inputs: entry.inputs ?? [] } }
+        childIds: instance.childIds ?? [], ...(instance.container ? { container: instance.container } : {}), data: instance.data })),
+      pages: entry.example.rootIds.flatMap(id => { const instance = entry.example.instances[id]; return instance?.container ? [{ id, kind: instance.container.kind,
+        title: instance.name ?? entry.definitions[instance.definitionId]?.title, childIds: instance.childIds ?? [] }] : [] }), inputs: entry.inputs ?? [] } }
   }
   /** One complete API 5 example for the canonical project writer. */
   libraryComponent(runId: string, packageId: string, version?: string) {

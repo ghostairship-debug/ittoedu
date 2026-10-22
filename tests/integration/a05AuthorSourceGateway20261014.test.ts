@@ -1,4 +1,6 @@
 // @vitest-environment node
+import { componentSurfaces } from '../../src/shared/contracts/component-platform/project'
+import { testContainerInstance } from '../helpers/glxWorkFixture'
 import { promises as fs } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -21,9 +23,9 @@ it('uses public object source paths with existing project authorization for priv
     project.definitions.web = { id: 'web', role: 'content', title: 'Web', implementation: { kind: 'builtin', key: 'guoling.web' } }
     for (const id of ['a', 'b']) project.instances[id] = { id, definitionId: 'web', data: { html: `<h1>${id}</h1>` },
       frame: { width: 320, height: 180, transform: [1, 0, 0, 1, id === 'a' ? 30 : 420, 50] } }
-    project.surfaces[0].childIds = ['a', 'b']
+    testContainerInstance(project, 0).childIds = ['a', 'b']
     const initial = await host.internalAPI.create({ kind: 'course-v10', project, resources: { assets: {}, components: {} } }, 'a05.glx')
-    const target = { kind: 'course-instance' as const, surfaceId: project.surfaces[0].id, instanceId: 'a' }
+    const target = { kind: 'course-instance' as const, surfaceId: componentSurfaces(project)[0].id, instanceId: 'a' }
     await host.tools.beginRun({ runId: 'source', actor: 'agent', documents: [{ documentId: initial.documentId, writable: [{ kind: 'document' }], selection: [target] }] })
     await host.tools.loadToolFamilies('source', ['content'])
     let sequence = 0

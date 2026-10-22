@@ -33,22 +33,24 @@ function projectUrls(value: string, bindings: Readonly<Record<string, string>>, 
 }
 
 /** The browser owns CSS background composition. This projection owns only resource URL leases. */
-export function componentBackgroundPaintStyles(background: ComponentBackground,
+export function componentBackgroundPaintStyles(background: ComponentBackground | null | undefined,
   resolve: (id: string) => string | undefined): Record<string, string>[] {
-  if (background.paint) return [{ backgroundColor: '#ffffff' }, ...background.paint.layers.map(layer => Object.fromEntries(Object.entries(layer.style)
+  if (!background) return []
+  if (background.paint) return background.paint.layers.map(layer => Object.fromEntries(Object.entries(layer.style)
     .map(([name, value]) => [name.replace(/-([a-z])/g, (_match, character: string) => character.toUpperCase()),
-      projectUrls(value, layer.resourceBindings, resolve)])))]
+      projectUrls(value, layer.resourceBindings, resolve)])))
   const url = background.assetId && resolve(background.assetId)
-  return [{ backgroundColor: background.color ?? '#ffffff', backgroundImage: url ? `url(${JSON.stringify(url)})` : 'none',
+  return [{ backgroundColor: background.color ?? 'transparent', backgroundImage: url ? `url(${JSON.stringify(url)})` : 'none',
     backgroundSize: background.fit === 'fill' ? '100% 100%' : background.fit ?? 'cover', backgroundPosition: 'center', backgroundRepeat: 'no-repeat' }]
 }
 
 /** Paint lives before content and never participates in selection, ownership or document layout. */
-export function applyComponentBackgroundPaint(root: HTMLElement, background: ComponentBackground,
+export function applyComponentBackgroundPaint(root: HTMLElement, background: ComponentBackground | null | undefined,
   resolve: (id: string) => string | undefined): void {
   root.style.isolation = 'isolate'
   for (const name of ['background-color', 'background-image', 'background-size', 'background-position', 'background-repeat', 'background-origin', 'background-clip', 'background-attachment', 'background-blend-mode']) root.style.removeProperty(name)
   let paint = root.querySelector<HTMLElement>(':scope > [data-component-background-paint]')
+  if (!background) { paint?.remove(); return }
   if (!paint) {
     paint = root.ownerDocument.createElement('div'); paint.dataset.componentBackgroundPaint = ''; paint.setAttribute('aria-hidden', 'true')
     paint.style.cssText = 'position:absolute;inset:0;pointer-events:none;overflow:hidden;z-index:-1'

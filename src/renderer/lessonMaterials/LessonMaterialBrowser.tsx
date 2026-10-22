@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import type { LessonMaterialList, LessonMaterialRead, LessonMaterialRecord, MaterialExtraction } from '../../shared/materialExtraction'
-import type { LessonMaterialSelectResult } from '../../shared/lessonMaterialDesktop'
+import type { LessonMaterialSelectResult, LessonMaterialPdfInput } from '../../shared/lessonMaterialDesktop'
 import { extractMaterial } from '../project/materialExtraction'
 
 export interface LessonMaterialBrowserProps {
@@ -11,6 +11,7 @@ export interface LessonMaterialBrowserProps {
   selectSource(): Promise<LessonMaterialSelectResult>
   list(): Promise<LessonMaterialList>
   importMaterial(input: { title: string; original: Uint8Array; extraction: MaterialExtraction }): Promise<LessonMaterialRecord>
+  importPdf?(input: Omit<LessonMaterialPdfInput, 'requestId'>, options: { signal: AbortSignal; onProgress: (page: number, total: number) => void }): Promise<LessonMaterialRecord>
   read(input: { id: string; extractionVersion: string; fragmentIds: string[] }): Promise<LessonMaterialRead>
 }
 function Images({ assets }: { assets: LessonMaterialRead['assets'] }) {
@@ -27,13 +28,16 @@ export function LessonMaterialBrowser(props: LessonMaterialBrowserProps) {
   const [selected, setSelected] = useState<LessonMaterialRead | null>(null)
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
+  const [progress, setProgress] = useState('')
+  const [pdfFrom, setPdfFrom] = useState('1'), [pdfTo, setPdfTo] = useState('')
+  const activeImport = useRef<AbortController | null>(null)
   const generation = useRef(0)
   const api = useRef(props); api.current = props
   useEffect(() => {
     const token = ++generation.current
-    setRecords([]); setSelected(null); setError(''); setBusy(false)
+    setRecords([]); setSelected(null); setError(''); setBusy(false); setProgress('')
     void api.current.list().then(next => { if (token === generation.current) { setRecords(next.records); setError(next.diagnostics.map(issue => issue.message).join('；')) } }).catch(reason => { if (token === generation.current) setError(reason instanceof Error ? reason.message : String(reason)) })
-    return () => { generation.current++ }
+    return () => { generation.current++; activeImport.current?.abort(); activeImport.current = null }
   }, [props.targetKey])
   async function run(action: () => Promise<void>) {
     const token = generation.current
@@ -45,24 +49,49 @@ export function LessonMaterialBrowser(props: LessonMaterialBrowserProps) {
   return <section aria-label="课例材料" style={{ padding: 16, overflow: 'auto', height: '100%' }}>
     <h2>课例材料</h2>
     <p>添加教材、教案或课件，查看提取的正文、图示与出处。材料独立保存在当前课例。</p>
+    <label>PDF 起始页 <input aria-label="PDF 起始页" type="number" min="1" value={pdfFrom} disabled={busy} onChange={event => setPdfFrom(event.target.value)} style={{ width: 70 }} /></label>
+    <label>结束页（留空至末页） <input aria-label="PDF 结束页" type="number" min="1" value={pdfTo} disabled={busy} onChange={event => setPdfTo(event.target.value)} style={{ width: 70 }} /></label>
     <button type="button" disabled={busy} onClick={() => {
         const token = generation.current
         const currentApi = api.current
+        const controller = new AbortController()
+        activeImport.current = controller
+        const from = Number(pdfFrom || '1'), to = pdfTo ? Number(pdfTo) : undefined
         void run(async () => {
-          const result = await currentApi.selectSource()
-          if (token !== generation.current) return
-          const failures = [...result.failures]
-          for (const source of result.sources) {
-            try {
-              const original = source.bytes
-              const extraction = await extractMaterial(original, source.title)
-              if (token !== generation.current) return
-              await currentApi.importMaterial({ title: source.title, original, extraction })
-            } catch (reason) { failures.push({ title: source.title, message: reason instanceof Error ? reason.message : String(reason) }) }
+          try {
+            const result = await currentApi.selectSource()
+            if (token !== generation.current || controller.signal.aborted) return
+            const failures = [...result.failures]
+            for (const source of result.sources) {
+              if (token !== generation.current || controller.signal.aborted) break
+              try {
+                const original = source.bytes
+                if (source.title.split('.').pop()?.toLowerCase() === 'pdf') {
+                  if (!Number.isSafeInteger(from) || from < 1 || (to !== undefined && (!Number.isSafeInteger(to) || to < from))) throw new Error('PDF 页范围须为正整数，且结束页不小于起始页')
+                  if (!currentApi.importPdf) throw new Error('PDF 隔离提取服务不可用，请重新打开应用')
+                  await currentApi.importPdf({ title: source.title, original, ...(to === undefined ? { fromPage: from } : { pages: { from, to } }) }, {
+                    signal: controller.signal,
+                    onProgress: (page, total) => { if (token === generation.current && !controller.signal.aborted) setProgress(`${source.title}：第 ${page} / ${total} 页`) },
+                  })
+                } else {
+                  const extraction = await extractMaterial(original, source.title)
+                  if (token !== generation.current || controller.signal.aborted) break
+                  await currentApi.importMaterial({ title: source.title, original, extraction })
+                }
+              } catch (reason) {
+                if (controller.signal.aborted || token !== generation.current) break
+                failures.push({ title: source.title, message: reason instanceof Error ? reason.message : String(reason) })
+              }
+            }
+            if (token !== generation.current) return
+            if (controller.signal.aborted) setError('材料导入已取消；已完成的材料已保留。')
+            else if (failures.length) setError(failures.map(failure => `${failure.title}：${failure.message}`).join('；'))
+            const next = await currentApi.list()
+            if (token === generation.current) { setRecords(next.records); if (next.diagnostics.length) setError(next.diagnostics.map(issue => issue.message).join('；')) }
+          } finally {
+            if (activeImport.current === controller) activeImport.current = null
+            if (token === generation.current) setProgress('')
           }
-          if (failures.length && token === generation.current) setError(failures.map(failure => `${failure.title}：${failure.message}`).join('；'))
-          const next = await currentApi.list()
-          if (token === generation.current) { setRecords(next.records); if (next.diagnostics.length) setError(next.diagnostics.map(issue => issue.message).join('；')) }
         })
       }}>添加材料（PDF / DOCX / PPTX / 文本 / 图片，可多选）</button>
     <button type="button" disabled={busy} onClick={() => {
@@ -74,7 +103,8 @@ export function LessonMaterialBrowser(props: LessonMaterialBrowserProps) {
         setRecords(next.records); setSelected(null); setError(next.diagnostics.map(issue => issue.message).join('；'))
       })
     }}>刷新材料</button>
-    {busy && <p role="status">正在读取材料…</p>}
+    {busy && activeImport.current && <button type="button" onClick={() => activeImport.current?.abort()}>取消导入</button>}
+    {busy && <p role="status">{progress || '正在读取材料…'}</p>}
     {error && <p role="alert">{error}</p>}
     {!records.length && !busy && <p>当前课例尚未添加材料。</p>}
     {records.map(record => {

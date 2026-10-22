@@ -1,3 +1,4 @@
+import { componentSurface, componentContainers, componentSurfaces } from '../../shared/contracts/component-platform/project'
 import { create } from 'zustand'
 import type { ComponentEdit } from '../../shared/contracts/component-platform/operations'
 import type { ComponentInstance, ComponentSurface, CourseProjectV10 } from '../../shared/contracts/component-platform/project'
@@ -160,7 +161,6 @@ export const useEditorStore = create<EditorState>((set, get) => {
     connectCourseDocuments: (api, recovery) => courseBridge.connect(api, () => courseInputs.connect(api, recovery)),
     async activateCourseDocument(id) { const current = courseBridge.read().activeDocumentId; if (current && current !== id) await retainBeforeNavigation(current); await courseBridge.activate(id) },
     async closeCourseDocument(id) {
-      await retainBeforeNavigation(id)
       if (!await courseBridge.close(id)) return false
       advancedDrafts.release(id); discardPropertiesDrafts(id)
       const drafts = { ...get().flowDocumentDrafts }; delete drafts[id]
@@ -211,14 +211,24 @@ export const selectCourseView = (state: EditorState) => state.courseView
 export const selectActiveCourseProjectDocument = (state: EditorState) => state.courseView.project
 export const selectActiveCourseLocationId = (state: EditorState) => state.courseView.surfaceId
 export const selectActiveSceneId = (state: EditorState) => state.courseView.surfaceId ?? ''
-export const selectActiveScene = (state: EditorState) => state.courseView.project?.surfaces.find(surface => surface.id === state.courseView.surfaceId) ?? null
+let activeSceneProject: CourseProjectV10 | null = null
+let activeSceneId: string | null = null
+let activeSceneView: Readonly<ComponentSurface> | null = null
+export const selectActiveScene = (state: EditorState) => {
+  const project = state.courseView.project, id = state.courseView.surfaceId
+  if (project !== activeSceneProject || id !== activeSceneId) {
+    activeSceneProject = project; activeSceneId = id
+    activeSceneView = project && id ? componentSurface(project, id) ?? null : null
+  }
+  return activeSceneView
+}
 let slideSceneProject: CourseProjectV10 | null = null
 let slideSceneList: ComponentSurface[] = []
 export const selectSlideSceneList = (state: EditorState): ComponentSurface[] => {
   const project = state.courseView.project
   if (project !== slideSceneProject) {
     slideSceneProject = project
-    slideSceneList = project?.surfaces.filter(surface => surface.kind === 'slide') ?? []
+    slideSceneList = (project == null ? undefined : componentSurfaces(project).filter(surface => surface.kind === 'slide')) ?? []
   }
   return slideSceneList
 }
@@ -233,8 +243,10 @@ export const selectSelectedNodes = (state: EditorState): ComponentInstance[] => 
   return project ? state.courseView.selectedInstanceIds.flatMap(id => project.instances[id] ? [project.instances[id]!] : []) : []
 }
 export const selectEditingNodes = (state: EditorState): ComponentInstance[] => {
-  const project = state.courseView.editingProject, surface = project?.surfaces.find(value => value.id === state.courseView.surfaceId)
-  return project && surface ? surface.childIds.flatMap(id => project.instances[id] ? [project.instances[id]!] : []) : []
+  const project = state.courseView.editingProject, surface = (project == null ? undefined : componentContainers(project).find(value => value.id === state.courseView.surfaceId))
+  if (!project) return []
+  const root = state.courseView.rootInstanceId ? project.instances[state.courseView.rootInstanceId] : undefined
+  return (surface?.childIds ?? root?.childIds ?? (root ? [root.id] : [])).flatMap(id => project.instances[id] ? [project.instances[id]!] : [])
 }
 export const selectEditingScope = (state: EditorState): EditingScope => {
   const surface = selectActiveScene(state)

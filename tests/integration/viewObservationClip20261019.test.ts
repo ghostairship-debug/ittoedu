@@ -1,4 +1,5 @@
 // @vitest-environment node
+import { componentSurfaces } from '../../src/shared/contracts/component-platform/project'
 import { expect, it } from 'vitest'
 import sharp from 'sharp'
 import { createBlankCourseProjectV10 } from '../../src/core/course/createCourseProjectV10'
@@ -10,7 +11,7 @@ import type { ViewObservationSnapshot } from '../../src/shared/workbench/viewObs
 
 it('crops actual PNG pixels in viewport CSS coordinates, preserves the original and leaves action coordinates unchanged', async () => {
   const project = createBlankCourseProjectV10('局部观察')
-  const locationId = project.surfaces[0]!.id
+  const locationId = componentSurfaces(project)[0]!.id
   const identity = { documentId: 'document', epoch: 'epoch', revision: 0, locationId }
   const snapshot: ViewObservationSnapshot = { ...identity, model: { kind: 'course-v10', project, resources: { assets: {}, components: {} } },
     binding: { kind: 'untitled', suggestedName: 'clip.glx' }, dirty: true, saving: false, recoverable: true, undoDepth: 0, redoDepth: 0 }

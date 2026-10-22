@@ -13,11 +13,13 @@ import { createSlideAuthoringSlice, createInitialSlideOwnedState } from '../../s
 import { courseDraftLifecycle } from '../../src/renderer/authoring/courseDraftLifecycle'
 import { DocumentToolGateway } from '../../src/core/tools/DocumentToolGateway'
 import type { CourseProjectV10, JsonValue } from '../../src/shared/contracts/component-platform/project'
+import { componentSurfaces } from '../../src/shared/contracts/component-platform/project'
+import { normalizeWorkProject } from '../../src/shared/contracts/component-platform/workProjectMigration'
 import type { InteractionRule } from '../../src/shared/interactionTypes'
 
 const json = (value: unknown): JsonValue => JSON.parse(JSON.stringify(value)) as JsonValue
 function fixture(): CourseProjectV10 {
-  return { schemaVersion: 10, id: 'store-project', revision: 0, title: '三表面', definitions: { [WEB_DEFINITION.id]: WEB_DEFINITION },
+  return normalizeWorkProject({ schemaVersion: 10, id: 'store-project', revision: 0, title: '三表面', definitions: { [WEB_DEFINITION.id]: WEB_DEFINITION },
     instances: Object.fromEntries(['slide-text', 'flow-text', 'trigger', 'peer', 'outside', 'global'].map((id, index) => [id, {
       id, definitionId: WEB_DEFINITION.id, data: { html: id }, frame: { width: 160, height: 80, transform: [1, 0, 0, 1, 20 + index * 180, 40] },
     }])),
@@ -25,7 +27,7 @@ function fixture(): CourseProjectV10 {
       { id: 'spatial', kind: 'spatial', title: '空间', childIds: ['trigger', 'peer', 'outside'], spatial: { home: { x: 0, y: 0, zoom: 1 }, frames: [],
         relations: [{ id: 'inside', sourceInstanceId: 'trigger', targetInstanceId: 'peer', kind: 'line' }, { id: 'external', sourceInstanceId: 'trigger', targetInstanceId: 'outside', kind: 'arrow' }],
         paths: [{ id: 'path', frameIds: [], instanceIds: ['trigger', 'outside'] }], semanticZoom: [{ id: 'zoom', instanceIds: ['peer', 'outside'], minZoom: .5, maxZoom: 2, visible: true }] } }],
-    global: { underlay: [], overlay: ['global'] }, assets: {} }
+    global: { underlay: [], overlay: ['global'] }, assets: {} })
 }
 const rule = (id: string, trigger: InteractionRule['trigger'], action: InteractionRule['actions'][number]['action']): InteractionRule => ({
   id, name: id, enabled: true, trigger, conditions: [], actions: [{ id: `${id}-action`, start: 'after-previous', delayMs: 0, action }],
@@ -34,7 +36,7 @@ function attachRules(project: CourseProjectV10, surfaceId: string, rules: Intera
   project.definitions[INTERACTIONS_DEFINITION.id] = INTERACTIONS_DEFINITION
   project.instances.behavior = { id: 'behavior', definitionId: INTERACTIONS_DEFINITION.id, data: json({ rules }),
     attachments: [{ instanceId: 'behavior', target: { kind: 'surface', surfaceId } }] }
-  project.surfaces.find(surface => surface.id === surfaceId)!.childIds.push('behavior')
+  project.instances[surfaceId].childIds!.push('behavior')
 }
 
 it('pastes the same Spatial graph twice with independent completion followers and relations, preserving external paths and zoom', async () => {
@@ -48,7 +50,7 @@ it('pastes the same Spatial graph twice with independent completion followers an
     const copies: string[][] = []
     for (let index = 0; index < 2; index++) {
       const target = h.kernel.captureTarget(), plan = prepareCourseObjectPaste(clipboard, { capturedTarget: target,
-        container: { kind: 'surface', surfaceId: 'spatial' }, index: target.project.surfaces[2].childIds.length, offset: { x: 20, y: 20 } })
+        container: { kind: 'surface', surfaceId: 'spatial' }, index: componentSurfaces(target.project)[2].childIds.length, offset: { x: 20, y: 20 } })
       expect(await h.kernel.editCaptured(h.kernel.capture(plan.edits, target))).toMatchObject({ status: 'applied' })
       copies.push(plan.rootIds)
       const [trigger, peer] = plan.rootIds, current = h.model().project
@@ -58,25 +60,25 @@ it('pastes the same Spatial graph twice with independent completion followers an
       const follower = rules.find(value => value.trigger.type === 'animation.completed' && value.trigger.actionId === root.actions[0].id)!
       expect(follower.actions[0].action).toMatchObject({ nodeId: trigger })
       expect(root.id).not.toBe('root'); expect(root.actions[0].id).not.toBe('root-action')
-      expect(current.surfaces[2].spatial!.relations).toContainEqual(expect.objectContaining({ sourceInstanceId: trigger, targetInstanceId: peer }))
-      expect(current.surfaces[2].spatial!.relations).not.toContainEqual(expect.objectContaining({ sourceInstanceId: trigger, targetInstanceId: 'outside' }))
-      expect(current.surfaces[2].spatial!.paths).toEqual(project.surfaces[2].spatial!.paths)
-      expect(current.surfaces[2].spatial!.semanticZoom).toEqual(project.surfaces[2].spatial!.semanticZoom)
+      expect(componentSurfaces(current)[2].spatial!.relations).toContainEqual(expect.objectContaining({ sourceInstanceId: trigger, targetInstanceId: peer }))
+      expect(componentSurfaces(current)[2].spatial!.relations).not.toContainEqual(expect.objectContaining({ sourceInstanceId: trigger, targetInstanceId: 'outside' }))
+      expect(componentSurfaces(current)[2].spatial!.paths).toEqual(componentSurfaces(project)[2].spatial!.paths)
+      expect(componentSurfaces(current)[2].spatial!.semanticZoom).toEqual(componentSurfaces(project)[2].spatial!.semanticZoom)
       if (!index) await h.kernel.edit([{ type: 'data.set', instanceId: 'outside', path: ['html'], value: '后续人工修改' }])
     }
     expect(new Set(copies.flat()).size).toBe(4)
     const copiedRules = interactionRules(interactionBehavior(h.model().project, { kind: 'surface', surfaceId: 'spatial' }))
     expect(new Set(copiedRules.flatMap(value => value.actions.map(action => action.id))).size).toBe(6)
-    expect(h.model().project.surfaces[2].spatial!.relations).toHaveLength(4)
+    expect(componentSurfaces(h.model().project)[2].spatial!.relations).toHaveLength(4)
     expect(h.first.read().undoDepth).toBe(3)
     await h.bridge.undo()
     expect(copies[1].every(id => !h.model().project.instances[id])).toBe(true)
     expect(copies[0].every(id => Boolean(h.model().project.instances[id]))).toBe(true)
     expect(h.driver.load(h.driver.serialize(h.model()))).toEqual(h.model())
-    const target = h.kernel.captureTarget(), spatialBefore = structuredClone(target.project.surfaces[2].spatial)
+    const target = h.kernel.captureTarget(), spatialBefore = structuredClone(componentSurfaces(target.project)[2].spatial)
     const globalCopy = prepareCourseObjectPaste(clipboard, { capturedTarget: target, container: { kind: 'global', plane: 'overlay' }, index: target.project.global.overlay.length })
     await h.kernel.editCaptured(h.kernel.capture(globalCopy.edits, target))
-    expect(h.model().project.surfaces[2].spatial).toEqual(spatialBefore)
+    expect(componentSurfaces(h.model().project)[2].spatial).toEqual(spatialBefore)
     expect(h.model().project.global.overlay).toEqual(['global', ...globalCopy.rootIds])
   } finally { h.bridge.dispose() }
 })
@@ -122,14 +124,14 @@ it('shares one resource-bearing History across Slide, Flow and Spatial, includin
   source.definitions.program = { id: 'program', role: 'content', implementation: { kind: 'source', language: 'javascript', workspace: { ownerId: 'code', entry: 'main.js' } } }
   source.instances.image = { id: 'image', definitionId: IMAGE_DEFINITION.id, data: json(createImageData('logo')) }
   source.instances.program = { id: 'program', definitionId: 'program', data: { title: '程序' } }
-  source.surfaces[0].childIds.push('image', 'program')
+  source.instances.slide.childIds!.push('image', 'program')
   source.assets.logo = { id: 'logo', path: 'assets/logo.svg', filename: 'logo.svg', mimeType: 'image/svg+xml' }
   const sourceResources = { assets: { logo: new TextEncoder().encode('<svg/>') }, components: { code: { 'main.js': new TextEncoder().encode('export const answer = 42') } } }
   const h = await createV10StoreHost(project), snapshots = [structuredClone(h.model())]
   try {
     for (const surfaceId of ['slide', 'flow', 'spatial']) {
       h.kernel.selectSurface(surfaceId)
-      const target = h.kernel.captureTarget(), surface = target.project.surfaces.find(value => value.id === surfaceId)!
+      const target = h.kernel.captureTarget(), surface = componentSurfaces(target.project).find(value => value.id === surfaceId)!
       const plan = prepareCourseObjectPaste({ documentId: 'other-document', project: source, roots: ['image', 'program'], resources: sourceResources },
         { capturedTarget: target, container: { kind: 'surface', surfaceId }, index: surface.childIds.length })
       expect(await h.kernel.editCaptured(h.kernel.capture(plan.edits, target))).toMatchObject({ status: 'applied' })
@@ -148,7 +150,7 @@ it('shares one resource-bearing History across Slide, Flow and Spatial, includin
     const sameContent = (index: number) => {
       const current = h.model(), previous = snapshots[index]
       expect(current.project.instances).toEqual(previous.project.instances)
-      expect(current.project.surfaces).toEqual(previous.project.surfaces)
+      expect(componentSurfaces(current.project)).toEqual(componentSurfaces(previous.project))
       expect(current.resources).toEqual(previous.resources)
       expect(current.project.global).toEqual(project.global)
     }
@@ -236,7 +238,7 @@ it('preserves composing professional drafts outside canonical data and commits e
   const chart = createChartData(), table = createTableData()
   project.instances.chart = { id: 'chart', definitionId: CHART_DEFINITION.id, data: json(chart) }
   project.instances.table = { id: 'table', definitionId: TABLE_DEFINITION.id, data: json(table) }
-  project.surfaces[0].childIds.push('text', 'chart', 'table')
+  project.instances.slide.childIds!.push('text', 'chart', 'table')
   const h = await createV10StoreHost(project)
   let owned = createInitialSlideOwnedState()
   const slice = createSlideAuthoringSlice(h.kernel, { read: () => owned, patch: patch => { owned = { ...owned, ...patch } } })

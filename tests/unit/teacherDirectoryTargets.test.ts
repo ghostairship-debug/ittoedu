@@ -1,20 +1,23 @@
+import { appendRootContainers, testContainerInstance } from '../helpers/glxWorkFixture'
+import { componentSurfaces } from '../../src/shared/contracts/component-platform/project'
 import { expect, it } from 'vitest'
 import { ComponentNavigationOwner } from '../../src/renderer/components/ComponentNavigationOwner'
 import { createBlankCourseProjectV10 } from '../../src/core/course/createCourseProjectV10'
 import { DOCUMENT_BLOCK_DEFINITION } from '../../src/components/document-block'
 import { createComponentSpatialCameraPort } from '../../src/player/surfaces/spatial/componentSpatialAdapter'
 import { teacherControllerActionSchema } from '../../src/shared/contracts/component-platform/teacherController'
+import { prepareCourseTeacherControllerEdits } from '../../src/core/course/courseElementInsertion'
+import { applyComponentOperation, captureComponentOperation } from '../../src/core/drivers/courseV10Operations'
 import { createTeacherControllerHudGeometry, projectTeacherControllerInstances, restoreTeacherControllerFrameEdits, teacherControllerReferenceSize } from '../../src/shared/teacherControllerViewportGeometry'
 
 it('derives the existing state/camera/body targets and executes Flow targets and page start on the one owner', async () => {
-  const project = createBlankCourseProjectV10(), slide = project.surfaces[0]
-  slide.presentation = { states: [{ id: 'state-a', title: '展开证明', overrides: {} }] }
+  const project = createBlankCourseProjectV10(), slide = componentSurfaces(project)[0]
+  testContainerInstance(project, slide.id).container.presentation = { states: [{ id: 'state-a', title: '展开证明', overrides: {} }] }
   project.definitions[DOCUMENT_BLOCK_DEFINITION.id] = DOCUMENT_BLOCK_DEFINITION
   const text = (value: string) => ({ inlines: [{ type: 'text', text: value }] })
   project.instances.section = { id: 'section', definitionId: DOCUMENT_BLOCK_DEFINITION.id, data: { type: 'section', title: text('第一章'), collapsedByDefault: true }, childIds: ['heading'] }
   project.instances.heading = { id: 'heading', definitionId: DOCUMENT_BLOCK_DEFINITION.id, data: { type: 'heading', level: 2, content: text('具体问题') } }
-  project.surfaces.push({ id: 'flow', title: '讲义', kind: 'flow', childIds: ['section'] },
-    { id: 'space', title: '空间', kind: 'spatial', childIds: [], spatial: { home: { x: 0, y: 0, zoom: 1 }, frames: [{ id: 'camera', title: '实验镜头', pose: { x: 50, y: 60, zoom: 1 } }] } })
+  appendRootContainers(project, { id: 'flow', title: '讲义', kind: 'flow', childIds: ['section'] }, { id: 'space', title: '空间', kind: 'spatial', childIds: [], spatial: { home: { x: 0, y: 0, zoom: 1 }, frames: [{ id: 'camera', title: '实验镜头', pose: { x: 50, y: 60, zoom: 1 } }] } })
   let active = slide.id, selectedState: string | null = null
   const visits: Array<string | null> = []
   const owner = new ComponentNavigationOwner({ project: () => project, surfaceId: () => active, select: id => { active = id }, selectState: id => { selectedState = id } })
@@ -35,7 +38,10 @@ it('derives the existing state/camera/body targets and executes Flow targets and
 })
 
 it('shrinks the default visible footprint while preserving the formal right anchor and saved drag geometry', () => {
-  const project = createBlankCourseProjectV10(), id = project.global.overlay[0], original = project.instances[id].frame!
+  const blank = createBlankCourseProjectV10()
+  const project = applyComponentOperation(blank, captureComponentOperation(blank,
+    prepareCourseTeacherControllerEdits(blank, blank.rootIds[0]).edits))
+  const id = project.global.overlay[0], original = project.instances[id].frame!
   const data = project.instances[id].data as Record<string, any>
   data.defaultCollapsed = false
   const hud = createTeacherControllerHudGeometry({ referenceSize: teacherControllerReferenceSize(project), viewportRect: { x: 0, y: 0, width: 1280, height: 720 } })

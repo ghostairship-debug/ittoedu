@@ -141,6 +141,7 @@ export const audioActionTargetSchema = z.discriminatedUnion('kind', [
 
 const presentationActionSchema = z.object({
   type: z.literal('presentation.set'),
+  containerId: stableIdSchema.optional(),
   stateId: stableIdSchema,
   transition: z.object({
     duration: z.number().finite().min(0).max(10_000).optional(),
@@ -181,15 +182,15 @@ const audioActionSchemas = [
 
 const baseActionSchemas = [
   presentationActionSchema,
-  z.object({ type: z.literal('location.go'), locationId: stableIdSchema, transition: componentNavigationTransitionSchema.optional() }).strict(),
+  z.object({ type: z.literal('location.go'), locationId: stableIdSchema, containerId: stableIdSchema.optional(), transition: componentNavigationTransitionSchema.optional() }).strict(),
   z.object({
     type: z.literal('scene.go'),
     sceneId: stableIdSchema,
     targetStateId: stableIdSchema.optional(),
     transition: componentNavigationTransitionSchema.optional(),
   }).strict(),
-  z.object({ type: z.literal('step.next'), transition: componentNavigationTransitionSchema.optional() }).strict(),
-  z.object({ type: z.literal('step.previous'), transition: componentNavigationTransitionSchema.optional() }).strict(),
+  z.object({ type: z.literal('step.next'), containerId: stableIdSchema.optional(), transition: componentNavigationTransitionSchema.optional() }).strict(),
+  z.object({ type: z.literal('step.previous'), containerId: stableIdSchema.optional(), transition: componentNavigationTransitionSchema.optional() }).strict(),
   z.object({ type: z.literal('scene.next'), transition: componentNavigationTransitionSchema.optional() }).strict(),
   z.object({ type: z.literal('scene.previous'), transition: componentNavigationTransitionSchema.optional() }).strict(),
   z.object({ type: z.literal('scene.replay'), transition: componentNavigationTransitionSchema.optional() }).strict(),

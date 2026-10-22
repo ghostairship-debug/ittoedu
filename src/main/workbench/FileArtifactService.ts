@@ -6,10 +6,11 @@ import type { DocumentHostService } from './DocumentHostService'
 import { readDocumentFileVersion } from './documentJournal'
 import { AgentFileOutcomeUnknown } from '../../core/tools/AgentFileTools'
 import { relocatedDocumentPath } from './DocumentFileCoordinator'
-import { prepareMediaFileContent } from './mediaFiles/MediaFilesService'
+import { prepareMediaFileContent, MediaFilesService } from './mediaFiles/MediaFilesService'
 
 /** Binary formats share the existing physical file owner, without a second document writer. */
 export class FileArtifactService {
+  readonly media = new MediaFilesService(this)
   private bindings = new Map<string, FileArtifactBinding>()
   private issued = new Map<string, FileArtifactBinding>()
   private nextBindingVersion = 0

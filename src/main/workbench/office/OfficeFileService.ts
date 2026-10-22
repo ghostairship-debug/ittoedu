@@ -3,8 +3,8 @@ import type { FileArtifactBinding } from '../../../shared/workbench/mediaFiles'
 import type { WorkspaceOperationResult } from '../../../shared/workbench/workspaceFiles'
 import { validateWorkspaceEntryName } from '../WorkspaceFiles'
 import { AgentFileOutcomeUnknown } from '../../../core/tools/AgentFileTools'
-import { applyOfficeContent, inspectOfficeContent, officeContentRequestSchema } from './OfficeContentService'
-import type { OfficeCalculation, OfficeContentInspection, OfficeContentRequest, OfficeDiagnostic, OfficeFormat } from '../../../shared/workbench/officeFiles'
+import { applyOfficeContentOffThread, inspectOfficeContentOffThread } from './officeContentWorker'
+import { officeContentRequestSchema, type OfficeCalculation, type OfficeContentInspection, type OfficeContentRequest, type OfficeDiagnostic, type OfficeFormat } from '../../../shared/workbench/officeFiles'
 
 export interface OfficeFileContext {
   signal?: AbortSignal
@@ -44,7 +44,9 @@ export class OfficeFileService {
     this.active(context)
     const bytes = await this.host.artifacts.read(binding, context.signal)
     this.active(context)
-    return { binding, inspection: inspectOfficeContent(bytes, format) }
+    const inspection = await inspectOfficeContentOffThread(bytes, format, context.signal)
+    this.active(context)
+    return { binding, inspection }
   }
   async create(destination: OfficeFileDestination, input: Extract<OfficeContentRequest, { operation: 'create' }>, context: OfficeFileContext = {}): Promise<OfficeFileResult> {
     const request = officeContentRequestSchema.parse(input)
@@ -52,7 +54,7 @@ export class OfficeFileService {
     validateWorkspaceEntryName(destination.name)
     if (path.extname(destination.name).toLowerCase() !== `.${request.format}`) throw new Error(`此内容需要 .${request.format} 文件名`)
     this.active(context)
-    const prepared = await applyOfficeContent(undefined, request)
+    const prepared = await applyOfficeContentOffThread(undefined, request, context.signal)
     this.active(context)
     const receipt = await this.host.files.createFile({ ...destination, format: 'file', bytes: prepared.bytes }, () => this.active(context))
     const created = receipt.items.find(item => (item.status === 'success' || item.status === 'partial') && item.targetPath)
@@ -60,7 +62,7 @@ export class OfficeFileService {
     let binding: FileArtifactBinding, inspection: OfficeContentInspection
     try {
       binding = await this.host.artifacts.bind(created.targetPath)
-      inspection = inspectOfficeContent(await this.host.artifacts.read(binding), request.format)
+      inspection = await inspectOfficeContentOffThread(await this.host.artifacts.read(binding), request.format)
     } catch (cause) {
       throw new AgentFileOutcomeUnknown(`Office 文件已创建，但回读结果未确认；请先读取原件，不要重复新建：${cause instanceof Error ? cause.message : String(cause)}`)
     }
@@ -77,11 +79,11 @@ export class OfficeFileService {
     this.active(context)
     const current = await this.host.artifacts.read(binding, context.signal)
     this.active(context)
-    const prepared = await applyOfficeContent(current, request)
+    const prepared = await applyOfficeContentOffThread(current, request, context.signal)
     this.active(context)
     const saved = await this.host.artifacts.replace(binding, prepared.bytes, context.signal, () => this.active(context))
     let inspection: OfficeContentInspection
-    try { inspection = inspectOfficeContent(await this.host.artifacts.read(saved), request.format) }
+    try { inspection = await inspectOfficeContentOffThread(await this.host.artifacts.read(saved), request.format) }
     catch (cause) { throw new AgentFileOutcomeUnknown(`Office 修改已写入，但回读结果未确认；请先读取原件后继续：${cause instanceof Error ? cause.message : String(cause)}`) }
     return { status: 'saved', binding: saved, inspection, diagnostics: prepared.diagnostics,
       ...(prepared.calculation ? { calculation: prepared.calculation } : {}) }

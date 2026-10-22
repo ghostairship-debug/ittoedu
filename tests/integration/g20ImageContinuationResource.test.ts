@@ -1,3 +1,5 @@
+import { componentSurfaces } from '../../src/shared/contracts/component-platform/project'
+import { testContainerInstance } from '../helpers/glxWorkFixture'
 import { imageDataSchema } from '../../src/components/image/data'
 // @vitest-environment node
 import { promises as fs } from 'node:fs'
@@ -40,7 +42,7 @@ it('recovers a ready document image after cold restore and applies a fresh autho
   project.definitions[IMAGE_DEFINITION.id] = IMAGE_DEFINITION
   const frame = { width: 120, height: 80, transform: [1, 0, 0, 1, 45, 65] as [number, number, number, number, number, number] }
   project.instances.picture = { id: 'picture', definitionId: IMAGE_DEFINITION.id, data: createImageData(asset.meta.id), frame }
-  project.surfaces[0].childIds = ['picture']
+  testContainerInstance(project, 0).childIds = ['picture']
   let host = new DocumentHostService(path.join(directory, 'documents'))
   const document = await host.internalAPI.create({ kind: 'course-v10', project,
     resources: { assets: { [asset.meta.id]: asset.bytes }, components: {} } }, 'document-image.h5lesson')
@@ -61,7 +63,7 @@ it('recovers a ready document image after cold restore and applies a fresh autho
   const begin = (runId: string, authorized = true) => host.tools.beginRun({ runId, actor: 'agent',
     documents: authorized ? [{ documentId: document.documentId, writable: [{ kind: 'document' }] }] : [],
     fileAccess: { permission: 'workspace', workspaceRoot: authorized ? directory : path.join(directory, 'other-workspace') } })
-  const target = { kind: 'course-instance' as const, surfaceId: project.surfaces[0].id, instanceId: 'picture' }
+  const target = { kind: 'course-instance' as const, surfaceId: componentSurfaces(project)[0].id, instanceId: 'picture' }
   await begin('original')
   const originalTarget = await host.tools.issueTarget('original', document.documentId, target)
   const ready = data(await host.tools.execute('original', 'create-image', { name: 'image.generate', input: { target: originalTarget, prompt: 'Controlled replacement' } }))

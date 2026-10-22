@@ -1,5 +1,5 @@
 import { isDeepStrictEqual } from 'node:util'
-import type { ModelAssistantMessage, ModelConnectionSnapshot, ModelEvent, ModelFailure, ModelJsonObject, ModelProvider, ModelRequest, ModelUsage, PreparedModelRequest, ModelTransportDiagnostic } from '../../../shared/workbench/modelProvider'
+import type { ModelAssistantMessage, ModelConnectionSnapshot, ModelEvent, ModelFailure, ModelJsonObject, ModelProvider, ModelRequest, ModelUsage, PreparedModelRequest, ModelPreparationOptions, ModelTransportDiagnostic } from '../../../shared/workbench/modelProvider'
 import { modelAcceptsImages } from '../../../shared/workbench/modelProvider'
 import { effectiveModelProtocol } from '../../../shared/workbench/modelRouting'
 import { normalizeModelOutputParameters } from '../../../shared/workbench/modelOutputParameters'
@@ -146,11 +146,11 @@ function retryAfter(value: string | null, now: number): number | undefined {
 class ResponsesProvider implements ModelProvider {
   readonly retrySafety = 'pure-generation' as const
   constructor(private readonly options: ChatGPTResponsesProviderOptions | OpenAIResponsesProviderOptions, private readonly protocol: ResponsesProtocol) {}
-  prepare(input: Payload): PreparedModelRequest {
+  prepare(input: Payload, accounting?: ModelPreparationOptions): PreparedModelRequest {
     const request = structuredClone(input)
     const prepared = prepare(request, this.protocol)
     const serialized = JSON.stringify(prepared.body)
-    return { serialized, stream: (requestId, options) => this.streamPrepared({ ...request, requestId }, prepared, serialized, options) }
+    return { serialized, ...(accounting ? { tokens: accounting.measurePayload(prepared.body) } : {}), stream: (requestId, options) => this.streamPrepared({ ...request, requestId }, prepared, serialized, options) }
   }
   async *stream(input: ModelRequest, options: { signal?: AbortSignal } = {}): AsyncGenerator<ModelEvent> {
     let prepared: PreparedModelRequest

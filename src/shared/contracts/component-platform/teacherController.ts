@@ -10,18 +10,28 @@ type TeacherNavigationAction =
   | { type: 'course.restart' }
   | { type: 'scene.go'; sceneId: string; targetStateId?: string; targetInstanceId?: string }
 
-export type TeacherControllerAction =
+type UnboundTeacherControllerAction =
   | (TeacherNavigationAction & ComponentNavigationMotion)
   | { type: 'scene.open-picker' | 'audio.toggle-mute' | 'player.fullscreen.toggle' }
   | { type: 'camera.present'; pose: ComponentCameraPose; motion?: ComponentCameraMotion }
 
-const navigationMotion = { transition: componentNavigationTransitionSchema.optional(), camera: componentCameraMotionSchema.optional() }
+/** An explicit range overrides the instance's bound navigation range. */
+export type TeacherControllerAction = UnboundTeacherControllerAction & { containerId?: string }
+
+const containerTarget = { containerId: z.string().min(1).optional() }
+const navigationMotion = { transition: componentNavigationTransitionSchema.optional(), camera: componentCameraMotionSchema.optional(), ...containerTarget }
 export const teacherControllerActionSchema: z.ZodType<TeacherControllerAction> = z.union([
   z.object({ type: z.enum(['step.previous', 'step.next', 'scene.previous', 'scene.next', 'scene.replay', 'course.restart']), ...navigationMotion }).strict(),
-  z.object({ type: z.enum(['scene.open-picker', 'audio.toggle-mute', 'player.fullscreen.toggle']) }).strict(),
+  z.object({ type: z.enum(['scene.open-picker', 'audio.toggle-mute', 'player.fullscreen.toggle']), ...containerTarget }).strict(),
   z.object({ type: z.literal('scene.go'), sceneId: z.string().min(1), targetStateId: z.string().optional(), targetInstanceId: z.string().min(1).optional(), ...navigationMotion }).strict(),
-  z.object({ type: z.literal('camera.present'), pose: componentCameraPoseSchema, motion: componentCameraMotionSchema.optional() }).strict(),
+  z.object({ type: z.literal('camera.present'), pose: componentCameraPoseSchema, motion: componentCameraMotionSchema.optional(), ...containerTarget }).strict(),
 ])
+export interface ComponentFlowReading {
+  containerId: string
+  activeInstanceId: string | null
+  /** Fraction of the actual article read, clamped to 0..1; a fully visible article is 1. */
+  progress: number
+}
 export interface TeacherControllerSnapshot {
   locationId: string | null
   /** Live host interaction mode; the author's component data and frame are unchanged. */
@@ -31,6 +41,8 @@ export interface TeacherControllerSnapshot {
     action: Extract<TeacherControllerAction, { type: 'scene.go' }>
   }[] }[]
   progress: { sceneIndex: number; sceneCount: number; stepIndex: number; stepCount: number; sceneName: string; stepName: string } | null
+  /** Live Flow position; never persisted in the project or History. */
+  reading?: ComponentFlowReading
   /** Unset until the session overrides the authored initial state. */
   collapsed?: boolean
   zoom: number
@@ -43,6 +55,12 @@ export interface TeacherControllerSnapshot {
 export interface TeacherControllerPort {
   /** Host binds view state to the mounted instance; course navigation stays shared. */
   forInstance?(instanceId: string): TeacherControllerPort
+  /** Bound views delegate to this same owner; they do not own another state store. */
+  forContainer?(containerId: string): TeacherControllerPort
+  currentStateId?(): string | null
+  isContainerActive?(containerId: string): boolean
+  /** Small view facts for visibility updates, without constructing a navigation directory. */
+  readVisibility?(): { zoom: number; stateId: string | null }
   placement?(): { x: number; y: number }
   subscribePlacement?(listener: () => void): () => void
   read(): TeacherControllerSnapshot

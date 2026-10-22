@@ -81,7 +81,7 @@
           },
           "componentSchemaVersion": {
             "type": "number",
-            "const": 1
+            "const": 2
           },
           "runtimeApiVersion": {
             "type": "number",

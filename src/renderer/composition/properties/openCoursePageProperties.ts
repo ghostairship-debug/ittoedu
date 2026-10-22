@@ -1,3 +1,4 @@
+import { componentContainers } from '../../../shared/contracts/component-platform/project'
 import type { EditorStoreKernel } from '../../store/editorStoreKernel'
 import type { DocumentSnapshot } from '../../../shared/workbench/document'
 
@@ -8,7 +9,7 @@ export async function openCoursePageProperties(input: {
   open(surfaceId: string): void
 }): Promise<void> {
   const target = input.kernel.captureTarget()
-  if (!target.surfaceId || !target.project.surfaces.some(surface => surface.id === target.surfaceId)) return
+  if (!target.surfaceId || !componentContainers(target.project).some(surface => surface.id === target.surfaceId)) return
   const confirmed = await input.drain(target.documentId), current = input.kernel.readView()
   if (current.activeDocumentId !== target.documentId || current.surfaceId !== target.surfaceId
     || confirmed.epoch !== target.epoch || current.snapshot?.epoch !== target.epoch) return

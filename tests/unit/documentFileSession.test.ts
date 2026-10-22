@@ -379,3 +379,97 @@ it('M25 a failed local draft has a confirmed discard path without retrying drain
   expect(await f.documents.list()).toEqual([])
   expect(await fs.readFile(f.filename, 'utf8')).toBe('original')
 })
+
+it('confirms close input without rereading the full source and keeps cancelled input editable', async () => {
+  const f = await fixture('<p>original</p>', 'close.html')
+  const read = vi.spyOn(f.documents, 'read')
+  f.session.edit('<p>teacher input</p>')
+  vi.spyOn(f.documents, 'closeWithDialog').mockImplementation(async () => {
+    // Main requests input confirmation before and after its write-task barrier.
+    expect(await f.session.preserveDraft()).toBe(true)
+    expect(await f.session.preserveDraft()).toBe(true)
+    return false
+  })
+  expect(await f.session.close()).toBe(false)
+  expect(read).not.toHaveBeenCalled()
+  expect(await f.host.internalAPI.read(f.session.documentId!)).toMatchObject({ dirty: true, undoDepth: 1, model: { source: '<p>teacher input</p>' } })
+  expect(await fs.readFile(f.filename, 'utf8')).toBe('<p>original</p>')
+  f.session.edit('<p>after cancellation</p>')
+  expect(await f.session.drain()).toBe(true)
+  expect(f.session.committedDocument).toMatchObject({ dirty: true, model: { source: '<p>after cancellation</p>' } })
+  read.mockRestore()
+})
+
+it('pauses the target disk poll during a single close request and resumes it after cancellation', async () => {
+  const f = await fixture('original', 'close.txt')
+  vi.useFakeTimers()
+  try {
+    const observe = vi.spyOn(f.documents, 'observeFile')
+    let enter!: () => void, cancel!: (result: boolean) => void
+    const entered = new Promise<void>(resolve => { enter = resolve })
+    const response = new Promise<boolean>(resolve => { cancel = resolve })
+    const dialog = vi.spyOn(f.documents, 'closeWithDialog').mockImplementation(() => { enter(); return response })
+    const closing = f.session.close()
+    expect(f.session.close()).toBe(closing)
+    await entered
+    await vi.advanceTimersByTimeAsync(1500)
+    expect(observe).not.toHaveBeenCalled()
+    expect(dialog).toHaveBeenCalledTimes(1)
+    cancel(false)
+    expect(await closing).toBe(false)
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(observe).toHaveBeenCalledTimes(1)
+  } finally { f.session.dispose(); vi.useRealTimers(); vi.restoreAllMocks() }
+})
+
+it('waits for close IME completion before confirming the committed input', async () => {
+  const f = await fixture('original', 'close-ime.txt')
+  const dialog = vi.spyOn(f.documents, 'closeWithDialog').mockResolvedValue(false)
+  try {
+    f.session.setComposing(true)
+    f.session.edit('中文输入')
+    const closing = f.session.close()
+    await Promise.resolve()
+    expect(dialog).not.toHaveBeenCalled()
+    expect(await f.host.internalAPI.read(f.session.documentId!)).toMatchObject({ dirty: false, model: { source: 'original' } })
+    f.session.setComposing(false)
+    expect(await closing).toBe(false)
+    expect(dialog).toHaveBeenCalledTimes(1)
+    expect(await f.host.internalAPI.read(f.session.documentId!)).toMatchObject({ dirty: true, undoDepth: 1, model: { source: '中文输入' } })
+    expect(await fs.readFile(f.filename, 'utf8')).toBe('original')
+  } finally { dialog.mockRestore() }
+})
+
+it('keeps an unknown input acknowledgement from reaching the close decision', async () => {
+  const f = await fixture('original', 'close-unknown.txt')
+  const dispatch = vi.spyOn(f.documents, 'dispatch').mockRejectedValueOnce(new Error('transport lost'))
+  const dialog = vi.spyOn(f.documents, 'closeWithDialog').mockResolvedValue(true)
+  try {
+    f.session.edit('input awaiting acknowledgement')
+    expect(await f.session.close()).toBe(false)
+    expect(await f.session.preserveDraft()).toBe(false)
+    expect(dialog).not.toHaveBeenCalled()
+    expect(f.session.getSnapshot()).toMatchObject({ source: 'input awaiting acknowledgement' })
+    expect(await f.host.internalAPI.read(f.session.documentId!)).toMatchObject({ dirty: false, model: { source: 'original' } })
+    expect(await fs.readFile(f.filename, 'utf8')).toBe('original')
+  } finally { dispatch.mockRestore(); dialog.mockRestore() }
+})
+
+it('resumes polling when a pre-close observation finishes after cancellation', async () => {
+  vi.useFakeTimers()
+  let f: Awaited<ReturnType<typeof fixture>> | undefined
+  try {
+    f = await fixture('original', 'close-poll.txt')
+    const observation = await f.documents.observeFile(f.session.documentId!)
+    let finishObservation!: (value: typeof observation) => void
+    const pending = new Promise<typeof observation>(resolve => { finishObservation = resolve })
+    const observe = vi.spyOn(f.documents, 'observeFile').mockReturnValueOnce(pending)
+    vi.spyOn(f.documents, 'closeWithDialog').mockResolvedValue(false)
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(observe).toHaveBeenCalledTimes(1)
+    expect(await f.session.close()).toBe(false)
+    finishObservation(observation)
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(observe).toHaveBeenCalledTimes(2)
+  } finally { f?.session.dispose(); vi.useRealTimers(); vi.restoreAllMocks() }
+})

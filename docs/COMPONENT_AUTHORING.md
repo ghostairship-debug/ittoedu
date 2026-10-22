@@ -1,10 +1,12 @@
 # 统一组件开发指南（API 5）
 
-当前正式合同是 Project V10 + Component API 5。源类型以 [project](../src/shared/contracts/component-platform/project.ts)、[runtime](../src/shared/contracts/component-platform/runtime.ts)、[operations](../src/shared/contracts/component-platform/operations.ts) 与 [Schema](../src/shared/contracts/component-platform/schema.ts) 为准，旧 V4 包指南仅作[历史材料](archive/README.md#历史原文)。
+当前正式合同是 Project 11 + Published 4 + Component API 5，组件库写出格式为 2。源类型以 [project](../src/shared/contracts/component-platform/project.ts)、[runtime](../src/shared/contracts/component-platform/runtime.ts)、[operations](../src/shared/contracts/component-platform/operations.ts) 与 [Schema](../src/shared/contracts/component-platform/schema.ts) 为准，旧 V4 包指南仅作[历史材料](archive/README.md#历史原文)。
 
 ## 定义、实例与实现
 
 定义包含数据合同、角色与共享实现；实例保存专业数据、样式、frame、childIds 及局部 Source。共享或私有 Source 不抹掉专业身份，普通局部编辑不重排整页。frame、编组、顺序与正式身份由软件维护。
+
+作品 rootIds 引用真实根实例，entry 只选择起点。Slide、Flow、Spatial 的配置归实例 container；Source 根可直接承载完整程序，不需要容器。容器可嵌套，子树只有一份 childIds 和一个 World 挂载负责人。库的插入、背景/转场附着和来源更新仍沿现有事务；实际基础资产与短调用入口见[能力交接](development-plan/20261020-glx-work-containers/CAPABILITY_HANDOFF.md)。
 
 实现消费 ComponentRuntimeContext，经 mount 返回 MountedComponent；update 接最新实例数据，updatePlacement 只处理位置变化，dispose 释放该挂载。具体端口和可选能力见源类型与[现有组件](../src/components/)。运行状态与作者工程分离，正式修改经唯一 DocumentSession/History。
 

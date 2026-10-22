@@ -303,6 +303,8 @@ export interface ExportBuildRequest {
   /** Immutable copy supplied by Main; never the renderer's live store. */
   snapshot: DocumentSnapshot
   options?: ExportPageOptions
+  /** Manual export keeps the existing preflight/artifacts, without publishing files in the worker. */
+  includeDelivery?: boolean
 }
 
 export interface ExportBuildReply {
@@ -314,6 +316,7 @@ export interface ExportBuildReply {
   printHtml?: string
   warnings: readonly string[]
   reason?: string
+  delivery?: import('./frozenDelivery').BuiltComponentDelivery
 }
 
 export interface ExportBuildProgress {

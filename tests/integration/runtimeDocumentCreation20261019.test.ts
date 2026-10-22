@@ -1,4 +1,5 @@
 // @vitest-environment node
+import { setRootContainers } from '../helpers/glxWorkFixture'
 import path from 'node:path'
 import fs from 'node:fs/promises'
 import { afterAll, beforeAll, expect, it } from 'vitest'
@@ -9,6 +10,7 @@ import { createBlankCourseProjectV10 } from '../../src/core/course/createCourseP
 import { CourseV10Driver } from '../../src/core/drivers/CourseV10Driver'
 import { captureComponentOperation } from '../../src/core/drivers/courseV10Operations'
 import { componentAuthorEnhancementEdits } from '../../src/core/components/source/componentAuthorSource'
+import { loadBuiltinComponentSource } from '../../src/core/components/source/builtinSources'
 import { buildPublishedCourseV3 } from '../../src/core/publish/componentPlatform/buildPublishedCourseV3'
 import { compileCoursePlayback } from '../../src/core/publish/componentPlatform/compileCoursePlayback'
 import { InMemoryComponentCompilation } from '../../src/core/components/compilation/InMemoryComponentCompilation'
@@ -45,6 +47,7 @@ export default {${web ? 'document:documentKind,' : ''}mount};`
 }
 
 beforeAll(async () => {
+  await loadBuiltinComponentSource('guoling.web')
   const project = createBlankCourseProjectV10('真实片段创作：普通组件、局部空增强与源码')
   for (const id of cases) {
     const custom = id === 'factory-web' || id === 'ordinary', key = id.includes('program') ? 'guoling.html-program' : 'guoling.web'
@@ -56,8 +59,8 @@ beforeAll(async () => {
       frame: { width: 500, height: 280, transform: [1, 0, 0, 1, 0, 0] },
       ...(custom ? { implementationOverride: { kind: 'source' as const, language: 'javascript' as const, source: sourceProgram(id === 'factory-web', markup) } } : {}) }
   }
-  project.surfaces = cases.map(id => ({ id: 'page-' + id, title: id, kind: 'spatial', childIds: [id], designSize: { width: 1000, height: 700 },
-    spatial: { home: { x: 250, y: 140, zoom: 1 }, frames: [{ id: 'frame-' + id, title: id, targetInstanceId: id, pose: { x: 250, y: 140, zoom: 1 } }] } }))
+  setRootContainers(project, cases.map(id => ({ id: 'page-' + id, title: id, kind: 'spatial', childIds: [id], designSize: { width: 1000, height: 700 },
+    spatial: { home: { x: 250, y: 140, zoom: 1 }, frames: [{ id: 'frame-' + id, title: id, targetInstanceId: id, pose: { x: 250, y: 140, zoom: 1 } }] } })))
   model = { kind: 'course-v10', project, resources: { assets: {}, components: {} } }
   const driver = new CourseV10Driver()
   for (const id of ['enhanced-web', 'enhanced-program']) {

@@ -1,4 +1,5 @@
 import type { ComponentFrame, ComponentInstance, CourseProjectV10 } from '../../../shared/contracts/component-platform'
+import { componentSurface } from '../../../shared/contracts/component-platform'
 import { applyComponentPaintStyle } from '../../components/componentPlacementStyle'
 import {
   componentSpatialCameraMatrix, type ComponentSpatialCameraPort,
@@ -14,13 +15,15 @@ export function componentFrameStyle(frame: ComponentFrame | undefined): Partial<
     : { position: 'absolute', left: '0px', top: '0px', width: '0px', height: '0px', transformOrigin: '0 0', transform: 'none' }
 }
 
-interface SpatialNode { outer: HTMLDivElement; content: HTMLDivElement; children: HTMLDivElement }
+interface SpatialNode { outer: HTMLDivElement; content: HTMLDivElement; children: HTMLDivElement; runtimeBound: boolean }
 
 /** Owns only local world DOM. The composition root owns global planes and R0 leases. */
 export function createComponentSpatialAdapter(options: {
   container: HTMLElement
   camera: ComponentSpatialCameraPort
   onElement(instanceId: string, element: HTMLElement | null): void
+  /** A container exclusively places its own subtree within this authored border box. */
+  onContainer?(instanceId: string, root: HTMLElement, outer: HTMLElement): void
 }) {
   const document = options.container.ownerDocument
   const world = document.createElement('div')
@@ -54,16 +57,21 @@ export function createComponentSpatialAdapter(options: {
         Object.assign(content.style, { position: 'relative', width: '100%', height: '100%', minWidth: '0px' })
         Object.assign(children.style, { position: 'absolute', left: '0px', top: '0px', width: '0px', height: '0px' })
         outer.append(content, children)
-        node = { outer, content, children }; nodes.set(id, node)
+        node = { outer, content, children, runtimeBound: false }; nodes.set(id, node)
         Object.assign(node.outer.style, componentFrameStyle(instance.frame))
         parent.insertBefore(node.outer, cursor)
-        options.onElement(id, content)
       }
       applyComponentPaintStyle(node.outer, instance, project.definitions[instance.definitionId])
       Object.assign(node.outer.style, componentFrameStyle(instance.frame))
       if (node.outer !== cursor) parent.insertBefore(node.outer, cursor)
       cursor = node.outer.nextElementSibling
-      renderChildren(node.children, instance.childIds ?? [], project, used)
+      if (instance.container) {
+        if (node.runtimeBound) { options.onElement(id, null); node.runtimeBound = false }
+        options.onContainer?.(id, node.content, node.outer)
+      } else {
+        if (!node.runtimeBound) { options.onElement(id, node.content); node.runtimeBound = true }
+        renderChildren(node.children, instance.childIds ?? [], project, used)
+      }
     }
   }
 
@@ -73,12 +81,13 @@ export function createComponentSpatialAdapter(options: {
     setViewport(next: ComponentSpatialViewport) { viewport = { ...next }; paintCamera() },
     sync(project: CourseProjectV10, surfaceId: string) {
       if (disposed) return
-      const surface = project.surfaces.find(value => value.id === surfaceId && value.kind === 'spatial')
-      if (!surface) throw new Error(`空间表面已不存在：${surfaceId}`)
+      const surface = componentSurface(project, surfaceId)
+      if (!surface || surface.kind !== 'spatial') throw new Error(`空间容器已不存在：${surfaceId}`)
       const used = new Set<string>()
       renderChildren(world, surface.childIds, project, used)
       for (const [id, node] of nodes) if (!used.has(id)) {
-        options.onElement(id, null); node.outer.remove(); nodes.delete(id)
+        if (node.runtimeBound) options.onElement(id, null)
+        node.outer.remove(); nodes.delete(id)
       }
     },
     /** Placement previews are DOM-only and do not call R0 update or alter the document. */
@@ -91,7 +100,7 @@ export function createComponentSpatialAdapter(options: {
     dispose() {
       if (disposed) return
       disposed = true; unsubscribe()
-      for (const id of nodes.keys()) options.onElement(id, null)
+      for (const [id, node] of nodes) if (node.runtimeBound) options.onElement(id, null)
       nodes.clear(); world.remove()
     },
   }

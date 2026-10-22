@@ -63,19 +63,56 @@ export const emptyExecutionProjection = (conversationId: string): ExecutionProje
 // so replaying or branching an older projection never observes a newer branch's item.
 const itemIndexHints = new WeakMap<ExecutionProjection, Map<string, number>>()
 const itemKey = (item: { runId: string; itemId: string }) => JSON.stringify([item.runId, item.itemId])
-/** Pure, read-only timeline fold. No tools, documents, providers, subscriptions or run state transitions. */
-export function foldExecutionEvents(previous: ExecutionProjection, events: readonly ExecutionEvent[]): ExecutionProjection {
-  const state = { ...previous, items: previous.items.slice() } // Only changed items are rebuilt.
+const generations = new WeakMap<ExecutionProjection, object>()
+const changes = new WeakMap<ExecutionProjection, ExecutionProjectionPlan>()
+export interface ExecutionProjectionPlan {
+  conversationId: string; fromCursor: number; cursor: number; fromItemCount: number; itemCount: number
+  /** Opaque same-process generations distinguish branches with equal cursors/counts. */
+  baseToken: object; token: object
+  upserts: readonly { index: number; item: ExecutionItem; contentChange?: { replace: boolean; parts: readonly ExecutionContent[] } }[]
+}
+export function executionProjectionToken(projection: ExecutionProjection): object {
+  let token = generations.get(projection)
+  if (!token) { token = {}; generations.set(projection, token) }
+  return token
+}
+/** Same-process hint only; it never owns a previous projection or crosses IPC. */
+export function executionProjectionChange(projection: ExecutionProjection): ExecutionProjectionPlan | undefined { return changes.get(projection) }
+
+/** Binary carries keep each adjacent inline run in geometrically decreasing chunks.
+ * Text/blob order and the full UTF-16 string are unchanged; event boundaries live in the event log. */
+export function appendExecutionContent(previous: readonly ExecutionContent[], added: readonly ExecutionContent[]): ExecutionContent[] {
+  if (!added.length) return previous as ExecutionContent[]
+  const content = previous.slice()
+  for (const part of added) {
+    if (part.kind === 'blob') { content.push(part); continue }
+    let text = part.text
+    if (!text.length && content.at(-1)?.kind === 'text') continue
+    while (content.at(-1)?.kind === 'text' && (content.at(-1) as { kind: 'text'; text: string }).text.length <= text.length) {
+      const prior = content.pop() as { kind: 'text'; text: string }
+      text = prior.text + text
+    }
+    content.push({ kind: 'text', text })
+  }
+  return content
+}
+
+/** Stage complete changed items without publishing or copying the unchanged item array. */
+export function prepareExecutionEvents(previous: ExecutionProjection, events: readonly ExecutionEvent[]): ExecutionProjectionPlan {
   const hints = itemIndexHints.get(previous) ?? new Map(previous.items.map((item, index) => [itemKey(item), index]))
+  itemIndexHints.set(previous, hints)
+  const updates = new Map<number, ExecutionItem>(), stagedKeys = new Map<string, number>()
+  const bodyChanges = new Map<number, { replace: boolean; parts: readonly ExecutionContent[] }>()
+  let cursor = previous.cursor, itemCount = previous.items.length
   for (const input of events) {
     const event = executionEventSchema.parse(input)
-    if (event.conversationId !== state.conversationId) throw new Error('事件不属于当前会话')
-    if (event.sequence <= state.cursor) continue // A replayed page or snapshot cannot append the same content again.
-    if (event.sequence !== state.cursor + 1) throw new Error('事件游标不连续，请先补拉缺失事件')
-    const key = itemKey(event), hint = hints.get(key)
-    const index = hint !== undefined && state.items[hint] && itemKey(state.items[hint]) === key
-      ? hint : hint === undefined ? -1 : state.items.findIndex(item => itemKey(item) === key)
-    const current = index < 0 ? undefined : state.items[index]
+    if (event.conversationId !== previous.conversationId) throw new Error('事件不属于当前会话')
+    if (event.sequence <= cursor) continue
+    if (event.sequence !== cursor + 1) throw new Error('事件游标不连续，请先补拉缺失事件')
+    const key = itemKey(event), hint = stagedKeys.get(key) ?? hints.get(key)
+    const hinted = hint === undefined ? undefined : updates.get(hint) ?? previous.items[hint]
+    let index = hinted && itemKey(hinted) === key ? hint! : hint === undefined ? -1 : previous.items.findIndex(item => itemKey(item) === key)
+    const current = index < 0 ? undefined : updates.get(index) ?? previous.items[index]
     if (current && (current.type !== event.type || current.source !== event.source || current.taskId !== event.taskId || current.parentItemId !== event.parentItemId)) throw new Error('同一运行项不能改变类型、来源或父项')
     const { text, textRef, ...data } = event.data
     const content: ExecutionContent[] = text !== undefined ? [{ kind: 'text', text }] : textRef ? [{ kind: 'blob', ref: textRef }] : []
@@ -87,16 +124,44 @@ export function foldExecutionEvents(previous: ExecutionProjection, events: reado
       // Final snapshots replace the visible text, while immutable tool parameters and
       // independently reported application/save facts survive status-only updates.
       data: { ...current?.data, ...data },
-      content: event.update === 'snapshot' ? content : [...current?.content ?? [], ...content],
+      content: event.update === 'snapshot' ? content : appendExecutionContent(current?.content ?? [], content),
     }
     for (const field of executionDetailKeys) {
       if (event.data[field] !== undefined) delete item.data[`${field}Ref`]
       if (event.data[`${field}Ref`] !== undefined) delete item.data[field]
     }
-    if (index < 0) { hints.set(key, state.items.length); state.items.push(item) }
-    else { hints.set(key, index); state.items[index] = item }
-    state.cursor = event.sequence
+    if (index < 0) index = itemCount++
+    updates.set(index, item); stagedKeys.set(key, index)
+    if (event.update === 'snapshot') bodyChanges.set(index, { replace: true, parts: content })
+    else if (content.length) {
+      const prior = bodyChanges.get(index)
+      bodyChanges.set(index, { replace: prior?.replace ?? false, parts: [...prior?.parts ?? [], ...content] })
+    }
+    cursor = event.sequence
   }
-  itemIndexHints.set(state, hints)
+  return { conversationId: previous.conversationId, fromCursor: previous.cursor, cursor,
+    fromItemCount: previous.items.length, itemCount, baseToken: executionProjectionToken(previous), token: {},
+    upserts: [...updates].map(([index, item]) => ({ index, item, ...(bodyChanges.has(index) ? { contentChange: bodyChanges.get(index)! } : {}) })) }
+}
+
+/** Explicit owned-state API. Main calls only after its append/fsync succeeds, under the existing owner. */
+export function applyExecutionProjectionOwned(state: ExecutionProjection, plan: ExecutionProjectionPlan): ExecutionProjection {
+  if (state.conversationId !== plan.conversationId || state.cursor !== plan.fromCursor || state.items.length !== plan.fromItemCount
+    || executionProjectionToken(state) !== plan.baseToken) throw new Error('事件投影计划不属于当前代')
+  const hints = itemIndexHints.get(state) ?? new Map(state.items.map((item, index) => [itemKey(item), index]))
+  for (const { index, item } of plan.upserts) { state.items[index] = item; hints.set(itemKey(item), index) }
+  state.cursor = plan.cursor
+  itemIndexHints.set(state, hints); generations.set(state, plan.token); changes.set(state, plan)
   return state
+}
+
+/** Pure, read-only timeline fold. Old projections/branches retain their exact prior values. */
+export function foldExecutionEvents(previous: ExecutionProjection, events: readonly ExecutionEvent[]): ExecutionProjection {
+  const plan = prepareExecutionEvents(previous, events)
+  if (plan.cursor === previous.cursor) return previous
+  const state = { ...previous, items: previous.items.slice() }
+  generations.set(state, plan.baseToken)
+  const hints = itemIndexHints.get(previous)
+  if (hints) itemIndexHints.set(state, hints)
+  return applyExecutionProjectionOwned(state, plan)
 }

@@ -110,17 +110,29 @@ export function isAllowedHtmlPreviewFrameUrl(candidate: string, ownerWebContents
   return key !== null && htmlPreviewFrameEntries.get(key) === ownerWebContentsId
 }
 
-/** Descendants may load only local srcdoc/Blob documents owned by an active preview origin. */
+/** Descendants reuse their active lease's confined HTML resources and local documents. */
 export function isAllowedHtmlPreviewChildFrameUrl(candidate: string, ownerWebContentsId: number, frame?: WebFrameMain | null): boolean {
   const local = candidate === 'about:srcdoc' || candidate === 'about:blank'
+  const resource = parseHtmlPreviewProtocolUrl(candidate)
   let blob: URL | null = null
-  if (!local) {
-    try { const url = new URL(candidate); if (url.protocol !== 'blob:') return false; blob = new URL(url.pathname) }
+  let opaqueBlob = false
+  if (!local && !resource) {
+    try {
+      const url = new URL(candidate)
+      if (url.protocol !== 'blob:') return false
+      opaqueBlob = url.pathname.startsWith('null/') && url.pathname.length > 'null/'.length
+      if (!opaqueBlob) blob = new URL(url.pathname)
+    }
     catch { return false }
   }
+  if (resource && (resource.kind !== 'file' || !/\.html?$/i.test(resource.relativePath))) return false
   for (let parent = frame?.parent; parent; parent = parent.parent) {
     if (!isAllowedHtmlPreviewFrameUrl(parent.url, ownerWebContentsId)) continue
     if (local) return true
+    if (resource) return resource.token === parseHtmlPreviewProtocolUrl(parent.url)?.token
+    // Opaque sandbox documents create blob:null URLs. The active ancestor lease
+    // authorizes this confined child consumption, not the Blob's creator.
+    if (opaqueBlob) return true
     const owner = new URL(parent.url)
     return blob?.protocol === owner.protocol && blob.host === owner.host
   }

@@ -1,3 +1,4 @@
+import { testContainerInstance } from '../helpers/glxWorkFixture'
 import { act, cleanup, renderHook, waitFor } from '@testing-library/react'
 import { afterEach, expect, it, vi } from 'vitest'
 import { promises as fs } from 'node:fs'
@@ -28,11 +29,11 @@ async function setup(warning = false) {
   project.definitions.image = { ...IMAGE_DEFINITION, id: 'image' }
   project.instances.image = { id: 'image', definitionId: 'image', data: jsonValueSchema.parse(createImageData('png')), frame: { width: 100, height: 100, transform: [1, 0, 0, 1, 10, 10] } }
   project.assets.png = { id: 'png', path: 'assets/image.png', mimeType: 'image/png' }
-  project.surfaces[0].childIds = ['image']
+  testContainerInstance(project, 0).childIds = ['image']
   if (warning) {
     project.definitions.web = { id: 'web', role: 'content', implementation: { kind: 'builtin', key: 'guoling.web' } }
     project.instances.web = { id: 'web', definitionId: 'web', data: { html: '<img src="https://lesson.example/online.png">' } }
-    project.surfaces[0].childIds.push('web')
+    testContainerInstance(project, 0).childIds.push('web')
   }
   const model = { kind: 'course-v10' as const, project, resources: { assets: { png }, components: {} } }
   const a = await host.internalAPI.create(model, 'A.h5lesson'), b = await host.internalAPI.create(model, 'B.h5lesson')

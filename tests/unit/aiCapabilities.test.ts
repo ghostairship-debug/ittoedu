@@ -18,27 +18,31 @@ import { queryCourseAgentCapabilities, type CourseAgentCapabilityData } from '..
 const directories: string[] = []
 afterEach(async () => { await Promise.all(directories.splice(0).map(directory => fs.rm(directory, { recursive: true, force: true }))) })
 async function directory() {
-  const value = await fs.mkdtemp(path.join(tmpdir(), 'guoling-capabilities-v10-')); directories.push(value); return value
+  const value = await fs.mkdtemp(path.join(tmpdir(), 'guoling-capabilities-v11-')); directories.push(value); return value
 }
 const nativeRead = (source: string) => source.split(/\r?\n/).map(line => line.length > 2000 ? `${line.slice(0, 2000)}... (line truncated to 2000 chars)` : line).join('\n')
 
-it('publishes complete current public tool schemas and V10/V3/API5 contracts readable through native line limits', async () => {
+it('publishes complete current public tool schemas and V11/V4/API5 contracts readable through native line limits', async () => {
   const generated = await generateAiCapabilityArtifacts()
   const read = (location: string): unknown => JSON.parse(nativeRead(generated.files.get(location)!))
   const tools = [...describeTools().map(tool => ({ name: tool.name, inputSchema: tool.schema })), ...agentFileTools, ...programmaticTools]
   for (const tool of tools) expect(read(`tools/${tool.name}.json`)).toMatchObject({ name: tool.name, inputSchema: tool.inputSchema })
   const discovery = read('discovery.json') as { tools: { id: string }[]; protocols: { id: string }[] }
   expect(discovery.tools.map(tool => tool.id).sort()).toEqual(tools.map(tool => tool.name).sort())
-  expect(discovery.protocols.map(protocol => protocol.id).sort()).toEqual(['component-api5', 'course-project-v10', 'published-course-v3'])
-  expect(read('schemas/course-project-v10.json')).toEqual(z.toJSONSchema(courseProjectV10Schema, { io: 'input' }))
-  expect(read('schemas/published-course-v3.json')).toEqual(z.toJSONSchema(publishedCourseV3Schema, { io: 'input' }))
+  expect(discovery.protocols.map(protocol => protocol.id).sort()).toEqual(['component-api5', 'course-project-v11', 'published-course-v4'])
+  expect(read('schemas/course-project-v11.json')).toEqual(z.toJSONSchema(courseProjectV10Schema, { io: 'input' }))
+  expect(read('schemas/published-course-v4.json')).toEqual(z.toJSONSchema(publishedCourseV3Schema, { io: 'input' }))
   const runtime = JSON.parse(generated.files.get('protocols/component-api5.json')!) as { apiVersion: number; types: Record<string, string> }
   expect(runtime.apiVersion).toBe(5)
   for (const [source, content] of Object.entries(runtime.types)) expect(content).toBe(await fs.readFile(source, 'utf8'))
   expect(read('component-catalog.snapshot.json')).toMatchObject({ status: 'runtime-discovery', builtinSourceKeys: [...builtinComponentSourceKeys].sort() })
   const index = read('index.json') as { protocols: unknown; surfaces: string[] }
-  expect(index.protocols).toMatchObject({ project: { version: 10 }, published: { version: 3 }, component: { version: 5 } })
+  expect(index.protocols).toMatchObject({ project: { version: 11 }, published: { version: 4 }, component: { version: 5 } })
   expect(index.surfaces).toEqual(['slide', 'flow', 'spatial'])
+  const program = queryCourseAgentCapabilities(JSON.parse(generated.capabilityBundle) as CourseAgentCapabilityData,
+    { ids: ['project.apply'], surface: 'program', owner: 'instance', detail: 'full' })
+  expect(program.total).toBe(1)
+  expect(program.cards![0]!.content?.description).toContain('program.set')
 })
 
 it('serves complete scoped cards from the generated offline CLI and rejects stale discovery while keeping actual method resources', async () => {

@@ -1,3 +1,4 @@
+import { componentPaintStack } from '../../../components/web/paintHit'
 import { hasWebContentData } from '../../../components/web/sourcePreparation'
 import { nanoid } from 'nanoid'
 import { splitInstalledBundledFontFaceCss } from '../../../shared/fonts/installedBundledFontFaceCss'
@@ -19,12 +20,12 @@ import { webRuntimeTargetProfile, type RuntimeTargetProfile, type WebRuntimeData
 import { refreshWebResourceReferences } from '../../../components/web/resources'
 import { createWebResourceUrlLease } from '../../../components/web/resourceUrlLease'
 import { installCourseNavigationReady } from '../../../components/web/courseNavigation'
-import { createDomAuthoring } from '../../../components/web/authoringDom'
-import { installOwnedDocumentAuthoring } from '../../../components/web/ownedDocumentAuthoring'
+import { createDomAuthoring, domAuthoringFactorySource } from '../../../components/web/authoringDom'
+import { installOwnedDocumentAuthoring, installAuthoringInputArbitration, authoringCaretOffset, type OwnedDocumentBlobCarriers } from '../../../components/web/ownedDocumentAuthoring'
 import { ownedDocumentExecutionSource } from '../../../components/web/ownedDocumentIdentity'
 import { domTextOverrideRealmSource, type DomTextOverrideController } from '../../lightEdit/domTextOverrides'
 import type { LightEditTextOverride } from '../../../shared/contracts/runtime/lightEdit'
-import { invertMatrix, transformPoint } from '../../../core/components/geometry'
+import { invertMatrix, multiplyMatrices, transformPoint, type AffineMatrix } from '../../../core/components/geometry'
 import { componentClientMatrix } from './componentClientMatrix'
 
 export interface RuntimeTargetSnapshot { reference: ComponentTarget; instanceId: string; value?: JsonValue }
@@ -32,7 +33,7 @@ export interface ComponentBootstrapTransport {
   createComponentBootstrap(input: ComponentBootstrapInput): Promise<ComponentBootstrapLease>
   releaseComponentBootstrap(input: { leaseId: string }): Promise<void>
 }
-export interface SandboxRuntimeSnapshots { state(): Record<string, JsonValue>; targets(profile: RuntimeTargetProfile): RuntimeTargetSnapshot[]; instance?(value: ComponentInstance): ComponentInstance<JsonValue | WebRuntimeData> | Promise<ComponentInstance<JsonValue | WebRuntimeData>>; webInstance?(value: ComponentInstance): ComponentInstance<JsonValue | WebRuntimeData> | Promise<ComponentInstance<JsonValue | WebRuntimeData>>; teacherController?: TeacherControllerPort; htmlAuthoring?: boolean; authorHtml?(instance: ComponentInstance): string | undefined; nativeDocument?: boolean; builtinKey?: string; connectOrigins?(): readonly string[]; themeCss?(): string; resources?(): Record<string, string>; resourceBindings?: Readonly<Record<string, string>>; bootstrap?: ComponentBootstrapTransport; hostAdapter?: SandboxRuntimeHostAdapter }
+export interface SandboxRuntimeSnapshots { state(): Record<string, JsonValue>; targets(profile: RuntimeTargetProfile): RuntimeTargetSnapshot[]; /** World-backed carriers send a small invalidation, then read their own profile. */ targetChanges?: boolean; instance?(value: ComponentInstance): ComponentInstance<JsonValue | WebRuntimeData> | Promise<ComponentInstance<JsonValue | WebRuntimeData>>; webInstance?(value: ComponentInstance): ComponentInstance<JsonValue | WebRuntimeData> | Promise<ComponentInstance<JsonValue | WebRuntimeData>>; teacherController?: TeacherControllerPort; htmlAuthoring?: boolean; authorHtml?(instance: ComponentInstance): string | undefined; nativeDocument?: boolean; builtinKey?: string; connectOrigins?(): readonly string[]; themeCss?(): string; resources?(): Record<string, string>; resourceBindings?: Readonly<Record<string, string>>; bootstrap?: ComponentBootstrapTransport; hostAdapter?: SandboxRuntimeHostAdapter }
 
 export interface SandboxRuntimeHostAdapter {
   clientMatrix?(element: HTMLElement): readonly [number, number, number, number, number, number] | null
@@ -44,72 +45,19 @@ interface ComponentAuthorHitRequest { point: { x: number; y: number }; resolve(r
 
 /** The browser identifies the leaf; transparent document/carrier boxes do not paint by themselves. */
 export function componentAuthorPaintAtPoint(root: Element, x: number, y: number): boolean {
-  const doc = root.ownerDocument, win = doc.defaultView
-  const top = doc.elementsFromPoint(x, y)[0]
-  if (!win || !top || !root.contains(top)) return false
-  const chain: Element[] = []
-  for (let element: Element | null = top; element && root.contains(element); element = element.parentElement) chain.push(element)
-  const styles = chain.map(element => win.getComputedStyle(element))
-  if (styles[0]?.visibility === 'hidden' || styles[0]?.visibility === 'collapse'
-    || styles.some(style => style.display === 'none' || style.opacity !== '' && Number(style.opacity) === 0)) return false
-  const colorPaints = (value: string) => value !== '' && value !== 'none' && value !== 'transparent' && !/^rgba\([^)]*,\s*0(?:\.0+)?\s*\)$/.test(value)
-  for (let index = 0; index < chain.length; index++) {
-    const element = chain[index]!, style = styles[index]!
-    if (style.backgroundImage && style.backgroundImage !== 'none' || colorPaints(style.backgroundColor)) return true
-    if (style.boxShadow && style.boxShadow !== 'none') return true
-    // Effects and generated paint do not have a reliable empty box here.
-    // Keep them blocking rather than inventing geometry for unknown CSS.
-    if (['filter', 'backdrop-filter', 'mask-image', 'border-image-source'].some(name => {
-      const value = style.getPropertyValue(name); return value !== '' && value !== 'none'
-    })) return true
-    for (const pseudo of ['::before', '::after']) {
-      const value = win.getComputedStyle(element, pseudo).content
-      if (value && value !== 'none' && value !== 'normal') return true
-    }
-    const rect = element.getBoundingClientRect()
-    const sx = element instanceof win.HTMLElement && element.offsetWidth ? rect.width / element.offsetWidth : 1
-    const sy = element instanceof win.HTMLElement && element.offsetHeight ? rect.height / element.offsetHeight : 1
-    if (['top', 'right', 'bottom', 'left'].some(side => {
-      const width = Number.parseFloat(style.getPropertyValue(`border-${side}-width`)) || 0
-      if (!width || /^(none|hidden)$/.test(style.getPropertyValue(`border-${side}-style`)) || !colorPaints(style.getPropertyValue(`border-${side}-color`))) return false
-      return side === 'top' ? y < rect.top + width * sy : side === 'bottom' ? y > rect.bottom - width * sy
-        : side === 'left' ? x < rect.left + width * sx : x > rect.right - width * sx
-    })) return true
-    // SVG containers and defs have no fill of their own. Browser hit-testing
-    // already honours fill/stroke/pointer-events for the actual graphic leaf.
-    if (element === top && element.namespaceURI === 'http://www.w3.org/2000/svg'
-      && !['svg', 'g', 'defs', 'symbol', 'a', 'switch'].includes(element.localName)) {
-      if (!['rect', 'circle', 'ellipse', 'line', 'path', 'polygon', 'polyline', 'text', 'tspan', 'textPath'].includes(element.localName)) return true
-      if (element.localName !== 'line' && colorPaints(style.fill) && Number(style.fillOpacity || '1') > 0
-        || colorPaints(style.stroke) && Number(style.strokeOpacity || '1') > 0 && Number.parseFloat(style.strokeWidth || '1') > 0) return true
-    }
-    if (element === top && /^(img|video|canvas|iframe|object|embed|input|button|select|textarea)$/.test(element.localName)) return true
-    for (const node of element.namespaceURI === 'http://www.w3.org/2000/svg' ? [] : element.childNodes) {
-      if (node.nodeType !== 3 || !node.textContent?.trim()) continue
-      const range = doc.createRange(); range.selectNodeContents(node)
-      if ([...range.getClientRects()].some(box => x >= box.left && x <= box.right && y >= box.top && y <= box.bottom)) return true
-    }
-  }
-  // Pointer-transparent descendants can still paint; their foreground pixels
-  // cannot be inferred from the carrier hit. Leave this uncertain case blocked.
-  if ([...top.querySelectorAll('*')].some(element => {
-    if (element.closest('defs,script,style,template')) return false
-    const style = win.getComputedStyle(element)
-    return style.pointerEvents === 'none' && style.display !== 'none' && style.visibility !== 'hidden'
-      && (style.opacity === '' || Number(style.opacity) !== 0)
-  })) return true
-  return false
+  return componentPaintStack(root, x, y).length > 0
 }
 
 /** Serialized trusted bridge only. Author code arrives through its dedicated port. */
-function contentRealmBridge(nonce: string, fragmentBox: { resourceFactory: typeof createWebResourceUrlLease; navigationReady: typeof installCourseNavigationReady; isMeasured: typeof isMeasuredWebFragmentBox; extent: typeof measuredFragmentExtent; refreshResources: typeof refreshWebResourceReferences; fragments: typeof createComponentFragmentProjection; authoring: typeof createDomAuthoring; paintAt: typeof componentAuthorPaintAtPoint; ownedAuthoring: typeof installOwnedDocumentAuthoring; textOverrides(roots: readonly Node[], rules: readonly LightEditTextOverride[]): DomTextOverrideController }, authoredDocument?: { release(): void; resourceLease?: ReturnType<typeof createWebResourceUrlLease>; transportFragment?: boolean; setActivity?(value: { active: boolean; visible: boolean; playing: boolean }): void; onDiagnostic?(listener: (message: string) => void): () => void }) {
+function contentRealmBridge(nonce: string, fragmentBox: { resourceFactory: typeof createWebResourceUrlLease; navigationReady: typeof installCourseNavigationReady; isMeasured: typeof isMeasuredWebFragmentBox; extent: typeof measuredFragmentExtent; refreshResources: typeof refreshWebResourceReferences; fragments: typeof createComponentFragmentProjection; authoring: typeof createDomAuthoring; paintAt: typeof componentAuthorPaintAtPoint; clientMatrix: typeof componentClientMatrix; ownedAuthoring: typeof installOwnedDocumentAuthoring; input: typeof installAuthoringInputArbitration; caret: typeof authoringCaretOffset; textOverrides(roots: readonly Node[], rules: readonly LightEditTextOverride[]): DomTextOverrideController }, authoredDocument?: { release(): void; resourceLease?: ReturnType<typeof createWebResourceUrlLease>; blobCarriers?: OwnedDocumentBlobCarriers; transportFragment?: boolean; setActivity?(value: { active: boolean; visible: boolean; playing: boolean }): void; onDiagnostic?(listener: (message: string) => void): () => void }) {
   const resourceLease = authoredDocument?.resourceLease ?? fragmentBox.resourceFactory(window)
   const navigationReady = fragmentBox.navigationReady(window)
   const runtimeInstance = (value: ComponentInstance): ComponentInstance => ({ ...value, data: JSON.parse(resourceLease.project(JSON.stringify(value.data))) })
   // This fixed loader is created only inside the content realm. Keeping import's
   // syntax in its string prevents Vite from inserting a parent lexical helper.
   const importModule = new Function('url', 'return import(url)') as (url: string) => Promise<Record<string, any>>
-  const fragmentRoot = document.getElementById('component-root')!, fragmentDefaults = document.getElementById('component-defaults')!
+  const fragmentRoot = document.getElementById('component-root')!
+  let fragmentDefaults = document.getElementById('component-defaults')
   const loader = document.currentScript; if (loader) document.head.append(loader)
   const courseStyle = document.createElement('style'); document.head.append(courseStyle)
   let sourceStyle: HTMLStyleElement | undefined
@@ -141,11 +89,12 @@ function contentRealmBridge(nonce: string, fragmentBox: { resourceFactory: typeo
     if (typeof next.active !== 'boolean' || typeof next.visible !== 'boolean' || typeof next.playing !== 'boolean') return
     const becameVisible = next.visible && activity?.visible !== true
     activity = { active: next.active, visible: next.visible, playing: next.playing }
+    if (!next.active || !next.visible || next.playing) { contentAuthoring?.suppressText(); ownedAuthoring?.input() }
     if (authoredDocument) authoredDocument.setActivity?.(activitySnapshot()!)
     else window.dispatchEvent(new CustomEvent('__runtime.activity', { detail: activitySnapshot() }))
     ownedAuthoring?.update()
     void applyMountedActivity()
-    if (becameVisible) refreshSourcePaint?.()
+    if (becameVisible) { refreshSourcePaint?.(); refreshInlineSlots?.() }
   }
   let updateResourceCss: (value: unknown) => void = () => {}
   let states: Record<string, JsonValue> = {}, targets: RuntimeTargetSnapshot[] = []
@@ -160,6 +109,7 @@ function contentRealmBridge(nonce: string, fragmentBox: { resourceFactory: typeo
   const refreshCurrentResources = () => fragmentBox.refreshResources(document, resourceUrls, currentBindings())
   const explicitAuthorSpots = new Map<number, ComponentAuthorSpotInput>()
   let hitAuthor: (x: number, y: number) => string | undefined = () => undefined
+  let caretAuthor: (x: number, y: number, authorKey?: string) => number | undefined = () => undefined
   let layoutInput: ComponentLayoutInput | undefined
   let sourceViewport: { left: number; top: number; right: number; bottom: number; width: number; height: number } | undefined
   let fragmentThemeCanvas = false
@@ -168,7 +118,11 @@ function contentRealmBridge(nonce: string, fragmentBox: { resourceFactory: typeo
   let measuredPaintStyle: HTMLStyleElement | undefined
   const layoutListeners = new Set<(layout: ComponentLayoutInput) => void>()
   let refreshSourcePaint: (() => void) | undefined
+  let refreshInlineSlots: (() => void) | undefined
   const applyFragmentLayout = () => {
+    // A native fragment's bridge runs before the parser reaches its transport
+    // stylesheet. Read that software-owned node again once mount receives layout.
+    if (authoredDocument?.transportFragment) fragmentDefaults ??= document.getElementById('component-defaults')
     if (measuredTransportScope) {
       const layout = layoutInput ?? { mode: 'free-frame', inlineSize: instance.frame!.width, blockSize: instance.frame!.height }
       // The parser document is only transport for this software-normalized scope.
@@ -180,12 +134,17 @@ function contentRealmBridge(nonce: string, fragmentBox: { resourceFactory: typeo
       measuredTransportScope.style.setProperty('position', 'relative', 'important')
       measuredTransportScope.style.setProperty('left', `${-measuredPaintOrigin.left}px`, 'important')
       measuredTransportScope.style.setProperty('top', `${-measuredPaintOrigin.top}px`, 'important')
+      refreshInlineSlots?.()
       return
     }
     if (!fragmentDefaults || authoredDocument && !authoredDocument.transportFragment) return
     fragmentDefaults.textContent = sourceViewport
       ? `html,body{width:100%;height:100%;margin:0;overflow:hidden}#component-root{position:absolute!important;left:${-sourceViewport.left}px!important;top:${-sourceViewport.top}px!important;width:${sourceViewport.width}px!important;height:${layoutInput?.mode === 'flow-content' ? 'auto' : `${sourceViewport.height}px`}!important;margin:0}`
       : `html,body,#component-root{width:100%;height:${layoutInput?.mode === 'flow-content' ? 'auto' : '100%'};margin:0}`
+    // This body is a synthetic fragment carrier. Keep descendant margins inside
+    // its measured box so natural Flow reports the whole visible content extent.
+    if (authoredDocument?.transportFragment) fragmentDefaults.textContent += 'body{display:flow-root}'
+    refreshInlineSlots?.()
   }
   const writeCourseTheme = (value: unknown) => {
     // Main has projected the immutable faces into this lease's resource URLs.
@@ -269,9 +228,31 @@ function contentRealmBridge(nonce: string, fragmentBox: { resourceFactory: typeo
   const reply = (id: number | undefined, error?: unknown, value?: unknown) => port.postMessage({ type: 'reply', id, value,
     ...(error ? { error: error instanceof Error ? error.message : String(error) } : {}) })
   const send = (message: Message) => { if (active) port.postMessage({ ...message, generation }) }
+  let releaseInput = () => {}
+  let selectingText: { authorKey: string; anchor: number } | undefined
+  let hoveredAuthorKey: string | undefined
+  const installInput = () => {
+    // document.open removes listeners while Chromium may retain the same
+    // Document object. Every real parser bootstrap installs a fresh owner.
+    releaseInput()
+    releaseInput = fragmentBox.input(document, {
+      editing: () => active && observeHtml && activity?.active === true && activity.visible && !activity.playing,
+      select: (point, event, word) => {
+        const authorKey = hitAuthor(point.x, point.y), caretOffset = caretAuthor(point.x, point.y, authorKey)
+        selectingText = typeof authorKey === 'string' && caretOffset !== undefined ? { authorKey, anchor: caretOffset } : undefined
+        send({ type: event.type === 'dblclick' ? 'authoring.double-click' : 'authoring.pointer', x: point.x + measuredPaintOrigin.left, y: point.y + measuredPaintOrigin.top,
+          authorKey, ...(caretOffset === undefined ? {} : { caretOffset }) })
+        if ((word || event.type === 'dblclick') && selectingText) send({ type: 'authoring.selection', ...selectingText, focus: caretOffset, word: true })
+      },
+      extend: point => { if (selectingText) { const focus = caretAuthor(point.x, point.y, selectingText.authorKey); if (focus !== undefined) send({ type: 'authoring.selection', ...selectingText, focus }) } },
+      hover: point => { const key = hitAuthor(point.x, point.y); if (key !== hoveredAuthorKey) { hoveredAuthorKey = key; send({ type: 'authoring.hover', authorKey: key }) } },
+    })
+  }
+  installInput()
   const nativeDiagnostics: string[] = []
   const adoptDocument = (next: NonNullable<typeof authoredDocument>) => {
     authoredDocument = next
+    installInput()
     document.head.append(courseStyle)
     if (sourceStyle) document.head.append(sourceStyle)
     const report = (message: string) => {
@@ -297,6 +278,7 @@ function contentRealmBridge(nonce: string, fragmentBox: { resourceFactory: typeo
   const cancel = () => {
     if (!active) return
     active = false; controller.abort()
+    releaseInput()
     for (const cleanup of cleanups) { try { cleanup() } catch {} }
     cleanups.clear(); listeners.clear(); layoutListeners.clear(); pendingStateWrites.clear()
     for (const pending of teacherPending.values()) pending.reject(new Error('导航作用域已取消'))
@@ -464,7 +446,8 @@ function contentRealmBridge(nonce: string, fragmentBox: { resourceFactory: typeo
         const documentRoot = message.visual && message.documentKind === 'document'
         const root = message.visual ? documentRoot ? document.body : fragmentRoot : undefined
         if (documentRoot) {
-          fragmentRoot?.remove(); fragmentDefaults?.remove()
+          fragmentRoot?.remove()
+          if (!authoredDocument?.transportFragment) fragmentDefaults?.remove()
           if (!authoredDocument && originalHtml && new DOMParser().parseFromString(originalHtml, 'text/html').compatMode !== document.compatMode)
             scope.events.emit('component.diagnostic', { instanceId: instance.id, message: '原 HTML 使用兼容排版模式；当前内容环境使用标准模式，原源码已保留' })
         }
@@ -473,8 +456,11 @@ function contentRealmBridge(nonce: string, fragmentBox: { resourceFactory: typeo
           const clickRoot = sourceViewport ? document : root
           clickRoot.addEventListener('click', clicked, true); cleanups.add(() => clickRoot.removeEventListener('click', clicked, true))
           const ownedClick = (event: MessageEvent) => {
+            const frame = [...document.querySelectorAll<HTMLIFrameElement>('iframe[srcdoc]'), ...(authoredDocument?.blobCarriers?.frames() ?? [])]
+              .find(frame => frame.contentWindow === event.source)
+            const channel = frame && authoredDocument?.blobCarriers?.channel(frame)
             if (event.data?.type === 'guoling.owned-document.click' && event.data.token === `__guoling_parser_${nonce.replace(/-/g, '_')}`
-              && [...document.querySelectorAll<HTMLIFrameElement>('iframe[srcdoc]')].some(frame => frame.contentWindow === event.source)) clicked()
+              && frame && (!channel || event.data.channel === channel)) clicked()
           }
           window.addEventListener('message', ownedClick); cleanups.add(() => window.removeEventListener('message', ownedClick))
           const doubleClicked = (event: MouseEvent) => send({ type: 'authoring.double-click', x: event.clientX + measuredPaintOrigin.left, y: event.clientY + measuredPaintOrigin.top,
@@ -497,7 +483,7 @@ function contentRealmBridge(nonce: string, fragmentBox: { resourceFactory: typeo
         } : undefined
         navigationReady.connect(teacherController)
         hitAuthor = (x, y) => {
-          const top = document.elementsFromPoint(x, y)[0]
+          const top = contentAuthoring?.paintedElementAt(x, y)
           if (!root || !top || !root.contains(top)) return undefined
           const observed = contentAuthoring?.hit(x, y)
           const rootOrigin = documentRoot ? { x: 0, y: 0 } : root.getBoundingClientRect()
@@ -522,6 +508,13 @@ function contentRealmBridge(nonce: string, fragmentBox: { resourceFactory: typeo
             } else if (top.localName === 'canvas' && top.getAttribute('data-cw-author-key') === spot.authorKey) return spot.authorKey
           }
           return observed?.authorKey
+        }
+        caretAuthor = (x, y, authorKey) => {
+          const observed = contentAuthoring?.hit(x, y)
+          if (!authorKey || observed?.record.kind !== 'text') return undefined
+          const sameField = observed.authorKey === authorKey || [...explicitAuthorSpots.values()].some(spot =>
+            spot.authorKey === authorKey && spot.kind === 'text' && spot.initialValue === observed.initialValue)
+          return sameField ? fragmentBox.caret(document, observed.node, x, y) : undefined
         }
         const authoring = { register: (input: ComponentAuthorSpotInput, callbacks?: ComponentAuthorPreviewCallbacks) => {
           const spotId = ++authorSpotSequence
@@ -553,8 +546,74 @@ function contentRealmBridge(nonce: string, fragmentBox: { resourceFactory: typeo
           subscribe: (listener: (layout: ComponentLayoutInput) => void) => { layoutListeners.add(listener); return () => layoutListeners.delete(listener) },
           reportSize: (report: { inlineSize: number; blockSize: number }) => send({ type: 'layout.size', report }),
         } : undefined
+        const inline = message.inline === true ? (() => {
+          let sequence = 0, queued = 0
+          type InlineSlot = { id: number; childId: string; element: HTMLElement; signature?: string; release?(): void }
+          const slots = new Map<number, InlineSlot>()
+          const measure = (slot: InlineSlot) => {
+            const element = slot.element, matrix = element.isConnected ? fragmentBox.clientMatrix(element) : null
+            const width = element.offsetWidth, height = element.offsetHeight
+            const clip = { left: 0, top: 0, right: innerWidth, bottom: innerHeight }
+            let visible = Boolean(matrix && width > 0 && height > 0)
+            for (let ancestor: HTMLElement | null = element; ancestor; ancestor = ancestor.parentElement) {
+              const css = getComputedStyle(ancestor)
+              if (css.display === 'none' || css.visibility === 'hidden' || css.visibility === 'collapse' || Number(css.opacity) === 0) visible = false
+              if (ancestor !== element && (/^(?:auto|scroll|hidden|clip)$/.test(css.overflowX) || /^(?:auto|scroll|hidden|clip)$/.test(css.overflowY))) {
+                const box = ancestor.getBoundingClientRect()
+                if (/^(?:auto|scroll|hidden|clip)$/.test(css.overflowX)) { clip.left = Math.max(clip.left, box.left); clip.right = Math.min(clip.right, box.right) }
+                if (/^(?:auto|scroll|hidden|clip)$/.test(css.overflowY)) { clip.top = Math.max(clip.top, box.top); clip.bottom = Math.min(clip.bottom, box.bottom) }
+              }
+            }
+            const placement = { matrix, width, height, clip, visible: visible && clip.right > clip.left && clip.bottom > clip.top }
+            const signature = JSON.stringify(placement)
+            if (signature !== slot.signature) {
+              send({ type: slot.signature === undefined ? 'inline.mount' : 'inline.layout', slotId: slot.id, childId: slot.childId, placement })
+              slot.signature = signature
+            }
+          }
+          const measureAll = () => {
+            queued = 0
+            if (!active || !slots.size) return
+            for (const slot of slots.values()) measure(slot)
+            // Only active content animations need frame-by-frame slot geometry.
+            if (document.getAnimations().some(animation => !['finished', 'idle'].includes(animation.playState))) enqueue()
+          }
+          const enqueue = () => { if (!queued && active && slots.size) queued = requestAnimationFrame(measureAll) }
+          const refresh = () => {
+            for (const slot of [...slots.values()]) if (!instance.childIds?.includes(slot.childId)) slot.release?.()
+            enqueue()
+          }
+          const resize = new ResizeObserver(enqueue), mutation = new MutationObserver(enqueue)
+          mutation.observe(document.body, { attributes: true, childList: true, subtree: true, characterData: true })
+          window.addEventListener('resize', enqueue); window.addEventListener('scroll', enqueue, true)
+          const events = ['animationstart', 'transitionrun', 'click']
+          for (const name of events) document.addEventListener(name, enqueue, true)
+          refreshInlineSlots = refresh
+          cleanups.add(() => {
+            if (queued) cancelAnimationFrame(queued)
+            resize.disconnect(); mutation.disconnect(); window.removeEventListener('resize', enqueue); window.removeEventListener('scroll', enqueue, true)
+            for (const name of events) document.removeEventListener(name, enqueue, true)
+            if (refreshInlineSlots === refresh) refreshInlineSlots = undefined
+            slots.clear()
+          })
+          return { mount: (childId: string, element: HTMLElement) => {
+            if (!active || typeof childId !== 'string' || !(element instanceof HTMLElement) || element.ownerDocument !== document || !instance.childIds?.includes(childId)) return () => {}
+            const slot: InlineSlot = { id: ++sequence, childId, element }
+            slots.set(slot.id, slot); resize.observe(element); measure(slot); enqueue()
+            let released = false
+            const release = () => {
+              if (released) return
+              released = true; slots.delete(slot.id); cleanups.delete(release)
+              if (![...slots.values()].some(value => value.element === element)) resize.unobserve(element)
+              send({ type: 'inline.release', slotId: slot.id })
+            }
+            slot.release = release
+            cleanups.add(release)
+            return release
+          } }
+        })() : undefined
         const runtimeContext = { instance, scope, root, teacherController, authoring, layout, authoredDocument: Boolean(authoredDocument), builtinKey: message.builtinKey, resourceCss: typeof message.resourceCss === 'string' ? resourceLease.project(message.resourceCss) : message.resourceCss, resources: { url: (name: string) => resourceUrls[currentBindings()[name] ?? name] },
-          media: message.media === true ? media : undefined, interactions: interaction ? interactions : undefined }
+          media: message.media === true ? media : undefined, interactions: interaction ? interactions : undefined, inline }
         updateResourceCss = value => { runtimeContext.resourceCss = typeof value === 'string' ? resourceLease.project(value) : value }
         mounted = await implementation.mount(runtimeContext) as typeof mounted
         mountedHtml = instance.data && typeof instance.data === 'object' && !Array.isArray(instance.data) && typeof instance.data.html === 'string' ? instance.data.html : undefined
@@ -568,7 +627,8 @@ function contentRealmBridge(nonce: string, fragmentBox: { resourceFactory: typeo
         mountedRunning = true
         await applyMountedActivity()
         if (!mounted || typeof mounted.update !== 'function' || typeof mounted.dispose !== 'function') throw new Error('mount 必须返回 update/dispose 生命周期')
-        if ((sourceViewport || webContent && message.visual && instance.frame) && root) {
+        const ownsNativeSlots = Boolean(instance.container || instance.childIds?.length)
+        if ((sourceViewport || webContent && message.visual && instance.frame || ownsNativeSlots) && root) {
           let queued = false, previous = ''
           const followedAnimations = new WeakSet<Animation>()
           const measurePaint = () => {
@@ -594,10 +654,10 @@ function contentRealmBridge(nonce: string, fragmentBox: { resourceFactory: typeo
               return css.backgroundImage !== 'none' || !/^(?:transparent|rgba\(0, 0, 0, 0\))$/.test(css.backgroundColor)
                 || paintsOutsideBox(element, css)
             })
-            if (webContent && paintsCanvas) rects.push(new DOMRect(0, 0, innerWidth, innerHeight))
+            if ((webContent || ownsNativeSlots) && paintsCanvas) rects.push(new DOMRect(0, 0, innerWidth, innerHeight))
             // CSS animation can move paint without a DOM mutation. Keep its
             // canvas intact until the browser reports the final geometry.
-            if (webContent) {
+            if (webContent || ownsNativeSlots) {
               const animations = document.getAnimations()
               for (const animation of animations) if (!followedAnimations.has(animation) && !['finished', 'idle'].includes(animation.playState)) {
                 followedAnimations.add(animation)
@@ -611,7 +671,7 @@ function contentRealmBridge(nonce: string, fragmentBox: { resourceFactory: typeo
               if (['style', 'script', 'template'].includes(element.localName)) continue
               const css = getComputedStyle(element)
               if (css.display === 'none' || css.visibility === 'hidden' || css.visibility === 'collapse' || Number(css.opacity) === 0) continue
-              if (webContent && paintsOutsideBox(element, css)) { rects.push(new DOMRect(0, 0, innerWidth, innerHeight)); continue }
+              if ((webContent || ownsNativeSlots) && paintsOutsideBox(element, css)) { rects.push(new DOMRect(0, 0, innerWidth, innerHeight)); continue }
               const painted = [...element.childNodes].some(node => node.nodeType === Node.TEXT_NODE && node.textContent?.trim())
                 || /^(?:button|input|select|textarea|img|video|canvas|iframe|svg|summary)$/.test(element.localName)
                 || css.backgroundImage !== 'none' || !/^(?:transparent|rgba\(0, 0, 0, 0\))$/.test(css.backgroundColor)
@@ -619,17 +679,18 @@ function contentRealmBridge(nonce: string, fragmentBox: { resourceFactory: typeo
               if (painted) for (const rect of element.getClientRects()) if (rect.width > 0 && rect.height > 0) rects.push(rect)
             }
             const bounds = rects.length ? { left: Math.min(...rects.map(rect => rect.left)), top: Math.min(...rects.map(rect => rect.top)), right: Math.max(...rects.map(rect => rect.right)), bottom: Math.max(...rects.map(rect => rect.bottom)) } : null
-            const signature = JSON.stringify(bounds)
-            if (signature !== previous) { previous = signature; send({ type: 'source.paint', bounds }) }
+            const paintedRects = ownsNativeSlots ? rects.map(rect => ({ left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom })) : undefined
+            const signature = JSON.stringify(paintedRects ?? bounds)
+            if (signature !== previous) { previous = signature; send({ type: 'source.paint', bounds, ...(paintedRects ? { rects: paintedRects } : {}) }) }
           }
           const enqueue = () => { if (!queued) { queued = true; queueMicrotask(() => { queued = false; measurePaint() }) } }
           // Native WAAPI has no CSS animation events. Notify the same paint
           // owner at its real start/finish instead of sampling every frame.
           const originalAnimate = Element.prototype.animate
           const trackedAnimate = function(this: Element, ...args: Parameters<Element['animate']>) {
-            const animation = originalAnimate.apply(this, args); enqueue(); return animation
+            const animation = originalAnimate.apply(this, args); enqueue(); refreshInlineSlots?.(); return animation
           }
-          if (webContent) Element.prototype.animate = trackedAnimate
+          if (webContent || ownsNativeSlots) Element.prototype.animate = trackedAnimate
           const observer = new MutationObserver(enqueue); observer.observe(document.body, { childList: true, attributes: true, characterData: true, subtree: true })
           const resize = new ResizeObserver(enqueue); resize.observe(root)
           window.addEventListener('resize', enqueue); root.addEventListener('load', enqueue, true)
@@ -637,12 +698,12 @@ function contentRealmBridge(nonce: string, fragmentBox: { resourceFactory: typeo
           for (const name of paintEvents) root.addEventListener(name, enqueue, true)
           refreshSourcePaint = enqueue
           cleanups.add(() => { observer.disconnect(); resize.disconnect(); window.removeEventListener('resize', enqueue); root.removeEventListener('load', enqueue, true)
-            if (webContent && Element.prototype.animate === trackedAnimate) Element.prototype.animate = originalAnimate
+            if ((webContent || ownsNativeSlots) && Element.prototype.animate === trackedAnimate) Element.prototype.animate = originalAnimate
             for (const name of paintEvents) root.removeEventListener(name, enqueue, true)
             if (refreshSourcePaint === enqueue) refreshSourcePaint = undefined })
           measurePaint()
         }
-        if (documentRoot && !authoredDocument) cleanups.add(() => { document.head.prepend(fragmentDefaults); document.body.append(fragmentRoot) })
+        if (documentRoot && !authoredDocument) cleanups.add(() => { if (fragmentDefaults) document.head.prepend(fragmentDefaults); document.body.append(fragmentRoot) })
         if (root && !webContent) {
           refreshSourceText = () => {
             if (originalHtml === undefined) { sourcePageText?.setRules([]); return }
@@ -657,11 +718,13 @@ function contentRealmBridge(nonce: string, fragmentBox: { resourceFactory: typeo
         // consumers. Editor target observation below is a separate concern.
         if (root) {
           ownedAuthoring = fragmentBox.ownedAuthoring(`__guoling_parser_${nonce.replace(/-/g, '_')}`, '', fragmentBox.authoring, {
+            paintedElementAt: (x, y) => contentAuthoring?.paintedElementAt(x, y),
             records: () => instance.authoring?.records ?? {}, resources: () => resourceLease.sources, bindings: currentBindings,
             runtimeResources: () => resourceUrls,
             resolveResource: (reference, bindings) => resourceLease.resolve(reference, bindings),
             matchesResource: (reference, liveUrl, bindings) => resourceLease.matches(reference, liveUrl, bindings),
             activity: () => authoredDocument ? undefined : activitySnapshot(),
+            blobCarriers: () => authoredDocument?.blobCarriers,
             observe: observeHtml, onChange: () => collectHtml(),
             report: (authorKey, status) => {
               if (status === 'unresolved') scope.events.emit('component.diagnostic', { instanceId: instance.id, authorKey,
@@ -669,6 +732,10 @@ function contentRealmBridge(nonce: string, fragmentBox: { resourceFactory: typeo
             },
             onDoubleClick: point => send({ type: 'authoring.double-click', ...point,
               x: point.x + measuredPaintOrigin.left, y: point.y + measuredPaintOrigin.top }),
+            onPointer: point => send({ type: 'authoring.pointer', ...point,
+              x: point.x + measuredPaintOrigin.left, y: point.y + measuredPaintOrigin.top }),
+            onSelection: selection => send({ type: 'authoring.selection', ...selection }),
+            onHover: authorKey => send({ type: 'authoring.hover', authorKey }),
           })
           cleanups.add(() => { ownedAuthoring?.dispose(); ownedAuthoring = undefined })
           contentAuthoring = fragmentBox.authoring(documentRoot ? document.documentElement : root, {
@@ -834,6 +901,7 @@ function contentRealmBridge(nonce: string, fragmentBox: { resourceFactory: typeo
         writeCourseTheme(message.themeCss)
         resourceUrls = resourceLease.update(message.resources as Record<string, string> ?? {})
         instance = runtimeInstance(message.instance as ComponentInstance)
+        refreshInlineSlots?.()
         updateResourceCss(message.resourceCss)
         originalHtml = typeof message.authorHtml === 'string' ? message.authorHtml : undefined
         targets = message.targets as RuntimeTargetSnapshot[]
@@ -850,6 +918,11 @@ function contentRealmBridge(nonce: string, fragmentBox: { resourceFactory: typeo
         contentAuthoring?.refresh()
         ownedAuthoring?.update()
         collectHtml()
+      } else if (message.type === 'authoring.input') {
+        if (!active || message.generation !== generation) return
+        const authorKey = typeof message.authorKey === 'string' && message.active === true ? message.authorKey : undefined
+        contentAuthoring?.suppressText(authorKey); ownedAuthoring?.input(authorKey)
+        return
       } else if (message.type === 'authoring.preview') {
         if (!active || message.generation !== generation) return
         const geometry = message.geometry as ComponentAuthorGeometry | null
@@ -998,8 +1071,9 @@ export async function preparePublishedNativeComponent(artifact: CompiledComponen
   // Main's existing preview protocol supplies the desktop document, without its
   // parent's CSP or Blob storage key. Standalone HTML owns this inline document.
   // The author module still arrives over a dedicated port and is loaded by the child.
+  const realmClientMatrix = `(function(){const ${multiplyMatrices.name}=(${multiplyMatrices.toString()});const ${transformPoint.name}=(${transformPoint.toString()});return (${componentClientMatrix.toString()});})()`
   const bridge = (programs?: import('../../../components/web/authoredDocumentBootstrap').AuthoredDocumentPrograms) =>
-    `(function(){${programs ? `const authored=${authoredDocumentProgramsSource(programs)};` : ''}(${contentRealmBridge.toString()})(${JSON.stringify(nonce)}, {resourceFactory:(${createWebResourceUrlLease.toString()}),navigationReady:(${installCourseNavigationReady.toString()}),isMeasured:(${isMeasuredWebFragmentBox.toString()}),extent:(${measuredFragmentExtent.toString()}),fragments:(${createComponentFragmentProjection.toString()}),refreshResources:(${refreshWebResourceReferences.toString()}),authoring:(${createDomAuthoring.toString()}),paintAt:(${componentAuthorPaintAtPoint.toString()}),ownedAuthoring:(${installOwnedDocumentAuthoring.toString()}),textOverrides:(roots,rules)=>{${domTextOverrideRealmSource()}return createPageTextOverrides(roots,rules)}}${programs ? ',authored' : ''})})()`
+    `(function(){${programs ? `const authored=${authoredDocumentProgramsSource(programs)};` : ''}(${contentRealmBridge.toString()})(${JSON.stringify(nonce)}, {resourceFactory:(${createWebResourceUrlLease.toString()}),navigationReady:(${installCourseNavigationReady.toString()}),isMeasured:(${isMeasuredWebFragmentBox.toString()}),extent:(${measuredFragmentExtent.toString()}),fragments:(${createComponentFragmentProjection.toString()}),refreshResources:(${refreshWebResourceReferences.toString()}),authoring:${domAuthoringFactorySource()},paintAt:(root,x,y)=>(${componentPaintStack.toString()})(root,x,y).length>0,clientMatrix:${realmClientMatrix},ownedAuthoring:(${installOwnedDocumentAuthoring.toString()}),input:(${installAuthoringInputArbitration.toString()}),caret:(${authoringCaretOffset.toString()}),textOverrides:(roots,rules)=>{${domTextOverrideRealmSource()}return createPageTextOverrides(roots,rules)}}${programs ? ',authored' : ''})})()`
   let runtimeBuiltinKey = snapshots.builtinKey, sourceWebDocument = false
   const pendingDocumentKeys: Record<string, string> = {}
   const readAuthorHtml = (instance: ComponentInstance | undefined): string | undefined => {
@@ -1020,7 +1094,7 @@ export async function preparePublishedNativeComponent(artifact: CompiledComponen
     if (!['guoling.web', 'guoling.html-program'].includes(runtimeBuiltinKey ?? '')
       || !data || typeof data.html !== 'string' || htmlDocumentKind(data.html) === 'document' || snapshots.nativeDocument) return projected
     return { ...projected, data: { ...data, html: authoredDocumentBootstrap(data, {
-      nonce, instanceId: instance.id, nestedOnly: true, pendingDocumentKeys, resources: snapshots.resources?.() ?? {},
+      nonce, instanceId: instance.id, nestedOnly: true, pendingDocumentKeys, resources: snapshots.resources?.() ?? {}, authoring: snapshots.htmlAuthoring === true,
       bridge: authoredDocumentProgramsSource,
     }) } }
   }
@@ -1033,6 +1107,38 @@ export async function preparePublishedNativeComponent(artifact: CompiledComponen
   let sourceViewport: { left: number; top: number; right: number; bottom: number; width: number; height: number } | undefined
   let authorInstance: ComponentInstance | undefined
   let authorRoot: HTMLElement | undefined
+  let inlinePort: ComponentRuntimeContext['inline'], inlineOverlay: HTMLElement | undefined
+  type InlinePlacement = { matrix: AffineMatrix | null; width: number; height: number; visible: boolean; clip: { left: number; top: number; right: number; bottom: number } }
+  const inlineSlots = new Map<number, { childId: string; element: HTMLElement; clipElement: HTMLElement; placement: InlinePlacement; release(): void }>()
+  const placeInlineSlot = (slot: { clipElement: HTMLElement; placement: InlinePlacement }) => {
+    const placement = slot.placement, rootMatrix = authorRoot && clientMatrix(authorRoot), iframeMatrix = clientMatrix(iframe)
+    slot.clipElement.hidden = !placement.visible || !placement.matrix || !rootMatrix || !iframeMatrix
+    if (slot.clipElement.hidden || !placement.matrix || !rootMatrix || !iframeMatrix) return
+    const matrix = multiplyMatrices(invertMatrix(rootMatrix), multiplyMatrices(iframeMatrix, placement.matrix))
+    // The host retains the iframe's real allocation even if author code alters a report.
+    const clip = { left: Math.max(0, placement.clip.left), top: Math.max(0, placement.clip.top),
+      right: Math.min(iframe.clientWidth, placement.clip.right), bottom: Math.min(iframe.clientHeight, placement.clip.bottom) }
+    if (clip.right <= clip.left || clip.bottom <= clip.top) { slot.clipElement.hidden = true; return }
+    const inverse = invertMatrix(placement.matrix)
+    const polygon = [{ x: clip.left, y: clip.top }, { x: clip.right, y: clip.top }, { x: clip.right, y: clip.bottom }, { x: clip.left, y: clip.bottom }]
+      .map(point => transformPoint(inverse, point)).map(point => `${point.x}px ${point.y}px`).join(',')
+    Object.assign(slot.clipElement.style, { width: `${placement.width}px`, height: `${placement.height}px`, transform: `matrix(${matrix.join(',')})`, clipPath: `polygon(${polygon})` })
+  }
+  const refreshInlinePlacements = () => { for (const slot of inlineSlots.values()) placeInlineSlot(slot) }
+  const releaseInlineSlot = (id: number) => {
+    const slot = inlineSlots.get(id)
+    if (!slot) return
+    inlineSlots.delete(id); slot.release(); slot.clipElement.remove()
+  }
+  const inlinePlacement = (value: unknown): InlinePlacement | undefined => {
+    if (!value || typeof value !== 'object') return
+    const placement = value as InlinePlacement
+    if (typeof placement.visible !== 'boolean' || !Number.isFinite(placement.width) || !Number.isFinite(placement.height)
+      || placement.width < 0 || placement.height < 0 || !placement.clip || !['left', 'top', 'right', 'bottom'].every(key => Number.isFinite(placement.clip[key as keyof typeof placement.clip]))) return
+    if (placement.matrix !== null && (!Array.isArray(placement.matrix) || placement.matrix.length !== 6 || !placement.matrix.every(Number.isFinite)
+      || Math.abs(placement.matrix[0] * placement.matrix[3] - placement.matrix[1] * placement.matrix[2]) < 1e-12)) return
+    return placement
+  }
   // A full realm can retain author-created handlers/timers across content updates.
   // Only its existing retirement lifecycle may reset this transport choice.
   let targetProfile: RuntimeTargetProfile | undefined
@@ -1050,6 +1156,12 @@ export async function preparePublishedNativeComponent(artifact: CompiledComponen
   const observedSpots = new Map<string, { signature: string; off(): void }>()
   const authorPreviews = new Set<string>()
   const authorHits = new Map<number, (result: ComponentAuthorHitResult) => void>()
+  const authorInput = (event: Event) => {
+    const value = (event as CustomEvent<{ instanceId: string; authorKey: string; active: boolean }>).detail
+    if (!scope?.isActive() || !authoring || !authorRoot || value?.instanceId !== scope.instanceId
+      || !(event.target instanceof Element) || !event.target.contains(authorRoot)) return
+    port.postMessage({ type: 'authoring.input', generation: scope.generation, authorKey: value.authorKey, active: value.active === true })
+  }
   let authorHitSequence = 0
   const authorHit = (event: Event) => {
     const request = (event as CustomEvent<ComponentAuthorHitRequest>).detail
@@ -1103,7 +1215,7 @@ export async function preparePublishedNativeComponent(artifact: CompiledComponen
       'scene.go': snapshot.scenes.some(scene => teacher.canExecute({ type: 'scene.go', sceneId: scene.id })) } }
   }
   const refreshSourceViewport = (notify = true) => {
-    if (!sourceViewport || !authorRoot) return
+    if (!sourceViewport || !authorRoot) { refreshInlinePlacements(); return }
     const matrix = clientMatrix(authorRoot)
     if (!matrix) return
     const view = authorRoot.ownerDocument.documentElement, bounds = runtimeTeacherController?.viewportBounds?.() ?? { left: 0, top: 0, right: view.clientWidth, bottom: view.clientHeight }
@@ -1118,12 +1230,15 @@ export async function preparePublishedNativeComponent(artifact: CompiledComponen
       || sourceViewport.right !== previous.right || sourceViewport.bottom !== previous.bottom
       || sourceViewport.width !== previous.width || sourceViewport.height !== previous.height
     if (notify && changed && scope?.isActive()) port.postMessage({ type: 'source.viewport', viewport: sourceViewport })
+    refreshInlinePlacements()
   }
   const release = () => {
     if (disposed) return
     if (scope) port.postMessage({ type: 'cancel', generation: scope.generation })
     disposed = true
     const error = new Error('组件运行已取消')
+    for (const id of [...inlineSlots.keys()]) releaseInlineSlot(id)
+    inlineOverlay?.remove(); inlineOverlay = undefined; inlinePort = undefined
     readyReject(error)
     for (const request of pending.values()) request.reject(error)
     pending.clear()
@@ -1135,6 +1250,7 @@ export async function preparePublishedNativeComponent(artifact: CompiledComponen
     observedSpots.clear()
     authorPreviews.clear()
     authorRoot?.removeEventListener(authorHitEvent, authorHit)
+    authorRoot?.ownerDocument.removeEventListener('component-author-input-state', authorInput, true)
     for (const resolve of authorHits.values()) resolve({ authorKey: null, painted: true })
     authorHits.clear()
     for (const value of remoteMotions.values()) { value.task.cancel(); value.finish() }
@@ -1179,10 +1295,47 @@ export async function preparePublishedNativeComponent(artifact: CompiledComponen
       return
     }
     if (!scope?.isActive() || message?.generation !== scope.generation) return
-    if (message.type === 'source.paint' && (sourceViewport || authorRoot && authorInstance?.frame
-      && ['guoling.web', 'guoling.html-program'].includes(runtimeBuiltinKey ?? ''))) {
+    if (message.type === 'inline.release' && Number.isInteger(message.slotId)) { releaseInlineSlot(message.slotId); return }
+    if ((message.type === 'inline.mount' || message.type === 'inline.layout') && Number.isInteger(message.slotId)) {
+      const placement = inlinePlacement(message.placement)
+      if (!placement || !inlinePort || !authorRoot) return
+      let slot = inlineSlots.get(message.slotId)
+      if (message.type === 'inline.mount') {
+        if (slot || typeof message.childId !== 'string' || !authorInstance?.childIds?.includes(message.childId)) return
+        for (const [id, previous] of inlineSlots) if (previous.childId === message.childId) releaseInlineSlot(id)
+        if (!inlineOverlay) {
+          if (getComputedStyle(authorRoot).position === 'static') {
+            const root = authorRoot, position = root.style.position
+            root.style.position = 'relative'; scope.cleanup(() => { root.style.position = position })
+          }
+          inlineOverlay = authorRoot.ownerDocument.createElement('div')
+          inlineOverlay.dataset.componentInlineOverlay = scope.instanceId
+          Object.assign(inlineOverlay.style, { position: 'absolute', left: '0', top: '0', width: '100%', height: '100%', pointerEvents: 'none', zIndex: '1' })
+          authorRoot.append(inlineOverlay)
+        }
+        const element = authorRoot.ownerDocument.createElement('div')
+        element.dataset.componentInlineSlot = message.childId
+        Object.assign(element.style, { width: '100%', height: '100%', pointerEvents: 'auto' })
+        const clipElement = authorRoot.ownerDocument.createElement('div')
+        clipElement.dataset.componentInlinePlacement = message.childId
+        Object.assign(clipElement.style, { position: 'absolute', left: '0', top: '0', transformOrigin: '0 0', pointerEvents: 'none' })
+        clipElement.append(element); inlineOverlay.append(clipElement)
+        slot = { childId: message.childId, element, clipElement, placement, release: () => {} }
+        inlineSlots.set(message.slotId, slot); placeInlineSlot(slot)
+        try { slot.release = inlinePort.mount(message.childId, element) }
+        catch (error) { releaseInlineSlot(message.slotId); scope.events.emit('component.diagnostic', { message: `子组件槽位未挂载：${String(error)}` }); return }
+      } else if (slot) { slot.placement = placement; placeInlineSlot(slot) }
+      return
+    }
+    if (message.type === 'source.paint' && (sourceViewport || authorRoot && (authorInstance?.container || authorInstance?.childIds?.length
+      || authorInstance?.frame && ['guoling.web', 'guoling.html-program'].includes(runtimeBuiltinKey ?? '')))) {
       const bounds = message.bounds
       if (bounds === null) iframe.style.clipPath = 'polygon(0 0,0 0,0 0)'
+      else if ((authorInstance?.container || authorInstance?.childIds?.length) && Array.isArray(message.rects)) {
+        const rects = message.rects.filter((box: Record<string, number>) => box && ['left', 'top', 'right', 'bottom'].every(key => Number.isFinite(box[key]))
+          && box.right > box.left && box.bottom > box.top)
+        iframe.style.clipPath = rects.length ? `path("${rects.map((box: Record<string, number>) => `M ${box.left} ${box.top} H ${box.right} V ${box.bottom} H ${box.left} Z`).join(' ')}")` : 'polygon(0 0,0 0,0 0)'
+      }
       else if (bounds && ['left', 'top', 'right', 'bottom'].every(key => Number.isFinite(bounds[key]))
         && bounds.right > bounds.left && bounds.bottom > bounds.top)
         iframe.style.clipPath = `polygon(${bounds.left}px ${bounds.top}px,${bounds.right}px ${bounds.top}px,${bounds.right}px ${bounds.bottom}px,${bounds.left}px ${bounds.bottom}px)`
@@ -1272,10 +1425,21 @@ export async function preparePublishedNativeComponent(artifact: CompiledComponen
       resolve?.({ authorKey: typeof message.authorKey === 'string' ? message.authorKey : null, painted: message.painted !== false })
       return
     }
-    if (message.type === 'authoring.double-click' && authoring && authorRoot?.isConnected
+    if ((message.type === 'authoring.pointer' || message.type === 'authoring.double-click') && authoring && authorRoot?.isConnected
       && (authorSpots.size || observedSpots.size) && Number.isFinite(message.x) && Number.isFinite(message.y)) {
-      authorRoot.dispatchEvent(new CustomEvent('component-author-double-click', { bubbles: true, detail: {
+      authorRoot.dispatchEvent(new CustomEvent(message.type === 'authoring.pointer' ? 'component-author-pointer' : 'component-author-double-click', { bubbles: true, detail: {
         instanceId: scope.instanceId, mountGeneration: scope.generation, localPoint: { x: message.x + (sourceViewport?.left ?? 0), y: message.y + (sourceViewport?.top ?? 0) }, authorKey: message.authorKey,
+        ...(Number.isSafeInteger(message.caretOffset) && message.caretOffset >= 0 ? { caretOffset: message.caretOffset } : {}),
+      } })); return
+    }
+    if (message.type === 'authoring.hover' && authoring && authorRoot?.isConnected) {
+      authorRoot.dispatchEvent(new CustomEvent('component-author-hover', { bubbles: true, detail: { instanceId: scope.instanceId, authorKey: message.authorKey } })); return
+    }
+    if (message.type === 'authoring.selection' && authoring && authorRoot?.isConnected && typeof message.authorKey === 'string'
+      && Number.isSafeInteger(message.anchor) && message.anchor >= 0 && Number.isSafeInteger(message.focus) && message.focus >= 0) {
+      authorRoot.dispatchEvent(new CustomEvent('component-author-selection', { bubbles: true, detail: {
+        instanceId: scope.instanceId, mountGeneration: scope.generation, authorKey: message.authorKey,
+        anchor: message.anchor, focus: message.focus, ...(message.word === true ? { word: true } : {}),
       } })); return
     }
     if (message.type === 'interaction.unsubscribe') {
@@ -1503,10 +1667,11 @@ export async function preparePublishedNativeComponent(artifact: CompiledComponen
           if (scope?.isActive() && !disposed) port.postMessage({ type: 'notification', kind: 'event', name: '__runtime.activity', value: activity })
         }))
         runtimeTeacherController = context.teacherController ?? snapshots.teacherController
-        mediaPort = context.media; interactionPort = context.interactions
+        mediaPort = context.media; interactionPort = context.interactions; inlinePort = context.inline
         authoring = context.authoring
         authorRoot = context.root
         authorRoot?.addEventListener(authorHitEvent, authorHit)
+        authorRoot?.ownerDocument.addEventListener('component-author-input-state', authorInput, true)
         layoutPort = context.layout
         authorInstance = context.instance
         scope.signal.addEventListener('abort', release, { once: true }); scope.cleanup(release)
@@ -1514,7 +1679,14 @@ export async function preparePublishedNativeComponent(artifact: CompiledComponen
           const currentScope = scope
           subscriptions.set('layout', layoutPort.subscribe(layout => {
             if (currentScope.isActive() && !disposed) port.postMessage({ type: 'layout.input', generation: currentScope.generation, layout })
+            refreshInlinePlacements()
           }))
+        }
+        if (inlinePort && authorRoot) {
+          const resize = new ResizeObserver(refreshInlinePlacements), refresh = () => refreshInlinePlacements()
+          resize.observe(authorRoot); resize.observe(iframe)
+          window.addEventListener('resize', refresh); window.addEventListener('scroll', refresh, true)
+          scope.cleanup(() => { resize.disconnect(); window.removeEventListener('resize', refresh); window.removeEventListener('scroll', refresh, true) })
         }
         subscriptions.set('course-theme', scope.events.subscribe('__runtime.theme', value => {
           if (scope?.isActive() && !disposed) port.postMessage({ type: 'notification', kind: 'event', name: '__runtime.theme', value })
@@ -1525,8 +1697,9 @@ export async function preparePublishedNativeComponent(artifact: CompiledComponen
         subscriptions.set('course-state', scope.events.subscribe('__runtime.state', value => {
           if (scope?.isActive() && !disposed) port.postMessage({ type: 'notification', kind: 'event', name: '__runtime.state', value })
         }))
-        subscriptions.set('course-targets', scope.events.subscribe('__runtime.targets', value => {
-          if (scope?.isActive() && !disposed) port.postMessage({ type: 'targets.snapshot', targets: value })
+        subscriptions.set('course-targets', scope.events.subscribe(snapshots.targetChanges ? '__runtime.targets.changed' : '__runtime.targets', value => {
+          if (scope?.isActive() && !disposed) port.postMessage({ type: 'targets.snapshot',
+            targets: snapshots.targetChanges && authorInstance ? targetsFor(authorInstance) : value })
         }))
         if (runtimeTeacherController) subscriptions.set('teacher', runtimeTeacherController.subscribe(() => {
           refreshSourceViewport()
@@ -1550,7 +1723,7 @@ export async function preparePublishedNativeComponent(artifact: CompiledComponen
         const nativeData = projected.data as WebRuntimeData
         const parserData = transportFragment ? { ...nativeData, html: `<!doctype html><html><head><style id="component-defaults">html,body{width:100%;height:100%;margin:0}</style></head><body>${nativeData.html}</body></html>` } : nativeData
         const html = documentKind === 'document' && context.root
-          ? authoredDocumentBootstrap(parserData, { nonce, instanceId: context.instance.id, bridge, resources, pendingDocumentKeys, themeCss: snapshots.themeCss?.(), transportFragment, resourceCss: typeof data?.css === 'string' ? data.css : undefined })
+          ? authoredDocumentBootstrap(parserData, { nonce, instanceId: context.instance.id, bridge, resources, pendingDocumentKeys, authoring: snapshots.htmlAuthoring === true, themeCss: snapshots.themeCss?.(), transportFragment, resourceCss: typeof data?.css === 'string' ? data.css : undefined })
           : `<!doctype html><meta charset="utf-8">${faces ? `<style data-component-bundled-faces>${faces.replace(/<\/style/gi, '<\\/style')}</style>` : ''}<style id="component-defaults">html,body,#component-root{width:100%;height:100%;margin:0}</style><div id="component-root"></div><script>${bridge().replace(/<\/script/gi, '<\\/script')}</script>`
         lease = bootstrapApi ? await bootstrapApi.createComponentBootstrap!({ leaseId, html, connectOrigins: [...(snapshots.connectOrigins?.() ?? [])],
           resourceSources: hasWebContentData(data) && Array.isArray(data?.resourceSources) ? data.resourceSources as unknown as ComponentBootstrapInput['resourceSources'] : undefined,
@@ -1580,7 +1753,7 @@ export async function preparePublishedNativeComponent(artifact: CompiledComponen
           authorHtml = readAuthorHtml(context.instance)
           if (signal.aborted || !scope.isActive()) throw new Error('组件挂载已取消')
           if (documentKind === 'document' && context.root) await request('document', { html: authoredDocumentBootstrap(projected.data as WebRuntimeData, {
-            nonce, instanceId: context.instance.id, resources, pendingDocumentKeys, resourceCss: typeof data.css === 'string' ? data.css : undefined,
+            nonce, instanceId: context.instance.id, resources, pendingDocumentKeys, authoring: snapshots.htmlAuthoring === true, resourceCss: typeof data.css === 'string' ? data.css : undefined,
             themeCss: `${prepared.fontFaceCss ?? ''}\n${splitInstalledBundledFontFaceCss(snapshots.themeCss?.() ?? '').theme}`,
             bridge: programs => `window[${JSON.stringify(`__guoling_adopt_${nonce.replace(/-/g, '_')}`)}](${authoredDocumentProgramsSource(programs)})`,
           }) })
@@ -1599,6 +1772,7 @@ export async function preparePublishedNativeComponent(artifact: CompiledComponen
           activity,
           visual: Boolean(context.root), state: snapshots.state(), targets: targetsFor(projected), teacher: teacherSnapshot(), htmlAuthoring: snapshots.htmlAuthoring,
           media: Boolean(mediaPort), interaction: interactionSnapshot(),
+          inline: Boolean(inlinePort && context.root),
           layout: layoutPort?.read(),
           sourceViewport,
           fragmentStateKey: componentFragmentStateKey(context.instance.id), themeCss: snapshots.themeCss?.(), resources: snapshots.resources?.(), resourceBindings: snapshots.resourceBindings,
@@ -1611,7 +1785,9 @@ export async function preparePublishedNativeComponent(artifact: CompiledComponen
           const preserveHtml = (sourceWebDocument || ['guoling.web', 'guoling.html-program'].includes(runtimeBuiltinKey ?? ''))
             && hasWebContentData(previousData) && hasWebContentData(nextData)
             && ownedDocumentExecutionSource(previousData.html) === ownedDocumentExecutionSource(nextData.html)
-          authorInstance = instance; updateFramePointer(instance); const projected = await projectInstance(instance); return request('update', { instance: projected, preserveHtml, state: snapshots.state(), targets: targetsFor(projected), themeCss: snapshots.themeCss?.(), resources: snapshots.resources?.(), interaction: interactionSnapshot(),
+          authorInstance = instance
+          for (const [id, slot] of inlineSlots) if (!instance.childIds?.includes(slot.childId)) releaseInlineSlot(id)
+          updateFramePointer(instance); const projected = await projectInstance(instance); return request('update', { instance: projected, preserveHtml, state: snapshots.state(), targets: targetsFor(projected), themeCss: snapshots.themeCss?.(), resources: snapshots.resources?.(), interaction: interactionSnapshot(),
             resourceCss: instance.data && typeof instance.data === 'object' && !Array.isArray(instance.data) && typeof instance.data.css === 'string' ? instance.data.css : undefined,
             authorHtml: readAuthorHtml(instance) }).then(() => undefined) },
           updatePlacement: frame => {

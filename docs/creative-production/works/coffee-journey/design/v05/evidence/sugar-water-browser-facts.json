@@ -1,0 +1,142 @@
+{
+  "started": "2026-10-21T01:38:09.716Z",
+  "chapters": [
+    {
+      "id": "u01",
+      "width": 1440,
+      "horizontalOverflow": false
+    },
+    {
+      "id": "u02",
+      "width": 1440,
+      "horizontalOverflow": false
+    },
+    {
+      "id": "u03",
+      "width": 1440,
+      "horizontalOverflow": false
+    },
+    {
+      "id": "u04",
+      "width": 1440,
+      "horizontalOverflow": false
+    },
+    {
+      "id": "u05",
+      "width": 1440,
+      "horizontalOverflow": false
+    },
+    {
+      "id": "u06",
+      "width": 1440,
+      "horizontalOverflow": false
+    },
+    {
+      "id": "u07",
+      "width": 1440,
+      "horizontalOverflow": false
+    },
+    {
+      "id": "u01",
+      "width": 390,
+      "horizontalOverflow": false
+    },
+    {
+      "id": "u02",
+      "width": 390,
+      "horizontalOverflow": false
+    },
+    {
+      "id": "u03",
+      "width": 390,
+      "horizontalOverflow": false
+    },
+    {
+      "id": "u04",
+      "width": 390,
+      "horizontalOverflow": false
+    },
+    {
+      "id": "u05",
+      "width": 390,
+      "horizontalOverflow": false
+    },
+    {
+      "id": "u06",
+      "width": 390,
+      "horizontalOverflow": false
+    },
+    {
+      "id": "u07",
+      "width": 390,
+      "horizontalOverflow": false
+    }
+  ],
+  "checks": {
+    "u03": {
+      "switch": true,
+      "detailImage": true,
+      "compareReturnsToSelected": true
+    },
+    "u05": {
+      "continuousInput": true,
+      "zoomExit": true,
+      "playPause": true
+    },
+    "u06": {
+      "values": [
+        {
+          "added": 0,
+          "total": 200,
+          "concentration": "1.50"
+        },
+        {
+          "added": 50,
+          "total": 250,
+          "concentration": "1.20"
+        },
+        {
+          "added": 100,
+          "total": 300,
+          "concentration": "1.00"
+        }
+      ],
+      "offscreenPause": true,
+      "audioNodeTriggeredByClick": true
+    },
+    "mobileInteraction": true,
+    "reducedMotion": {
+      "steps": [
+        "1",
+        "2",
+        "0"
+      ],
+      "staticDilution": true
+    },
+    "reuse": {
+      "values": [
+        {
+          "added": 0,
+          "total": 300,
+          "percent": "10.00"
+        },
+        {
+          "added": 150,
+          "total": 450,
+          "percent": "6.67"
+        },
+        {
+          "added": 300,
+          "total": 600,
+          "percent": "5.00"
+        }
+      ],
+      "engineIdentical": true,
+      "engineSha256": "4467596e69e323bec095bb5706fa3dae4132ba7f1a04140e297f6a224a7c03e6",
+      "accessibleDescription": true
+    }
+  },
+  "errors": [],
+  "status": "passed",
+  "finished": "2026-10-21T01:38:24.105Z"
+}

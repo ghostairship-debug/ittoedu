@@ -1,6 +1,8 @@
+import { componentContainers } from '../../../shared/contracts/component-platform/project'
 import type { ComponentEdit } from '../../../shared/contracts/component-platform/operations'
 import { componentDefinitionBuiltinKey, type ComponentBackground, type ComponentFlowBodyLayout, type JsonValue } from '../../../shared/contracts/component-platform/project'
 import type { DocumentSelection } from '../../../shared/document/ports'
+import { documentBlockChildren, type DocumentBlock } from '../../../shared/document/content'
 import type { AssetMeta } from '../../../shared/contracts/media-v1'
 import type { PropertiesOwnerReadModel } from '../../composition/properties/PropertiesAuthoringReadModel'
 import type { CapturedCourseTarget } from '../../documents/CourseV10DocumentBridge'
@@ -32,28 +34,37 @@ export function buildFlowPropertiesOwner(input: {
   const project = read.project, surface = read.surface
   if (!project || surface?.kind !== 'flow' || read.selectedIsGlobal || read.selectedInstanceIds.length > 1) return null
   const blocks: FlowPropertiesView['blocks'][number][] = []
-  const collect = (ids: readonly string[], parentId: string | null) => ids.forEach((blockId, index) => {
-    const block = projectFlowBlock(project, blockId)
+  const collect = (children: readonly DocumentBlock[], parentId: string | null) => children.forEach((block, index) => {
+    const blockId = block.id
     blocks.push({ blockId, block, parentId, index, label: project.instances[blockId]?.name ?? `${block.type} ${index + 1}` })
-    if (block.type === 'section') collect(project.instances[blockId]?.childIds ?? [], blockId)
+    const descendants = documentBlockChildren(block)
+    if (descendants) collect(descendants, blockId)
   })
-  collect(flowBodyIds(project, surface.id), null)
+  collect(flowBodyIds(project, surface.id).map(id => projectFlowBlock(project, id)), null)
   const selected = read.selectedInstance, definition = selected ? project.definitions[selected.definitionId] : null
+  const selectedBodyBlock = blocks.find(item => item.blockId === selected?.id)?.block
   const professionalKey = componentDefinitionBuiltinKey(definition ?? undefined)
   const semantic = selected && !selected.flowPlacement
-    && ['guoling.text', 'guoling.document-block'].includes(professionalKey ?? '') && projectFlowBlock(project, selected.id).type !== 'course-instance'
+    && ['guoling.text', 'guoling.document-block'].includes(professionalKey ?? '') && selectedBodyBlock && selectedBodyBlock.type !== 'course-instance'
   const background = surface.background
   const view: FlowPropertiesView = { surfaceId: surface.id, surfaceTitle: surface.title,
     backgroundMode: background?.mode ?? 'inherit', backgroundColor: background?.color, backgroundAssetId: background?.assetId,
     effectiveBackground: propertiesEffectiveBackground(project, surface), layout: { ...surface.flow?.layout, widthMode: surface.flow?.layout.widthMode ?? 'reading' }, blocks }
   const selection = input.documentSelection
+  const textFormatIdentity = JSON.stringify(selection?.kind === 'text' && selection.anchor.blockId === selected?.id && selection.head.blockId === selected?.id
+    ? { kind: selection.kind, anchor: selection.anchor, head: selection.head } : null)
   const textRange = selection?.kind === 'text' && selection.anchor.blockId === selection.head.blockId && JSON.stringify(selection.anchor.slot) === JSON.stringify(selection.head.slot)
     ? { blockId: selection.anchor.blockId, start: Math.min(selection.anchor.offset, selection.head.offset), end: Math.max(selection.anchor.offset, selection.head.offset),
       ...(selection.anchor.slot.kind === 'item' ? { listItemId: selection.anchor.slot.itemId } : {}),
       ...(selection.anchor.slot.kind === 'cell' ? { tableRowId: selection.anchor.slot.rowId, tableColumnId: selection.anchor.slot.columnId } : {}),
       ...(selection.anchor.slot.kind === 'header' ? { tableColumnId: selection.anchor.slot.columnId } : {}) } : null
   const run = (fn: () => unknown) => { try { void Promise.resolve(fn()).catch(report) } catch (error) { report(error) } }
-  const intent = async (value: FlowAuthoringIntent) => { const receipt = await actions.runFlowAuthoringIntent(liveTarget(), value); if (!receipt.ok) throw new Error(receipt.reason) }
+  const intent = async (value: FlowAuthoringIntent) => { const receipt = await actions.runFlowAuthoringIntent(liveTarget(), value); if (!receipt.ok) throw receipt.error ?? new Error(receipt.reason) }
+  const commitIntent = (value: FlowAuthoringIntent): Promise<void> => {
+    const pending = intent(value)
+    void pending.catch(report)
+    return pending
+  }
   const backgroundValue = (value: { backgroundMode?: 'inherit' | 'own'; backgroundColor?: string; backgroundAssetId?: string | null }): ComponentBackground => ({
     ...(value.backgroundMode === undefined ? {} : { mode: value.backgroundMode }),
     ...(value.backgroundColor === undefined ? {} : { color: value.backgroundColor, mode: 'own' as const }),
@@ -87,12 +98,11 @@ export function buildFlowPropertiesOwner(input: {
     setToc: toc => run(() => { const target = liveTarget(); submit(surfaceSettingsEdits(target.editingProject, surface.id, { flowLayout: { toc } }), target) }),
     setWidthMode: widthMode => run(() => intent({ kind: 'set-width-mode', widthMode })),
     setPaperWidth: width => {
-      const target = liveTarget(), currentSurface = target.editingProject.surfaces.find(value => value.id === surface.id)
+      const target = liveTarget(), currentSurface = componentContainers(target.editingProject).find(value => value.id === surface.id)
       return submit(surfaceSettingsEdits(target.editingProject, surface.id, { flowLayout: currentSurface?.flow?.layout.widthMode === 'fluid'
         ? { wideContentWidth: width } : { readingWidth: width } }), target)
     },
-    renamePage: (_surfaceId, title) => run(() => intent({ kind: 'rename-page', title })),
-    setPaperBackground: (_surfaceId, backgroundColor) => run(() => intent({ kind: 'set-paper-background', backgroundColor })),
+    renamePage: (_surfaceId, title) => commitIntent({ kind: 'rename-page', title }),
     updateSurfaceBackground: value => run(() => { const target = liveTarget(); submit(surfaceSettingsEdits(target.editingProject, surface.id,
       { background: backgroundValue(value) }), target) }),
     previewSurfaceBackground: value => run(() => input.preview(value.backgroundColor == null ? null : surfaceSettingsEdits(liveTarget().editingProject, surface.id,
@@ -118,7 +128,7 @@ export function buildFlowPropertiesOwner(input: {
         })
         if (Object.keys(layoutPatch).length) edits.push(...flowBodyLayoutEdits(target.editingProject, instance.id, layoutPatch))
         assertFlowStructureEditsAllowed(target.editingProject, edits)
-        submit(edits, target); return null
+        return submit(edits, target)
       } catch (error) { report(error); return error instanceof Error ? error.message : String(error) }
     },
     patchOverlayProperties: nativePatch,
@@ -137,22 +147,23 @@ export function buildFlowPropertiesOwner(input: {
     },
     deleteSelectedBlocks: () => run(() => intent({ kind: 'delete-blocks', blockIds: [...read.selectedInstanceIds] })),
     formatBlock: spec => run(() => intent({ kind: 'format-block', spec })),
-    formatTextStyle: style => run(() => intent({ kind: 'format-text-style', style, expectedEdit: null })),
+    formatTextStyle: style => commitIntent({ kind: 'format-text-style', style, expectedEdit: null }),
     patchOverlayPaperSpace: paperSpace => run(() => intent({ kind: 'patch-overlay-paper-space', paperSpace })),
     commitOverlayFormula: unavailable, beginTableFieldEdit: unavailable, updateTableFieldDraft: unavailable, finishTableFieldEdit: unavailable,
     beginBlockFormulaEdit: unavailable, updateBlockFormulaDraft: unavailable, setBlockFormulaComposing: unavailable,
     cancelBlockFormulaEdit: unavailable, commitBlockFormula: unavailable,
   }
-  const block = selected ? projectFlowBlock(project, selected.id) : null
+  const block = selectedBodyBlock ?? (selected ? projectFlowBlock(project, selected.id) : null)
   const structureDisabledReason = selected ? flowStructureDisabledReason(project, selected.id) : null
-  const bodyRoot = selected && !selected.flowPlacement && blocks.some(item => item.blockId === selected.id)
+  const bodyRoot = selected && !selected.flowPlacement && Boolean(selectedBodyBlock)
   const native = input.selectedContext ? { ...input.selectedContext, commands: { ...input.selectedContext.commands, patch: nativePatch },
+    flowLayoutEditingEnabled: true,
     ...(bodyRoot ? { frameEditingEnabled: false,
       frameDimensionsEditingEnabled: Boolean(selected?.frame) && (block?.type === 'course-instance' || block?.type === 'course-component' || (block?.type === 'media' && block.mediaKind === 'image')) } : {}),
     ...(structureDisabledReason ? { frameEditingEnabled: false, frameDimensionsEditingEnabled: false } : {}) } : null
   return { kind: !selected ? 'flow-page' : semantic ? 'flow-block' : 'flow-component', view, assets: input.assets,
     selection: { selectedBlockId: selected?.id ?? null, selectedBlockIds: read.selectedInstanceIds, textRange }, native,
     flowPlacement: selected?.flowPlacement, flowLayout: selected?.flowLayout, block, structureDisabledReason,
-    textEdit: null, draftBindingKey: JSON.stringify([read.documentId, read.epoch, surface.id, read.activeStateId, read.selectedInstanceIds]),
+    textEdit: null, textFormatIdentity, draftBindingKey: JSON.stringify([read.documentId, read.epoch, surface.id, read.activeStateId, read.selectedInstanceIds]),
     course: { backgroundColor: project.background?.color, backgroundAssetId: project.background?.assetId }, commands }
 }

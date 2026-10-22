@@ -1,3 +1,4 @@
+import { createTestProjectFromLegacy } from '../helpers/glxWorkFixture'
 // @vitest-environment node
 import { describe, expect, it } from 'vitest'
 import { DocumentRegistry } from '../../src/core/documents/DocumentRegistry'
@@ -20,11 +21,11 @@ async function host() {
   const registry = new DocumentRegistry({ drivers: [new CourseV10Driver()], createId: () => `close-${++sequence}`,
     bindingKey: binding => binding.path,
     persistence: { async append() {}, async save(input) { if (input.binding.kind !== 'file') throw new Error('file required'); return input.binding } } })
-  const project: CourseProjectV10 = { schemaVersion: 10, id: 'close-project', revision: 0, title: 'Close',
+  const project: CourseProjectV10 = createTestProjectFromLegacy({ schemaVersion: 10, id: 'close-project', revision: 0, title: 'Close',
     definitions: { text: { id: 'text', role: 'content', implementation: { kind: 'source', language: 'javascript', source: 'export default { mount() {} }' } } },
     instances: { text: { id: 'text', definitionId: 'text', data: { text: 'committed' }, frame: { transform: [1, 0, 0, 1, 0, 0], width: 200, height: 100 } } },
     surfaces: [{ id: 'slide', kind: 'slide', title: 'Slide', childIds: ['text'], designSize: { width: 1280, height: 720 } }],
-    global: { underlay: [], overlay: [] }, assets: {} }
+    global: { underlay: [], overlay: [] }, assets: {} })
   const session = await registry.create({ kind: 'course-v10', project, resources: { assets: {}, components: {} } }, 'close.h5lesson', true)
   const listeners = new Set<(event: DocumentEvent) => void>()
   const authoringDrafts = new Map<string, AuthoringDraftRecovery>()

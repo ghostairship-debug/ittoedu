@@ -1,3 +1,4 @@
+import { componentContainers } from '../../../shared/contracts/component-platform/project'
 import { componentDefinitionBuiltinKey, type CourseProjectV10, type JsonValue } from '../../../shared/contracts/component-platform/project'
 import { componentAuthorRecordsSchema } from '../../../shared/contracts/component-platform/schema'
 
@@ -19,7 +20,7 @@ export function normalizeWebAuthoring(project: CourseProjectV10): CourseProjectV
     }
     const authoring = adopt(data)
     if (authoring && instance.authoring === undefined) instance.authoring = authoring
-    for (const surface of next.surfaces) for (const state of surface.presentation?.states ?? []) {
+    for (const surface of componentContainers(next)) for (const state of surface.presentation?.states ?? []) {
       const override = state.overrides[instance.id]
       if (override?.data === undefined) continue
       const authoring = adopt(override.data)

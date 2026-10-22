@@ -1,3 +1,4 @@
+import { testContainerInstance } from '../../helpers/glxWorkFixture'
 import { app, BrowserWindow, webContents } from 'electron'
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
@@ -33,7 +34,7 @@ Reflect.set(globalThis, 'runTaskRegionHandoff', async () => {
   const html = await fs.readFile(path.join(root, 'tests/fixtures/contentLocalRegion20261019.html'), 'utf8')
   const candidatePath = path.join(directory, 'candidate.html')
   await fs.writeFile(candidatePath, html)
-  const project = createBlankCourseProjectV10('Frozen region handoff'), surface = project.surfaces[0]!
+  const project = createBlankCourseProjectV10('Frozen region handoff'), surface = testContainerInstance(project, 0)
   project.definitions[TEXT_DEFINITION.id] = TEXT_DEFINITION
   project.instances.heading = { id: 'heading', definitionId: TEXT_DEFINITION.id,
     data: jsonValueSchema.parse(createTextComponentData('Native heading remains')),

@@ -45,7 +45,7 @@ test('M10-T04 external changes retain tree state and an occupied file gives an h
     await expect(tree.getByRole('button', { name: 'folder', exact: true })).toBeVisible()
     await page.evaluate(async directory => {
       const files = window.desktopAPI!.workspaceFiles!, root = await files({ type: 'root', directory })
-      await files({ type: 'watch', workspaceId: root.workspaceId })
+      await files({ type: 'watch', workspaceId: root.workspaceId, watchId: 'm10-windows-e2e-observer' })
     }, workspace)
 
     writeFileSync(join(workspace, 'external.md'), 'new')

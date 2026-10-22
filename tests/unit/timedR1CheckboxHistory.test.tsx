@@ -1,3 +1,4 @@
+import { createTestProjectFromLegacy } from '../helpers/glxWorkFixture'
 import { useSyncExternalStore } from 'react'
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, expect, it, vi } from 'vitest'
@@ -35,11 +36,11 @@ it('undoes and redoes one ACKed checkbox property while preserving its focus and
   const directory = await mkdtemp(path.join(tmpdir(), 'guoling-r1-checkbox-'))
   dispose.push(() => rm(directory, { recursive: true, force: true }))
   const frame = { width: 320, height: 180, transform: [1, 0, 0, 1, 480, 270] as [number, number, number, number, number, number] }
-  const project: CourseProjectV10 = { schemaVersion: 10, id: 'checkbox-image', title: '图片', revision: 0,
+  const project: CourseProjectV10 = createTestProjectFromLegacy({ schemaVersion: 10, id: 'checkbox-image', title: '图片', revision: 0,
     definitions: { [IMAGE_DEFINITION.id]: IMAGE_DEFINITION }, instances: { image: { id: 'image', definitionId: IMAGE_DEFINITION.id,
       data: JSON.parse(JSON.stringify(createImageData('image-asset'))), frame } },
     surfaces: [{ id: 'slide', kind: 'slide', title: '第一页', childIds: ['image'], designSize: { width: 1280, height: 720 } }],
-    global: { underlay: [], overlay: [] }, assets: { 'image-asset': { id: 'image-asset', path: 'assets/image.png', filename: 'image.png', mimeType: 'image/png' } } }
+    global: { underlay: [], overlay: [] }, assets: { 'image-asset': { id: 'image-asset', path: 'assets/image.png', filename: 'image.png', mimeType: 'image/png' } } })
   const service = new DocumentHostService(path.join(directory, 'recovery'))
   const initial = await service.internalAPI.create({ kind: 'course-v10', project, resources: { assets: { 'image-asset': new Uint8Array([1]) }, components: {} } }, '图片')
   const unavailable = async (): Promise<never> => { throw new Error('fixture has no dialogs') }

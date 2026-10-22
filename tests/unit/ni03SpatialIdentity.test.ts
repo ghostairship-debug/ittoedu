@@ -1,3 +1,5 @@
+import { setRootContainers } from '../helpers/glxWorkFixture'
+import { componentSurfaces } from '../../src/shared/contracts/component-platform/project'
 import { expect, it } from 'vitest'
 import { createBlankCourseProjectV10 } from '../../src/core/course/createCourseProjectV10'
 import { DocumentSession } from '../../src/core/documents/DocumentSession'
@@ -21,7 +23,7 @@ async function fixture() {
     id, definitionId: TEXT_DEFINITION.id, data: JSON.parse(JSON.stringify(createTextComponentData(id))),
     frame: { width: 120, height: 80, transform: [1, 0, 0, 1, x, 0] },
   }
-  project.surfaces[0] = { id: 'world', kind: 'spatial', title: '世界', childIds: ['left', 'right'], spatial: {
+  setRootContainers(project, [{ id: 'world', kind: 'spatial', title: '世界', childIds: ['left', 'right'], spatial: {
     home: { x: 0, y: 0, zoom: 1 }, frames: [
       { id: 'frame-left', title: '左侧镜头', pose: { x: 10, y: 20, zoom: 2 }, targetInstanceId: 'left' },
       { id: 'frame-right', title: '右侧镜头', pose: { x: 700, y: 20, zoom: 1 } },
@@ -35,7 +37,7 @@ async function fixture() {
       { id: 'near', instanceIds: ['left'], minZoom: 0, maxZoom: 3, visible: true },
       { id: 'far', instanceIds: ['right'], minZoom: 3, maxZoom: 10, visible: false },
     ],
-  } }
+  } }])
   const driver = new CourseV10Driver(), session = await DocumentSession.create({ documentId: 'spatial', epoch: 'original',
     binding: { kind: 'untitled', suggestedName: 'spatial.h5lesson' }, model: { kind: 'course-v10', project, resources: { assets: {}, components: {} } } },
   driver, { async append() {}, async save() { throw new Error('archive check uses the real Driver') } })
@@ -58,7 +60,7 @@ it('reorders observed Spatial cameras and paths without changing their identity 
   const result = await session.execute({ documentId: 'spatial', epoch: 'original', operationId: 'source-reorder', baseRevision: before.revision,
     actor: 'agent', mutation: { type: 'command', command } })
   expect(result.status).toBe('applied')
-  const after = session.read() as ComponentProjectSnapshot, spatial = after.model.project.surfaces[0].spatial!
+  const after = session.read() as ComponentProjectSnapshot, spatial = componentSurfaces(after.model.project)[0].spatial!
   expect(spatial.frames.map(frame => frame.id)).toEqual(['frame-right', 'frame-left'])
   expect(spatial.paths!.map(path => path.id)).toEqual(['right-to-left', 'left-to-right'])
   expect(spatial.paths!.find(path => path.id === 'left-to-right')!.frameIds).toEqual(['frame-left', 'frame-right'])
@@ -78,17 +80,17 @@ it('reorders observed Spatial cameras and paths without changing their identity 
     actor: 'agent', mutation: { type: 'command', command: captureComponentOperation(continued.snapshot.model.project, continuedEdits) } })
   expect(continuedResult.status, JSON.stringify(continuedResult)).toBe('applied')
   const final = session.read() as ComponentProjectSnapshot
-  expect(final.model.project.surfaces[0].spatial!.frames.find(frame => frame.id === 'frame-left')!.title).toBe('续改原左侧镜头')
-  expect(final.model.project.surfaces[0].spatial!.frames.find(frame => frame.id === 'frame-right')!.title).toBe('右侧镜头')
+  expect(componentSurfaces(final.model.project)[0].spatial!.frames.find(frame => frame.id === 'frame-left')!.title).toBe('续改原左侧镜头')
+  expect(componentSurfaces(final.model.project)[0].spatial!.frames.find(frame => frame.id === 'frame-right')!.title).toBe('右侧镜头')
   expect(final.undoDepth).toBe(2)
   expect(driver.load(driver.serialize(final.model))).toEqual(final.model)
   expect((await session.execute({ documentId: 'spatial', epoch: 'original', operationId: 'undo-continue', baseRevision: final.revision,
     actor: 'human', mutation: { type: 'undo' } })).status).toBe('applied')
-  expect((session.read() as ComponentProjectSnapshot).model.project.surfaces[0].spatial).toEqual(spatial)
+  expect(componentSurfaces((session.read() as ComponentProjectSnapshot).model.project)[0].spatial).toEqual(spatial)
   const undone = await session.execute({ documentId: 'spatial', epoch: 'original', operationId: 'undo-reorder', baseRevision: session.read().revision,
     actor: 'human', mutation: { type: 'undo' } })
   expect(undone.status).toBe('applied')
-  expect((session.read() as ComponentProjectSnapshot).model.project.surfaces[0].spatial).toEqual(before.model.project.surfaces[0].spatial)
+  expect(componentSurfaces((session.read() as ComponentProjectSnapshot).model.project)[0].spatial).toEqual(componentSurfaces(before.model.project)[0].spatial)
 })
 
 it('shares the mature identity commands with the real slice and prepares currentViewport only from its live captured facts', async () => {
@@ -119,14 +121,14 @@ it('shares the mature identity commands with the real slice and prepares current
   await actions.reorderSpatialCameraFrames('world', ['frame-right', 'frame-left'])
   await actions.deleteSpatialCameraFrame('world', 'frame-right')
   const current = session.read() as ComponentProjectSnapshot
-  expect(current.model.project.surfaces[0].spatial!.paths!.map(path => path.frameIds)).toEqual([['frame-left'], ['frame-left']])
+  expect(componentSurfaces(current.model.project)[0].spatial!.paths!.map(path => path.frameIds)).toEqual([['frame-left'], ['frame-left']])
   const observed = observeSpatialSource(current.model.project, 'world', { left: 'left.json', right: 'right.json' })
   const source = { ...observed.source, home: 'currentViewport' }
   expect(() => prepareSpatialSourceEdit(current.model.project, 'world', source, observed.refs, { left: 'left.json', right: 'right.json' })).toThrow('尚未捕获')
   const edit = prepareSpatialSourceEdit(current.model.project, 'world', source, observed.refs, { left: 'left.json', right: 'right.json' }, capture.pose)
   await kernel.editCaptured(kernel.capture([edit], captureTarget()))
   const applied = session.read() as ComponentProjectSnapshot
-  expect(applied.model.project.surfaces[0].spatial!.home).toEqual(capture.pose)
+  expect(componentSurfaces(applied.model.project)[0].spatial!.home).toEqual(capture.pose)
   expect(actions.readSpatialView('world', 'spatial').camera).toEqual(capture.pose)
   expect(driver.load(driver.serialize(applied.model))).toEqual(applied.model)
 })

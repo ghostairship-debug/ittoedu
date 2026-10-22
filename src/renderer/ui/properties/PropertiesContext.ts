@@ -4,8 +4,10 @@ import type { FlowPropertiesContext } from './FlowPropertiesPanel'
 import type { MultiSelectionPropertiesContext } from './MultiSelectionPropertiesPanel'
 import type { SlideNativePropertiesContext } from './SlideNativePropertiesPanel'
 import type { SpatialPropertiesContext } from './SpatialPropertiesPanel'
+import type { AuthorFieldPropertiesContext } from './AuthorFieldPropertiesPanel'
 
 export type PropertiesContext =
+  | AuthorFieldPropertiesContext
   | FlowPropertiesContext
   | SpatialPropertiesContext
   | SlideNativePropertiesContext

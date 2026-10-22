@@ -1,3 +1,5 @@
+import { testContainerInstance } from '../helpers/glxWorkFixture'
+import { componentSurfaces } from '../../src/shared/contracts/component-platform/project'
 import { buildPublishedFixture as buildPublishedCourseV2Payload } from '../fixtures/teacherController'
 import { describe, expect, it, vi } from 'vitest'
 import { unzipSync } from 'fflate'
@@ -31,9 +33,9 @@ const NOW = '2026-08-17T12:00:00.000Z'
 
 function importCurrentPptx(draft: Awaited<ReturnType<typeof parsePptxImport>>, title: string) {
   const project = createBlankCourseProjectV10(title), resources = { assets: {}, components: {} }
-  project.instances = {}; project.definitions = {}; project.global.overlay = []
+  project.global.overlay = []
   const step = planPptxImportTransaction({ documentId: 'export-import', epoch: 'epoch', project, resources,
-    editingProject: project, surfaceId: project.surfaces[0].id, activeStateId: null, instanceId: null, instanceIds: [] }, draft, title)
+    editingProject: project, surfaceId: componentSurfaces(project)[0].id, activeStateId: null, instanceId: null, instanceIds: [] }, draft, title)
   const model = new CourseV10Driver().apply({ kind: 'course-v10', project, resources },
     { type: step.type, edits: step.edits, expected: step.expected })
   if (model.kind !== 'course-v10') throw new Error('V10 model required')
@@ -159,7 +161,7 @@ describe('buildCoursePptx', () => {
     for (const id of project.global.underlay) {
       const instance = project.instances[id], visibility = instance.visibility
       if (!visibility || visibility.mode !== 'include' || !instance.name) throw new Error('Imported scoped decoration required')
-      for (const [index, surface] of project.surfaces.entries()) {
+      for (const [index, surface] of componentSurfaces(project).entries()) {
         expect(named(pages[index], `${instance.name} · ${instance.id}`)).toHaveLength(visibility.surfaceIds.includes(surface.id) ? 1 : 0)
         if (visibility.surfaceIds.includes(surface.id)) {
           const names = Array.from(pages[index].getElementsByTagNameNS('*', 'cNvPr')).map(node => node.getAttribute('name'))
@@ -182,7 +184,7 @@ describe('buildCoursePptx', () => {
     const files = unzipSync(exported.bytes)
     const page = new DOMParser().parseFromString(new TextDecoder().decode(files['ppt/slides/slide2.xml']), 'application/xml')
     const names = Array.from(page.getElementsByTagNameNS('*', 'cNvPr')).map(node => node.getAttribute('name'))
-    const surface = project.surfaces[1], local = project.instances[surface.childIds.at(-1)!], lastLocal = `${local.name} · ${local.id}`
+    const surface = componentSurfaces(project)[1], local = project.instances[testContainerInstance(project, 1).childIds.at(-1)!], lastLocal = `${local.name} · ${local.id}`
     for (const id of project.global.overlay) {
       const shared = project.instances[id]
       if (shared.visibility?.mode === 'include' && shared.visibility.surfaceIds.includes(surface.id)) {

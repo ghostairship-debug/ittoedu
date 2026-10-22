@@ -1,4 +1,5 @@
 // @vitest-environment node
+import { componentSurfaces } from '../../src/shared/contracts/component-platform/project'
 import { afterAll, beforeAll, expect, it } from 'vitest'
 import { build } from 'esbuild'
 import { chromium, type Browser } from 'playwright'
@@ -83,12 +84,12 @@ it('assembles the frozen first real author write directly into page paint and in
       operationId: randomUUID(), actor: 'agent', mutation: { type: 'command', command } })
   } }, measure: async request => { measurements++; observed = await captureHtml(request); return observed.assembly },
   compilation: { async compile() { throw new Error('The frozen static content needs no source compilation') } } })
-  const result = await service.apply({ intent: 'insert', target: { kind: 'container', container: { kind: 'surface', surfaceId: project.surfaces[0]!.id } }, source: { kind: 'html', html } })
+  const result = await service.apply({ intent: 'insert', target: { kind: 'container', container: { kind: 'surface', surfaceId: componentSurfaces(project)[0]!.id } }, source: { kind: 'html', html } })
   expect(result).toMatchObject({ commit: 'committed', usability: 'usable' })
   expect(measurements).toBe(1)
   expect(observed!.capture.sourceScopes).toEqual([])
   expect(session.read()).toMatchObject({ revision: 1, undoDepth: 1 })
-  const first = current(), surface = first.surfaces[0]!, roots = surface.childIds.map(id => first.instances[id]!)
+  const first = current(), surface = componentSurfaces(first)[0]!, roots = surface.childIds.map(id => first.instances[id]!)
   expect(surface.background).toEqual({ mode: 'own', color: 'rgb(243, 246, 240)', assetId: null })
   expect(roots).toHaveLength(8)
   expect(Object.values(first.instances).some(instance => instance.frame?.width === 1280 && instance.frame.height === 720)).toBe(false)
@@ -119,7 +120,7 @@ it('assembles the frozen first real author write directly into page paint and in
   expect(saved).toBeDefined()
   registry = new DocumentRegistry(registryOptions)
   session = await registry.open(binding, async () => driver.load(saved!))
-  expect(current().surfaces).toEqual(first.surfaces)
+  expect(componentSurfaces(current())).toEqual(componentSurfaces(first))
   expect(current().instances).toEqual(first.instances)
 }, 20000)
 
@@ -160,10 +161,10 @@ it('assembles the frozen Luna cover into formal page paint and independently own
       operationId: randomUUID(), actor: 'agent', mutation: { type: 'command', command } })
   } }, measure: async request => { observed = await captureHtml(request); return observed.assembly },
     compilation: { async compile() { throw new Error('This static cover needs no Source compilation') } } })
-  const result = await service.apply({ intent: 'insert', target: { kind: 'container', container: { kind: 'surface', surfaceId: project.surfaces[0]!.id } }, source: { kind: 'html', html } })
+  const result = await service.apply({ intent: 'insert', target: { kind: 'container', container: { kind: 'surface', surfaceId: componentSurfaces(project)[0]!.id } }, source: { kind: 'html', html } })
   expect(result).toMatchObject({ commit: 'committed', usability: 'usable' })
   expect(observed!.capture.sourceScopes).toEqual([])
-  const assembled = current(), instances = Object.values(assembled.instances), surface = assembled.surfaces[0]!
+  const assembled = current(), instances = Object.values(assembled.instances), surface = componentSurfaces(assembled)[0]!
   expect(surface.background?.paint?.layers[0]?.style['background-image']).toContain('radial-gradient(')
   const heading = instances.find(instance => compact(textOf(instance) ?? '') === '一场雨，校园为何会积水？')
   expect(heading?.definitionId).toBe('guoling.text')

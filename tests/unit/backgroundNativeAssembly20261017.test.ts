@@ -1,4 +1,6 @@
 // @vitest-environment node
+import { componentSurfaces } from '../../src/shared/contracts/component-platform/project'
+import { testContainerInstance } from '../helpers/glxWorkFixture'
 import { afterAll, beforeAll, expect, it } from 'vitest'
 import { build } from 'esbuild'
 import { chromium, type Browser } from 'playwright'
@@ -85,7 +87,7 @@ async function authoring(project = createBlankCourseProjectV10('Native page back
     dispatch: (command: DocumentCommand) => execute({ type: 'command', command }) }, measure,
     compilation: { async compile() { throw new Error('Builtin assembly must not compile a new implementation') } } })
   const apply = (html: string, intent: 'insert' | 'redo' = 'insert') => service.apply({ intent,
-    target: { kind: 'container', container: { kind: 'surface', surfaceId: current().surfaces[0]!.id } }, source: { kind: 'html', html } })
+    target: { kind: 'container', container: { kind: 'surface', surfaceId: componentSurfaces(current())[0]!.id } }, source: { kind: 'html', html } })
   return { current, apply, service, resources, snapshot: () => session.read(), execute,
     async reopen() {
       const binding = { kind: 'file' as const, path: 'D:/native-background-test.glx', version: null, bindingVersion: 0 }
@@ -113,7 +115,7 @@ it('commits page paint and independent native card/text in one history entry and
   const html = documentHtml('<h1>Independent heading</h1><section class="card"><p>Editable card text</p></section><p class="upper">Upper overlay</p><i class="decoration"></i><p class="lower">Lower overlay</p><p class="caption">Independent caption</p>',
     'main{isolation:isolate}.card{position:absolute;left:80px;top:160px;width:420px;height:220px;background:#fff;border-radius:20px;isolation:isolate}.card p{position:absolute;left:24px;top:28px;width:360px}.caption{position:absolute;left:80px;top:440px}.upper,.lower{position:absolute;left:80px;top:160px}.upper{z-index:3}.lower{z-index:-2}.decoration{position:absolute;left:70px;top:150px;width:440px;height:240px;background:#efdddd;z-index:1}')
   expect(await harness.apply(html)).toMatchObject({ commit: 'committed', usability: 'usable' })
-  const inserted = harness.current(), surface = inserted.surfaces[0]!
+  const inserted = harness.current(), surface = componentSurfaces(inserted)[0]!
   expect(surface.background).toMatchObject({ mode: 'own', color: 'rgb(237, 242, 250)', assetId: null })
   expect(Object.values(inserted.instances).some(pageSized)).toBe(false)
   expect(harness.snapshot()).toMatchObject({ revision: 1, undoDepth: 1 })
@@ -139,9 +141,9 @@ it('commits page paint and independent native card/text in one history entry and
 
   expect(await harness.execute({ type: 'undo' })).toMatchObject({ status: 'applied' })
   expect(harness.current().instances).toEqual({})
-  expect(harness.current().surfaces[0]!.background).toBeUndefined()
+  expect(componentSurfaces(harness.current())[0]!.background).toBeUndefined()
   expect(await harness.execute({ type: 'redo' })).toMatchObject({ status: 'applied' })
-  expect(harness.current().surfaces).toEqual(inserted.surfaces)
+  expect(componentSurfaces(harness.current())).toEqual(componentSurfaces(inserted))
   expect(harness.current().instances).toEqual(inserted.instances)
 
   const beforeFrames = frames(harness.current())
@@ -152,9 +154,9 @@ it('commits page paint and independent native card/text in one history entry and
   expect(harness.current().instances[heading.id]).toEqual(inserted.instances[heading.id])
   const beforeReload = harness.current()
   const reloaded = await harness.reopen()
-  expect(reloaded.surfaces).toEqual(beforeReload.surfaces)
+  expect(componentSurfaces(reloaded)).toEqual(componentSurfaces(beforeReload))
   expect(reloaded.instances).toEqual(beforeReload.instances)
-  expect(reloaded.surfaces[0]!.background).toEqual(surface.background)
+  expect(componentSurfaces(reloaded)[0]!.background).toEqual(surface.background)
   expect(text(reloaded.instances[bodyText.id]!)).toBe('Updated card text')
   expect(frames(reloaded)).toEqual(beforeFrames)
 }, 20000)
@@ -164,7 +166,7 @@ it('adopts a bound background image as surface paint with its real fit and asset
   const pixel = `data:image/png;base64,${Buffer.from(auditExportPng(8, 4)).toString('base64')}`
   const html = documentHtml('<h1>Image page</h1>', `main{background-image:url("${pixel}");background-size:cover;background-position:center;background-repeat:no-repeat}`)
   expect(await harness.apply(html)).toMatchObject({ commit: 'committed' })
-  const project = harness.current(), background = project.surfaces[0]!.background!
+  const project = harness.current(), background = componentSurfaces(project)[0]!.background!
   expect(background).toMatchObject({ mode: 'own', fit: 'cover' })
   expect(typeof background.assetId).toBe('string')
   expect(project.assets[background.assetId!]).toMatchObject({ mimeType: 'image/png' })
@@ -175,24 +177,24 @@ it('adopts a bound background image as surface paint with its real fit and asset
 
 it('keeps existing manual page paint and content frames during insert, while an explicit redo adopts new paint', async () => {
   const initial = createBlankCourseProjectV10('A manually painted empty page')
-  initial.surfaces[0]!.background = { mode: 'own', color: '#ffeedd', assetId: null }
+  testContainerInstance(initial, 0).container.background = { mode: 'own', color: '#ffeedd', assetId: null }
   const harness = await authoring(initial)
   expect(await harness.apply(documentHtml('<h1>Existing heading</h1>'))).toMatchObject({ commit: 'committed' })
-  const surfaceId = harness.current().surfaces[0]!.id
-  expect(harness.current().surfaces[0]!.background).toEqual(initial.surfaces[0]!.background)
+  const surfaceId = componentSurfaces(harness.current())[0]!.id
+  expect(componentSurfaces(harness.current())[0]!.background).toEqual(componentSurfaces(initial)[0]!.background)
   const existing = structuredClone(harness.current().instances)
   const html = documentHtml('<p class="new">New content</p>', '.new{position:absolute;left:600px;top:240px}', '#112233')
   expect(await harness.apply(html)).toMatchObject({ commit: 'committed' })
-  expect(harness.current().surfaces[0]!.background).toEqual({ mode: 'own', color: '#ffeedd', assetId: null })
+  expect(componentSurfaces(harness.current())[0]!.background).toEqual({ mode: 'own', color: '#ffeedd', assetId: null })
   for (const [id, instance] of Object.entries(existing)) expect(harness.current().instances[id]).toEqual(instance)
   expect(Object.values(harness.current().instances).some(pageSized)).toBe(false)
   expect(await harness.service.apply(htmlRequest(html, surfaceId))).toMatchObject({ commit: 'committed' })
-  expect(harness.current().surfaces[0]!.background).toMatchObject({ color: 'rgb(17, 34, 51)' })
+  expect(componentSurfaces(harness.current())[0]!.background).toMatchObject({ color: 'rgb(17, 34, 51)' })
   expect(Object.values(harness.current().instances).map(text)).toEqual(['New content'])
   const beforePaintOnly = harness.snapshot().undoDepth
   expect(await harness.apply(documentHtml('', '', 'rgba(52,86,120,0.25)'), 'redo')).toMatchObject({ commit: 'committed' })
   // The translucent main paint composes over the white document canvas.
-  expect(documentColorChannels(harness.current().surfaces[0]!.background!.color!)).toEqual({ red: 204.25, green: 212.75, blue: 221.25, alpha: 1 })
+  expect(documentColorChannels(componentSurfaces(harness.current())[0]!.background!.color!)).toEqual({ red: 204.25, green: 212.75, blue: 221.25, alpha: 1 })
   expect(harness.current().instances).toEqual({})
   expect(harness.snapshot().undoDepth).toBe(beforePaintOnly + 1)
 }, 20000)

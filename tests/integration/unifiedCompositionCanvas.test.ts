@@ -1,4 +1,5 @@
 // @vitest-environment node
+import { setRootContainers } from '../helpers/glxWorkFixture'
 import { randomUUID } from 'node:crypto'
 import { promises as fs } from 'node:fs'
 import os from 'node:os'
@@ -21,7 +22,7 @@ it('F05 edits actual current Slide author spots through one Web runtime and cano
     const driver = new CourseV10Driver(), registry = new DocumentRegistry({ drivers: [driver], createId: randomUUID, bindingKey: binding => binding.path,
       persistence: { async append() {}, async save(input) { if (input.binding.kind !== 'file') throw Error('File required'); await fs.writeFile(input.binding.path, input.bytes); return { ...input.binding, version: `revision-${input.revision}` } } } })
     const project = createBlankCourseProjectV10('Canvas content'); project.global = { underlay: [], overlay: [] }; project.instances = {}; project.definitions = { [HTML_PROGRAM_DEFINITION.id]: HTML_PROGRAM_DEFINITION }
-    project.surfaces = [{ id: 'slide', kind: 'slide', title: '内容编辑', childIds: ['canvas-content'], designSize: { width: 1000, height: 620 } }]
+    setRootContainers(project, [{ id: 'slide', kind: 'slide', title: '内容编辑', childIds: ['canvas-content'], designSize: { width: 1000, height: 620 } }])
     const html = '<!doctype html><html><head><style>body{margin:0;position:relative;height:620px;background:white;font:18px sans-serif}#free{position:absolute;left:100px;top:240px;width:240px;height:100px;margin:0;background:#fff1cc;box-sizing:border-box}main{display:flex;gap:16px;padding:30px}section{flex:0 0 180px;height:100px;background:#e9f2ff}#counter{position:absolute;left:100px;top:420px}</style></head><body><p id="free" data-cw-author-key="free">Editable content</p><main><section>Card a</section><section>Card b</section><section>Card c</section></main><button id="counter">count:0</button><script>window.counterCreates=(window.counterCreates||0)+1;let count=0;document.getElementById("counter").onclick=()=>document.getElementById("counter").textContent="count:"+(++count)</script></body></html>'
     const record: ComponentAuthorRecord = { kind: 'text', binding: { kind: 'dom', path: [{ tag: 'body', index: 1 }, { tag: 'p', index: 0, attributes: { id: 'free', 'data-cw-author-key': 'free' } }], textIndex: 0, baseline: 'Editable content' }, overrides: {} }
     project.instances['canvas-content'] = { id: 'canvas-content', definitionId: HTML_PROGRAM_DEFINITION.id, data: { html }, authoring: { records: { free: record } }, frame: { width: 1000, height: 620, transform: [1, 0, 0, 1, 0, 0] } }

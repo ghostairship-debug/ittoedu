@@ -1,3 +1,4 @@
+import { componentContainers, componentSurfaces } from '../../shared/contracts/component-platform/project'
 import type { ComponentDefinition, ComponentEdit, ComponentInstance, ComponentFrame, JsonValue } from '../../shared/contracts/component-platform'
 import type { FormulaAstNode } from '../../shared/contracts/native-v1'
 import { normalizeDocumentText, type FlowInline } from '../../shared/document/content'
@@ -77,7 +78,7 @@ export function planPptxImportTransaction(target: CapturedCourseTarget, draft: P
   if (!draft.slides.length) throw new Error('没有可导入的页面')
   const { project } = target, edits: ComponentEdit[] = [], definitions = new Map<string, ComponentDefinition>(), ids = new Map<string, string>()
   const surfaces = draft.slides.map(() => crypto.randomUUID())
-  const canvas = options.canvas ?? project.surfaces.find(surface => surface.id === target.surfaceId)?.designSize ?? { width: 1280, height: 720 }
+  const canvas = options.canvas ?? componentContainers(project).find(surface => surface.id === target.surfaceId)?.designSize ?? { width: 1280, height: 720 }
   const addDefinition = (definition: ComponentDefinition) => {
     const existing = project.definitions[definition.id]
     if (existing && (existing.implementation.kind !== 'builtin' || definition.implementation.kind !== 'builtin' || existing.implementation.key !== definition.implementation.key)) throw new Error(`专业组件身份已由另一实现占用：${definition.id}`)
@@ -127,7 +128,7 @@ export function planPptxImportTransaction(target: CapturedCourseTarget, draft: P
         data: remapComponentInteractionData(json({ rules }), { instances: ids, surfaces: new Map() }),
         attachments: [{ instanceId: id, target: { kind: 'surface', surfaceId } }] })
     }
-    edits.push({ type: 'surface.insert', index: project.surfaces.length + index,
+    edits.push({ type: 'surface.insert', index: componentSurfaces(project).length + index,
       surface: { id: surfaceId, kind: 'slide', title: slide.title || `${title} ${index + 1}`, childIds: [], designSize: canvas, background: { mode: 'own', color: slide.backgroundColor } } },
       { type: 'instance.insert', container: { kind: 'surface', surfaceId }, index: 0, instances, rootIds: instances.map(item => item.id) })
   }

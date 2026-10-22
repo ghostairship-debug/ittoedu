@@ -1,4 +1,6 @@
 // @vitest-environment node
+import { componentSurfaces } from '../../src/shared/contracts/component-platform/project'
+import { appendRootContainers, testContainerInstance } from '../helpers/glxWorkFixture'
 import { promises as fs } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -30,7 +32,7 @@ it('uses compact opaque handles and names the same uniquely observed page throug
     const host = new DocumentHostService(path.join(root, 'recovery')), project = createBlankCourseProjectV10('原课')
     project.definitions[TEXT_DEFINITION.id] = TEXT_DEFINITION
     project.instances.text = { id: 'text', definitionId: TEXT_DEFINITION.id, data: textDataEdit('text', createTextComponentData('原内容')).value, frame }
-    project.surfaces[0]!.childIds = ['text']
+    testContainerInstance(project, 0).childIds = ['text']
     const original = await host.internalAPI.create({ kind: 'course-v10', project, resources: { assets: {}, components: {} } }, 'lesson.h5lesson')
     await host.tools.beginRun({ runId: 'unique', actor: 'agent', documents: [{ documentId: original.documentId, writable: [{ kind: 'document' }] }] })
     const target = await host.tools.issueTarget('unique', original.documentId, { kind: 'document' })
@@ -44,12 +46,12 @@ it('uses compact opaque handles and names the same uniquely observed page throug
     await host.tools.execute('unique', 'list', { name: 'project.list', input: {} })
     expect(await host.tools.execute('unique', 'title', { name: 'project.apply', input: { path: 'pages', intent: 'surface.title', title: '第一课' } })).toMatchObject({ kind: 'read', data: { commit: 'committed' } })
     const after = await host.internalAPI.read(original.documentId)
-    expect(model(after).project.surfaces).toEqual([{ ...project.surfaces[0], title: '第一课' }])
+    expect(componentSurfaces(model(after).project)).toEqual([{ ...componentSurfaces(project)[0], title: '第一课' }])
     expect(model(after).project.instances).toEqual(project.instances)
     expect(after.revision).toBe(original.revision + 1)
     await host.internalAPI.dispatch({ documentId: after.documentId, epoch: after.epoch, baseRevision: after.revision,
       actor: 'human', operationId: 'undo-title', mutation: { type: 'undo' } })
-    expect(model(await host.internalAPI.read(original.documentId)).project.surfaces).toEqual(project.surfaces)
+    expect(componentSurfaces(model(await host.internalAPI.read(original.documentId)).project)).toEqual(componentSurfaces(project))
     await host.tools.stop('unique'); await host.tools.stop('foreign')
   } finally { await fs.rm(root, { recursive: true, force: true }) }
 })
@@ -62,9 +64,9 @@ it('refuses ambiguous or human-expanded pages title and preserves observed title
     await host.tools.beginRun({ runId: 'observed', actor: 'agent', documents: [{ documentId: original.documentId, writable: [{ kind: 'document' }] }] })
     await host.tools.execute('observed', 'list', { name: 'project.list', input: {} })
     await host.internalAPI.dispatch({ documentId: original.documentId, epoch: original.epoch, baseRevision: original.revision,
-      actor: 'human', operationId: 'human-title', mutation: { type: 'command', command: captureComponentOperation(project, [{ type: 'surface.title.set', surfaceId: project.surfaces[0]!.id, title: '人工标题' }]) } })
+      actor: 'human', operationId: 'human-title', mutation: { type: 'command', command: captureComponentOperation(project, [{ type: 'surface.title.set', surfaceId: componentSurfaces(project)[0]!.id, title: '人工标题' }]) } })
     expect(await host.tools.execute('observed', 'stale-title', { name: 'project.apply', input: { path: 'pages', intent: 'surface.title', title: '覆盖' } })).toMatchObject({ kind: 'read', data: { commit: 'not_committed' } })
-    expect(model(await host.internalAPI.read(original.documentId)).project.surfaces[0]!.title).toBe('人工标题')
+    expect(componentSurfaces(model(await host.internalAPI.read(original.documentId)).project)[0]!.title).toBe('人工标题')
     await host.tools.beginRun({ runId: 'human', actor: 'agent', documents: [{ documentId: original.documentId, writable: [{ kind: 'document' }] }] })
     expect(await host.tools.execute('human', 'add', { name: 'project.apply', input: { path: 'pages', intent: 'surface.add', kind: 'slide', title: '第二页' } })).toMatchObject({ kind: 'read', data: { commit: 'committed' } })
     const expanded = await host.internalAPI.read(original.documentId)
@@ -83,7 +85,7 @@ it('absorbs project metadata through the shared settings owner, retains structur
     const original = await host.internalAPI.create({ kind: 'course-v10', project, resources: { assets: {}, components: {} } }, 'settings.h5lesson')
     await host.tools.beginRun({ runId: 'settings', actor: 'agent', documents: [{ documentId: original.documentId, writable: [{ kind: 'document' }] }], fileAccess: { permission: 'workspace', workspaceRoot: root } })
     await host.tools.execute('settings', 'read', { name: 'project.read', input: { path: 'project.json' } })
-    const call = { name: 'project.apply', input: { path: 'project.json', content: JSON.stringify({ schemaVersion: 10, revision: 0, title: '正式标题' }) } }
+    const call = { name: 'project.apply', input: { path: 'project.json', content: JSON.stringify({ schemaVersion: 11, revision: 0, title: '正式标题' }) } }
     expect(await host.tools.effectTargets('settings', call)).toEqual([{ documentId: original.documentId, epoch: original.epoch, target: { kind: 'document' } }])
     const expectedScopes = [{ documentId: original.documentId, epoch: original.epoch, paths: [['title']] }]
     expect(await host.tools.effectWriteScopes('settings', call)).toEqual(expectedScopes)
@@ -92,7 +94,7 @@ it('absorbs project metadata through the shared settings owner, retains structur
     expect(model(after).project).toEqual({ ...project, revision: after.revision, title: '正式标题' })
     const target = await host.tools.issueTarget('settings', after.documentId, { kind: 'document' })
     expect(await host.tools.effectWriteScopes('settings', { name: 'course.configure', input: { target, settings: { title: '语义标题' } } })).toEqual(expectedScopes)
-    expect(await host.tools.execute('settings', 'structural-overwrite', { name: 'project.apply', input: { path: 'project.json', content: JSON.stringify({ surfaces: [] }) } })).toMatchObject({ kind: 'error' })
+    expect(await host.tools.execute('settings', 'structural-overwrite', { name: 'project.apply', input: { path: 'project.json', content: JSON.stringify({ rootIds: [] }) } })).toMatchObject({ kind: 'error' })
     const current = await host.internalAPI.read(original.documentId)
     await host.internalAPI.dispatch({ documentId: current.documentId, epoch: current.epoch, baseRevision: current.revision,
       actor: 'human', operationId: 'human-title', mutation: { type: 'command', command: captureComponentOperation(model(current).project, [{ type: 'project.title.set', title: '人工标题' }]) } })
@@ -116,7 +118,7 @@ it('reads the complete mixed page and edits native text through the captured gro
       { type: 'math', formulaId: 'original-formula', latex: 'x+1', accessibleText: 'x加1' },
     ] })).value, frame: { ...frame, transform: [1, 0, 0, 1, 7, 9] } }
     project.instances.image = { id: 'image', definitionId: IMAGE_DEFINITION.id, data: { ...createImageData('photo', '原照片'), flipX: true, crop: { left: 0.1, top: 0, right: 0, bottom: 0 } }, frame }
-    project.surfaces[0]!.childIds = ['group']
+    testContainerInstance(project, 0).childIds = ['group']
     const host = new DocumentHostService(path.join(root, 'recovery'))
     const original = await host.internalAPI.create({ kind: 'course-v10', project, resources: { assets: { photo: encode(svg) }, components: {} } }, 'mixed.h5lesson')
     await host.tools.beginRun({ runId: 'mixed', actor: 'agent', documents: [{ documentId: original.documentId, writable: [{ kind: 'document' }] }], fileAccess: { permission: 'workspace', workspaceRoot: root } })
@@ -211,7 +213,7 @@ it('uses live project tools for shared/private source, confined relative imports
     project.definitions.custom = { id: 'custom', title: '程序', role: 'content', version: 'one', dataSchema: { type: 'object' },
       implementation: { kind: 'source', language: 'javascript', workspace: { ownerId: 'shared', entry: 'main.js' } } }
     for (const id of ['a', 'b']) project.instances[id] = { id, definitionId: 'custom', data: { value: id }, frame }
-    project.surfaces[0].childIds = ['a', 'b']
+    testContainerInstance(project, 0).childIds = ['a', 'b']
     const host = new DocumentHostService(path.join(root, 'recovery'))
     const initial = await host.internalAPI.create({ kind: 'course-v10', project,
       resources: { assets: {}, components: { shared: { 'main.js': encode(source), 'helper.js': encode('export const value=1;'), 'a.bin': Uint8Array.of(255, 1), 'b.bin': Uint8Array.of(255, 2), 'opaque.bin': Uint8Array.of(255, 0, 128) } } } }, 'sources.h5lesson')
@@ -320,8 +322,7 @@ it('round-trips HTML/Markdown professional body and software-owned spatial targe
     project.instances.opaque = { id: 'opaque', definitionId: 'web', data: { html: '<button>原互动</button>' }, frame }
     project.instances.float = { id: 'float', definitionId: TEXT_DEFINITION.id, data: textDataEdit('float', text).value, frame, flowPlacement: { space: 'paper', plane: 'overlay' } }
     project.instances.spatial = { id: 'spatial', definitionId: TEXT_DEFINITION.id, data: textDataEdit('spatial', text).value, frame }
-    project.surfaces.push({ id: 'flow', kind: 'flow', title: '讲义', childIds: ['paragraph', 'opaque', 'float'], flow: { layout: { readingWidth: 800, wideContentWidth: 1000 } } },
-      { id: 'spatial', kind: 'spatial', title: '空间', childIds: ['spatial'], spatial: { home: { x: 0, y: 0, zoom: 1 },
+    appendRootContainers(project, { id: 'flow', kind: 'flow', title: '讲义', childIds: ['paragraph', 'opaque', 'float'], flow: { layout: { readingWidth: 800, wideContentWidth: 1000 } } }, { id: 'spatial-page', kind: 'spatial', title: '空间', childIds: ['spatial'], spatial: { home: { x: 0, y: 0, zoom: 1 },
         frames: [{ id: 'camera', pose: { x: 50, y: 40, zoom: 1 }, targetInstanceId: 'spatial' }] } })
     const host = new DocumentHostService(path.join(root, 'recovery'))
     const initial = await host.internalAPI.create({ kind: 'course-v10', project, resources: { assets: {}, components: {} } }, 'body.h5lesson')
@@ -361,7 +362,7 @@ it('round-trips HTML/Markdown professional body and software-owned spatial targe
     expect(reopened.project.instances.paragraph.data).toMatchObject({ content: { inlines: [{ type: 'text', text: 'Markdown正文' }] } })
     expect(reopened.project.instances.float).toEqual(project.instances.float)
     expect(reopened.project.instances.opaque.frame).toEqual(frame)
-    expect(reopened.project.surfaces.find(surface => surface.id === 'spatial')!.spatial!.frames).toMatchObject([
+    expect(componentSurfaces(reopened.project).find(surface => surface.id === 'spatial-page')!.spatial!.frames).toMatchObject([
       { id: 'camera', targetInstanceId: 'spatial', pose: { zoom: 2 } }, { title: '新镜头' }])
     expect(Object.values(reopened.project.assets).filter(asset => asset.mimeType === 'image/svg+xml')).toHaveLength(2)
     await host.tools.stop('body')
@@ -372,7 +373,7 @@ it('admits usable HTML body with a missing local media diagnostic and keeps its 
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'guoling-q2-partial-'))
   try {
     const project = createBlankCourseProjectV10('Partial body')
-    project.surfaces.push({ id: 'flow', kind: 'flow', title: '讲义', childIds: [] })
+    appendRootContainers(project, { id: 'flow', kind: 'flow', title: '讲义', childIds: [] })
     const host = new DocumentHostService(path.join(root, 'recovery'))
     const initial = await host.internalAPI.create({ kind: 'course-v10', project, resources: { assets: {}, components: {} } }, 'partial.h5lesson')
     await host.tools.beginRun({ runId: 'partial', actor: 'agent', documents: [{ documentId: initial.documentId, writable: [{ kind: 'document' }] }], fileAccess: { permission: 'workspace', workspaceRoot: root } })
@@ -401,7 +402,7 @@ it('applies precise source edits sequentially as one undoable commit and saves t
     const authoredSource = `${source}\r\n// 旧caption😺\r\n`
     project.instances.material = { id: 'material', definitionId: WEB_DEFINITION.id, data: { html }, frame, style: { opacity: 0.9 } }
     project.instances.neighbour = { id: 'neighbour', definitionId: WEB_DEFINITION.id, data: { html: '<button>原互动</button>' }, frame }
-    project.surfaces[0]!.childIds = ['material', 'neighbour']
+    testContainerInstance(project, 0).childIds = ['material', 'neighbour']
     const host = new DocumentHostService(path.join(root, 'recovery'))
     const initial = await host.internalAPI.create({ kind: 'course-v10', project,
       resources: { assets: {}, components: { shared: { 'main.js': encode(authoredSource), 'helper.js': encode('export const value=1;'), 'opaque.bin': Uint8Array.of(255, 0, 128) } } } }, 'precise.h5lesson')
@@ -460,7 +461,7 @@ it('rejects unobserved, binary, missing and ambiguous precise edits without a pa
     project.definitions[WEB_DEFINITION.id] = WEB_DEFINITION
     project.definitions.custom = { id: 'custom', role: 'content', implementation: { kind: 'source', language: 'javascript', workspace: { ownerId: 'shared', entry: 'main.js' } } }
     project.instances.material = { id: 'material', definitionId: WEB_DEFINITION.id, data: { html: '<p>aaa 重复 重复 唯一</p>' }, frame }
-    project.surfaces[0]!.childIds = ['material']
+    testContainerInstance(project, 0).childIds = ['material']
     const host = new DocumentHostService(path.join(root, 'recovery'))
     const initial = await host.internalAPI.create({ kind: 'course-v10', project,
       resources: { assets: {}, components: { shared: { 'main.js': encode(source), 'opaque.bin': Uint8Array.of(255, 0, 128) } } } }, 'precise-errors.h5lesson')
@@ -501,7 +502,7 @@ it('keeps same-field human HTML changes protected when precise edits still match
     const project = createBlankCourseProjectV10('Precise CAS')
     project.definitions[WEB_DEFINITION.id] = WEB_DEFINITION
     project.instances.material = { id: 'material', definitionId: WEB_DEFINITION.id, data: { html: '<svg><text>原图注</text></svg>' }, frame }
-    project.surfaces[0]!.childIds = ['material']
+    testContainerInstance(project, 0).childIds = ['material']
     const host = new DocumentHostService(path.join(root, 'recovery'))
     const initial = await host.internalAPI.create({ kind: 'course-v10', project, resources: { assets: {}, components: {} } }, 'precise-cas.h5lesson')
     await host.tools.beginRun({ runId: 'precise-cas', actor: 'agent', documents: [{ documentId: initial.documentId, writable: [{ kind: 'document' }] }] })

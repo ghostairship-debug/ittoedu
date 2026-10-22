@@ -1,17 +1,19 @@
 import { describe, expect, it, vi } from 'vitest'
 import { createElement } from 'react'
 import { render } from '@testing-library/react'
-import type { CourseProjectV10 } from '../../src/shared/contracts/component-platform'
+import type { CourseProjectV10, ComponentSurface } from '../../src/shared/contracts/component-platform'
 import { resolveComponentOuterPresentation, isGlobalFramedWebDocument } from '../../src/shared/componentPresentation'
-import { resolveFlowPaperBackground } from '../../src/shared/flowBodyPresentation'
+import { resolveComponentBackground } from '../../src/shared/contracts/component-platform'
 import { InstanceView } from '../../src/renderer/documents/CourseV10DocumentView'
 import { createComponentModelProjection } from '../../src/player/componentPlatform/modelProjection'
 import type { ComponentPlatformRuntime } from '../../src/player/components/ComponentPlatformRuntime'
 import { mountV10Model } from '../../src/player/componentPlatform/ModelPlayer'
 import { createTextComponentData } from '../../src/components/text/data'
+import { componentSurface, createComponentContainerInstance, componentContainerBuiltinKey } from '../../src/shared/contracts/component-platform'
+import { migrateCourseProjectV10 } from '../../src/shared/contracts/component-platform/workProjectMigration'
 
 function fixture(): CourseProjectV10 {
-  return { schemaVersion: 10, id: 'presentation', revision: 0, title: 'Flow presentation',
+  return migrateCourseProjectV10({ schemaVersion: 10, id: 'presentation', revision: 0, title: 'Flow presentation',
     definitions: Object.fromEntries(['image', 'document-block', 'web'].map(key => [`guoling.${key}`, { id: `guoling.${key}`, role: 'content', implementation: { kind: 'builtin', key: `guoling.${key}` } }])),
     instances: {
       image: { id: 'image', definitionId: 'guoling.image', data: {}, frame: { width: 600, height: 300, transform: [1, 0, 0, 1, 0, 0] }, flowLayout: { width: 'wide', wrap: 'left' } },
@@ -19,14 +21,21 @@ function fixture(): CourseProjectV10 {
       group: { id: 'group', definitionId: 'guoling.web', data: {}, frame: { width: 600, height: 300, transform: [1, 0, 0, 1, 0, 0] }, childIds: ['child'] },
       child: { id: 'child', definitionId: 'guoling.image', data: {}, frame: { width: 200, height: 100, transform: [1, 0, 0, 1, 500, 250] } },
     }, surfaces: [{ id: 'flow', kind: 'flow', title: 'Flow', childIds: ['section', 'group'], flow: { layout: { readingWidth: 860, wideContentWidth: 1100, paperBackgroundColor: '#ffeedd' } } }],
-    global: { underlay: [], overlay: [] }, assets: {} }
+    global: { underlay: [], overlay: [] }, assets: {} })
+}
+
+function addContainer(project: CourseProjectV10, surface: ComponentSurface) {
+  const definitionId = componentContainerBuiltinKey(surface.kind)
+  project.definitions[definitionId] = { id: definitionId, role: 'mixed', implementation: { kind: 'builtin', key: definitionId } }
+  project.instances[surface.id] = createComponentContainerInstance(surface, definitionId)
+  project.rootIds.push(surface.id)
 }
 
 describe('shared component outer presentation', () => {
   it('keeps the native global Web input owner distinct from page Web and professional Source identity', () => {
     const project = fixture(), instance = project.instances.group
     expect(isGlobalFramedWebDocument(project, instance)).toBe(false)
-    project.surfaces[0].childIds = ['section']
+    project.instances.flow!.childIds = ['section']
     project.global.overlay = [instance.id]
     expect(isGlobalFramedWebDocument(project, instance)).toBe(true)
     expect(resolveComponentOuterPresentation(project, instance, { placement: 'free', purpose: 'playback', inlineSize: 600 }).outerStyle.pointerEvents).toBe('none')
@@ -62,13 +71,14 @@ describe('shared component outer presentation', () => {
     expect(author.extent).toBeNull()
   })
 
-  it('paints explicit course or page backgrounds on the real paper and retains paper color fallback', () => {
-    const project = fixture(), surface = project.surfaces[0]
-    expect(resolveFlowPaperBackground(project, surface).color).toBe('#ffeedd')
+  it('resolves the effective course and Surface backgrounds without a paper color fact', () => {
+    const project = fixture(), surface = componentSurface(project, 'flow')!
+    delete project.instances.flow!.container!.background
+    expect(resolveComponentBackground(project, componentSurface(project, 'flow')!).color).toBe('#ffffff')
     project.background = { color: '#123456', assetId: 'background', fit: 'contain' }
-    expect(resolveFlowPaperBackground(project, surface)).toEqual({ color: '#123456', assetId: 'background', fit: 'contain' })
-    surface.background = { mode: 'own', color: '#abcdef', fit: 'cover' }
-    expect(resolveFlowPaperBackground(project, surface).color).toBe('#abcdef')
+    expect(resolveComponentBackground(project, componentSurface(project, 'flow')!)).toEqual({ color: '#123456', assetId: 'background', fit: 'contain' })
+    project.instances.flow!.container!.background = { mode: 'own', color: '#abcdef', fit: 'cover' }
+    expect(resolveComponentBackground(project, componentSurface(project, 'flow')!).color).toBe('#abcdef')
   })
 
   it('connects React and Player to the same frame decisions while retaining bound DOM and runtime section state', () => {
@@ -100,15 +110,15 @@ describe('shared component outer presentation', () => {
     data.appearance.verticalAlign = 'middle'
     project.definitions.text = { id: 'text', role: 'content', implementation: { kind: 'builtin', key: 'guoling.text' } }
     project.instances.text = { id: 'text', definitionId: 'text', data: JSON.parse(JSON.stringify(data)), frame: { width: 600, height: 300, transform: [1, 0, 0, 1, 0, 0] } }
-    project.surfaces[0].childIds = ['text']
-    project.surfaces.push({ id: 'slide', kind: 'slide', title: 'Slide', designSize: { width: 1280, height: 720 }, childIds: [] })
+    project.instances.flow!.childIds = ['text']
+    addContainer(project, { id: 'slide', kind: 'slide', title: 'Slide', designSize: { width: 1280, height: 720 }, childIds: [] })
     const root = document.createElement('div'); document.body.append(root)
     const model = { kind: 'course-v10' as const, project, resources: { assets: {}, components: {} } }
     const player = mountV10Model({ root, model, runScopeId: 'text-flow' })
     try {
       await player.ready
       expect(root.querySelector<HTMLElement>('[data-text-component]')?.style).toMatchObject({ display: 'block', height: 'auto' })
-      project.surfaces[0].childIds = []; project.surfaces[1].childIds = ['text']
+      project.instances.flow!.childIds = []; project.instances.slide!.childIds = ['text']
       player.revealSurface('slide'); await player.update(model)
       const text = root.querySelector<HTMLElement>('[data-text-component]')!
       expect(text.style.display).toBe('flex')

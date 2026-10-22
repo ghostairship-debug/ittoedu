@@ -1,4 +1,6 @@
 // @vitest-environment node
+import { testContainerInstance } from '../../../helpers/glxWorkFixture'
+import { componentSurfaces } from '../../../../src/shared/contracts/component-platform/project'
 import { promises as fs } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -31,7 +33,7 @@ it('real Canvas IME input survives normal preserve close and cold Main recovery 
     const frame = { width: 180, height: 80, transform: [1, .2, 0, 1, 50, 40] as [number, number, number, number, number, number] }
     project.instances.text = { id: 'text', name: 'Original target', definitionId: 'custom', data: { label: 'Teacher original' }, frame }
     project.instances.neighbor = { id: 'neighbor', definitionId: 'custom', data: { label: 'Keep neighbor' }, frame: { ...frame, transform: [1, 0, 0, 1, 300, 40] } }
-    project.surfaces[0].childIds = ['text', 'neighbor']
+    testContainerInstance(project, 0).childIds = ['text', 'neighbor']
     const initial = await host.internalAPI.create({ kind: 'course-v10', project, resources: { assets: {}, components: {} } }, 'canvas.h5lesson')
     const api = (owner: DocumentHostService, snapshot: DocumentSnapshot): DocumentHostAPI => ({ ...owner.internalAPI,
       bootstrapCourse: async () => snapshot, saveWithDialog: async id => owner.saveToPath(id, path.join(directory, 'canvas.h5lesson')),
@@ -40,7 +42,7 @@ it('real Canvas IME input survives normal preserve close and cold Main recovery 
       close: async (id, discardDirty) => { await owner.operate({ type: 'close', documentId: id, discardDirty }) }, subscribe: listener => owner.subscribeEvents(listener) })
     const setup = async (owner: DocumentHostService, snapshot: DocumentSnapshot) => {
       const bridge = new CourseV10DocumentBridge(); bridges.push(bridge); await bridge.connect(api(owner, snapshot))
-      bridge.selectInstances(snapshot.documentId, ['text'], project.surfaces[0].id)
+      bridge.selectInstances(snapshot.documentId, ['text'], componentSurfaces(project)[0].id)
       const kernel = createEditorStoreKernel({ bridge, commit() {} })
       let owned = createInitialSlideOwnedState(), changed: (() => void) | undefined
       const slice = createSlideAuthoringSlice(kernel, { read: () => owned, patch: patch => { owned = { ...owned, ...patch }; changed?.() } })
@@ -79,7 +81,7 @@ it('real Canvas IME input survives normal preserve close and cold Main recovery 
     if (!records) throw new Error('Missing durable raw input')
     const cold = await setup(coldHost, coldDoc)
     expect(courseDraftLifecycle(cold.bridge).restore(coldDoc.documentId, records.advanced)).toMatchObject({ restored: 1, issues: [] })
-    cold.bridge.selectInstances(coldDoc.documentId, ['neighbor'], project.surfaces[0].id)
+    cold.bridge.selectInstances(coldDoc.documentId, ['neighbor'], componentSurfaces(project)[0].id)
     render(<cold.Editor />)
     const recoveredInput = within(document.body).getByRole('textbox', { name: 'Canvas input' })
     expect(recoveredInput).toHaveValue('尚未完成的拼音稿')

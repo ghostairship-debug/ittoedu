@@ -1,3 +1,5 @@
+import { testContainerInstance } from '../helpers/glxWorkFixture'
+import { componentSurfaces } from '../../src/shared/contracts/component-platform/project'
 import { TextSelection } from 'prosemirror-state'
 import { createCourseDocumentClipboardContext, readCourseDocumentClipboardContext } from '../../src/renderer/document/documentClipboardContext'
 import { createFlowDocumentResourcePort, prepareFlowDocumentResourceTransaction } from '../../src/renderer/document/flowDocumentResources'
@@ -14,15 +16,15 @@ import { inlineComponentIds, documentTextRanges } from '../../src/shared/documen
 
 it('submits the actual professional editor range projection for repeated text deletion', () => {
   let project = createBlankCourseProjectV10('正文')
-  project.surfaces[0].kind = 'flow'; project.surfaces[0].childIds = ['body']; project.definitions[TEXT_DEFINITION.id] = TEXT_DEFINITION
+  testContainerInstance(project, 0).container!.kind = 'flow'; testContainerInstance(project, 0).childIds = ['body']; project.definitions[TEXT_DEFINITION.id] = TEXT_DEFINITION
   project.instances.body = { id: 'body', definitionId: TEXT_DEFINITION.id, data: JSON.parse(JSON.stringify(createTextComponentData('甲甲甲'))) }
-  const note = componentTextInteractionEdits(project, { surfaceId: project.surfaces[0].id, instanceId: 'body', dataPath: ['content'], from: 0, to: 1 }, { kind: 'annotation', content: '第一个甲' })
+  const note = componentTextInteractionEdits(project, { surfaceId: componentSurfaces(project)[0].id, instanceId: 'body', dataPath: ['content'], from: 0, to: 1 }, { kind: 'annotation', content: '第一个甲' })
   project = applyComponentOperation(project, captureComponentOperation(project, note.edits))
   const host = document.createElement('div'); document.body.append(host)
   const messages: string[] = []
-  const editor = createLayoutEditor(host, { document: projectFlowDocument(project, project.surfaces[0].id), revision: String(project.revision), presentation: 'flow',
+  const editor = createLayoutEditor(host, { document: projectFlowDocument(project, componentSurfaces(project)[0].id), revision: String(project.revision), presentation: 'flow',
     undo() {}, redo() {}, diagnostic: message => messages.push(message), change(next, operation) {
-      const edits = flowDocumentEdits(project, project.surfaces[0].id, next.content.blocks, project, operation.rangeProjection)
+      const edits = flowDocumentEdits(project, componentSurfaces(project)[0].id, next.content.blocks, project, operation.rangeProjection)
       project = applyComponentOperation(project, captureComponentOperation(project, edits)); return true
     } })
   try {
@@ -37,7 +39,7 @@ it('submits the actual professional editor range projection for repeated text de
 
 it('uses actual editor copy/cut/paste events for a partial range and inline atom with formal source context', async () => {
   let project = createBlankCourseProjectV10('剪贴板')
-  const surfaceId = project.surfaces[0].id; project.surfaces[0].kind = 'flow'; project.surfaces[0].childIds = ['body','destination']; project.definitions[TEXT_DEFINITION.id] = TEXT_DEFINITION
+  const surfaceId = componentSurfaces(project)[0].id; testContainerInstance(project, 0).container!.kind = 'flow'; testContainerInstance(project, 0).childIds = ['body','destination']; project.definitions[TEXT_DEFINITION.id] = TEXT_DEFINITION
   for (const [id,text] of [['body','前甲乙后'],['destination','粘贴：']]) project.instances[id] = { id, definitionId: TEXT_DEFINITION.id, data: JSON.parse(JSON.stringify(createTextComponentData(text))) }
   const apply = (edits: Parameters<typeof captureComponentOperation>[1]) => { project = applyComponentOperation(project, captureComponentOperation(project, edits)) }
   const note = componentTextInteractionEdits(project, { surfaceId, instanceId: 'body', dataPath: ['content'], from: 1, to: 3 }, { kind: 'annotation', content: '注释' }); apply(note.edits)

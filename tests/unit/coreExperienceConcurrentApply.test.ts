@@ -1,3 +1,5 @@
+import { componentSurfaces } from '../../src/shared/contracts/component-platform/project'
+import { testContainerInstance } from '../helpers/glxWorkFixture'
 // @vitest-environment node
 import { expect, it } from 'vitest'
 import { createBlankCourseProjectV10 } from '../../src/core/course/createCourseProjectV10'
@@ -22,7 +24,7 @@ import type { JsonValue } from '../../src/shared/contracts/component-platform/pr
 import type { InteractionRule } from '../../src/shared/interactionTypes'
 
 it('updates managed text answers through an object-only Gateway grant with live grading and one undo', async () => {
-  const project = createBlankCourseProjectV10('局部改判题答案'), driver = new CourseV10Driver(), surfaceId = project.surfaces[0].id
+  const project = createBlankCourseProjectV10('局部改判题答案'), driver = new CourseV10Driver(), surfaceId = componentSurfaces(project)[0].id
   project.definitions[INPUT_DEFINITION.id] = INPUT_DEFINITION
   project.definitions[WEB_DEFINITION.id] = WEB_DEFINITION
   project.definitions.interactions = { id: 'interactions', role: 'behavior', implementation: { kind: 'builtin', key: 'guoling.interactions' } }
@@ -39,7 +41,7 @@ it('updates managed text answers through an object-only Gateway grant with live 
     actions: [{ id: 'other-action', start: 'after-previous', delayMs: 0, action: motion('no', true) }] }
   project.instances.behavior = { id: 'behavior', definitionId: 'interactions', data: { rules: [...family, other] } as unknown as JsonValue,
     attachments: [{ instanceId: 'behavior', target: { kind: 'surface', surfaceId } }] }
-  project.surfaces[0].childIds = ['answer', 'yes', 'no', 'behavior']
+  testContainerInstance(project, 0).childIds = ['answer', 'yes', 'no', 'behavior']
   project.logic = { courseState: [{ key: keys.stateKey, valueType: 'string', defaultValue: '' }, { key: keys.validityKey, valueType: 'boolean', defaultValue: false }], navigationGuards: [] }
   const registry = new DocumentRegistry({ drivers: [driver], createId: () => crypto.randomUUID(), bindingKey: binding => binding.path,
     persistence: { async append() {}, async save() { throw new Error('unused') } } })
@@ -89,12 +91,12 @@ it('applies a delayed local AI reply through Gateway while preserving human geom
     local: { kind: 'text', scope: { item: 'one' }, binding: { kind: 'dom', path: [{ tag: 'p', index: 0 }], baseline: 'Original' }, overrides: { text: 'Human text' } },
   } } }
   project.instances.b = { id: 'b', definitionId: WEB_DEFINITION.id, data: { html: 'Other original' } }
-  project.surfaces[0].childIds = ['a', 'b']
+  testContainerInstance(project, 0).childIds = ['a', 'b']
   const registry = new DocumentRegistry({ drivers: [driver], createId: () => crypto.randomUUID(), bindingKey: binding => binding.path,
     persistence: { async append() {}, async save() { throw new Error('unused') } } })
   const session = await registry.create({ kind: 'course-v10', project, resources: { assets: {}, components: {} } }, '共编.h5lesson')
   const gateway = new DocumentToolGateway(registry, [driver], () => crypto.randomUUID())
-  const target = { kind: 'course-instance' as const, surfaceId: project.surfaces[0].id, instanceId: 'a', fieldScope: 'authoring' as const, dataPath: ['records', 'local', 'overrides', 'text'] }
+  const target = { kind: 'course-instance' as const, surfaceId: componentSurfaces(project)[0].id, instanceId: 'a', fieldScope: 'authoring' as const, dataPath: ['records', 'local', 'overrides', 'text'] }
   await gateway.beginRun({ runId: 'ai', actor: 'agent', documents: [{ documentId: session.documentId, writable: [target] }] })
   const handle = await gateway.issueTarget('ai', session.documentId, target)
   let release!: () => void
@@ -127,12 +129,12 @@ it('edits the effective text of a geometry-only author record through its origin
   project.instances.a = { id: 'a', definitionId: WEB_DEFINITION.id, data: { html: '<p>Original</p>' }, authoring: { records: {
     local: { kind: 'text', binding: { kind: 'dom', path: [{ tag: 'p', index: 0 }], baseline: 'Original' }, overrides: { geometry: { translateX: 40 } } },
   } } }
-  project.surfaces[0].childIds = ['a']
+  testContainerInstance(project, 0).childIds = ['a']
   const registry = new DocumentRegistry({ drivers: [driver], createId: () => crypto.randomUUID(), bindingKey: binding => binding.path,
     persistence: { async append() {}, async save() { throw new Error('unused') } } })
   const session = await registry.create({ kind: 'course-v10', project, resources: { assets: {}, components: {} } }, '先移动后续写.h5lesson')
   const gateway = new DocumentToolGateway(registry, [driver], () => crypto.randomUUID())
-  const target = { kind: 'course-instance' as const, surfaceId: project.surfaces[0].id, instanceId: 'a',
+  const target = { kind: 'course-instance' as const, surfaceId: componentSurfaces(project)[0].id, instanceId: 'a',
     fieldScope: 'authoring' as const, dataPath: ['records', 'local', 'overrides', 'text'] }
   await gateway.beginRun({ runId: 'ai', actor: 'agent', documents: [{ documentId: session.documentId, writable: [target] }] })
   const handle = await gateway.issueTarget('ai', session.documentId, target)

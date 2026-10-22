@@ -117,7 +117,7 @@ it('ignores unrelated package and asset map changes but remounts when an overrid
   expect(firstHandle.destroy).toHaveBeenCalledTimes(1)
 })
 
-it('leases a URL generation and tracks actual projectAssetUrl reads across whole-map rotations', async () => {
+it('keeps a consumed asset stable across unrelated changes and remounts only when it changes', async () => {
   const live = new Set<string>()
   let serial = 0
   vi.stubGlobal('URL', {
@@ -134,23 +134,23 @@ it('leases a URL generation and tracks actual projectAssetUrl reads across whole
   const plain = { ...item, assetOverrides: undefined }
   await act(async () => root.render(<FlowPageComponent {...base} item={plain} assetUrls={firstUrls} />))
   const firstOptions = vi.mocked(mountPublishedComponent).mock.calls[0]![1]
+  await act(async () => { expect(firstOptions.resolveAsset?.('image1')).toBe(firstUrls.image1) })
   sources.rerender({ files: { image1, other: new Uint8Array([3]) } })
   const secondUrls = sources.result.current
-  expect(secondUrls.image1).not.toBe(firstUrls.image1)
+  expect(secondUrls.image1).toBe(firstUrls.image1)
   expect(live.has(firstUrls.image1!)).toBe(true)
   await act(async () => root.render(<FlowPageComponent {...base} item={plain} assetUrls={secondUrls} />))
   expect(mountPublishedComponent).toHaveBeenCalledTimes(1)
   expect(live.has(firstUrls.image1!)).toBe(true)
   await act(async () => { expect(firstOptions.resolveAsset?.('image1')).toBe(secondUrls.image1) })
-  expect(mountPublishedComponent).toHaveBeenCalledTimes(2)
-  expect(live.has(firstUrls.image1!)).toBe(false)
-  expect(vi.mocked(mountPublishedComponent).mock.calls[1]![1].resolveAsset?.('image1')).toBe(secondUrls.image1)
+  expect(mountPublishedComponent).toHaveBeenCalledTimes(1)
+  expect(live.has(firstUrls.image1!)).toBe(true)
   sources.rerender({ files: { image1: new Uint8Array([4]), other: new Uint8Array([3]) } })
   const thirdUrls = sources.result.current
   expect(live.has(secondUrls.image1!)).toBe(true)
   await act(async () => root.render(<FlowPageComponent {...base} item={plain} assetUrls={thirdUrls} />))
-  expect(mountPublishedComponent).toHaveBeenCalledTimes(3)
-  expect(vi.mocked(mountPublishedComponent).mock.calls[2]![1].resolveAsset?.('image1')).toBe(thirdUrls.image1)
+  expect(mountPublishedComponent).toHaveBeenCalledTimes(2)
+  expect(vi.mocked(mountPublishedComponent).mock.calls[1]![1].resolveAsset?.('image1')).toBe(thirdUrls.image1)
   expect(live.has(secondUrls.image1!)).toBe(false)
   await act(async () => root.unmount())
   roots.pop()?.container.remove()
@@ -158,7 +158,7 @@ it('leases a URL generation and tracks actual projectAssetUrl reads across whole
   expect(live.size).toBe(0)
 })
 
-it('remounts a manifest image override when its managed URL rotates and releases the prior lease', async () => {
+it('keeps a manifest image override mounted when another asset changes', async () => {
   const live = new Set<string>()
   let serial = 0
   vi.stubGlobal('URL', {
@@ -174,11 +174,12 @@ it('remounts a manifest image override when its managed URL rotates and releases
   await act(async () => root.render(<FlowPageComponent {...base} item={item} assetUrls={firstUrls} />))
   sources.rerender({ files: { image1: firstBytes, other: new Uint8Array([3]) } })
   const secondUrls = sources.result.current
+  expect(secondUrls.image1).toBe(firstUrls.image1)
   expect(live.has(firstUrls.image1!)).toBe(true)
   await act(async () => root.render(<FlowPageComponent {...base} item={item} assetUrls={secondUrls} />))
-  expect(mountPublishedComponent).toHaveBeenCalledTimes(2)
-  expect(live.has(firstUrls.image1!)).toBe(false)
-  expect(vi.mocked(mountPublishedComponent).mock.calls[1]![1].resolveAsset?.('image1')).toBe(secondUrls.image1)
+  expect(mountPublishedComponent).toHaveBeenCalledTimes(1)
+  expect(live.has(firstUrls.image1!)).toBe(true)
+  expect(vi.mocked(mountPublishedComponent).mock.calls[0]![1].resolveAsset?.('image1')).toBe(secondUrls.image1)
   await act(async () => root.unmount())
   roots.pop()?.container.remove()
   sources.unmount()

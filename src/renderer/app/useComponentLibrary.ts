@@ -10,6 +10,7 @@ import { captureComponentPackageReplacementTarget, commitComponentReplacementAtT
 import { insertComponentPackagesAtTarget } from '../components/insertComponentPackages'
 import type { CourseInsertionOptions } from '../media/commitCourseMediaAuthoring'
 import { selectProjectLibraryDefinitions } from '../components/componentLibraryModel'
+import { inspectComponentLibraryUpdate, type ComponentLibraryUpdateReview } from '../../core/components/library/updateSource'
 
 type CatalogPackageReference = Parameters<DesktopAPI['readComponentCatalogPackage']>[0]
 const catalogPackageReference = ({ sourceId, packageId, version }: AvailableComponentCatalogPackage): CatalogPackageReference =>
@@ -29,11 +30,13 @@ export interface ComponentLibraryPorts {
   commitStatus(message: string | null): void
   reportError(message: string): void
 }
-export interface ComponentPackageReplacementRequest { mode: 'replace'; packageId: string; target: ComponentPackageReplacementTarget; packageData: ComponentLibraryEntry; sourceFileName: string }
-export interface CatalogPackageUpdateRequest { mode: 'update'; entries: AvailableComponentCatalogPackage[]; target: ComponentPackageReplacementTarget }
+export interface ComponentPackageReplacementRequest { mode: 'replace'; packageId: string; target: ComponentPackageReplacementTarget; packageData: ComponentLibraryEntry; sourceFileName: string; sourceReview: ComponentLibraryUpdateReview }
+export interface CatalogPackageUpdateRequest { mode: 'update'; entries: AvailableComponentCatalogPackage[]; target: ComponentPackageReplacementTarget; packageData: ComponentLibraryEntry; sourceReview: ComponentLibraryUpdateReview }
+/** Library cards retain identity and labels; the existing insertion service extracts their actual example on demand. */
+export interface InstalledComponentLibraryEntry { id: string; title: string; definitionId: string }
 export interface ComponentLibraryApi {
   componentCatalog: ComponentCatalogSnapshot
-  installedEntries: ComponentLibraryEntry[]
+  installedEntries: InstalledComponentLibraryEntry[]
   replacementRequest: ComponentPackageReplacementRequest | null
   catalogUpdateRequest: CatalogPackageUpdateRequest | null
   importExternalPackages(): void
@@ -56,21 +59,15 @@ export function useComponentLibrary(ports: ComponentLibraryPorts): ComponentLibr
   const [componentCatalog, setCatalog] = useState<ComponentCatalogSnapshot>(EMPTY)
   const [replacementRequest, setReplacement] = useState<ComponentPackageReplacementRequest | null>(null)
   const [catalogUpdateRequest, setUpdate] = useState<CatalogPackageUpdateRequest | null>(null)
-  const installed = useMemo(() => {
-    const entries: ComponentLibraryEntry[] = [], issues: string[] = []
-    if (!view.project) return { entries, issues }
-    const resources = view.views.find(item => item.documentId === view.activeDocumentId)?.model.resources
-    if (!resources) return { entries, issues }
-    for (const definition of selectProjectLibraryDefinitions(view.project.definitions)) {
-      const sample = Object.values(view.project.instances).find(instance => instance.definitionId === definition.id)
-      if (!sample) continue
-      try { entries.push(extractComponentLibraryEntry(view.project, resources, { id: definition.library?.packageId ?? definition.id, title: definition.title ?? definition.id, rootIds: [sample.id] }).entry) }
-      catch (error) { issues.push(`${definition.title ?? definition.id}：${error instanceof Error ? error.message : String(error)}`) }
-    }
-    return { entries, issues }
-  }, [view.project, ports.kernel])
-  const installedEntries = installed.entries
-  useEffect(() => { if (installed.issues.length) current.current.reportError(installed.issues.join('\n')) }, [installed])
+  const catalogUpdateGeneration = useRef(0)
+  const installedEntries = useMemo((): InstalledComponentLibraryEntry[] => {
+    const project = view.project
+    if (!project) return []
+    const usedDefinitions = new Set(Object.values(project.instances).map(instance => instance.definitionId))
+    return selectProjectLibraryDefinitions(project.definitions).filter(definition => usedDefinitions.has(definition.id))
+      .map(definition => ({ id: definition.library?.packageId ?? definition.id,
+        title: definition.title ?? definition.id, definitionId: definition.id }))
+  }, [view.project])
   const refreshCatalog = useCallback(() => {
     if (!current.current.desktopAvailable()) return
     void current.current.runBusy(async () => { setCatalog(await current.current.loadCatalog()) }, '组件目录读取失败。')
@@ -130,31 +127,40 @@ export function useComponentLibrary(ports: ComponentLibraryPorts): ComponentLibr
     void current.current.runBusy(async () => {
       const file = await current.current.selectComponentPackage()
       if (!file) return
-      setReplacement({ mode: 'replace', packageId: id, target, packageData: importComponentLibraryArchive(file.bytes).entry, sourceFileName: file.name })
+      const packageData = importComponentLibraryArchive(file.bytes).entry
+      const sourceReview = inspectComponentLibraryUpdate(target.captured.project, target.packageId, packageData, target.captured.resources)
+      setReplacement({ mode: 'replace', packageId: id, target, packageData, sourceFileName: file.name, sourceReview })
     }, '替换组件读取失败，原版本保留。')
   }, [])
   const confirmReplacement = useCallback(() => {
     const request = replacementRequest; setReplacement(null)
     if (!request) return
     void current.current.runBusy(async () => {
-      const result = await commitComponentReplacementAtTarget(current.current.kernel, request.target, request.packageData)
+      const result = await commitComponentReplacementAtTarget(current.current.kernel, request.target, request.packageData,
+        { replaceLocalSource: request.sourceReview.localSourceModified })
       if (!result.ok) throw new Error(result.reason)
     }, '组件替换失败，原版本保留。')
   }, [replacementRequest])
   const requestCatalogUpdate = useCallback((entry: AvailableComponentCatalogPackage) => {
     const target = captureComponentPackageReplacementTarget(current.current.kernel, entry.packageId,true)
-    if (target) setUpdate({ mode: 'update', entries: [entry], target })
-    else current.current.reportError('工程中没有此组件定义，无法更新。')
+    if (!target) { current.current.reportError('工程中没有此组件定义，无法更新。'); return }
+    const generation = ++catalogUpdateGeneration.current
+    setUpdate(null)
+    void current.current.runBusy(async () => {
+      const file = await current.current.readCatalogPackage(catalogPackageReference(entry))
+      const archive = importComponentLibraryArchive(file.bytes)
+      if (archive.entry.id !== entry.packageId || archive.version !== entry.version) throw new Error('目录条目身份已改变，请刷新；工程原版本保留。')
+      const sourceReview = inspectComponentLibraryUpdate(target.captured.project, target.packageId, archive.entry, target.captured.resources)
+      if (generation === catalogUpdateGeneration.current) setUpdate({ mode: 'update', entries: [entry], target,
+        packageData: archive.entry, sourceReview })
+    }, '组件更新准备失败，原版本保留。')
   }, [])
   const confirmCatalogUpdate = useCallback(() => {
     const request = catalogUpdateRequest; setUpdate(null)
     if (!request) return
     void current.current.runBusy(async () => {
-      const selected = request.entries[0]
-      const file = await current.current.readCatalogPackage(catalogPackageReference(selected))
-      const archive = importComponentLibraryArchive(file.bytes)
-      if (archive.entry.id !== selected.packageId || archive.version !== selected.version) throw new Error('目录条目身份已改变，请刷新；工程原版本保留。')
-      const result = await commitComponentReplacementAtTarget(current.current.kernel, request.target, archive.entry)
+      const result = await commitComponentReplacementAtTarget(current.current.kernel, request.target, request.packageData,
+        { replaceLocalSource: request.sourceReview.localSourceModified })
       if (!result.ok) throw new Error(result.reason)
     }, '组件更新失败。')
   }, [catalogUpdateRequest])
@@ -178,5 +184,5 @@ export function useComponentLibrary(ports: ComponentLibraryPorts): ComponentLibr
   }, [])
   return { componentCatalog, installedEntries, replacementRequest, catalogUpdateRequest, importExternalPackages, replacePackage, refreshCatalog,
     addCatalogPackages, prepareCatalogPackage, requestCatalogUpdate, confirmReplacement, cancelReplacement: () => setReplacement(null),
-    confirmCatalogUpdate, cancelCatalogUpdate: () => setUpdate(null), extractSelection, deleteCatalogPackage }
+    confirmCatalogUpdate, cancelCatalogUpdate: () => { catalogUpdateGeneration.current++; setUpdate(null) }, extractSelection, deleteCatalogPackage }
 }

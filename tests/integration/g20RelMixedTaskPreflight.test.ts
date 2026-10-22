@@ -1,4 +1,5 @@
 // @vitest-environment node
+import { componentSurfaces } from '../../src/shared/contracts/component-platform/project'
 import { afterEach, expect, it } from 'vitest'
 import { mkdtemp, mkdir, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -65,7 +66,7 @@ it('REL-T11 zero-cost preflight creates a V10 file from a document-free run and 
   expect(finalTools).not.toContain('image.generate') // No image provider is configured in this local fixture.
   const { openCourseProjectV10Archive } = await import('../../src/core/drivers/codecs/courseProjectV10Archive')
   const archive = openCourseProjectV10Archive(new Uint8Array(await readFile(filePath)))
-  expect(archive.project.surfaces.length).toBeGreaterThan(0)
+  expect(componentSurfaces(archive.project).length).toBeGreaterThan(0)
   expect(host.registry.list().some(snapshot => snapshot.model.kind === 'course-v10' && snapshot.binding.kind === 'file'
     && snapshot.binding.path === filePath)).toBe(true)
 })

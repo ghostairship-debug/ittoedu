@@ -124,7 +124,13 @@ it('reuses a matching source build and accepts a completed dependency reinstall 
   try {
     expect(await prepareSourceLaunch(root, run)).toHaveLength(5)
     calls.length = 0
-    expect(await prepareSourceLaunch(root, run)).toEqual([])
+    const stat = vi.spyOn(fs, 'stat')
+    try {
+      expect(await prepareSourceLaunch(root, run)).toEqual([])
+      for (const input of ['src/shared', 'src/core', 'src/components', 'dist-player', 'node_modules/.package-lock.json']) {
+        expect(stat.mock.calls.filter(([filename]) => filename === path.join(root, input))).toHaveLength(1)
+      }
+    } finally { stat.mockRestore() }
     expect(calls).toEqual([])
     for (const input of ['src/components/text/render.ts', 'scripts/generate-component-builtin-sources.ts']) {
       const file = path.join(root, input)

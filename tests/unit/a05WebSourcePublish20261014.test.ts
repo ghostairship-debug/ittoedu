@@ -1,4 +1,6 @@
 // @vitest-environment node
+import { componentSurfaces } from '../../src/shared/contracts/component-platform/project'
+import { testContainerInstance } from '../helpers/glxWorkFixture'
 import { expect, it } from 'vitest'
 import { JSDOM } from 'jsdom'
 import { build } from 'esbuild'
@@ -39,8 +41,8 @@ it('prepares real Source HTML/module/resource data and retains it through compil
   project.instances.web={id:'web',definitionId:'web',data:{html,business:{count:7},resourceBindings:{'cw-resource:photo':'photo'},modules:{'main.js':`import {value} from './shared.js';document.body.dataset.module=String(value)`,'shared.js':'export const value=42','child.js':`document.body.dataset.child='ready'`}},frame:{width:640,height:360,transform:[1,0,0,1,0,0]}}
   project.definitions.custom={id:'custom',role:'mixed',implementation:{kind:'source',language:'javascript',source:`export default {mount(context){let count=0;const button=document.createElement('button');button.id='custom';button.textContent='custom:0';button.onclick=()=>button.textContent='custom:'+ ++count;context.root.append(button);return {update(next){button.dataset.state=next.data.state},dispose(){button.remove()}}}}`}}
   project.instances.custom={id:'custom',definitionId:'custom',data:{html:'<script>throw new Error("must not execute")</script>',state:'base'},frame:{width:260,height:160,transform:[1,0,0,1,650,0]}}
-  project.surfaces[0].childIds=['web','custom']
-  project.surfaces[0].presentation={initialStateId:'base',states:[{id:'base',title:'base',overrides:{}},{id:'next',title:'next',overrides:{web:{data:{...project.instances.web.data as object,html:html.replace('child</p>','next</p>')}},custom:{data:{html:'<script>throw new Error("must still not execute")</script>',state:'next'}}}}]}
+  testContainerInstance(project, 0).childIds=['web','custom']
+  testContainerInstance(project, 0).container.presentation={initialStateId:'base',states:[{id:'base',title:'base',overrides:{}},{id:'next',title:'next',overrides:{web:{data:{...project.instances.web.data as object,html:html.replace('child</p>','next</p>')}},custom:{data:{html:'<script>throw new Error("must still not execute")</script>',state:'next'}}}}]}
   const image=new TextEncoder().encode('<svg xmlns="http://www.w3.org/2000/svg" width="2" height="3"><rect width="2" height="3" fill="red"/></svg>')
   project.assets.photo={id:'photo',path:'assets/photo.svg',mimeType:'image/svg+xml',byteLength:image.length,filename:'photo.svg'}
   const before=structuredClone(project), compilation=new InMemoryComponentCompilation(createEsbuildComponentCompiler())
@@ -50,7 +52,7 @@ it('prepares real Source HTML/module/resource data and retains it through compil
   expect(data.html).toBe(html);expect(data.business).toEqual({count:7})
   expect(data.moduleGraph.entries).toMatchObject({'0':'main.js','0:0':'child.js'})
   expect(data.publishedModuleBundle).toContain('42');expect(data.publishedDocumentBundles['0']).toContain('ready')
-  const next=published.payload.surfaces[0].presentation!.states[1].overrides.web.data as any
+  const next=componentSurfaces(published.payload)[0].presentation!.states[1].overrides.web.data as any
   expect(next.html).toContain('next</p>');expect(next.publishedDocumentBundles['0']).toBeTruthy()
   expect(published.payload.assets.photo.url).toMatch(/^data:image\/svg\+xml/)
   const resolved=resolveWebResourceBindings(published.payload.instances.web,id=>published.payload.assets[id]?.url).data as any
@@ -78,7 +80,7 @@ it('prepares real Source HTML/module/resource data and retains it through compil
       await frame.locator('#business').click();expect(await frame.locator('#business').textContent()).toBe('business:1')
       expect(await frame.locator('img').getAttribute('src')).toMatch(/^data:image\/svg\+xml/)
       await expect.poll(()=>frame.locator('img').evaluate(image=>(image as HTMLImageElement).naturalWidth)).toBe(2)
-      await page.evaluate(surface=>(window as any).player.go(surface,'next'),project.surfaces[0].id)
+      await page.evaluate(surface=>(window as any).player.go(surface,'next'),componentSurfaces(project)[0].id)
       await expect.poll(()=>frame.frameLocator('iframe').locator('#child').textContent()).toBe('next')
       expect(await frame.locator('#business').textContent()).toBe('business:0')
       expect(await custom.locator('#custom').textContent()).toBe('custom:1')
@@ -97,7 +99,7 @@ it('routes explicit Web declarations and keeps plain Source direct, including un
     source: "export default {mount(context){context.root.textContent='plain';return {update(){},dispose(){}}}}" } }
   project.instances.web = { id: 'web', definitionId: 'web', data: { html: '<!doctype html><img src="cw-resource:photo">', resourceBindings: { 'cw-resource:photo': 'photo' } } }
   project.instances.plain = { id: 'plain', definitionId: 'plain', data: { html: '<p>unused business field</p>' } }
-  project.surfaces[0].childIds = ['web', 'plain']
+  testContainerInstance(project, 0).childIds = ['web', 'plain']
   const bytes = new TextEncoder().encode('<svg xmlns="http://www.w3.org/2000/svg" width="2" height="3"/>')
   project.assets.photo = { id: 'photo', path: 'assets/photo.svg', mimeType: 'image/svg+xml', byteLength: bytes.length }
   const resources = { assets: { photo: bytes }, components: {} }, compilation = new InMemoryComponentCompilation(createEsbuildComponentCompiler())
@@ -112,7 +114,7 @@ it('routes explicit Web declarations and keeps plain Source direct, including un
   } finally { dom.window.close() }
   const entry = extractComponentLibraryEntry(project, resources, { id: 'saved', title: 'Web source', rootIds: ['web'] }).entry
   const destination = createBlankCourseProjectV10('Destination'), driver = new CourseV10Driver()
-  const insertion = prepareComponentLibraryInsertion(destination, entry, { container: { kind: 'surface', surfaceId: destination.surfaces[0].id }, index: 0 })
+  const insertion = prepareComponentLibraryInsertion(destination, entry, { container: { kind: 'surface', surfaceId: componentSurfaces(destination)[0].id }, index: 0 })
   const inserted = driver.apply({ kind: 'course-v10', project: destination, resources: { assets: {}, components: {} } }, insertion.command)
   if (inserted.kind !== 'course-v10') throw new Error('Expected V10')
   const instance = inserted.project.instances[insertion.rootIds[0]], implementation = inserted.project.definitions[instance.definitionId].implementation

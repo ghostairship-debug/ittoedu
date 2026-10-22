@@ -1,4 +1,6 @@
 // @vitest-environment node
+import { componentSurfaces } from '../../src/shared/contracts/component-platform/project'
+import { testContainerInstance } from '../helpers/glxWorkFixture'
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import os from 'node:os'
@@ -24,7 +26,7 @@ import { resolveComponentPresentation, owningContainer, type ComponentEdit, type
 
 function course() {
   const project = createBlankCourseProjectV10('范围注释与行内填空')
-  project.surfaces[0].kind = 'flow'; project.surfaces[0].childIds = ['body']
+  testContainerInstance(project, 0).container.kind = 'flow'; testContainerInstance(project, 0).childIds = ['body']
   project.definitions[TEXT_DEFINITION.id] = TEXT_DEFINITION
   project.instances.body = { id: 'body', definitionId: TEXT_DEFINITION.id, data: JSON.parse(JSON.stringify(createTextComponentData({ inlines: [{ type: 'text', text: '😀观察' }, { type: 'text', text: '电流方向', style: { bold: true } }, { type: 'math', formulaId: 'math', latex: 'I', accessibleText: 'I' }, { type: 'text', text: '，填写答案。', link: { href: 'https://example.com' } }] }))) }
   return project
@@ -40,21 +42,21 @@ it('commits range and inline ownership with body, maps edits and full deletion i
   const commit = async (edits: ComponentEdit[]) => { const { current, project } = await read(); const result = await host.internalAPI.dispatch({ documentId: snapshot.documentId, epoch: current.epoch, baseRevision: current.revision, actor: 'human', operationId: randomUUID(), mutation: { type: 'command', command: captureComponentOperation(project, edits) } }); if (result.status !== 'applied') throw new Error(JSON.stringify(result)) }
   try {
     let { project } = await read()
-    const note = componentTextInteractionEdits(project, { surfaceId: project.surfaces[0].id, instanceId: 'body', dataPath: ['content'], from: 3, to: 7 }, { kind: 'annotation', content: '电流从正极经过电路流向负极。' })
+    const note = componentTextInteractionEdits(project, { surfaceId: componentSurfaces(project)[0].id, instanceId: 'body', dataPath: ['content'], from: 3, to: 7 }, { kind: 'annotation', content: '电流从正极经过电路流向负极。' })
     await commit(note.edits)
     let state = await read(); expect(state.current.undoDepth).toBe(1); project = state.project
-    const answer = componentTextInteractionEdits(project, { surfaceId: project.surfaces[0].id, instanceId: 'body', dataPath: ['content'], from: 9, to: 13 }, { kind: 'input', label: '电流方向', acceptedAnswers: ['正极到负极'] })
+    const answer = componentTextInteractionEdits(project, { surfaceId: componentSurfaces(project)[0].id, instanceId: 'body', dataPath: ['content'], from: 9, to: 13 }, { kind: 'input', label: '电流方向', acceptedAnswers: ['正极到负极'] })
     await commit(answer.edits)
     project = (await read()).project
     expect(inlineComponentIds(body(project))).toEqual([answer.instanceId]); expect(owningContainer(project, answer.instanceId)).toEqual({ kind: 'instance', instanceId: 'body' })
     const next = replaceDocumentText(replaceDocumentText(body(project), 0, 0, { inlines: [{ type: 'text', text: '请' }] }), 5, 5, { inlines: [{ type: 'text', text: '实际' }] })
-    await commit(componentDataEdits(project, { surfaceId: project.surfaces[0].id, instanceId: 'body' }, { kind: 'patch', data: { content: JSON.parse(JSON.stringify(next)) } }))
+    await commit(componentDataEdits(project, { surfaceId: componentSurfaces(project)[0].id, instanceId: 'body' }, { kind: 'patch', data: { content: JSON.parse(JSON.stringify(next)) } }))
     project = (await read()).project
     const rangeId = note.target.kind === 'text-range' ? note.target.rangeId : ''
     expect(documentTextRanges(body(project)).get(rangeId)).toEqual({ from: 4, to: 10 })
     const selected = documentTextRanges(body(project)).get(rangeId)!
     const erased = replaceDocumentText(body(project), selected.from, selected.to, { inlines: [] })
-    await commit(componentDataEdits(project, { surfaceId: project.surfaces[0].id, instanceId: 'body' }, { kind: 'patch', data: { content: JSON.parse(JSON.stringify(erased)) } }))
+    await commit(componentDataEdits(project, { surfaceId: componentSurfaces(project)[0].id, instanceId: 'body' }, { kind: 'patch', data: { content: JSON.parse(JSON.stringify(erased)) } }))
     state = await read(); expect(state.project.instances[note.instanceId]).toBeUndefined()
     await host.internalAPI.dispatch({ documentId: snapshot.documentId, epoch: state.current.epoch, baseRevision: state.current.revision, actor: 'human', operationId: randomUUID(), mutation: { type: 'undo' } })
     project = (await read()).project
@@ -68,10 +70,10 @@ it('commits range and inline ownership with body, maps edits and full deletion i
 })
 
 it('partially copies annotated text and an inline child into its actual paragraph using the existing clone and resource transaction', async () => {
-  let project = course(), surfaceId = project.surfaces[0].id
+  let project = course(), surfaceId = componentSurfaces(project)[0].id
   const note = componentTextInteractionEdits(project, { surfaceId, instanceId: 'body', dataPath: ['content'], from: 3, to: 7 }, { kind: 'annotation', content: '注释' }); project = apply(project, note.edits)
   const answer = componentTextInteractionEdits(project, { surfaceId, instanceId: 'body', dataPath: ['content'], from: 7, to: 7 }, { kind: 'input', acceptedAnswers: ['答案'] }); project = apply(project, answer.edits)
-  project.instances.destination = { id: 'destination', definitionId: TEXT_DEFINITION.id, data: JSON.parse(JSON.stringify(createTextComponentData('粘贴：'))) }; project.surfaces[0].childIds.push('destination')
+  project.instances.destination = { id: 'destination', definitionId: TEXT_DEFINITION.id, data: JSON.parse(JSON.stringify(createTextComponentData('粘贴：'))) }; testContainerInstance(project, 0).childIds.push('destination')
   const target = { documentId: 'document', epoch: 'epoch', activation: 1, project, resources: { assets: {}, components: {} }, editingProject: project, activeStateId: null, surfaceId, instanceIds: [], instanceId: null }
   const port = createFlowDocumentResourcePort({ target, source: { documentId: 'document', project, resources: target.resources, roots: ['body'] } })
   const prepared = await prepareDocumentClipboard({ content: { blocks: [{ id: 'body', type: 'paragraph', content: sliceDocumentText(body(project), 3, 8) }] }, resources: emptyDocumentResources() }, emptyDocumentResources(), port)
@@ -91,7 +93,7 @@ it('partially copies annotated text and an inline child into its actual paragrap
 
 
 it('moves table/list slot attachments by authored identity and cleans replaced ranges and inline children once', () => {
-  let project = course(), surfaceId = project.surfaces[0].id
+  let project = course(), surfaceId = componentSurfaces(project)[0].id
   const table = createTableData({ rows: 2, columns: 1 })
   const {text: _text, ...cell} = table.rows[0].cells[0]
   table.rows[0].cells[0] = { ...cell, content: { inlines: [{ type: 'text', text: '甲甲甲' }] } }
@@ -99,7 +101,7 @@ it('moves table/list slot attachments by authored identity and cleans replaced r
   project.definitions[DOCUMENT_BLOCK_DEFINITION.id] = DOCUMENT_BLOCK_DEFINITION
   project.instances.table = { id: 'table', definitionId: TABLE_DEFINITION.id, data: JSON.parse(JSON.stringify(table)) }
   project.instances.list = { id: 'list', definitionId: DOCUMENT_BLOCK_DEFINITION.id, data: { type: 'list', ordered: false, items: [{ id: 'first', content: { inlines: [{ type: 'text', text: '第一项' }] } }, { id: 'second', content: { inlines: [{ type: 'text', text: '第二项' }] } }] } }
-  project.surfaces[0].childIds.push('table', 'list')
+  testContainerInstance(project, 0).childIds.push('table', 'list')
   const tablePath = ['rows','0','cells','0','content'], listPath = ['items','0','content']
   const note = componentTextInteractionEdits(project, { surfaceId, instanceId: 'table', dataPath: tablePath, from: 0, to: 1 }, { kind: 'annotation', content: '首字' }); project = apply(project, note.edits)
   const answer = componentTextInteractionEdits(project, { surfaceId, instanceId: 'table', dataPath: tablePath, from: 3, to: 3 }, { kind: 'input', acceptedAnswers: ['甲'] }); project = apply(project, answer.edits)
@@ -125,10 +127,10 @@ it('moves table/list slot attachments by authored identity and cleans replaced r
 
 
 it('keeps other formal body versions when a presentation state deletes its ranges and inline atom', () => {
-  let project = course(), surfaceId = project.surfaces[0].id
+  let project = course(), surfaceId = componentSurfaces(project)[0].id
   const note = componentTextInteractionEdits(project, { surfaceId, instanceId: 'body', dataPath: ['content'], from: 3, to: 7 }, { kind: 'annotation', content: '基态注释' }); project = apply(project, note.edits)
   const answer = componentTextInteractionEdits(project, { surfaceId, instanceId: 'body', dataPath: ['content'], from: 7, to: 7 }, { kind: 'input', acceptedAnswers: ['答案'] }); project = apply(project, answer.edits)
-  project.surfaces[0].kind = 'slide'; project.surfaces[0].presentation = { states: [{ id: 'empty-state', title: '当前展示', overrides: {} }] }
+  testContainerInstance(project, 0).container.kind = 'slide'; testContainerInstance(project, 0).container.presentation = { states: [{ id: 'empty-state', title: '当前展示', overrides: {} }] }
   const old = body(project)
   const edits = componentDataEdits(project, { surfaceId, stateId: 'empty-state', instanceId: 'body' }, { kind: 'fields', fields: [{ path: ['content'], value: { inlines: [] } }] })
   const changed = apply(project, presentationComponentEdits(project, surfaceId, 'empty-state', edits))
@@ -147,11 +149,11 @@ it('keeps other formal body versions when a presentation state deletes its range
   const erase = componentDataEdits(effective, { surfaceId, instanceId: 'body' }, { kind: 'fields', fields: [{ path: ['content'], value: { inlines: [] } }] })
   project = apply(project, presentationComponentEdits(project, surfaceId, 'empty-state', erase))
   expect(project.instances[stateInput.instanceId]).toBeUndefined(); expect(project.instances[stateNote.instanceId]).toBeUndefined()
-  expect(project.surfaces[0].presentation?.states[0].overrides[stateInput.instanceId]).toBeUndefined()
+  expect(componentSurfaces(project)[0].presentation?.states[0].overrides[stateInput.instanceId]).toBeUndefined()
   expect(project.instances[answer.instanceId]).toBeDefined(); expect(project.instances[note.instanceId]).toBeDefined(); expect(body(project)).toEqual(old)
   project.definitions[DOCUMENT_BLOCK_DEFINITION.id] = DOCUMENT_BLOCK_DEFINITION
   project.instances.list = { id: 'list', definitionId: DOCUMENT_BLOCK_DEFINITION.id, data: { type: 'list', ordered: false, items: [{ id: 'first', content: { inlines: [{ type: 'text', text: '第一项' }] } }, { id: 'second', content: { inlines: [{ type: 'text', text: '第二项' }] } }] } }
-  project.surfaces[0].childIds.push('list')
+  testContainerInstance(project, 0).childIds.push('list')
   const listNote = componentTextInteractionEdits(project, { surfaceId, instanceId: 'list', dataPath: ['items','0','content'], from: 0, to: 2 }, { kind: 'annotation', content: '基础第一项' }); project = apply(project, listNote.edits)
   const list = structuredClone(project.instances.list.data) as {items:Array<{id:string}>}; list.items.reverse()
   const reorder = componentDataEdits(project, { surfaceId, stateId: 'empty-state', instanceId: 'list' }, { kind: 'replace', data: JSON.parse(JSON.stringify(list)) })

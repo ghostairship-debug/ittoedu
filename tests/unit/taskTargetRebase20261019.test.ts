@@ -1,4 +1,5 @@
 // @vitest-environment node
+import { testContainerInstance } from '../helpers/glxWorkFixture'
 import { randomUUID } from 'node:crypto'
 import { expect, it } from 'vitest'
 import { createBlankCourseProjectV10 } from '../../src/core/course/createCourseProjectV10'
@@ -11,11 +12,11 @@ import { WEB_DEFINITION } from '../../src/components/web/data'
 import type { ComponentFrame } from '../../src/shared/contracts/component-platform'
 
 async function fixture() {
-  const project = createBlankCourseProjectV10('Continue target'), surfaceId = project.surfaces[0].id
+  const project = createBlankCourseProjectV10('Continue target'), surfaceId = testContainerInstance(project, 0).id
   project.definitions[WEB_DEFINITION.id] = WEB_DEFINITION
   project.instances.item = { id: 'item', definitionId: WEB_DEFINITION.id, data: { html: '<h1>保留原对象正文</h1>' },
     frame: { width: 400, height: 240, transform: [1, 0, 0, 1, 100, 50] } }
-  project.surfaces[0].childIds = ['item']
+  testContainerInstance(project, 0).childIds = ['item']
   const driver = new CourseV10Driver(), registry = new DocumentRegistry({ drivers: [driver], createId: randomUUID,
     bindingKey: binding => binding.path, persistence: { async append() {}, async save() { throw new Error('No save requested') } } })
   const session = await registry.create({ kind: 'course-v10', project, resources: { assets: {}, components: {} } }, 'continue-target.glx')

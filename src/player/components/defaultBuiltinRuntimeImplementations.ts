@@ -10,6 +10,13 @@ import { disclosureRuntimeImplementation } from '../../components/disclosure'
 import { popoverRuntimeImplementation } from '../../components/popover'
 import { documentBlockRuntimeImplementation } from '../../components/document-block'
 import type { ComponentRuntimeImplementation, TeacherControllerPort } from '../../shared/contracts/component-platform'
+/** The common projection owns layout and child mounting; the boundary shares the ordinary runtime lifecycle. */
+const containerRuntimeImplementation: ComponentRuntimeImplementation = {
+  mount({ root }) {
+    if (root) root.dataset.componentContainerBoundary = ''
+    return { update() {}, dispose() { if (root) delete root.dataset.componentContainerBoundary } }
+  },
+}
 export function defaultBuiltinRuntimeImplementations(ports:{assetUrl(id:string):string|undefined;teacherController?:TeacherControllerPort;reportImage(message:string,assetId:string):void}):ReadonlyMap<string,ComponentRuntimeImplementation>{
   const image=createImageRuntimeImplementation(id=>{const url=ports.assetUrl(id);return url?{url}:undefined},d=>ports.reportImage(d.message,d.assetId));
   return new Map([
@@ -21,5 +28,6 @@ export function defaultBuiltinRuntimeImplementations(ports:{assetUrl(id:string):
       ['guoling.disclosure', disclosureRuntimeImplementation as ComponentRuntimeImplementation], ['guoling.popover', popoverRuntimeImplementation as ComponentRuntimeImplementation],
       ['guoling.feedback', feedbackRuntimeImplementation as ComponentRuntimeImplementation], ['guoling.visibility', visibilityRuntimeImplementation as ComponentRuntimeImplementation],
       ['guoling.document-block', documentBlockRuntimeImplementation],
+      ['guoling.container.slide', containerRuntimeImplementation], ['guoling.container.flow', containerRuntimeImplementation], ['guoling.container.spatial', containerRuntimeImplementation],
   ]);
 }

@@ -1,3 +1,5 @@
+import { componentSurfaces } from '../../src/shared/contracts/component-platform/project'
+import { setRootContainers } from '../helpers/glxWorkFixture'
 import { afterEach, expect, it, vi } from 'vitest'
 import { createBlankCourseProjectV10 } from '../../src/core/course/createCourseProjectV10'
 import { ComponentRuntimeWorld } from '../../src/player/components/ComponentRuntimeWorld'
@@ -19,20 +21,20 @@ async function fixture(active = 'B', single = false) {
     project.instances[id] = { id, definitionId: id, implementationOverride: source(id), data: { html: '<p class="fragment">one</p><p class="fragment">two</p>' },
       frame: { width: 100, height: 100, transform: [1, 0, 0, 1, index * 2000, 0] } }
   }
-  project.surfaces = [
+  setRootContainers(project, [
     { id: 'A', title: 'Before', kind: 'slide', childIds: [] },
     { id: 'B', title: 'Space', kind: 'spatial', childIds: single ? ['first'] : ['first', 'last'], designSize: { width: 800, height: 600 },
       spatial: { home: { x: -4000, y: 0, zoom: 1 }, frames: (single ? ['first'] : ['first', 'last']).map(id => ({ id: `frame-${id}`, title: id, targetInstanceId: id, pose: { x: 0, y: 0, zoom: 1 } })) } },
     { id: 'C', title: 'After', kind: 'slide', childIds: [] },
     { id: 'hidden-surface', title: 'Never visited', kind: 'slide', childIds: ['hidden'] },
-  ]
-  if (single) { project.surfaces = [project.surfaces[1]]; delete project.instances.last; delete project.instances.hidden }
+  ])
+  if (single) { setRootContainers(project, [componentSurfaces(project)[1]]); delete project.instances.last; delete project.instances.hidden }
   // A camera arrives before the next observer delivery in a real browser.
   const visibility = new Map<Element, (visible: boolean) => void>()
   vi.stubGlobal('IntersectionObserver', class { constructor(private callback: (entries: unknown[]) => void) {} observe(target: Element) { const notify = (visible: boolean) => this.callback([{ target, isIntersecting: visible }]); visibility.set(target, notify); notify(false) } unobserve(target: Element) { visibility.delete(target) } disconnect() {} })
-  const roots = new Map<string, HTMLElement>(), camera = createComponentSpatialCameraPort(project.surfaces.find(surface => surface.id === 'B')!.spatial!.home)
+  const roots = new Map<string, HTMLElement>(), camera = createComponentSpatialCameraPort(componentSurfaces(project).find(surface => surface.id === 'B')!.spatial!.home)
   let frame: string | null = null, index: number | null = null, world!: ComponentRuntimeWorld
-  const rootsVisible = () => { for (const [id, root] of roots) root.hidden = !project.surfaces.find(surface => surface.id === active)?.childIds.includes(id) }
+  const rootsVisible = () => { for (const [id, root] of roots) root.hidden = !componentSurfaces(project).find(surface => surface.id === active)?.childIds.includes(id) }
   const navigation = new ComponentNavigationOwner({ project: () => project, surfaceId: () => active,
     courseState: { get: key => world?.getState(key) as never, set: (key, value) => world?.setState(key, value) },
     select: async id => { active = id; rootsVisible(); await world.sync(project, { assets: {}, components: {} }) } })
@@ -50,7 +52,7 @@ async function fixture(active = 'B', single = false) {
     } })
     return implementation
   }
-  for (const id of Object.keys(project.instances)) define(id)
+  for (const id of Object.keys(project.instances).filter(id => !project.instances[id].container)) define(id)
   const errors: string[] = []
   world = new ComponentRuntimeWorld('document-navigation', { teacherController: navigation.teacherPort(), studentNavigation: navigation, report: message => errors.push(message),
     resolveSource: async implementation => {
@@ -59,6 +61,7 @@ async function fixture(active = 'B', single = false) {
       return { implementation: loaded }
     } })
   for (const [id, instance] of Object.entries(project.instances)) {
+    if (instance.container) continue
     const root = document.createElement('div'); roots.set(id, root); document.body.append(root)
     root.getBoundingClientRect = () => new DOMRect(instance.frame!.transform[4] - camera.read().x + 400, 100, 100, 100)
     world.bind(id, root); world.bindTarget(id, root)
@@ -159,8 +162,10 @@ it('a cancelled readiness wait cannot overwrite replacement navigation or stop t
 it('keeps repeated authored frame occurrences distinct when the first visit expands into fragments', async () => {
   const h = await fixture('B', true)
   try {
-    const project = h.project(), surface = project.surfaces[0]
-    h.setProject({ ...project, surfaces: [{ ...surface, spatial: { ...surface.spatial!, defaultPathId: 'repeat', paths: [{ id: 'repeat', title: 'Return', frameIds: ['frame-first', 'frame-first'] }] } }] })
+    const project = h.project(), surface = componentSurfaces(project)[0]
+    const next = structuredClone(project)
+    setRootContainers(next, [{ ...surface, spatial: { ...surface.spatial!, defaultPathId: 'repeat', paths: [{ id: 'repeat', title: 'Return', frameIds: ['frame-first', 'frame-first'] }] } }])
+    h.setProject(next)
     const initial = h.navigation.initializeSpatialPlayback(); await vi.waitFor(() => expect(h.mounts).toEqual(['first']))
     h.gates.get('first')!.resolve(); await initial
     expect(h.navigation.read().progress!.stepCount).toBe(4)

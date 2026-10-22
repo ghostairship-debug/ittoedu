@@ -1,4 +1,6 @@
 // @vitest-environment node
+import { componentSurfaces } from '../../src/shared/contracts/component-platform/project'
+import { testContainerInstance } from '../helpers/glxWorkFixture'
 import { expect, it } from 'vitest'
 import { createBlankCourseProjectV10 } from '../../src/core/course/createCourseProjectV10'
 import { createTextComponentData, TEXT_DEFINITION } from '../../src/components/text'
@@ -9,12 +11,12 @@ import { DocumentRegistry } from '../../src/core/documents/DocumentRegistry'
 import { DocumentToolGateway } from '../../src/core/tools/DocumentToolGateway'
 import { mutationCallSchema } from '../../src/core/tools/ToolCatalog'
 it('commits public component text appearance in one named-state batch and preserves base, neighbors, frames, save/reopen and Undo', async () => {
-  const driver = new CourseV10Driver(), project = createBlankCourseProjectV10('命名文字'), surfaceId = project.surfaces[0].id
+  const driver = new CourseV10Driver(), project = createBlankCourseProjectV10('命名文字'), surfaceId = componentSurfaces(project)[0].id
   project.definitions[TEXT_DEFINITION.id] = TEXT_DEFINITION
   const data = createTextComponentData('标题'); data.appearance.emphasis = true; data.sizing.mode = 'fixed'
   project.instances.text = { id: 'text', definitionId: TEXT_DEFINITION.id, data: JSON.parse(JSON.stringify(data)), frame: { width: 120, height: 90, transform: [1, 0, 0, 1, 40, 60] } }
   project.instances.neighbor = { ...structuredClone(project.instances.text), id: 'neighbor', frame: { width: 120, height: 90, transform: [1, 0, 0, 1, 300, 60] } }
-  project.surfaces[0].childIds = ['text', 'neighbor']; project.surfaces[0].presentation = { states: [{ id: 'named-a', title: 'A', overrides: {} }, { id: 'named-b', title: 'B', overrides: {} }] }
+  testContainerInstance(project, 0).childIds = ['text', 'neighbor']; testContainerInstance(project, 0).container.presentation = { states: [{ id: 'named-a', title: 'A', overrides: {} }, { id: 'named-b', title: 'B', overrides: {} }] }
   let serial = 0, saved = new Uint8Array()
   const registry = new DocumentRegistry({ drivers: [driver], createId: () => `style-${++serial}`, bindingKey: binding => binding.path, persistence: { async append() {}, async save(input) { saved = input.bytes.slice(); if (input.binding.kind !== 'file') throw new Error('File required'); return { ...input.binding, version: 'saved' } } } })
   const session = await registry.create({ kind: 'course-v10', project, resources: { assets: {}, components: {} } }, 'style.h5lesson'), gateway = new DocumentToolGateway(registry, [driver], () => String(++serial))

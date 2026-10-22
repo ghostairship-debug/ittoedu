@@ -21,12 +21,13 @@ export function AutomationTab() {
   const [scope, setScope] = useState<'scene' | 'global'>(initialScope)
   const [clickRulesOpen, setClickRulesOpen] = useState(false)
   const project = courseView.project, surfaceId = courseView.surfaceId, documentId = courseView.activeDocumentId
-  if (!project || !surfaceId || !documentId) return <div className="properties-scroll" data-testid="automation-tab"><section className="property-section interaction-overview"><h2>互动与动画</h2><p>请打开课件并选择一个页面。</p></section></div>
-  const view = componentInteractionView(courseView.editingProject ?? project, surfaceId, scope === 'global')
+  const contextId = surfaceId ?? courseView.rootInstanceId
+  if (!project || !contextId || !documentId) return <div className="properties-scroll" data-testid="automation-tab"><section className="property-section interaction-overview"><h2>互动与动画</h2><p>请打开作品并选择内容。</p></section></div>
+  const view = componentInteractionView(courseView.editingProject ?? project, contextId, scope === 'global')
   const commit = (change: (rules: InteractionRule[]) => InteractionRule[]) => {
     try {
       const target = kernel.captureTarget(documentId)
-      const current = componentInteractionView(target.editingProject, surfaceId, scope === 'global')
+      const current = componentInteractionView(target.editingProject, contextId, scope === 'global')
       const edits = componentRuleEdits(target.project, current.target, change(structuredClone(current.rules)))
       void kernel.editCaptured(kernel.capture(edits, target)).catch(error => setError(String(error)))
     } catch (error) { setError(String(error)) }
@@ -35,7 +36,7 @@ export function AutomationTab() {
   const reveal = (rule: InteractionRule) => {
     try {
       const target = kernel.captureTarget(documentId)
-      const current = componentInteractionView(target.editingProject, surfaceId, scope === 'global')
+      const current = componentInteractionView(target.editingProject, contextId, scope === 'global')
       const edits = componentRevealSequenceEdits(target.project, current.target, rule, current.rules)
       void kernel.editCaptured(kernel.capture(edits, target)).catch(error => setError(String(error)))
     } catch (error) { setError(String(error)) }
@@ -78,11 +79,11 @@ export function AutomationTab() {
       }}>启用／关闭默认控制台</button>}
     </section>
     <CourseLogicAuthoringPanel key={documentId} project={courseLogicAuthoringView(project)} onCommand={command => commitCourseLogicAuthoringCommand(kernel, documentId, command)} />
-    <SceneAutomationEditor {...shared} authoringStates={view.scene.presentation?.states ?? []} conditionSceneId={scope === 'global' ? surfaceId : null}
+    <SceneAutomationEditor {...shared} authoringStates={view.scene.presentation?.states ?? []} conditionSceneId={scope === 'global' ? courseView.rootInstanceId ?? contextId : null}
       revealTemplateTargetNodeIds={view.nodes.filter(node => node.visible && !node.locked).map(node => node.id)}
       onOpenClickRules={() => setClickRulesOpen(true)}
       onApplyRevealSequenceTemplate={intent => reveal(buildInteractionTemplateRule({ templateId: SCENE_ENTER_REVEAL_SEQUENCE_TEMPLATE_ID, ...intent,
-        conditions: [...(scope === 'global' ? [{ type: 'scene.in' as const, sceneIds: [surfaceId] }] : []),
+        conditions: [...(scope === 'global' ? [{ type: 'scene.in' as const, sceneIds: [courseView.rootInstanceId ?? contextId] }] : []),
           ...(courseView.activeStateId ? [{ type: 'presentation.in' as const, stateIds: [courseView.activeStateId] }] : [])] }))}
       onDuplicateRule={ruleId => commit(rules => { const index = rules.findIndex(rule => rule.id === ruleId); if (index >= 0) rules.splice(index + 1, 0, duplicateComponentRule(rules[index]!)); return rules })}
       onMoveRule={(ruleId, direction) => commit(rules => moveComponentRule(rules, ruleId, direction))} />

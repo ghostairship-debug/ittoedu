@@ -1,3 +1,5 @@
+import { setRootContainers, testContainerInstance } from '../helpers/glxWorkFixture'
+import { componentSurfaces } from '../../src/shared/contracts/component-platform/project'
 import { expect, it } from 'vitest'
 import { createBlankCourseProjectV10 } from '../../src/core/course/createCourseProjectV10'
 import { componentDataEdits, componentChartDataEdits, componentTableDataEdits } from '../../src/core/course/componentDataEdits'
@@ -23,7 +25,7 @@ function lesson() {
     project.definitions[id] = { id, role: 'content', implementation: { kind: 'builtin', key: `guoling.${id}` } }
     project.instances[id] = { id, definitionId: id, data: json(data), frame: { width: 520, height: 320, transform: [1, 0, 0, 1, 30, 40] } }
   }
-  project.surfaces = [{ id: 'flow', kind: 'flow', title: '讲义', childIds: ['chart', 'table'] }]
+  setRootContainers(project, [{ id: 'flow', kind: 'flow', title: '讲义', childIds: ['chart', 'table'] }])
   return { project, chart, table }
 }
 
@@ -117,7 +119,7 @@ it('prepares established Flow defaults, explicit destination geometry, and retai
   project.instances.table.childIds = ['chart']
   project.instances.table.frame = { width: 600, height: 400, transform: [2, 0, 0, 2, 100, 200] }
   project.instances.chart.frame = { width: 80, height: 40, transform: [1, 0, 0, 1, 10, 20] }
-  project.surfaces[0].childIds = ['table']
+  testContainerInstance(project, 0).childIds = ['table']
   const nested = apply(project, flowPlacementEdits(project, 'chart', input))
   expect(nested.instances.chart.frame).toEqual({ width: 80, height: 40, transform: [2, 0, 0, 2, 120, 240] })
   expect(nested.instances.table.childIds).toEqual([])
@@ -127,8 +129,8 @@ it('prepares established Flow defaults, explicit destination geometry, and retai
 
 it('submits named-state professional preparation through Session CAS/History and saves/reopens the same semantic result', async () => {
   const { project, table } = lesson()
-  project.surfaces[0].kind = 'slide'
-  project.surfaces[0].presentation = { states: [{ id: 'state', title: '专业数据状态', overrides: {} }] }
+  testContainerInstance(project, 0).container.kind = 'slide'
+  testContainerInstance(project, 0).container.presentation = { states: [{ id: 'state', title: '专业数据状态', overrides: {} }] }
   const driver = new CourseV10Driver(), saved: Uint8Array[] = []
   const session = await DocumentSession.create({ documentId: 'professional', epoch: 'one', binding: { kind: 'untitled', suggestedName: 'professional.h5lesson' },
     model: { kind: 'course-v10', project, resources: { assets: {}, components: {} } } }, driver, {
@@ -142,8 +144,11 @@ it('submits named-state professional preparation through Session CAS/History and
   expect((await session.execute({ ...operation, operationId: 'stale' })).status).toBe('conflict')
   const stored = session.read().model
   if (stored.kind !== 'course-v10') throw new Error('expected course')
-  expect(stored.project.instances).toEqual(project.instances)
-  const override = stored.project.surfaces[0].presentation!.states[0].overrides.table
+  // Named states now live on the container instance; ordinary author objects
+  // retain the exact base data while the container owns the state override.
+  expect(Object.values(stored.project.instances).filter(instance => !instance.container))
+    .toEqual(Object.values(project.instances).filter(instance => !instance.container))
+  const override = componentSurfaces(stored.project)[0].presentation!.states[0].overrides.table
   expect(parseTableData(override.data).rows[0].id).toBe(table.rows[1].id)
   await session.save({ kind: 'file', path: 'professional.h5lesson', bindingVersion: 1, version: null })
   expect(driver.load(saved[0])).toEqual(stored)

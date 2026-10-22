@@ -1,3 +1,5 @@
+import { componentSurfaces } from '../../src/shared/contracts/component-platform/project'
+import { testContainerInstance } from '../helpers/glxWorkFixture'
 // @vitest-environment node
 import { afterAll, beforeAll, expect, it } from 'vitest'
 import { build } from 'esbuild'
@@ -61,7 +63,7 @@ async function applyHtml(html: string, themeCss?: string) {
       operationId: randomUUID(), actor: 'agent', mutation: { type: 'command', command } })
   } }, measure: async request => { observed = await measure(request, html.includes('class="detail"')); return observed.assembly },
     compilation: { async compile() { throw new Error('Static HTML assembly must not compile Source') } } })
-  const result = await service.apply({ intent: 'insert', target: { kind: 'container', container: { kind: 'surface', surfaceId: project.surfaces[0]!.id } },
+  const result = await service.apply({ intent: 'insert', target: { kind: 'container', container: { kind: 'surface', surfaceId: componentSurfaces(project)[0]!.id } },
     source: { kind: 'html', html } })
   return { result, project: current(), snapshot: session.read(), observed: observed! }
 }
@@ -79,8 +81,8 @@ it('keeps the real default cursor theme while assembling the frozen static page 
   expect(authored.result).toMatchObject({ commit: 'committed', usability: 'usable' })
   expect(authored.observed.capture.sourceScopes).toEqual([])
   expect(authored.snapshot).toMatchObject({ revision: 1, undoDepth: 1 })
-  const surface = authored.project.surfaces[0]!, roots = surface.childIds.map(id => authored.project.instances[id]!)
-  expect(surface.background).toEqual({ mode: 'own', color: 'rgb(245, 247, 239)', assetId: null })
+  const surface = componentSurfaces(authored.project)[0]!, roots = testContainerInstance(authored.project, 0).childIds.map(id => authored.project.instances[id]!)
+  expect(testContainerInstance(authored.project, 0).container!.background).toEqual({ mode: 'own', color: 'rgb(245, 247, 239)', assetId: null })
   expect(roots).toHaveLength(5)
   expect(roots.every(instance => instance.definitionId === 'guoling.text')).toBe(true)
   expect(roots.map(textOf)).toContain('如果让土地多喝一点水？')
@@ -94,8 +96,8 @@ it.each(['author', 'theme'] as const)('retains actual %s state CSS that reveals 
   expect(authored.result).toMatchObject({ commit: 'committed', usability: 'usable' })
   expect(authored.observed).toMatchObject({ before: 'none', after: 'block' })
   expect(authored.observed.capture.sourceScopes).toContainEqual(expect.objectContaining({ reason: expect.stringContaining('state-css-context') }))
-  expect(authored.project.surfaces[0]!.background).toBeUndefined()
-  const roots = authored.project.surfaces[0]!.childIds.map(id => authored.project.instances[id]!)
+  expect(testContainerInstance(authored.project, 0).container!.background).toBeUndefined()
+  const roots = testContainerInstance(authored.project, 0).childIds.map(id => authored.project.instances[id]!)
   expect(roots).toHaveLength(1)
   expect(data(roots[0]!).html).toContain('The real extra content')
   expect(authored.observed.assembly.root.retainedSource).toBeDefined()

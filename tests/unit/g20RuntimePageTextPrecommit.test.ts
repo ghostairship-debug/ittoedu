@@ -1,3 +1,5 @@
+import { testContainerInstance } from '../helpers/glxWorkFixture'
+import { componentSurfaces } from '../../src/shared/contracts/component-platform/project'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { createBlankCourseProjectV10 } from '../../src/core/course/createCourseProjectV10'
 import { WEB_DEFINITION } from '../../src/components/web/data'
@@ -9,9 +11,9 @@ import type { ComponentPlatformRuntime } from '../../src/player/components/Compo
 const project = createBlankCourseProjectV10('页面文字')
 project.definitions[WEB_DEFINITION.id] = WEB_DEFINITION
 project.instances.web = { id: 'web', definitionId: WEB_DEFINITION.id, data: { html: '<p>原文</p><script>const states=["其他状态"];</script>' } }
-project.surfaces[0].childIds = ['web']
+testContainerInstance(project, 0).childIds = ['web']
 const target: CapturedCourseTarget = { documentId: 'document-1', epoch: 'epoch', project, editingProject: project,
-  resources: { assets: {}, components: {} }, activeStateId: null, surfaceId: project.surfaces[0].id, instanceId: 'web', instanceIds: ['web'] }
+  resources: { assets: {}, components: {} }, activeStateId: null, surfaceId: componentSurfaces(project)[0].id, instanceId: 'web', instanceIds: ['web'] }
 const submit = vi.fn()
 const bridge = { captureTarget: () => structuredClone(target),
   capture: (edits: Parameters<typeof captureComponentOperation>[1], value: CapturedCourseTarget) =>

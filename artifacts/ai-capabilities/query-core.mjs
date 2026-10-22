@@ -61,7 +61,7 @@ export function courseAgentCapabilityDiskIndex(data                           ) 
 
 
 
-const surfaces = ['slide', 'flow', 'spatial']
+const surfaces = ['slide', 'flow', 'spatial', 'program']
 const owners = ['global', 'surface', 'instance']
 const carriers = ['component']
 const kinds = ['tool', 'recipe', 'component', 'protocol', 'skill', 'reference']
@@ -254,7 +254,7 @@ export function readCourseAgentCapability(data                           , id   
     carriers: [...new Set(variants.flatMap(variant => variant.carriers ?? entry.carriers))], variants } : entry), content }
 }
 
-export const courseAgentCapabilityQueryHelp = '保持原生工作目录；node "<query.mjs绝对路径>" [--help] [--id <能力ID> | --query <关键词>] [--operation <操作>] [--mode <模式>] [--nativeType <类型>] [--surface <slide|flow|spatial>] [--owner <global|surface|instance>] [--carrier <component>] [--kind <种类>] [--task <create|edit|repair|design>] [--limit <1..100>] [--semanticVersion <当前版本>] [--summary]。无参数返回精简发现入口；定向查询默认返回完整卡片，--summary 只返回索引。'
+export const courseAgentCapabilityQueryHelp = '保持原生工作目录；node "<query.mjs绝对路径>" [--help] [--id <能力ID> | --query <关键词>] [--operation <操作>] [--mode <模式>] [--nativeType <类型>] [--surface <slide|flow|spatial|program>] [--owner <global|surface|instance>] [--carrier <component>] [--kind <种类>] [--task <create|edit|repair|design>] [--limit <1..100>] [--semanticVersion <当前版本>] [--summary]。program 查询根 Source 程序能力，不是第四种容器。无参数返回精简发现入口；定向查询默认返回完整卡片，--summary 只返回索引。'
 
 /** The generated CLI and app share parsing-independent query semantics. */
 export function runCourseAgentCapabilityQuery(data                           , args                   ) {

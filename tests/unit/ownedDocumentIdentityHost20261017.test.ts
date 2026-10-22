@@ -1,3 +1,4 @@
+import { testContainerInstance } from '../helpers/glxWorkFixture'
 // @vitest-environment node
 import { createServer } from 'node:http'
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
@@ -58,7 +59,7 @@ it('keeps the real Host and Source fragment realms across first-edit identity pr
     const project = createBlankCourseProjectV10('Owned document Host identity')
     project.definitions.web = { id: 'web', role: 'content', implementation: { kind: 'source', language: 'javascript', source: code } }
     project.instances.web = { id: 'web', definitionId: 'web', authoring: { records: {} }, data: { html: html() } }
-    project.surfaces[0].childIds = ['web']
+    testContainerInstance(project, 0).childIds = ['web']
     const driver = new CourseV10Driver(), session = await DocumentSession.create({ documentId: 'identity-host', epoch: 'epoch',
       binding: { kind: 'untitled', suggestedName: 'identity-host' },
       model: { kind: 'course-v10', project, resources: { assets: {}, components: {} } } }, driver,

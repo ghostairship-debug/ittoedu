@@ -10,7 +10,7 @@ interface Unit { from: number; to: number; text: string; barrier?: true; wrapper
 export interface SlotMap { key: string; units: Unit[]; from?: number; to?: number; depth?: number; ordered?: boolean; ordinal?: number; retained?: MarkdownInlineWrapper[] }
 /** `keys` keeps the block's own slot order, including slots this map could not locate, so a
  * selection across an unlocatable slot is still visible to the caller. */
-export interface MarkdownBlockMap { blockId: string; from: number; to: number; keys: string[]; slots: SlotMap[]; table?: { rows: string[]; columns: string[] } }
+export interface MarkdownBlockMap { blockId: string; from: number; to: number; keys: string[]; slots: SlotMap[]; table?: { rows: string[]; columns: string[] }; /** A recoverable fragment is shown as source, not authored as a fenced code block. */ rawSource?: true }
 export interface MarkdownSourceMap { blocks: MarkdownBlockMap[] }
 interface Projection { text: string; positions: number[] }
 /** The parser accepts this syntax, but its local source span cannot be proven; only this

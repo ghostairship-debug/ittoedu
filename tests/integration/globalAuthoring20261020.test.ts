@@ -1,4 +1,5 @@
 // @vitest-environment node
+import { componentSurfaces } from '../../src/shared/contracts/component-platform/project'
 import { promises as fs } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -26,7 +27,7 @@ it('authors once into an initially empty formal global container and preserves i
     const current = await host.internalAPI.read(snapshot.documentId)
     if (current.model.kind !== 'course-v10') throw new Error('Expected formal project')
     expect(current.model.project.global.overlay).not.toHaveLength(0)
-    expect(current.model.project.surfaces).toEqual(project.surfaces)
+    expect(componentSurfaces(current.model.project)).toEqual(componentSurfaces(project))
     const page = componentProjectFiles(current.model.project, current.model.resources).find(file => file.kind === 'structure' && file.path.startsWith('pages/'))!
     const context = await host.tools.taskTargetContext('author', { path: page.path })
     expect(context).toMatchObject({ neighbors: expect.arrayContaining([expect.objectContaining({ coordinates: 'global-overlay',

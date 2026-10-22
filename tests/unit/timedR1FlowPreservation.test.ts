@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { createTestProjectFromLegacy, appendRootContainers, testContainerInstance } from '../helpers/glxWorkFixture'
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { createElement } from 'react'
 import { afterAll, afterEach, beforeAll, beforeEach, expect, it, vi } from 'vitest'
@@ -52,14 +53,14 @@ afterEach(async () => {
   for (const directory of directories.splice(0)) await rm(directory, { recursive: true, force: true, maxRetries: 3, retryDelay: 10 })
 })
 function initial(locked = false): CourseProjectV10 {
-  return { schemaVersion: 10, id: 'timed-r1-flow', revision: 0, title: '讲义',
+  return createTestProjectFromLegacy({ schemaVersion: 10, id: 'timed-r1-flow', revision: 0, title: '讲义',
     definitions: { [SHAPE_DEFINITION.id]: SHAPE_DEFINITION, [TEXT_DEFINITION.id]: TEXT_DEFINITION,
       private: { id: 'private', role: 'content', implementation: { kind: 'source', language: 'javascript', workspace: { ownerId: 'files', entry: 'main.js' } } } },
     instances: { shape: { id: 'shape', definitionId: SHAPE_DEFINITION.id, data: JSON.parse(JSON.stringify(defaultShapeData())), locked, frame: structuredClone(manualFrame) },
       seed: { id: 'seed', definitionId: SHAPE_DEFINITION.id, data: JSON.parse(JSON.stringify(defaultShapeData())) },
       body: { id: 'body', definitionId: TEXT_DEFINITION.id, data: JSON.parse(JSON.stringify(createTextComponentData('原正文'))), locked: true },
       private: { id: 'private', definitionId: 'private', data: { title: '保留私有数据' } } },
-    surfaces: [{ id: 'flow', kind: 'flow', title: '正文', childIds: ['shape', 'body', 'seed', 'private'] }], global: { underlay: [], overlay: [] }, assets: {} }
+    surfaces: [{ id: 'flow', kind: 'flow', title: '正文', childIds: ['shape', 'body', 'seed', 'private'] }], global: { underlay: [], overlay: [] }, assets: {} })
 }
 async function harness(project = initial()) {
   const directory = await mkdtemp(path.join(tmpdir(), 'guoling-r1-flow-')); directories.push(directory)
@@ -122,7 +123,7 @@ it('disables locked Flow structural controls and rejects their direct owners ato
     data: { type: 'section', title: { inlines: [{ type: 'text', text: '锁定组' }] }, collapsedByDefault: false } }
   project.instances.float = { ...structuredClone(project.instances.shape), id: 'float', flowPlacement: { space: 'paper', plane: 'overlay' } }
   project.instances.seed.flowPlacement = { space: 'paper', plane: 'overlay' }
-  project.surfaces[0].childIds.push('section', 'float')
+  testContainerInstance(project, 0).childIds.push('section', 'float')
   const h = await harness(project)
   render(createElement(PropertiesTab, { onReplaceImage: () => {} }))
   expect(screen.getByRole('button', { name: '转为浮层' })).toBeDisabled()
@@ -163,11 +164,11 @@ it('disables locked Flow structural controls and rejects their direct owners ato
 it('keeps locked floating controls disabled while permitting adjacent PM insertion and locked body text edits through the real Flow owner', async () => {
   const project = initial(true)
   project.instances.shape.flowPlacement = { space: 'paper', plane: 'overlay' }
-  project.surfaces[0].childIds = ['body', 'shape', 'seed', 'private']
+  testContainerInstance(project, 0).childIds = ['body', 'shape', 'seed', 'private']
   for (const kind of ['slide', 'spatial'] as const) {
     const id = `${kind}-locked`
     project.instances[id] = { ...structuredClone(project.instances.body), id }
-    project.surfaces.push({ id: kind, kind, title: kind, childIds: [id] })
+    appendRootContainers(project, { id: kind, kind, title: kind, childIds: [id] })
   }
   const h = await harness(project)
   probe.runtime = { resources: h.resources, selectedInstanceIds: ['shape'], selectInstances: (ids: string[]) => useEditorStore.getState().selectNodes(ids),
@@ -228,7 +229,7 @@ it('rejects an old rendered Properties Delete and a late Flow media replacement 
   project.definitions[IMAGE_DEFINITION.id] = IMAGE_DEFINITION
   project.instances.picture = { id: 'picture', definitionId: IMAGE_DEFINITION.id, data: JSON.parse(JSON.stringify(createImageData('original-picture'))) }
   project.assets['original-picture'] = { id: 'original-picture', path: 'assets/original.svg', mimeType: 'image/svg+xml', kind: 'image' }
-  project.surfaces[0].childIds.push('picture')
+  testContainerInstance(project, 0).childIds.push('picture')
   const h = await harness(project)
   const properties = render(createElement(PropertiesTab, { onReplaceImage: () => {} }))
   const oldDelete = screen.getByRole('button', { name: '删除' })

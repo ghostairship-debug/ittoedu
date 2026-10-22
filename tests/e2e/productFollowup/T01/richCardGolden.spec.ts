@@ -1,3 +1,4 @@
+import { setRootContainers } from '../../../helpers/glxWorkFixture'
 import { jsonValueSchema } from '../../../../src/shared/contracts/component-platform/schema'
 import { expect, test, type ElectronApplication } from '@playwright/test'
 import { createServer } from 'node:http'
@@ -25,7 +26,7 @@ test('actual rich card rewrites from material, preserves links formulas and neig
   project.instances.tail = { id: 'tail', definitionId: TEXT_DEFINITION.id, data: jsonValueSchema.parse(createTextComponentData('未选正文保留')) }
   project.instances.overlay = { id: 'overlay', definitionId: TEXT_DEFINITION.id, data: jsonValueSchema.parse(createTextComponentData('人工定位保留')),
     frame: { width: 180, height: 60, transform: [1, 0, 0, 1, 470, 220] }, style: { opacity: .65 }, flowPlacement: { space: 'paper', plane: 'overlay' } }
-  project.surfaces = [{ id: 'flow', title: '讲义', kind: 'flow', childIds: ['body', 'tail', 'overlay'] }]
+  setRootContainers(project, [{ id: 'flow', title: '讲义', kind: 'flow', childIds: ['body', 'tail', 'overlay'] }])
   writeFileSync(join(workspace, filename), new CourseV10Driver().serialize({ kind: 'course-v10', project, resources: { assets: {}, components: {} } }))
   writeFileSync(join(workspace, '资料.md'), '教师材料：正方形面积是边长的平方。\n')
   const requests: any[] = [], serverErrors: string[] = [], pageErrors: string[] = []
@@ -99,7 +100,7 @@ test('actual rich card rewrites from material, preserves links formulas and neig
     await expect.poll(async () => (await readSelectionDocument(page, opened.documentId)).model).toMatchObject({ project: { instances: { body: { data: jsonValueSchema.parse(original) } } } })
     await frame.locator('.course-light-tools').getByRole('button', { name: '重做', exact: true }).click()
     await expect.poll(async () => (await readSelectionDocument(page, opened.documentId)).model).toMatchObject({ kind: 'course-v10', project: {
-      instances: committed.model.project.instances, definitions: committed.model.project.definitions, surfaces: committed.model.project.surfaces,
+      instances: committed.model.project.instances, definitions: committed.model.project.definitions, rootIds: committed.model.project.rootIds, entry: committed.model.project.entry,
     }, resources: committed.model.resources })
     const redone = await readSelectionDocument(page, opened.documentId)
     await frame.locator('.course-light-tools').getByRole('button', { name: '保存', exact: true }).click()

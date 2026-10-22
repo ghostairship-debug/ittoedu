@@ -1,3 +1,4 @@
+import { createTestProjectFromLegacy } from '../helpers/glxWorkFixture'
 import { expect, it } from 'vitest'
 import { createTextComponentData } from '../../src/components/text'
 import { defaultShapeData } from '../../src/components/shape'
@@ -9,7 +10,7 @@ import { freeSurfaceTargets, hitFreeObject } from '../../src/renderer/componentP
 
 // Geometry from the frozen six-page authoring result, page 2's rain-volume card.
 function fixture(): CourseProjectV10 {
-  return {
+  return createTestProjectFromLegacy({
     schemaVersion: 10, id: 'group-text', revision: 0, title: '雨水的两条去路',
     definitions: {
       group: { id: 'group', role: 'mixed', implementation: { kind: 'builtin', key: 'guoling.group' } },
@@ -28,7 +29,7 @@ function fixture(): CourseProjectV10 {
     },
     surfaces: [{ id: 'slide', kind: 'slide', title: '雨水的两条去路', childIds: ['card'], designSize: { width: 1280, height: 720 } }],
     global: { underlay: [], overlay: [] }, assets: {},
-  }
+  })
 }
 const identity = [1, 0, 0, 1, 0, 0] as const
 

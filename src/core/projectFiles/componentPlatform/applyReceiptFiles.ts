@@ -2,6 +2,7 @@ import type { ContentApplyResult } from '../../contentApply/planning/types'
 import { equalComponentValue } from '../../drivers/courseV10Operations'
 import type { ComponentProjectSnapshot } from './coordinator'
 import { componentProjectFiles, componentProjectScopeFiles, type ComponentProjectFile, type ComponentProjectFileScope } from './projection'
+import { hasBuiltinComponentSource } from '../../components/source/builtinSources'
 
 function bindingIdentity(file: ComponentProjectFile): unknown {
   const binding = file.binding
@@ -14,11 +15,16 @@ export const sameComponentProjectFile = (left: ComponentProjectFile, right: Comp
   && (left.binding ? equalComponentValue(bindingIdentity(left), bindingIdentity(right))
     : !right.binding && (left.target ? equalComponentValue(left.target, right.target) : !right.target && left.path === right.path))
   && left.sourceFile?.path === right.sourceFile?.path
-  && left.authorSource?.dependencyId === right.authorSource?.dependencyId
+  && (left.builtinSource && right.builtinSource
+    ? left.builtinSource.key === right.builtinSource.key && left.builtinSource.part === right.builtinSource.part
+    : (left.builtinSource?.part !== 'implementation' || hasBuiltinComponentSource(left.builtinSource.key))
+      && (right.builtinSource?.part !== 'implementation' || hasBuiltinComponentSource(right.builtinSource.key))
+      && left.authorSource?.dependencyId === right.authorSource?.dependencyId)
 
 /** Select actual result paths; returning metadata does not advance any observed content baseline. */
 export function componentProjectApplyReceiptFiles(baseline: ComponentProjectSnapshot, original: ComponentProjectFile,
-  result: ContentApplyResult, after: ComponentProjectSnapshot, scope: ComponentProjectFileScope = { kind: 'document' }) {
+  result: ContentApplyResult, after: ComponentProjectSnapshot, scope: ComponentProjectFileScope = { kind: 'document' },
+  currentFiles?: ComponentProjectFile[]) {
   if (result.commit !== 'committed' && result.commit !== 'unchanged') return { files: [] as ComponentProjectFile[] }
   if (after.documentId !== baseline.documentId || after.epoch !== baseline.epoch)
     throw new Error('工程身份已变化，无法取得本次提交的当前文件路径。')
@@ -37,7 +43,7 @@ export function componentProjectApplyReceiptFiles(baseline: ComponentProjectSnap
   const definitionId = binding?.kind === 'definition' || binding?.kind === 'definition-source' ? binding.definitionId : undefined
   if (definitionId && binding?.kind === 'definition')
     Object.values(project.instances).filter(instance => instance.definitionId === definitionId).forEach(instance => visit(instance.id))
-  const current = componentProjectScopeFiles(project, componentProjectFiles(project, after.model.resources), scope)
+  const current = componentProjectScopeFiles(project, currentFiles ?? componentProjectFiles(project, after.model.resources), scope)
   const files = current.filter(file => {
     if (file.target?.kind === 'instance' && instanceIds.has(file.target.instanceId)) return true
     if (definitionId && (file.binding?.kind === 'definition' || file.binding?.kind === 'definition-source')) return file.binding.definitionId === definitionId

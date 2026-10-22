@@ -1,12 +1,12 @@
-import type { PublishedCourseV3 } from '../../shared/contracts/component-platform/published'
-import { mountPublishedCourseV3, publishedComponentModel } from './publishedPlayer'
+import type { PublishedCourseV4 } from '../../shared/contracts/component-platform/published'
+import { mountPublishedCourseV4, publishedComponentModel } from './publishedPlayer'
 import { componentSurfaceGeometryTargets } from './spatialTargets'
 import { spatialFramePose } from '../surfaces/spatial/componentPlatform/graph'
-import { componentDefinitionBuiltinKey } from '../../shared/contracts/component-platform/project'
+import { componentDefinitionBuiltinKey, componentSurface } from '../../shared/contracts/component-platform/project'
 
 export interface ComponentOutputImage { dataUrl: string; width: number; height: number }
 export interface ComponentOutputCaptureOptions {
-  payload: PublishedCourseV3
+  payload: PublishedCourseV4
   root: HTMLElement
   staticExport?: true
   screenshot(rect: { x: number; y: number; width: number; height: number }): Promise<ComponentOutputImage>
@@ -14,11 +14,11 @@ export interface ComponentOutputCaptureOptions {
 
 /** Camera and local-frame preparation is shared by isolated observation and output capture. */
 export async function prepareComponentOutputRegion(input: {
-  payload: PublishedCourseV3; root: HTMLElement; player: Awaited<ReturnType<typeof mountPublishedCourseV3>>;
+  payload: PublishedCourseV4; root: HTMLElement; player: Awaited<ReturnType<typeof mountPublishedCourseV4>>;
   surfaceId: string; instanceId?: string; spatialFrameId?: string; staticExport?: true;
 }): Promise<{ x: number; y: number; width: number; height: number }> {
   const { payload, root, player, surfaceId, instanceId, spatialFrameId } = input
-  const surface = payload.surfaces.find(value => value.id === surfaceId)
+  const surface = componentSurface(publishedComponentModel(payload).project, surfaceId)
   if (!surface) throw new Error(`捕获表面已不存在：${surfaceId}`)
   const omitted = new Set<string>()
   if (input.staticExport === true) {
@@ -35,11 +35,20 @@ export async function prepareComponentOutputRegion(input: {
     if (!frame || !camera) throw new Error(`捕获镜头已不存在：${spatialFrameId}`)
     camera.set(spatialFramePose(frame, player.viewport(surfaceId) ?? surface.designSize ?? { width: 960, height: 640 }, componentSurfaceGeometryTargets(publishedComponentModel(payload).project, surfaceId)))
   }
-  const element = instanceId ? player.runtime.contentElement(instanceId) : root
+  const container = Boolean(instanceId && payload.instances[instanceId]?.container)
+  const localTarget = instanceId ? player.runtime.targetElement(instanceId) : undefined
+  let containerTarget = localTarget
+  if (container && instanceId) for (let parent = localTarget?.parentElement; parent && parent !== root; parent = parent.parentElement) {
+    if (parent.dataset.componentObject === instanceId) { containerTarget = parent; break }
+  }
+  // A container's runtime target is its inner viewport. Its own authored paint,
+  // border and opacity belong to the ordinary instance outer around that view.
+  const element = instanceId ? container ? containerTarget : player.runtime.contentElement(instanceId)
+    : payload.rootIds.includes(surfaceId) ? root : player.runtime.targetElement(surfaceId)
   if (!element) throw new Error(`捕获组件没有运行内容：${instanceId}`)
   await player.waitForCaptureReady(element)
   if (instanceId) {
-    const target = player.runtime.targetElement(instanceId)
+    const target = container ? containerTarget : localTarget
     if (!target) throw new Error(`捕获组件没有本地投影：${instanceId}`)
     // Office applies the authored frame itself. Capture only local professional pixels.
     const local = root.ownerDocument.createElement('div')
@@ -48,8 +57,10 @@ export async function prepareComponentOutputRegion(input: {
     const width = frame?.width ?? target.offsetWidth, height = frame?.height ?? target.offsetHeight
     const scale = Math.min(1, root.clientWidth / Math.max(1, width), root.clientHeight / Math.max(1, height))
     Object.assign(local.style, { position: 'absolute', left: '0px', top: '0px', width: `${width}px`, height: `${height}px`,
-      transform: `scale(${scale})`, transformOrigin: '0 0', background: 'white', zIndex: '10' })
+      transform: `scale(${scale})`, transformOrigin: '0 0', background: 'transparent', zIndex: '10' })
     root.append(local)
+    // This bitmap owns local pixels only; work/Surface paint belongs to the output page.
+    for (const sibling of root.children) if (sibling !== local) (sibling as HTMLElement).style.display = 'none'
     player.runtime.beforeProjectionMutation()
     local.append(target)
     Object.assign(target.style, { position: 'relative', left: '0px', top: '0px', width: `${width}px`, height: `${height}px`, maxWidth: 'none', margin: '0px', float: 'none', transform: 'none', translate: 'none', rotate: 'none', scale: 'none' })
@@ -58,13 +69,13 @@ export async function prepareComponentOutputRegion(input: {
     Object.assign(element.style, { position: 'absolute', inset: '0px', width: '100%', height: '100%', transform: 'none', translate: 'none', rotate: 'none', scale: 'none' })
     // The Flow stage can still have a fitted extent/height between target and
     // content. Reset that projection wrapper too, so 100% means the local frame.
-    for (let wrapper = element.parentElement; wrapper && wrapper !== target; wrapper = wrapper.parentElement) {
+    for (let wrapper = element === target ? null : element.parentElement; wrapper && wrapper !== target; wrapper = wrapper.parentElement) {
       Object.assign(wrapper.style, { position: 'absolute', inset: '0px', width: '100%', height: '100%', transform: 'none', translate: 'none', rotate: 'none', scale: 'none' })
     }
     player.runtime.afterProjectionMutation()
     for (const outer of root.querySelectorAll<HTMLElement>('[data-component-object],[data-component-instance-id]')) {
       const ownerId = outer.dataset.componentObject ?? outer.dataset.componentInstanceId
-      if (ownerId !== instanceId && !outer.contains(target)) outer.hidden = true
+      if (ownerId !== instanceId && !outer.contains(target) && !(container && target.contains(outer))) outer.hidden = true
     }
     if (!omitted.has(instanceId)) target.hidden = false
     // Reparenting native media can restart decoding. Prepare the final local
@@ -93,14 +104,14 @@ export async function prepareComponentOutputRegion(input: {
 
 /** Every image starts a fresh author-initial run of the supplied immutable payload. */
 export async function prepareComponentOutputCapture(options: ComponentOutputCaptureOptions) {
-  let disposed = false, current: Awaited<ReturnType<typeof mountPublishedCourseV3>> | undefined
+  let disposed = false, current: Awaited<ReturnType<typeof mountPublishedCourseV4>> | undefined
   let queue = Promise.resolve()
   const capture = (surfaceId: string, instanceId?: string, spatialFrameId?: string): Promise<ComponentOutputImage> => {
     const work = queue.then(async () => {
       if (disposed) throw new Error('输出捕获已结束')
-      const surface = options.payload.surfaces.find(value => value.id === surfaceId)
+      const surface = componentSurface(publishedComponentModel(options.payload).project, surfaceId)
       if (!surface) throw new Error(`捕获表面已不存在：${surfaceId}`)
-      current = await mountPublishedCourseV3(options.payload, options.root, { initialSurfaceId: surfaceId, capture: true, keyboardNavigation: false })
+      current = await mountPublishedCourseV4(options.payload, options.root, { initialSurfaceId: surfaceId, capture: true, keyboardNavigation: false })
       try {
         if (disposed) throw new Error('输出捕获已结束')
         const rect = await prepareComponentOutputRegion({ payload: options.payload, root: options.root, player: current,

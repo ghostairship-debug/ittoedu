@@ -117,8 +117,16 @@ export function projectTeacherControllerInstances(project: CourseProjectV10, hud
     const projected: ComponentFrame = { ...frame, transform: [...multiplyMatrices(hud.authorToViewport, frame.transform)] }
     const localFrame = { ...projected, transform: [...projected.transform] as ComponentFrame['transform'] }
     localFrame.transform[4] -= origin.x; localFrame.transform[5] -= origin.y
+    // Explicit full-width HUD uses viewport CSS pixels, so labels remain readable
+    // when the work's reference canvas and the actual viewport differ.
+    const stretch = instance.style?.width === '100%' && frame.transform[0] === 1 && frame.transform[1] === 0
+      && frame.transform[2] === 0 && frame.transform[3] === 1
+    if (stretch) {
+      localFrame.width = size.width; localFrame.height = frame.height
+      localFrame.transform = [1, 0, 0, 1, 0, frame.transform[5]]
+    }
     const shown = teacherControllerViewportFrame(localFrame, size, offset, teacherControllerIsCollapsed(project, id, port),
-      teacherControllerExpandedWidth(project, id, port?.read().locationId ?? ''))
+      stretch ? size.width : teacherControllerExpandedWidth(project, id, port?.read().locationId ?? ''))
     shown.transform[4] += origin.x; shown.transform[5] += origin.y
     if (instances === project.instances) instances = { ...instances }
     instances[id] = { ...instance, frame: shown }

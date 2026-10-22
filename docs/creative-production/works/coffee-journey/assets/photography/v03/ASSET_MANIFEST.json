@@ -1,0 +1,122 @@
+[
+  {
+    "id": "sorting",
+    "source_file": "kenya_sorting_cherries_kamweti_cc_by_sa.jpg",
+    "source_url": "https://commons.wikimedia.org/wiki/File:Kenyan_farmers_sorting_coffee_cherries.jpg",
+    "credit": "Kamweti wa Mutu",
+    "license": "CC BY-SA 4.0",
+    "license_url": "https://creativecommons.org/licenses/by-sa/4.0/",
+    "changes": "按原图方向信息校正、等比缩放与JPEG压缩；未裁切、调色或合成。",
+    "source_sha256": "e4e879ed5d904333e6a469ce398cb6effb09f32159a1963ff637f95865918f00",
+    "variants": [
+      {
+        "path": "assets/photography/v03/sorting-640.jpg",
+        "width": 640,
+        "height": 956,
+        "bytes": 205423
+      },
+      {
+        "path": "assets/photography/v03/sorting-1440.jpg",
+        "width": 1371,
+        "height": 2048,
+        "bytes": 662516
+      }
+    ]
+  },
+  {
+    "id": "field",
+    "source_file": "coffee_plantation_athira96_cc_by_sa.jpg",
+    "source_url": "https://commons.wikimedia.org/wiki/File:Coffee_plantation.jpg",
+    "credit": "Athira96",
+    "license": "CC BY-SA 4.0",
+    "license_url": "https://creativecommons.org/licenses/by-sa/4.0/",
+    "changes": "按原图方向信息校正、等比缩放与JPEG压缩；未裁切、调色或合成。",
+    "source_sha256": "67d5f878b5272be2ef1c5bcef0d0fe04c919fd9d75e514a431229ab0373b8c2c",
+    "variants": [
+      {
+        "path": "assets/photography/v03/field-640.jpg",
+        "width": 640,
+        "height": 360,
+        "bytes": 92596
+      },
+      {
+        "path": "assets/photography/v03/field-1440.jpg",
+        "width": 1440,
+        "height": 810,
+        "bytes": 472853
+      }
+    ]
+  },
+  {
+    "id": "cherry",
+    "source_file": "roger_burger_open_cherry_cc0.jpg",
+    "source_url": "https://commons.wikimedia.org/wiki/File:Open_coffee_cherry.jpg",
+    "credit": "Roger Burger",
+    "license": "CC0 1.0",
+    "license_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+    "changes": "按原图方向信息校正、等比缩放与JPEG压缩；未裁切、调色或合成。",
+    "source_sha256": "faf7fdb57c38c4799757768f2f7f7386bebfe8092496cc9bcb9e91b18f5d01f7",
+    "variants": [
+      {
+        "path": "assets/photography/v03/cherry-640.jpg",
+        "width": 640,
+        "height": 480,
+        "bytes": 42472
+      },
+      {
+        "path": "assets/photography/v03/cherry-1440.jpg",
+        "width": 1440,
+        "height": 1080,
+        "bytes": 164465
+      }
+    ]
+  },
+  {
+    "id": "beans",
+    "source_file": "green_beans_on_burlap_david_joyce_cc_by_sa.jpg",
+    "source_url": "https://commons.wikimedia.org/wiki/File:Green_Bean_Coffee.jpg",
+    "credit": "DeaPeaJay / David Joyce",
+    "license": "CC BY-SA 2.0",
+    "license_url": "https://creativecommons.org/licenses/by-sa/2.0/",
+    "changes": "按原图方向信息校正、等比缩放与JPEG压缩；未裁切、调色或合成。",
+    "source_sha256": "4a1fee124165062ce45f81acaa0417a93bbc4cbdb02fd0942b5eac6d510c17d7",
+    "variants": [
+      {
+        "path": "assets/photography/v03/beans-640.jpg",
+        "width": 640,
+        "height": 426,
+        "bytes": 48293
+      },
+      {
+        "path": "assets/photography/v03/beans-1440.jpg",
+        "width": 1440,
+        "height": 958,
+        "bytes": 172636
+      }
+    ]
+  },
+  {
+    "id": "sacks",
+    "source_file": "colombia_coffee_sacks_ciat_cc_by_sa.jpg",
+    "source_url": "https://commons.wikimedia.org/wiki/File:NP_coffee_sacks_(5867722798).jpg",
+    "credit": "Neil Palmer / CIAT",
+    "license": "CC BY-SA 2.0",
+    "license_url": "https://creativecommons.org/licenses/by-sa/2.0/",
+    "changes": "按原图方向信息校正、等比缩放与JPEG压缩；未裁切、调色或合成。",
+    "source_sha256": "cbcf3940de98033049df0f80a017c89aef33f59b0e152749ed5846817ea44161",
+    "variants": [
+      {
+        "path": "assets/photography/v03/sacks-640.jpg",
+        "width": 640,
+        "height": 425,
+        "bytes": 64048
+      },
+      {
+        "path": "assets/photography/v03/sacks-1440.jpg",
+        "width": 1440,
+        "height": 956,
+        "bytes": 239181
+      }
+    ]
+  }
+]

@@ -8,6 +8,7 @@ import { CHART_DEFINITION, createChartData } from '../../src/components/chart'
 import type { ComponentAuthorRecord, ComponentDefinition, ComponentFrame, JsonValue } from '../../src/shared/contracts/component-platform'
 import type { DocumentModel } from '../../src/shared/workbench/document'
 import type { ToolTarget } from '../../src/shared/workbench/tools'
+import { setRootContainers } from './glxWorkFixture'
 
 export const currentFragmentPrompt = '先预测数据变化，再操作并观察图表。'
 export const compositionSourceCss = '.card{padding:20px;color:#20334b}.columns{display:grid;grid-template-columns:1fr 1fr;gap:18px}@media(max-width:600px){.columns{grid-template-columns:1fr}}'
@@ -23,7 +24,7 @@ export function currentCompositionGatewayFixture(options: { professionalText?: b
   project.global = { underlay: [], overlay: [] }; project.instances = {}; project.definitions = {}
   const group: ComponentDefinition = { id: 'guoling.group', role: 'content', implementation: { kind: 'builtin', key: 'guoling.group' }, title: '编组' }
   for (const definition of [group, WEB_DEFINITION, HTML_PROGRAM_DEFINITION, IMAGE_DEFINITION, CHART_DEFINITION, TEXT_DEFINITION]) project.definitions[definition.id] = structuredClone(definition)
-  project.surfaces = [{ id: 'slide', kind: 'slide', title: '观察与解释', childIds: ['quality-composition'], designSize: { width: 800, height: 1100 } }]
+  setRootContainers(project,[{ id: 'slide', kind: 'slide', title: '观察与解释', childIds: ['quality-composition'], designSize: { width: 800, height: 1100 } }])
   const textRecord: ComponentAuthorRecord = { kind: 'text', binding: { kind: 'dom', path: [
     { tag: 'section', index: 0, attributes: { id: 'left' } }, { tag: 'p', index: 0, attributes: { id: 'paragraph' } },
   ], textIndex: 0, baseline: currentFragmentPrompt }, overrides: { text: currentFragmentPrompt } }

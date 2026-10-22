@@ -1,3 +1,4 @@
+import { testContainerInstance } from '../helpers/glxWorkFixture'
 // @vitest-environment node
 import { expect, it } from 'vitest'
 import { z } from 'zod'
@@ -28,7 +29,7 @@ it('prepares only reachable HTML modules and retains unused author files without
       'draft.js': 'export const value = (',
     },
   } }
-  project.surfaces[0].childIds.push('web')
+  testContainerInstance(project, 0).childIds.push('web')
   const before = structuredClone(project)
   const compilation = new InMemoryComponentCompilation(createEsbuildComponentCompiler())
   const runtime = await projectWebModuleGraph(project.instances.web, input => compilation.compile(input))
@@ -47,7 +48,7 @@ it('reports a missing reachable HTML import while retaining source and usable si
     html: '<script type="module" src="./main.js"></script><script type="module" src="./healthy.js"></script>',
     modules: { 'main.js': "import './missing.js';", 'healthy.js': 'export const value = 42;' },
   } }
-  project.surfaces[0].childIds.push('web')
+  testContainerInstance(project, 0).childIds.push('web')
   const before = structuredClone(project)
   const compilation = new InMemoryComponentCompilation(createEsbuildComponentCompiler())
   const published = await buildPublishedCourseV3({ project, assetBytes: {} }, { compilation })

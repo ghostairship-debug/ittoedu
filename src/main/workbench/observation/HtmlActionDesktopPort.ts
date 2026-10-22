@@ -25,6 +25,8 @@ export const isPublishedActionContext = (context: PageActionAutomationContext): 
 export interface HtmlActionFramePort {
   frameToken(context: PageActionAutomationContext): Promise<string>
   observe(context: PageActionAutomationContext, frameToken: string): Promise<HtmlPageState>
+  /** A single invocation owns readiness, DOM sampling and the immediately following pixels. */
+  observeAndCapture?(context: PageActionAutomationContext, frameToken: string, signal?: AbortSignal): Promise<{ state: HtmlPageState; capture: HtmlActionCapture }>
   act(context: PageActionAutomationContext, frameToken: string, input: Extract<HtmlPageOperation, { type: 'click' | 'input' }>, isCurrent?: () => boolean): Promise<HtmlPageActionResult>
   navigate(context: PageActionAutomationContext, frameToken: string, index: number): Promise<void>
   capture(context: PageActionAutomationContext, frameToken: string): Promise<HtmlActionCapture>
@@ -174,10 +176,16 @@ function visibleLocalRect(entry: VisibleFrame) {
 async function visibleChildFrames(root: WebFrameMain, rootClip?: { x: number; y: number; width: number; height: number }): Promise<{ visible: VisibleFrame[]; excluded: Array<{ frame: WebFrameMain; reason: string }> }> {
   const visible: VisibleFrame[] = [], excluded: Array<{ frame: WebFrameMain; reason: string }> = []
   const visit = async (parent: WebFrameMain, chain: FrameGeometry[]) => {
-    for (const child of parent.frames) {
-      if (child.detached || child.isDestroyed()) continue
+    const children = parent.frames.filter(child => !child.detached && !child.isDestroyed())
+    const sampled = await Promise.all(children.map(async child => {
       let geometry: FrameGeometry | null = null
       try { geometry = await ownerGeometry(child) } catch { /* Report inaccessible frames below. */ }
+      return { child, geometry }
+    }))
+    // Sibling geometry reads are independent. Keep the original tree order for
+    // clipping, diagnostics and depth-first recursion after those reads settle.
+    for (const { child, geometry } of sampled) {
+      if (child.detached || child.isDestroyed()) continue
       if (!geometry?.visible) {
         excluded.push({ frame: child, reason: geometry?.reason ?? 'owner-unavailable' }); continue
       }
@@ -203,6 +211,17 @@ async function prepareVisibleFramePaint(contents: WebContents, frame: WebFrameMa
 export class HtmlActionDesktopPort implements HtmlActionFramePort {
   async frameToken(context: PageActionAutomationContext): Promise<string> { return frameFor(context).frame.frameToken }
 
+  async observeAndCapture(context: PageActionAutomationContext, frameToken: string, signal?: AbortSignal): Promise<{ state: HtmlPageState; capture: HtmlActionCapture }> {
+    if (signal?.aborted) throw new Error('页面观察已停止')
+    const state = await this.observe(context, frameToken)
+    if (signal?.aborted) throw new Error('页面观察已停止')
+    // observe already completed frame readiness and paint immediately before
+    // its read-only DOM sample. Do not rediscover and repaint that tree again.
+    const capture = await this.captureReady(context, frameToken)
+    if (signal?.aborted) throw new Error('页面观察已停止')
+    return { state, capture }
+  }
+
   async observe(context: PageActionAutomationContext, frameToken: string): Promise<HtmlPageState> {
     const { contents, frame } = frameFor(context, frameToken)
     await frame.executeJavaScript(htmlObservationReadyScript())
@@ -221,22 +240,28 @@ export class HtmlActionDesktopPort implements HtmlActionFramePort {
       url: frame.url, status: 'observed' as const, matchedElements: observed.matchedElements ?? observed.elements.length,
       returnedElements: observed.elements.length, truncatedElements: Math.max(0, (observed.matchedElements ?? observed.elements.length) - observed.elements.length) }] as HtmlFrameObservationScope[] }
     const descendants = await visibleChildFrames(frame, rootClip)
-    for (const entry of descendants.visible) {
+    const samples = await Promise.all(descendants.visible.map(async entry => {
       const child = entry.frame
       try {
         const state = await child.executeJavaScript(htmlActionScript({ type: 'observe', clip: visibleLocalRect(entry) })) as HtmlPageState
         const elements = state.elements.map(element => ({ ...element, frameToken: child.frameToken, frameProcessId: child.processId, rect: mapRect(element.rect, entry.chain) }))
           .filter(element => element.rect.width > 0 && element.rect.height > 0)
-        observed.structure.push(...state.structure)
-        observed.diagnostics.push(...state.diagnostics)
-        observed.elements.push(...elements)
-        scope.frames.push({ frameId: child.frameTreeNodeId, url: child.url, status: 'observed',
+        return { state, elements, scope: { frameId: child.frameTreeNodeId, url: child.url, status: 'observed' as const,
           matchedElements: state.matchedElements ?? state.elements.length, returnedElements: elements.length,
-          truncatedElements: Math.max(0, (state.matchedElements ?? state.elements.length) - state.elements.length) })
+          truncatedElements: Math.max(0, (state.matchedElements ?? state.elements.length) - state.elements.length) } }
       } catch (error) {
-        scope.frames.push({ frameId: child.frameTreeNodeId, url: child.url, status: 'unavailable', matchedElements: 0,
-          returnedElements: 0, truncatedElements: 0, reason: error instanceof Error ? error.message : String(error) })
+        return { scope: { frameId: child.frameTreeNodeId, url: child.url, status: 'unavailable' as const, matchedElements: 0,
+          returnedElements: 0, truncatedElements: 0, reason: error instanceof Error ? error.message : String(error) } }
       }
+    }))
+    // Merge in the original frame order regardless of IPC completion order.
+    for (const sample of samples) {
+      if (sample.state) {
+        observed.structure.push(...sample.state.structure)
+        observed.diagnostics.push(...sample.state.diagnostics)
+        observed.elements.push(...sample.elements)
+      }
+      scope.frames.push(sample.scope)
     }
     for (const entry of descendants.excluded) scope.frames.push({ frameId: entry.frame.frameTreeNodeId, url: entry.frame.url,
       status: ['not-visible', 'empty-paint'].includes(entry.reason) ? 'not-visible' : 'unavailable', matchedElements: 0,
@@ -363,6 +388,11 @@ export class HtmlActionDesktopPort implements HtmlActionFramePort {
   async capture(context: PageActionAutomationContext, frameToken: string): Promise<HtmlActionCapture> {
     const { contents, frame } = frameFor(context, frameToken)
     await prepareVisibleFramePaint(contents, frame)
+    return this.captureReady(context, frameToken)
+  }
+
+  private async captureReady(context: PageActionAutomationContext, frameToken: string): Promise<HtmlActionCapture> {
+    const { contents } = frameFor(context, frameToken)
     if (isPublishedActionContext(context)) {
       const bitmap = await contents.capturePage(), size = bitmap.getSize()
       frameFor(context, frameToken)

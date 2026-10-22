@@ -1,3 +1,4 @@
+import { testContainerInstance } from '../helpers/glxWorkFixture'
 // @vitest-environment node
 import { expect, it, vi } from 'vitest'
 import { createBlankCourseProjectV10 } from '../../src/core/course/createCourseProjectV10'
@@ -152,15 +153,15 @@ it('uses the same compiler cache for base, duplicate and state Web snapshots wit
   } }
   project.instances.first = { id: 'first', definitionId: 'web', data: structuredClone(data) }
   project.instances.second = { id: 'second', definitionId: 'web', data: structuredClone(data) }
-  project.surfaces[0].childIds = ['first', 'second']
-  project.surfaces[0].presentation = { states: [{ id: 'state', title: 'State', overrides: { first: { data: structuredClone(data) } } }] }
+  testContainerInstance(project, 0).childIds = ['first', 'second']
+  testContainerInstance(project, 0).container.presentation = { states: [{ id: 'state', title: 'State', overrides: { first: { data: structuredClone(data) } } }] }
   const before = structuredClone(project), compiler = createEsbuildComponentCompiler(), compile = vi.fn(compiler.compile.bind(compiler))
   const compilation = new InMemoryComponentCompilation({ ...compiler, compile })
   const published = await buildPublishedCourseV3({ project, assetBytes: {} }, { compilation })
   expect(published.diagnostics).toEqual([])
   expect(compile).toHaveBeenCalledTimes(2) // one native graph, one prepared bundle
   const base = published.payload.instances.first.data as unknown as WebRuntimeData
-  const state = published.payload.surfaces[0].presentation!.states[0].overrides.first.data as unknown as WebRuntimeData
+  const state = testContainerInstance(published.payload, 0).container.presentation!.states[0].overrides.first.data as unknown as WebRuntimeData
   expect(base.publishedModuleBundle).toBeTruthy()
   expect(state.publishedModuleBundle).toBe(base.publishedModuleBundle)
   for (const version of [base, state]) {
@@ -206,7 +207,7 @@ function localityProject(data: WebData) {
   const project = createBlankCourseProjectV10('Entry locality')
   project.definitions.web = { id: 'web', role: 'content', implementation: { kind: 'builtin', key: 'guoling.html-program' } }
   project.instances.web = { id: 'web', definitionId: 'web', data }
-  project.surfaces[0].childIds = ['web']
+  testContainerInstance(project, 0).childIds = ['web']
   return project
 }
 

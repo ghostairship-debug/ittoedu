@@ -134,6 +134,12 @@ describe('S06 real EditSession/Gateway/Registry integration', () => {
     expect(h.events.filter(event => event.type === 'edit.finished')).toHaveLength(1)
     expect(h.events.some(event => event.type === 'edit.aborted')).toBe(false)
     h.edits.finish('edit', result); h.edits.finish('edit', result)
+    // Only the duplicate/late-call barrier survives completion, not the model,
+    // current preview or all preceding complete text snapshots.
+    expect((h.edits as unknown as { entries: Map<string, unknown> }).entries.has('edit')).toBe(false)
+    if (!('revision' in result)) throw new Error('fixture commit must be acknowledged')
+    expect(() => h.edits.finish('edit', { ...result, revision: result.revision + 1 })).toThrow('不同的正式提交回执')
+    await expect(h.edits.begin({ editId: 'edit', runId: 'run', targetHandle: handle })).rejects.toMatchObject({ code: 'edit-id-used' })
     expect(await h.edits.snapshot('edit', 99, 'late text')).toBeNull()
     expect(session.read()).toMatchObject({ undoDepth: 2, model: { source: 'long heading\n新正文😀\ntail' } })
     const current = session.read()
@@ -170,6 +176,7 @@ describe('S06 real EditSession/Gateway/Registry integration', () => {
     await h.edits.snapshot('a', 0, 'first'); await h.edits.snapshot('a', 3, 'replacement')
     expect(await h.edits.snapshot('a', 0, 'first')).toMatchObject({ value: 'replacement', sequence: 3 })
     await expect(h.edits.snapshot('a', 3, 'different')).rejects.toMatchObject({ code: 'sequence-conflict' })
+    expect((h.edits as unknown as { entries: Map<string, unknown> }).entries.has('a')).toBe(false)
     expect(h.edits.list(a.documentId)).toEqual([])
     expect(await h.edits.snapshot('b', 0, 'still generating')).toMatchObject({ value: 'still generating', status: 'active' })
     expect(a.read().undoDepth).toBe(0); expect(b.read().undoDepth).toBe(0)

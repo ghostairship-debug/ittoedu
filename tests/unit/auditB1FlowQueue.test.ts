@@ -1,4 +1,5 @@
 // @vitest-environment node
+import { testContainerInstance } from '../helpers/glxWorkFixture'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { transformSync } from 'esbuild'
@@ -30,7 +31,7 @@ function appEntry(dependencies: Record<string, unknown>): (command: FlowInsertCo
 }
 
 it('CA-261 inserts into A when the actual App callback waits in the action queue and the user activates B', async () => {
-  const project = createBlankCourseProjectV10('A'); project.surfaces[0].kind = 'flow'
+  const project = createBlankCourseProjectV10('A'); testContainerInstance(project, 0).container.kind = 'flow'
   const h = await createV10StoreHost(project)
   await h.bridge.create({ kind: 'course-v10', project: { ...structuredClone(project), id: 'B', title: 'B' }, resources: { assets: {}, components: {} } })
   const other = h.bridge.read().snapshot!

@@ -1,4 +1,5 @@
 // @vitest-environment node
+import { componentSurfaces } from '../../src/shared/contracts/component-platform/project'
 import { promises as fs } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -34,7 +35,7 @@ it('keeps previews run-scoped and fetched images workspace-owned, permits indepe
       registerWorkspaceResource: imageOwner.registerWorkspaceResource.bind(imageOwner), readWorkspaceResource: imageOwner.readWorkspaceResource.bind(imageOwner) } })
   const initial = await host.internalAPI.create({ kind: 'course-v10', project: createBlankCourseProjectV10('秋天'), resources: { assets: {}, components: {} } }, '秋天.h5lesson')
   if (initial.model.kind !== 'course-v10') throw new Error('V10 required')
-  const surfaceId = initial.model.project.surfaces[0].id
+  const surfaceId = componentSurfaces(initial.model.project)[0].id
   const begin = (runId: string, permission: 'workspace' | 'read-only') => host.tools.beginRun({ runId, actor: 'agent',
     documents: [{ documentId: initial.documentId, writable: permission === 'read-only' ? [] : [{ kind: 'document' }] }], fileAccess: { permission, workspaceRoot: root } })
   const call = (runId: string, id: string, name: string, input: unknown) => host.tools.execute(runId, id, { name, input })
@@ -82,7 +83,7 @@ it('keeps previews run-scoped and fetched images workspace-owned, permits indepe
     const [asset] = Object.values(inserted.model.project.assets)
     expect(asset.source).toEqual(fetched.source)
     expect(Buffer.from(inserted.model.resources.assets[asset.id])).toEqual(Buffer.from(resource.bytes))
-    expect(inserted.model.project.surfaces[0].childIds).toHaveLength(1)
+    expect(componentSurfaces(inserted.model.project)[0].childIds).toHaveLength(1)
     const saved = path.join(root, 'saved.h5lesson'); await host.internalAPI.save(initial.documentId, saved)
     const head = await host.internalAPI.read(initial.documentId)
     expect(await host.internalAPI.dispatch({ documentId: head.documentId, epoch: head.epoch, baseRevision: head.revision, actor: 'human', operationId: 'undo-insert', mutation: { type: 'undo' } }))

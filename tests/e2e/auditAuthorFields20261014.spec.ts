@@ -1,3 +1,4 @@
+import { testContainerInstance } from '../helpers/glxWorkFixture'
 import { _electron as electron, expect, test, type ElectronApplication, type Locator, type Page } from '@playwright/test'
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
@@ -36,7 +37,7 @@ function fixture(): CourseProjectV10 {
     frame: { width: 520, height: 200, transform: [1, 0, 0, 1, 70, 100] } }
   project.instances.primitive = { id: 'primitive', name: 'Primitive Source 标题', definitionId: 'primitive', data: 17,
     frame: { width: 520, height: 200, transform: [1, 0, 0, 1, 660, 100] } }
-  project.surfaces[0].childIds = ['html', 'primitive']
+  testContainerInstance(project, 0).childIds = ['html', 'primitive']
   return project
 }
 

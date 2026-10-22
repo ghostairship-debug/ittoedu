@@ -1,7 +1,10 @@
-import { act, cleanup, fireEvent, render } from '@testing-library/react'
+import { createTestProjectFromLegacy, setRootContainers } from '../helpers/glxWorkFixture'
+import { componentSurfaces } from '../../src/shared/contracts/component-platform/project'
+import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/react'
 import { afterAll, afterEach, beforeAll, expect, it, vi } from 'vitest'
 import * as sessions from '../../src/renderer/document/editorSession'
-import { captureComponentOperation } from '../../src/core/drivers/courseV10Operations'
+import { createV10StoreHost } from '../helpers/courseV10StoreHost'
+import { ComponentNavigationOwner, type ComponentObservationBinding } from '../../src/renderer/components/ComponentNavigationOwner'
 import { TEXT_DEFINITION } from '../../src/components/text/adapters'
 import { createTextComponentData } from '../../src/components/text/data'
 import { createImageData } from '../../src/components/image'
@@ -11,7 +14,7 @@ import {serializeDocumentMarkdown} from '../../src/shared/document/markdown'
 import {prepareDocumentClipboard} from '../../src/renderer/document/documentClipboard'
 import {createFlowDocumentResourcePort,prepareFlowDocumentResourceTransaction} from '../../src/renderer/document/flowDocumentResources'
 const probe = vi.hoisted(()=>({state:{} as Record<string,unknown>,runtime:{} as Record<string,unknown>}))
-vi.mock('../../src/renderer/store/editorStore',()=>({useEditorStore:(select:(state:typeof probe.state)=>unknown)=>select(probe.state)}))
+vi.mock('../../src/renderer/store/editorStore',()=>({useEditorStore:Object.assign((select:(state:typeof probe.state)=>unknown)=>select(probe.state),{getState:()=>probe.state})}))
 vi.mock('../../src/renderer/components/CourseV10RuntimeView',()=>({useCourseV10Runtime:()=>probe.runtime}))
 vi.mock('../../src/renderer/ui/useAssetObjectUrls',()=>({useAssetObjectUrls:()=>({})}))
 vi.mock('../../src/renderer/workbench/NativeSelectionContext',()=>({NativeSelectionContext:()=>null}))
@@ -27,52 +30,91 @@ beforeAll(()=>{
   vi.stubGlobal('PointerEvent',MouseEvent)
 })
 afterAll(()=>{geometry.forEach((key,index)=>{if(descriptors[index])Object.defineProperty(Range.prototype,key,descriptors[index]!);else Reflect.deleteProperty(Range.prototype,key)});vi.unstubAllGlobals()})
-afterEach(()=>{cleanup();vi.restoreAllMocks()})
+const disposers:Array<()=>void>=[]
+afterEach(()=>{cleanup();for(const dispose of disposers.splice(0))dispose();vi.restoreAllMocks()})
 function deferred<T>() {let resolve!:(value:T)=>void,reject!:(error:Error)=>void;const promise=new Promise<T>((done,fail)=>{resolve=done;reject=fail});return {promise,resolve,reject}}
+/** Keep DOM rendering isolated; target capture, ACKs, History and navigation use their real owners. */
+async function workspaceFixture(project:CourseProjectV10,selectedInstanceIds:readonly string[]=[]) {
+  const host=await createV10StoreHost(project),documentId=host.first.documentId
+  host.bridge.selectInstances(documentId,selectedInstanceIds,'flow')
+  const navigation=new ComponentNavigationOwner({project:()=>host.bridge.read().project ?? project,surfaceId:()=>host.bridge.read().surfaceId,
+    select:(surfaceId,_signal,onCommit)=>{host.bridge.selectSurface(documentId,surfaceId);onCommit?.()}})
+  disposers.push(()=>{navigation.dispose();host.bridge.dispose()})
+  const drafts=vi.fn((value:unknown,ownerId:string)=>{
+    const current={...probe.state.flowDocumentDrafts as Record<string,unknown>}
+    if(value===null)delete current[ownerId];else current[ownerId]=value
+    probe.state.flowDocumentDrafts=current
+  })
+  probe.state={courseBridge:host.bridge,courseKernel:host.kernel,get courseView(){return host.bridge.read()},editingScope:'surface',
+    flowDocumentDrafts:{},setFlowDocumentDraft:drafts,setFlowContextSelection:()=>{},flowEditingInstance:null,slideContentEdit:null,
+    beginSlideDataEdit:()=>{},commitSlideContentEdit:async()=>{}}
+  const contents=new Map<string,HTMLElement>(),targets=new Map<string,HTMLElement>()
+  probe.runtime={documentId,project,resources:host.model().resources,surfaceId:'flow',player:false,
+    get selectedInstanceIds(){return host.bridge.read().selectedInstanceIds},
+    selectInstances:(ids:readonly string[],surfaceId='flow')=>host.bridge.selectInstances(documentId,ids,surfaceId),
+    onElement:(id:string,element:HTMLElement|null)=>{if(element)contents.set(id,element);else contents.delete(id)},
+    onTargetElement:(id:string,element:HTMLElement|null)=>{if(element)targets.set(id,element);else targets.delete(id)},
+    world:{authorSpots:()=>[],subscribeAuthorSpots:()=>()=>{},contentElement:(id:string)=>contents.get(id),targetElement:(id:string)=>targets.get(id),
+      beforeProjectionMutation:()=>{},afterProjectionMutation:()=>{},beforeProjectionRemoval:()=>{}},
+    renderInstance:()=>null,renderContainer:()=>null,navigation,
+    registerObservation:(id:string,binding:ComponentObservationBinding)=>navigation.registerObservation(id,binding)}
+  return {host,documentId,navigation,drafts}
+}
 it('waits for the Flow body ACK during drain and preserves rejected input with the original document target',async()=>{
-  const project:CourseProjectV10={schemaVersion:10,id:'flow-ack',revision:0,title:'讲义',definitions:{[TEXT_DEFINITION.id]:TEXT_DEFINITION},
+  const project:CourseProjectV10=createTestProjectFromLegacy({schemaVersion:10,id:'flow-ack',revision:0,title:'讲义',definitions:{[TEXT_DEFINITION.id]:TEXT_DEFINITION},
     instances:{body:{id:'body',definitionId:TEXT_DEFINITION.id,data:JSON.parse(JSON.stringify(createTextComponentData('原文')))}},
-    surfaces:[{id:'flow',kind:'flow',title:'正文',childIds:['body']}],global:{underlay:[],overlay:[]},assets:{}}
-  const resources={assets:{},components:{}}, target={documentId:'flow-doc',epoch:'epoch',project,editingProject:project,resources,surfaceId:'flow',activeStateId:null,instanceIds:[],instanceId:null}
-  const ack=deferred<unknown>(), rejected=deferred<unknown>(), drafts=vi.fn()
-  const editCaptured=vi.fn().mockImplementationOnce(()=>ack.promise).mockImplementationOnce(()=>rejected.promise)
-  const bridge={captureTarget:()=>target,capture:(edits:Parameters<typeof captureComponentOperation>[1],captured:typeof target)=>({...captureComponentOperation(captured.project,edits),documentId:captured.documentId,epoch:captured.epoch}),editCaptured,read:()=>({activation:1}),undo:async()=>{},redo:async()=>{}}
-  probe.state={courseBridge:bridge,courseKernel:bridge,flowDocumentDrafts:{},setFlowDocumentDraft:drafts,setFlowContextSelection:()=>{},flowEditingInstance:null,slideContentEdit:null}
-  probe.runtime={resources,selectedInstanceIds:[],selectInstances:()=>{},onElement:()=>{},onTargetElement:()=>{},world:{beforeProjectionMutation:()=>{},afterProjectionMutation:()=>{}},renderInstance:()=>null,registerObservation:()=>()=>{},navigation:{changed:()=>{}}}
-  const factory=vi.spyOn(sessions,'createLayoutEditor')
-  const ui=render(<FlowWorkspace documentId="flow-doc" project={project} surfaceId="flow" onSelectImageAsset={async()=>null}/>)
+    surfaces:[{id:'flow',kind:'flow',title:'正文',childIds:['body']}],global:{underlay:[],overlay:[]},assets:{}})
+  const {host,documentId,drafts}=await workspaceFixture(project)
+  const target=host.bridge.captureTarget(documentId),ack=deferred<void>(),rejected=deferred<void>()
+  const dispatch=host.api.dispatch.bind(host.api)
+  vi.spyOn(host.api,'dispatch').mockImplementationOnce(async(operation,options)=>{await ack.promise;return dispatch(operation,options)})
+    .mockImplementationOnce(async operation=>{await rejected.promise;return {status:'failed',documentId:operation.documentId,operationId:operation.operationId,
+      code:'fixture-flow-body-refused',message:'正式ACK拒绝',applied:false}})
+  const editCaptured=vi.spyOn(host.bridge,'editCaptured'),factory=vi.spyOn(sessions,'createLayoutEditor')
+  const ui=render(<FlowWorkspace documentId={documentId} project={project} surfaceId="flow" onSelectImageAsset={async()=>null}/>)
   const editor=factory.mock.results.at(-1)!.value
   await act(async()=>editor.view.dispatch(editor.view.state.tr.insertText('新',1)))
   let settled=false
-  const drain=drainFlowWorkspace('flow-doc').then(result=>{settled=true;return result})
-  await act(async()=>{await Promise.resolve()})
-  expect(settled).toBe(false); expect(editCaptured).toHaveBeenCalledTimes(1)
-  expect(editCaptured.mock.calls[0][0]).toMatchObject({documentId:'flow-doc',epoch:'epoch'})
-  await act(async()=>ack.resolve({revision:1}))
-  expect(await drain).toEqual({ok:true});expect(editCaptured).toHaveBeenCalledTimes(1)
+  const drain=drainFlowWorkspace(documentId).then(result=>{settled=true;return result})
+  await waitFor(()=>expect(editCaptured).toHaveBeenCalledTimes(1))
+  expect(settled).toBe(false)
+  expect(editCaptured.mock.calls[0][0]).toMatchObject({documentId,epoch:target.epoch})
+  expect(host.first.read().undoDepth).toBe(0)
+  await act(async()=>{ack.resolve();expect(await drain).toEqual({ok:true})})
+  expect(editCaptured).toHaveBeenCalledTimes(1)
+  const accepted=host.model().project
+  expect(serializeDocumentMarkdown(projectFlowDocument(accepted,'flow'))).toContain('新原文')
+  expect(host.first.read().undoDepth).toBe(1)
   await act(async()=>editor.view.dispatch(editor.view.state.tr.insertText('保留',1)))
-  await act(async()=>rejected.reject(new Error('正式ACK拒绝')))
-  expect(await drainFlowWorkspace('flow-doc')).toMatchObject({ok:false})
+  await waitFor(()=>expect(editCaptured).toHaveBeenCalledTimes(2))
+  await act(async()=>rejected.resolve())
+  expect(await drainFlowWorkspace(documentId)).toMatchObject({ok:false})
   expect(ui.getAllByRole('alert').some(element=>element.textContent?.includes('正式ACK拒绝'))).toBe(true)
   expect(editor.view.state.doc.textContent).toBe('保留新原文')
-  expect(drafts.mock.calls.at(-1)).toEqual([expect.objectContaining({source:expect.stringContaining('保留新原文'),diagnostics:expect.any(Array)}),'flow-doc'])
+  expect(drafts.mock.calls.at(-1)).toEqual([expect.objectContaining({source:expect.stringContaining('保留新原文'),diagnostics:expect.any(Array)}),documentId])
+  expect(editCaptured.mock.calls[1][0]).toMatchObject({documentId,epoch:target.epoch})
+  expect(host.model().project).toEqual(accepted)
+  expect(host.first.read().undoDepth).toBe(1)
 })
 it('binds the original Flow observation session while rendering floating children and preserving custom teacher chrome',async()=>{
   vi.spyOn(HTMLElement.prototype,'clientWidth','get').mockReturnValue(1280)
   vi.spyOn(HTMLElement.prototype,'clientHeight','get').mockReturnValue(720)
-  const project:CourseProjectV10={schemaVersion:10,id:'observation',revision:0,title:'Flow',definitions:{[TEXT_DEFINITION.id]:TEXT_DEFINITION,
+  const project:CourseProjectV10=createTestProjectFromLegacy({schemaVersion:10,id:'observation',revision:0,title:'Flow',definitions:{[TEXT_DEFINITION.id]:TEXT_DEFINITION,
     group:{id:'group',role:'content',implementation:{kind:'builtin',key:'guoling.group'}},'guoling.navigation':{id:'guoling.navigation',role:'content',professionalBuiltinKey:'guoling.navigation',implementation:{kind:'source',language:'javascript',source:'export default 1'}}},
     instances:{body:{id:'body',definitionId:TEXT_DEFINITION.id,data:JSON.parse(JSON.stringify(createTextComponentData('正文')))},
       group:{id:'group',definitionId:'group',data:{},frame:{width:300,height:180,transform:[1,.2,.3,1,30,40]},flowPlacement:{space:'paper',plane:'overlay'},childIds:['child']},
       child:{id:'child',definitionId:TEXT_DEFINITION.id,data:JSON.parse(JSON.stringify(createTextComponentData('组内文字'))),frame:{width:100,height:60,transform:[1,0,0,1,14,17]}},
       teacher:{id:'teacher',definitionId:'guoling.navigation',data:{},frame:{width:240,height:90,transform:[1,0,0,1,5,6]}}},
-    surfaces:[{id:'flow',kind:'flow',title:'Flow',childIds:['body','group']}],global:{underlay:[],overlay:['teacher']},assets:{}}
-  const resources={assets:{},components:{}},editCaptured=vi.fn(),target={documentId:'observe-doc',epoch:'epoch',project,editingProject:project,resources,surfaceId:'flow',activeStateId:null,instanceIds:[],instanceId:null}
-  const capture=vi.fn((edits:unknown)=>({edits})),bridge={captureTarget:()=>target,capture,editCaptured,read:()=>({activation:1})}
-  const bindings: {readZoom():number;setZoom(value:number):void;reset():void}[]=[],release=vi.fn(),navigation={changed:vi.fn()},renderInstance=vi.fn((id:string)=><div key={id} data-testid={id}/>)
-  probe.state={courseBridge:bridge,courseKernel:bridge,flowDocumentDrafts:{},setFlowDocumentDraft:()=>{},setFlowContextSelection:()=>{},flowEditingInstance:null,slideContentEdit:null}
-  probe.runtime={resources,selectedInstanceIds:['group','teacher'],selectInstances:()=>{},onElement:()=>{},onTargetElement:()=>{},world:{beforeProjectionMutation:()=>{},afterProjectionMutation:()=>{}},renderInstance,navigation,registerObservation:(_id:string,binding:typeof bindings[number])=>{bindings.push(binding);return release}}
-  const ui=render(<FlowWorkspace documentId="observe-doc" project={project} surfaceId="flow" toolbarContainer={document.createElement('div')} onSelectImageAsset={async()=>null}/>)
+    surfaces:[{id:'flow',kind:'flow',title:'Flow',childIds:['body','group']}],global:{underlay:[],overlay:['teacher']},assets:{}})
+  const {host,documentId,navigation}=await workspaceFixture(project,['group','teacher'])
+  const editCaptured=vi.spyOn(host.bridge,'editCaptured'),capture=vi.spyOn(host.bridge,'capture')
+  const bindings:ComponentObservationBinding[]=[],release=vi.fn(),register=navigation.registerObservation
+  vi.spyOn(navigation,'registerObservation').mockImplementation((id,binding)=>{
+    bindings.push(binding);const stop=register(id,binding);return ()=>{release();stop()}
+  })
+  const renderInstance=vi.fn((id:string)=><div key={id} data-testid={id}/>)
+  probe.runtime.renderInstance=renderInstance
+  const ui=render(<FlowWorkspace documentId={documentId} project={project} surfaceId="flow" toolbarContainer={document.createElement('div')} onSelectImageAsset={async()=>null}/>)
   expect(renderInstance).toHaveBeenCalledWith('child',project,'free')
   expect(bindings).toHaveLength(1)
   act(()=>bindings[0].setZoom(2))
@@ -87,8 +129,11 @@ it('binds the original Flow observation session while rendering floating childre
     fireEvent.pointerMove(button,{clientX:120,clientY:220,pointerId:1})
     await act(async()=>fireEvent.pointerUp(button,{clientX:120,clientY:220,pointerId:1}))
   }
-  await move('group');expect(capture.mock.calls.at(-1)![0]).toEqual([expect.objectContaining({type:'frame.set',instanceId:'group',frame:expect.objectContaining({transform:[1,.2,.3,1,40,50]})})])
-  await move('teacher');expect(capture.mock.calls.at(-1)![0]).toEqual([expect.objectContaining({type:'frame.set',instanceId:'teacher',frame:expect.objectContaining({transform:[1,0,0,1,25,26]})})])
+  await move('group');await waitFor(()=>expect(host.model().project.instances.group.frame?.transform).toEqual([1,.2,.3,1,40,50]))
+  expect(capture.mock.calls.at(-1)![0]).toEqual([expect.objectContaining({type:'frame.set',instanceId:'group',frame:expect.objectContaining({transform:[1,.2,.3,1,40,50]})})])
+  await move('teacher');await waitFor(()=>expect(host.model().project.instances.teacher.frame?.transform).toEqual([1,0,0,1,25,26]))
+  expect(capture.mock.calls.at(-1)![0]).toEqual([expect.objectContaining({type:'frame.set',instanceId:'teacher',frame:expect.objectContaining({transform:[1,0,0,1,25,26]})})])
+  expect(host.first.read().undoDepth).toBe(2)
   ui.unmount();expect(release).toHaveBeenCalledTimes(1)
 })
 it('keeps the crop draft while its ACK is pending or rejected and permits an explicit retry',async()=>{
@@ -103,20 +148,21 @@ it('keeps the crop draft while its ACK is pending or rejected and permits an exp
   expect(onConfirm).toHaveBeenCalledTimes(2);expect(onConfirm.mock.calls[1][0].crop.left).toBe(.2)
 })
 it('explicitly discards restored valid rejected source and its resource preparations without replaying it',async()=>{
-  const project:CourseProjectV10={schemaVersion:10,id:'restore',revision:0,title:'Flow',definitions:{[TEXT_DEFINITION.id]:TEXT_DEFINITION},instances:{body:{id:'body',definitionId:TEXT_DEFINITION.id,data:JSON.parse(JSON.stringify(createTextComponentData('原文')))}},surfaces:[{id:'flow',kind:'flow',title:'Flow',childIds:['body']}],global:{underlay:[],overlay:[]},assets:{}}
-  const resources={assets:{},components:{}},target={documentId:'restore-doc',epoch:'epoch',project,editingProject:project,resources,surfaceId:'flow',activeStateId:null,instanceIds:[],instanceId:null}
-  const source:CourseProjectV10={...project,id:'source',definitions:{group:{id:'group',role:'content',implementation:{kind:'builtin',key:'guoling.group'}}},instances:{foreign:{id:'foreign',definitionId:'group',data:{}}},surfaces:[{...project.surfaces[0],childIds:['foreign']}]}
+  const project:CourseProjectV10=createTestProjectFromLegacy({schemaVersion:10,id:'restore',revision:0,title:'Flow',definitions:{[TEXT_DEFINITION.id]:TEXT_DEFINITION},instances:{body:{id:'body',definitionId:TEXT_DEFINITION.id,data:JSON.parse(JSON.stringify(createTextComponentData('原文')))}},surfaces:[{id:'flow',kind:'flow',title:'Flow',childIds:['body']}],global:{underlay:[],overlay:[]},assets:{}})
+  const {host,documentId,drafts}=await workspaceFixture(project),resources=host.model().resources,target=host.bridge.captureTarget(documentId)
+  const editCaptured=vi.spyOn(host.bridge,'editCaptured')
+  const source:CourseProjectV10={...project,id:'source',definitions:{group:{id:'group',role:'content',implementation:{kind:'builtin',key:'guoling.group'}}},instances:{foreign:{id:'foreign',definitionId:'group',data:{}}}}
+  setRootContainers(source,[{...componentSurfaces(project)[0],childIds:['foreign']}])
   const port=createFlowDocumentResourcePort({target,source:{documentId:'source-doc',project:source,resources,roots:['foreign']}})
   const pasted=await prepareDocumentClipboard(projectFlowDocument(source,'flow'),{assets:[],components:[]},port)
   const changed={content:{blocks:[...projectFlowDocument(project,'flow').content.blocks,...pasted.document.content.blocks]},resources:pasted.document.resources}
   const draft={surfaceId:'flow',revision:0,source:serializeDocumentMarkdown(changed),composing:false,diagnostics:[{message:'恢复的正式ACK拒绝',offset:0,endOffset:0,line:1,column:1}],preparedResources:[pasted.prepared]}
-  const drafts=vi.fn(),editCaptured=vi.fn(),bridge={captureTarget:()=>target,capture:()=>{},editCaptured,read:()=>({activation:1})}
-  probe.state={courseBridge:bridge,courseKernel:bridge,flowDocumentDrafts:{'restore-doc':draft},setFlowDocumentDraft:drafts,setFlowContextSelection:()=>{},flowEditingInstance:null,slideContentEdit:null}
-  probe.runtime={resources,selectedInstanceIds:[],selectInstances:()=>{},onElement:()=>{},onTargetElement:()=>{},world:{beforeProjectionMutation:()=>{},afterProjectionMutation:()=>{}},renderInstance:()=>null,registerObservation:()=>()=>{},navigation:{changed:()=>{}}}
-  const ui=render(<FlowWorkspace documentId="restore-doc" project={project} surfaceId="flow" onSelectImageAsset={async()=>null}/>)
-  expect(await drainFlowWorkspace('restore-doc')).toMatchObject({ok:false})
+  probe.state.flowDocumentDrafts={[documentId]:draft}
+  const ui=render(<FlowWorkspace documentId={documentId} project={project} surfaceId="flow" onSelectImageAsset={async()=>null}/>)
+  expect(await drainFlowWorkspace(documentId)).toMatchObject({ok:false})
   await act(async()=>fireEvent.click(ui.getByRole('button',{name:'丢弃待修草稿'})))
-  expect(drafts).toHaveBeenCalledWith(null,'restore-doc');expect(editCaptured).not.toHaveBeenCalled()
+  expect(drafts).toHaveBeenCalledWith(null,documentId);expect(editCaptured).not.toHaveBeenCalled()
+  expect(host.model().project).toEqual(project);expect(host.first.read().undoDepth).toBe(0)
   expect(()=>prepareFlowDocumentResourceTransaction(target,'flow',changed.content.blocks,[pasted.prepared])).toThrow('准备已失效')
-  expect(await drainFlowWorkspace('restore-doc')).toEqual({ok:true})
+  expect(await drainFlowWorkspace(documentId)).toEqual({ok:true})
 })

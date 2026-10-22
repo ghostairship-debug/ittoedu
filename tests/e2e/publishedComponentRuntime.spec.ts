@@ -1,3 +1,4 @@
+import { setRootContainers, testContainerInstance } from '../helpers/glxWorkFixture'
 import { expect, test } from '@playwright/test'
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
@@ -37,14 +38,14 @@ test('V10 publishes one isolated interactive component across Slide, Flow and Sp
       return {update(next) {label.textContent = next.data.label}, dispose() {root.replaceChildren()}};
     }}`,
   } }
-  project.surfaces = ['slide', 'flow', 'spatial'].map(kind => ({ id: kind, kind: kind as 'slide' | 'flow' | 'spatial', title: kind,
-    childIds: [kind + '-counter'], ...(kind === 'flow' ? {} : { designSize: { width: 800, height: 450 } }), ...(kind === 'spatial' ? { spatial: { home: { x: 190, y: 130, zoom: 1 }, frames: [] } } : {}) }))
+  setRootContainers(project, ['slide', 'flow', 'spatial'].map(kind => ({ id: kind, kind: kind as 'slide' | 'flow' | 'spatial', title: kind,
+    childIds: [kind + '-counter'], ...(kind === 'flow' ? {} : { designSize: { width: 800, height: 450 } }), ...(kind === 'spatial' ? { spatial: { home: { x: 190, y: 130, zoom: 1 }, frames: [] } } : {}) })))
   for (const kind of ['slide', 'flow', 'spatial']) project.instances[kind + '-counter'] = {
     id: kind + '-counter', definitionId: 'counter', data: { label: kind + ' 实时互动' },
     frame: { width: 280, height: 180, transform: [1, 0, 0, 1, 50, 40] },
   }
   project.instances['flow-counter'].flowPlacement = { space: 'viewport', plane: 'overlay' }
-  project.surfaces[0].designSize = { width: 1280, height: 720 }
+  testContainerInstance(project, 0).container.designSize = { width: 1280, height: 720 }
   project.definitions[IMAGE_DEFINITION.id] = IMAGE_DEFINITION; project.definitions[TEXT_DEFINITION.id] = TEXT_DEFINITION
   const imageIds = ['layout-image-a', 'layout-image-b', 'layout-image-c'], textIds = ['layout-text-a', 'layout-text-b', 'layout-text-c']
   const descriptions = ['山地汇聚降水并塑造河流，为下游生态系统提供水源。', '森林涵养水源并为生物提供栖息地。', '湿地调蓄洪水，也维持丰富的生物多样性。']
@@ -60,7 +61,7 @@ test('V10 publishes one isolated interactive component across Slide, Flow and Sp
       data: jsonValueSchema.parse(textComponentDataSchema.parse({ content: { inlines: [{ type: 'text', text: descriptions[index] }] },
         appearance: { fontSize: 24, color: '#172033', lineHeight: 1.35, padding: 10 }, sizing: { mode: 'fixed', minHeight: 120, overflow: 'visible' } })),
       frame: { width: 280, height: 120, transform: [1, 0, 0, 1, [80, 550, 920][index], [450, 480, 450][index]] } }
-    project.surfaces[0].childIds.push(imageIds[index], textIds[index])
+    testContainerInstance(project, 0).childIds.push(imageIds[index], textIds[index])
   }
   // Stage the current affine alignment/distribution algorithm as one formal operation.
   const edits: ComponentEdit[] = [], initial = structuredClone(project)
@@ -87,7 +88,7 @@ test('V10 publishes one isolated interactive component across Slide, Flow and Sp
   expect(model.project.instances['flow-counter']).toEqual({ ...initial.instances['flow-counter'], flowPlacement: undefined,
     flowLayout: { width: 'content-width', wrap: 'none' } })
   expect(model.project.definitions.counter).toEqual(initial.definitions.counter)
-  expect(model.project.surfaces.find(surface => surface.id === 'flow')!.childIds).toEqual(['flow-counter'])
+  expect(testContainerInstance(model.project, 'flow').childIds).toEqual(['flow-counter'])
   const body = structuredClone(model.project)
   for (const history of ['undo', 'redo'] as const) {
     expect(await session.execute({ documentId: session.documentId, epoch: 'epoch', baseRevision: session.read().revision,

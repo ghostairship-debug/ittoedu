@@ -1,10 +1,10 @@
 import {createComponentReferenceCapture} from '../../components/library/references'
 import { componentBackgroundAssetIds } from '../../../shared/componentBackgroundPaint'
-import {resolveComponentPresentation,resolveComponentBackground} from '../../../shared/contracts/component-platform/project'
+import { resolveComponentPresentation, resolveComponentBackground } from '../../../shared/contracts/component-platform/project'
 import type { ComponentAsset, ComponentImplementation, CourseProjectV10, JsonObject } from '../../../shared/contracts/component-platform/project'
-import type { PublishedCourseV3, PublishedDefinition, PublishedImplementation, PublishedInstance } from '../../../shared/contracts/component-platform/published'
-import { publishedCourseV3Schema } from '../../../shared/contracts/component-platform/published'
-import { courseProjectV10Schema } from '../../../shared/contracts/component-platform/schema'
+import type { PublishedCourseV4, PublishedDefinition, PublishedImplementation, PublishedInstance } from '../../../shared/contracts/component-platform/published'
+import { publishedCourseV4Schema } from '../../../shared/contracts/component-platform/published'
+import { courseProjectV11Schema } from '../../../shared/contracts/component-platform/schema'
 import type { DocumentResources } from '../../../shared/workbench/document'
 import { componentCompilationInput } from '../../components/compilation/componentCompilationInput'
 import { componentPublishDependencies, type ComponentPublishDependencies } from './dependencies'
@@ -35,7 +35,7 @@ export interface ComponentPublishOptions {
 }
 
 export interface ComponentPublishResult {
-  payload: PublishedCourseV3
+  payload: PublishedCourseV4
   dependencies: ComponentPublishDependencies
   diagnostics: ComponentPublishDiagnostic[]
   /** Embedded assets, compiled effective sources and no source-observed network dependency.
@@ -48,14 +48,15 @@ function portableUrl(value: string | undefined): value is string {
 }
 
 /** Project identity/ownership is checked; local resource or source problems remain recoverable. */
-export async function buildPublishedCourseV3(
+export async function buildPublishedCourseV4(
   sources: { project: CourseProjectV10; assetBytes: Readonly<Record<string, Uint8Array>>; componentFiles?: DocumentResources['components'] },
   options: ComponentPublishOptions = {},
 ): Promise<ComponentPublishResult> {
   const check = () => { options.signal?.throwIfAborted(); options.onProgress?.() }
   check()
   // Parse creates a detached snapshot and rejects actual wrong ownership before projection.
-  const project = courseProjectV10Schema.parse(sources.project)
+  const project = courseProjectV11Schema.parse(sources.project)
+  if (!project.entry) throw new Error('作品尚未配置运行入口；请先指定已有顶层实例，原内容与资源已保留')
   const diagnostics: ComponentPublishDiagnostic[] = []
   const dependencies = componentPublishDependencies(project)
   const effectiveDefinitions = new Set(Object.values(project.instances)
@@ -202,28 +203,31 @@ export async function buildPublishedCourseV3(
   for (const [id, instance] of Object.entries(project.instances)) {
     check()
     const runtimeInstance = await prepareWebInstance(instance, ['instances', id, 'data'])
-    instances[id] = { ...runtimeInstance, ...(instance.implementationOverride ? {
+    instances[id] = { ...runtimeInstance,
+      ...(instance.container ? { container: structuredClone(instance.container) } : {}), ...(instance.implementationOverride ? {
       implementationOverride: await implementation(instance.implementationOverride, ['instances', id, 'implementationOverride']),
     } : {}) }
   }
 
   // A state's effective Web program uses the same compiler and cache as its base.
-  const surfaces = structuredClone(project.surfaces)
-  for (const [surfaceIndex, surface] of surfaces.entries()) for (const [stateIndex, state] of (surface.presentation?.states ?? []).entries()) {
-    const effective = resolveComponentPresentation(project, surface.id, state.id)
+  for (const [containerId, containerInstance] of Object.entries(instances)) for (const [stateIndex, state] of (containerInstance.container?.presentation?.states ?? []).entries()) {
+    const effective = resolveComponentPresentation(project, containerId, state.id)
     for (const [id, override] of Object.entries(state.overrides)) if (override.data !== undefined && effective.instances[id])
-      override.data = (await prepareWebInstance(effective.instances[id], ['surfaces', surfaceIndex, 'presentation', 'states', stateIndex, 'overrides', id, 'data'])).data
+      override.data = (await prepareWebInstance(effective.instances[id], ['instances', containerId, 'container', 'presentation', 'states', stateIndex, 'overrides', id, 'data'])).data
   }
 
   const assetIds=new Set<string>()
   const resources={assets:{...sources.assetBytes},components:sources.componentFiles??{}}
   const references=createComponentReferenceCapture(project,resources)
-  const versions=[project,...project.surfaces.flatMap(surface=>(surface.presentation?.states??[]).map(state=>resolveComponentPresentation(project,surface.id,state.id)))]
-  for(const version of versions){for(const instance of Object.values(version.instances))for(const id of references.componentAssetIds(instance,version.definitions[instance.definitionId],version))assetIds.add(id);for(const surface of version.surfaces)for(const id of componentBackgroundAssetIds(resolveComponentBackground(version,surface)))assetIds.add(id)}
+  const versions=[project,...Object.values(project.instances).flatMap(instance=>(instance.container?.presentation?.states??[]).map(state=>resolveComponentPresentation(project,instance.id,state.id)))]
+  for(const version of versions)for(const instance of Object.values(version.instances)){
+    for(const id of references.componentAssetIds(instance,version.definitions[instance.definitionId],version))assetIds.add(id)
+    if(instance.container)for(const id of componentBackgroundAssetIds(resolveComponentBackground(version,instance.container)))assetIds.add(id)
+  }
   for(const id of componentBackgroundAssetIds(project.background))assetIds.add(id)
   for(const asset of Object.values(project.theme?.assets??{}))assetIds.add(asset.assetId)
   for(const sound of Object.values(project.media?.audio.sounds??{}))assetIds.add(sound.assetId)
-  const assets: PublishedCourseV3['assets'] = {}
+  const assets: PublishedCourseV4['assets'] = {}
   for (const origin of project.logic?.network?.connectOrigins ?? []) diagnostics.push({
     code: 'network-dependency', message: `课程声明网络地址 ${origin}；导出保留网络行为，相应功能在离线时需要网络。`, path: ['logic', 'network', 'connectOrigins'],
   })
@@ -259,7 +263,7 @@ export async function buildPublishedCourseV3(
 
   const { schemaVersion: _version, revision: _revision, definitions: _definitions,
     instances: _instances, assets: _assets, ...runtimeData } = project
-  const payload = publishedCourseV3Schema.parse({ ...runtimeData, schemaVersion: 3, surfaces, definitions, instances, assets })
+  const payload = publishedCourseV4Schema.parse({ ...runtimeData, schemaVersion: 4, definitions, instances, assets })
   check()
   return { payload, dependencies, diagnostics,
     offlineComplete: diagnostics.every(issue => ['source-compile-warning','asset-encoding-warning'].includes(issue.code))
@@ -267,3 +271,6 @@ export async function buildPublishedCourseV3(
         (!!asset.url && !/^[a-z][a-z\d+.-]*:/i.test(asset.url))),
   }
 }
+
+/** Existing internal imports use the same Published 4 producer; no Published 3 writer remains. */
+export const buildPublishedCourseV3 = buildPublishedCourseV4

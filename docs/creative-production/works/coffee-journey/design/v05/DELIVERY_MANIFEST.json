@@ -1,0 +1,148 @@
+{
+  "schema": "guoling-creative-reference-2026-10",
+  "work": "一杯咖啡的远行",
+  "edition": "v0.5",
+  "updated": "2026-10-22",
+  "official": {
+    "format": "Project 11",
+    "revision": 179,
+    "status": "current-verified-pre-owner-acceptance",
+    "structure": {
+      "flowRoots": 1,
+      "nativeGroups": 7,
+      "nativeText": 62,
+      "nativeTitle": 8,
+      "nativeImages": 8,
+      "nativeBackgroundShapes": 7,
+      "localPrograms": 3
+    }
+  },
+  "artifacts": [
+    {
+      "name": "formalProject",
+      "path": "native/coffee-journey-v05.glx",
+      "revision": 179,
+      "bytes": 6969845,
+      "sha256": "e3303319b283afe4284628adb07a06e00251435569cd37268ad9171426e5ab90"
+    },
+    {
+      "name": "formalOffline",
+      "path": "native/coffee-journey-v05-offline.html",
+      "bytes": 14986940,
+      "sha256": "c434a3a392d012373720747d4564dddfc217a46b32656d4c3f7cfa27e6adc237"
+    },
+    {
+      "name": "responsiveReference",
+      "path": "index.html",
+      "bytes": 15423,
+      "sha256": "e4913f114c52f8c27cadeb25dbc3394454feff8b13347b2d271f8cb6d58f5946"
+    },
+    {
+      "name": "sourceIndex",
+      "path": "README.md",
+      "bytes": 2889,
+      "sha256": "9277d35b82a066a0b9a3cc978e2f38e4213e0df332ebacfd3f13dcc3fcf328b7"
+    },
+    {
+      "name": "caseIndex",
+      "path": "REFERENCE_CASES.md",
+      "bytes": 3520,
+      "sha256": "29740c9b970536c049e49562a68c33dc52ae5814a442cae7b7d47fde7eb41246"
+    },
+    {
+      "name": "licensedAssets",
+      "path": "ASSETS.md",
+      "bytes": 3264,
+      "sha256": "4b01d4c3de045e21fe0c0fe408e1fc5934f46ec680cefe71622c2913bb02eb58"
+    },
+    {
+      "name": "sourceGuide",
+      "path": "native/ASSEMBLY_GUIDE.md",
+      "bytes": 2610,
+      "sha256": "9cc34a3f780fb1191a21134bc96608951800a1eecfeaf054de757804fa972985"
+    }
+  ],
+  "previews": [
+    {
+      "path": "previews/u01-desktop.png",
+      "sha256": "88fc38f5e85f05bd72c5fba16d01cb6acabecb0681f11090805c4e20c8378c91",
+      "bytes": 689989
+    },
+    {
+      "path": "previews/u02-desktop.png",
+      "sha256": "421b26f80cb76fbd31fe57dbef6a67dc181d89ff44d2e87c017bfa42bc504c06",
+      "bytes": 1115770
+    },
+    {
+      "path": "previews/u03-desktop.png",
+      "sha256": "d2414b03cda4b0b36268c4b67f9a19c422c2421f4935d42dc3852f2d29750257",
+      "bytes": 353464
+    },
+    {
+      "path": "previews/u04-desktop.png",
+      "sha256": "ff0742a60124b7e261b7548a199e92ac59072de941abb3b1d13d4d07222d24d7",
+      "bytes": 862238
+    },
+    {
+      "path": "previews/u05-desktop.png",
+      "sha256": "199dea0aba95c82a3e71322edb799f22924fcc85e515c7a7a82051cebd6e8350",
+      "bytes": 360205
+    },
+    {
+      "path": "previews/u06-desktop.png",
+      "sha256": "6413ec0904b4d83645f8792b9361ce74c0a313febaa8d76ef72f6959e1146bff",
+      "bytes": 97105
+    },
+    {
+      "path": "previews/u07-desktop.png",
+      "sha256": "ccca1ae91b3a823a42887e9fd3be1bfef37ff7550c49939e7167726362c862b0",
+      "bytes": 483696
+    },
+    {
+      "path": "previews/u03-mobile.png",
+      "sha256": "6fba7b67648ca39df496f69db30c09699f76911f0f60552b63c481f66acb0356",
+      "bytes": 129380
+    },
+    {
+      "path": "previews/u05-mobile.png",
+      "sha256": "b10754745f993278a0343f8d00b134e7e5fd7a51fa9eee23558340f7f27d7e8a",
+      "bytes": 150786
+    },
+    {
+      "path": "previews/u06-mobile.png",
+      "sha256": "ce056b0812b87e7e343d7a071b9c85da26ee0a45ae5e425d6167f911a89748a9",
+      "bytes": 37675
+    },
+    {
+      "path": "previews/u03-compare.png",
+      "sha256": "89b3c4f29ec6a8c5c635049aef49061d6e8df513b6e90f15b3f44e6000f2e8b5",
+      "bytes": 606460
+    },
+    {
+      "path": "previews/u06-dilution.png",
+      "sha256": "51a3a8d4efa9ef07e868e9cb309ad3d297953d8af8ca9760fb3435d7114e77a5",
+      "bytes": 99673
+    },
+    {
+      "path": "previews/u05-mid-50.png",
+      "sha256": "f8876e30eb2f354f6e72c885ea91cc86bcd6e9418f563e9809e25f6fa3f876a6",
+      "bytes": 393980
+    }
+  ],
+  "verified": {
+    "software": "Representative editing/UndoRedo/save/new PID cold open in production",
+    "offline": "Single HTML offline at 1440 and 390px; chapter navigation, 3 labs, decoded images",
+    "sugarWater": "Same engine with changed configuration in standalone HTML only"
+  },
+  "pending": [
+    "U03 SVG and comparison clarity",
+    "U06 visual/scaled labels",
+    "U06 cross-topic GLX insertion and roundtrip",
+    "Persistent cross-chapter background runtime idea NOT implemented"
+  ],
+  "frozenSource": {
+    "glx": "output/structured-coffee-fidelity-20261021/full-final-20261021/workspace/coffee-journey-v05-delivery.glx",
+    "offline": "output/independent-repair-20261022/ui-final/coffee-journey-r179-reverified-offline.html"
+  },
+  "doNotReadAsCurrent": "output/coffee-document-cleanup-20261022/obsolete-materials-20261022.zip"
+}

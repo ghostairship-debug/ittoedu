@@ -1,4 +1,5 @@
 // @vitest-environment node
+import { testContainerInstance } from '../../../helpers/glxWorkFixture'
 import { promises as fs } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -23,7 +24,7 @@ it('cancelled close can reopen A for a real edit while old A authority remains s
       const project = createBlankCourseProjectV10(name)
       project.definitions.text = { ...TEXT_DEFINITION, id: 'text' }
       project.instances.content = { id: 'content', definitionId: 'text', data: textDataEdit('fixture', createTextComponentData(name)).value }
-      project.surfaces[0].childIds = ['content']
+      testContainerInstance(project, 0).childIds = ['content']
       const snapshot = await host.internalAPI.create({ kind: 'course-v10', project, resources: { assets: {}, components: {} } }, `${name}.h5lesson`)
       await host.saveToPath(snapshot.documentId, path.join(workspace, `${name}.h5lesson`))
       return { snapshot }

@@ -1,4 +1,5 @@
 // @vitest-environment node
+import { testContainerInstance } from '../helpers/glxWorkFixture'
 import { promises as fs } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -24,7 +25,7 @@ it('applies a current image resource to an observed Web asset file with identity
   project.assets[assetId] = { id: assetId, path: assetPath, filename: 'photo.png', mimeType: 'image/png', width: 12, height: 8, byteLength: original.byteLength }
   project.instances.web = { id: 'web', definitionId: WEB_DEFINITION.id, data: { html: `<img src="${uri}" alt="预测照片"><button>原互动</button>`,
     resourceBindings: { [uri]: assetId } }, frame: { width: 400, height: 240, transform: [1, 0, 0, 1, 30, 40] } }
-  project.surfaces[0].childIds = ['web']
+  testContainerInstance(project, 0).childIds = ['web']
   const host = new DocumentHostService(path.join(root, 'recovery'))
   try {
     const initial = await host.internalAPI.create({ kind: 'course-v10', project, resources: { assets: { [assetId]: original }, components: {} } }, 'asset.h5lesson')

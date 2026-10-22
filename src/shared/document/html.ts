@@ -43,8 +43,9 @@ export interface FlowHtmlContext {
   assets: Assets
   /** Component package display names, for blocks that embed a component. */
   packageName(packageId: string): string
-  /** The formal output owner renders an instance reference without a component filename. */
-  instanceHtml?(instanceId: string): string
+  /** Undefined children keep an opaque reference. An empty string is an expanded,
+   * empty reading group; the output owner retains that distinction in its wrapper. */
+  instanceHtml?(instanceId: string, childrenHtml?: string): string
 }
 
 const escapeText = (value: string) => value.replace(/&/g, '&amp;').replace(/ /g, '&nbsp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
@@ -168,7 +169,7 @@ export function blockHtml(block: Block, context: FlowHtmlContext): string {
     case 'component': return `<guoling-component name="${escapeAttribute(context.packageName(block.component.packageId))}"${block.wrap ? ` data-wrap="${block.wrap}"` : ''}></guoling-component>`
     case 'course-instance':
       if (!context.instanceHtml) throw new FlowContentError(`正式实例尚未连接 HTML 输出：${block.id}`)
-      return context.instanceHtml(block.id)
+      return context.instanceHtml(block.id, block.blocks?.map(child => blockHtml(child, context)).join('\n'))
     case 'course-component': return `<iframe src="../components/${escapeAttribute(block.name)}.html"${block.title ? ` title="${escapeAttribute(block.title)}"` : ''}${
       block.height !== undefined ? ` height="${block.height}"` : ''}${block.wrap ? ` data-wrap="${block.wrap}"` : ''}></iframe>`
   }
@@ -491,7 +492,10 @@ export function parseFlowHtml(html: string, options: { parse?: PageParsePort; as
       } else if (tag === 'guoling-instance') {
         const id = options.instanceByPath?.(node.attributes.path ?? '')
         if (!id) throw new FlowContentError(`正文引用的正式对象已不存在：${node.attributes.path ?? ''}`)
-        block({ id, type: 'course-instance', ...(node.attributes.title ? { title: node.attributes.title } : {}) })
+        const expanded = node.attributes['data-flow-layout-group'] === 'true'
+          || node.children.some(child => child.kind === 'element' || child.kind === 'text' && Boolean(child.text.trim()))
+        block({ id, type: 'course-instance', ...(node.attributes.title ? { title: node.attributes.title } : {}),
+          ...(expanded ? { blocks: blocks(node.children) } : {}) })
       } else if (tag === 'guoling-component') {
         // Matched to an existing block by the caller; a new one cannot be created from text.
         block({ id: stableFlowId('block'), type: 'component', component: { packageId: '', version: '' }, props: {}, staticFallbackAssetId: '',
@@ -588,9 +592,13 @@ function adoptChart(next: NativeChartContent, previous: NativeChartContent): Nat
 
 export function alignFlowBlocks(next: readonly Block[], previous: readonly Block[], context: FlowHtmlContext): { blocks: Block[]; unresolved: string[] } {
   const unresolved: string[] = []
-  const signature = (block: Block) => (block as Record<string, unknown>)[UNRESOLVED_COMPONENT] !== undefined
-    ? `<guoling-component name="${escapeAttribute(String((block as Record<string, unknown>)[UNRESOLVED_COMPONENT]))}"${'wrap' in block && block.wrap ? ` data-wrap="${block.wrap}"` : ''}></guoling-component>`
-    : blockHtml(normalized(block), context)
+  const signature = (block: Block) => {
+    const html = (block as Record<string, unknown>)[UNRESOLVED_COMPONENT] !== undefined
+      ? `<guoling-component name="${escapeAttribute(String((block as Record<string, unknown>)[UNRESOLVED_COMPONENT]))}"${'wrap' in block && block.wrap ? ` data-wrap="${block.wrap}"` : ''}></guoling-component>`
+      : blockHtml(normalized(block), context)
+    // An instance ID is a formal reference, not parser-assigned prose identity.
+    return block.type === 'course-instance' ? JSON.stringify([block.id, html]) : html
+  }
   const normalized = (block: Block): Block => {
     const clone = structuredClone(block) as Block & Record<string, unknown>
     for (const key of ['content', 'citation', 'caption', 'title', 'body'] as const) {
@@ -600,8 +608,9 @@ export function alignFlowBlocks(next: readonly Block[], previous: readonly Block
     return clone
   }
   const align = (blocks: readonly Block[], prior: readonly Block[]): Block[] => {
-    const paired = pairItems(blocks, prior, signature, (a, b) => a.type === b.type && a.type !== 'component'
-      || ['paragraph', 'heading'].includes(a.type) && ['paragraph', 'heading'].includes(b.type))
+    const paired = pairItems(blocks, prior, signature, (a, b) => a.type === 'course-instance' || b.type === 'course-instance'
+      ? a.type === b.type && a.id === b.id
+      : a.type === b.type && a.type !== 'component' || ['paragraph', 'heading'].includes(a.type) && ['paragraph', 'heading'].includes(b.type))
     return blocks.flatMap((block, index): Block[] => {
       const old = paired[index]
       if (old && signature(old) === signature(block)) return [old]
@@ -623,6 +632,7 @@ export function alignFlowBlocks(next: readonly Block[], previous: readonly Block
       next.items = next.items.map((item, index) => ({ ...item, id: items[index]?.id ?? item.id, content: adoptFormulas(item.content, items[index]?.content) }))
     }
     if (next.type === 'section' && old.type === 'section') next.blocks = align(next.blocks, old.blocks)
+    if (next.type === 'course-instance' && old.type === 'course-instance' && next.blocks !== undefined && old.blocks !== undefined) next.blocks = align(next.blocks, old.blocks)
     if (next.type === 'chart' && old.type === 'chart') next.chart = adoptChart(next.chart, old.chart)
     if (next.type === 'table' && old.type === 'table') {
       const columns = pairItems(next.columns, old.columns, column => inlineHtml(normalizeDocumentText(column.header)))

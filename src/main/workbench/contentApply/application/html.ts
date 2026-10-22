@@ -1,6 +1,6 @@
 import { parse, serialize, serializeOuter, type DefaultTreeAdapterTypes } from 'parse5'
 import { htmlObjectStyle, type HtmlAssembly, type HtmlAssemblyObject, type HtmlObjectContent } from '../../../../core/contentApply/assembly/htmlAssembly'
-import { containerChildIds, type ComponentDefinition, type ComponentFrame, type CourseProjectV10, type JsonObject } from '../../../../shared/contracts/component-platform'
+import { componentDefinitionBuiltinKey, containerChildIds, type ComponentDefinition, type ComponentFrame, type CourseProjectV10, type JsonObject } from '../../../../shared/contracts/component-platform'
 import { htmlContentTargetIds } from './plan'
 import type { ContentApplyDiagnostic, ContentChangeRequest, ContentObjectDraft, HtmlContentProjection } from './types'
 import { professionalHtmlDraft } from './professionalHtml'
@@ -291,8 +291,14 @@ export function localHtmlInputs(project: CourseProjectV10, request: ContentChang
   const ids = htmlContentTargetIds(project, request)
   if (request.source.scope !== 'projection') {
     const roots = request.target.kind === 'instance' ? [request.target.instanceId] : containerChildIds(project, request.target.container)
-    // One leaf is an unambiguous content target even when its read alias is the page file.
-    if (roots.length === 1 && !project.instances[roots[0]!]!.childIds?.length) return [{ instanceId: roots[0]!, html: request.source.html }]
+    // A program owns its HTML independently of its native child plane.
+    // Other mixed groups still need their current mapped projection.
+    if (roots.length === 1) {
+      const instance = project.instances[roots[0]!]!, definition = project.definitions[instance.definitionId]
+      const implementation = instance.implementationOverride ?? definition?.implementation
+      const key = implementation?.kind === 'builtin' ? implementation.key : componentDefinitionBuiltinKey(definition)
+      if (!instance.childIds?.length || key === 'guoling.html-program') return [{ instanceId: instance.id, html: request.source.html }]
+    }
     // A read-back projection passed as complete content can still modify its mapped objects.
     // Independent replacement programs take redo's assembly path and never enter this mapper.
     if (!request.projection) throw new Error('编组内容修改需要当前软件投影；独立新内容可沿同一范围使用 intent: "redo"')

@@ -1,3 +1,4 @@
+import { componentContainerForInstance, componentSurface } from '../../shared/contracts/component-platform/project'
 import { z } from 'zod'
 import { documentDigest } from '../documents/documentDigest'
 import { componentSpatialAuthoringSchema, componentSpatialPoseSchema, owningContainer,
@@ -5,8 +6,8 @@ import { componentSpatialAuthoringSchema, componentSpatialPoseSchema, owningCont
 
 /** Spatial authoring shares the Surface field and the document's canonical History. */
 export function spatialAuthoringEdit(project: CourseProjectV10, surfaceId: string, change: (spatial: ComponentSpatialAuthoring) => void): ComponentEdit {
-  const surface = project.surfaces.find(value => value.id === surfaceId && value.kind === 'spatial')
-  if (!surface) throw new Error('空间表面已不存在')
+  const surface = componentSurface(project, surfaceId)
+  if (surface?.kind !== 'spatial') throw new Error('空间表面已不存在')
   const spatial = structuredClone(surface.spatial ?? { home: { x: 0, y: 0, zoom: 1 }, frames: [] })
   change(spatial)
   return { type: 'spatial.set', surfaceId, spatial }
@@ -55,9 +56,7 @@ export function updateSpatialCameraFrameEdit(project: CourseProjectV10, surfaceI
 export function spatialWorldInstance(project: CourseProjectV10, surfaceId: string, instanceId: string): boolean {
   const instance = project.instances[instanceId]
   if (!instance?.frame || project.definitions[instance.definitionId]?.role === 'behavior') return false
-  let owner = owningContainer(project, instanceId)
-  while (owner?.kind === 'instance') owner = owningContainer(project, owner.instanceId)
-  return owner?.kind === 'surface' && owner.surfaceId === surfaceId
+  return componentContainerForInstance(project, instanceId)?.id === surfaceId
 }
 export function updateSpatialCameraFrameTargetEdit(project: CourseProjectV10, surfaceId: string, frameId: string, instanceId: string | null): ComponentEdit {
   if (instanceId && !spatialWorldInstance(project, surfaceId, instanceId)) throw new Error('镜头跟随对象已不在当前世界中')
@@ -111,8 +110,8 @@ export interface SpatialObservedRefs {
   semanticZoom: Record<string, string>
 }
 export function observeSpatialSource(project: CourseProjectV10, surfaceId: string, objectPaths: Readonly<Record<string, string>>, previousRefs?: SpatialObservedRefs) {
-  const surface = project.surfaces.find(value => value.id === surfaceId && value.kind === 'spatial')
-  if (!surface) throw new Error('空间表面已不存在')
+  const surface = componentSurface(project, surfaceId)
+  if (surface?.kind !== 'spatial') throw new Error('空间表面已不存在')
   const spatial = surface.spatial ?? { home: { x: 0, y: 0, zoom: 1 }, frames: [] }
   const refs: SpatialObservedRefs = previousRefs ? structuredClone(previousRefs) : { frames: {}, paths: {}, relations: {}, semanticZoom: {} }
   const observe = (kind: keyof SpatialObservedRefs, id: string, index: number) => {
@@ -149,7 +148,7 @@ const sourceSchema = z.object({ defaultRoute: z.union([z.string().min(1), z.numb
 })
 export function prepareSpatialSourceEdit(project: CourseProjectV10, surfaceId: string, source: unknown, observed: SpatialObservedRefs,
   objectPaths: Readonly<Record<string, string>>, currentViewport?: ComponentSpatialPose): ComponentEdit {
-  const value = sourceSchema.parse(source), prior = project.surfaces.find(surface => surface.id === surfaceId && surface.kind === 'spatial')?.spatial
+  const value = sourceSchema.parse(source), prior = componentSurface(project, surfaceId)?.spatial
   const used = new Set<string>()
   const names = { frames: '镜头', paths: '路径', relations: '关系', semanticZoom: '缩放规则' }
   const identity = (kind: keyof SpatialObservedRefs, ref: string | undefined) => {
@@ -220,7 +219,7 @@ export function prepareSpatialSourceEdit(project: CourseProjectV10, surfaceId: s
 /** The existing path/relation identity is the complete write boundary. */
 export interface SpatialGraphScope { surfaceId: string; graph: 'path' | 'relation'; graphId: string }
 export function spatialGraphItem(project: CourseProjectV10, scope: SpatialGraphScope) {
-  const surface = project.surfaces.find(value => value.id === scope.surfaceId && value.kind === 'spatial')
+  const surface = componentSurface(project, scope.surfaceId)
   const item = surface?.spatial?.[scope.graph === 'path' ? 'paths' : 'relations']?.find(value => value.id === scope.graphId)
   if (!item) throw new Error('所选空间图项已不存在')
   return item
@@ -229,7 +228,7 @@ export function spatialGraphItem(project: CourseProjectV10, scope: SpatialGraphS
 /** Both preparation and final authorization verify the canonical command, including unchanged siblings. */
 export function isSpatialGraphScopedEdit(project: CourseProjectV10, scope: SpatialGraphScope, edit: ComponentEdit): boolean {
   if (edit.type !== 'spatial.set' || edit.surfaceId !== scope.surfaceId) return false
-  const prior = project.surfaces.find(value => value.id === scope.surfaceId && value.kind === 'spatial')?.spatial
+  const prior = componentSurface(project, scope.surfaceId)?.spatial
   const kind = scope.graph === 'path' ? 'paths' : 'relations'
   const index = prior?.[kind]?.findIndex(value => value.id === scope.graphId) ?? -1
   if (!prior || index < 0 || edit.spatial[kind]?.[index]?.id !== scope.graphId) return false
@@ -242,7 +241,7 @@ export function isSpatialGraphScopedEdit(project: CourseProjectV10, scope: Spati
 
 /** Read geometry and the actual ancestor chain used by tour/relation endpoints. */
 export function spatialGraphDependencyPaths(project: CourseProjectV10, scope: SpatialGraphScope): string[][] {
-  const item = spatialGraphItem(project, scope), surface = project.surfaces.find(value => value.id === scope.surfaceId)!
+  const item = spatialGraphItem(project, scope), surface = componentSurface(project, scope.surfaceId)!
   const ids = 'frameIds' in item ? [...item.instanceIds ?? [], ...surface.spatial!.frames.filter(frame => item.frameIds.includes(frame.id)).flatMap(frame => frame.targetInstanceId ? [frame.targetInstanceId] : [])]
     : [item.sourceInstanceId, item.targetInstanceId]
   const paths: string[][] = [['@surface', scope.surfaceId, 'id'], ['@surface', scope.surfaceId, 'kind']]

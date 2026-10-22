@@ -2,7 +2,7 @@ import { expect, it } from 'vitest'
 import { strFromU8, unzipSync } from 'fflate'
 import { createChartData } from '../../src/components/chart/data'
 import { createTableData } from '../../src/components/table/data'
-import { courseProjectV10Schema } from '../../src/shared/contracts/component-platform/schema'
+import { createTestProjectFromLegacy } from '../helpers/glxWorkFixture'
 import { buildComponentDocx } from '../../src/renderer/export/componentPlatform/document'
 
 const w = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'
@@ -28,7 +28,7 @@ it('exports CSS pixel sizes consistently for rich text, table cells and editable
   chart.series[0].points[0].value = 12; chart.series[0].points[1].value = 18
   const headings = Array.from({ length: 6 }, (_, index) => ({ id: `heading${index + 1}`, definitionId: 'guoling.document-block',
     data: { type: 'heading', level: index + 1, content: { inlines: [{ type: 'text', text: `标题${index + 1}`, style: { fontSize: 32 } }] } } }))
-  const document = courseProjectV10Schema.parse({ schemaVersion: 10, id: 'docx-semantics', revision: 0, title: 'DOCX语义',
+  const document = createTestProjectFromLegacy({ schemaVersion: 10, id: 'docx-semantics', revision: 0, title: 'DOCX语义',
     definitions: Object.fromEntries(['text', 'formula', 'table', 'chart', 'document-block'].map(key => [`guoling.${key}`, { id: `guoling.${key}`, role: 'content', implementation: { kind: 'builtin', key: `guoling.${key}` } }])),
     instances: Object.fromEntries([
       ...headings,

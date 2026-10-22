@@ -1,3 +1,4 @@
+import { setRootContainers } from '../helpers/glxWorkFixture'
 import { describe, expect, it, vi } from 'vitest'
 import { createBlankCourseProjectV10 } from '../../src/core/course/createCourseProjectV10'
 import { ObservationImageStore } from '../../src/main/workbench/observation/ObservationImageStore'
@@ -8,8 +9,8 @@ import type { DocumentSnapshot } from '../../src/shared/workbench/document'
 const png = Uint8Array.from(Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=', 'base64'))
 const identity = { documentId: 'd', epoch: 'e', revision: 3, locationId: 'second' }
 const project = createBlankCourseProjectV10('观察'); project.id = 'project'
-project.surfaces = ['first', 'second'].map(id => ({ id, kind: 'slide', title: id, childIds: [] }))
 project.global.overlay = []; project.instances = {}; project.definitions = {}
+setRootContainers(project, ['first', 'second'].map(id => ({ id, kind: 'slide', title: id, childIds: [] })))
 const snapshot: DocumentSnapshot = { documentId: 'd', epoch: 'e', revision: 3,
   model: { kind: 'course-v10', project, resources: { assets: {}, components: {} } },
   binding: { kind: 'untitled', suggestedName: 'test' }, dirty: true, saving: false, recoverable: true,

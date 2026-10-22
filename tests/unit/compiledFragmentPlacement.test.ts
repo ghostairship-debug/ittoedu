@@ -1,3 +1,4 @@
+import { setRootContainers } from '../helpers/glxWorkFixture'
 // @vitest-environment node
 import { expect, it } from 'vitest'
 import { build } from 'esbuild'
@@ -32,7 +33,7 @@ it('keeps HTML program placement and document roots while normalizing only measu
     project.definitions[id] = { id, role: 'mixed', implementation: { kind: 'builtin', key } }
     project.instances[id] = { id, definitionId: id, data: { html: source }, frame: { width: 1280, height: 720, transform: [1, 0, 0, 1, 0, 0] } }
   }
-  project.surfaces = ['program', 'web', 'document'].map(id => ({ id: 'surface-' + id, kind: 'slide', title: id, childIds: [id], designSize: { width: 1280, height: 720 } }))
+  setRootContainers(project, ['program', 'web', 'document'].map(id => ({ id: 'surface-' + id, kind: 'slide', title: id, childIds: [id], designSize: { width: 1280, height: 720 } })))
   const published = await buildPublishedCourseV3({ project, assetBytes: {} }, { compilation: new InMemoryComponentCompilation(createEsbuildComponentCompiler()) })
   const dom = new JSDOM('<!doctype html>')
   const artifact = await compileCoursePlayback(published.payload, { document: dom.window.document, renderBuiltin: async () => { throw new Error('Unexpected static builtin') } })
