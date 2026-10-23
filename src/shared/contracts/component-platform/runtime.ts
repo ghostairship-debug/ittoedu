@@ -110,7 +110,7 @@ export interface ComponentAuthorSpotInput {
   kind: 'text' | 'image'
   /** Current computed CSS for the local text tools; never persisted as author data. */
   textStyle?: Partial<Record<'font-family' | 'font-size' | 'color' | 'fill' | 'font-weight' | 'font-style'
-    | 'text-decoration-line' | 'background-color' | 'text-align' | 'line-height' | 'letter-spacing' | 'word-spacing' | 'text-transform' | 'width' | 'transform' | 'transform-origin', string>>
+    | 'text-decoration-line' | 'background-color' | 'text-align' | 'line-height' | 'letter-spacing' | 'word-spacing' | 'text-transform' | 'white-space' | 'width' | 'transform' | 'transform-origin', string>>
   authorKey?: string
   scope?: ComponentAuthorScope
   binding?: ComponentAuthorBinding

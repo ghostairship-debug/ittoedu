@@ -126,7 +126,11 @@ it('CA266 rejects a real A background CAS change and retains the original File a
         [{ type: 'surface.background.set', surfaceId: componentSurfaces(f.model(f.a).project)[0].id, background: { mode: 'own', color: '#123456' } }]) } })
     selected.gate.resolve()
   })
-  await screen.findByRole('button', { name: '重试上传' })
+  // A's retained upload belongs to A. B gets its own panel while the old
+  // bytes and conflict remain with the original registry owner.
+  await waitFor(() => expect(JSON.parse(preservePropertiesDrafts(f.a).find(record => record.label.endsWith(':图片上传'))!.raw).bytes)
+    .toEqual(Array.from(selected.bytes)))
+  expect(screen.queryByRole('button', { name: '重试上传' })).not.toBeInTheDocument()
   expect(Object.keys(f.model(f.b).resources.assets)).toHaveLength(0)
   expect(Object.keys(f.model(f.a).resources.assets)).toHaveLength(0)
   expect(componentSurfaces(f.model(f.a).project)[0].background).toEqual({ mode: 'own', color: '#123456' })

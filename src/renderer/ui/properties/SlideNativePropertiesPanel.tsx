@@ -23,6 +23,7 @@ import {
 } from 'lucide-react'
 import { nanoid } from 'nanoid'
 import { useLayoutEffect, useRef, useState, type ReactNode } from 'react'
+import { isCourseComponentInputFailure, settleCourseComponentInput } from '../../documents/CourseV10DocumentBridge'
 import type {
   ArrowHead,
   FeatherMode,
@@ -80,6 +81,7 @@ import {
   ToggleRow,
   usePropertyDraftBindingKey,
   usePropertyDraftFlush,
+  type PropertyCommitFailure,
 } from './PropertyControls'
 import {
   ChartProperties,
@@ -91,6 +93,7 @@ import {
   type NativeTablePropertiesCommands,
   type NativeTablePropertiesView,
 } from './NativeTableProperties'
+import { ContainerProperties, type PropertiesContainerView } from './ContainerProperties'
 
 export type DeepPartial<T> = T extends object ? { [K in keyof T]?: DeepPartial<T[K]> } : T
 
@@ -135,6 +138,7 @@ export type PropertiesItemView = (
   | PropertiesComponentView
   | PropertiesRuntimeView
   | PropertiesCompositionView
+  | PropertiesContainerView
 ) & { ownLocked?: boolean }
 
 export type PropertiesFormulaView = Omit<FormulaNode, 'ast'> & {
@@ -239,7 +243,7 @@ export function CommonNodeProperties({
       </div>}
       {showDimensions && <div className="coordinate-grid">
         <BufferedInput
-          label="宽"
+          label={node.type === 'container' ? '外框宽' : '宽'}
           type="number"
           min={16}
           step={0.1}
@@ -251,7 +255,7 @@ export function CommonNodeProperties({
           onCommit={(width) => update({ width: Number(width) })}
         />
         <BufferedInput
-          label="高"
+          label={node.type === 'container' ? '外框高' : '高'}
           type="number"
           min={16}
           step={0.1}
@@ -483,7 +487,7 @@ function FormalFormulaPropertyEditor({ node, update, accessibilityAutomatic }: {
   const [, setInputEpoch] = useState(0)
   const resumeRequired = useRef(false)
   const fresh = () => ({ key: bindingKey, baseline: node.latex, raw: node.latex, dirty: false, composing: false,
-    serial: 0, update, pending: undefined as Promise<boolean> | undefined })
+    serial: 0, update, pending: undefined as Promise<boolean> | undefined, failure: undefined as PropertyCommitFailure | undefined })
   const session = useRef(fresh())
   useLayoutEffect(() => {
     const owner = session.current
@@ -494,13 +498,28 @@ function FormalFormulaPropertyEditor({ node, update, accessibilityAutomatic }: {
     session.current = fresh()
     setDraft(node.latex)
   }, [bindingKey, node.latex, update])
-  const reset = () => { resumeRequired.current = false; session.current = fresh(); setDraft(node.latex); setError('') }
-  const commit = (source = session.current.raw): boolean | Promise<boolean> => {
+  const resetCurrent = () => { resumeRequired.current = false; session.current = fresh(); setDraft(node.latex); setError('') }
+  const reset = () => {
+    const owner = session.current
+    if (owner.pending) return
+    const failure = owner.failure
+    if (!failure) { resetCurrent(); return }
+    const raw = owner.raw
+    const pending = failure.error.resolveInput('cancel').then(outcome => {
+      if (outcome === 'pending') { setError(failure.error.message); return false }
+      if (session.current !== owner || owner.raw !== raw) return false
+      resetCurrent(); return true
+    }, reason => { setError(reason instanceof Error ? reason.message : String(reason)); return false })
+      .finally(() => { if (owner.pending === pending) owner.pending = undefined })
+    owner.pending = pending
+  }
+  const commit = (source = session.current.raw, explicit = false): boolean | Promise<boolean> => {
     const owner = session.current
     if (owner.pending) return owner.pending
+    if (owner.failure && !explicit) return false
     if (resumeRequired.current || owner.composing) return false
-    if (!owner.dirty && source === owner.baseline) return true
-    if (owner.key !== bindingKey || node.latex !== owner.baseline && node.latex !== source) {
+    if (!owner.dirty && source === owner.baseline && !owner.failure) return true
+    if (owner.key !== bindingKey || !owner.failure && node.latex !== owner.baseline && node.latex !== source) {
       setError('公式草稿对应的目标或源文已改变；输入保留，请按 Esc 放弃后重试。')
       return false
     }
@@ -513,16 +532,33 @@ function FormalFormulaPropertyEditor({ node, update, accessibilityAutomatic }: {
     const serial = owner.serial
     const finish = () => {
       if (session.current !== owner) return true
+      owner.failure = undefined
       owner.baseline = source
       owner.dirty = owner.serial !== serial || owner.composing
       setError(''); setInputEpoch(epoch => epoch + 1)
       return !owner.dirty
     }
-    const fail = (failure: unknown) => { setError(failure instanceof Error ? failure.message : String(failure)); return false }
+    const fail = (reason: unknown) => {
+      if (isCourseComponentInputFailure(reason)) owner.failure = { error: reason, value: source, bindingKey: owner.key, label: '公式 LaTeX', kind: 'text' }
+      setError(reason instanceof Error ? reason.message : String(reason))
+      return isCourseComponentInputFailure(reason) ? settleCourseComponentInput(reason).then(outcome => outcome === 'applied' && owner.failure?.error === reason ? finish() : false,
+        error => { setError(error instanceof Error ? error.message : String(error)); return false }) : false
+    }
     try {
-      const result = owner.update({ latex: source, accessibleText })
+      const failure = owner.failure
+      const result = failure ? failure.error.resolveInput('retry').then(outcome => {
+        if (outcome === 'pending') { setError(failure.error.message); return false }
+        if (session.current !== owner || owner.key !== bindingKey || owner.raw !== source) return false
+        if (outcome === 'applied') {
+          owner.failure = undefined; owner.baseline = failure.value
+          if (source !== failure.value) { setError(''); return false }
+          return true
+        }
+        owner.failure = undefined
+        return Promise.resolve(owner.update({ latex: source, accessibleText })).then(() => true)
+      }) : owner.update({ latex: source, accessibleText })
       if (!result) return finish()
-      const pending = Promise.resolve(result).then(() => { owner.pending = undefined; return finish() }, failure => {
+      const pending = Promise.resolve(result).then(applied => { owner.pending = undefined; return applied === false ? false : finish() }, failure => {
         owner.pending = undefined; return fail(failure)
       })
       owner.pending = pending
@@ -530,19 +566,40 @@ function FormalFormulaPropertyEditor({ node, update, accessibilityAutomatic }: {
     } catch (failure) { return fail(failure) }
   }
   usePropertyDraftFlush(() => commit(), {
-    hasDirty: () => resumeRequired.current || session.current.dirty || session.current.composing || Boolean(session.current.pending),
+    hasDirty: () => resumeRequired.current || session.current.dirty || session.current.composing || Boolean(session.current.pending) || Boolean(session.current.failure),
+    isComposing: () => session.current.composing,
+    inFlight: () => session.current.pending,
+    commitFailure: () => session.current.failure,
     readDraft: () => ({ bindingKey: session.current.key, label: '公式 LaTeX', kind: 'text', raw: session.current.raw,
       baseline: session.current.baseline, composing: resumeRequired.current || session.current.composing }),
-    restoreDraft: record => {
+    restoreDraft: (record, resume) => {
       session.current.key = record.bindingKey; session.current.baseline = record.baseline ?? node.latex
       session.current.raw = record.raw; session.current.dirty = true; resumeRequired.current = record.composing
       setDraft(record.raw)
       if (record.composing) setError('恢复的输入法草稿尚未完成，请继续编辑后再应用。')
+      const sameSession = resume?.readDraft()?.bindingKey === bindingKey
+      const adoptFailure = () => {
+        const failure = sameSession ? resume?.commitFailure?.() : undefined
+        session.current.failure = failure?.bindingKey === bindingKey && failure.label === '公式 LaTeX' ? failure : undefined
+        if (session.current.failure) setError(session.current.failure.error.message)
+      }
+      adoptFailure()
+      if (sameSession && resume?.pending) {
+        const pending = resume.pending.then(ready => {
+          if (session.current.pending !== pending) return ready
+          session.current.pending = undefined; adoptFailure()
+          const previous = resume.readDraft(); if (previous?.baseline !== undefined) session.current.baseline = previous.baseline
+          if (ready && session.current.raw === session.current.baseline) session.current.dirty = false
+          setInputEpoch(epoch => epoch + 1)
+          return !session.current.dirty && !session.current.failure
+        })
+        session.current.pending = pending
+      }
     },
   })
   return <><FormulaAuthoringEditor node={node} latexSource={node.latex} draftSource={draft}
     onCommit={() => { throw new Error('公式属性保留正式 LaTeX 源文') }}
-    onCommitLatex={source => { void commit(source) }} onCancel={reset}
+    onCommitLatex={source => { void commit(source, true) }} onCancel={reset}
     onBeginEdit={() => { if (!session.current.dirty && !session.current.composing && !session.current.pending) session.current = fresh() }}
     onDraftChange={next => {
       resumeRequired.current = false; session.current.raw = next.source; session.current.dirty = next.source !== session.current.baseline
@@ -869,6 +926,7 @@ export function SlideNativeTypeFields({
   tableCommands: NativeTablePropertiesCommands | null
   chartCommands: ChartPropertiesCommands | null
 }) {
+  if (node.type === 'container') return <ContainerProperties node={node} update={update} />
   if (node.type === 'composition') {
     const layoutStyle = flowLayoutEditingEnabled ? node.layoutStyle : undefined
     return (

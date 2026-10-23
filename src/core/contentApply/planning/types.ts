@@ -27,6 +27,11 @@ export interface ContentObjectDraft {
   children?: ContentObjectDraft[]
 }
 
+/** Public input may select a built-in; software resolves its formal definition and defaults. */
+export type ContentObjectInput =
+  | (Omit<ContentObjectDraft, 'children'> & { children?: ContentObjectInput[] })
+  | (Omit<ContentObjectDraft, 'definitionId' | 'data' | 'children'> & { builtinKey: string; data?: JsonValue; children?: ContentObjectInput[] })
+
 export type ContentApplySource =
   | { kind: 'html'; html: string; scope?: 'target' | 'projection'; themeCss?: string; siblingFiles?: ReadonlyMap<string, Uint8Array>;
       /** Software-projected HTML uses canonical asset IDs, outside an instance's private alias namespace. */
@@ -78,6 +83,11 @@ export interface CanonicalContentApplyRequest {
 }
 
 export type ContentApplyRequest = ContentChangeRequest | SurfaceApplyRequest | CanonicalContentApplyRequest
+
+/** A containing canonical batch owns relationship cleanup after all usable plans. */
+export interface ContentApplyPlanOptions {
+  deferTextRelationships?: boolean
+}
 
 export interface ContentApplyDiagnostic extends HtmlAssemblyDiagnostic {
   instanceId?: string

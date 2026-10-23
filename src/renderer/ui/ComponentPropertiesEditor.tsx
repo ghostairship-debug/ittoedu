@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
-import { BufferedInput, PropertyDraftFieldBoundary, usePropertyDraftBindingKey, usePropertyDraftFlush } from './properties/PropertyControls'
+import { BufferedInput, PropertyDraftFieldBoundary, usePropertyDraftBindingKey, usePropertyDraftFlush, type PropertyCommitFailure } from './properties/PropertyControls'
+import { isCourseComponentInputFailure, settleCourseComponentInput } from '../documents/CourseV10DocumentBridge'
 import { SlidersHorizontal } from 'lucide-react'
 import type { ComponentAsset, ComponentDefinition, ComponentInstance, JsonValue } from '../../shared/contracts/component-platform/project'
 import { componentDefinitionPresentation, componentFieldPresentation, componentEditorPresentation } from './properties/componentDefinitionPresentation'
@@ -19,37 +20,92 @@ function StructuredField({label,value,onChange,structured=true,maxLength,placeho
   const [,setInputEpoch]=useState(0)
   const draftRef=useRef(draft)
   const resumeRequired=useRef(false)
-  const session=useRef<{key:string;baseline:string;dirty:boolean;composing:boolean;blurPending:boolean;serial:number;pending?:Promise<boolean>;commit:(value:JsonValue)=>void|Promise<void>}>({key:bindingKey,baseline:source(),dirty:false,composing:false,blurPending:false,serial:0,commit:onChange})
+  const session=useRef<{key:string;baseline:string;dirty:boolean;composing:boolean;blurPending:boolean;serial:number;pending?:Promise<boolean>;failure?:PropertyCommitFailure;commit:(value:JsonValue)=>void|Promise<void>}>({key:bindingKey,baseline:source(),dirty:false,composing:false,blurPending:false,serial:0,commit:onChange})
   const fresh=()=>({key:bindingKey,baseline:source(),dirty:false,composing:false,blurPending:false,serial:0,commit:onChange})
   const edit=(next:string)=>{draftRef.current=next;setDraft(next)}
   useEffect(()=>{if(!session.current.dirty&&!session.current.composing){edit(source());setError('');session.current=fresh()}else if(session.current.key===bindingKey)session.current.commit=onChange},[value,bindingKey,onChange])
-  const reset=()=>{resumeRequired.current=false;session.current=fresh();edit(source());setError('')}
-  const commit=(candidate=draftRef.current):boolean|Promise<boolean>=>{
+  const resetCurrent=()=>{resumeRequired.current=false;session.current=fresh();edit(source());setError('')}
+  const reset=()=>{
+    const owner=session.current
+    if(owner.pending)return
+    const failure=owner.failure
+    if(!failure){resetCurrent();return}
+    const raw=draftRef.current
+    const pending=failure.error.resolveInput('cancel').then(outcome=>{
+      if(outcome==='pending'){setError(failure.error.message);return false}
+      if(session.current!==owner||owner.failure!==failure||draftRef.current!==raw)return false
+      resetCurrent();return true
+    },reason=>{setError(reason instanceof Error?reason.message:String(reason));return false})
+      .finally(()=>{if(owner.pending===pending)owner.pending=undefined})
+    owner.pending=pending
+  }
+  const commit=(candidate=draftRef.current,explicit=false):boolean|Promise<boolean>=>{
     if(session.current.pending)return session.current.pending
+    if(session.current.failure&&!explicit)return false
     if(resumeRequired.current){setError('恢复的输入法草稿尚未完成，请继续编辑后再应用。');return false}
     if(session.current.composing)return false
     if(!session.current.dirty)return true
     if(session.current.key!==bindingKey){setError('编辑目标已改变；输入保留，请按 Esc 放弃后重试。');return false}
-    if(session.current.baseline!==source()&&candidate!==source()){setError('原属性已在其他入口改变；输入保留，请按 Esc 放弃后重试。');return false}
+    if(!session.current.failure&&session.current.baseline!==source()&&candidate!==source()){setError('原属性已在其他入口改变；输入保留，请按 Esc 放弃后重试。');return false}
     let parsed:JsonValue
     try{parsed=structured?JSON.parse(candidate) as JsonValue:candidate}catch{setError('请输入有效的 JSON；输入保留，尚未改写工程。');return false}
     const owner=session.current,serial=owner.serial
-    const finish=()=>{if(session.current===owner){owner.baseline=structured?JSON.stringify(parsed,null,2):String(parsed??'');if(owner.serial===serial&&!owner.composing&&!owner.blurPending)owner.dirty=false;setError('');return !owner.dirty}return true}
-    const fail=(error:unknown)=>{if(session.current===owner)setError(error instanceof Error?error.message:String(error));return false}
+    const finish=()=>{if(session.current===owner){owner.failure=undefined;owner.baseline=structured?JSON.stringify(parsed,null,2):String(parsed??'');if(owner.serial===serial&&!owner.composing&&!owner.blurPending)owner.dirty=false;setError('');return !owner.dirty}return true}
+    const fail=(reason:unknown)=>{
+      if(isCourseComponentInputFailure(reason))owner.failure={error:reason,value:candidate,bindingKey:owner.key,label,kind:structured?'structured':'text'}
+      if(session.current===owner)setError(reason instanceof Error?reason.message:String(reason))
+      return isCourseComponentInputFailure(reason)?settleCourseComponentInput(reason).then(outcome=>outcome==='applied'&&owner.failure?.error===reason?finish():false,
+        error=>{setError(error instanceof Error?error.message:String(error));return false}):false
+    }
     try{
-      const result=owner.commit(parsed)
+      const failure=owner.failure
+      const result=failure?failure.error.resolveInput('retry').then(outcome=>{
+        if(outcome==='pending'){setError(failure.error.message);return false}
+        if(session.current!==owner||owner.key!==bindingKey||draftRef.current!==candidate)return false
+        if(outcome==='applied'){
+          owner.failure=undefined
+          owner.baseline=structured?JSON.stringify(JSON.parse(failure.value),null,2):failure.value
+          if(candidate!==failure.value){setError('');return false}
+          return true
+        }
+        owner.failure=undefined
+        return Promise.resolve(owner.commit(parsed)).then(()=>true)
+      }):owner.commit(parsed)
       if(!result)return finish()
-      const pending=Promise.resolve(result).then(()=>{owner.pending=undefined;return finish()},error=>{owner.pending=undefined;return fail(error)})
+      const pending=Promise.resolve(result).then(applied=>{owner.pending=undefined;return applied===false?false:finish()},error=>{owner.pending=undefined;return fail(error)})
       owner.pending=pending
       return pending
     }catch(error){return fail(error)}
   }
   usePropertyDraftFlush(()=>commit(),{
-    hasDirty:()=>resumeRequired.current||session.current.dirty||session.current.composing||Boolean(session.current.pending),
+    hasDirty:()=>resumeRequired.current||session.current.dirty||session.current.composing||Boolean(session.current.pending)||Boolean(session.current.failure),
+    isComposing:()=>session.current.composing,
+    inFlight:()=>session.current.pending,
+    commitFailure:()=>session.current.failure,
     readDraft:()=>({bindingKey:session.current.key,label,kind:structured?'structured':'text',raw:draftRef.current,baseline:session.current.baseline,composing:resumeRequired.current||session.current.composing}),
-    restoreDraft:record=>{resumeRequired.current=record.composing;session.current.key=record.bindingKey;session.current.baseline=record.baseline??source();session.current.dirty=true;edit(record.raw);if(record.composing)setError('恢复的输入法草稿尚未完成，请继续编辑后再应用。')},
+    restoreDraft:(record,resume)=>{
+      resumeRequired.current=record.composing;session.current.key=record.bindingKey;session.current.baseline=record.baseline??source();session.current.dirty=true;edit(record.raw)
+      if(record.composing)setError('恢复的输入法草稿尚未完成，请继续编辑后再应用。')
+      const sameSession=resume?.readDraft()?.bindingKey===bindingKey
+      const adoptFailure=()=>{
+        const failure=sameSession?resume?.commitFailure?.():undefined
+        session.current.failure=failure?.bindingKey===bindingKey&&failure.label===label?failure:undefined
+        if(session.current.failure)setError(session.current.failure.error.message)
+      }
+      adoptFailure()
+      if(sameSession&&resume?.pending){
+        const pending=resume.pending.then(ready=>{
+          if(session.current.pending!==pending)return ready
+          session.current.pending=undefined;adoptFailure()
+          const previous=resume.readDraft();if(previous?.baseline!==undefined)session.current.baseline=previous.baseline
+          if(ready&&draftRef.current===session.current.baseline)session.current.dirty=false
+          setInputEpoch(epoch=>epoch+1)
+          return !session.current.dirty&&!session.current.failure
+        });session.current.pending=pending
+      }
+    },
   })
-  return <><textarea aria-label={label} rows={structured?5:draft.includes('\n')?4:2} maxLength={maxLength} placeholder={placeholder} value={draft} onFocus={()=>{if(!session.current.dirty)session.current=fresh()}} onChange={event=>{resumeRequired.current=false;session.current.dirty=true;session.current.serial++;edit(event.currentTarget.value)}} onBlur={()=>{if(session.current.composing)session.current.blurPending=true;else commit()}} onCompositionStart={()=>{resumeRequired.current=false;session.current.composing=true;setInputEpoch(epoch=>epoch+1)}} onCompositionEnd={event=>{session.current.composing=false;edit(event.currentTarget.value);setInputEpoch(epoch=>epoch+1);if(session.current.blurPending){session.current.blurPending=false;commit(event.currentTarget.value)}}} onKeyDown={event=>{if(event.key==='Escape'&&!session.current.composing)reset()}}/>{error&&<small role="alert" className="component-property-description">{error}</small>}</>
+  return <><textarea aria-label={label} rows={structured?5:draft.includes('\n')?4:2} maxLength={maxLength} placeholder={placeholder} value={draft} onFocus={()=>{if(!session.current.dirty)session.current=fresh()}} onChange={event=>{resumeRequired.current=false;session.current.dirty=true;session.current.serial++;edit(event.currentTarget.value)}} onBlur={()=>{if(session.current.composing)session.current.blurPending=true;else commit()}} onCompositionStart={()=>{resumeRequired.current=false;session.current.composing=true;setInputEpoch(epoch=>epoch+1)}} onCompositionEnd={event=>{session.current.composing=false;edit(event.currentTarget.value);setInputEpoch(epoch=>epoch+1);if(session.current.blurPending){session.current.blurPending=false;commit(event.currentTarget.value)}}} onKeyDown={event=>{if(event.nativeEvent.isComposing||session.current.composing)return;if(event.key==='Escape'){event.preventDefault();reset()}if((event.ctrlKey||event.metaKey)&&event.key==='Enter'){event.preventDefault();void commit(undefined,true)}}}/>{error&&<small role="alert" className="component-property-description">{error}</small>}</>
 }
 /** The original properties panel now edits the definition's formal author data. */
 export function ComponentPropertiesEditor({definition,node,assets={},onChange,onPreview,title,groups}:ComponentPropertiesEditorProps){

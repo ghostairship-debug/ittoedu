@@ -14,7 +14,7 @@ import type { HtmlDesignMeasurementRequest } from './measurement/ElectronHtmlDes
 import { prepareMeasurementDocument } from './measurement/prepareMeasurementDocument'
 import { assemblyContentDraft, htmlAssemblyFraming, htmlForAssembly, localHtmlInputs, preserveHtmlOuterStyle } from './application/html'
 import { contentTargetIds, NoContentTargetError, planContentApply } from './application/plan'
-import type { CanonicalContentApplyRequest, ContentApplyDiagnostic, ContentApplyPlan, ContentApplyRequest, ContentApplyResult, ContentApplySessionPort, ContentChangeRequest, ContentObjectDraft, SurfaceApplyRequest } from './application/types'
+import type { CanonicalContentApplyRequest, ContentApplyDiagnostic, ContentApplyPlan, ContentApplyPlanOptions, ContentApplyRequest, ContentApplyResult, ContentApplySessionPort, ContentChangeRequest, ContentObjectDraft, SurfaceApplyRequest } from './application/types'
 import type { DocumentResources } from '../../../shared/workbench/document'
 import { extractHtmlAuthoringRecords, type HtmlAuthoringRecords } from '../../../shared/html/htmlAuthoringRecords'
 import { decodeHtmlEntities } from '../../../shared/html/htmlSourceScanner'
@@ -25,7 +25,7 @@ import { adoptFormulas } from '../../../shared/document/html'
 import { courseThemeStyleText } from '../../../shared/contracts/design-v1/theme'
 import { contentPlacementRegion } from '../../../core/contentApply/planning/placement'
 
-export type { ContentApplyRequest, ContentApplyResult, ContentApplyPlan, ContentApplySessionPort } from './application/types'
+export type { ContentApplyRequest, ContentApplyResult, ContentApplyPlan, ContentApplyPlanOptions, ContentApplySessionPort } from './application/types'
 
 export interface ContentApplyServiceOptions {
   session: ContentApplySessionPort
@@ -174,11 +174,11 @@ export class ContentApplyService {
   private readonly createId: () => string
   constructor(private readonly options: ContentApplyServiceOptions) { this.createId = options.createId ?? randomUUID }
 
-  async plan(request: ContentApplyRequest, signal?: AbortSignal): Promise<ContentApplyPlan> {
+  async plan(request: ContentApplyRequest, signal?: AbortSignal, options: ContentApplyPlanOptions = {}): Promise<ContentApplyPlan> {
     const baseProject = structuredClone(this.options.session.project())
     signal?.throwIfAborted()
-    if (request.intent === 'canonical') return this.planCanonicalApply(baseProject, request, signal)
-    if (!('source' in request)) return this.planSurfaceApply(baseProject, request)
+    if (request.intent === 'canonical') return this.planCanonicalApply(baseProject, request, signal, options)
+    if (!('source' in request)) return this.planSurfaceApply(baseProject, request, options)
     const context = request.editingContext
     const project = context ? resolveComponentPresentation(baseProject, context.surfaceId, context.stateId) : baseProject
     const originalRequest = request
@@ -328,7 +328,7 @@ export class ContentApplyService {
           const bindings = { ...dataBindings(data), ...instance.authoring?.resourceBindings }
           for (const [reference, id] of Object.entries(bindings)) {
             if (redoBindings[reference] && redoBindings[reference] !== id) return {
-              command: captureComponentOperation(baseProject, []), input: originalRequest, insertedIds: [], usability: 'partial',
+              command: captureComponentOperation(baseProject, [], [], options), input: originalRequest, insertedIds: [], usability: 'partial',
               diagnostics: [...diagnostics, { level: 'warning', code: 'redo-authoring-source-retained', instanceId: instance.id, reference, repairable: true,
                 message: '所选范围的作者记录使用不同资源身份解释同一引用，原程序与记录保留，尚未替换结构。请缩小到各原对象分别重做。' }] }
             redoBindings[reference] = id
@@ -350,7 +350,7 @@ export class ContentApplyService {
             const conflicting = Object.keys(previousRecords).filter(key => retained[key] && !equalComponentValue(retained[key], previousRecords[key]))
             if (!reconciled || reconciled.unresolved.length || conflicting.length) {
               const references = reconciled?.unresolved.length ? reconciled.unresolved : conflicting.length ? conflicting : Object.keys(previousRecords)
-              return { command: captureComponentOperation(baseProject, []), input: originalRequest, insertedIds: [], usability: 'partial',
+              return { command: captureComponentOperation(baseProject, [], [], options), input: originalRequest, insertedIds: [], usability: 'partial',
                 diagnostics: [...diagnostics, { level: 'warning', code: 'redo-authoring-source-retained', instanceId: id,
                   reference: references.slice(0, 5).join(', '), repairable: true,
                   message: '本次重做无法把既有作者记录可靠对应到新源文，原程序、作者记录与本次输入均保留，尚未替换结构。请保留记录绑定的原元素后重做，或沿原对象使用 content 局改。' }] }
@@ -503,7 +503,7 @@ export class ContentApplyService {
     unverified ||= sourceImplementations.length > 0
     if (request.source.kind === 'objects') unverified ||= request.source.objects.some(draft => hasSourceProgram(draft, compilationProject.definitions))
     signal?.throwIfAborted()
-    const plan = planContentApply({ project: baseProject, request, createId: this.createId, drafts, edits, diagnostics, unusable, unverified, preserveLayout })
+    const plan = planContentApply({ project: baseProject, request, createId: this.createId, drafts, edits, diagnostics, unusable, unverified, preserveLayout }, options)
     const expectedPaths = new Set(plan.command.expected.map(value => JSON.stringify(value.path)))
     for (const path of measurementDependencies) if (!expectedPaths.has(JSON.stringify(path))) {
       expectedPaths.add(JSON.stringify(path))
@@ -549,7 +549,7 @@ export class ContentApplyService {
     return { diagnostics, failed }
   }
 
-  private async planCanonicalApply(project: CourseProjectV10, request: CanonicalContentApplyRequest, signal?: AbortSignal): Promise<ContentApplyPlan> {
+  private async planCanonicalApply(project: CourseProjectV10, request: CanonicalContentApplyRequest, signal?: AbortSignal, options: ContentApplyPlanOptions = {}): Promise<ContentApplyPlan> {
     const edits = structuredClone(request.edits), compilationProject = structuredClone(project)
     const resources = structuredClone(this.options.session.resources?.() ?? { assets: {}, components: {} })
     const sourceImplementations: Extract<ComponentImplementation, { kind: 'source' }>[] = []
@@ -581,7 +581,7 @@ export class ContentApplyService {
     const compiled = await this.compileSources(compilationProject, resources, sourceImplementations, signal)
     signal?.throwIfAborted()
     const diagnostics = [...(request.diagnostics ?? []), ...compiled.diagnostics]
-    return { command: captureComponentOperation(project, edits), input: request,
+    return { command: captureComponentOperation(project, edits, [], options), input: request,
       insertedIds: edits.flatMap(edit => edit.type === 'instance.insert' ? edit.rootIds : edit.type === 'surface.insert' ? [edit.surface.id] : []),
       diagnostics, usability: compiled.failed ? 'unusable' : diagnostics.some(item => item.level !== 'info') ? 'partial' : sourceImplementations.length ? 'unverified' : 'usable' }
   }
@@ -613,7 +613,7 @@ export class ContentApplyService {
     }
   }
 
-  private planSurfaceApply(project: CourseProjectV10, request: SurfaceApplyRequest): ContentApplyPlan {
+  private planSurfaceApply(project: CourseProjectV10, request: SurfaceApplyRequest, options: ContentApplyPlanOptions): ContentApplyPlan {
     const edits: ComponentEdit[] = [], insertedIds: string[] = []
     if (request.intent === 'surface.add') {
       const pages = 'pages' in request ? request.pages : [request]
@@ -628,7 +628,7 @@ export class ContentApplyService {
           referenceSurfaceId: page.beforeSurfaceId }, this.createId)
         const edit: ComponentEdit = { type: 'surface.insert', surface, index }
         edits.push(edit); insertedIds.push(surface.id)
-        planning = applyComponentOperation(planning, captureComponentOperation(planning, [edit]))
+        planning = applyComponentOperation(planning, captureComponentOperation(planning, [edit], [], options))
       }
     } else {
       const roots = componentSurfaces(project), index = roots.findIndex(surface => surface.id === request.surfaceId)
@@ -649,7 +649,7 @@ export class ContentApplyService {
         if (nextIndex !== index) edits.push({ type: 'surface.move', surfaceId: surface.id, index: nextIndex })
       }
     }
-    return { command: captureComponentOperation(project, edits), input: request, insertedIds,
+    return { command: captureComponentOperation(project, edits, [], options), input: request, insertedIds,
       diagnostics: [], usability: 'usable' }
   }
 

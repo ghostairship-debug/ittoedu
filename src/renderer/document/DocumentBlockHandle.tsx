@@ -14,27 +14,24 @@ export interface DocumentBlockHandleProps {
 
 /** The host supplies the active caret block, its visible rect and already-bound commands. */
 export function DocumentBlockHandle({ blockId, rect, commands, disabledReason, onDragStart }: DocumentBlockHandleProps) {
-  const [menu, setMenu] = useState<'insert' | 'block' | null>(null)
-  useEffect(() => setMenu(null), [blockId])
+  const [menu, setMenu] = useState(false)
+  useEffect(() => setMenu(false), [blockId])
   if (!blockId || !rect || rect.height <= 0) return null
-  const insert = commands.filter(command => command.group === '插入')
   const blocked = commands.map(command => ({ ...command, disabledReason: disabledReason ?? command.disabledReason }))
-  const items = menu === 'insert' ? blocked.filter(command => command.group === '插入') : blocked
-  const at = { x: Math.max(4, rect.left - 56), y: rect.top + rect.height / 2 }
+  const at = { x: Math.max(4, rect.left - 30), y: rect.top + Math.min(rect.height, 28) }
   return createPortal(<div className="document-block-handle" data-block-id={blockId} style={{ position: 'fixed', left: at.x, top: rect.top, zIndex: 20 }}>
-    <button type="button" aria-label="插入段落" disabled={Boolean(disabledReason) || !insert.length}
-      onMouseDown={event => event.preventDefault()} onClick={() => setMenu(value => value === 'insert' ? null : 'insert')}>+</button>
     <button type="button" aria-label="段落操作" draggable={!disabledReason}
-      aria-description={disabledReason ?? '拖动以排序段落'} title={disabledReason ?? '拖动以排序段落'}
-      onClick={() => setMenu(value => value === 'block' ? null : 'block')}
+      aria-expanded={menu} aria-haspopup="menu" disabled={Boolean(disabledReason)}
+      aria-description={disabledReason ?? '点击插入或操作段落，拖动以排序'} title={disabledReason ?? '点击操作段落，拖动以排序'}
+      onClick={() => setMenu(value => !value)}
       onDragStart={event => {
         if (disabledReason) { event.preventDefault(); return }
         event.dataTransfer.setData(DOCUMENT_BLOCK_DRAG_MIME, blockId)
         event.dataTransfer.effectAllowed = 'move'
-        setMenu(null)
+        setMenu(false)
         onDragStart?.(blockId)
       }}>⋮⋮</button>
-    {menu && <ContextMenu at={at} label={menu === 'insert' ? '插入段落' : '段落操作'} items={items} onClose={() => setMenu(null)} />}
+    {menu && <ContextMenu at={at} label="段落操作" items={blocked} onClose={() => setMenu(false)} />}
   </div>, document.body)
 }
 

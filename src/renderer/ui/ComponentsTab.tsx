@@ -1,22 +1,24 @@
 import { Box, Check, ChevronLeft, Download, Info, Library, LocateFixed, MoreVertical, RefreshCw, Search, ShieldAlert, Trash2, Upload, X } from 'lucide-react'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { AvailableComponentCatalogPackage, AvailableHtmlComponent, ComponentCatalogSnapshot } from '../../shared/componentCatalog'
-import { componentSurface, componentSurfaces, type ComponentDefinition } from '../../shared/contracts/component-platform/project'
+import { componentDefinitionBuiltinKey, componentSurface, componentSurfaces, type ComponentDefinition, type CourseProjectV10 } from '../../shared/contracts/component-platform/project'
 import type { FlowDeepInsertPort } from './RightSidebar'
 import { collectCourseComponentPackageUsage, type CourseComponentPackageUsage } from '../components/courseComponentPackageTransactions'
-import { collectComponentLibrarySubjects, filterComponentLibraryPackages, filterHtmlComponents, selectCurrentCatalogPackages, selectCurrentHtmlComponents, componentCatalogInstallStatus, selectProjectLibraryDefinitions,projectLibraryDefinition, filterBuiltInWorkAssets } from '../components/componentLibraryModel'
-import { componentDefinitionEntry, insertComponentDefinitionAtTarget, insertComponentPackagesAtTarget } from '../components/insertComponentPackages'
-import { builtInWorkAssetMetadata, loadBuiltInWorkAsset } from '../../core/components/library/workAssets'
+import { filterHtmlComponents, selectCurrentCatalogPackages, selectCurrentHtmlComponents, componentCatalogInstallStatus, selectProjectLibraryDefinitions,projectLibraryDefinition, createComponentLibraryCards, filterComponentLibraryCards, componentLibraryCardAvailability, componentLibraryPlacementLabel, type ComponentLibraryCardEntry } from '../components/componentLibraryModel'
+import { componentDefinitionEntry, prepareComponentDefinitionEntryAtTarget, insertComponentPackagesAtTarget, type ComponentLibraryAddOptions, type ComponentPackageInsertionOptions } from '../components/insertComponentPackages'
+import { settleCourseComponentInput, type CapturedCourseTarget } from '../documents/CourseV10DocumentBridge'
 import { createComponentAuthoringActions } from '../components/commitComponentPackageAuthoring'
 import { extractComponentLibraryEntry } from '../../core/components/library'
 import { exportComponentLibraryArchive } from '../../core/components/library/archive'
+import { COMPONENT_LIBRARY_CATEGORIES, createProjectDefinitionDiscoveryEntries, searchDiscoveryEntries } from '../../shared/componentDiscovery'
+import { courseInsertionViewPlacement } from '../media/commitCourseMediaAuthoring'
 import { selectActiveCourseProjectDocument, selectEditingScope, useEditorStore } from '../store/editorStore'
 interface ComponentsTabProps {
   onFlowInsert?: FlowDeepInsertPort
   componentCatalog?: ComponentCatalogSnapshot
   onImportExternalComponents?(): void
   onRefreshComponentCatalog?(): void
-  onAddCatalogComponents?(entries: AvailableComponentCatalogPackage[]): boolean | Promise<boolean>
+  onAddCatalogComponents?(entries: AvailableComponentCatalogPackage[], options?: ComponentLibraryAddOptions): boolean | Promise<boolean>
   onUpdateCatalogComponent?(entry: AvailableComponentCatalogPackage): void
   onReplaceComponent?(definitionId: string): void
   onExtractSelection?(title: string, kind?: 'objects' | 'page' | 'structure', surfaceIds?: readonly string[]): Promise<void>
@@ -24,7 +26,6 @@ interface ComponentsTabProps {
 }
 const EMPTY_CATALOG: ComponentCatalogSnapshot = { sources: [], packages: [], issues: [] }
 const installStatusLabels = { available: '可加入工程', embedded: '已加入工程', 'update-available': '有新版本', 'embedded-newer': '工程版本更新' }
-const qualityLabels = { experimental: '试验', candidate: '候选', stable: '稳定', deprecated: '已弃用' }
 function CatalogThumbnail({entry}: {entry: AvailableComponentCatalogPackage}) { return entry.thumbnailDataUrl ? <img src={entry.thumbnailDataUrl} alt="" /> : <Box size={20} /> }
 function closeContainingMenu(target: HTMLElement) { target.closest('details')?.removeAttribute('open') }
 function ComponentDetailsDialog({data,entry,usage,onClose}: {data?: ComponentDefinition;entry?: AvailableComponentCatalogPackage;usage?: CourseComponentPackageUsage;onClose():void}) {
@@ -60,7 +61,7 @@ function HtmlComponentLibrarySection({ entries, onRefresh }: { entries: Availabl
       <div className="component-library__results-heading">
         <div><strong>HTML 组件</strong><span>{entries.length} 个结果</span></div>
       </div>
-      <p className="component-library__html-note">这里保留旧 HTML 资产，可查看条目信息，并删除“我的资产库”中的条目；这些条目暂不支持 AI 检索和插入。</p>
+      <p className="component-library__html-note">这里保留旧 HTML 资产，可查看条目信息，并删除“我的资产库”中的条目；检索会说明限制，这些条目当前尚无插入入口。</p>
       {error && <div className="component-library__issues" role="alert"><ShieldAlert size={16} /><span>{error}</span></div>}
       <div className="component-library__grid">
         {entries.map((entry) => {
@@ -96,294 +97,212 @@ function HtmlComponentLibrarySection({ entries, onRefresh }: { entries: Availabl
   )
 }
 
-function WorkAssetLibrarySection({ query }: { query: string }) {
-  const kernel = useEditorStore(state => state.courseKernel)
-  const assets = useMemo(() => filterBuiltInWorkAssets(builtInWorkAssetMetadata(), query), [query])
-  const [adding, setAdding] = useState<string | null>(null), [message, setMessage] = useState<string | null>(null)
-  const add = async (id: string, placement?: 'local') => {
-    setAdding(id); setMessage(null)
-    try {
-      const target = kernel.captureTarget()
-      const selected = await loadBuiltInWorkAsset(id)
-      if (!selected) throw new Error('资产已不存在')
-      const result = await insertComponentPackagesAtTarget(kernel, target, [selected], {
-        placement,
-        ...(target.instanceId ? { targetBindings: { navigation: target.instanceId } } : {}),
-      })
-      if (!result.ok) throw new Error(result.reason ?? '资产未能应用')
-      setMessage(selected.usage?.kind === 'transition' ? '转场已应用到所选导航动作。' : '资产已插入，可继续编辑。')
-    } catch (error) { setMessage(error instanceof Error ? error.message : String(error)) }
-    finally { setAdding(null) }
-  }
-  if (!assets.length) return null
-  return <section aria-label="内置作品资产" data-testid="work-asset-library">
-    <div className="component-library__results-heading"><div><strong>内置作品资产</strong><span>{assets.length} 个结果</span></div></div>
-    {message && <p role="status">{message}</p>}
-    <div className="component-library__grid">{assets.map(asset => <article className="component-library-card" key={asset.id} data-testid={`work-asset-${asset.id}`}>
-      <div className="component-library-card__copy"><div className="component-library-card__title"><strong>{asset.title}</strong></div><p>{asset.usage?.description}</p>
-        <div className="component-library-card__metadata"><span>{asset.usage?.editable?.map(value => value === 'parameters' ? '参数' : value === 'structure' ? '结构' : '源码').join(' / ')}</span></div>
-      </div>
-      <div className="component-library-card__actions"><button type="button" className="secondary-button" disabled={adding !== null} onClick={() => void add(asset.id)}>
-        {adding === asset.id ? '正在应用…' : asset.usage?.kind === 'transition' ? '应用到所选导航' : '插入'}
-      </button>{(asset.usage?.kind === 'container' || asset.usage?.kind === 'template') && <button type="button" className="secondary-button" disabled={adding !== null} onClick={() => void add(asset.id, 'local')}>放入当前容器</button>}</div>
-    </article>)}</div>
-  </section>
-}
+const libraryTypeLabels = { component: '组件', container: '容器', 'example-page': '示例页面', template: '组合模板', transition: '转场' }
+const libraryEditableLabels = { parameters: '参数', structure: '内部内容与结构', source: '源码' }
+const librarySubjectLabel = (entry: ComponentLibraryCardEntry) => entry.library?.subjects.length ? entry.library.subjects.join(' / ') : entry.sourceId === 'built-in' ? '通用' : '学科未标注'
+const libraryStageLabel = (entry: ComponentLibraryCardEntry) => entry.library?.schoolStages.length ? entry.library.schoolStages.join(' / ') : entry.sourceId === 'built-in' ? '不限学段' : '学段未标注'
 
 interface ComponentLibraryDialogProps {
   catalog: ComponentCatalogSnapshot
   components: Record<string, ComponentDefinition>
+  project?: CourseProjectV10 | null
+  navigationTargetId?: string | null
   onClose(): void
   onRefresh?(): void
-  onAdd?(entries: AvailableComponentCatalogPackage[]): boolean | Promise<boolean>
+  onAdd?(entries: AvailableComponentCatalogPackage[], options?: ComponentLibraryAddOptions): boolean | Promise<boolean>
   onUpdate?(entry: AvailableComponentCatalogPackage): void
   onDelete?(entry: AvailableComponentCatalogPackage): void | Promise<void>
 }
 
-export function ComponentLibraryDialog({
-  catalog,
-  components,
-  onClose,
-  onRefresh,
-  onAdd,
-  onUpdate,
-  onDelete,
-}: ComponentLibraryDialogProps) {
-  const entries = useMemo(
-    () => selectCurrentCatalogPackages(
-      catalog.packages,
-    ),
-    [catalog.packages],
-  )
-  const subjects = useMemo(() => collectComponentLibrarySubjects(entries), [entries])
-  const schoolStages = useMemo(() => [...new Set(entries.flatMap((entry) => entry.schoolStage))]
-    .sort((left, right) => left.localeCompare(right, 'zh-CN')), [entries])
-  const categories = useMemo(() => [...new Set(entries.flatMap((entry) => entry.category ? [entry.category] : []))]
-    .sort((left, right) => left.localeCompare(right, 'zh-CN')), [entries])
-  const [query, setQuery] = useState('')
-  const [subject, setSubject] = useState<string | null>(null)
-  const [schoolStage, setSchoolStage] = useState('')
-  const [category, setCategory] = useState('')
+export function ComponentLibraryDialog({ catalog, components, project, navigationTargetId, onClose, onRefresh, onAdd, onUpdate, onDelete }: ComponentLibraryDialogProps) {
+  const cards = useMemo(() => createComponentLibraryCards(catalog.packages), [catalog.packages])
+  const [query, setQuery] = useState(''), [category, setCategory] = useState(''), [source, setSource] = useState('')
+  const [subject, setSubject] = useState(''), [schoolStage, setSchoolStage] = useState('')
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
-  const [adding, setAdding] = useState(false)
-  const [addError, setAddError] = useState<string | null>(null)
-  const [detailsEntry, setDetailsEntry] = useState<AvailableComponentCatalogPackage | null>(null)
-  const visibleEntries = useMemo(() => filterComponentLibraryPackages(entries, {
-    query,
-    subject,
-    schoolStage,
-    category,
-  }), [category, entries, query, schoolStage, subject])
-  const selectableVisibleIds = visibleEntries
-    .map((entry) => entry.packageId)
-  const selectedEntries = entries.filter((entry) => selectedIds.has(entry.packageId))
+  const [adding, setAdding] = useState(false), [addError, setAddError] = useState<string | null>(null)
+  const [details, setDetails] = useState<ComponentLibraryCardEntry | null>(null)
+  const [placement, setPlacement] = useState<'default' | 'local'>('default')
+  const addAttempt = useRef<{ choices: string; id: string } | null>(null)
+  const filters = { query, category, source, subject, schoolStage }
+  const visible = filterComponentLibraryCards(cards, filters)
+  const selected = cards.filter(entry => selectedIds.has(entry.selectionId))
+  const sources = [...new Map(cards.map(entry => [entry.sourceId, entry.sourceLabel])).entries()]
+  const subjects = [...new Set(cards.flatMap(entry => entry.library?.subjects ?? []))].filter(value => !['通用', '通用组件'].includes(value))
+  const stages = [...new Set(cards.flatMap(entry => entry.library?.schoolStages ?? []))].filter(value => !['通用', '不限', '不限学段'].includes(value))
+  const available = (entry: ComponentLibraryCardEntry) => componentLibraryCardAvailability(entry, project, navigationTargetId)
+  const bulkIds = visible.filter(entry => entry.usage?.kind !== 'transition' && available(entry).available).map(entry => entry.selectionId)
+  const allVisibleSelected = bulkIds.length > 0 && bulkIds.every(id => selectedIds.has(id))
+  const selectedTransitionIds = new Set(cards.filter(entry => entry.usage?.kind === 'transition').map(entry => entry.selectionId))
+  const hasPages = selected.some(entry => entry.workAsset?.kind === 'page' || entry.workAsset?.kind === 'structure')
+  const selectedTeacher = selected.some(entry => entry.teacherController)
+  const existingTeacher = Object.values(project?.instances ?? {}).some(instance => componentDefinitionBuiltinKey(components[instance.definitionId]) === 'guoling.navigation')
+  const selectedUnavailable = selected.find(entry => !available(entry).available)
   const htmlComponents = useMemo(() => selectCurrentHtmlComponents(catalog.htmlComponents ?? []), [catalog.htmlComponents])
-  const visibleHtmlComponents = useMemo(() => filterHtmlComponents(htmlComponents, query), [htmlComponents, query])
+  const visibleHtml = filterHtmlComponents(htmlComponents, query)
+  const localCount = selected.filter(entry => !entry.teacherController && entry.usage?.kind !== 'transition' && entry.usage?.kind !== 'background'
+    && (!['page', 'structure'].includes(entry.workAsset?.kind ?? '') || placement === 'local')).length
+  const description = [
+    localCount ? `当前容器新增 ${localCount} 项` : '',
+    hasPages && placement === 'default' ? `新增页面 ${selected.filter(entry => entry.workAsset?.kind === 'page' || entry.workAsset?.kind === 'structure').length} 项` : '',
+    selected.some(entry => entry.usage?.kind === 'background') ? '添加到当前作用范围的背景层' : '',
+    selectedTeacher ? existingTeacher ? '复用教师控制台' : '整课全局层添加教师控制台' : '',
+    selected.some(entry => entry.usage?.kind === 'transition') ? '转场应用到所选导航动作' : '',
+  ].filter(Boolean).join(' · ')
 
   useEffect(() => {
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape' && !detailsEntry && !adding) onClose()
+    const close = (event: KeyboardEvent) => { if (event.key === 'Escape' && !adding) { if (details) setDetails(null); else onClose() } }
+    window.addEventListener('keydown', close)
+    return () => window.removeEventListener('keydown', close)
+  }, [adding, details, onClose])
+  const toggle = (entry: ComponentLibraryCardEntry) => setSelectedIds(current => {
+    const next = new Set(current)
+    if (next.has(entry.selectionId)) next.delete(entry.selectionId)
+    else {
+      if (entry.usage?.kind === 'transition') selectedTransitionIds.forEach(id => next.delete(id))
+      next.add(entry.selectionId)
     }
-    window.addEventListener('keydown', handleKeyDown)
-    return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [adding, detailsEntry, onClose])
-
-  const toggleSelection = (packageId: string) => {
-    setSelectedIds((current) => {
-      const next = new Set(current)
-      if (next.has(packageId)) next.delete(packageId)
-      else next.add(packageId)
-      return next
-    })
+    return next
+  })
+  const toggleAll = () => setSelectedIds(current => {
+    const next = new Set(current)
+    bulkIds.forEach(id => { if (allVisibleSelected) next.delete(id); else next.add(id) })
+    return next
+  })
+  const add = async () => {
+    if (!onAdd || adding || !selected.length || selectedUnavailable) return
+    const choices = JSON.stringify([project?.id, [...selectedIds].sort(), placement])
+    if (addAttempt.current?.choices !== choices) addAttempt.current = { choices, id: crypto.randomUUID() }
+    setAdding(true); setAddError(null)
+    const entries = selected.flatMap(entry => entry.catalogEntry ? [entry.catalogEntry] : [])
+    const builtInAssetIds = selected.flatMap(entry => entry.workAsset ? [entry.workAsset.id] : [])
+    const options: ComponentLibraryAddOptions = {
+      ...(builtInAssetIds.length ? { builtInAssetIds } : {}),
+      ...(selectedTeacher ? { includeTeacherController: true } : {}),
+      ...(hasPages && placement === 'local' ? { placement: 'local' as const } : {}),
+    }
+    try {
+      const completed = await onAdd(entries, { ...options, attemptId: addAttempt.current.id })
+      if (!completed) { setAddError('添加未完成，选择已保留，请重试。'); return }
+      setSelectedIds(new Set()); onClose()
+    } catch (error) { setAddError(error instanceof Error ? error.message : String(error)) }
+    finally { setAdding(false) }
   }
 
-  const toggleAllVisible = () => {
-    setSelectedIds((current) => {
-      const next = new Set(current)
-      const shouldSelect = selectableVisibleIds.some((id) => !next.has(id))
-      selectableVisibleIds.forEach((id) => {
-        if (shouldSelect) next.add(id)
-        else next.delete(id)
-      })
-      return next
-    })
-  }
-
-  return (
-    <div className="component-library" data-testid="component-library" role="dialog" aria-modal="true" aria-labelledby="component-library-title">
-      <header className="component-library__header">
-        <button type="button" className="secondary-button" disabled={adding} onClick={onClose}>
-          <ChevronLeft size={16} />返回编辑器
-        </button>
-        <div>
-          <h2 id="component-library-title">组件与资产库</h2>
-          <p>选择后直接添加到当前画布；已加入工程的组件会复用现有定义。</p>
-        </div>
-        <button type="button" className="secondary-button" disabled={!onRefresh} onClick={onRefresh}>
-          <RefreshCw size={14} />刷新
-        </button>
-      </header>
-
-      <div className="component-library__tools">
-        <label className="component-library__search">
-          <Search size={16} aria-hidden="true" />
-          <input
-            type="search"
-            aria-label="搜索组件"
-            placeholder="搜索名称、用途或标签"
-            value={query}
-            onChange={(event) => setQuery(event.currentTarget.value)}
-          />
-        </label>
-        <select aria-label="筛选学段" value={schoolStage} onChange={(event) => setSchoolStage(event.currentTarget.value)}>
-          <option value="">全部学段</option>
-          {schoolStages.map((value) => <option key={value} value={value}>{value}</option>)}
-        </select>
-        <select aria-label="筛选用途" value={category} onChange={(event) => setCategory(event.currentTarget.value)}>
-          <option value="">全部用途</option>
-          {categories.map((value) => <option key={value} value={value}>{value}</option>)}
-        </select>
-      </div>
-
-      <div className="component-library__body">
-        <nav className="component-library__subjects" aria-label="组件学科分类">
-          <button type="button" className={subject === null ? 'is-active' : ''} onClick={() => setSubject(null)}>
-            <span>全部组件</span><small>{entries.length}</small>
-          </button>
-          {subjects.map((value) => (
-            <button type="button" key={value} className={subject === value ? 'is-active' : ''} onClick={() => setSubject(value)}>
-              <span>{value}</span>
-              <small>{entries.filter((entry) =>
-                filterComponentLibraryPackages([entry], { query: '', subject: value, schoolStage: '', category: '' }).length > 0,
-              ).length}</small>
-            </button>
-          ))}
-        </nav>
-
-        <main className="component-library__results">
-          {(!subject || subject === '通用组件') && !schoolStage && !category && <WorkAssetLibrarySection query={query} />}
-          <div className="component-library__results-heading">
-            <div><strong>{subject ?? '全部组件'}</strong><span>{visibleEntries.length} 个结果</span></div>
-            <button
-              type="button"
-              className="secondary-button"
-              disabled={selectableVisibleIds.length === 0}
-              onClick={toggleAllVisible}
-            >
-              <Check size={13} />全选当前结果
-            </button>
-          </div>
-          {catalog.issues.length > 0 && (
-            <div className="component-library__issues" role="status"><ShieldAlert size={16} /><span>{catalog.issues.map(issue => issue.message).join('；')}</span></div>
-          )}
-          {addError && <div className="component-library__issues" role="alert">{addError}</div>}
-          {visibleEntries.length === 0 ? (
-            <div className="empty-state component-library__empty">
-              {entries.length === 0 ? '当前没有可用的内置组件。' : '没有符合筛选条件的组件。'}
-            </div>
-          ) : (
-            <div className="component-library__grid">
-              {visibleEntries.map((entry) => {
-                const status = componentCatalogInstallStatus(entry, projectLibraryDefinition(components,entry.packageId))
-                const selectable = true
-                const selected = selectedIds.has(entry.packageId)
-                return (
-                  <article
-                    key={entry.packageId}
-                    className={`component-library-card${selected ? ' is-selected' : ''}`}
-                    data-testid={`catalog-component-${entry.packageId}`}
-                  >
-                    <label className={`component-library-card__select${selectable ? '' : ' is-disabled'}`}>
-                      <input
-                        type="checkbox"
-                        checked={selected}
-                        disabled={!selectable}
-                        aria-label={`选择${entry.name}`}
-                        onChange={() => toggleSelection(entry.packageId)}
-                      />
-                      <span className="component-library-card__thumbnail"><CatalogThumbnail entry={entry} /></span>
-                    </label>
-                    <div className="component-library-card__copy">
-                      <div className="component-library-card__title">
-                        <strong>{entry.name}</strong>
-                        <span className={`component-quality component-quality--${entry.quality}`}>{qualityLabels[entry.quality]}</span>
-                      </div>
-                      <p>{entry.description}</p>
-                      <div className="component-library-card__metadata">
-                        <span>v{entry.version}</span>
-                        <span>{entry.subject.length > 0 ? entry.subject.join(' / ') : '通用'}</span>
-                        {entry.schoolStage.length > 0 && <span>{entry.schoolStage.join(' / ')}</span>}
-                      </div>
-                      <div className="component-library-card__status">
-                        <span>{installStatusLabels[status]}</span>
-                      </div>
-                    </div>
-                    <div className="component-library-card__actions">
-                      <button type="button" className="secondary-button" onClick={() => setDetailsEntry(entry)}>
-                        <Info size={13} />详情
-                      </button>
-                      {entry.removable && onDelete && <button type="button" className="secondary-button" onClick={() => void onDelete(entry)}><Trash2 size={13} />删除库条目</button>}
-                      {status === 'update-available' && (
-                        <button type="button" className="secondary-button" disabled={!onUpdate} onClick={() => onUpdate?.(entry)}>
-                          <RefreshCw size={13} />审阅更新
-                        </button>
-                      )}
-                    </div>
-                  </article>
-                )
-              })}
-            </div>
-          )}
-          {visibleHtmlComponents.length > 0 && (
-            <HtmlComponentLibrarySection entries={visibleHtmlComponents} onRefresh={onRefresh} />
-          )}
-        </main>
-      </div>
-
-      <footer className="component-library__footer">
-        <span>已选择 {selectedEntries.length} 个组件</span>
-        <button
-          type="button"
-          className="primary-button"
-          disabled={selectedEntries.length === 0 || !onAdd || adding}
-          onClick={() => {
-            if (!onAdd || adding) return
-            setAdding(true); setAddError(null)
-            void Promise.resolve().then(() => onAdd(selectedEntries))
-              .then((completed) => {
-                if (!completed) return
-                setSelectedIds(new Set())
-                onClose()
-              })
-              .catch(error => setAddError(error instanceof Error ? error.message : String(error)))
-              .finally(() => setAdding(false))
-          }}
-        >
-          {adding ? '正在添加…' : `添加到画布${selectedEntries.length > 0 ? `（${selectedEntries.length}）` : ''}`}
-        </button>
-      </footer>
-      {detailsEntry && (
-        <ComponentDetailsDialog entry={detailsEntry} onClose={() => setDetailsEntry(null)} />
-      )}
+  return <div className="component-library" data-testid="component-library" role="dialog" aria-modal="true" aria-labelledby="component-library-title">
+    <header className="component-library__header">
+      <button type="button" className="secondary-button" disabled={adding} onClick={onClose}><ChevronLeft size={16} />返回编辑器</button>
+      <div><h2 id="component-library-title">组件与资产库</h2><p>按用途查找，跨分类勾选，再从底部添加所选内容。</p></div>
+      <button type="button" className="secondary-button" disabled={!onRefresh || adding} onClick={onRefresh}><RefreshCw size={14} />刷新</button>
+    </header>
+    <div className="component-library__tools">
+      <label className="component-library__search"><Search size={16} aria-hidden="true" /><input type="search" aria-label="搜索组件" placeholder="搜索名称、用途或标签" value={query} onChange={event => setQuery(event.currentTarget.value)} /></label>
+      <select aria-label="筛选来源" value={source} onChange={event => setSource(event.currentTarget.value)}><option value="">全部来源</option>{sources.map(([id, label]) => <option key={id} value={id}>{label}</option>)}</select>
+      <select aria-label="筛选学科" value={subject} onChange={event => setSubject(event.currentTarget.value)}><option value="">全部学科</option>{subjects.map(value => <option key={value} value={value}>{value}</option>)}</select>
+      <select aria-label="筛选学段" value={schoolStage} onChange={event => setSchoolStage(event.currentTarget.value)}><option value="">全部学段</option>{stages.map(value => <option key={value} value={value}>{value}</option>)}</select>
     </div>
-  )
+    <div className="component-library__body">
+      <nav className="component-library__subjects" aria-label="组件用途分类">
+        <button type="button" aria-pressed={!category} className={!category ? 'is-active' : ''} onClick={() => setCategory('')}><span>全部组件与资产</span><small>{filterComponentLibraryCards(cards, { ...filters, category: '' }).length}</small></button>
+        {COMPONENT_LIBRARY_CATEGORIES.map(value => <button type="button" key={value.id} aria-pressed={category === value.id} className={category === value.id ? 'is-active' : ''} onClick={() => setCategory(value.id)}><span>{value.label}</span><small>{filterComponentLibraryCards(cards, { ...filters, category: value.id }).length}</small></button>)}
+      </nav>
+      <main className="component-library__results">
+        <div className="component-library__results-heading component-library__selection-tools"><div><strong>{COMPONENT_LIBRARY_CATEGORIES.find(value => value.id === category)?.label ?? '全部组件与资产'}</strong><span>{visible.length} 个结果 · 通用与未标注内容保留显示</span></div><button type="button" className="secondary-button" disabled={!bulkIds.length || adding} onClick={toggleAll}><Check size={13} />{allVisibleSelected ? '取消全选普通条目' : '全选普通条目'}</button></div>
+        {catalog.issues.length > 0 && <div className="component-library__issues" role="status"><ShieldAlert size={16} /><span>{catalog.issues.map(issue => issue.message).join('；')}</span></div>}
+        {visible.length === 0 ? <div className="empty-state component-library__empty">没有符合筛选条件的组件或资产。</div> : <div className="component-library__grid">{visible.map(entry => {
+          const availability = available(entry), isSelected = selectedIds.has(entry.selectionId)
+          const catalogEntry = entry.catalogEntry
+          const status = catalogEntry ? componentCatalogInstallStatus(catalogEntry, projectLibraryDefinition(components, catalogEntry.packageId)) : undefined
+          return <article key={entry.selectionId} className={`component-library-card${isSelected ? ' is-selected' : ''}${!availability.available ? ' is-unavailable' : ''}`} data-testid={catalogEntry ? `catalog-component-${entry.id}` : entry.teacherController ? 'library-teacher-controller' : `work-asset-${entry.id}`}>
+            <label className={`component-library-card__select${!availability.available ? ' is-disabled' : ''}`}>
+              <input type="checkbox" checked={isSelected} disabled={adding || !availability.available && !isSelected} aria-label={`选择${entry.title}`} onChange={() => toggle(entry)} />
+              <span className="component-library-card__thumbnail">{catalogEntry ? <CatalogThumbnail entry={catalogEntry} /> : <Box size={24} />}</span>
+              <div className="component-library-card__copy"><div className="component-library-card__title"><strong>{entry.title}</strong></div><div className="component-library-card__metadata"><span>{libraryTypeLabels[entry.library?.itemType ?? 'component']}</span><span>{entry.sourceLabel}</span><span>{librarySubjectLabel(entry)}</span></div><p>{entry.description}</p><div className="component-library-card__placement">{componentLibraryPlacementLabel(entry, placement === 'local')}</div><div className="component-library-card__metadata">{entry.library?.editable.map(value => <span key={value}>可改{libraryEditableLabels[value]}</span>)}</div>
+                {status && <div className="component-library-card__status"><span>{installStatusLabels[status]}</span></div>}
+                {entry.teacherController && existingTeacher && <div className="component-library-card__status"><span>已添加到工程 · 保留现有样式并复用</span></div>}
+                {!availability.available && <p className="component-library-card__unavailable">{availability.reason}</p>}
+              </div>
+            </label>
+            <div className="component-library-card__actions"><button type="button" className="secondary-button" onClick={() => setDetails(entry)}><Info size={13} />详情</button>
+              {catalogEntry?.removable && onDelete && <button type="button" className="secondary-button" disabled={adding} onClick={() => void onDelete(catalogEntry)}><Trash2 size={13} />删除库条目</button>}
+              {catalogEntry && status === 'update-available' && <button type="button" className="secondary-button" disabled={!onUpdate || adding} onClick={() => onUpdate?.(catalogEntry)}><RefreshCw size={13} />审阅更新</button>}
+            </div>
+          </article>
+        })}</div>}
+        {visibleHtml.length > 0 && !category && !source && !subject && !schoolStage && <HtmlComponentLibrarySection entries={visibleHtml} onRefresh={onRefresh} />}
+      </main>
+    </div>
+    <footer className="component-library__footer">
+      {addError && <div className="component-library__issues" role="alert">{addError}</div>}
+      {selectedUnavailable && <div className="component-library__issues" role="status">{available(selectedUnavailable).reason}</div>}
+      <div className="component-library__selection-summary"><span role="status">已选择 {selected.length} 项</span>{description && <small>{description}</small>}</div>
+      {selected.length > 0 && <button type="button" className="secondary-button" disabled={adding} onClick={() => setSelectedIds(new Set())}>清空选择</button>}
+      {hasPages && <label className="component-library__placement">页面与模板位置<select aria-label="容器与模板添加位置" value={placement} disabled={adding} onChange={event => setPlacement(event.currentTarget.value as 'default' | 'local')}><option value="default">添加为独立页面</option><option value="local">放入当前容器</option></select></label>}
+      <button type="button" className="primary-button" disabled={!selected.length || !onAdd || adding || Boolean(selectedUnavailable)} onClick={() => void add()}>{adding ? '正在添加…' : `添加所选${selected.length ? `（${selected.length}）` : ''}`}</button>
+    </footer>
+    {details && <div className="modal-backdrop" data-testid="component-details-dialog"><section className="modal component-details-dialog" role="dialog" aria-modal="true" aria-labelledby="component-details-title"><div className="component-details-dialog__header"><div><span>{libraryTypeLabels[details.library?.itemType ?? 'component']}</span><h2 id="component-details-title">{details.title}</h2></div><button type="button" className="icon-button" aria-label="关闭组件详情" onClick={() => setDetails(null)}><X size={17} /></button></div><p className="component-details-dialog__description">{details.description}</p><dl className="component-details-dialog__list"><div><dt>来源</dt><dd>{details.sourceLabel}</dd></div><div><dt>身份</dt><dd>{details.id}</dd></div><div><dt>学科</dt><dd>{librarySubjectLabel(details)}</dd></div><div><dt>学段</dt><dd>{libraryStageLabel(details)}</dd></div><div><dt>版本</dt><dd>{details.library?.version ?? '随软件提供'}</dd></div><div><dt>添加位置</dt><dd>{componentLibraryPlacementLabel(details, placement === 'local')}</dd></div><div><dt>可编辑内容</dt><dd>{details.library?.editable.map(value => libraryEditableLabels[value]).join('、') || '使用现有编辑功能'}</dd></div></dl><div className="modal__actions"><button type="button" className="primary-button" onClick={() => setDetails(null)}>完成</button></div></section></div>}
+  </div>
 }
 
-export function ComponentsTab({componentCatalog=EMPTY_CATALOG,onImportExternalComponents,onRefreshComponentCatalog,onAddCatalogComponents,onUpdateCatalogComponent,onReplaceComponent,onExtractSelection,onDeleteCatalogComponent}:ComponentsTabProps) {
+export function ComponentsTab({componentCatalog=EMPTY_CATALOG,onFlowInsert,onImportExternalComponents,onRefreshComponentCatalog,onAddCatalogComponents,onUpdateCatalogComponent,onReplaceComponent,onExtractSelection,onDeleteCatalogComponent}:ComponentsTabProps) {
   const project=useEditorStore(selectActiveCourseProjectDocument), kernel=useEditorStore(state=>state.courseKernel), view=useEditorStore(state=>state.courseView)
   const [libraryOpen,setLibraryOpen]=useState(false), [searchQuery,setSearchQuery]=useState(''),[detailsId,setDetailsId]=useState<string|null>(null),[extractName,setExtractName]=useState(''),[extracting,setExtracting]=useState(false)
   const [extractKind, setExtractKind] = useState<'objects' | 'page' | 'structure'>('objects')
   const [extractPages, setExtractPages] = useState<string[] | null>(null)
+  const [copySources, setCopySources] = useState<Record<string, string>>({})
+  const [pendingInsert, setPendingInsert] = useState<{ key: string; id: string; target: CapturedCourseTarget;
+    entry: import('../../shared/contracts/component-platform/library').ComponentLibraryEntry;
+    options: ComponentPackageInsertionOptions; error: unknown } | null>(null)
+  const inserting = useRef(false)
   const selectedTemplatePages = extractPages ?? (view.surfaceId ? [view.surfaceId] : [])
   const components=project?.definitions ?? {}, packages=selectProjectLibraryDefinitions(components)
-  const current=selectCurrentCatalogPackages(componentCatalog.packages), query=searchQuery.trim().toLocaleLowerCase()
-  const visible=packages.filter(data=>[data.title,data.id,data.library?.version ?? data.version].join(' ').toLocaleLowerCase().includes(query))
+  const current=selectCurrentCatalogPackages(componentCatalog.packages)
+  const facts = project ? createProjectDefinitionDiscoveryEntries(project, { definitionIds: packages.map(value => value.id), instanceIds: Object.keys(project.instances) }, current) : []
+  const visible=searchDiscoveryEntries(facts.map(fact => ({ ...fact, definition: components[fact.id] })), searchQuery)
   const report=(error:unknown)=>kernel.setFeedback({errorMessage:error instanceof Error?error.message:String(error)})
-  const insert=(id:string,destination:'document'|'paper'='document')=>{
+  const sourceKey=(id:string)=>`${view.activeDocumentId}:${id}`
+  const sourceId=(id:string)=>{const sources=facts.find(value=>value.id===id)?.sources??[],chosen=copySources[sourceKey(id)];return sources.some(value=>value.instanceId===chosen)?chosen:sources.length===1?sources[0].instanceId:undefined}
+  const insert=async(id:string,destination:'document'|'paper'='document',copy=false)=>{
+    if (inserting.current) return
+    inserting.current = true
+    try {
     const target=kernel.captureTarget(),state=useEditorStore.getState()
     const camera=(target.surfaceId ? componentSurface(target.project,target.surfaceId) : undefined)?.kind==='spatial'&&selectEditingScope(state)!=='global'
       ? state.readSpatialView(target.surfaceId??'',target.documentId).camera:null
-    void insertComponentDefinitionAtTarget(kernel,target,id,undefined,{destination,...(camera?{center:{x:camera.x,y:camera.y}}:{})}).then(result=>{if(!result.ok)report(result.reason)})
+    const fact=facts.find(value=>value.id===id)
+    const catalogEntry=fact?.source.kind==='catalog'?current.find(value=>value.packageId===fact.action.input?.packageId&&value.sourceId===fact.action.input?.sourceId&&value.version===fact.action.input?.version):undefined
+    if (onFlowInsert && selectEditingScope(state) !== 'global' && (target.surfaceId ? componentSurface(target.project,target.surfaceId) : undefined)?.kind === 'flow') {
+      onFlowInsert({ destination, kind: 'component', label: '组件' }, { packageId: id,
+        ...(copy || fact?.action.kind === 'copy' ? { sourceInstanceId: sourceId(id) } : { catalogEntry }) })
+      return
+    }
+    const options={...courseInsertionViewPlacement(target, { scope: selectEditingScope(state), plane: state.courseView.editingPlane, camera }),destination,
+      ...(copy||fact?.action.kind==='copy'?{sourceInstanceId:sourceId(id)}:{catalogEntry})}
+    const key = JSON.stringify([target.documentId, target.epoch, target.rootInstanceId, target.surfaceId, target.activeStateId, target.editingContainerId, target.activation, state.courseView.editingPlane,
+      target.selectionIdentity, target.instanceIds, id, destination, copy, options])
+    let attempt = pendingInsert?.key === key ? pendingInsert : null
+    if (pendingInsert) {
+      const outcome = await settleCourseComponentInput(pendingInsert.error)
+      if (outcome === 'pending') { report('上一次添加结果仍在核实，已准备内容保留；这次尚未添加。'); return }
+      if (outcome === 'applied') {
+        setPendingInsert(current => current === pendingInsert ? null : current)
+        if (attempt) { kernel.setFeedback({ statusMessage: '上一次组件添加已经完成', errorMessage: null }); return }
+      }
+      else if (attempt) attempt = { ...attempt, target, options }
+    }
+    attempt ??= { key, id, target, entry: await prepareComponentDefinitionEntryAtTarget(kernel, target, id, options), options, error: null }
+    const result = await insertComponentPackagesAtTarget(kernel, attempt.target, [attempt.entry], attempt.options)
+    if (!result.ok) {
+      if (result.inputFailure) {
+        const retained = { ...attempt, error: result.inputFailure }
+        setPendingInsert(retained)
+        const outcome = await settleCourseComponentInput(result.inputFailure)
+        if (outcome === 'applied') { setPendingInsert(current => current === retained ? null : current); return }
+      }
+      report(result.reason)
+      return
+    }
+    setPendingInsert(current => current?.key === key ? null : current)
+    }catch(error){report(error)} finally { inserting.current = false }
   }
   const extract=async()=>{setExtracting(true);try {if(onExtractSelection)await onExtractSelection(extractName,extractKind,selectedTemplatePages);else {
     const target=kernel.captureTarget();if(!extractName.trim()||extractKind==='objects'&&!target.instanceIds.length)throw new Error('请填写名称并选择对象。')
@@ -399,21 +318,26 @@ export function ComponentsTab({componentCatalog=EMPTY_CATALOG,onImportExternalCo
     <div className="composition-fragment-actions"><select aria-label="提炼范围" value={extractKind} onChange={event=>{setExtractKind(event.currentTarget.value as typeof extractKind);setExtractPages(null)}}><option value="objects">所选对象组合</option><option value="page">当前页面模板</option><option value="structure">所选课程结构</option></select><input aria-label="资产名称" placeholder="为资产命名" value={extractName} onChange={event=>setExtractName(event.currentTarget.value)}/><button type="button" disabled={(extractKind==='objects'?!view.selectedInstanceIds.length:extractKind==='page'?!view.surfaceId:!selectedTemplatePages.length)||!extractName.trim()||extracting} onClick={()=>void extract()}>提炼到我的资产库</button></div>
     {extractKind==='structure'&&<fieldset><legend>保留顺序的页面</legend>{project && componentSurfaces(project).map(surface=><label key={surface.id}><input type="checkbox" checked={selectedTemplatePages.includes(surface.id)} onChange={event=>setExtractPages(event.currentTarget.checked?[...selectedTemplatePages,surface.id]:selectedTemplatePages.filter(id=>id!==surface.id))}/>{surface.title}</label>)}</fieldset>}
     <label className="component-project-search"><Search size={15}/><input type="search" aria-label="搜索工程组件" placeholder="搜索工程组件" value={searchQuery} onChange={event=>setSearchQuery(event.currentTarget.value)}/></label>
-    {!visible.length?<div className="empty-state">{packages.length?'没有符合条件的组件。':'工程中还没有组件。请从组件库加入，或导入外部组件。'}</div>:<div className="project-component-list">{visible.map(data=>{
+    {!visible.length?<div className="empty-state">{packages.length?'没有符合条件的组件。':'工程中还没有组件。请从组件库加入，或导入外部组件。'}</div>:<div className="project-component-list">{visible.map(fact=>{
+      const data=fact.definition
       const id=data.id, usage=collectCourseComponentPackageUsage(project!,id),entry=current.find(value=>value.packageId===(data.library?.packageId ?? id)),status=entry?componentCatalogInstallStatus(entry,data):null
       return <article className="project-component-card" key={id} data-testid={`component-package-${id}`}><div className="project-component-card__main">
-        <button type="button" className="component-card" data-testid={`component-${id}`} draggable={usage.totalInstanceCount>0} onDragStart={event=>{event.dataTransfer.effectAllowed='copy';event.dataTransfer.setData('application/x-courseware-element',`component:${id}`);event.dataTransfer.setData('text/plain',data.title??id)}} onClick={()=>insert(id)}><span className="component-card__thumbnail"><Box size={20}/></span><span><strong>{data.title??id}</strong><small>{data.library?.version ?? data.version ?? '工程定义'} · {usage.totalInstanceCount} 个实例</small></span><Box size={15}/></button>
-        {(project && view.surfaceId ? componentSurface(project,view.surfaceId) : undefined)?.kind==='flow'&&<button type="button" aria-label={`将${data.title??id}放到纸面上`} onClick={()=>insert(id,'paper')}>放到纸面上</button>}
+        <button type="button" className="component-card" data-testid={`component-${id}`} disabled={!fact.availability.available || fact.action.kind==='copy'&&!sourceId(id)}
+          draggable={fact.availability.available&&(fact.action.kind==='template'||!!sourceId(id))} onDragStart={event=>{event.dataTransfer.effectAllowed='copy';event.dataTransfer.setData('application/x-courseware-element',`component:${id}`);event.dataTransfer.setData('text/plain',data.title??id);if(fact.action.kind==='copy'&&sourceId(id))event.dataTransfer.setData('application/x-courseware-component-source',sourceId(id)!);}} onClick={()=>void insert(id)}><span className="component-card__thumbnail"><Box size={20}/></span><span><strong>{data.title??id}</strong><small>{pendingInsert?.id === id && pendingInsert.target.documentId === view.activeDocumentId ? '核实／重试上次添加' : fact.action.label} · {data.library?.version ?? data.version ?? '工程定义'} · {usage.totalInstanceCount} 个实例</small></span><Box size={15}/></button>
+        {!!fact.sources?.length&&<label>复制来源<select aria-label={`选择${data.title??id}的复制来源`} value={sourceId(id)??''} onChange={event=>setCopySources({...copySources,[sourceKey(id)]:event.currentTarget.value})}><option value="">请选择现有实例</option>{fact.sources.map(source=><option key={source.instanceId} value={source.instanceId}>{source.title}（{source.instanceId}）</option>)}</select></label>}
+        {fact.action.kind==='template'&&!!fact.sources?.length&&<button type="button" disabled={!sourceId(id)} onClick={()=>void insert(id,'document',true)}>复制所选实例</button>}
+        {!fact.availability.available&&<small role="status">{fact.availability.reason}</small>}
+        {(project && view.surfaceId ? componentSurface(project,view.surfaceId) : undefined)?.kind==='flow'&&<button type="button" disabled={!fact.availability.available || fact.action.kind==='copy'&&!sourceId(id)} aria-label={`将${data.title??id}放到纸面上`} onClick={()=>void insert(id,'paper')}>放到纸面上</button>}
         <details className="project-component-menu"><summary aria-label={`管理${data.title??id}`}><MoreVertical size={17}/></summary><div className="project-component-menu__panel" role="menu">
           <button type="button" role="menuitem" onClick={event=>{closeContainingMenu(event.currentTarget);setDetailsId(id)}}><Info size={14}/>查看详情</button>
-          <button type="button" role="menuitem" disabled={!usage.totalInstanceCount} onClick={()=>void(async()=>{try{if(!window.desktopAPI)throw new Error('请在桌面软件中导出资产。');await window.desktopAPI.exportBinary({suggestedName:`${data.title??id}.h5component`,extension:'h5component',bytes:exportComponentLibraryArchive(componentDefinitionEntry(kernel,id))})}catch(error){report(error)}})()}><Download size={14}/>导出结构资产</button>
+          <button type="button" role="menuitem" disabled={!usage.totalInstanceCount || !sourceId(id)} onClick={()=>void(async()=>{try{if(!window.desktopAPI)throw new Error('请在桌面软件中导出资产。');await window.desktopAPI.exportBinary({suggestedName:`${data.title??id}.h5component`,extension:'h5component',bytes:exportComponentLibraryArchive(componentDefinitionEntry(kernel,id,kernel.captureTarget(),sourceId(id)))})}catch(error){report(error)}})()}><Download size={14}/>导出所选实例资产</button>
           <button type="button" role="menuitem" disabled={status!=='update-available'||!onUpdateCatalogComponent} onClick={()=>entry&&onUpdateCatalogComponent?.(entry)}><RefreshCw size={14}/>更新组件</button>
           <button type="button" role="menuitem" disabled={!onReplaceComponent} onClick={()=>onReplaceComponent?.(id)}><Upload size={14}/>替换组件包</button>
           <button type="button" role="menuitem" disabled={!usage.totalInstanceCount} onClick={()=>{const ref=usage.references[0];kernel.selectInstances([ref.instanceId],ref.surfaceId??view.surfaceId)}}><LocateFixed size={14}/>定位使用位置</button>
           <button type="button" role="menuitem" className="is-danger" disabled={usage.totalInstanceCount>0} onClick={()=>void createComponentAuthoringActions(kernel).deleteComponentPackage(id)}><Trash2 size={14}/>从工程移除</button>
         </div></details></div></article>
     })}</div>}
-    {libraryOpen&&<ComponentLibraryDialog catalog={componentCatalog} components={components} onClose={()=>setLibraryOpen(false)} onRefresh={onRefreshComponentCatalog} onAdd={onAddCatalogComponents} onUpdate={onUpdateCatalogComponent} onDelete={onDeleteCatalogComponent}/>}
+    {libraryOpen&&<ComponentLibraryDialog catalog={componentCatalog} components={components} project={project} navigationTargetId={view.selectedInstanceId} onClose={()=>setLibraryOpen(false)} onRefresh={onRefreshComponentCatalog} onAdd={onAddCatalogComponents} onUpdate={onUpdateCatalogComponent} onDelete={onDeleteCatalogComponent}/>}
     {detailsId&&components[detailsId]&&<ComponentDetailsDialog data={components[detailsId]} entry={current.find(entry=>entry.packageId===(components[detailsId].library?.packageId ?? detailsId))} usage={collectCourseComponentPackageUsage(project!,detailsId)} onClose={()=>setDetailsId(null)}/>}
   </div>
 }

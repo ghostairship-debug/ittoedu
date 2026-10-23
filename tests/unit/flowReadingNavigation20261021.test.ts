@@ -20,7 +20,9 @@ function reading(height: number, stops: number[]) {
     return element
   })
   const ids = targets.map((_, index) => String(index))
-  const navigation = createFlowReadingNavigation(() => ({ scroll, body }), id => targets[Number(id)])
+  const owner = createFlowReadingNavigation(() => ({ scroll, body }), id => targets[Number(id)])
+  // These cases exercise clamped selection, independently of the motion clock.
+  const navigation = { ...owner, goToInstance: (id: string | null) => owner.goToInstance(id, undefined, { behavior: 'instant' }) }
   return { scroll, targets, ids, navigation, active: () => navigation.readReading(ids)?.activeInstanceId }
 }
 

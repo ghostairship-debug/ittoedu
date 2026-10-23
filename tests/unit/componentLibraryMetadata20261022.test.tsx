@@ -1,12 +1,17 @@
 import { act, cleanup, renderHook } from '@testing-library/react'
 import { afterEach, expect, it, vi } from 'vitest'
 import { useComponentLibrary, type ComponentLibraryPorts } from '../../src/renderer/app/useComponentLibrary'
-import { componentDefinitionEntry } from '../../src/renderer/components/insertComponentPackages'
+import { componentDefinitionEntry, insertComponentDefinitionAtTarget } from '../../src/renderer/components/insertComponentPackages'
+import { createBlankCourseProjectV10 } from '../../src/core/course/createCourseProjectV10'
+import { exportComponentLibraryArchive } from '../../src/core/components/library/archive'
+import type { ComponentLibraryEntry } from '../../src/shared/contracts/component-platform/library'
+import type { ComponentEdit } from '../../src/shared/contracts/component-platform/operations'
+import type { AvailableComponentCatalogPackage } from '../../src/shared/componentCatalog'
 import type { EditorStoreKernel } from '../../src/renderer/store/editorStoreKernel'
 import type { CapturedCourseTarget, CourseV10ViewState } from '../../src/renderer/documents/CourseV10DocumentBridge'
 import type { CourseProjectV10 } from '../../src/shared/contracts/component-platform/project'
 
-afterEach(cleanup)
+afterEach(() => { cleanup(); vi.unstubAllGlobals() })
 
 function project(): CourseProjectV10 {
   return { schemaVersion: 11, id: 'work', revision: 0, title: 'Work', rootIds: ['example'],
@@ -59,4 +64,43 @@ it('extracts the chosen definition from its frozen target while preserving its e
   expect(entry.definitions.implementation).not.toBe(selected.definitions.implementation)
   delete selected.definitions.implementation.library
   expect(componentDefinitionEntry(kernel, 'implementation', target).id).toBe('implementation')
+})
+
+it('copies the explicitly chosen current instance and never picks the first example when no source is selected', () => {
+  const selected = project()
+  selected.instances.second = { id: 'second', definitionId: 'implementation', data: { title: '人工修改乙' } }
+  const target = { documentId: 'document', epoch: 'epoch', project: selected, editingProject: structuredClone(selected), resources: { assets: {}, components: {} },
+    activeStateId: null, surfaceId: null, instanceIds: [], instanceId: null } as CapturedCourseTarget
+  target.editingProject.instances.second.data = { title: '当前展示状态乙' }
+  const kernel = {} as EditorStoreKernel
+  expect(() => componentDefinitionEntry(kernel, 'implementation', target)).toThrow('请选择要复制')
+  expect(componentDefinitionEntry(kernel, 'implementation', target, 'second').example.instances.second.data).toEqual({ title: '当前展示状态乙' })
+  expect(() => componentDefinitionEntry(kernel, 'native', target, 'second')).toThrow('没有可复制')
+})
+
+it('creates from the readable catalog default rather than an edited project instance and preserves explicit copy', async () => {
+  const selected = createBlankCourseProjectV10(), surfaceId = selected.rootIds[0]
+  selected.definitions.implementation = project().definitions.implementation
+  selected.instances.authored = { id: 'authored', definitionId: 'implementation', data: { title: '人工改过的正文' } }
+  selected.instances[surfaceId].childIds!.push('authored')
+  const target = { documentId: 'document', epoch: 'epoch', project: selected, editingProject: selected, resources: { assets: {}, components: {} },
+    activeStateId: null, surfaceId, instanceIds: [], instanceId: null } as CapturedCourseTarget
+  let applied: ComponentEdit[] = []
+  const editCaptured = vi.fn(async () => {})
+  const kernel = { capture(edits: ComponentEdit[]) { applied = edits; return {} }, editCaptured,
+    readView: () => ({ activeDocumentId: 'document' }), selectInstances: vi.fn(), setFeedback: vi.fn() } as unknown as EditorStoreKernel
+  const archive: ComponentLibraryEntry = { schemaVersion: 2, id: 'shared-package', title: '库默认', definitions: { implementation: selected.definitions.implementation },
+    example: { rootIds: ['default'], instances: { default: { id: 'default', definitionId: 'implementation', data: { title: '模板默认正文' } } } }, assets: {}, resources: { assets: {}, components: {} } }
+  const catalog: AvailableComponentCatalogPackage = { packageId: 'shared-package', name: '库默认', version: '1.0.0', description: '测试', subject: [], schoolStage: [], tags: [], packagePath: 'default.h5component', thumbnailPath: 'default.svg', sha256: '0'.repeat(64), componentSchemaVersion: 2, runtimeApiVersion: 5,
+    renderMode: 'dom', supportedScopes: ['scene'], quality: 'candidate', maintainer: 'test', verifiedCases: [], sourceId: 'trusted:library', sourceLabel: '我的资产库', sourceTrust: 'trusted' }
+  const readCatalogPackage = vi.fn(async () => ({ bytes: exportComponentLibraryArchive(archive) }))
+  vi.stubGlobal('desktopAPI', { loadComponentCatalog: async () => ({ sources: [], packages: [catalog], issues: [] }), readComponentCatalogPackage: readCatalogPackage })
+  expect(await insertComponentDefinitionAtTarget(kernel, target, 'implementation')).toMatchObject({ ok: true })
+  expect(readCatalogPackage).toHaveBeenCalledWith({ sourceId: 'trusted:library', packageId: 'shared-package', version: '1.0.0' })
+  expect(applied.flatMap(edit => edit.type === 'instance.insert' ? edit.instances : []).map(value => value.data)).toContainEqual({ title: '模板默认正文' })
+  expect(selected.instances.authored.data).toEqual({ title: '人工改过的正文' })
+  expect(editCaptured).toHaveBeenCalledOnce()
+  expect(await insertComponentDefinitionAtTarget(kernel, target, 'implementation', undefined, { sourceInstanceId: 'authored' })).toMatchObject({ ok: true })
+  expect(applied.flatMap(edit => edit.type === 'instance.insert' ? edit.instances : []).map(value => value.data)).toContainEqual({ title: '人工改过的正文' })
+  expect(readCatalogPackage).toHaveBeenCalledOnce()
 })

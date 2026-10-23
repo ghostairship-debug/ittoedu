@@ -18,13 +18,14 @@ export interface FlowCompositionPictures {
 }
 
 /** Crop an actual rendered region into readable page pictures; never shrink a long region to one page. */
-export function flowCompositionPictureSlices(sourceWidth: number, sourceHeight: number, width: number, height: number) {
+export function flowCompositionPictureSlices(sourceWidth: number, sourceHeight: number, width: number, height: number, firstHeight = height) {
   const scale = Math.min(1, width / sourceWidth)
-  const sourcePageHeight = Math.max(1, Math.floor(height / scale))
   const slices: { y: number; pixels: number; width: number; height: number }[] = []
-  for (let y = 0; y < sourceHeight; y += sourcePageHeight) {
+  for (let y = 0; y < sourceHeight;) {
+    const sourcePageHeight = Math.max(1, Math.floor((slices.length ? height : firstHeight) / scale))
     const pixels = Math.min(sourcePageHeight, sourceHeight - y)
     slices.push({ y, pixels, width: Math.max(1, Math.round(sourceWidth * scale)), height: Math.max(1, Math.round(pixels * scale)) })
+    y += pixels
   }
   return slices
 }

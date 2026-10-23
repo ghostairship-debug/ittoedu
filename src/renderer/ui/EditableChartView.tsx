@@ -34,6 +34,8 @@ export function EditableChartView({ id, chart, width, height, onCommit, onHeight
   const [error, setError] = useState<string | null>(null)
   const [previewHeight, setPreviewHeight] = useState<number | null>(null)
   const resize = useRef<{ y: number; height: number; scale: number; commit: (height: number) => void } | null>(null)
+  const resizedHeight = (active: NonNullable<typeof resize.current>, y: number) => y === active.y ? active.height
+    : Math.round(Math.min(1600, Math.max(160, active.height + (y - active.y) / active.scale)))
   const svg = buildNativeChartSvg(chart, width, previewHeight ?? height, id)
   // Selection renders must retain the SVG text node between the two clicks.
   const markup = useMemo(() => ({ __html: svg }), [svg])
@@ -123,8 +125,8 @@ export function EditableChartView({ id, chart, width, height, onCommit, onHeight
     {textController?.draft?.error ? <div role="alert" style={{ position: 'absolute', bottom: 0, background: '#fee2e2', color: '#991b1b' }}>{textController.draft.error}</div> : null}
     {onHeightCommit ? <button type="button" aria-label="调整图表高度" style={{ position: 'absolute', bottom: -5, left: '45%', width: '10%', height: 10, padding: 0, cursor: 'ns-resize', touchAction: 'none' }}
       onPointerDown={event => { event.stopPropagation(); event.preventDefault(); event.currentTarget.setPointerCapture(event.pointerId); resize.current = { y: event.clientY, height, scale: (root.current?.getBoundingClientRect().width ?? width) / width, commit: onHeightCommit } }}
-      onPointerMove={event => { if (resize.current) setPreviewHeight(Math.round(Math.min(1600, Math.max(160, resize.current.height + (event.clientY - resize.current.y) / resize.current.scale)))) }}
-      onPointerUp={event => { event.stopPropagation(); const active = resize.current; resize.current = null; if (active && previewHeight !== null && previewHeight !== active.height) active.commit(previewHeight); setPreviewHeight(null) }}
+      onPointerMove={event => { if (resize.current) setPreviewHeight(resizedHeight(resize.current, event.clientY)) }}
+      onPointerUp={event => { event.stopPropagation(); const active = resize.current; resize.current = null; if (active) { const next = resizedHeight(active, event.clientY); if (next !== active.height) active.commit(next) } setPreviewHeight(null) }}
       onPointerCancel={() => { resize.current = null; setPreviewHeight(null) }} /> : null}
   </div>
 }

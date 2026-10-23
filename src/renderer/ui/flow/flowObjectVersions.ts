@@ -87,7 +87,11 @@ export function createFlowObjectVersions() {
         continue
       }
       const presentations = new Map<string, ReturnType<typeof resolveComponentOuterPresentation>>()
-      const output = { group, nodes: nodes.map((instance, index) => {
+      const output = project.instances[id]?.container ? {
+        // Its retained projection and FlowWorkspace shell update in place. A PM
+        // presentation refresh would dispose the live camera and observation.
+        container: project.instances[id]!.container!.kind, caption: project.instances[id]!.flowLayout?.caption,
+      } : { group, nodes: nodes.map((instance, index) => {
         const definition = project.definitions[instance.definitionId]
         const parent = parents.get(instance.id), parentPresentation = parent && presentations.get(parent.id)
         const placement = index === 0 || parent?.container?.kind === 'flow' ? 'flow'

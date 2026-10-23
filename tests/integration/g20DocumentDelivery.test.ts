@@ -9,6 +9,7 @@ import { DocumentDeliveryService } from '../../src/main/workbench/delivery/Docum
 import { DocumentDeliveryOperationStore } from '../../src/main/workbench/delivery/DocumentDeliveryOperationStore'
 import type { DocumentSaveIdentity } from '../../src/shared/workbench/documentSave'
 import type { DocumentDeliveryServiceOptions } from '../../src/main/workbench/delivery/DocumentDeliveryService'
+import type { DocumentJournal } from '../../src/main/workbench/documentJournal'
 
 const roots: string[] = []
 afterEach(async () => { vi.restoreAllMocks(); for (const root of roots.splice(0)) await fs.rm(root, { recursive: true, force: true }) })
@@ -122,14 +123,17 @@ it('does not treat an unrelated equal-byte replacement as the original publicati
 
 it('reconciles a published file after its canonical save acknowledgement failed, preserving newer input', async () => {
   const f = await fixture(), input = saveInput(f, 'journal-ack')
-  const journal = (f.host as unknown as { journal: { append(state: import('../../src/shared/workbench/document').DurableDocumentState): Promise<void> } }).journal
-  const append = journal.append.bind(journal)
-  let fail = true
-  vi.spyOn(journal, 'append').mockImplementation(async state => {
-    if (fail && state.savedRevision === 0) { fail = false; throw new Error('save acknowledgement disk failure') }
-    return append(state)
+  const journal = (f.host as unknown as { journal: DocumentJournal }).journal
+  const append = journal.appendTransition!.bind(journal)
+  // Both the original ACK and the Host's same-publication proof ACK must fail:
+  // a single failed ACK is now correctly recovered inside saveWithFact itself.
+  const acknowledge = vi.spyOn(journal, 'appendTransition').mockImplementation(async (transition, checkpoint) => {
+    if (checkpoint.savedRevision === 0) throw new Error('save acknowledgement disk failure')
+    return append(transition, checkpoint)
   })
   await expect(f.service.save(input)).rejects.toMatchObject({ code: 'tool-outcome-unknown' })
+  expect(acknowledge).toHaveBeenCalledTimes(2)
+  acknowledge.mockRestore()
   const current = await f.host.internalAPI.read(f.document.documentId)
   await f.host.internalAPI.dispatch({ documentId: current.documentId, epoch: current.epoch, operationId: 'later-input',
     baseRevision: current.revision, actor: 'human', mutation: { type: 'command', command: { type: 'markdown.replace', source: '# later input\n' } } })

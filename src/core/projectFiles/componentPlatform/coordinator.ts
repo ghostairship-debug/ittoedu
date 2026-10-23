@@ -33,6 +33,7 @@ import { parseFragment, type DefaultTreeAdapterTypes } from 'parse5'
 import { publicContentApplyReceipt, publicOperationReceipt } from '../../tools/publicWriteReceipt'
 import { MODEL_DELIVERY_BYTES, modelTextEnd, modelJsonBytes } from '../../tools/modelDeliveryBudget'
 import { loadBuiltinComponentSource } from '../../components/source/builtinSources'
+import { projectDocumentRanges } from '../../../shared/document/textInteraction'
 
 export type ComponentProjectSnapshot = DocumentSnapshot & { model: Extract<DocumentSnapshot['model'], { kind: 'course-v10' }> }
 export interface ComponentProjectFileInput {
@@ -278,7 +279,7 @@ export function canonicalComponentFileEdits(snapshot: ComponentProjectSnapshot, 
         return { assetId: asset.id, source: { kind: 'project' } }
       } })
     if (parsed.status === 'valid') {
-      const edits = flowDocumentEdits(project, binding.surfaceId, parsed.document.content.blocks)
+      const edits = flowDocumentEdits(project, binding.surfaceId, parsed.document.content.blocks, project, projectDocumentRanges(parsed.document.content))
       if (parsed.diagnostics.length) {
         diagnostics.push(...parsed.diagnostics.map(issue => ({ level: 'warning' as const, code: 'flow-markdown-partial', message: issue.message, repairable: true })))
         const id = crypto.randomUUID(), bytes = input?.bytes ?? new TextEncoder().encode(content)
@@ -298,7 +299,7 @@ export function canonicalComponentFileEdits(snapshot: ComponentProjectSnapshot, 
   diagnostics.push(...parsed.diagnostics.map(issue => ({ ...issue, repairable: true })))
   const aligned = alignFlowBlocks(parsed.blocks, binding.document.content.blocks, context)
   if (aligned.unresolved.length) throw new Error(`正文引用的组件尚未提供：${aligned.unresolved.join('、')}`)
-  const edits = flowDocumentEdits(project, binding.surfaceId, aligned.blocks)
+  const edits = flowDocumentEdits(project, binding.surfaceId, aligned.blocks, project, projectDocumentRanges({ blocks: aligned.blocks }))
   if (diagnostics.some(issue => issue.level !== 'info')) {
     const id = crypto.randomUUID(), bytes = input?.bytes ?? new TextEncoder().encode(content)
     edits.push({ type: 'asset.add', asset: { id, path: `assets/${id}.html`, filename: input?.filename ?? '正文源文.html',

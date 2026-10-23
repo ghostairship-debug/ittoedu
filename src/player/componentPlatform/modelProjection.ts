@@ -1,4 +1,5 @@
 import { createFlowReadingNavigation, observeFlowReading } from '../../shared/flowReading'
+import { resolveFlowChapterEntry } from '../../shared/flowChapterEntry'
 import {allDocumentTextSlots,inlineComponentIds,documentInlineChildIds} from '../../shared/document/textInteraction'
 import {paintComponentSpatialGraph} from './paintSpatialGraph'
 import {bindSpatialInput} from './spatialInput'
@@ -37,9 +38,11 @@ interface SurfaceView {
   releaseInput?: () => void
   playback?: PlaybackViewSession
   observation?: ComponentPlayerObservation
+  disposeReading?: () => void
   content?: HTMLElement
   runtimeSlot?: HTMLElement
   designSize?: ComponentSurface['designSize']
+  naturalHeight?: boolean
   flow?: { scroll: HTMLElement; scrollPaddingBottom: number; paper: HTMLElement; body: HTMLElement; paperUnderlay: HTMLElement; paperOverlay: HTMLElement; viewportUnderlay: HTMLElement; viewportOverlay: HTMLElement }
   graph?: SVGSVGElement
   releaseGraph?: () => void
@@ -52,6 +55,8 @@ export function createComponentModelProjection(context: {
   initialSurfaceId?: string
   /** A local editor view shares its existing World and excludes work-level planes. */
   containerId?: string
+  /** A local Flow preview participates in its parent's reading flow. */
+  naturalHeight?: boolean
   teacherController?: TeacherControllerDisplayPort
   onCamera?(surfaceId: string, camera: ComponentSpatialCameraPort): () => void
 }): ComponentPlayerProjection {
@@ -59,7 +64,7 @@ export function createComponentModelProjection(context: {
   const document = root.ownerDocument
   const shell = document.createElement('div')
   shell.dataset.componentModelPlayer = ''
-  Object.assign(shell.style, { position: 'relative', isolation: 'isolate', width: '100%', height: '100%', transformOrigin: '0 0' })
+  Object.assign(shell.style, { position: 'relative', isolation: 'isolate', width: '100%', height: context.naturalHeight ? 'auto' : '100%', transformOrigin: '0 0' })
   const plane = (name: string, zIndex: string) => {
     const element = document.createElement('div')
     element.dataset.componentPlane = name
@@ -129,8 +134,7 @@ export function createComponentModelProjection(context: {
     const project = currentProject
     if (!project || disposed || context.containerId) return
     const geometry = createTeacherControllerHudGeometry({ referenceSize: teacherControllerReferenceSize(project),
-      viewportRect: { x: 0, y: 0, width: root.clientWidth, height: root.clientHeight },
-      controllerInsets: surfaces.get(activeSurface ?? '')?.playback?.chrome.controllerInsets })
+      viewportRect: { x: 0, y: 0, width: root.clientWidth, height: root.clientHeight } })
     const display = projectTeacherControllerInstances(project, geometry, context.teacherController)
     for (const id of [...project.global.underlay, ...project.global.overlay]) {
       if (!isViewportComponent(project, id)) continue
@@ -148,16 +152,7 @@ export function createComponentModelProjection(context: {
     applyComponentPresentationStyle(node.stage,presentation.stageStyle)
     applyComponentPresentationStyle(node.content,presentation.contentStyle)
     applyComponentPresentationStyle(node.children,presentation.childrenStyle)
-    const container = componentSurface(project, instance.id)
-    if (container) placeContainerNode(node, instance, container, Boolean(node.flow))
     return presentation
-  }
-
-  function placeContainerNode(node: NodeView, instance: ComponentInstance, container: ComponentSurface, flow: boolean) {
-    Object.assign(node.stage.style, { position: 'relative', width: '100%', height: '100%' })
-    Object.assign(node.content.style, { position: 'relative', left: '0px', top: '0px', width: '100%', height: '100%', transform: 'none' })
-    node.children.style.display = 'none'
-    if (flow) node.outer.style.height = `${instance.frame?.height ?? container.designSize?.height ?? 320}px`
   }
 
   function renderChildren(parent: HTMLElement, ids: readonly string[], project: CourseProjectV10, flow: boolean, used: Set<string>, flowLayout?: FlowMediaLayoutWidths, programRoot = false) {
@@ -212,8 +207,7 @@ export function createComponentModelProjection(context: {
       if (container) {
         // The owning outer projection places this border box. The container
         // exclusively owns everything below it, using the document's same World.
-        placeContainerNode(node, instance, container, flow)
-        syncContainer(container, node.content, false, used)
+        syncContainer(container, node.content, false, used, presentation.containerSizing?.naturalHeight)
         continue
       }
       // Only document sections continue the reading order. Local compositions keep their frames.
@@ -224,6 +218,7 @@ export function createComponentModelProjection(context: {
   }
   function revealSurface(id: string): boolean {
     if (disposed || !currentProject || !(context.containerId ? context.containerId === id : currentProject.rootIds.includes(id))) return false
+    if (activeSurface !== id) for (const view of surfaces.values()) view.observation?.cancel?.()
     activeSurface = id
     // The existing display API exposes geometry/observation synchronously. Realm
     // readiness remains owned by the caller's normal ModelPlayer update queue.
@@ -250,7 +245,8 @@ export function createComponentModelProjection(context: {
   const resize = () => {
     const project = currentProject
     const active = activeSurface ? surfaces.get(activeSurface) : undefined
-    Object.assign(shell.style, { width: '100%', height: '100%', transform: 'none' })
+    Object.assign(shell.style, { width: '100%', height: context.naturalHeight ? 'auto' : '100%', transform: 'none' })
+    Object.assign(surfacePlane.style, { position: context.naturalHeight ? 'relative' : 'absolute', inset: context.naturalHeight ? 'auto' : '0px' })
     // Establish the current viewport before measuring paragraph anchors in logical coordinates.
     active?.playback?.resize()
     const activeModel = project && activeSurface ? componentSurface(project, activeSurface) : undefined
@@ -267,6 +263,12 @@ export function createComponentModelProjection(context: {
       for (const surface of componentContainers(project)) {
         const view = surfaces.get(surface.id)
         if (!view?.flow || view.root.closest('[hidden]')) continue
+        if (view.naturalHeight) {
+          const style = document.defaultView?.getComputedStyle(view.flow.scroll)
+          const height = Math.ceil(view.flow.paper.scrollHeight + (parseFloat(style?.paddingTop ?? '') || 0) + (parseFloat(style?.paddingBottom ?? '') || 0))
+          const value = `${height}px`
+          if (view.root.style.height !== value) view.root.style.height = value
+        }
         view.playback?.resize()
         const rect = view.flow.paper.getBoundingClientRect(), blocks: FlowParagraphBlockRect[] = [], zoom = (view.playback?.fitScale(surface.id) ?? 1) * (view.playback?.state.zoom ?? 1)
         const visit = (ids: readonly string[], depth: number) => { for (const id of ids) {
@@ -300,7 +302,7 @@ export function createComponentModelProjection(context: {
   const contentRelayout = () => resize()
   root.addEventListener('toggle', contentRelayout, true); root.addEventListener('load', contentRelayout, true)
   void document.fonts?.ready.then(() => { if (!disposed) resize() })
-  function syncContainer(surface: ComponentSurface, parent: HTMLElement, topLevel: boolean, used: Set<string>) {
+  function syncContainer(surface: ComponentSurface, parent: HTMLElement, topLevel: boolean, used: Set<string>, naturalHeight = false) {
     const project = currentProject!
     let view = surfaces.get(surface.id)
     if (!view) {
@@ -319,7 +321,8 @@ export function createComponentModelProjection(context: {
         const content = createPlaybackContent(host)
         if (surface.designSize) { host.dataset.canvasWidth = String(surface.designSize.width); host.dataset.canvasHeight = String(surface.designSize.height) }
         playback.register({ id: surface.id, kind: surface.kind, root: host, content, onObservationChange: paintGlobalObservation }); playback.activate(surface.id)
-        const reading = createFlowReadingNavigation(() => view!.flow, id => nodes.get(id)?.outer)
+        const reading = createFlowReadingNavigation(() => view!.flow, (id, kind) => nodes.get(kind === 'chapter' && currentProject ? resolveFlowChapterEntry(currentProject, surface.id, id) : id)?.outer)
+        view.disposeReading = reading.dispose
         view.observation = {
           readZoom: () => playback.state.zoom,
           setZoom: zoom => { if (!disposed && !context.signal.aborted) playback.zoomTo(zoom) },
@@ -329,14 +332,16 @@ export function createComponentModelProjection(context: {
             reading.goToInstance(null)
           },
           readReading: reading.readReading,
-          goToInstance: (instanceId, signal) => {
+          readMotion: reading.readMotion,
+          cancel: reading.cancel,
+          goToInstance: (instanceId, signal, options) => {
             if (disposed || context.signal.aborted || signal?.aborted || surface.kind !== 'flow') return false
-            return reading.goToInstance(instanceId, signal)
+            return reading.goToInstance(instanceId, signal, options)
           },
           subscribe: listener => {
-            const offView = playback.subscribe(listener), flow = view!.flow
+            const offView = playback.subscribe(listener), offMotion = reading.subscribe(listener), flow = view!.flow
             const offReading = flow ? observeFlowReading(flow.scroll, flow.body, listener) : () => {}
-            return () => { offView(); offReading() }
+            return () => { offView(); offMotion(); offReading() }
           },
         }
         view.playback = playback; view.content = content
@@ -355,6 +360,7 @@ export function createComponentModelProjection(context: {
         scroll.dataset.flowPaperScroll = 'true'
         scroll.append(paper); view.content!.append(scroll)
         view.flow = { scroll, scrollPaddingBottom: parseFloat(scroll.style.paddingBottom), paper, body, paperUnderlay, paperOverlay, viewportUnderlay: layer(view.content!, 'viewport-underlay', '0'), viewportOverlay: layer(view.content!, 'viewport-overlay', '2') }
+        observer?.observe(body)
       }
       if (surface.kind === 'spatial') {
         view.camera = createComponentSpatialCameraPort(surface.spatial?.home ?? { x: 0, y: 0, zoom: 1 })
@@ -390,10 +396,14 @@ export function createComponentModelProjection(context: {
       runtime.bindTarget(surface.id, view.root)
     }
     view.topLevel = topLevel
+    view.naturalHeight = naturalHeight
+    if (!naturalHeight) view.root.style.height = '100%'
     if (!topLevel) view.root.hidden = false
     applyComponentBackgroundPaint(view.root, resolveComponentSurfaceBackground(project, surface), id => runtime.assetUrl(id))
     if (surface.kind === 'spatial') view.spatial!.sync(project, surface.id)
     if (view.flow) {
+      Object.assign(view.flow.scroll.style, { position: naturalHeight ? 'relative' : 'absolute', inset: naturalHeight ? 'auto' : '0px', overflow: naturalHeight ? 'visible' : 'auto' })
+      view.flow.paper.style.minHeight = naturalHeight ? '0px' : '100%'
       if (surface.flow?.layout.toc === 'hidden') { view.toc?.destroy(); view.toc = undefined }
       else if (topLevel && context.teacherController) {
         view.toc ??= mountComponentFlowToc(view.root, surface.id, context.teacherController)
@@ -422,6 +432,7 @@ export function createComponentModelProjection(context: {
 
   let currentUsed = new Set<string>()
   function retireContainer(id: string, view: SurfaceView) {
+    view.disposeReading?.()
     bindPlacement(id, null, null, `container:${id}`)
     view.spatial?.dispose(); view.releaseCamera?.(); view.releaseInput?.(); view.releaseGraph?.(); view.camera?.dispose(); view.toc?.destroy(); view.playback?.destroy()
     observer?.unobserve(view.root); view.root.remove(); surfaces.delete(id); releaseTarget(id, view.root)
@@ -466,7 +477,7 @@ export function createComponentModelProjection(context: {
       const container = componentSurface(project, id)
       if (container) {
         // Unvisited roots stay unmounted. Retained roots keep their World and DOM.
-        if (id === activeSurface || surfaces.has(id)) syncContainer(container, surfacePlane, !context.containerId, used)
+        if (id === activeSurface || surfaces.has(id)) syncContainer(container, surfacePlane, !context.containerId, used, context.naturalHeight)
       } else if (id === activeSurface || programs.has(id)) {
         let program = programs.get(id)
         if (!program) {
@@ -491,7 +502,7 @@ export function createComponentModelProjection(context: {
     dispose() {
       if (disposed) return
       disposed = true; observer?.disconnect(); releaseControllerPlacement?.(); releasePlacementOnly?.()
-      for (const view of surfaces.values()) { view.spatial?.dispose(); view.releaseCamera?.(); view.releaseInput?.(); view.releaseGraph?.(); view.camera?.dispose(); view.toc?.destroy(); view.playback?.destroy() }
+      for (const view of surfaces.values()) { view.disposeReading?.(); view.spatial?.dispose(); view.releaseCamera?.(); view.releaseInput?.(); view.releaseGraph?.(); view.camera?.dispose(); view.toc?.destroy(); view.playback?.destroy() }
       for (const [id, node] of nodes) { bindPlacement(id, null, null, 'nodes'); releaseTarget(id, node.outer) }
       for (const [id, view] of surfaces) { bindPlacement(id, null, null, `container:${id}`); releaseTarget(id, view.root) }
       if (projectId) releaseTarget(projectId, shell)

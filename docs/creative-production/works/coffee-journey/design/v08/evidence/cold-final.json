@@ -1,0 +1,180 @@
+{
+  "revision": 247,
+  "started": "2026-10-23T13:38:24.362Z",
+  "kind": "independent-electron-cold-open-and-formal-export",
+  "screens": [
+    "D:/果铃工作台/docs/creative-production/works/coffee-journey/design/v08/evidence/final-cold-opening.png",
+    "D:/果铃工作台/docs/creative-production/works/coffee-journey/design/v08/evidence/final-cold-u03.png",
+    "D:/果铃工作台/docs/creative-production/works/coffee-journey/design/v08/evidence/final-cold-u05.png",
+    "D:/果铃工作台/docs/creative-production/works/coffee-journey/design/v08/evidence/final-cold-u06-before-add.png",
+    "D:/果铃工作台/docs/creative-production/works/coffee-journey/design/v08/evidence/final-cold-u06.png"
+  ],
+  "cold": {
+    "revision": 247,
+    "dirty": false,
+    "instances": 190,
+    "definitions": 13,
+    "assets": 80,
+    "retainedInstances": 183,
+    "missingInstances": [],
+    "nav": {
+      "id": "931b8fb6-7308-4876-8e5b-c3cfb5d95d3f",
+      "parent": "47415583-2d75-4b72-9c46-dfd29b47d82a",
+      "position": "sticky"
+    },
+    "programFiles": [
+      {
+        "path": "pages/01-一杯咖啡的远行/07-编组/01-编组/04-编组/01-Web 内容.content.html",
+        "kind": "html",
+        "target": {
+          "kind": "instance",
+          "instanceId": "8bc2720a-0b46-439a-98c1-dc505b1cb456"
+        }
+      },
+      {
+        "path": "pages/01-一杯咖啡的远行/09-编组/02-Web 内容.content.html",
+        "kind": "html",
+        "target": {
+          "kind": "instance",
+          "instanceId": "aee929af-3338-409a-a386-bcbef0d0e285"
+        }
+      },
+      {
+        "path": "pages/01-一杯咖啡的远行/10-编组/01-编组/04-编组/01-HTML 程序.content.html",
+        "kind": "html",
+        "target": {
+          "kind": "instance",
+          "instanceId": "8f45751d-9cc3-49dd-ba88-c645759f022c"
+        }
+      }
+    ],
+    "sourceFileCount": 938
+  },
+  "u06BeforeClick": {
+    "box": {
+      "x": 1182.4375,
+      "y": 579.140625,
+      "width": 45.09375,
+      "height": 44
+    },
+    "dataset": {
+      "waterLab": "",
+      "mode": "dilute",
+      "extraction": "true",
+      "playing": "false",
+      "added": "0",
+      "solute": "3",
+      "total": "200",
+      "concentration": "1.50",
+      "particles": "72",
+      "step": "0",
+      "progress": "0.080",
+      "shownAdded": "0.00",
+      "materialStatus": "ready",
+      "visibleParticles": "72",
+      "journeyOwner": "u06",
+      "journeyPhase": "arrival"
+    }
+  },
+  "u06ClickDiagnostic": {
+    "water": {
+      "waterLab": "",
+      "mode": "dilute",
+      "extraction": "true",
+      "playing": "false",
+      "added": "50",
+      "solute": "3",
+      "total": "250",
+      "concentration": "1.20",
+      "particles": "72",
+      "step": "0",
+      "progress": "0.080",
+      "shownAdded": "49.26",
+      "materialStatus": "ready",
+      "visibleParticles": "72",
+      "journeyOwner": "u06",
+      "journeyPhase": "arrival"
+    },
+    "clicks": [
+      {
+        "text": "02　水再多一点",
+        "mode": "dilute"
+      },
+      {
+        "text": "＋50 克",
+        "add": "50"
+      }
+    ]
+  },
+  "trial": {
+    "u03": {
+      "processLab": "",
+      "method": "honey",
+      "compare": "false"
+    },
+    "u05": {
+      "roastLab": "",
+      "phase": "gold"
+    },
+    "u06": {
+      "waterLab": "",
+      "mode": "dilute",
+      "extraction": "true",
+      "playing": "false",
+      "added": "50",
+      "solute": "3",
+      "total": "250",
+      "concentration": "1.20",
+      "particles": "72",
+      "step": "0",
+      "progress": "0.080",
+      "shownAdded": "49.26",
+      "materialStatus": "ready",
+      "visibleParticles": "72",
+      "journeyOwner": "u06",
+      "journeyPhase": "arrival"
+    },
+    "actor": {
+      "coffeeJourney": "v08",
+      "slotCount": "7",
+      "reading": "0.7833889157235379",
+      "reduced": "false",
+      "tick": "39",
+      "stage": "resident",
+      "u05Mask": "border-maxRGB<35;inward-feather=1px",
+      "u05Bounds": "{\"u05green\":[252,55,754,1116],\"u05gold\":[251,55,756,1116],\"u05roast\":[251,54,756,1117]}",
+      "progress": "0",
+      "pose": ""
+    },
+    "navigationButtons": 7
+  },
+  "export": {
+    "kind": "read",
+    "data": {
+      "status": "written",
+      "documentId": "aaf828b4-4ff5-419e-bb3c-1202215a6271",
+      "epoch": "ac9a2ec9-1934-456b-b802-506599b695aa",
+      "format": "html-offline",
+      "exportedRevision": 247,
+      "currentRevision": 247,
+      "warnings": [],
+      "path": "D:\\果铃工作台\\docs\\creative-production\\works\\coffee-journey\\design\\v08\\native\\coffee-journey-v08-offline.html",
+      "fileVersion": "04cd48a52bb0916c3e10f570ba9f884ef997f02d7ab83b511fcf7a0843bc8054"
+    }
+  },
+  "files": {
+    "glx": {
+      "path": "D:/果铃工作台/docs/creative-production/works/coffee-journey/design/v08/native/coffee-journey-v08.glx",
+      "bytes": 17502438,
+      "sha256": "989c8d2e65fb4370ae463f9f5a4ae299f743bb8c0aa71341ccc58b29a1db8e98"
+    },
+    "offline": {
+      "path": "D:/果铃工作台/docs/creative-production/works/coffee-journey/design/v08/native/coffee-journey-v08-offline.html",
+      "bytes": 29529332,
+      "sha256": "04cd48a52bb0916c3e10f570ba9f884ef997f02d7ab83b511fcf7a0843bc8054"
+    }
+  },
+  "errors": [],
+  "finished": "2026-10-23T13:39:26.363Z",
+  "passed": true
+}

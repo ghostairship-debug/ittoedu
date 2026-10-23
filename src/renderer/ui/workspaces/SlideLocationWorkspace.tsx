@@ -92,6 +92,7 @@ export interface SlideWorkspacePorts {
   commitTextEdit(): Promise<void>
   commitTextInput?(): Promise<void>
   cancelTextEdit(): void
+  preserveTextEdit?(): Promise<boolean>
   undo(): void
   redo(): void
   onElement(id: string, element: HTMLElement | null): void
@@ -102,7 +103,7 @@ export interface SlideWorkspacePorts {
   addShapeNode(type: string, x?: number, y?: number): void
   addTableNode(x?: number, y?: number): void
   addChartNode(type: 'bar' | 'line' | 'area' | 'pie' | 'donut', x?: number, y?: number): void
-  addExternalComponentNode(id: string, x?: number, y?: number, presetId?: string): void
+  addExternalComponentNode(id: string, x?: number, y?: number, presetId?: string, sourceInstanceId?: string): void
   drawShapeNode(input: SlideLineDrawCommit, target?: CapturedCourseTarget): void
 }
 export interface SlideLocationWorkspaceProps {
@@ -388,7 +389,7 @@ export function SlideLocationWorkspace({ snapshot, ports, onAddImage, onAddVideo
       && snapshot.contentEdit.target.surfaceId === snapshot.surfaceId && snapshot.contentEdit.target.activeStateId === snapshot.activeStateId
       && snapshot.contentEdit.target.epoch === snapshot.epoch
       && (!globalEditing || listSlideWorkspaceHitTargets(state()).some(target => target.instanceId === snapshot.contentEdit!.instanceId)) ? snapshot.contentEdit : null,
-    begin: ports.beginTextEdit, update: ports.updateDataDraft, updateSpot: ports.updateSpotDraft, setComposing: ports.setTextComposing, commit: ports.commitTextEdit, commitInput: ports.commitTextInput, cancel: ports.cancelTextEdit,
+    begin: ports.beginTextEdit, update: ports.updateDataDraft, updateSpot: ports.updateSpotDraft, setComposing: ports.setTextComposing, commit: ports.commitTextEdit, commitInput: ports.commitTextInput, cancel: ports.cancelTextEdit, preserve: ports.preserveTextEdit,
     readProject: () => latest.current.ports.read().project!,
     fieldIsCurrent: identity => {
       const current = latest.current.ports.read()
@@ -639,7 +640,8 @@ export function SlideLocationWorkspace({ snapshot, ports, onAddImage, onAddVideo
     else if (item.startsWith('component-preset:')) {
       const [packageId, presetId] = item.slice(17).split(':', 2)
       if (packageId && presetId) ports.addExternalComponentNode(decodeURIComponent(packageId), at.x, at.y, decodeURIComponent(presetId))
-    } else if (item.startsWith('component:')) ports.addExternalComponentNode(item.slice(10), at.x, at.y)
+    } else if (item.startsWith('component:')) ports.addExternalComponentNode(item.slice(10), at.x, at.y, undefined,
+      event.dataTransfer.getData('application/x-courseware-component-source') || undefined)
   }
   if (!project || !surface) return <main className="workspace" data-testid="slide-workspace-sessionless" role="alert"><p className="property-hint">请先打开或新建课件。</p></main>
   let effectiveProject = displayProject!
@@ -944,6 +946,9 @@ export function SlideLocationWorkspace({ snapshot, ports, onAddImage, onAddVideo
       }
       if (internalGesture.current?.pointerId === event.pointerId) {
         stop(event); const gesture = internalGesture.current; internalGesture.current = null; setInternalPreview(null)
+        const update = gesture.value.update({ x: event.clientX, y: event.clientY }, { shift: event.shiftKey, alt: event.altKey })
+        gesture.frame = update.frame; gesture.geometry = update.geometry
+        gesture.moved ||= Math.hypot(event.clientX - gesture.start.x, event.clientY - gesture.start.y) >= 2
         event.currentTarget.releasePointerCapture(event.pointerId); suppressSpotClick.current = gesture.moved
         if (gesture.moved && gesture.geometry && Object.keys(gesture.geometry).length) {
           try {

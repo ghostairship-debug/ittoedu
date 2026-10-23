@@ -9,10 +9,4 @@ export interface PlaybackChromeGeometry {
   y: boolean
   native: PlaybackChromeInsets
   insets: PlaybackChromeInsets
-  /** Controller width budget stays stable while observation chrome changes. */
-  controllerInsets: PlaybackChromeInsets
-}
-export function playbackControllerInsets(native: PlaybackChromeInsets): PlaybackChromeInsets {
-  return { right: native.right * PLAYBACK_VIEW_MAX_ZOOM + PLAYBACK_VIEW_CHROME_GUTTER,
-    bottom: native.bottom * PLAYBACK_VIEW_MAX_ZOOM + PLAYBACK_VIEW_CHROME_GUTTER }
 }

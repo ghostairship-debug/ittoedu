@@ -31,6 +31,132 @@ const course = (snapshot: DocumentSnapshot) => {
 }
 const json = (value: unknown) => JSON.parse(JSON.stringify(value, (_key, item) => item instanceof Uint8Array ? [...item] : item))
 
+test('S1 mixed reading groups preserve native editing and program state through column resize and cold reopen', async ({ browser }, info) => {
+  test.setTimeout(90_000)
+  const { TEXT_DEFINITION } = await import('../../src/components/text/adapters')
+  const { createTextComponentData } = await import('../../src/components/text/data')
+  const { HTML_PROGRAM_DEFINITION } = await import('../../src/components/web/data')
+  const { CHART_DEFINITION } = await import('../../src/components/chart')
+  const { createChartData } = await import('../../src/components/chart/data')
+  const { IMAGE_DEFINITION } = await import('../../src/components/image')
+  const { createImageData } = await import('../../src/components/image/data')
+  const directory = info.outputPath('s1-mixed-reading'), root = resolve(__dirname, '../..')
+  await fs.mkdir(directory, { recursive: true })
+  const project = createBlankCourseProjectV10('Mixed reading'), surfaceId = project.rootIds[0]!
+  const frame = (width: number, height: number) => ({ width, height, transform: [1, 0, 0, 1, 0, 0] as [number, number, number, number, number, number] })
+  const text = (id: string, value: string) => ({ id, definitionId: TEXT_DEFINITION.id, data: json(createTextComponentData(value)), frame: frame(520, 80) })
+  project.definitions = { [TEXT_DEFINITION.id]: TEXT_DEFINITION, [HTML_PROGRAM_DEFINITION.id]: HTML_PROGRAM_DEFINITION,
+    [CHART_DEFINITION.id]: CHART_DEFINITION, [IMAGE_DEFINITION.id]: IMAGE_DEFINITION,
+    group: { id: 'group', role: 'content', implementation: { kind: 'builtin', key: 'guoling.group' } } }
+  project.instances = {
+    columns: { id: 'columns', definitionId: 'group', data: {}, childIds: ['left', 'right'], style: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '24px' } },
+    left: { id: 'left', definitionId: 'group', data: {}, childIds: ['body', 'neighbor'], style: { display: 'flex', flexDirection: 'column', gap: '12px' } },
+    right: { id: 'right', definitionId: 'group', data: {}, childIds: ['program', 'chart'], style: { display: 'flex', flexDirection: 'column', gap: '12px' } },
+    body: text('body', '连续正文：中文与 emoji 🙂，邻近程序不改变我的编辑能力。'),
+    neighbor: text('neighbor', 'Keep this neighboring paragraph.'),
+    program: { id: 'program', definitionId: HTML_PROGRAM_DEFINITION.id, frame: frame(520, 180), data: { html: '<!doctype html><html><body style="margin:0;background:#dff4ed;padding:16px;box-sizing:border-box;font:20px Arial"><button id="counter">Count 0</button><input aria-label="Program input" value="initial"><script>window.bootToken=Math.random();let n=0;document.querySelector("button").onclick=()=>document.querySelector("button").textContent="Count "+(++n)</script></body></html>' } },
+    chart: { id: 'chart', definitionId: CHART_DEFINITION.id, data: json(createChartData()), frame: frame(520, 320) },
+    media: { id: 'media', definitionId: 'group', data: {}, childIds: ['picture1', 'picture2'], style: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' } },
+    ...Object.fromEntries(['picture1', 'picture2'].map(id => [id, { id, definitionId: IMAGE_DEFINITION.id, data: json(createImageData('picture')) }])),
+  }
+  const picture = new TextEncoder().encode('<svg xmlns="http://www.w3.org/2000/svg" width="240" height="100"><rect width="240" height="100" fill="#22584c"/><text x="20" y="60" fill="white" font-size="28">Reading grid</text></svg>')
+  project.assets = { picture: { id: 'picture', kind: 'image', filename: 'picture.svg', path: 'assets/picture.svg', mimeType: 'image/svg+xml', byteLength: picture.length, width: 240, height: 100 } }
+  project.global = { underlay: [], overlay: [] }
+  setRootContainers(project, [{ id: surfaceId, title: 'Mixed reading', kind: 'flow', childIds: ['columns', 'media'],
+    flow: { layout: { widthMode: 'fluid', readingWidth: 960, wideContentWidth: 1100, toc: 'hidden' } } }])
+  const host = new DocumentHostService(join(directory, 'recovery')), events: DocumentEvent[] = [], errors: string[] = []
+  const initial = await host.internalAPI.create({ kind: 'course-v10', project, resources: { assets: { picture }, components: {} } }, 'mixed.glx')
+  const off = host.subscribeEvents(event => events.push(event))
+  const bundled = await build({ stdin: { contents: 'import "./src/renderer/styles/variables.css";import "./src/renderer/styles/globals.css";export * from "./tests/helpers/currentFlowBrowserHarness";export {useEditorStore} from "./src/renderer/store/editorStore"', resolveDir: root },
+    bundle: true, platform: 'browser', format: 'iife', globalName: 'W3Editor', write: false, outfile: join(directory, 'editor.js'),
+    loader: { '.css': 'css', '.woff2': 'dataurl', '.woff': 'dataurl', '.ttf': 'dataurl', '.png': 'dataurl' }, logLevel: 'silent' })
+  const editorBundle = `(()=>{const s=document.createElement('style');s.textContent=${JSON.stringify(bundled.outputFiles.find(file => file.path.endsWith('.css'))!.text)};document.head.append(s)})();` + bundled.outputFiles.find(file => file.path.endsWith('.js'))!.text
+  const editor = await browser.newPage({ viewport: { width: 1200, height: 1000 } }), facts: Record<string, unknown> = {}
+  editor.on('pageerror', error => errors.push(error.message))
+  try {
+    await mountMainEditor(editor, host, initial.documentId, events, editorBundle)
+    const body = editor.locator('[data-flow-block-id="body"]')
+    await expect(body).toBeVisible()
+    const program = editor.locator('[data-flow-block-id="program"] iframe').contentFrame()
+    await expect(program.getByRole('button', { name: 'Count 0', exact: true })).toBeVisible()
+    // Author mode owns pointers. Seed the running program's transient state
+    // without submitting an author edit; real pointer operation is checked in Player below.
+    await program.locator('body').evaluate(element => {
+      element.querySelector('button')!.textContent = 'Count 1'
+      element.querySelector('input')!.value = 'Keep my live input'
+    })
+    await editor.evaluate(() => { (window as any).s1Frame = document.querySelector('[data-flow-block-id="program"] iframe') })
+    const token = await program.locator('body').evaluate(element => (element.ownerDocument.defaultView as any).bootToken)
+    facts.beforeResize = { token, input: await program.getByRole('textbox', { name: 'Program input' }).inputValue(), button: await program.locator('button').textContent() }
+    const geometry = () => editor.evaluate(() => Object.fromEntries(['columns','left','right','body','program','chart','media','picture1','picture2'].map(id => {
+      const element = document.querySelector<HTMLElement>(`[data-flow-block-id="${id}"]`)!
+      return [id, element.getBoundingClientRect().toJSON()]
+    })))
+    facts.initial = await geometry()
+    expect((facts.initial as any).picture1.width).toBeGreaterThan(0)
+    expect((facts.initial as any).chart.height).toBeGreaterThan(0)
+    await editor.screenshot({ path: join(directory, 'initial.png') })
+    const captured = await host.internalAPI.read(initial.documentId)
+    await host.internalAPI.dispatch({ documentId: initial.documentId, epoch: captured.epoch, baseRevision: captured.revision,
+      operationId: randomUUID(), actor: 'human', mutation: { type: 'command',
+        command: captureComponentOperation(course(captured).project, [{ type: 'style.set', instanceId: 'columns', path: ['gridTemplateColumns'], value: '2fr 1fr' }]) } })
+    await editor.evaluate(value => (window as any).w3Receive(value), json(events.splice(0)))
+    await expect.poll(async () => { const value = await geometry(); return value.left.width / value.right.width }).toBeGreaterThan(1.8)
+    facts.resized = await geometry()
+    facts.afterResize = { token: await program.locator('body').evaluate(element => (element.ownerDocument.defaultView as any).bootToken), input: await program.getByRole('textbox', { name: 'Program input' }).inputValue(), button: await program.locator('button').textContent() }
+    expect((facts.resized as any).program.width).toBeLessThanOrEqual((facts.resized as any).right.width + 1)
+    const caret = () => editor.evaluate(() => { const s = document.getSelection(), n = s?.anchorNode; return { block: (n?.nodeType === 1 ? n as Element : n?.parentElement)?.closest<HTMLElement>('[data-flow-block-id]')?.dataset.flowBlockId, offset: s?.anchorOffset, text: n?.textContent } })
+    await body.click({ position: { x: 80, y: 12 } }); facts.caretAfterClick = await caret()
+    await editor.keyboard.press('End'); facts.caretAfterEnd = await caret()
+    await editor.keyboard.insertText(' 人工续写。')
+    await expect.poll(async () => JSON.stringify(course(await host.internalAPI.read(initial.documentId)).project.instances.body.data)).toContain('人工续写')
+    expect(await editor.evaluate(() => (window as any).s1Frame === document.querySelector('[data-flow-block-id="program"] iframe'))).toBe(true)
+    expect(await program.locator('body').evaluate(element => (element.ownerDocument.defaultView as any).bootToken)).toBe(token)
+    await expect(program.getByRole('button', { name: 'Count 1', exact: true })).toBeVisible()
+    await expect(program.getByRole('textbox', { name: 'Program input' })).toHaveValue('Keep my live input')
+    await editor.evaluate(async documentId => { await (window as any).W3Editor.useEditorStore.getState().courseBridge.undo(documentId) }, initial.documentId)
+    await expect.poll(async () => JSON.stringify(course(await host.internalAPI.read(initial.documentId)).project.instances.body.data)).not.toContain('人工续写')
+    await expect(program.getByRole('textbox', { name: 'Program input' })).toHaveValue('Keep my live input')
+    const current = course(await host.internalAPI.read(initial.documentId))
+    for (const id of ['body','program','chart']) expect(current.project.instances[id].frame).toEqual(project.instances[id].frame)
+    const filename = join(directory, 'mixed.glx'); await host.saveToPath(initial.documentId, filename)
+    const coldHost = new DocumentHostService(join(directory, 'cold')), reopened = await coldHost.open(filename)
+    expect(course(reopened).project.instances).toEqual(current.project.instances)
+    await editor.evaluate(() => (window as any).w3Harness.dispose())
+    const coldEditor = await browser.newPage({ viewport: { width: 1200, height: 1000 } }), coldEvents: DocumentEvent[] = []
+    const coldOff = coldHost.subscribeEvents(event => coldEvents.push(event))
+    try {
+      await mountMainEditor(coldEditor, coldHost, reopened.documentId, coldEvents, editorBundle)
+      await expect(coldEditor.locator('[data-flow-block-id="body"]')).toContainText('连续正文')
+      await expect(coldEditor.locator('[data-flow-block-id="program"] iframe').contentFrame().getByRole('button', { name: 'Count 0', exact: true })).toBeVisible()
+      await coldEditor.screenshot({ path: join(directory, 'cold-editor.png') })
+      expect(await coldEditor.evaluate(() => (window as any).w3Harness.errors)).toEqual([])
+      await coldEditor.evaluate(() => (window as any).w3Harness.dispose())
+    } finally { coldOff(); await coldEditor.close() }
+    const published = await buildPublishedCourseV3({ project: current.project, assetBytes: current.resources.assets, componentFiles: current.resources.components })
+    const player = await build({ stdin: { contents: 'export * from "./src/player/componentPlatform/entry"', resolveDir: root }, bundle: true, platform: 'browser', format: 'iife', globalName: 'CoursewarePlayer', write: false, loader: { '.css': 'empty' }, logLevel: 'silent' })
+    const html = buildComponentSingleHtml(published.payload, player.outputFiles[0]!.text)
+    await fs.writeFile(join(directory, 'mixed.html'), html)
+    const output = await browser.newPage({ viewport: { width: 1200, height: 1000 }, offline: true })
+    try {
+      output.on('pageerror', error => errors.push(error.message))
+      await output.route('http://localhost/s1-player', route => route.fulfill({ contentType: 'text/html', body: html }))
+      await output.goto('http://localhost/s1-player'); await output.evaluate(() => (window as any).coursePlayerReady)
+      await expect(output.locator('[data-component-object="body"]')).toContainText('连续正文')
+      const counter = output.locator('[data-component-object="program"] iframe').contentFrame().getByRole('button', { name: 'Count 0', exact: true })
+      await counter.click(); await expect(output.locator('[data-component-object="program"] iframe').contentFrame().getByRole('button', { name: 'Count 1', exact: true })).toBeVisible()
+      await expect(output.locator('[data-component-object="chart"] svg[data-native-chart-id="chart"]')).toBeVisible()
+      await expect(output.locator('[data-component-object="picture1"] img')).toBeVisible()
+      await output.screenshot({ path: join(directory, 'player.png') })
+    } finally { await output.close() }
+    facts.programRetained = true; facts.savedColdReopen = true; facts.actualPlayer = true
+    expect(errors).toEqual([])
+  } finally {
+    facts.errors = errors; await fs.writeFile(join(directory, 'facts.json'), JSON.stringify(facts, null, 2))
+    off(); await editor.close()
+  }
+})
+
 async function mountMainEditor(editor: Page, host: DocumentHostService, documentId: string, events: DocumentEvent[], bundle: string) {
   await editor.route('http://localhost/w3-editor', route => route.fulfill({ contentType: 'text/html', body: '<!doctype html><style>html,body,#editor{margin:0;width:100%;height:100%}#editor{position:relative}</style><div id="editor"></div>' }))
   await editor.goto('http://localhost/w3-editor')

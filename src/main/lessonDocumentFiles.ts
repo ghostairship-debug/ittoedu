@@ -13,7 +13,7 @@ import { fileResourceMime } from '../shared/document/fileResourceMime'
 const hash = (data: string) => createHash('sha256').update(data).digest('hex')
 const same = (a: DocumentFileVersion | null, b: DocumentFileVersion | null) => JSON.stringify(a) === JSON.stringify(b)
 const absent = (error: unknown) => (error as NodeJS.ErrnoException).code === 'ENOENT'
-export type MarkdownDocumentHost = Pick<DocumentHostAPI, 'open' | 'read' | 'dispatch' | 'save' | 'list' | 'create' | 'recoverable' | 'restore' | 'observeFile' | 'reconcileFile'>
+export type MarkdownDocumentHost = Pick<DocumentHostAPI, 'open' | 'read' | 'dispatch' | 'save' | 'list' | 'create' | 'recoverySummaries' | 'restore' | 'observeFile' | 'reconcileFile'>
 export interface LessonDocumentFilesOptions {
   recoveryDirectory: string
   validateTarget: (ref: DocumentFileRef) => Promise<void>
@@ -46,7 +46,7 @@ export function createLessonDocumentFiles(options: LessonDocumentFilesOptions) {
         } catch (error) { if (!absent(error)) throw error; ancestor = path.dirname(ancestor) }
       }
     }
-    const matches = (value: DocumentSnapshot) => value.binding.kind === 'file' && pathKey(value.binding.path) === pathKey(filename)
+    const matches = (value: Pick<DocumentSnapshot, 'binding'>) => value.binding.kind === 'file' && pathKey(value.binding.path) === pathKey(filename)
     const live = (await documents.list()).find(matches)
     if (live) {
       const current = await documents.read(live.documentId)
@@ -60,7 +60,7 @@ export function createLessonDocumentFiles(options: LessonDocumentFilesOptions) {
       }
       return current
     }
-    const recovery = (await documents.recoverable()).find(matches)
+    const recovery = (await documents.recoverySummaries!()).find(matches)
     if (recovery) return documents.restore(recovery.documentId)
     try { return await documents.open(filename) }
     catch (error) {

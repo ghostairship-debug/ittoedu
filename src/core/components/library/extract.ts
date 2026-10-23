@@ -1,5 +1,5 @@
 import type { ComponentLibraryEntry } from '../../../shared/contracts/component-platform/library'
-import type { ComponentDefinition, ComponentImplementation, ComponentInstance, ComponentSurface, CourseProjectV10 } from '../../../shared/contracts/component-platform/project'
+import type { BehaviorAttachment, ComponentDefinition, ComponentImplementation, ComponentInstance, ComponentSurface, CourseProjectV10 } from '../../../shared/contracts/component-platform/project'
 import { createComponentReferenceCapture, interactionReferenceTargets, sourceModuleBindings, type ComponentReferenceCapture } from './references'
 import { componentDefinitionBuiltinKey, componentSurface } from '../../../shared/contracts/component-platform/project'
 import { associatedComponentInteractionRules, componentInteractionDataSchema } from '../../../shared/componentInteractionData'
@@ -8,6 +8,7 @@ import { resolveComponentBackground, resolveComponentPresentation, isComponentVi
 import { courseThemeStyleText, courseThemeVariables } from '../../../shared/contracts/design-v1/theme'
 import { componentBackgroundAssetIds, mergeComponentBackground } from '../../../shared/componentBackgroundPaint'
 import { componentInputStateReferences } from '../../../components/input/authoring'
+import { documentComponentDataVersions, documentRangeAt } from '../../../shared/document/textInteraction'
 
 export interface ExtractLibraryOptions {
   id: string
@@ -17,6 +18,22 @@ export interface ExtractLibraryOptions {
   kind?: ComponentLibraryEntry['kind']
   inputs?: ComponentLibraryEntry['inputs']
   adapters?: Readonly<Record<string, LibraryReferenceAdapter>>
+}
+
+/** A range annotation follows the selected authored text, even when owned by its Flow. */
+export function selectedRangePopoverAttachments(project: CourseProjectV10, selected: ReadonlySet<string>): Map<string, BehaviorAttachment[]> {
+  const result = new Map<string, BehaviorAttachment[]>()
+  for (const instance of Object.values(project.instances)) {
+    const definition = project.definitions[instance.definitionId]
+    if (definition?.role !== 'behavior' || componentDefinitionBuiltinKey(definition) !== 'guoling.popover') continue
+    const attachments = (instance.attachments ?? []).filter(attachment => {
+      const target = attachment.target
+      return target.kind === 'text-range' && selected.has(target.instanceId)
+        && documentComponentDataVersions(project, target.instanceId).some(data => documentRangeAt(data, target.dataPath, target.rangeId))
+    })
+    if (attachments.length) result.set(instance.id, attachments)
+  }
+  return result
 }
 
 /** Reads an author snapshot. The library owns copies; no live instance or byte buffer is retained. */
@@ -96,6 +113,15 @@ export function extractComponentLibraryEntry(project: CourseProjectV10, resource
   }
   const requestedRoots = [...options.rootIds ?? [], ...surfaces.map(surface => surface.id), ...global.underlay, ...global.overlay]
   requestedRoots.forEach(visit)
+  let rangePopovers: ReturnType<typeof selectedRangePopoverAttachments>
+  for (;;) {
+    rangePopovers = selectedRangePopoverAttachments(project, new Set(Object.keys(instances)))
+    const count = Object.keys(instances).length
+    for (const id of rangePopovers.keys()) visit(id)
+    if (Object.keys(instances).length === count) break
+  }
+  // Copy only this detached text's part of a shared annotation, never a live outside target.
+  for (const [id, attachments] of rangePopovers) instances[id].attachments = structuredClone(attachments)
   // These descriptors share only this detached entry's container configuration, never the live project.
   surfaces = Object.values(instances).flatMap(instance => instance.container
     ? [{ ...instance.container, id: instance.id, title: instance.name ?? instance.id, childIds: instance.childIds ?? [] }] : [])

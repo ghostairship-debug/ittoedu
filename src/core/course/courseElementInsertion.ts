@@ -6,31 +6,17 @@ import { componentDefinitionBuiltinKey, containerChildIds, owningContainer } fro
 import { courseSettingsEdits } from './courseSemanticEdits'
 import { courseGlobalPlacementEdits } from './courseObjectEdits'
 import type { ComponentEdit } from '../../shared/contracts/component-platform/operations'
-import type { NativeLineGeometry } from '../../shared/contracts/native-v1/types'
-import { TEXT_DEFINITION, FORMULA_DEFINITION } from '../../components/text/adapters'
-import { createTextComponentData, createFormulaComponentData } from '../../components/text/data'
-import { SHAPE_DEFINITION, defaultShapeData } from '../../components/shape/authoring'
-import { shapeDataSchema, type ShapeData } from '../../components/shape/data'
-import { TABLE_DEFINITION } from '../../components/table/adapters'
-import { createTableData, type TableContentInput } from '../../components/table/data'
-import { createTableContentData } from '../../components/table/content'
-import { CHART_DEFINITION } from '../../components/chart'
-import { createChartData, type ChartData } from '../../components/chart/data'
-import { changeChartType } from '../../components/chart/contentOperations'
-import { INPUT_DEFINITION, createInputData } from '../../components/input/data'
+import { prepareProfessionalElement, type ProfessionalElementOptions, type CourseElementKind } from './professionalElementDefaults'
+export type { CourseElementKind } from './professionalElementDefaults'
 import { TEACHER_CONTROLLER_DEFINITION, createTeacherControllerData, createTeacherControllerFrame } from '../../components/teacher-controller/data'
 
-export type CourseElementKind = 'text' | 'formula' | 'shape' | 'table' | 'chart' | 'input'
-export interface CourseInsertionOptions {
+export interface CourseInsertionOptions extends ProfessionalElementOptions {
   x?: number; y?: number; width?: number; height?: number
   center?: { x: number; y: number }
   container?: ComponentContainer; afterInstanceId?: string | null; index?: number
-  shapeType?: ShapeData['shapeType']; chartType?: ChartData['chartType']; text?: string
-  table?: TableContentInput
-  lineGeometry?: NativeLineGeometry
   destination?: 'document' | 'paper'
   /** Existing UI default profile, prepared by the host rather than supplied by public intent. */
-  origin?: 'slide-authoring'
+  origin?: ProfessionalElementOptions['origin']
 }
 interface CourseInsertionTarget { project: CourseProjectV10; surfaceId: string | null; instanceId?: string | null; rootInstanceId?: string | null }
 
@@ -94,20 +80,10 @@ export function courseInsertionFrame(target: CourseInsertionTarget, width: numbe
 export function prepareCourseElementEdits(project: CourseProjectV10, surfaceId: string | null, selectedInstanceId: string | null,
   kind: CourseElementKind, options: CourseInsertionOptions = {}): { edits: ComponentEdit[]; instanceIds: string[] } {
   if (surfaceId && !componentSurface(project, surfaceId)) throw new Error('插入的原页面已不存在')
-  const target = { project, surfaceId, instanceId: selectedInstanceId }, slide = options.origin === 'slide-authoring'
-  let definition: ComponentDefinition, data: unknown, width = slide ? 320 : 400, height = slide ? 80 : 70
-  if (kind === 'text') { definition = TEXT_DEFINITION; data = createTextComponentData(options.text ?? '双击编辑文字') }
-  else if (kind === 'formula') {
-    definition = FORMULA_DEFINITION; data = createFormulaComponentData(`formula_${nanoid()}`, options.text ?? (slide ? 'x^2' : 'x^2+y^2=r^2'))
-    width = slide ? 240 : 400; height = slide ? 100 : 90
-  } else if (kind === 'shape') {
-    definition = SHAPE_DEFINITION; data = shapeDataSchema.parse({ ...defaultShapeData(options.shapeType), ...(options.lineGeometry ? { lineGeometry: options.lineGeometry } : {}) })
-    width = slide ? 200 : 220; height = 140
-  } else if (kind === 'table') { definition = TABLE_DEFINITION; data = options.table ? createTableContentData(options.table) : createTableData(); width = 600; height = slide ? 120 : 220 }
-  else if (kind === 'input') { definition = INPUT_DEFINITION; data = createInputData(); height = 120 }
-  else { definition = CHART_DEFINITION; const chart = createChartData(); data = changeChartType(chart, options.chartType ?? chart.chartType); width = slide ? 560 : 520; height = slide ? 360 : 320 }
+  const target = { project, surfaceId, instanceId: selectedInstanceId }
+  const { definition, data, width, height } = prepareProfessionalElement(kind, options)
   const instance: ComponentInstance = { id: `instance_${nanoid()}`, definitionId: definition.id,
-    ...(!slide ? { name: definition.title } : {}), data: courseAuthorData(data), frame: courseInsertionFrame(target, width, height, options) }
+    ...(!options.origin ? { name: definition.title } : {}), data: courseAuthorData(data), frame: courseInsertionFrame(target, width, height, options) }
   const instanceIds = [instance.id], placement = resolveCourseInsertionPlacement(target, options, instanceIds)
   return { instanceIds, edits: [...definitionInsertionEdits(target, definition),
     { type: 'instance.insert', container: placement.container, index: placement.index, instances: [instance], rootIds: instanceIds }, ...placement.edits] }

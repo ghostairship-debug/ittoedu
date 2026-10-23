@@ -17,6 +17,7 @@ export interface HtmlPreviewControllerEvents {
   onTarget(target: HtmlSelectedTarget | null, issue?: string): void
   onReady(sectionCount: number, ambiguous: boolean): void
   onEditModeReady(enabled: boolean): void
+  onEditModeError?(message: string): void
   onPage(index: number, scroll: number): void
   onEditing(): void
   onApplied(revision: number, patch: Extract<HtmlPreviewEditOutcome, { status: 'applied' }>['patch'], beforeValue: string): void
@@ -38,6 +39,7 @@ export class HtmlPreviewController {
   private requestSerial = 0
   private modeRequest: { requestId: string; enabled: boolean } | null = null
   private editMode = false
+  private acknowledgedEditMode = false
   private readonly cardKeys = new Set<string>()
   private readonly cardTargets = new Map<string, HtmlTargetReport>()
   private modeSerial = 0
@@ -90,7 +92,15 @@ export class HtmlPreviewController {
     if (message.event === 'edit-mode-ready' && this.modeRequest?.requestId === message.requestId
       && this.modeRequest.enabled === message.enabled) {
       this.modeRequest = null
+      this.acknowledgedEditMode = message.enabled
       this.events.onEditModeReady(message.enabled)
+    }
+    if (message.event === 'edit-mode-error' && this.modeRequest?.requestId === message.requestId
+      && this.modeRequest.enabled === message.enabled) {
+      this.modeRequest = null
+      this.editMode = this.acknowledgedEditMode
+      this.pendingConfirmation = null
+      this.events.onEditModeError?.(message.message)
     }
     if (this.visible && message.event === 'targets') void this.resolve(message.targets)
     if (this.visible && this.editMode && message.event === 'selection') {
@@ -230,7 +240,8 @@ export class HtmlPreviewController {
         return
       }
       this.select({ report, resolved })
-    } catch { if (this.active && serial === this.requestSerial) this.select(null, '源码已变化，请重新选择。') }
+    } catch (error) { if (this.active && serial === this.requestSerial) this.select(null,
+      error instanceof Error ? error.message : '未能读取此处编辑位置，可重新选择或在源码中继续。') }
   }
 
   async editText(value: string, target?: HtmlSelectedTarget): Promise<HtmlPreviewEditOutcome> { return this.edit({ kind: 'text', value }, target) }

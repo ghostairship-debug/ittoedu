@@ -12,7 +12,7 @@ import { prepareHtmlImage } from './htmlImagePreparation'
 import { replaceSrcsetUrls } from '../../../shared/html/responsiveImage'
 import type { HtmlSourceEditCommand, HtmlSourceEditOutcome } from '../../../shared/html/sourceEditCommands'
 import { applyHtmlSourceEdit, type HtmlSourceEditResult } from './htmlSourceEdits'
-import { patchHtmlAuthoringRecords, readHtmlAuthoringRecords, readHtmlFrameSources } from '../../../shared/html/htmlAuthoringRecords'
+import { analyzeHtmlAuthoringRecords, patchHtmlAuthoringRecords, readHtmlAuthoringRecords } from '../../../shared/html/htmlAuthoringRecords'
 import { neededHtmlFrameSources } from '../../../shared/html/htmlFrameAuthoring'
 import { prepareHtmlFramePassiveResources } from './htmlFramePassiveResources'
 import type { ComponentAuthorGeometry } from '../../../shared/contracts/component-platform/runtime'
@@ -225,7 +225,10 @@ export class HtmlSourceEditService implements HtmlPreviewEditPort {
       if (!matchingSnapshot(snapshot, request, context)) return { status: 'rejected', reason: 'stale-revision' }
       if (snapshot.model.kind !== 'text') return { status: 'rejected', reason: 'not-editable' }
       const source = snapshot.model.source
-      const sourceRecords = readHtmlAuthoringRecords(source)
+      let sourceScan: ReturnType<typeof scanHtmlSource> | undefined
+      const sourceTokens = () => (sourceScan ??= scanHtmlSource(source)).tokens
+      const sourceAnalysis = analyzeHtmlAuthoringRecords(source, sourceTokens)
+      const sourceRecords = sourceAnalysis.authoringRecords
       const described = record.report.authoring
       const existing = described && sourceRecords[described.authorKey]
       const ownsValue = existing && (request.change.kind === 'text' ? existing.overrides.text !== undefined
@@ -270,8 +273,9 @@ export class HtmlSourceEditService implements HtmlPreviewEditPort {
         }
         records[authoring.authorKey] = { ...current, overrides }
         const updated = patchHtmlAuthoringRecords(authorSource, records, {
+          ...(authorSource === source ? { tokens: sourceTokens } : {}),
           sources: await prepareHtmlFramePassiveResources(
-            neededHtmlFrameSources(authoring.record.scope, { ...readHtmlFrameSources(authorSource), ...context.frameSources }), context.rootRealPath),
+            neededHtmlFrameSources(authoring.record.scope, { ...sourceAnalysis.frameSources, ...context.frameSources }), context.rootRealPath),
         }, changes)
         if (updated === source) return { status: 'unchanged', revision: snapshot.revision }
         const result = await this.dependencies.execute({ documentId: snapshot.documentId, epoch: snapshot.epoch,

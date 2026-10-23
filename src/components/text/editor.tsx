@@ -42,7 +42,8 @@ export interface TextComponentEditorOwner<Data> {
 export function TextComponentEditor(props: TextComponentEditorOwner<TextComponentData>) {
   const styles = textAppearanceStyles(props.data.appearance, props.data.sizing)
   return <div className="component-text-editor" style={styles.box as CSSProperties}><div style={styles.content as CSSProperties}><SharedDocumentEditor ref={props.editorRef} document={textEditorDocument(props.data)} revision={props.revision} contentScope="inline-text"
-    inlineStyleDefaults={() => ({ bold: props.data.appearance.bold, italic: props.data.appearance.italic,
+    inlineStyleDefaults={() => ({ fontFamily: props.data.appearance.fontFamily, fontSize: props.data.appearance.fontSize, color: props.data.appearance.color,
+      bold: props.data.appearance.bold, italic: props.data.appearance.italic,
       underline: props.data.appearance.underline, strike: props.data.appearance.strike,
       emphasis: props.data.appearance.emphasis, highlightColor: props.data.appearance.highlightColor })}
     toolbarHost={props.toolbarHost} onUndo={props.onUndo} onRedo={props.onRedo}

@@ -16,6 +16,7 @@ import type { StaticCourseExportFormat } from './CourseExportSettingsDialog'
 import type { FrozenDeliveryBuildInput } from '../../shared/workbench/frozenDelivery'
 import type { DocumentSnapshot } from '../../shared/workbench/document'
 import { setDeliveryImageDocuments } from '../export/componentPlatform/encodeDeliveryImage'
+import type { PdfExportOptions } from '../export/pdfExportClient'
 
 export type { CourseDeliverySnapshot } from './courseDeliverySnapshot'
 export type { ComponentDeliveryFinding, ComponentDeliveryReport } from '../export/componentPlatform/delivery'
@@ -35,7 +36,7 @@ export interface CourseDeliveryPorts {
   navigateFinding(item: ComponentDeliveryFinding): void
   exportHtml(input: { suggestedName: string; html: string; projectPath?: string }): Promise<{ path: string } | null>
   exportWebPackage(input: { suggestedName: string; bytes: Uint8Array; projectPath?: string }): Promise<{ path: string } | null>
-  exportPdf(input: { suggestedName: string; html: string; projectPath?: string }): Promise<{ path: string } | null>
+  exportPdf(input: { suggestedName: string; html: string; projectPath?: string }, options?: PdfExportOptions): Promise<{ path: string } | null>
   exportBinary(input: { suggestedName: string; extension: 'pptx' | 'json' | 'docx'; bytes: Uint8Array; projectPath?: string }): Promise<{ path: string } | null>
 }
 export interface CourseDeliveryWatch { readonly documentTrigger: unknown; readonly sidecarTrigger: unknown; readonly componentPackagesTrigger: unknown; readonly liveDocuments?: readonly DocumentSnapshot[] }
@@ -111,26 +112,29 @@ export function useCourseDelivery(ports: CourseDeliveryPorts, watch: CourseDeliv
     : buildComponentDelivery(snapshot, format, { compile: ref.current.compileComponent,
       createCapture: ref.current.createOutputCapture ?? (ref.current.captureAuthoringObservation
         ? payload => createComponentDeliveryCapture(payload, ref.current.captureAuthoringObservation!) : undefined), signal, singleHtmlMode: mode }), [])
-  const write = useCallback(async (value: PendingDelivery, beforeSave: () => void) => {
+  const write = useCallback(async (value: PendingDelivery, beforeSave: () => void, signal: AbortSignal) => {
     const paths: string[] = []
     const binding = value.snapshot.snapshot.binding
     const location = binding.kind === 'file' ? { projectPath: binding.path } : {}
-    for (const artifact of value.built.artifacts) {
-      beforeSave()
+    try { for (const artifact of value.built.artifacts) {
+      signal.throwIfAborted()
+      // PDF still has cancellable Chromium work before the native save phase.
+      if (artifact.extension !== 'pdf') beforeSave()
       const result = artifact.extension === 'html'
         ? await ref.current.exportHtml({ suggestedName: artifact.suggestedName, html: artifact.html!, ...location })
         : artifact.extension === 'zip' ? await ref.current.exportWebPackage({ suggestedName: artifact.suggestedName, bytes: artifact.bytes!, ...location })
-        : artifact.extension === 'pdf' ? await ref.current.exportPdf({ suggestedName: artifact.suggestedName, html: artifact.html!, ...location })
+        : artifact.extension === 'pdf' ? await ref.current.exportPdf({ suggestedName: artifact.suggestedName, html: artifact.html!, ...location }, { signal, onSaving: beforeSave })
         : await ref.current.exportBinary({ suggestedName: artifact.suggestedName, extension: artifact.extension, bytes: artifact.bytes!, ...location })
       if (!result) break
       paths.push(result.path)
+    } } finally {
+      if (paths.length) ref.current.commitStatus(`已导出到 ${paths.length === 1 ? paths[0] : `${paths.length} 个文件`}${value.built.report.items.length ? `；${value.built.report.items.length} 项输出说明` : ''}`)
     }
-    if (paths.length) ref.current.commitStatus(`已导出到 ${paths.length === 1 ? paths[0] : `${paths.length} 个文件`}${value.built.report.items.length ? `；${value.built.report.items.length} 项输出说明` : ''}`)
   }, [])
-  const present = useCallback(async (value: PendingDelivery, beforeSave: () => void) => {
+  const present = useCallback(async (value: PendingDelivery, beforeSave: () => void, signal: AbortSignal) => {
     const html = value.built.artifacts[0]?.extension === 'html' ? value.built.artifacts[0].html : undefined
     if (html && utf8ByteLength(html) > SINGLE_HTML_WARNING_BYTES) { large.current = value; setLargeHtmlByteLength(utf8ByteLength(html)); return }
-    await write(value, beforeSave)
+    await write(value, beforeSave, signal)
   }, [write])
   const exportCourse = useCallback((format: CourseDeliveryFormat, mode: SingleHtmlExportMode = 'offline-portable', options?: ExportPageOptions) => {
     const expected = ref.current.readCanonicalSnapshot()
@@ -139,7 +143,7 @@ export function useCourseDelivery(ports: CourseDeliveryPorts, watch: CourseDeliv
       const snapshot = { ...await capture(expected), ...(deliveryOptions ? { deliveryOptions } : {}) }, built = await build(snapshot, format, signal, mode)
       const value = { snapshot, format, mode, built }
       if (built.report.items.some(item => item.severity !== 'info')) { pending.current = value; setExportPreflightReport(built.report) }
-      else await present(value, beforeSave)
+      else await present(value, beforeSave, signal)
     })
   }, [build, capture, generate, present])
   const openExportSettings = useCallback(() => {
@@ -163,7 +167,7 @@ export function useCourseDelivery(ports: CourseDeliveryPorts, watch: CourseDeliv
       if (pending.current !== value) return
       // New edits refresh the actual producer; revision is not a user-supplied delivery gate.
       const built = current.revision === value.snapshot.revision ? value.built : await build(current, value.format, signal, value.mode)
-      cancelPreflight(); await present({ ...value, snapshot: current, built }, beforeSave)
+      cancelPreflight(); await present({ ...value, snapshot: current, built }, beforeSave, signal)
     })
   }, [build, cancelPreflight, capture, generate, present])
   const cancelLargeHtml = useCallback(() => { large.current = null; setLargeHtmlByteLength(null) }, [])
@@ -172,7 +176,7 @@ export function useCourseDelivery(ports: CourseDeliveryPorts, watch: CourseDeliv
     if (value) generate(async (signal, beforeSave) => {
       const current = { ...await capture(value.snapshot), deliveryOptions: value.snapshot.deliveryOptions }
       const built = current.revision === value.snapshot.revision ? value.built : await build(current, value.format, signal, value.mode)
-      await write({ ...value, snapshot: current, built }, beforeSave)
+      await write({ ...value, snapshot: current, built }, beforeSave, signal)
     })
   }, [build, cancelLargeHtml, capture, generate, write])
   const savePreflightReport = useCallback(() => {

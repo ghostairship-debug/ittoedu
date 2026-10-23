@@ -145,6 +145,101 @@ function documentsFixture() {
   return { documents: documents as unknown as Pick<DocumentHostAPI, 'subscribe'>, close: (documentId: string) => { for (const listener of listeners) listener({ type: 'closed', documentId }) } }
 }
 
+it.each(['submissions', 'conversation', 'run'] as const)('preserves a task after a failed %s refresh and allows fold, reveal and retry', async read => {
+  const f = executionFixture(), cards = new ElementCardController({ execution: () => f.execution, settings: () => settings() })
+  cards.setWorkspace('workspace')
+  const key = cards.ensure({ documentId: 'doc', target: target('a'), label: '标题' })
+  cards.reveal(key)
+  await cards.send(key, '修改标题', capture('a'))
+  f.api[read].mockRejectedValueOnce(new Error('read unavailable'))
+  f.finish('c1', 'run-1', { state: 'applied', fields: ['文字'] })
+  await waitFor(() => expect(cards.view(key)?.refreshError).toContain('任务可能仍在运行'))
+  expect(cards.view(key)).toMatchObject({ busy: true, entries: [{ state: 'running', runId: 'run-1' }] })
+
+  cards.dismiss(key)
+  expect(cards.view(key)).toMatchObject({ dismissed: true, busy: true })
+  expect(cards.active().map(card => card.key)).toEqual([key])
+  expect(f.api.stop).not.toHaveBeenCalled()
+  expect(f.api.deleteConversation).not.toHaveBeenCalled()
+
+  cards.reveal(key)
+  cards.retryRefresh(key)
+  await waitFor(() => expect(cards.view(key)).toMatchObject({ dismissed: false, busy: false, refreshError: '', entries: [{ state: 'completed' }] }))
+  expect(f.api.send).toHaveBeenCalledTimes(1)
+  cards.forgetDocument('doc')
+})
+
+it('does not replace a successful refresh with an older read failure', async () => {
+  const f = executionFixture(), cards = new ElementCardController({ execution: () => f.execution, settings: () => settings() })
+  cards.setWorkspace('workspace')
+  const key = cards.ensure({ documentId: 'doc', target: target('a'), label: '标题' })
+  await cards.send(key, '修改标题', capture('a'))
+  let reject!: (reason: Error) => void
+  f.api.submissions.mockImplementationOnce(() => new Promise((_resolve, fail) => { reject = fail }))
+  f.finish('c1', 'run-1', { state: 'applied', fields: ['文字'] })
+  cards.retryRefresh(key)
+  await waitFor(() => expect(cards.view(key)).toMatchObject({ busy: false, refreshError: '', entries: [{ state: 'completed' }] }))
+  reject(new Error('older read failed'))
+  await act(async () => { await Promise.resolve() })
+  expect(cards.view(key)).toMatchObject({ busy: false, refreshError: '' })
+  cards.forgetDocument('doc')
+})
+
+it('shows retry and a non-stopping fold action when the visible card cannot refresh its task', async () => {
+  const f = executionFixture(), d = documentsFixture()
+  window.desktopAPI = { execution: f.execution, executionSettings: settings(), documents: d.documents } as unknown as typeof window.desktopAPI
+  elementCards.setWorkspace('workspace')
+  const key = elementCards.ensure({ documentId: 'doc', target: target('refresh'), label: '标题' })
+  elementCards.reveal(key)
+  try {
+    render(<><ElementTextCardLayer /><div data-layer-item-id="refresh" /></>)
+    await act(() => elementCards.send(key, '修改标题', capture('refresh')))
+    f.api.submissions.mockRejectedValueOnce(new Error('read unavailable'))
+    act(() => { f.finish('c1', 'run-1', { state: 'applied', fields: ['文字'] }) })
+    const card = screen.getByRole('dialog', { name: 'AI 修改：标题' })
+    expect(await within(card).findByRole('alert')).toHaveTextContent('任务可能仍在运行')
+    expect(within(card).getByRole('button', { name: '重试读取任务状态' })).toBeEnabled()
+    fireEvent.click(within(card).getByRole('button', { name: '收起卡片（任务保留）' }))
+    expect(screen.queryByRole('dialog', { name: 'AI 修改：标题' })).toBeNull()
+    expect(elementCards.view(key)).toMatchObject({ dismissed: true, busy: true, entries: [{ state: 'running' }] })
+    expect(f.api.stop).not.toHaveBeenCalled()
+    expect(f.api.deleteConversation).not.toHaveBeenCalled()
+
+    act(() => elementCards.reveal(key))
+    fireEvent.click(within(screen.getByRole('dialog', { name: 'AI 修改：标题' })).getByRole('button', { name: '重试读取任务状态' }))
+    await screen.findByText('已完成', { exact: true })
+    expect(screen.queryByText('任务状态暂不可读取', { exact: false })).toBeNull()
+    expect(f.api.send).toHaveBeenCalledTimes(1)
+  } finally {
+    act(() => d.close('doc'))
+    window.desktopAPI = undefined as unknown as typeof window.desktopAPI
+  }
+})
+
+it('keeps a running text card reachable after a failed refresh even when its original capture is stale', async () => {
+  const f = executionFixture()
+  let revision = 1, source = 'hello'
+  const snapshot = async () => ({ documentId: 'doc', epoch: 'epoch', revision, model: { kind: 'markdown', source, resources: { attachments: [] } } }) as unknown as DocumentSnapshot
+  const cards = new ElementCardController({ execution: () => f.execution, settings: () => settings(), snapshot })
+  cards.setWorkspace('workspace')
+  const target = { kind: 'markdown-range' as const, from: 0, to: 5 }
+  const key = cards.openText({ documentId: 'doc', target, capture: textCapture(target, 1), label: 'hello', anchor: { left: 10, top: 20 }, content: 'hello' })
+  await cards.send(key, '修改文字')
+  source = 'changed'; revision = 2
+  f.api.submissions.mockRejectedValueOnce(new Error('read unavailable'))
+  f.finish('c1', 'run-1', { state: 'applied', fields: ['文字'], target: { ...target, to: 7 }, content: source, epoch: 'epoch', revision })
+  await waitFor(() => expect(cards.view(key)?.refreshError).toContain('任务可能仍在运行'))
+  expect(cards.matchesTextCapture(key, textCapture(target, 2))).toBe(false)
+  cards.dismiss(key)
+  expect(cards.view(key)).toMatchObject({ dismissed: false, busy: true })
+  expect(cards.visible().map(card => card.key)).toContain(key)
+  cards.retryRefresh(key)
+  await waitFor(() => expect(cards.view(key)).toMatchObject({ busy: false, refreshError: '', entries: [{ state: 'completed' }] }))
+  expect(f.api.send).toHaveBeenCalledTimes(1)
+  expect(f.api.stop).not.toHaveBeenCalled()
+  cards.forgetDocument('doc')
+})
+
 it('does not copy a host or card legacy preference into local edits', async () => {
   const f = executionFixture()
   const parent = await f.api.createConversation('workspace', '宿主会话')

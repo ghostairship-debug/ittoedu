@@ -1,0 +1,104 @@
+[
+  {
+    "width": 1280,
+    "images": [
+      {
+        "src": "assets/natural-section.webp",
+        "decoded": true
+      },
+      {
+        "src": "assets/washed-section.webp",
+        "decoded": true
+      },
+      {
+        "src": "assets/honey-section.webp",
+        "decoded": true
+      },
+      {
+        "src": "assets/natural.webp",
+        "decoded": true
+      },
+      {
+        "src": "assets/washed.webp",
+        "decoded": true
+      },
+      {
+        "src": "assets/honey.webp",
+        "decoded": true
+      },
+      {
+        "src": "assets/honey-section.webp",
+        "decoded": true
+      }
+    ],
+    "overflow": false,
+    "matrixCells": [
+      "保留",
+      "已去除¹",
+      "已去除¹",
+      "保留",
+      "去除",
+      "保留不等",
+      "保留",
+      "保留",
+      "保留",
+      "保留",
+      "保留",
+      "保留"
+    ],
+    "stateReturn": true,
+    "keyboard": true,
+    "errors": []
+  },
+  {
+    "width": 390,
+    "images": [
+      {
+        "src": "assets/natural-section.webp",
+        "decoded": true
+      },
+      {
+        "src": "assets/washed-section.webp",
+        "decoded": true
+      },
+      {
+        "src": "assets/honey-section.webp",
+        "decoded": true
+      },
+      {
+        "src": "assets/natural.webp",
+        "decoded": true
+      },
+      {
+        "src": "assets/washed.webp",
+        "decoded": true
+      },
+      {
+        "src": "assets/honey.webp",
+        "decoded": true
+      },
+      {
+        "src": "assets/honey-section.webp",
+        "decoded": true
+      }
+    ],
+    "overflow": false,
+    "matrixCells": [
+      "保留",
+      "已去除¹",
+      "已去除¹",
+      "保留",
+      "去除",
+      "保留不等",
+      "保留",
+      "保留",
+      "保留",
+      "保留",
+      "保留",
+      "保留"
+    ],
+    "stateReturn": true,
+    "keyboard": true,
+    "errors": []
+  }
+]

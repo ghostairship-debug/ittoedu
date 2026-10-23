@@ -758,7 +758,9 @@ export async function writeBinaryExportFile(
   extension: 'pptx' | 'pdf' | 'json' | 'docx' | 'h5component',
   bytes: Uint8Array,
   projectPath?: string,
+  signal?: AbortSignal,
 ): Promise<{ path: string } | null> {
+  signal?.throwIfAborted()
   if (bytes.byteLength === 0) {
     throw new DesktopOperationError(
       'EXPORT_SIZE_INVALID',
@@ -781,6 +783,9 @@ export async function writeBinaryExportFile(
     properties: ['showOverwriteConfirmation', 'dontAddToRecent'],
   })
   if (result.canceled || !result.filePath) return null
+  // Cancellation before publication is safe. Once atomicWrite starts, finish it
+  // and report the actual written path rather than claiming it was cancelled.
+  signal?.throwIfAborted()
   const targetPath = ensureExtension(result.filePath, `.${extension}`)
   try {
     await atomicWrite(targetPath, bytes)

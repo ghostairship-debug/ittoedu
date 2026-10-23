@@ -1,0 +1,243 @@
+{
+  "file": "coffee-journey-v06-art-pass5.html",
+  "offline": true,
+  "views": [
+    {
+      "width": 1440,
+      "u03Compare": {
+        "width": 1280,
+        "scroll": 1280,
+        "svg": 3,
+        "matrix": [
+          "保留",
+          "已去除¹",
+          "已去除¹",
+          "保留",
+          "去除",
+          "保留不等",
+          "保留",
+          "保留",
+          "保留",
+          "保留",
+          "保留",
+          "保留"
+        ]
+      },
+      "u03Return": {
+        "method": "honey",
+        "detail": "true",
+        "images": [
+          {
+            "complete": true,
+            "width": 1254
+          },
+          {
+            "complete": true,
+            "width": 1420
+          },
+          {
+            "complete": true,
+            "width": 1420
+          }
+        ]
+      },
+      "u05": {
+        "phase": "gold",
+        "zoom": "true",
+        "images": [
+          {
+            "width": 1254,
+            "opacity": "1"
+          },
+          {
+            "width": 1254,
+            "opacity": "1"
+          },
+          {
+            "width": 1254,
+            "opacity": "0"
+          }
+        ]
+      },
+      "u06Dilution": {
+        "waterLab": "",
+        "mode": "dilute",
+        "extraction": "true",
+        "playing": "false",
+        "added": "100",
+        "solute": "3",
+        "total": "300",
+        "concentration": "1.00",
+        "particles": "72",
+        "step": "1",
+        "progress": "0.528",
+        "shownAdded": "100.00",
+        "visibleParticles": "72"
+      },
+      "u06Labels": {
+        "width": 1280,
+        "scroll": 1280,
+        "labels": [
+          {
+            "text": "同一份溶解物，更多液体稀释示意",
+            "size": "12px"
+          },
+          {
+            "text": "咖啡来源溶解物清水粉体",
+            "size": "12px"
+          },
+          {
+            "text": "1浸润2溶出3滤开",
+            "size": "16px"
+          },
+          {
+            "text": "点与颜色用于解释物质关系，大小、速度与色深均为示意。",
+            "size": "11px"
+          }
+        ],
+        "canvas": {
+          "w": 564,
+          "h": 522
+        }
+      },
+      "u06Idle": true,
+      "audioEvents": null,
+      "returnConcentration": "1.00",
+      "reduced": {
+        "waterLab": "",
+        "mode": "extract",
+        "extraction": "true",
+        "playing": "false",
+        "added": "100",
+        "solute": "3",
+        "total": "300",
+        "concentration": "1.00",
+        "particles": "72",
+        "step": "2",
+        "progress": "1.000",
+        "shownAdded": "100.00",
+        "visibleParticles": "72"
+      }
+    },
+    {
+      "width": 390,
+      "u03Compare": {
+        "width": 390,
+        "scroll": 390,
+        "svg": 3,
+        "matrix": [
+          "保留",
+          "已去除¹",
+          "已去除¹",
+          "保留",
+          "去除",
+          "保留不等",
+          "保留",
+          "保留",
+          "保留",
+          "保留",
+          "保留",
+          "保留"
+        ]
+      },
+      "u03Return": {
+        "method": "honey",
+        "detail": "true",
+        "images": [
+          {
+            "complete": true,
+            "width": 1254
+          },
+          {
+            "complete": true,
+            "width": 1420
+          },
+          {
+            "complete": true,
+            "width": 1420
+          }
+        ]
+      },
+      "u05": {
+        "phase": "gold",
+        "zoom": "true",
+        "images": [
+          {
+            "width": 1254,
+            "opacity": "1"
+          },
+          {
+            "width": 1254,
+            "opacity": "1"
+          },
+          {
+            "width": 1254,
+            "opacity": "0"
+          }
+        ]
+      },
+      "u06Dilution": {
+        "waterLab": "",
+        "mode": "dilute",
+        "extraction": "true",
+        "playing": "false",
+        "added": "100",
+        "solute": "3",
+        "total": "300",
+        "concentration": "1.00",
+        "particles": "72",
+        "step": "1",
+        "progress": "0.473",
+        "shownAdded": "100.00",
+        "visibleParticles": "72"
+      },
+      "u06Labels": {
+        "width": 390,
+        "scroll": 390,
+        "labels": [
+          {
+            "text": "同一份溶解物，更多液体稀释示意",
+            "size": "12px"
+          },
+          {
+            "text": "咖啡来源溶解物清水粉体",
+            "size": "12px"
+          },
+          {
+            "text": "1浸润2溶出3滤开",
+            "size": "15px"
+          },
+          {
+            "text": "点与颜色用于解释物质关系，大小、速度与色深均为示意。",
+            "size": "11px"
+          }
+        ],
+        "canvas": {
+          "w": 342,
+          "h": 316
+        }
+      },
+      "u06Idle": true,
+      "audioEvents": "1",
+      "returnConcentration": "1.00",
+      "reduced": {
+        "waterLab": "",
+        "mode": "extract",
+        "extraction": "true",
+        "playing": "false",
+        "added": "100",
+        "solute": "3",
+        "total": "300",
+        "concentration": "1.00",
+        "particles": "72",
+        "step": "2",
+        "progress": "1.000",
+        "shownAdded": "100.00",
+        "visibleParticles": "72",
+        "audioEvents": "1"
+      }
+    }
+  ],
+  "errors": [],
+  "passed": true
+}

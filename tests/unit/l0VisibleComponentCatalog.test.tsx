@@ -189,7 +189,7 @@ it('shows shipped visual packages and authored definitions, then inserts, reopen
     expect(screen.getByTestId('component-my-card')).toBeInTheDocument()
     for (const id of ['text', 'formula', 'teacher', 'block']) expect(screen.queryByTestId(`component-${id}`)).toBeNull()
     fireEvent.click(screen.getByLabelText('选择文字视觉容器'))
-    fireEvent.click(screen.getByRole('button', { name: '添加到画布（1）' }))
+    fireEvent.click(screen.getByRole('button', { name: '添加所选（1）' }))
     await waitFor(() => expect(testContainerInstance(model.project, 0).childIds).toHaveLength(2))
     await act(async () => {})
     const reopened = driver.load(driver.serialize(model))

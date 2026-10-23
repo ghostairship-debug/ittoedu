@@ -1,0 +1,114 @@
+{
+  "chapters": [
+    {
+      "targetId": "ca1efa48-27a3-4517-89ea-175c3d215142",
+      "number": "01",
+      "label": "总量"
+    },
+    {
+      "targetId": "923db1a3-613f-43fd-b76f-76a9278cc0f4",
+      "number": "02",
+      "label": "加水"
+    },
+    {
+      "targetId": "a5030d3f-9275-4563-b495-bc94e8bf3d97",
+      "number": "03",
+      "label": "分布"
+    }
+  ],
+  "stages": [
+    {
+      "key": "crystal",
+      "symbol": 0,
+      "base": [
+        237,
+        241,
+        231
+      ],
+      "tint": [
+        207,
+        221,
+        200
+      ],
+      "x": 0.82,
+      "y": 0.66,
+      "mx": 0.95,
+      "my": 0.8,
+      "size": 166,
+      "msize": 96,
+      "opacity": 0.47,
+      "roast": 0,
+      "dust": 0,
+      "liquid": 0,
+      "cup": 0,
+      "seed": 0,
+      "shell": 0,
+      "peel": 0,
+      "rotation": 0
+    },
+    {
+      "key": "dissolved",
+      "symbol": 1,
+      "base": [
+        228,
+        240,
+        234
+      ],
+      "tint": [
+        169,
+        210,
+        199
+      ],
+      "x": 0.94,
+      "y": 0.66,
+      "mx": 0.95,
+      "my": 0.8,
+      "size": 166,
+      "msize": 96,
+      "opacity": 0.47,
+      "roast": 0,
+      "dust": 0,
+      "liquid": 0,
+      "cup": 0,
+      "seed": 0,
+      "shell": 0,
+      "peel": 0,
+      "rotation": 0
+    },
+    {
+      "key": "distributed",
+      "symbol": 2,
+      "base": [
+        235,
+        240,
+        230
+      ],
+      "tint": [
+        189,
+        209,
+        184
+      ],
+      "x": 0.82,
+      "y": 0.66,
+      "mx": 0.95,
+      "my": 0.8,
+      "size": 166,
+      "msize": 96,
+      "opacity": 0.47,
+      "roast": 0,
+      "dust": 0,
+      "liquid": 0,
+      "cup": 0,
+      "seed": 0,
+      "shell": 0,
+      "peel": 0,
+      "rotation": 0
+    }
+  ],
+  "symbols": [
+    "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"240\" height=\"240\" viewBox=\"0 0 240 240\"><path d=\"M120 24 207 70 206 172 120 218 34 172 34 70Z\" fill=\"#c7d9cf\" stroke=\"#5a8275\" stroke-width=\"3\"/><path d=\"M34 70 120 120 207 70 M120 120v98\" fill=\"none\" stroke=\"#5a8275\" stroke-width=\"2\"/><path d=\"m50 89 55 32v64l-55-32Z\" fill=\"#eaf1e6\"/><path d=\"m137 130 48-28v47l-48 28Z\" fill=\"#97b4a5\"/><path d=\"m74 70 45-24 42 24-42 24Z\" fill=\"#f6f6df\"/></svg>",
+    "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"240\" height=\"240\" viewBox=\"0 0 240 240\"><path d=\"M120 18 C103 51 50 95 50 142a70 70 0 0 0 140 0C190 95 137 51 120 18Z\" fill=\"#bddad7\" stroke=\"#4b888c\" stroke-width=\"3\"/><path d=\"M88 91q-30 37-14 70\" fill=\"none\" stroke=\"#edf7ee\" stroke-width=\"8\" stroke-linecap=\"round\"/><g fill=\"#bb9856\"><circle cx=\"108\" cy=\"146\" r=\"7\"/><circle cx=\"140\" cy=\"166\" r=\"6\"/><circle cx=\"100\" cy=\"180\" r=\"5\"/><circle cx=\"147\" cy=\"127\" r=\"5\"/></g></svg>",
+    "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"240\" height=\"240\" viewBox=\"0 0 240 240\"><path d=\"m45 39 15 164q1 14 60 14t60-14l15-164Z\" fill=\"#dfece4\" fill-opacity=\".6\" stroke=\"#578583\" stroke-width=\"3\"/><path d=\"m52 110 8 93q1 14 60 14t60-14l8-93Z\" fill=\"#b8d7cd\" fill-opacity=\".6\"/><ellipse cx=\"120\" cy=\"110\" rx=\"68\" ry=\"16\" fill=\"#d7e6d9\" stroke=\"#578583\" stroke-width=\"2\"/><g fill=\"#b59857\"><circle cx=\"90\" cy=\"148\" r=\"5\"/><circle cx=\"141\" cy=\"137\" r=\"4\"/><circle cx=\"118\" cy=\"187\" r=\"5\"/><circle cx=\"157\" cy=\"179\" r=\"4\"/><circle cx=\"80\" cy=\"191\" r=\"3\"/></g></svg>"
+  ],
+  "durationMs": 1100
+}

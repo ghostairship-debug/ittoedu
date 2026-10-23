@@ -1,0 +1,17 @@
+[
+  {
+    "kind": "read",
+    "data": {
+      "path": "references/component-api5.md",
+      "type": "reference",
+      "documentId": "fd96892e-aa00-413f-a9d6-bf55dfba58f6",
+      "epoch": "6817c86b-975f-4bac-8754-0a21b4b8d3dd",
+      "revision": 204,
+      "currentRevision": 204,
+      "basis": "current",
+      "summary": "共享 Component API5 与局部增强说明；按需读取",
+      "content": "API5：DOM 和监听在 mount(context) 内建立；context.root 是当前组件的可选 HTMLElement，context.instance 是当前实例。\n共享运行状态使用 context.scope.state：get(name) 返回 JSON 值或 undefined，set(name, value) 写 JSON 值，subscribe(name, listener) 返回退订函数并自动随挂载清理。相同名称在同一运行会话的组件/页面间共享；这是运行态，不写作者工程或保存文件。subscribe 不回放当前值，首次显示另读 get(name)。\n导航使用可选的 const tc = context.teacherController：tc.read().scenes 返回实际 {id,name,targets?}，tc.read().locationId 是当前页；用实际 scene.id 执行 await tc.execute({type:\"scene.go\",sceneId:scene.id}, context.scope.signal)，也支持 {type:\"scene.next\"}/{type:\"scene.previous\"}。tc.canExecute(action) 返回当前能否执行；tc.subscribe(listener) 返回退订函数并自动随挂载清理。\n给当前实例追加业务行为时，用 project.apply {path:主Source路径,intent:\"enhance\",content:业务模块}，或 from 提供普通 JS/TS 文件及相对依赖。软件在原实现挂载后执行增强，接力 update/dispose，保留 frame、HTML/专业数据与其他实例；回执 enhancementPath 指向实际业务模块，继续编辑它即可。共享定义和依赖仍用 content 深改。\n增强模块导出 default 函数或 enhance(context)。context 提供原 API5 端口及 listen(type,selector,handler) 的根节点委托监听、observe(key,paint) 的首次读取和订阅；重绘后继续使用这些受管监听/显示，更新时先清理增强再执行原 update 并重新接入。可返回清理函数或含 dispose() 的对象，异步 dispose 会等待。scope.cleanup 用于计时器、Observer 和外部资源。\n显式连接由 object.update.properties.stateBindings 提供 alias→已声明的 courseState.key；增强用 bindings.get/set/observe(alias)，observe 同时首显与订阅。软件维护这些声明引用的改名与复制映射，不改写业务 JS 字符串。scope.state 的普通 JSON 业务仍可直接使用。\nscope.state/events.subscribe 和 tc.subscribe 已自动随挂载清理，无需重复登记；state.subscribe 不回放当前值，直接使用时首显另读 get。scope.signal 随该次挂载结束而取消，scope.isActive() 表示挂载仍存活；普通暂停、离屏和跨页保留沿原生命周期。\n局部增强示例：\nexport default ({root, scope, listen, observe}) => {\n  observe('value', value => {\n    const output = root?.querySelector('[data-value]');\n    if (output) output.textContent = String(value ?? '');\n  });\n  listen('click', '[data-increment]', () => scope.state.set('value', Number(scope.state.get('value') ?? 0) + 1));\n};\n仍可完整深改 API5：保留 import、...implementation；await implementation.mount(context) 后自行接入，return mounted 或显式转交原 update/dispose；新增 DOM/外部资源需要 cleanup。",
+      "complete": true
+    }
+  }
+]

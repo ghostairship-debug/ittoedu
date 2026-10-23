@@ -462,6 +462,7 @@ it('keeps the durable append and complete history when checkpoint replacement fa
   })
   for (let sequence = 0; sequence < 10; sequence++) await journal.append({ ...current, sequence, revision: sequence })
   expect(failedCheckpoints).toBeGreaterThan(0)
+  await waitForBindingIndex(journalFile(directory, current.documentId), 9)
   expect(isDeepStrictEqual(await createDocumentJournal({ directory }).recover(current.documentId), { ...current, sequence: 9, revision: 9 })).toBe(true)
   expect((await fs.readdir(directory)).filter(name => name.endsWith('.tmp'))).toEqual([])
 }, 20_000)

@@ -1,13 +1,15 @@
-import { isNativeFlowLayoutGroup, isNativeFlowContainerStyle, isNativeFlowItemStyle, componentFlowStylePolicy } from '../../../../shared/flowNativeLayout'
+import { isNativeFlowLayoutGroup, isNativeFlowContainerStyle, isNativeFlowItemStyle, componentFlowStylePolicy, isFlowStickyStyle } from '../../../../shared/flowNativeLayout'
 import { componentSurface } from '../../../../shared/contracts/component-platform/project'
 import { captureComponentOperation, equalComponentValue, presentationComponentEdits } from '../../../../core/drivers/courseV10Operations'
 import { componentDataEdits } from '../../../../core/course/componentDataEdits'
 import { frameCorners, multiplyMatrices, translateFrame } from '../../../../core/components/geometry'
 import { contentPlacementRegion } from '../../../../core/contentApply/planning/placement'
 import { containerChildIds, owningContainer, resolveComponentPresentation, type ComponentContainer, type ComponentDefinition, type ComponentEdit, type ComponentFrame, type ComponentInstance, type CourseProjectV10, type JsonObject, type JsonValue } from '../../../../shared/contracts/component-platform'
-import type { ContentApplyDiagnostic, ContentApplyPlan, ContentChangeRequest, ContentObjectDraft } from './types'
+import type { ContentApplyDiagnostic, ContentApplyPlan, ContentApplyPlanOptions, ContentChangeRequest, ContentObjectDraft } from './types'
 import { applyComponentStylePatch, cssStyleName, isOuterGeometryStyle } from '../../../../shared/componentStylePatch'
 import { GROUP_DEFINITION } from './professionalGraphics'
+import { normalizeContentObjectSource } from '../../../../core/contentApply/planning/objectSource'
+import { professionalElementDefaultSize, professionalElementKind } from '../../../../core/course/professionalElementDefaults'
 export { cssStyleName, isOuterGeometryStyle } from '../../../../shared/componentStylePatch'
 
 /** The outer frame remains the sole geometry owner. Internal Web CSS is handled by its component. */
@@ -82,6 +84,11 @@ function placeInRegion(project: CourseProjectV10, container: ComponentContainer,
 /** Reading order owns the block position; a bounded local component keeps its intrinsic stage size. */
 function flowBodyDraft(draft: ContentObjectDraft, definitions: Readonly<Record<string, ComponentDefinition>>): ContentObjectDraft {
   const implementation = draft.implementationOverride ?? definitions[draft.definitionId]?.implementation
+  const professional = implementation?.kind === 'builtin' ? professionalElementKind(implementation.key) : undefined
+  if (professional === 'table' || professional === 'chart') {
+    const frame = draft.frame ?? { ...professionalElementDefaultSize(professional), transform: [1, 0, 0, 1, 0, 0] as ComponentFrame['transform'] }
+    return { ...draft, frame: { ...frame, transform: [1, 0, 0, 1, 0, 0] } }
+  }
   const bounded = implementation?.kind === 'builtin' && ['guoling.web', 'guoling.html-program'].includes(implementation.key)
     || Boolean(draft.children?.length) || implementation?.kind === 'source'
   if (bounded && draft.frame) return { ...draft, frame: { width: draft.frame.width, height: draft.frame.height, transform: [1, 0, 0, 1, 0, 0] } }
@@ -128,8 +135,10 @@ export interface PlanContentApplyInput {
   preserveLayout?: boolean
 }
 
-export function planContentApply(input: PlanContentApplyInput): ContentApplyPlan {
-  const { project: baseProject, request } = input
+export function planContentApply(input: PlanContentApplyInput, options: ContentApplyPlanOptions = {}): ContentApplyPlan {
+  const { project: baseProject } = input
+  const request: ContentChangeRequest = input.request.source.kind === 'objects'
+    ? { ...input.request, source: normalizeContentObjectSource(input.request.source) } : input.request
   const context = request.editingContext
   const project = context ? resolveComponentPresentation(baseProject, context.surfaceId, context.stateId) : baseProject
   if (request.intent === 'content' && request.source.kind === 'html') htmlContentTargetIds(project, request)
@@ -166,7 +175,8 @@ export function planContentApply(input: PlanContentApplyInput): ContentApplyPlan
       const children = draft.children?.map(child => allocate(child, native))
       const style = draft.style ? Object.fromEntries(Object.entries(draft.style).filter(([name]) => !isOuterGeometryStyle(name)
         || native && isNativeFlowContainerStyle(name) || (native || parentLayout) && isNativeFlowItemStyle(name)
-        || draft.viewportPinned && name === 'width' && draft.style![name] === '100%').map(([name, value]) => [cssStyleName(name), value])) : undefined
+        || flow && isFlowStickyStyle(draft, name)
+        || draft.viewportPinned && ['width', 'height'].includes(name) && draft.style![name] === '100%').map(([name, value]) => [cssStyleName(name), value])) : undefined
       instances.push({ id, definitionId: draft.definitionId, data: structuredClone(draft.data),
         ...(draft.name !== undefined ? { name: draft.name } : {}), ...(draft.flowLayout ? { flowLayout: structuredClone(draft.flowLayout) } : {}),
         ...(draft.viewportPinned !== undefined ? { viewportPinned: draft.viewportPinned } : {}),
@@ -192,7 +202,7 @@ export function planContentApply(input: PlanContentApplyInput): ContentApplyPlan
       const target = project.instances[request.target.instanceId]!
       const removed = new Set((target.childIds ?? []).flatMap(id => contentTargetIds(project, { target: { kind: 'instance', instanceId: id } })))
       const detached = new Set<string>()
-      for (const childId of target.childIds ?? []) for (const expected of captureComponentOperation(project, [{ type: 'instance.remove', instanceId: childId }]).expected) {
+      for (const childId of target.childIds ?? []) for (const expected of captureComponentOperation(project, [{ type: 'instance.remove', instanceId: childId }], [], options).expected) {
         const path = expected.path
         if (path[0] === 'instances' && !removed.has(path[1]!) && ['data', 'attachments', 'flowPlacement'].includes(path[2]!)
           || path[0] === '@surface' && ['presentation', 'spatial'].includes(path[2]!)) detached.add(path.join('.'))
@@ -243,7 +253,7 @@ export function planContentApply(input: PlanContentApplyInput): ContentApplyPlan
     { kind: 'fields', fields: request.source.fields }))
     if (request.source.implementation !== undefined) edits.push({ type: 'implementation.set', instanceId, implementation: request.source.implementation })
   } else if (request.source.kind !== 'html') throw new Error('内容意图需要局部 HTML 或专业字段')
-  const mapped = context ? presentationComponentEdits(baseProject, context.surfaceId, context.stateId, edits) : edits
-  return { command: captureComponentOperation(baseProject, mapped), diagnostics, input: request, insertedIds,
+  const mapped = context ? presentationComponentEdits(baseProject, context.surfaceId, context.stateId, edits, options) : edits
+  return { command: captureComponentOperation(baseProject, mapped, [], options), diagnostics, input: request, insertedIds,
     usability: input.unusable ? 'unusable' : diagnostics.some(item => item.level !== 'info') ? 'partial' : input.unverified ? 'unverified' : 'usable' }
 }

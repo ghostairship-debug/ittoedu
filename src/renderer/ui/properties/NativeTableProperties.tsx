@@ -75,6 +75,7 @@ function TableCellInput({
   const editingRef = useRef(false)
   const composingRef = useRef(false)
   const pendingBlurRef = useRef(false)
+  const [, refreshComposition] = useState(0)
   const baselineRef = useRef(value)
   const bindingKey = usePropertyDraftBindingKey()
   const targetRef = useRef(bindingKey)
@@ -88,7 +89,7 @@ function TableCellInput({
     editingRef.current = false
     baselineRef.current = draftRef.current
     return true
-  })
+  }, undefined, () => composingRef.current || pendingBlurRef.current)
 
   useEffect(() => {
     if (!editingRef.current) {
@@ -120,10 +121,12 @@ function TableCellInput({
       onCompositionStart={() => {
         if (stale()) return
         composingRef.current = true
+        refreshComposition(epoch => epoch + 1)
         commands.updateCellDraft(cellId, draft, true)
       }}
       onCompositionEnd={(event) => {
         composingRef.current = false
+        refreshComposition(epoch => epoch + 1)
         if (stale()) { pendingBlurRef.current = false; return }
         setDraft(event.currentTarget.value)
         commands.updateCellDraft(cellId, event.currentTarget.value, false)

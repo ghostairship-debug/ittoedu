@@ -1,0 +1,114 @@
+{
+  "result": {
+    "joins": [
+      {
+        "phase": 1,
+        "meanChannelDifference": 0.014907407407407407,
+        "pixelsOver10": 0,
+        "maxChannelDifference": 5
+      },
+      {
+        "phase": 2,
+        "meanChannelDifference": 0.006812169312169312,
+        "pixelsOver10": 0,
+        "maxChannelDifference": 4
+      },
+      {
+        "phase": 3,
+        "meanChannelDifference": 0.020712396069538928,
+        "pixelsOver10": 0,
+        "maxChannelDifference": 6
+      },
+      {
+        "phase": 4,
+        "meanChannelDifference": 0.024421768707482992,
+        "pixelsOver10": 0,
+        "maxChannelDifference": 6
+      },
+      {
+        "phase": 5,
+        "meanChannelDifference": 0,
+        "pixelsOver10": 0,
+        "maxChannelDifference": 0
+      }
+    ],
+    "determinism": [
+      {
+        "phase": 0.33,
+        "meanChannelDifference": 0,
+        "pixelsOver10": 0,
+        "maxChannelDifference": 0
+      },
+      {
+        "phase": 1.43,
+        "meanChannelDifference": 0,
+        "pixelsOver10": 0,
+        "maxChannelDifference": 0
+      },
+      {
+        "phase": 2.51,
+        "meanChannelDifference": 0,
+        "pixelsOver10": 0,
+        "maxChannelDifference": 0
+      },
+      {
+        "phase": 3.66,
+        "meanChannelDifference": 0,
+        "pixelsOver10": 0,
+        "maxChannelDifference": 0
+      },
+      {
+        "phase": 4.35,
+        "meanChannelDifference": 0,
+        "pixelsOver10": 0,
+        "maxChannelDifference": 0
+      },
+      {
+        "phase": 5.56,
+        "meanChannelDifference": 0,
+        "pixelsOver10": 0,
+        "maxChannelDifference": 0
+      }
+    ],
+    "mobileGuard": [
+      {
+        "phase": 2,
+        "protectedMaximum": 0,
+        "railMaximum": 182
+      },
+      {
+        "phase": 3,
+        "protectedMaximum": 0,
+        "railMaximum": 182
+      },
+      {
+        "phase": 4,
+        "protectedMaximum": 0,
+        "railMaximum": 173
+      },
+      {
+        "phase": 5,
+        "protectedMaximum": 0,
+        "railMaximum": 184
+      }
+    ],
+    "timing": {
+      "samples": 121,
+      "medianMs": 4.5,
+      "p95Ms": 16.30000000447035,
+      "maxMs": 26.5,
+      "canvas": "420x420, DPR1, component-only"
+    },
+    "lifecycle": {
+      "idleStable": true,
+      "connected": 1,
+      "suspendedListeners": 0,
+      "suspendedStable": true,
+      "resumedPhase": 4,
+      "resumedListeners": 1,
+      "disposedListeners": 0,
+      "disposedChildren": 0
+    }
+  },
+  "errors": []
+}

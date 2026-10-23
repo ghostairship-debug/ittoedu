@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto'
 import { promises as fs } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { afterEach, expect, it } from 'vitest'
+import { afterEach, expect, it, vi } from 'vitest'
 import { DocumentHostService } from '../../src/main/workbench/DocumentHostService'
 import { ExecutionDesktopService } from '../../src/main/workbench/execution/ExecutionDesktopService'
 import { ExecutionSettingsStore } from '../../src/main/workbench/providers/ExecutionSettingsStore'
@@ -80,10 +80,21 @@ it('restores a dirty dynamically opened document before continuing after a proce
     .rejects.toMatchObject({ code: 'execution-recovery-binding-conflict' })
   expect(requests).toBe(3)
 
+  const failedRecovery = makeService()
+  vi.spyOn(failedRecovery.documents.internalAPI, 'restore').mockRejectedValue(new Error('目标恢复记录无法解码，原记录保留'))
+  const failedConversation = await failedRecovery.service.operate({ type: 'conversation', workspaceId: send.workspaceId,
+    conversationId: send.conversationId }) as ConversationRecord
+  await expect(failedRecovery.service.operate({ ...send, submissionId: randomUUID(),
+    expectedRevision: failedConversation.revision, retryOfRunId: partial.runId }))
+    .rejects.toMatchObject({ code: 'execution-recovery-failed' })
+  expect(failedRecovery.documents.registry.list()).toEqual([])
+  expect(requests).toBe(3)
+
   const restarted = makeService()
+  const legacy = vi.spyOn(restarted.documents.internalAPI, 'recoverable').mockRejectedValue(new Error('无关文档恢复记录无法解码'))
   const current = await restarted.service.operate({ type: 'conversation', workspaceId: send.workspaceId,
     conversationId: send.conversationId }) as ConversationRecord
-  expect((await restarted.documents.internalAPI.recoverable()).map(item => item.documentId)).toContain(documentId)
+  expect((await restarted.documents.internalAPI.recoverySummaries!()).map(item => item.documentId)).toContain(documentId)
   const continued = await restarted.service.operate({ ...send, submissionId: randomUUID(),
     expectedRevision: current.revision, retryOfRunId: partial.runId }) as ExecutionSendResult
   const completed = await restarted.service.engine.wait(continued.run!.runId)
@@ -93,4 +104,5 @@ it('restores a dirty dynamically opened document before continuing after a proce
     model: { source: '已提交但未保存' } })
   expect(await fs.readFile(filename, 'utf8')).toBe('磁盘原稿')
   expect(requests).toBe(5)
+  expect(legacy).not.toHaveBeenCalled()
 })

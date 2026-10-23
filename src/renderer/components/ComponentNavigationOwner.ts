@@ -1,4 +1,5 @@
-import type { CourseProjectV10, TeacherControllerAction, TeacherControllerPort, TeacherControllerSnapshot, ComponentFlowReading } from '../../shared/contracts/component-platform'
+import type { CourseProjectV10, TeacherControllerAction, TeacherControllerPort, TeacherControllerSnapshot, ComponentFlowReading, ComponentFlowNavigationMotion } from '../../shared/contracts/component-platform'
+import type { FlowNavigationOptions } from '../../shared/flowReading'
 import { navigationGuardHasSource } from '../../shared/courseNavigationGuards'
 import type { ComponentSpatialCameraPort } from '../../player/surfaces/spatial/componentSpatialAdapter'
 import type { ComponentRuntimeNavigationPort } from '../../player/components/runtime/ComponentRuntimeHost'
@@ -7,8 +8,7 @@ import { componentSurfaceGeometryTargets } from '../../player/componentPlatform/
 import { componentFragmentStateKey } from '../../player/componentPlatform/fragments'
 import { matchesPublishedCourseStateCondition } from '../../player/surfaces/publishedCourseState'
 import type { AudioManager } from '../../player/AudioManager'
-import { createTeacherControllerHudGeometry, isGlobalTeacherController, teacherControllerAuthoredCollapsed, teacherControllerExpandedWidth, teacherControllerFrameOrigin, teacherControllerIsCollapsed, teacherControllerReferenceSize, teacherControllerViewportFrame } from '../../shared/teacherControllerViewportGeometry'
-import { multiplyMatrices } from '../../core/components/geometry'
+import { createTeacherControllerHudGeometry, isGlobalTeacherController, resolveGlobalViewportLayout, teacherControllerAuthoredCollapsed, teacherControllerFrameOrigin, teacherControllerIsCollapsed, teacherControllerReferenceSize, teacherControllerViewportFrame } from '../../shared/teacherControllerViewportGeometry'
 import { plainDocumentText, documentTextContentSchema } from '../../shared/document/content'
 import { componentContainers, componentSurface, componentDefinitionBuiltinKey, isComponentVisibleAtSurface } from '../../shared/contracts/component-platform'
 import { NavigationTasks } from '../../player/behaviors/navigation/NavigationTasks'
@@ -31,8 +31,11 @@ export interface ComponentObservationBinding {
   setZoom(zoom: number): void
   reset(): void
   /** The mounted Flow owns scrolling and expanding the requested formal body target. */
-  goToInstance?(instanceId: string | null, signal?: AbortSignal): boolean | Promise<boolean>
+  goToInstance?(instanceId: string | null, signal?: AbortSignal, options?: FlowNavigationOptions): boolean | Promise<boolean>
   readReading?(targetIds: readonly string[]): Omit<ComponentFlowReading, 'containerId'> | null
+  readMotion?(): Omit<ComponentFlowNavigationMotion, 'containerId'> | undefined
+  subscribe?(listener: () => void): () => void
+  cancel?(): void
 }
 
 interface NavigationPorts {
@@ -72,6 +75,7 @@ export class ComponentNavigationOwner implements TeacherControllerPort {
   private fragmentRevision = 0
   private readonly cameras = new Map<string, { camera: ComponentSpatialCameraPort; binding?: ComponentCameraBinding; frameId: string | null; stepIndex: number | null; off(): void }>()
   private readonly observations = new Map<string, ComponentObservationBinding>()
+  private readonly observationReleases = new Map<string, () => void>()
   private directoryProject?: CourseProjectV10
   private readonly directories = new Map<string, NonNullable<TeacherControllerSnapshot['scenes'][number]['targets']>>()
   private readonly directorySteps = new Map<string, readonly SpatialTourStep[]>()
@@ -132,8 +136,18 @@ export class ComponentNavigationOwner implements TeacherControllerPort {
   }
   registerObservation = (surfaceId: string, binding: ComponentObservationBinding): (() => void) => {
     if (this.retired) return () => {}
+    this.observationReleases.get(surfaceId)?.()
     this.observations.set(surfaceId, binding); this.changed()
-    return () => { if (this.observations.get(surfaceId) === binding) this.observations.delete(surfaceId) }
+    const off = binding.subscribe?.(this.changed)
+    let released = false
+    const release = () => {
+      if (released) return
+      released = true
+      off?.(); binding.cancel?.()
+      if (this.observations.get(surfaceId) === binding) { this.observations.delete(surfaceId); this.observationReleases.delete(surfaceId) }
+    }
+    this.observationReleases.set(surfaceId, release)
+    return release
   }
   currentStateId = (containerId?: string): string | null => {
     const id = containerId ?? this.ports.surfaceId()
@@ -234,6 +248,8 @@ export class ComponentNavigationOwner implements TeacherControllerPort {
     const surface = this.activeSurface(containerId), entry = this.cameras.get(surface?.id ?? '')
     if (surface?.kind === 'flow') {
       const targets = this.directoryTargets(surface.id)
+      const motion = this.observations.get(surface.id)?.readMotion?.()
+      if (motion?.status === 'running') return targets.findIndex(target => target.id === motion.targetInstanceId)
       const reading = this.observations.get(surface.id)?.readReading?.(targets.map(target => target.id))
       return targets.findIndex(target => target.id === reading?.activeInstanceId)
     }
@@ -312,7 +328,7 @@ export class ComponentNavigationOwner implements TeacherControllerPort {
     const initialSteps = this.steps(surfaceId), surface = componentSurface(this.ports.project(), surfaceId ?? ''), step = initialSteps[index]
     if (!surface || !step) return false
     if (surface.kind === 'flow') {
-      if (!('instanceId' in step) || !step.instanceId || !await this.observations.get(surface.id)?.goToInstance?.(step.instanceId, signal) || signal?.aborted) return false
+      if (!('instanceId' in step) || !step.instanceId || !await this.observations.get(surface.id)?.goToInstance?.(step.instanceId, signal, { kind: 'chapter' }) || signal?.aborted) return false
       onCommit?.(); this.changed(); return true
     }
     if (surface.kind !== 'spatial') return this.presentState(surface.id, step.frameId, signal, motion, onCommit)
@@ -409,7 +425,7 @@ export class ComponentNavigationOwner implements TeacherControllerPort {
       if (block && (type === 'heading' || type === 'section')) {
         const text = documentTextContentSchema.safeParse(type === 'heading' ? data.content : data.title)
         targets.push({ id, name: (text.success ? plainDocumentText(text.data).trim() : '') || instance.name || '标题', kind: 'heading', depth,
-          action: { type: 'scene.go', sceneId: surfaceId, targetInstanceId: id } })
+          action: { type: 'scene.go', sceneId: surfaceId, targetInstanceId: id, targetKind: 'chapter' } })
       }
       if (!instance.container) for (const child of instance.childIds ?? []) visit(child, depth + (type === 'section' ? 1 : 0))
     }
@@ -449,6 +465,7 @@ export class ComponentNavigationOwner implements TeacherControllerPort {
       progress: sceneIndex < 0 ? null : { sceneIndex, sceneCount: surfaces.length, sceneName: surfaces[sceneIndex].title,
         stepIndex, stepCount: directSteps ? Math.max(1, steps.length) : steps.length + 1, stepName: steps[directSteps ? cursor : stepIndex - 1]?.title ?? '' },
       ...(reading && id ? { reading: { containerId: id, ...reading } } : {}),
+      ...(id && this.observations.get(id)?.readMotion?.() ? { flowMotion: { containerId: id, ...this.observations.get(id)!.readMotion!()! } } : {}),
       zoom: this.observations.get(id ?? '')?.readZoom() ?? this.cameras.get(id ?? '')?.camera.read().zoom ?? this.zoom,
       camera: this.cameras.get(id ?? '')?.camera.read(),
       muted: this.ports.audio?.()?.muted() ?? false, fullscreen: typeof document !== 'undefined' && Boolean(document.fullscreenElement) }
@@ -514,15 +531,26 @@ export class ComponentNavigationOwner implements TeacherControllerPort {
         ? { type: 'scene.go', sceneId: surfaces[request.edge === 'first' ? 0 : surfaces.length - 1]?.id ?? '' }
         : { type: request.kind === 'scene' ? request.direction === 'next' ? 'scene.next' : 'scene.previous'
           : request.direction === 'next' ? 'step.next' : 'step.previous' }
-      return this.canExecute(action) ? action : null
+      return this.canExecute(action) ? this.resolveFlowStepAction(action) : null
     },
     prepare() {}, commit: (action, signal) => !signal.aborted && this.canExecute(action),
     transition: (action, signal) => this.execute(action, signal),
   })
+  private resolveFlowStepAction(action: TeacherControllerAction, containerId?: string): TeacherControllerAction {
+    if ((action.type === 'step.next' || action.type === 'step.previous') && this.activeSurface(containerId)?.kind === 'flow') {
+      const id = containerId ?? this.ports.surfaceId()!, index = this.stepIndex(id) + (action.type === 'step.next' ? 1 : -1)
+      const target = this.directoryTargets(id)[index]
+      if (target) return { ...action, type: 'scene.go', sceneId: id, targetInstanceId: target.id, targetKind: 'chapter' }
+    }
+    return action
+  }
   private async executeAction(action: TeacherControllerAction, signal?: AbortSignal, teacher = false, pausedNavigation = false, onCommit?: () => void, originContainerId?: string | null): Promise<boolean> {
     if (this.retired || signal?.aborted) return false
     const containerId = action.containerId ?? (action.type === 'scene.go' ? action.sceneId : originContainerId) ?? undefined
     if (!this.canExecuteAction(action, teacher, pausedNavigation, originContainerId)) { if (action.type === 'scene.go') this.blocked(action.sceneId, true); return false }
+    // Resolve a repeated step against the current navigation intent before
+    // aborting that presentation. Reading itself remains the visible position.
+    action = this.resolveFlowStepAction(action, containerId)
     if (action.type === 'audio.toggle-mute' || action.type === 'player.fullscreen.toggle' || action.type === 'scene.open-picker') return this.executeNavigation(action, signal, false, undefined, containerId)
     const scopeKey = containerId && this.nestedContainer(containerId) && containerRootId(this.ports.project(), containerId) === this.ports.surfaceId() ? containerId : '@work'
     return this.runTransition(async next => {
@@ -558,14 +586,17 @@ export class ComponentNavigationOwner implements TeacherControllerPort {
     if (containerId) {
       const key = this.nestedContainer(containerId) ? containerId : '@work'
       const request = this.transitions.get(key); this.transitions.delete(key); request?.abort()
+      this.observations.get(containerId)?.cancel?.()
       return
     }
     const requests = [...this.transitions.values()]; this.transitions.clear()
     for (const request of requests) request.abort()
+    for (const observation of this.observations.values()) observation.cancel?.()
   }
   dispose = () => {
     if (this.retired) return
     this.retired = true; this.cancel()
+    for (const release of this.observationReleases.values()) release()
     for (const entry of this.cameras.values()) entry.off()
     this.views.clear(); this.instancePorts.clear(); this.containerPorts.clear(); this.placementListeners.clear(); this.cameras.clear(); this.observations.clear(); this.listeners.clear(); this.replayListeners.clear(); this.states.clear(); this.fragmentCache.clear(); this.surfaceFragments.clear(); this.fragmentProject = undefined; this.cursorSteps.clear(); this.runtime = undefined
     this.directories.clear(); this.directorySteps.clear(); this.directoryProject = undefined; this.geometryTargets.clear(); this.spatialSteps.clear(); this.geometryProject = undefined
@@ -609,7 +640,8 @@ export class ComponentNavigationOwner implements TeacherControllerPort {
       if (targetInstanceId) {
         const surface = componentSurface(this.ports.project(), destination ?? '')
         if (surface?.kind === 'flow') {
-          if (!await this.observations.get(destination)?.goToInstance?.(targetInstanceId, signal)) return false
+          const kind = action.type === 'scene.go' ? action.targetKind ?? (this.directoryTargets(destination).some(target => target.id === targetInstanceId) ? 'chapter' : 'object') : 'object'
+          if (!await this.observations.get(destination)?.goToInstance?.(targetInstanceId, signal, { kind }) || signal?.aborted) return false
         } else {
           const target = (this.steps(destination) as SpatialTourStep[]).findIndex(step => step.instanceId === targetInstanceId)
           if (target < 0 || !await this.presentStep(target, signal, destination, true, motion, onCommit)) return false
@@ -701,10 +733,9 @@ export class ComponentNavigationOwner implements TeacherControllerPort {
     if (frame && bounds && bounds.right > bounds.left && bounds.bottom > bounds.top) {
       const viewport = { width: bounds.right - bounds.left, height: bounds.bottom - bounds.top }, collapsed = teacherControllerIsCollapsed(project, id, port)
       const geometry = createTeacherControllerHudGeometry({ referenceSize: teacherControllerReferenceSize(project), viewportRect: { x: 0, y: 0, ...viewport } })
-      const projected = { ...frame, transform: [...multiplyMatrices(geometry.authorToViewport, frame.transform)] as typeof frame.transform }
-      const expandedWidth = teacherControllerExpandedWidth(project, id, this.ports.surfaceId() ?? '')
-      const shown = teacherControllerViewportFrame(projected, viewport, view.offset, collapsed, expandedWidth)
-      const origin = teacherControllerFrameOrigin(projected, collapsed, expandedWidth)
+      const layout = resolveGlobalViewportLayout(project, id, geometry, this.ports.surfaceId() ?? '')!
+      const shown = teacherControllerViewportFrame(layout.frame, viewport, view.offset, collapsed, layout.expandedWidth)
+      const origin = teacherControllerFrameOrigin(layout.frame, collapsed, layout.expandedWidth)
       view.offset = { x: dx === 0 ? view.offset.x : shown.transform[4] + dx - origin.x,
         y: dy === 0 ? view.offset.y : shown.transform[5] + dy - origin.y }
     } else view.offset = { x: view.offset.x + dx, y: view.offset.y + dy }

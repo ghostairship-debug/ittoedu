@@ -382,10 +382,11 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
   useEffect(() => {
     const subscribe = window.desktopAPI?.onWorkspaceFilesChanged
     if (!api || !workspaceId || !subscribe) return
-    let live = true
-    return subscribe(() => {
+    let live = true, request = 0
+    const unsubscribe = subscribe(() => {
+      const ticket = ++request
       void api.workspace(root).then(value => {
-        if (!live || value.workspace.workspaceId !== workspaceId) return
+        if (!live || ticket !== request || value.workspace.workspaceId !== workspaceId) return
         setConversations(previous => value.conversations.map(latest => {
           const current = previous.find(item => item.conversationId === latest.conversationId)
           return current && current.updatedAt > latest.updatedAt ? current : latest
@@ -394,6 +395,7 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
         if (latest) applyConversationMetadata(latest)
       }).catch(() => undefined)
     })
+    return () => { live = false; ++request; unsubscribe() }
   }, [api, root, workspaceId])
 
   useEffect(() => {
@@ -953,29 +955,36 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
   }
 
   const select = async (conversation: ConversationRecord) => {
-    if (!active || conversation.conversationId === active.conversationId || busy) return
+    if (!active || conversation.workspaceId !== workspaceId || conversation.conversationId === active.conversationId || busy) return
+    const ticket = generation.current
     setBusy(true); setError('')
     try {
       await persist()
+      if (ticket !== generation.current) return
       const latest = await api?.conversation(conversation.workspaceId, conversation.conversationId)
+      if (ticket !== generation.current) return
       applyConversation(latest ?? conversation)
-    } catch { setError('草稿未保存，已留在当前会话，请重试。') }
-    finally { setBusy(false) }
+    } catch { if (ticket === generation.current) setError('草稿未保存，已留在当前会话，请重试。') }
+    finally { if (ticket === generation.current) setBusy(false) }
   }
 
   const create = async () => {
     if (!api || !workspaceId || busy) return
+    const ticket = generation.current
     setBusy(true); setError('')
     try {
       await persist()
+      if (ticket !== generation.current) return
       const created = await api.createConversation(workspaceId)
+      if (ticket !== generation.current) return
       setConversations(value => [...value, created]); setSessionSearch(''); applyConversation(created)
-    } catch { setError('新会话暂未创建。') }
-    finally { setBusy(false) }
+    } catch { if (ticket === generation.current) setError('新会话暂未创建。') }
+    finally { if (ticket === generation.current) setBusy(false) }
   }
 
   const renameConversationItem = async (conversation: ConversationRecord, title: string) => {
-    if (!api || !title.trim() || busy) return
+    if (!api || conversation.workspaceId !== workspaceId || !title.trim() || busy) return
+    const ticket = generation.current
     setBusy(true); setError('')
     try {
       if (activeRef.current?.conversationId === conversation.conversationId) await persist()
@@ -983,20 +992,23 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
       if (!latest) throw new Error('会话名称未保存：会话已不存在。')
       const saved = await api.renameConversation({ workspaceId: latest.workspaceId, conversationId: latest.conversationId,
         expectedRevision: latest.revision, title: title.trim() })
+      if (ticket !== generation.current) return
       setConversations(value => updateConversation(value, saved))
       if (activeRef.current?.conversationId === saved.conversationId) { setActive(saved); activeRef.current = saved }
       setRenamingId(null); setSessionMenuId(null)
-    } catch (failure) { setError(failure instanceof Error ? failure.message : '会话名称未保存，请重试。') }
-    finally { setBusy(false) }
+    } catch (failure) { if (ticket === generation.current) setError(failure instanceof Error ? failure.message : '会话名称未保存，请重试。') }
+    finally { if (ticket === generation.current) setBusy(false) }
   }
 
   const removeConversationItem = async (conversation: ConversationRecord) => {
-    if (!api || busy) return
+    if (!api || conversation.workspaceId !== workspaceId || busy) return
+    const ticket = generation.current
     setBusy(true); setError('')
     try {
       const latest = await api.conversation(conversation.workspaceId, conversation.conversationId)
       if (!latest) throw new Error('Conversation no longer exists')
       await api.deleteConversation({ workspaceId: latest.workspaceId, conversationId: latest.conversationId, expectedRevision: latest.revision })
+      if (ticket !== generation.current) return
       documentsByConversation.current.delete(conversation.conversationId)
       frozenByConversation.current.delete(conversation.conversationId)
       setAttachmentOwners(owners => owners.filter(owner => owner.conversation.conversationId !== conversation.conversationId))
@@ -1007,11 +1019,12 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
       })
       let remaining = conversations.filter(value => value.conversationId !== conversation.conversationId)
       if (remaining.length === 0) remaining = [await api.createConversation(workspaceId)]
+      if (ticket !== generation.current) return
       setConversations(remaining)
       if (activeRef.current?.conversationId === conversation.conversationId) applyConversation(remaining[0]!)
       setRenamingId(null); setSessionMenuId(null)
-    } catch { setError('会话未删除；关联文件没有改变。') }
-    finally { setBusy(false) }
+    } catch { if (ticket === generation.current) setError('会话未删除；关联文件没有改变。') }
+    finally { if (ticket === generation.current) setBusy(false) }
   }
 
   const replaceSubmission = (next: ExecutionSubmissionRecord) => setSubmissions(value => {

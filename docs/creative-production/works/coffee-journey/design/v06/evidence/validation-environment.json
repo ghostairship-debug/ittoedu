@@ -1,0 +1,11 @@
+{
+  "date": "2026-10-22T14:14:58.367Z",
+  "platform": "win32",
+  "node": "v24.14.0",
+  "repositoryHead": "7610135797ed26f11f3bef5c5c2489a0a7806a4f",
+  "appPackageVersion": "0.0.1",
+  "appEntry": "dist-electron/main/index.js",
+  "scope": "Creative files and task registration only; concurrent software source/test changes left untouched.",
+  "gitStatusEvidence": "output/coffee-final-20261022/root/git-status-at-closeout.txt",
+  "appEntrySha256": "6c2ce027286c15e81d52084a2114d75b7c482b263404ea993f8e7b39ee0e6a1b"
+}

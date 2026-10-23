@@ -4,7 +4,7 @@ import { componentDefinitionBuiltinKey, componentIsLocked, containerChildIds, ow
 import type { ComponentFrame } from '../../shared/contracts/component-platform/frame'
 import type { DocumentResources } from '../../shared/workbench/document'
 import { translateFrame, reparentFrame, composeMatrices, IDENTITY_MATRIX, type AffineMatrix } from '../components/geometry'
-import { extractComponentLibraryEntry } from '../components/library'
+import { extractComponentLibraryEntry, selectedRangePopoverAttachments } from '../components/library'
 import { rebindComponentLibraryImplementation } from '../components/library/rebindSource'
 import { createComponentReferenceCapture, rebindAuthoringAssets, rebindProfessionalAssets, rebindWebAssets, sourceAssetIds, sourceModuleBindings } from '../components/library/references'
 import type { LibraryDiagnostic, LibraryExtractResult } from '../components/library/types'
@@ -300,6 +300,18 @@ function prepareCourseObjectPasteWithExtraction(source: CourseObjectClipboardSou
       }
     }
   }
+  // Shared range annotations are owned by the Flow rather than either text child.
+  // Their selected-text closure must also receive clipboard instance identities.
+  let rangePopovers = new Map<string, NonNullable<CourseProjectV10['instances'][string]['attachments']>>()
+  for (;;) {
+    rangePopovers = selectedRangePopoverAttachments(source.project, copied)
+    const count = copied.size
+    for (const id of rangePopovers.keys()) if (!copied.has(id)) {
+      copyRoots.push(id)
+      courseObjectDescendants(source.project, [id]).forEach(value => copied.add(value))
+    }
+    if (copied.size === count) break
+  }
   const copiedIds = [...copied], idMap = new Map(copiedIds.map(id => [id, moving && !Object.hasOwn(project.instances,id) ? id : crypto.randomUUID()]))
   // The library's existing extractor owns source-module/resource closure, including
   // private implementation workspaces. Clipboard does not infer bindings from code.
@@ -449,6 +461,7 @@ function prepareCourseObjectPasteWithExtraction(source: CourseObjectClipboardSou
   }
   const instances = copiedIds.map(id => {
     const item = structuredClone(source.project.instances[id])
+    if (rangePopovers.has(id)) item.attachments = structuredClone(rangePopovers.get(id)!)
     return { ...item, id: mapId(id), data: professionalKey(id) === 'guoling.interactions'
       ? rebindRules(item.data, id)
       : rebindNavigation(id, professionalData(id,inputData.get(id) ?? rewrite(item.data))),

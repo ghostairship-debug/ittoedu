@@ -147,7 +147,8 @@ describe('Markdown projection on the main document owner', () => {
     f.session.edit('A base\nB saved\nC base'); await f.session.drain()
     let edited = false
     const stop = f.documents.subscribe(event => {
-      if (event.type === 'changed' && event.snapshot.saving && !edited) {
+      const saving = event.type === 'changed' ? event.snapshot.saving : event.type === 'state' ? event.head.saving : false
+      if (saving && !edited) {
         edited = true; f.session.edit('A teacher\nB saved\nC base')
       }
     })
@@ -447,7 +448,13 @@ it('keeps an unknown input acknowledgement from reaching the close decision', as
   try {
     f.session.edit('input awaiting acknowledgement')
     expect(await f.session.close()).toBe(false)
-    expect(await f.session.preserveDraft()).toBe(false)
+    expect(await f.session.preserveDraft()).toBe(true)
+    const raw = await f.documents.readAuthoringDrafts(f.session.documentId!)
+    expect(raw?.sourceConflicts).toEqual(expect.arrayContaining([expect.objectContaining({
+      conflictBaseline: expect.stringContaining(dispatch.mock.calls[0]![0].operationId),
+      hunks: [{ id: 'source-input-v1', text: 'input awaiting acknowledgement' }],
+    })]))
+    expect(dispatch).toHaveBeenCalledTimes(1)
     expect(dialog).not.toHaveBeenCalled()
     expect(f.session.getSnapshot()).toMatchObject({ source: 'input awaiting acknowledgement' })
     expect(await f.host.internalAPI.read(f.session.documentId!)).toMatchObject({ dirty: false, model: { source: 'original' } })

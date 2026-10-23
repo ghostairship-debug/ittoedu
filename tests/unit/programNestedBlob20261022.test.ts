@@ -3,6 +3,7 @@ import { chromium, type Page } from '@playwright/test'
 import { expect, it } from 'vitest'
 import { domAuthoringFactorySource, createDomAuthoring } from '../../src/components/web/authoringDom'
 import { installOwnedDocumentAuthoring } from '../../src/components/web/ownedDocumentAuthoring'
+import { createAuthoringFrameGeometry } from '../../src/components/web/authoringFrame'
 import { authoredDocumentBootstrap, authoredDocumentProgramsSource } from '../../src/components/web/authoredDocumentBootstrap'
 import { anchorOwnedDocumentAuthoring, ownedDocumentExecutionSource } from '../../src/components/web/ownedDocumentIdentity'
 import { authorSpotEdits } from '../../src/core/components/authoring/componentAuthorEdits'
@@ -19,7 +20,7 @@ type Report = ReturnType<ReturnType<typeof installOwnedDocumentAuthoring>['repor
 const token = '__guoling_parser_blob_test'
 async function mount(page: Page, html: string, records: Record<string, ComponentAuthorRecord> = {}, authoring = true) {
   const prepared = authoredDocumentBootstrap({ html }, { nonce: 'blob-test', instanceId: 'web', resources: {}, authoring,
-    bridge: programs => `${authoredDocumentProgramsSource(programs)};window.__q={records:${JSON.stringify(records)},pointers:[]};window.__q.owner=(${installOwnedDocumentAuthoring.toString()})(${JSON.stringify(programs.property)},'',${domAuthoringFactorySource()},{records:()=>window.__q.records,resources:()=>({}),bindings:()=>({}),observe:${authoring},activity:()=>({active:true,visible:true,playing:false}),blobCarriers:()=>window[${JSON.stringify(programs.property)}].blobCarriers,onPointer:value=>window.__q.pointers.push(value)});window.dispatchEvent(new CustomEvent('__runtime.activity',{detail:{active:true,visible:true,playing:false}}));`,
+    bridge: programs => `${authoredDocumentProgramsSource(programs)};window.__q={records:${JSON.stringify(records)},pointers:[]};window.__q.owner=(${installOwnedDocumentAuthoring.toString()})(${JSON.stringify(programs.property)},'',${domAuthoringFactorySource()},{records:()=>window.__q.records,resources:()=>({}),bindings:()=>({}),observe:${authoring},activity:()=>({active:true,visible:true,playing:false}),blobCarriers:()=>window[${JSON.stringify(programs.property)}].blobCarriers,onPointer:value=>window.__q.pointers.push(value)},(${createAuthoringFrameGeometry.toString()}));window.dispatchEvent(new CustomEvent('__runtime.activity',{detail:{active:true,visible:true,playing:false}}));`,
   })
   await page.locator('#root').evaluate((element, html) => { (element as HTMLIFrameElement).srcdoc = html }, prepared)
   const root = page.frameLocator('#root'), child = root.frameLocator('#known')

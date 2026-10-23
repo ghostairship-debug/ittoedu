@@ -2,6 +2,7 @@ import type { createDomAuthoring } from './authoringDom'
 import type { ComponentAuthorGeometry, ComponentAuthorGeometryObservation, ComponentAuthorRecord, ComponentAuthorSpotInput } from '../../shared/contracts/component-platform/runtime'
 import type { DomTextOverrideController } from '../../player/lightEdit/domTextOverrides'
 import type { installHtmlBlobCapture } from './htmlBlobCapture'
+import { createAuthoringFrameGeometry } from './authoringFrame'
 
 export interface OwnedDocumentBlobCarriers {
   frames(): HTMLIFrameElement[]
@@ -208,10 +209,11 @@ export function installOwnedDocumentAuthoring(token: string, documentPath: strin
   channel?: string
   blobCarriers?(): OwnedDocumentBlobCarriers | undefined
   report?(authorKey: string, status: 'bound' | 'unmounted' | 'unresolved'): void
-} = {}) {
+} = {}, frameFactory: typeof createAuthoringFrameGeometry = createAuthoringFrameGeometry) {
   type Matrix = ComponentAuthorGeometryObservation['parentToInstance']
   type State = { records: Record<string, ComponentAuthorRecord>; resources: Record<string, string>; bindings: Readonly<Record<string, string>>; observe: boolean }
   type Child = { reports: OwnedAuthorReport[]; width: number; height: number }
+  const frameFacts = frameFactory()
   let state: State = { records: {}, resources: {}, bindings: {}, observe: options.observe === true }
   const resourceUrls = () => options.runtimeResources?.(state.resources) ?? state.resources
   let ended = false, queued = false, consumer: ReturnType<typeof factory> | undefined, sequence = 0
@@ -255,31 +257,8 @@ export function installOwnedDocumentAuthoring(token: string, documentPath: strin
   // Child coordinates are its viewport CSS pixels. Include border/padding,
   // individual transforms and ancestor zoom before composing the next realm.
   const frameMatrix = (frame: HTMLIFrameElement, child: Child): Matrix | undefined => {
-    const rect = frame.getBoundingClientRect(), css = getComputedStyle(frame), number = (value: string) => parseFloat(value) || 0
-    if (css.display === 'none' || css.visibility === 'hidden' || !rect.width || !rect.height || !child.width || !child.height) return
-    const paddingX = number(css.paddingLeft) + number(css.paddingRight), paddingY = number(css.paddingTop) + number(css.paddingBottom)
-    const borderX = number(css.borderLeftWidth) + number(css.borderRightWidth), borderY = number(css.borderTopWidth) + number(css.borderBottomWidth)
-    const width = number(css.width) + (css.boxSizing === 'border-box' ? 0 : paddingX + borderX)
-    const height = number(css.height) + (css.boxSizing === 'border-box' ? 0 : paddingY + borderY)
-    if (!(width > 0 && height > 0)) return
-    let linear: Matrix = [1, 0, 0, 1, 0, 0]
-    for (let node: HTMLElement | null = frame; node; node = node.parentElement) {
-      const style = getComputedStyle(node)
-      const transform = new DOMMatrix(style.transform === 'none' ? undefined : style.transform)
-      if (!transform.is2D) return
-      const rotate = style.rotate && style.rotate !== 'none' ? /^(?:z\s+)?(-?[\d.]+)(deg|rad|turn)$/.exec(style.rotate) : undefined
-      if (style.rotate && style.rotate !== 'none' && !rotate) return
-      const angle = rotate ? Number(rotate[1]) * (rotate[2] === 'deg' ? Math.PI / 180 : rotate[2] === 'turn' ? Math.PI * 2 : 1) : 0
-      const scale = style.scale && style.scale !== 'none' ? style.scale.split(/\s+/).map(Number) : [1, 1]
-      if (scale.some(value => !Number.isFinite(value)) || scale.length > 2) return
-      const zoom = number(style.zoom) || 1, x = scale[0]! * zoom, y = (scale[1] ?? scale[0])! * zoom
-      linear = multiply(multiply([Math.cos(angle) * x, Math.sin(angle) * x, -Math.sin(angle) * y, Math.cos(angle) * y, 0, 0],
-        [transform.a, transform.b, transform.c, transform.d, 0, 0]), linear)
-    }
-    const corners = [[0, 0], [width, 0], [0, height], [width, height]].map(([x, y]) => point(linear, x!, y!))
-    linear[4] = rect.left - Math.min(...corners.map(value => value.x)); linear[5] = rect.top - Math.min(...corners.map(value => value.y))
-    return multiply(linear, [(width - borderX - paddingX) / child.width, 0, 0, (height - borderY - paddingY) / child.height,
-      number(css.borderLeftWidth) + number(css.paddingLeft), number(css.borderTopWidth) + number(css.paddingTop)])
+    if (consumer && !consumer.visible(frame)) return
+    return frameFacts.frameMatrix(frame, child)
   }
   const prune = () => {
     const current = frames()
@@ -308,6 +287,7 @@ export function installOwnedDocumentAuthoring(token: string, documentPath: strin
           .map(([x, y]) => point(matrix, x!, y!))
         const xs = corners.map(value => value.x), ys = corners.map(value => value.y)
         result.push({ ...report, ...(report.geometry ? { geometry: { ...report.geometry, parentToInstance: multiply(matrix, report.geometry.parentToInstance) } } : {}),
+          ...(report.textStyle ? { textStyle: frameFacts.transformTextStyle(report.textStyle, matrix) } : {}),
           rect: { x: Math.min(...xs), y: Math.min(...ys), width: Math.max(...xs) - Math.min(...xs), height: Math.max(...ys) - Math.min(...ys) } })
       }
     }

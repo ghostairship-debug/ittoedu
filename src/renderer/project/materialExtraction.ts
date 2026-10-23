@@ -4,6 +4,7 @@ import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 import { inspectImageTransformSource } from './imageTransform'
 
 export interface MaterialExtractionOptions {
+  signal?: AbortSignal
   pages?: { from: number; to: number }
   maxPages?: number
   fromPage?: number
@@ -14,6 +15,7 @@ export interface MaterialExtractionOptions {
   onPageImage?: (image: { assetId: string; width: number; height: number; downsampled: boolean }) => void
 }
 function pageRange(total: number, options: MaterialExtractionOptions) {
+  options.signal?.throwIfAborted()
   options.onPageCount?.(total)
   const range = options.pages ?? { from: options.fromPage ?? 1, to: total }
   if (!Number.isSafeInteger(range.from) || !Number.isSafeInteger(range.to) || range.from < 1 || range.to < range.from || range.to > total) throw new Error(`页范围必须在 1–${total} 内`)
@@ -93,6 +95,7 @@ function paragraphText(root: Element): string {
   return xmlChildren(root).map(paragraphText).join('')
 }
 export function extractOfficeMaterial(bytes: Uint8Array, format: 'docx' | 'pptx', options: MaterialExtractionOptions = {}): MaterialExtraction {
+  options.signal?.throwIfAborted()
   const out = result(format)
   const part = format === 'docx' ? 'word/document.xml' : 'ppt/presentation.xml'
   const pkg = openPptxPackage(bytes, part)
@@ -102,6 +105,7 @@ export function extractOfficeMaterial(bytes: Uint8Array, format: 'docx' | 'pptx'
     if (!body) throw new Error('Word 正文缺失')
     content(pkg, body, part, out)
     for (const rel of pkg.relationships(part).filter(item => /\/(header|footer|footnotes|endnotes)$/.test(item.type))) {
+      options.signal?.throwIfAborted()
       if (rel.external || !pkg.files[rel.target]) { out.gaps.push({ locator: { part }, reason: '附属正文关系缺失' }); continue }
       content(pkg, pkg.xml(rel.target).documentElement, rel.target, out)
     }
@@ -111,8 +115,10 @@ export function extractOfficeMaterial(bytes: Uint8Array, format: 'docx' | 'pptx'
     const range = pageRange(slides.length, options)
     const relationships = pkg.relationships(part)
     slides.forEach((slide, index) => {
+      options.signal?.throwIfAborted()
       if (index + 1 < range.from || index + 1 > range.to) return
       options.onProgress?.(index + 1, slides.length)
+      options.signal?.throwIfAborted()
       const rel = relationships.find(item => item.id === pptxRelationshipId(slide) && item.type.endsWith('/slide'))
       if (!rel || rel.external || !pkg.files[rel.target]) { out.gaps.push({ locator: { part: rel?.target ?? part, page: index + 1 }, reason: `第 ${index + 1} 页内容缺失` }); return }
       let slideRoot: Element
@@ -121,6 +127,7 @@ export function extractOfficeMaterial(bytes: Uint8Array, format: 'docx' | 'pptx'
       content(pkg, slideRoot, rel.target, out, index + 1)
       const inherited = new Set<string>([rel.target])
       const readInherited = (source: string) => {
+        options.signal?.throwIfAborted()
         for (const relation of pkg.relationships(source).filter(item => /\/(slideLayout|slideMaster)$/.test(item.type))) {
           if (relation.external || !pkg.files[relation.target]) { out.gaps.push({ locator: { part: source, page: index + 1 }, reason: '版式或母版内容缺失' }); continue }
           if (inherited.has(relation.target)) continue
@@ -143,28 +150,40 @@ export function extractOfficeMaterial(bytes: Uint8Array, format: 'docx' | 'pptx'
       }
     })
   }
+  options.signal?.throwIfAborted()
   return verify(out, format === 'pptx' && (options.maxPages !== undefined || options.fromPage !== undefined))
 }
 
 /** Each PDF page is also rasterized: scanned text, equations and diagrams remain readable. */
 export async function extractPdfMaterialPages(bytes: Uint8Array, options: MaterialExtractionOptions, consume: (page: PdfMaterialPage) => Promise<void>): Promise<PdfMaterialSummary> {
+  options.signal?.throwIfAborted()
   const pdfjs = await import('pdfjs-dist')
+  options.signal?.throwIfAborted()
   pdfjs.GlobalWorkerOptions.workerSrc = pdfWorkerUrl
   const loading = pdfjs.getDocument({ data: bytes.slice(), useSystemFonts: true })
+  const abort = () => { void loading.destroy().catch(() => undefined) }
+  options.signal?.addEventListener('abort', abort, { once: true })
   let fragmentCount = 0
   try {
+    if (options.signal?.aborted) { abort(); options.signal.throwIfAborted() }
     const pdf = await loading.promise
+    options.signal?.throwIfAborted()
     const range = pageRange(pdf.numPages, options)
     for (let page = range.from; page <= range.to; page++) {
+      options.signal?.throwIfAborted()
       options.onProgress?.(page, pdf.numPages)
       const out = result('pdf')
       const emit = async () => {
+        options.signal?.throwIfAborted()
         for (const fragment of out.fragments) fragment.id = `fragment-${++fragmentCount}`
         await consume({ page, total: pdf.numPages, material: out })
+        options.signal?.throwIfAborted()
       }
       const source = await pdf.getPage(page)
+      options.signal?.throwIfAborted()
       const locator = { part: 'document.pdf', page }
       const text = (await source.getTextContent()).items.map(item => 'str' in item ? item.str + (item.hasEOL ? '\n' : ' ') : '').join('').trim()
+      options.signal?.throwIfAborted()
       if (text) add(out, { kind: 'text', locator, text })
       if (options.images === 'auto' && text) {
         const ops = (await source.getOperatorList()).fnArray
@@ -177,6 +196,7 @@ export async function extractPdfMaterialPages(bytes: Uint8Array, options: Materi
       canvas.width = Math.ceil(viewport.width); canvas.height = Math.ceil(viewport.height)
       try {
         await source.render({ canvas, viewport }).promise
+        options.signal?.throwIfAborted()
         const blob = await new Promise<Blob>((resolve, reject) => canvas.toBlob(value => value ? resolve(value) : reject(new Error('PDF 页面图像编码失败')), 'image/png'))
         const imageBytes = new Uint8Array(await blob.arrayBuffer())
         const id = `page-${page}.png`
@@ -189,7 +209,7 @@ export async function extractPdfMaterialPages(bytes: Uint8Array, options: Materi
     }
     if (!fragmentCount) throw new Error('材料没有可读取内容')
     return { streamed: true, totalPages: pdf.numPages, selectedPages: range }
-  } finally { await loading.destroy() }
+  } finally { options.signal?.removeEventListener('abort', abort); await loading.destroy() }
 }
 export async function extractPdfMaterial(bytes: Uint8Array, options: MaterialExtractionOptions = {}): Promise<MaterialExtraction> {
   const out = result('pdf')
@@ -198,14 +218,16 @@ export async function extractPdfMaterial(bytes: Uint8Array, options: MaterialExt
   })
   return verify(out)
 }
-export async function extractMaterial(bytes: Uint8Array, filename: string): Promise<MaterialExtraction> {
+export async function extractMaterial(bytes: Uint8Array, filename: string, options: MaterialExtractionOptions = {}): Promise<MaterialExtraction> {
+  options.signal?.throwIfAborted()
   if (!bytes.length) throw new Error('材料须为非空文件')
   const extension = filename.split('.').pop()?.toLowerCase()
-  if (extension === 'docx' || extension === 'pptx') return extractOfficeMaterial(bytes, extension)
-  if (extension === 'pdf') return extractPdfMaterial(bytes)
+  if (extension === 'docx' || extension === 'pptx') return extractOfficeMaterial(bytes, extension, options)
+  if (extension === 'pdf') return extractPdfMaterial(bytes, options)
   const imageMime = ({ png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', webp: 'image/webp' } as Record<string, string>)[extension ?? '']
   if (imageMime) {
-    const inspected = await inspectImageTransformSource(bytes, imageMime)
+    const inspected = await inspectImageTransformSource(bytes, imageMime, options.signal)
+    options.signal?.throwIfAborted()
     if (inspected.status !== 'ready') throw new Error(inspected.message)
     const out = result('image'), assetId = `original.${extension === 'jpeg' ? 'jpg' : extension}`
     out.assets.push({ id: assetId, mime: imageMime, bytes: bytes.slice() })

@@ -1,6 +1,6 @@
 import { projectDocumentRanges, type DocumentRangeProjection, type TextRangeProjection } from '../../shared/document/textInteraction'
 import type { MarkdownSourceMap } from '../../shared/document/markdownSourceMap'
-import { Plugin, EditorState, NodeSelection, TextSelection, type Transaction } from 'prosemirror-state'
+import { Plugin, EditorState, NodeSelection, TextSelection, type Transaction, type Selection } from 'prosemirror-state'
 import { Decoration, DecorationSet, EditorView } from 'prosemirror-view'
 import { baseKeymap, chainCommands, exitCode, newlineInCode, splitBlock } from 'prosemirror-commands'
 import { keymap } from 'prosemirror-keymap'
@@ -12,7 +12,7 @@ import { CellSelection, tableEditing } from 'prosemirror-tables'
 import { Fragment, Slice } from 'prosemirror-model'
 import { dropPoint } from 'prosemirror-transform'
 import { parseFlowHtml } from '../../shared/document/html'
-import { walkDocument, type DocumentBlock } from '../../shared/document/content'
+import { walkDocument, type DocumentBlock, type DocumentContent } from '../../shared/document/content'
 import { prepareDocumentClipboard, type DocumentClipboardResourcePort } from './documentClipboard'
 import { documentResourceReferences } from '../../shared/document/resources'
 import { resolveFlowParagraphPresentation } from '../../shared/flowBodyPresentation'
@@ -23,6 +23,8 @@ import { createDocumentInputRuleResult, matchDocumentInputRule, type DocumentFor
 import { MermaidCodeBlockView } from './mermaidCodeBlockView'
 import { documentComponentKey } from './documentClipboardContext'
 import { editorTextChangeBlockIds } from './documentTransactionChanges'
+import { DocumentInsertionTargetError } from '../../shared/document/blockInsertion'
+import { flowSelectionSlice, flowSelectionTransaction, isFlowCompositionPreparation, preserveFlowTextTransaction, withFlowSelection } from './documentFlowEditing'
 
 /** Sent from a document object (picture, chart, component) that was right-clicked, after selecting it (M21). */
 export const DOCUMENT_OBJECT_CONTEXT_MENU_EVENT = 'document-object-context-menu'
@@ -49,6 +51,7 @@ export interface DocumentOperation {
 }
 export type DocumentContentScope = 'document' | 'inline-text' | 'formula'
 export type DocumentCommitResult = boolean | void | Promise<boolean | void>
+export interface DocumentInsertionSelection { read(currentContent?: DocumentContent): DocumentSelection | null; drain?(): Promise<boolean>; release(): void }
 /** Editable content stays local until its caller acknowledges the formal transaction. */
 export function createDocumentDraftSession(initial: MarkdownDocument) {
   let document = initial, failed = false, sequence = 0
@@ -135,6 +138,7 @@ export function createLayoutEditor(element: HTMLElement, initial: LayoutEditorOp
   let options = initial
   const draftSession = initial.draftSession ?? createDocumentDraftSession(initial.document)
   let composing = false
+  let startingComposition = false
   let observingDomChange = false
   let group = crypto.randomUUID()
   let lastInput = 0
@@ -148,7 +152,7 @@ export function createLayoutEditor(element: HTMLElement, initial: LayoutEditorOp
   const clipboardType = 'application/x-cw-document-slice'
   const boundary = () => { group = crypto.randomUUID(); lastInput = 0 }
   const tablePlugin=tableEditing()
-  const bookmarks=new Set<{bookmark:import('prosemirror-state').SelectionBookmark}>()
+  const bookmarks=new Set<{bookmark:import('prosemirror-state').SelectionBookmark; insertion?: boolean; valid?: boolean}>()
   const objectRefreshers = new Map<string, Set<() => void>>()
   const registerObjectRefresher = (id: string, refresh: () => void) => {
     let values = objectRefreshers.get(id)
@@ -158,7 +162,60 @@ export function createLayoutEditor(element: HTMLElement, initial: LayoutEditorOp
   }
   let pendingTextBlocks: Set<string> | undefined = new Set()
   let publishedDocument: import('prosemirror-model').Node | null = null
-  const mapBookmarks=(transactions:readonly Transaction[])=>{for(const target of bookmarks)for(const transaction of transactions)target.bookmark=target.bookmark.map(transaction.mapping)}
+  // A whole projection replacement can cover an untouched paragraph. Retain its
+  // exact slot/caret rather than treating that coarse PM step as a user deletion.
+  const preservedTextPosition = (before: import('prosemirror-model').Node, after: import('prosemirror-model').Node, position: number): number | null => {
+    const resolved = before.resolve(position), point = editorPositionToPoint(before, position)
+    if (!point || !resolved.parent.isTextblock) return null
+    let kept: number | null = null
+    after.descendants((node, at) => {
+      if (kept !== null || !node.isTextblock || !node.content.eq(resolved.parent.content)) return
+      const candidate = editorPositionToPoint(after, at + 1)
+      if (candidate?.blockId === point.blockId && JSON.stringify(candidate.slot) === JSON.stringify(point.slot)) kept = at + 1 + resolved.parentOffset
+    })
+    return kept
+  }
+  const preservedSelection = (before: import('prosemirror-model').Node, after: import('prosemirror-model').Node, selection: Selection): Selection | null => {
+    if (selection instanceof TextSelection) {
+      const anchor = preservedTextPosition(before, after, selection.anchor), head = preservedTextPosition(before, after, selection.head)
+      return anchor !== null && head !== null ? TextSelection.create(after, anchor, head) : null
+    }
+    if (selection instanceof NodeSelection && selection.node.attrs.id) {
+      let at: number | null = null
+      after.descendants((node, position) => { if (at === null && node.attrs.id === selection.node.attrs.id && node.type === selection.node.type) at = position })
+      return at !== null ? NodeSelection.create(after, at) : null
+    }
+    if (selection instanceof CellSelection) {
+      let depth = selection.$anchorCell.depth
+      while (depth > 0 && !selection.$anchorCell.node(depth).attrs.id) depth--
+      const tableId = selection.$anchorCell.node(depth).attrs.id
+      const anchorKey = selection.$anchorCell.nodeAfter?.firstChild?.attrs.key, headKey = selection.$headCell.nodeAfter?.firstChild?.attrs.key
+      let anchor: number | null = null, head: number | null = null
+      after.descendants((node, at) => {
+        if (node.attrs.id !== tableId) return
+        node.descendants((cell, offset) => {
+          if (!cell.type.spec.tableRole) return
+          if (cell.firstChild?.attrs.key === anchorKey) anchor = at + 1 + offset
+          if (cell.firstChild?.attrs.key === headKey) head = at + 1 + offset
+        })
+        return false
+      })
+      return anchor !== null && head !== null ? CellSelection.create(after, anchor, head) : null
+    }
+    return null
+  }
+  const mapBookmarks=(transactions:readonly Transaction[])=>{for(const target of bookmarks)for(const transaction of transactions){
+    if (target.insertion && target.valid) {
+      const selection = target.bookmark.resolve(transaction.before)
+      const anchor = transaction.mapping.mapResult(selection.anchor), head = transaction.mapping.mapResult(selection.head)
+      if (anchor.deletedAcross || head.deletedAcross || selection instanceof NodeSelection && anchor.deleted) {
+        const preserved = preservedSelection(transaction.before, transaction.doc, selection)
+        if (preserved) { target.bookmark = preserved.getBookmark(); continue }
+        target.valid = false
+      }
+    }
+    target.bookmark=target.bookmark.map(transaction.mapping)
+  }}
   const clearCells=(state:EditorState,dispatch?: (transaction:Transaction)=>void)=>{
     if(!(state.selection instanceof CellSelection))return false
     const tr=state.tr
@@ -188,25 +245,25 @@ export function createLayoutEditor(element: HTMLElement, initial: LayoutEditorOp
       'Mod-End': (state, dispatch) => documentEdge(state, dispatch, true),
       'Mod-Shift-Home': (state, dispatch) => documentEdge(state, dispatch, false, true),
       'Mod-Shift-End': (state, dispatch) => documentEdge(state, dispatch, true, true),
-      'Shift-Enter': (state,dispatch,currentView)=>options.contentScope==='formula' || chainCommands(exitCode,(state,dispatch)=>{dispatch?.(state.tr.replaceSelectionWith(schema.nodes.hard_break.create()).scrollIntoView());return true})(state,dispatch,currentView),
+      'Shift-Enter': (state,dispatch,currentView)=>options.contentScope==='formula' || withFlowSelection(chainCommands(exitCode,(state,dispatch)=>{dispatch?.(state.tr.replaceSelectionWith(schema.nodes.hard_break.create()).scrollIntoView());return true}))(state,dispatch,currentView),
       Delete:(state,dispatch)=>clearCells(state,dispatch)||hiddenBoundary(state,1), Backspace:(state,dispatch)=>clearCells(state,dispatch)||hiddenBoundary(state,-1),
       Enter: (state, dispatch, currentView) => {
         if (options.contentScope === 'formula') return true
         if(newlineInCode(state,dispatch,currentView))return true
         if (options.contentScope === 'inline-text') {
-          boundary(); dispatch?.(state.tr.replaceSelectionWith(schema.nodes.hard_break.create()).scrollIntoView()); return true
+          boundary(); dispatch?.(flowSelectionTransaction(state).replaceSelectionWith(schema.nodes.hard_break.create()).scrollIntoView()); return true
         }
         if (state.selection.$from.parent.type.name === 'slot') {
           if (state.selection.$from.parent.attrs.key.startsWith('item:')) {
-            const tr = state.tr.deleteSelection()
+            const tr = flowSelectionTransaction(state).deleteSelection()
             const sourceSlot=options.sourceMap?.blocks.flatMap(block=>block.slots).find(slot=>slot.key===state.selection.$from.parent.attrs.key)
             tr.split(tr.selection.from, 1, [{ type: schema.nodes.slot, attrs: { key: `item:${crypto.randomUUID()}`,depth:sourceSlot?.depth ?? state.selection.$from.parent.attrs.depth,ordered:sourceSlot?.ordered ?? state.selection.$from.parent.attrs.ordered } }])
             boundary(); dispatch?.(tr); return true
           }
-          dispatch?.(state.tr.replaceSelectionWith(schema.nodes.hard_break.create()))
+          dispatch?.(flowSelectionTransaction(state).replaceSelectionWith(schema.nodes.hard_break.create()))
           return true
         }
-        boundary(); return splitBlock(state, dispatch, currentView)
+        boundary(); return withFlowSelection(splitBlock)(state, dispatch, currentView)
       },
     }), keymap(baseKeymap), tablePlugin] }),
     attributes: { role: 'textbox', 'aria-label': '正文编辑', 'aria-multiline': 'true' },
@@ -307,7 +364,11 @@ export function createLayoutEditor(element: HTMLElement, initial: LayoutEditorOp
         if (selected !== undefined) options.selection?.(selected)
         return false
       },
-      compositionstart: () => { composing = true; return false },
+      compositionstart: () => {
+        composing = true; startingComposition = true
+        queueMicrotask(() => { startingComposition = false })
+        return false
+      },
       compositionend: () => { composing = false; queueMicrotask(() => { if (view.isDestroyed) return; publish(); if (deferred) { const next = deferred; deferred = null; update(next) } }); return false },
       blur: () => { boundary(); return false },
       keyup: (_view, event) => {
@@ -335,9 +396,21 @@ export function createLayoutEditor(element: HTMLElement, initial: LayoutEditorOp
       return true
     },
     handleDrop: (current,event,slice,move)=>{
-      if(move || options.readOnly)return false
+      if(options.readOnly)return false
       const point=current.posAtCoords({left:event.clientX,top:event.clientY})
       if(!point)return false
+      if (move) {
+        const transaction = flowSelectionTransaction(current.state)
+        if (!transaction.docChanged) return false
+        if (point.pos >= current.state.selection.from && point.pos <= current.state.selection.to) return true
+        const moving = flowSelectionSlice(current.state, slice)
+        const retainedIds = new Set<string>()
+        transaction.doc.descendants(node => { if (node.attrs.id) retainedIds.add(node.attrs.id) })
+        const fragment = renewEditorIdentities(schema.nodes.doc.create(null, moving.content), () => crypto.randomUUID(), false, retainedIds).content
+        const mapped = transaction.mapping.map(point.pos), position = dropPoint(transaction.doc, mapped, new Slice(fragment, moving.openStart, moving.openEnd)) ?? mapped
+        boundary(); current.dispatch(transaction.replaceRange(position, position, new Slice(fragment, moving.openStart, moving.openEnd)).scrollIntoView())
+        return true
+      }
       const position=dropPoint(current.state.doc,point.pos,slice) ?? point.pos
       const formal = formalDocumentSlice(slice)
       if(formal && options.clipboardResourcePort){const preparation=pastePrepared(clipboardPayload(slice),'copy',position);preparations.add(preparation);void preparation.finally(()=>preparations.delete(preparation));return true}
@@ -356,7 +429,7 @@ export function createLayoutEditor(element: HTMLElement, initial: LayoutEditorOp
           if(node.isInline)nodes.push(node)
           else node.descendants(child=>{if(child.isInline){nodes.push(child);return false}return true})
         })
-        view.dispatch(view.state.tr.replaceSelection(new Slice(Fragment.from(nodes),0,0)).scrollIntoView())
+        view.dispatch(flowSelectionTransaction(view.state).replaceSelection(new Slice(Fragment.from(nodes),0,0)).scrollIntoView())
         return true
       }
       if (plainPastePending) {
@@ -375,7 +448,7 @@ export function createLayoutEditor(element: HTMLElement, initial: LayoutEditorOp
             if(!parsed.blocks.length)return false
             const slice=new Slice(toEditorDocument({blocks:parsed.blocks}).content,0,0)
             event.preventDefault()
-            if(!slotPaste(slice))view.dispatch(view.state.tr.replaceSelection(slice).scrollIntoView())
+            if(!slotPaste(slice))view.dispatch(flowSelectionTransaction(view.state).replaceSelection(slice).scrollIntoView())
             parsed.diagnostics.forEach(value=>options.diagnostic(value.message))
             return true
           } catch(error){options.diagnostic(error instanceof Error ? error.message:String(error));return true}
@@ -389,7 +462,7 @@ export function createLayoutEditor(element: HTMLElement, initial: LayoutEditorOp
         if (parsed.status !== 'valid') { options.diagnostic(parsed.diagnostics.map(value => value.message).join('；')); return false }
         const fragment = toEditorDocument(parsed.document.content).content
         event.preventDefault()
-        view.dispatch(view.state.tr.replaceSelection(new Slice(fragment, 0, 0)).scrollIntoView())
+        view.dispatch(flowSelectionTransaction(view.state).replaceSelection(new Slice(fragment, 0, 0)).scrollIntoView())
         return true
       }
       try {
@@ -417,13 +490,20 @@ export function createLayoutEditor(element: HTMLElement, initial: LayoutEditorOp
         if (payload.resources.assets.some((asset: { assetId: string }) => !options.document.resources.assets.some(current => current.assetId === asset.assetId)) || payload.resources.components.some((component: { packageId: string; version: string }) => !options.document.resources.components.some(current => current.packageId === component.packageId && current.version === component.version))) throw new Error('跨文档粘贴需要先接入对象引用的素材与组件资源')
         pendingCut = null
         const doc = schema.nodes.doc.create(null, slice.content)
-        const copied = renewEditorIdentities(doc, () => crypto.randomUUID(), !moved)
+        const retainedIds = new Set<string>()
+        if (moved) view.state.doc.descendants(node => { if (node.attrs.id) retainedIds.add(node.attrs.id) })
+        const copied = renewEditorIdentities(doc, () => crypto.randomUUID(), !moved, retainedIds)
         const pasted=new Slice(copied.content,slice.openStart,slice.openEnd)
-        if(!slotPaste(pasted))view.dispatch(view.state.tr.replaceSelection(pasted).scrollIntoView())
+        if(!slotPaste(pasted))view.dispatch(flowSelectionTransaction(view.state).replaceSelection(pasted).scrollIntoView())
       } catch (error) { options.diagnostic(error instanceof Error ? error.message : String(error)) }
       return true
     },
     dispatchTransaction(transaction: Transaction) {
+      // PM's synchronous composition preparation is not author input. Its
+      // startup flush may also deliver real DOM input without composition
+      // metadata; observer transactions always take the normal path below.
+      if (startingComposition && !observingDomChange && isFlowCompositionPreparation(view.state, transaction)) return
+      transaction = preserveFlowTextTransaction(view.state, transaction)
       const applied = view.state.applyTransaction(transaction)
       const changed = applied.transactions.some(item => item.docChanged)
       const textBlocks = changed ? editorTextChangeBlockIds(applied.transactions) : []
@@ -523,7 +603,7 @@ export function createLayoutEditor(element: HTMLElement, initial: LayoutEditorOp
       const components = new Map(options.document.resources.components.map(component => [documentComponentKey(component), component])); prepared.document.resources.components.forEach(component => components.set(documentComponentKey(component), component))
       options = { ...options, document: { ...options.document, resources: { assets: [...assets.values()], components: [...components.values()] } } }
       const fragment = toEditorDocument(prepared.document.content).content
-      const transaction = (insertAt === undefined ? view.state.tr.replaceSelection(new Slice(fragment, slice.openStart, slice.openEnd)) : view.state.tr.replaceRange(insertAt, insertAt, new Slice(fragment, slice.openStart, slice.openEnd)))
+      const transaction = (insertAt === undefined ? flowSelectionTransaction(view.state).replaceSelection(new Slice(fragment, slice.openStart, slice.openEnd)) : view.state.tr.replaceRange(insertAt, insertAt, new Slice(fragment, slice.openStart, slice.openEnd)))
         .setMeta('preparedResources', { value: prepared.prepared, discard: () => port!.discard(prepared!.prepared) })
       pendingCut = null
       view.dispatch(transaction)
@@ -659,7 +739,7 @@ export function createLayoutEditor(element: HTMLElement, initial: LayoutEditorOp
   function clipboard(event: ClipboardEvent, cut: boolean): boolean {
     if (options.projectionClipboard?.(view, event, cut)) return true
     if (!event.clipboardData || view.state.selection.empty) return false
-    const slice = view.state.selection.content()
+    const slice = flowSelectionSlice(view.state, view.state.selection.content())
     const cutToken = cut ? crypto.randomUUID() : null
     pendingCut = cutToken
     let payload: ReturnType<typeof clipboardPayload>
@@ -668,7 +748,7 @@ export function createLayoutEditor(element: HTMLElement, initial: LayoutEditorOp
     event.clipboardData.setData(clipboardType, JSON.stringify({ editorId, cutToken, ...payload }))
     event.clipboardData.setData('text/plain', slice.content.textBetween(0, slice.content.size, '\n', node => node.attrs.data?.accessibleText ?? ''))
     event.preventDefault()
-    if (cut) { boundary(); if(!clearCells(view.state,view.dispatch))view.dispatch(view.state.tr.deleteSelection()) }
+    if (cut) { boundary(); if(!clearCells(view.state,view.dispatch))view.dispatch(flowSelectionTransaction(view.state).deleteSelection()) }
     return true
   }
   function publish(prepared?: { value: unknown; discard(): Promise<void> }) {
@@ -738,8 +818,9 @@ export function createLayoutEditor(element: HTMLElement, initial: LayoutEditorOp
     }
     if (selection) applyState(view.state.apply(view.state.tr.setSelection(selection)))
   }
-  /** A closed top-level replacement is required when a changed node contains a table. */
-  function tableReplacement(before: import('prosemirror-model').Node, after: import('prosemirror-model').Node) {
+  /** Canonical updates across parents need a closed sibling range: fitting an
+   * open slice can retain an old group wrapper beside its replacement. */
+  function closedBlockReplacement(before: import('prosemirror-model').Node, after: import('prosemirror-model').Node, acrossParents: boolean) {
     let prefix = 0, suffix = 0, from = 0
     while (prefix < before.childCount && prefix < after.childCount && before.child(prefix).eq(after.child(prefix))) {
       from += before.child(prefix).nodeSize; prefix++
@@ -756,7 +837,7 @@ export function createLayoutEditor(element: HTMLElement, initial: LayoutEditorOp
     }
     const affected = (doc: import('prosemirror-model').Node) =>
       Array.from({ length: doc.childCount - prefix - suffix }, (_, i) => doc.child(prefix + i)).some(hasTable)
-    return affected(before) || affected(after) ? { from, beforeEnd, afterEnd } : null
+    return acrossParents || affected(before) || affected(after) ? { from, beforeEnd, afterEnd } : null
   }
   /** Resolve a logical document point after a closed replacement, including Unicode and math atoms. */
   function pointPosition(doc: import('prosemirror-model').Node, point: DocumentPoint): number | null {
@@ -806,7 +887,10 @@ export function createLayoutEditor(element: HTMLElement, initial: LayoutEditorOp
       if (from !== null && end) {
         const overlap = from - Math.min(end.a, end.b)
         const to = end.a + Math.max(0, overlap), nextTo = end.b + Math.max(0, overlap)
-        const closed = tableReplacement(view.state.doc, document)
+        const beforeFrom = view.state.doc.resolve(from), beforeTo = view.state.doc.resolve(to)
+        const afterFrom = document.resolve(from), afterTo = document.resolve(nextTo)
+        const local = beforeFrom.sameParent(beforeTo) && afterFrom.sameParent(afterTo) && beforeFrom.parent.sameMarkup(afterFrom.parent)
+        const closed = closedBlockReplacement(view.state.doc, document, !local)
         const before = view.state.doc.nodeAt(from), after = document.nodeAt(from)
         const paragraph = (node: import('prosemirror-model').Node) => node.type === schema.nodes.paragraph || node.type === schema.nodes.heading
         // A type/attribute-only paragraph update keeps its text and the caret through a markup step.
@@ -833,8 +917,8 @@ export function createLayoutEditor(element: HTMLElement, initial: LayoutEditorOp
   async function drain() {
     if (composing || view.composing) return false
     while (preparations.size) await Promise.allSettled([...preparations])
-    if (view.isDestroyed || composing || view.composing) return false
-    publish(); boundary()
+    if (composing || view.composing) return false
+    if (!view.isDestroyed) { publish(); boundary() }
     return draftSession.drain()
   }
   function navigateHistory(direction: 'undo' | 'redo'): Promise<void> {
@@ -850,6 +934,23 @@ export function createLayoutEditor(element: HTMLElement, initial: LayoutEditorOp
     return drain().then(ready => { if (ready) return invoke() })
   }
   return { view, update, boundary, syncDomTextSelection, paintProjection, duplicateBlock,
+    captureInsertionSelection(): DocumentInsertionSelection {
+      syncDomTextSelection()
+      const target = { bookmark: view.state.selection.getBookmark(), insertion: true, valid: true }
+      const kind = describeSelection(view.state)?.kind
+      bookmarks.add(target)
+      return { read(currentContent) {
+        if (!bookmarks.has(target) || !target.valid) throw new DocumentInsertionTargetError('原正文插入位置已失效，请在原讲义重新选择落点')
+        if (kind === undefined) return null
+        const state = view.state, selection = target.bookmark.resolve(state.doc)
+        const doc = currentContent ? toEditorDocument(currentContent) : state.doc
+        const current = doc === state.doc ? selection : preservedSelection(state.doc, doc, selection)
+        if (!current) throw new DocumentInsertionTargetError('原正文插入位置已变化，请在原讲义重新选择落点')
+        const described = describeSelection(EditorState.create({ doc, selection: current })) ?? null
+        if (described?.kind !== kind) throw new DocumentInsertionTargetError('原正文插入位置已失效，请在原讲义重新选择落点')
+        return described
+      }, drain, release() { bookmarks.delete(target) } }
+    },
     trackSelection(selection=view.state.selection) {
       const target={bookmark:selection.getBookmark()};bookmarks.add(target)
       return {resolve:()=>target.bookmark.resolve(view.state.doc),release:()=>bookmarks.delete(target)}
@@ -858,7 +959,7 @@ export function createLayoutEditor(element: HTMLElement, initial: LayoutEditorOp
     flush: () => { if (composing || view.composing || preparations.size) return false; publish(); boundary(); return !draftSession.rejected },
     drain,
     discardDraft: async (next: LayoutEditorOptions) => { if (!await draftSession.discard(next.document)) return false; update(next); return true },
-    destroy: () => { clearPlainPaste(); projectionMutation(()=>view.destroy()) },
+    destroy: () => { clearPlainPaste(); for (const target of bookmarks) if (!target.insertion) bookmarks.delete(target); projectionMutation(()=>view.destroy()) },
     /** Current selection at the current revision, for re-reporting it after a committed edit such as formatting. */
     readSelection: () => describeSelection(view.state) ?? null }
 }

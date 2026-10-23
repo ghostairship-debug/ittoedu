@@ -13,6 +13,7 @@ import type { ChartCandidateData } from '../../course/chartContentOperations'
 import type { ChartCanvasTextPort } from '../../authoring/chartCanvasTextBridge'
 import { ColorInput } from '../ColorInput'
 import { NativeColorInput, NativeColorPreviewContext } from './NativeColorPreview'
+import { isCourseComponentInputFailure, settleCourseComponentInput } from '../../documents/CourseV10DocumentBridge'
 import {
   BufferedInput,
   FontFamilyPicker,
@@ -20,6 +21,7 @@ import {
   SelectField,
   ToggleRow,
   usePropertyDraftFlush,
+  type PropertyCommitFailure,
 } from './PropertyControls'
 
 export type ChartType = NativeChartContent['chartType']
@@ -223,14 +225,24 @@ export function ChartProperties({
   const signatureRef = useRef(draftSignature(node))
   const preparedCanvasCommit = useRef<{ signature: string; raw: string; nodeId: string; bindingKey: string } | null>(null)
   const pendingApply = useRef<Promise<string | null> | null>(null)
+  const pendingInput = useRef<{ source: Promise<string | null>; ready: Promise<boolean> } | null>(null)
+  const inFlight = () => {
+    const source = pendingApply.current
+    if (!source) return undefined
+    if (pendingInput.current?.source !== source) pendingInput.current = { source, ready: source.then(reason => !reason) }
+    return pendingInput.current.ready
+  }
+  const inputFailure = useRef<PropertyCommitFailure | undefined>(undefined)
   const nodeRef = useRef(node); nodeRef.current = node
 
-  const commitCandidate = (candidate: ChartCandidateData): string | null | Promise<string | null> => {
+  const commitCandidate = (candidate: ChartCandidateData, explicit = true): string | null | Promise<string | null> => {
     if (pendingApply.current) return pendingApply.current
+    if (inputFailure.current && !explicit) return inputFailure.current.error.message
     const raw = JSON.stringify(draftRef.current), target = targetRef.current, nodeId = nodeRef.current.id
     const finish = (reason: string | null) => {
       if (targetRef.current !== target) return reason
       if (reason) { preparedCanvasCommit.current = null; setApplyError(reason); return reason }
+      inputFailure.current = undefined
       preparedCanvasCommit.current = { signature: tableValueSignature(candidate), raw, nodeId, bindingKey: target }
       const acknowledged = validateDraft(draftFromView(nodeRef.current), chartType).candidate
       if (acknowledged && tableValueSignature(acknowledged) === tableValueSignature(candidate)) baselineRef.current = draftSignature(nodeRef.current)
@@ -240,14 +252,40 @@ export function ChartProperties({
       setApplyError(null)
       return null
     }
+    const fail = async (error: unknown): Promise<string | null> => {
+      if (isCourseComponentInputFailure(error)) {
+        // The raw table remains in this owner before its known-unapplied
+        // proposal is released. Unknown outcomes only query the original ID.
+        inputFailure.current = { error, value: raw, bindingKey: target, label: '图表数据', kind: 'chart' }
+        try {
+          const outcome = await settleCourseComponentInput(error)
+          if (outcome === 'applied' && inputFailure.current?.error === error) return finish(null)
+        } catch (reason) { return finish(reason instanceof Error ? reason.message : String(reason)) }
+      }
+      return finish(error instanceof Error ? error.message : String(error))
+    }
     try {
-      const result = commands.commitTableData(candidate)
+      const previous = inputFailure.current
+      const result = previous ? previous.error.resolveInput('retry').then(outcome => {
+        if (outcome === 'pending') return previous.error.message
+        if (inputFailure.current !== previous || targetRef.current !== bindingKey || JSON.stringify(draftRef.current) !== raw) return '图表新输入仍保留，请继续应用。'
+        if (outcome === 'applied') {
+          inputFailure.current = undefined
+          baselineRef.current = draftSignature(nodeRef.current)
+          return raw === previous.value ? null : '原修改已确认，当前新输入仍保留，请继续应用。'
+        }
+        inputFailure.current = undefined
+        return commands.commitTableData(candidate)
+      }) : commands.commitTableData(candidate)
       if (!(result instanceof Promise)) return finish(result)
-      const pending = result.then(finish, error => finish(error instanceof Error ? error.message : String(error)))
+      const pending = result.then(finish, fail)
         .finally(() => { if (pendingApply.current === pending) pendingApply.current = null })
       pendingApply.current = pending
       return pending
-    } catch (error) { return finish(error instanceof Error ? error.message : String(error)) }
+    } catch (error) {
+      const pending = fail(error).finally(() => { if (pendingApply.current === pending) pendingApply.current = null })
+      pendingApply.current = pending; return pending
+    }
   }
 
   const markDirty = () => {
@@ -354,23 +392,26 @@ export function ChartProperties({
     commands.patchType(next, isCircularType(next) ? node.series[0]?.id : undefined)
   }
 
-  const applyDraft = () => {
+  const applyDraft = (explicit = true) => {
     if (resumeRequired.current) { setApplyError('恢复的输入法草稿尚未完成，请继续编辑后再应用。'); return false }
     if (!dirtyRef.current) return !composingRef.current
     if (targetRef.current !== bindingKey) { setApplyError('图表数据草稿对应的编辑目标已经改变，请取消草稿后重试。'); return false }
     if (pendingApply.current) return pendingApply.current.then(reason => !reason && !dirtyRef.current)
-    if (dirtyRef.current && baselineRef.current !== draftSignature(node)) { setApplyError('图表数据已在其他编辑入口改变，请取消此草稿后重试。'); return false }
+    if (dirtyRef.current && !inputFailure.current && baselineRef.current !== draftSignature(node)) { setApplyError('图表数据已在其他编辑入口改变，请取消此草稿后重试。'); return false }
     const candidate = validateDraft(draftRef.current, chartType).candidate
     if (composingRef.current || !candidate) return false
     preview?.(null)
-    const reason = commitCandidate(candidate)
+    const reason = commitCandidate(candidate, explicit)
     return reason instanceof Promise ? reason.then(value => !value && !dirtyRef.current) : !reason && !dirtyRef.current
   }
-  usePropertyDraftFlush(() => !resumeRequired.current && !composingRef.current && (!dirtyRef.current || applyDraft()), {
+  usePropertyDraftFlush(() => !resumeRequired.current && !composingRef.current && (!dirtyRef.current || applyDraft(false)), {
     hasDirty: () => resumeRequired.current || dirtyRef.current || composingRef.current,
+    isComposing: () => composingRef.current,
+    inFlight,
+    commitFailure: () => inputFailure.current,
     readDraft: () => ({ bindingKey: targetRef.current, label: '图表数据', kind: 'chart', raw: JSON.stringify(draftRef.current),
       baseline: baselineRef.current, composing: resumeRequired.current || composingRef.current }),
-    restoreDraft: record => {
+    restoreDraft: (record, resume) => {
       targetRef.current = record.bindingKey
       baselineRef.current = record.baseline ?? draftSignature(node)
       dirtyRef.current = true
@@ -378,10 +419,28 @@ export function ChartProperties({
       setDirty(true)
       if (record.composing) setApplyError('恢复的输入法草稿尚未完成，请继续编辑后再应用。')
       setDraft(JSON.parse(record.raw) as ChartDataDraft)
+      const sameSession = resume?.readDraft()?.bindingKey === bindingKey
+      const adoptFailure = () => {
+        const failure = sameSession ? resume?.commitFailure?.() : undefined
+        inputFailure.current = failure?.bindingKey === bindingKey && failure.kind === 'chart' ? failure : undefined
+        if (inputFailure.current) setApplyError(inputFailure.current.error.message)
+      }
+      adoptFailure()
+      if (sameSession && resume?.pending) {
+        const pending = resume.pending.then(ready => {
+          adoptFailure()
+          const previous = resume.readDraft()
+          if (previous?.baseline !== undefined) baselineRef.current = previous.baseline
+          if (ready && JSON.stringify(draftRef.current) === record.raw) { dirtyRef.current = false; setDirty(false) }
+          return ready ? null : inputFailure.current?.error.message ?? '图表输入仍保留。'
+        }).finally(() => { if (pendingApply.current === pending) pendingApply.current = null })
+        pendingApply.current = pending
+      }
     },
   })
 
-  const resetDraft = () => {
+  const resetCurrentDraft = () => {
+    inputFailure.current = undefined
     resumeRequired.current = false
     targetRef.current = bindingKey
     baselineRef.current = draftSignature(node)
@@ -390,6 +449,19 @@ export function ChartProperties({
     setDirty(false)
     setApplyError(null)
     setDraft(draftFromView(node))
+  }
+  const resetDraft = () => {
+    if (pendingApply.current) return
+    const failure = inputFailure.current
+    if (!failure) { resetCurrentDraft(); return }
+    const raw = JSON.stringify(draftRef.current)
+    const pending = failure.error.resolveInput('cancel').then(outcome => {
+      if (outcome === 'pending') { setApplyError(failure.error.message); return failure.error.message }
+      if (inputFailure.current === failure && JSON.stringify(draftRef.current) === raw) resetCurrentDraft()
+      return null
+    }, error => { const reason = error instanceof Error ? error.message : String(error); setApplyError(reason); return reason })
+      .finally(() => { if (pendingApply.current === pending) pendingApply.current = null })
+    pendingApply.current = pending
   }
 
   const addCategory = () => {

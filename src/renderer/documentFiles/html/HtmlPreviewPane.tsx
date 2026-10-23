@@ -35,8 +35,8 @@ function selectedTextChange(before: string, after: string, selected: HtmlSelecte
   if (rawEnd < span.start) return null
   const raw = after.slice(span.start, rawEnd)
   const scan = analysis.scan
-  if (scan.diagnostics.length || (raw && !scan.tokens.some(token => token.kind === 'text'
-    && token.span.start <= span.start && token.span.end >= rawEnd))) return null
+  if (raw && !scan.tokens.some(token => token.kind === 'text'
+    && token.span.start <= span.start && token.span.end >= rawEnd)) return null
   return { patch: { handle: selected.report.handle, kind: 'text',
     value: decodeHtmlEntities(raw.replace(/\r\n?/g, '\n')) }, beforeValue: selected.report.rawText }
 }
@@ -54,6 +54,8 @@ export interface HtmlPreviewPaneProps {
   active?: boolean
   toolbarLeading?: ReactNode
   pendingSourceDraft?: boolean
+  /** A structure operation may proceed after unapplied text is durably retained. */
+  preserveTextDrafts?(): Promise<boolean>
   onReloadRequest?(): void
   reloadIssue?: string | null
   target?: HtmlEditingTarget | null
@@ -62,7 +64,7 @@ export interface HtmlPreviewPaneProps {
 
 /** Keeps one sandbox frame mounted across canonical text revisions. */
 export function HtmlPreviewPane({ lease, committed, analysis: providedAnalysis, textDrafts, onUndo, onRedo, onSave, active = true, toolbarLeading,
-  pendingSourceDraft = false, onReloadRequest, reloadIssue, target, onTargetChange }: HtmlPreviewPaneProps) {
+  pendingSourceDraft = false, preserveTextDrafts, onReloadRequest, reloadIssue, target, onTargetChange }: HtmlPreviewPaneProps) {
   const retainedDrafts = useSyncExternalStore(textDrafts.subscribe, textDrafts.read)
   const frame = useRef<HTMLIFrameElement>(null)
   const container = useRef<HTMLDivElement>(null)
@@ -82,7 +84,7 @@ export function HtmlPreviewPane({ lease, committed, analysis: providedAnalysis, 
   const pendingEdit = useRef<{ beforeSource: string; observedSource?: string; observedRevision?: number } | null>(null)
   const view = useRef({ index: 0, scroll: 0 })
   const restoreAfterLoad = useRef<{ index: number; scroll: number } | null>(null)
-  const editModeRef = useRef(true)
+  const editModeRef = useRef(false)
   const [selected, setSelected] = useState<HtmlSelectedTarget | null>(null)
   const [issue, setIssue] = useState<string | null>(null)
   const [responsiveNotice, setResponsiveNotice] = useState<string | null>(null)
@@ -93,9 +95,11 @@ export function HtmlPreviewPane({ lease, committed, analysis: providedAnalysis, 
   const [stale, setStale] = useState(false)
   const [frameReady, setFrameReady] = useState(false)
   const [modePending, setModePending] = useState(false)
+  const [modeIssue, setModeIssue] = useState<string | null>(null)
   const [editMode, setEditMode] = useState(false)
   const [inlineSelection, setInlineSelection] = useState<PlainTextSelectionIntent | undefined>(undefined)
   const inlineSubmitting = useRef<Promise<boolean> | null>(null)
+  const [inlineComposing, setInlineComposing] = useState(false)
   useEffect(() => {
     if (!active) return
     const clear = workbenchSelection.registerSelectionClearer(committed.documentId, () => controller.current?.clearSelection())
@@ -200,6 +204,7 @@ export function HtmlPreviewPane({ lease, committed, analysis: providedAnalysis, 
   const refreshPreservingView = () => {
     if (!frame.current) return
     setFrameReady(false)
+    setModeIssue(null)
     setModePending(editModeRef.current)
     setEditMode(false)
     restoreAfterLoad.current = { ...view.current }
@@ -216,6 +221,7 @@ export function HtmlPreviewPane({ lease, committed, analysis: providedAnalysis, 
     const iframe = frame.current
     if (!iframe) return
     setFrameReady(false)
+    setModeIssue(null)
     setModePending(editModeRef.current)
     setEditMode(false)
     latestSource.current = source
@@ -255,7 +261,9 @@ export function HtmlPreviewPane({ lease, committed, analysis: providedAnalysis, 
         if (enabled !== editModeRef.current) return
         setEditMode(enabled)
         setModePending(false)
+        setModeIssue(null)
       },
+      onEditModeError(message) { setModePending(false); setModeIssue(message); setSelected(null) },
       onPage(index, scroll) { view.current = { index, scroll }; setPage(index) },
       onEditing() { pendingEdit.current = { beforeSource: latestSource.current } },
       onApplied(revision, patch, beforeValue) {
@@ -348,15 +356,18 @@ export function HtmlPreviewPane({ lease, committed, analysis: providedAnalysis, 
     if (value === target.report.rawText) { broker.clearSelection(); return Promise.resolve(true) }
     const pending = broker.editText(value, target).then(result => {
       if (result.status === 'applied' || result.status === 'unchanged') { textDrafts.applied(target, latestSource.current, value); if (result.status === 'unchanged') broker.clearSelection(); return true }
-      setIssue('文字尚未应用，草稿已保留；请重新定位原文字。'); return false
-    }).catch(error => { setIssue(String(error)); return false }).finally(() => { inlineSubmitting.current = null })
+      setIssue('这处文字尚未应用，原稿已保留；可重新定位，其他内容可继续编辑。'); return false
+    }).catch(() => { setIssue('这处文字尚未应用，原稿已保留；可稍后重试或在源码中修改。'); return false }).finally(() => { inlineSubmitting.current = null })
     inlineSubmitting.current = pending
     return pending
   }
   const setEditing = async (next: boolean) => {
+    if (inlineComposing) return
     const target = selectedTarget.current
-    if (target?.report.kind === 'text') { const value = textDrafts.find(target, source)?.value ?? target.report.rawText; if (!await finishInline(value)) return }
-    editModeRef.current = next; setModePending(true); setSelected(null); controller.current?.setEditMode(next)
+    if (target?.report.kind === 'text') { const value = textDrafts.find(target, source)?.value ?? target.report.rawText; await finishInline(value) }
+    // A failed field remains in its document draft owner; it does not own the
+    // preview mode. The business program is enabled only after the real ACK.
+    editModeRef.current = next; setModeIssue(null); setModePending(true); setSelected(null); controller.current?.setEditMode(next)
   }
   const inlineBox = (() => {
     const iframe = frame.current, outer = container.current
@@ -366,15 +377,21 @@ export function HtmlPreviewPane({ lease, committed, analysis: providedAnalysis, 
       transform: `scale(${sx},${sy})`, transformOrigin: 'top left' }
   })()
   const canTransform = Boolean(selectedBox && selected?.resolved.status === 'editable' && selected.report.authoring?.authorKey)
+  const moveControl = <button type="button" aria-label="移动 HTML 内部对象" title="拖拽移动此对象" className="html-preview-pane__move-handle"
+    onPointerDown={event => beginTransform(event, 'drag')} onLostPointerCapture={() => { if (transform.current) cancelTransform() }}
+    style={{ pointerEvents: 'auto', cursor: 'move', touchAction: 'none', flexShrink: 0 }}>
+    <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M12 2v20M2 12h20M8 6l4-4 4 4M8 18l4 4 4-4M6 8l-4 4 4 4M18 8l4 4-4 4" fill="none" stroke="currentColor" strokeWidth="1.5" /></svg>
+  </button>
   return <div ref={container} className="html-preview-pane" onPointerMove={updateTransform} onPointerUp={event => void finishTransform(event)}
     onPointerCancel={cancelTransform} onKeyDown={event => { if (event.key === 'Escape' && transform.current) cancelTransform() }}>
     <div className="html-preview-pane__toolbar" role="toolbar" aria-label="HTML 分页">
       {toolbarLeading}
-      <div role="group" aria-label="HTML 操作模式">
-        <button type="button" aria-pressed={editMode} disabled={!frameReady || modePending} onClick={() => void setEditing(true)}>编辑</button>
-        <button type="button" aria-pressed={!editMode} disabled={!frameReady || modePending} onClick={() => void setEditing(false)}>试运行</button>
-      </div>
-      {editMode && <span role="status">点文字编辑；可移动对象选中后显示手柄</span>}
+      <button type="button" className="html-preview-pane__edit" aria-pressed={editMode} disabled={!frameReady || modePending || inlineComposing || Boolean(modeIssue)}
+        onClick={() => void setEditing(!editModeRef.current)}>{editMode ? '完成编辑' : '编辑'}</button>
+      {editMode && <span role="status" className="html-preview-pane__edit-hint">虚线框内文字可编辑；拖拽手柄可移动对象</span>}
+      {editMode && <span className="html-preview-pane__move-slot" aria-hidden={!canTransform || !active ? true : undefined}>
+        {canTransform && active && moveControl}
+      </span>}
       {pageCount > 1 && <div className="html-preview-pane__pages" role="group" aria-label="页面导航">
         <button type="button" disabled={page === 0} onClick={() => controller.current?.navigate(page - 1)}>上一页</button>
         <span>{page + 1} / {pageCount}</span>
@@ -387,6 +404,10 @@ export function HtmlPreviewPane({ lease, committed, analysis: providedAnalysis, 
       {ambiguous && <span role="status">分页结构不明确，按连续页面预览。</span>}
     </div>
     {responsiveNotice && <p role="status" className="html-preview-pane__notice">{responsiveNotice}</p>}
+    {(modePending || modeIssue || !frameReady) && <p role={modeIssue ? 'alert' : 'status'} className="html-preview-pane__notice">
+      {modeIssue ?? (modePending ? '正在准备编辑模式…' : '正在连接预览…')}
+      <button type="button" onClick={refreshPreservingView}>重新连接预览</button>
+    </p>}
     {reloadIssue && <p role="alert" className="html-preview-pane__notice">{reloadIssue}
       <button type="button" onClick={refreshPreservingView}>重试预览</button></p>}
     {stale && <div role="status" className="html-preview-pane__notice">
@@ -394,8 +415,8 @@ export function HtmlPreviewPane({ lease, committed, analysis: providedAnalysis, 
     </div>}
     <div className="html-preview-pane__body">
     <iframe ref={frame} title="HTML 预览" src={lease.url} sandbox="allow-scripts allow-same-origin" referrerPolicy="no-referrer"
-      style={{ pointerEvents: modePending ? 'none' : undefined }}
-      onLoad={() => controller.current?.frameLoaded()} onError={() => { setModePending(false); setIssue('预览未能加载。可重新加载预览或切换源码；文档和输入均保留。') }} />
+      style={{ pointerEvents: modePending || modeIssue ? 'none' : undefined }}
+      onLoad={() => controller.current?.frameLoaded()} onError={() => { setModePending(false); setModeIssue('预览未能加载。可重新连接或切换源码，文档和输入均保留。') }} />
     {structureMounted && <Suspense fallback={structureOpen && active ? <p role="status">正在加载结构与样式…</p> : null}>
     <HtmlStructureEditor committed={committed} lease={lease} analysis={analysis} active={active && structureOpen} target={target ?? null}
       onTargetChange={(value, node, path) => {
@@ -403,14 +424,11 @@ export function HtmlPreviewPane({ lease, committed, analysis: providedAnalysis, 
         targetPublisher.current?.(value)
         if (path) controller.current?.selectSource(path, node.name === 'img' ? 'image' : node.kind === 'text' ? 'text' : null, node.value)
       }}
-      pendingDraft={pendingSourceDraft || retainedDrafts.length > 0} loading={!frameReady} />
+      pendingDraft={pendingSourceDraft} beforeSourceEdit={async () => !retainedDrafts.length || await preserveTextDrafts?.() === true} loading={!frameReady} />
     </Suspense>}
     </div>
     {canTransform && selectedBox && active && editMode && <div aria-label="HTML 内部对象变换"
       style={{ ...selectedBox, position: 'absolute', border: '1px solid #1677ff', pointerEvents: 'none', boxSizing: 'border-box', zIndex: 10 }}>
-      <button type="button" aria-label="移动 HTML 内部对象" onPointerDown={event => beginTransform(event, 'drag')}
-        onLostPointerCapture={() => { if (transform.current) cancelTransform() }}
-        style={{ position: 'absolute', left: 0, top: -25, pointerEvents: 'auto', cursor: 'move', touchAction: 'none' }}>移动</button>
       <button type="button" aria-label={selected?.report.kind === 'text' ? '调整 HTML 文字内容盒' : '缩放 HTML 图片'} onPointerDown={event => beginTransform(event, 'resize')}
         onLostPointerCapture={() => { if (transform.current) cancelTransform() }}
         style={{ position: 'absolute', right: -6, bottom: -6, width: 12, height: 12, padding: 0, background: '#1677ff', pointerEvents: 'auto', cursor: 'nwse-resize', touchAction: 'none' }} />
@@ -419,7 +437,7 @@ export function HtmlPreviewPane({ lease, committed, analysis: providedAnalysis, 
       <CanvasPlainTextEditor key={selected.report.handle} presentation="inline" bounds={{ x: 0, y: 0, width: selected.report.rect.width, height: selected.report.rect.height }}
         multiline label="编辑此处文字" textStyle={selected.report.textStyle} selectionIntent={inlineSelection} initialCaret={selected.report.selection?.anchor}
         value={textDrafts.find(selected, source)?.value ?? selected.report.rawText}
-        onDraftChange={value => textDrafts.change(selected, source, value)} onCommit={value => { void finishInline(value) }} onCancel={() => setSelected(null)} />
+        onDraftChange={(value, composing) => { setInlineComposing(composing); textDrafts.change(selected, source, value) }} onCommit={value => { void finishInline(value) }} onCancel={() => setSelected(null)} />
     </div>}
     {selected && selected.report.kind !== 'text' && editMode && <HtmlLightEditOverlay target={selected} committed={committed} position={position}
       value={textDrafts.find(selected, source)?.value ?? selected.report.rawText}

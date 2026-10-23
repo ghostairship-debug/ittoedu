@@ -69,6 +69,15 @@ function pendingSave(state: Pick<DurableDocumentState, 'epoch' | 'revision' | 's
   return state.savedRevision !== intent.revision || newBinding
 }
 
+/** Reconciliation eligibility is not proof of settlement: a rename may change
+ * the source binding while an earlier Save As still has an unknown outcome. */
+function acknowledgedSave(state: Pick<DurableDocumentState, 'epoch' | 'savedRevision' | 'binding'>,
+  kind: DocumentKind, intent: SaveIntent): boolean {
+  return state.epoch === intent.epoch && kind === intent.kind && state.savedRevision !== null
+    && state.savedRevision >= intent.revision
+    && isDeepStrictEqual(state.binding, { ...intent.targetBinding, version: intent.expectedVersion })
+}
+
 async function syncDirectory(directory: string): Promise<void> {
   // Windows does not expose directory fsync through Node; file handles are flushed.
   if (process.platform === 'win32') return
@@ -85,19 +94,17 @@ function checkState(state: DurableDocumentState, documentId: string): void {
       !Number.isSafeInteger(state.revision) || state.revision < 0 ||
       !Array.isArray(state.past) || !Array.isArray(state.future) ||
       !Array.isArray(state.operations) || !Array.isArray(state.stoppedRuns)) throw new Error('恢复日志状态无效')
-  const models = [state.model, ...(state.savedModel ? [state.savedModel] : []),
-    ...state.past.flatMap(item => item.before && item.after ? [item.before, item.after] : []),
-    ...state.future.flatMap(item => item.before && item.after ? [item.before, item.after] : [])]
-  if ([...state.past, ...state.future].some(item => !item.effects && (!item.before || !item.after)
-    || item.effects && (!Array.isArray(item.effects) || !item.effects.length))) throw new Error('恢复历史记录无效')
-  for (const model of models) {
+  // The current document and replay identities are required. Optional historical
+  // models are checked by Session restore, which can retain the raw journal and
+  // isolate a broken history without rejecting a usable current document.
+  for (const model of [state.model]) {
     if (!model || !['markdown', 'text', 'course-v9', 'course-v10'].includes(model.kind) || !model.resources ||
         ((model.kind === 'markdown' || model.kind === 'text') && typeof model.source !== 'string')) throw new Error('恢复日志文档无效')
     const bytes = [...Object.values(model.resources.assets), ...Object.values(model.resources.components).flatMap(files => Object.values(files))]
     if (bytes.some(value => !(value instanceof Uint8Array))) throw new Error('恢复日志资源无效')
   }
   for (const operation of state.operations) {
-    if (!operation.operationId || !operation.digest || operation.result.documentId !== documentId ||
+    if (!operation || !operation.operationId || !operation.digest || !operation.result || operation.result.documentId !== documentId ||
         operation.result.operationId !== operation.operationId) throw new Error('恢复日志操作回执无效')
   }
 }
@@ -412,8 +419,9 @@ export function createDocumentJournal(options: { directory: string; isLive?(docu
   }
   const filename = (documentId: string) => path.join(directory, `${digest(Buffer.from(documentId))}.journal`)
   const intentFilename = (documentId: string) => path.join(directory, `${digest(Buffer.from(documentId))}.save-intent.json`)
-  const preserveProjectV10Input = async (target: string): Promise<void> => {
-    const retainedDirectory = path.join(directory, 'project-v10-inputs', path.basename(target, '.journal'))
+  const retainedIntentFilename = (documentId: string, identity: DocumentSaveIdentity) => path.join(directory, 'save-intents',
+    digest(Buffer.from(JSON.stringify([documentId, identity.runId, identity.operationId, identity.requestDigest]))), path.basename(intentFilename(documentId)))
+  const preserveJournalInput = async (target: string, retainedDirectory: string): Promise<void> => {
     const retained = path.join(retainedDirectory, path.basename(target))
     try { await fs.access(retained); return } catch (error) { if (!missing(error)) throw error }
     await fs.mkdir(retainedDirectory, { recursive: true })
@@ -431,9 +439,9 @@ export function createDocumentJournal(options: { directory: string; isLive?(docu
       await syncDirectory(directory)
     } finally { await fs.rm(temporary, { force: true }).catch(() => undefined) }
   }
-  const readIntent = async (documentId: string): Promise<SaveIntent | null> => {
+  const readIntentAt = async (documentId: string, source: string): Promise<SaveIntent | null> => {
     let bytes: string
-    try { bytes = await fs.readFile(intentFilename(documentId), 'utf8') }
+    try { bytes = await fs.readFile(source, 'utf8') }
     catch (error) { if (missing(error)) return null; throw error }
     let intent: SaveIntent
     try { intent = JSON.parse(bytes) as SaveIntent } catch { throw new Error('保存恢复记录损坏') }
@@ -452,15 +460,25 @@ export function createDocumentJournal(options: { directory: string; isLive?(docu
     if (intent.sourcePublication) validateSourcePublication(intent.sourcePublication)
     return intent
   }
+  const readIntent = async (documentId: string, identity?: DocumentSaveIdentity): Promise<SaveIntent | null> => {
+    if (identity) {
+      const retained = await readIntentAt(documentId, retainedIntentFilename(documentId, identity))
+      if (retained) return retained
+    }
+    const current = await readIntentAt(documentId, intentFilename(documentId))
+    if (!identity || current?.saveIdentity && isDeepStrictEqual(current.saveIdentity, identity)) return current
+    return null
+  }
   const preserveLegacyProject = async (target: string, state: DurableDocumentState, offset?: number): Promise<void> => {
     if (state.model.kind !== 'course-v10' || state.model.project.schemaVersion !== 11 || checkedProjectInputs.has(target)) return
     const original = await scan(target, state.documentId, { offset, repairTail: false })
     const models = original ? [original.model, ...(original.savedModel ? [original.savedModel] : []),
-      ...[...original.past, ...original.future].flatMap(entry => entry.before && entry.after ? [entry.before, entry.after] : []),
+      ...[...original.past, ...original.future].flatMap(entry => entry?.before && entry.after ? [entry.before, entry.after] : []),
       ...original.operations.flatMap(operation => [...(operation.before ? [operation.before] : []), ...(operation.after ? [operation.after] : [])])] : []
     // Decoded legacy input predates the current Project 11 static type.
     const rawSchemaVersion = (project: object): unknown => Reflect.get(project, 'schemaVersion')
-    if (models.some(model => model.kind === 'course-v10' && rawSchemaVersion(model.project) === 10)) await preserveProjectV10Input(target)
+    if (models.some(model => model?.kind === 'course-v10' && model.project && rawSchemaVersion(model.project) === 10))
+      await preserveJournalInput(target, path.join(directory, 'project-v10-inputs', path.basename(target, '.journal')))
     checkedProjectInputs.add(target)
   }
   const appendBytes = async (target: string, encoded: Buffer): Promise<number> => {
@@ -607,6 +625,12 @@ export function createDocumentJournal(options: { directory: string; isLive?(docu
     return serial(fileKey(target), async () => {
       const state = await verifiedHead(target, input.documentId)
       if (!state || state.disposition && state.disposition !== 'active' || state.revision < input.revision || state.kind !== input.model.kind) throw new Error('保存版本不属于当前文档恢复日志')
+      // A later Save As may proceed independently of an earlier uncertain
+      // publication. Keep only that unresolved operation's small original proof,
+      // rather than overwriting the only way its caller can query the outcome.
+      const previous = await readIntent(input.documentId)
+      if (previous?.saveIdentity && !acknowledgedSave(state, state.kind, previous))
+        await preserveJournalInput(intentFilename(input.documentId), path.dirname(retainedIntentFilename(input.documentId, previous.saveIdentity)))
       const intent: SaveIntent = { schemaVersion: 1, documentId: input.documentId, epoch: state.epoch,
         revision: input.revision, kind: input.model.kind, sourceBinding: state.binding,
         targetBinding, expectedVersion, ...(input.saveIdentity ? { saveIdentity: input.saveIdentity } : {}), ...(fileIdentity ? { fileIdentity } : {}),
@@ -697,6 +721,20 @@ export function createDocumentJournal(options: { directory: string; isLive?(docu
       const target = filename(frozen.documentId)
       return serial(fileKey(target), () => appendWithinQueue(target, frozen))
     },
+    preserveRecovery(state) {
+      const target = filename(state.documentId)
+      return serial(fileKey(target), async () => {
+        const head = await verifiedHead(target, state.documentId)
+        if (!head || head.sequence !== state.sequence || head.epoch !== state.epoch)
+          throw new DocumentJournalError('journal-sequence-conflict', '原恢复记录已改变，未隔离或覆盖历史')
+        const retained = path.join(directory, 'recovery-inputs', `${path.basename(target, '.journal')}-${randomUUID()}`)
+        await preserveJournalInput(target, retained)
+        try { await writeFlushed(path.join(retained, path.basename(intentFilename(state.documentId))), await fs.readFile(intentFilename(state.documentId))) }
+        catch (error) { if (!missing(error)) throw error }
+        await syncDirectory(retained)
+        return retained
+      })
+    },
     appendTransition(transition, checkpoint) {
       // Both inputs are private immutable Session facts, not renderer/IPC payloads.
       return serial(fileKey(filename(transition.documentId)), () => appendTransitionWithinQueue(filename(transition.documentId), transition, checkpoint))
@@ -719,10 +757,18 @@ export function createDocumentJournal(options: { directory: string; isLive?(docu
       const target = filename(documentId)
       return serial(fileKey(target), async () => {
         const state = await load(target, documentId)
+        // Discard applies to the authoring draft, not an uncertain disk write.
+        // Do not require proof I/O to succeed just to close the document; an
+        // unreadable intent remains available for the original query/diagnosis.
+        let retainIntent = true
+        try {
+          const intent = await readIntent(documentId)
+          retainIntent = Boolean(intent && (!state || !acknowledgedSave(state, state.model.kind, intent)))
+        } catch { /* Keep the unclassified publication evidence. */ }
         if (state && (!state.disposition || state.disposition === 'active')) {
           await appendWithinQueue(target, { ...state, schemaVersion: state.schemaVersion === 3 ? 3 : 2, disposition: 'discarded', sequence: state.sequence + 1 })
         }
-        await Promise.all([target, intentFilename(documentId)].map(name => fs.rm(name, { force: true })))
+        await Promise.all([target, ...(!retainIntent ? [intentFilename(documentId)] : [])].map(name => fs.rm(name, { force: true })))
         await bindings.discard(target)
         heads.delete(target)
         pendingCheckpoints.delete(target)
@@ -744,7 +790,7 @@ export function createDocumentJournal(options: { directory: string; isLive?(docu
     },
     async lookupSave(documentId, identity) {
       return serial(fileKey(filename(documentId)), async () => {
-        const intent = await readIntent(documentId)
+        const intent = await readIntent(documentId, identity)
         if (!intent?.saveIdentity || !isDeepStrictEqual(intent.saveIdentity, identity) || !intent.fileIdentity) return null
         try {
           if (fileKey(await fs.realpath(path.dirname(intent.targetBinding.path))) !== fileKey(path.dirname(intent.targetBinding.path))) return null

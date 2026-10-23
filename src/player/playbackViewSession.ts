@@ -1,4 +1,4 @@
-import { PLAYBACK_VIEW_CHROME_GUTTER, PLAYBACK_VIEW_OVERFLOW_EPSILON, PLAYBACK_VIEW_MAX_ZOOM, playbackControllerInsets, type PlaybackChromeGeometry } from '../shared/playbackViewGeometry'
+import { PLAYBACK_VIEW_CHROME_GUTTER, PLAYBACK_VIEW_OVERFLOW_EPSILON, PLAYBACK_VIEW_MAX_ZOOM, type PlaybackChromeGeometry } from '../shared/playbackViewGeometry'
 import { DEFAULT_SLIDE_CANVAS, type SlideCanvasSize } from '../shared/slideCanvas'
 import { fitPage, NO_PAGE_INSETS, PAGE_FRAME_BACKDROP, PAGE_FRAME_FULLSCREEN_BACKDROP, pageFrameStyle, parsePageInsets, type PageFrameInsets } from '../shared/pageFrame'
 
@@ -104,7 +104,7 @@ export class PlaybackViewSession implements PlaybackViewPort {
   #anchor: ViewPoint | undefined
   #insets: PageFrameInsets = NO_PAGE_INSETS
   #backdrop = PAGE_FRAME_BACKDROP
-  #chrome: PlaybackChromeGeometry = { x: false, y: false, native: { right: 0, bottom: 0 }, insets: { right: 0, bottom: 0 }, controllerInsets: playbackControllerInsets({ right: 0, bottom: 0 }) }
+  #chrome: PlaybackChromeGeometry = { x: false, y: false, native: { right: 0, bottom: 0 }, insets: { right: 0, bottom: 0 } }
   get state(): PlaybackViewState { return structuredClone(this.#state) }
   get chrome(): PlaybackChromeGeometry { return structuredClone(this.#chrome) }
   /** The element the page is seen through; the teacher controller stays inside its visible part. */
@@ -302,10 +302,7 @@ export class PlaybackViewSession implements PlaybackViewPort {
       native.right = Math.max(0, scroll.offsetWidth - scroll.clientWidth) * fit * this.#state.zoom
       native.bottom = Math.max(0, scroll.offsetHeight - scroll.clientHeight) * fit * this.#state.zoom
     }
-    this.#chrome = { x, y, native, controllerInsets: playbackControllerInsets({
-      right: scroll ? Math.max(0, scroll.offsetWidth - scroll.clientWidth) * fit : 0,
-      bottom: scroll ? Math.max(0, scroll.offsetHeight - scroll.clientHeight) * fit : 0,
-    }), insets: {
+    this.#chrome = { x, y, native, insets: {
       right: native.right + (y ? PLAYBACK_VIEW_CHROME_GUTTER : 0),
       bottom: native.bottom + (x ? PLAYBACK_VIEW_CHROME_GUTTER : 0),
     } }

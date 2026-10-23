@@ -1,8 +1,41 @@
 # 果铃软件与创作修复结果
 
-更新：2026-10-22。原两份方案及启动提示词已于2026-10-13按原目标完成规定实施、Skill/协议/分发同步和最小验收，原goal已标记complete，现作为[已执行历史依据](../archive/README.md#已执行软件与创作方案)归档；本文件是结果/后续跟踪记录，不是待执行方案。2026-10-12—17详细实施、失败、勘误、费用及具体输入边界见[阶段全文](../archive/20261017-软件与创作修复阶段记录.md)。
+更新：2026-10-23。原两份方案及启动提示词已于2026-10-13按原目标完成规定实施、Skill/协议/分发同步和最小验收，原goal已标记complete，现作为[已执行历史依据](../archive/README.md#已执行软件与创作方案)归档；本文件是结果/后续跟踪记录，不是待执行方案。2026-10-12—17详细实施、失败、勘误、费用及具体输入边界见[阶段全文](../archive/20261017-软件与创作修复阶段记录.md)。
 
-**此前10月20日 A—G 可实施软件项及修后真实副本验收通过；“质量不低于基线且作者耗时下降”未通过，原goal 未完成。** 保存、冷开、实际互动、公开HTML、模型采用分别按已有证据判断，旧局部PASS不扩大为完整产品通过。当前主树含有效未提交成果，不能只用HEAD或旧包代表。Owner整体接受及发行仍未签收。
+**此前10月20日 A—G 可实施软件项及修后真实副本验收通过；“质量不低于基线且作者耗时下降”未通过，原goal 未完成。** 保存、冷开、实际互动、公开HTML、模型采用分别按已有证据判断，旧局部PASS不扩大为完整产品通过。本次卫生整理将有效软件和作品成果纳入本地提交，实际范围见Git日志；不能只用旧包代表当前实现。Owner整体接受及发行仍未签收。
+
+<a id="result-editing-regressions-20261023"></a>
+## 编辑阻断与体验回退修复
+
+P1–P9软件修复与独立复核完成；原稿、输入占用、失败出口、HTML作者事实、Flow范围与关系、输出布局、异步归属及保存查证沿现有owner收口。指定GLX与大小HTML副本实际编辑／保存／新进程冷开、GLX UndoRedo及最终工具栏视觉通过；A01–A20／B01–B21裁定和原失败见[唯一结果](20261023-editing-regressions/RESULT.md)。不签普遍提速、物理IME、Word GUI或Owner整体接受。
+
+<a id="result-audit-refactor-20261023"></a>
+## 审计整合与组件／Flow重构
+
+审计归并、B1–B8架构裁决、混排／语义插入／专业默认／同源发现／分栏及恢复／运行／输出已实施并独审，DocumentSession仍为唯一writer。真实模型接力、人工布局与图片批注保留、保存新进程冷开、Published与正式compiled离线互动通过；实跑新增缺陷的修复接续、费用及证据边界见[唯一结果](20261023-audit-refactor/RESULT.md)。无可比基线，不宣称普遍提速或首轮一次成功。
+
+<a id="result-global-viewport-sticky-20261023"></a>
+## 全局视口与Flow原生吸顶
+
+viewport-pinned全局实例统一完整画布，绘制、逆投影和运行拖拽使用同一解析布局；Flow读序接通原生CSS sticky，保留既有flowMotion和iframe滚轮接管。正式model／compiled、1440／390导出及真实Electron缩放、正反吸顶证据见[最新结果](20261022-flow-navigation/GLOBAL_VIEWPORT_AND_STICKY_RESULT_20261023.md)；[早期导航结果](20261022-flow-navigation/RESULT.md)保留为原样本依据。各批未提交描述属于当时状态，本次仅追加卫生整理及本地Git提交授权，不签发行或整体接受。
+
+<a id="result-editability-flow-20261022"></a>
+## 文字可编辑性、全局入口与 Flow 浮层
+
+Owner 后续截图中的提示遮字、空虚线框、原生文字无法输入／双击字号跳变已修；Flow 外层只读不再让内部编辑器继承 inert，原生输入保原 appearance／sizing 和文本边界。底部导航提供常驻全局层入口；Flow 转浮层按当前纸面坐标保留位置，图表设计画幅不变，旧 NodeView 不再抢回运行宿主。验收发现的含 iframe 文档关闭错误补齐卸载前停泊与复挂恢复。
+
+真实 Electron 原生及 HTML 首次拖选／改字、UndoRedo、另存／关闭重开、全局进出通过；真实 Chromium 三类组件正文／浮层往返与 UndoRedo、普通／StrictMode 关闭回归通过。58 项聚焦检查、Renderer 类型、必要开发构建和独立增量审查通过；旧夹具失败未计通过。原件和用户 profile 未改，无提交／发行。Flow 建议以有序章节／内容块、显式放置及稳定输入替代按后代类型推断编辑方式；本轮未实施该结构重做。见[完整结果与证据边界](20261022-editability-flow/RESULT.md)。
+
+<a id="result-document-toolbar-drag-20261022"></a>
+## Markdown／Flow 工具栏与段落拖放修复
+
+Owner 截图中的工具栏空隙、横向滚动／换行和段落手柄问题已修。Markdown 的文件区取消顶部内边距，格式栏移到正文滚动区上方；两种模式使用紧凑单行控件，顶栏移除行内代码，字号步进、删除线、着重号和上下标收进“更多文字格式”。左侧合为一个段落手柄，菜单保留插入、转换、复制、删除和排序；失焦／离开窗口隐藏，转移焦点到自身菜单或开始拖动时保持挂载。
+
+拖放按同级段落的实际边缘定位，显示插入线，支持段间空白与 Flow 文末空白；Flow 稿纸的空白落点转给原正文 owner，最终仍用既有 canonical transaction／History。拖动期间复用开始时的正文快照，同一落点不重复更新 UI；没有引入另一份工程或 writer。
+
+聚焦 5 文件／16 项及 renderer 类型检查通过。agent-browser 在隔离浏览器挂载真实 LessonDocumentEditor、FlowWorkspace、DocumentSession／Driver：MD 680px、Flow 外壳 680px（格式栏 662px）均为 36px 单行且无水平溢出；MD 滚动 400px 后格式栏 top 保持 97px；真实鼠标拖到第三段后／Flow 文末空白均得到预期顺序和一次操作，失焦隐藏、Undo／Redo 通过。MD 保存端口内容正确；Flow 保存为实际存档后由 Driver 重新解码，顺序保持。界面图与脚本在 `output/document-toolbar-repair/`。这是隔离浏览器与存档层证据，未重启用户窗口、未签真实文件新进程冷开或发行。
+
+附带执行的存量 `f1FlowOwnerUx.test.tsx` 在其 runtime mock 缺少 `navigation.editorPort()` 时失败，未进入正文操作；未修改该夹具或将其记为通过。对应 Flow 行为由上述真实 consumer 验证覆盖。本轮未 commit／push／打包／发布。
 
 <a id="result-responsiveness-editing-20261022"></a>
 ## 关闭、Markdown 与 HTML／GLX 编辑最终修复
@@ -446,3 +479,25 @@ A01—A05、A07—A09已实施范围与有效证据保留。A05短作者入口/�
 2026-10-17首轮将根目录从20份MD收敛为7份：11份历史正文实际迁入[归档目录](../archive/README.md)，ROADMAP/开发总纲并入现有状态/开发入口；旧ENTRYPOINTS也合入文档导航。详细阶段结果迁出后，本文件承担当前整合结论与证据导航；随后按Owner对完成状态的纠偏，将已执行两份方案与提示词归档、结果记录迁入开发文档，根目录最终只留README、AGENTS、CHANGELOG。AGENTS只同步完成状态和必要入口，原费用/权限/发行边界保留。最终状态及迁移检查见[完成状态复核](../../output/hygiene-20261017/root-docs/completed-plans/REPORT.md)；首轮文档迁移见[原整理记录](../../output/hygiene-20261017/root-docs/REPORT.md)，缓存清理见[卫生记录](../../output/hygiene-20261017/REPORT.md)。
 
 仅文档整理，未改产品源码/Skill或用户作品，未新增模型/生图/产品测试或构建。无commit、push、Portable、发布或部署，发行继续暂停。
+
+
+<a id="result-component-library-20261023"></a>
+## 2026-10-23 组件与资产库统一目录及批量添加
+
+Owner 授权按本聊19项方案实施，并要求实际界面、批量、Undo及保存重开；禁止commit、打包发布。本轮已完成，无新增模型/收费路径。
+
+- 同一列表按内容5／布局3／互动5／效果4／模板2分类；来源、学科、学段为辅助筛选，跨分类保留选择。复用componentDiscovery给界面与AI提供同源说明，14内置资产与4个包保留现有载入方式；教师控制台第19项接入现有prepare owner。
+- 卡片显示实际类型、完整用途、位置和编辑能力；三个示例/控件重命名并保留旧名搜索。外来缺元数据如实标未标注，继续可用。源位置sourceKind独立于自动使用的trust事实，人工勾选继续原手动接入语义，AI自动准入不变。
+- 教师台与普通条目累计为一次正式事务，教师台不进入普通center/尺寸/Flow位置变换；已有时保留人工值、全局归属并复用。转场复用真实导航适用规则，无目标时说明原因、不可误随普通全选加入。
+- 补内置程序dataSchema中文参数和实际update：标题/速度/颜色、按钮文字及镜头时长等；无新增参数编辑器、第二writer或持久化工程。
+
+直接验证：
+
+1. `npx vitest run tests/unit/componentLibraryBrowse20261023.test.tsx tests/unit/componentLibraryFacets20261023.test.ts tests/unit/componentLibraryTeacherBatch20261023.test.tsx tests/unit/componentLibrarySelection20261023.test.tsx tests/unit/l0LibraryClosure.test.tsx tests/unit/componentLibraryMetadata20261022.test.tsx`：6文件／26项通过。包含真实DocumentSession的混合历史及内存文件服务往返、跨来源筛选和实际source mount/update；不把内存IO冒充磁盘冷开。
+2. renderer及Electron类型检查通过；本地Main构建用于sourceKind接线，未生成发行包。独立review核教师台单份全局复用、普通位置隔离、单事务和source/trust区分；指出的空标签表述已修并补UI断言。
+3. 实际Electron窗口看过19项/五类、完整换行和统一卡片；随后用隔离后台Electron完成实际CDP界面点击（不调用供应商）：跨分类勾选program＋目录文字容器＋背景＋模板＋教师台，revision0→1，9实例／2根／1素材／1教师台；点击一次Undo回1实例／1根／0素材／0教师台，再点击Redo恢复。再次program＋教师台混选仅新增1实例，教师台data/frame/id及全局归属保留。
+4. 正式preload DocumentHostAPI.save显式路径真实落盘 `output/library-catalog-20261023/library-acceptance.glx`；新进程、新profile以产品启动文件参数打开同文件，10实例／2根／1素材／5份source／1教师台，dirty=false。实际切到第二Flow页，正文编辑框、程序标题及运动速度/记录按钮呈现，0页面错误。此项未覆盖OS文件选择器。
+
+证据：[结构化记录](../../output/library-catalog-20261023/receipt.json)、[界面截图](../../output/library-catalog-20261023/catalog-all.png)、[验收工程](../../output/library-catalog-20261023/library-acceptance.glx)。本轮起点dirty源码副本保留在output/library-catalog-20261023/baseline，不回退既有成果。
+
+另跑的 `componentLibraryModel` 6项通过；额外旧 `l0VisibleComponentCatalog` 仍有2项失败：异步目录更新在等待完成前同步断言，以及fixture已有slide容器却预期installedIds仅my-card。本轮未改这两处产品逻辑、未放宽断言，未把它们计为通过；不据新增夹具红灯扩成其他修复批次。软件检查／实际渲染／磁盘重开证据分别成立，不签Owner整体接受或发行。

@@ -1,0 +1,491 @@
+{
+  "date": "2026-10-22T13:49:51.070Z",
+  "revision": 202,
+  "file": "native/coffee-journey-v06-offline.html",
+  "offline": true,
+  "views": [
+    {
+      "width": 1440,
+      "chapters": [
+        {
+          "coffeeUnderlay": "journey-v1",
+          "mountId": "1792677002027-szq15",
+          "chapter": "1",
+          "stage": "cup",
+          "reading": "{\"containerId\":\"47415583-2d75-4b72-9c46-dfd29b47d82a\",\"activeInstanceId\":\"5b629c9b-d44b-4fe6-a156-ed4d3b03880d\",\"progress\":0.007807860606723874}",
+          "events": "11",
+          "tick": "2",
+          "idle": "true",
+          "reduced": "false",
+          "size": "1422x982"
+        },
+        {
+          "coffeeUnderlay": "journey-v1",
+          "mountId": "1792677002027-szq15",
+          "chapter": "2",
+          "stage": "fruit",
+          "reading": "{\"containerId\":\"47415583-2d75-4b72-9c46-dfd29b47d82a\",\"activeInstanceId\":\"b3d345ba-f2c8-4c52-add1-2aa477d6a241\",\"progress\":0.126533270420731}",
+          "events": "13",
+          "tick": "64",
+          "idle": "true",
+          "reduced": "false",
+          "size": "1422x982"
+        },
+        {
+          "coffeeUnderlay": "journey-v1",
+          "mountId": "1792677002027-szq15",
+          "chapter": "3",
+          "stage": "layers",
+          "reading": "{\"containerId\":\"47415583-2d75-4b72-9c46-dfd29b47d82a\",\"activeInstanceId\":\"a8add446-cdcf-4007-824f-f0449a24912a\",\"progress\":0.3258633588512111}",
+          "events": "15",
+          "tick": "128",
+          "idle": "true",
+          "reduced": "false",
+          "size": "1422x982"
+        },
+        {
+          "coffeeUnderlay": "journey-v1",
+          "mountId": "1792677002027-szq15",
+          "chapter": "4",
+          "stage": "green",
+          "reading": "{\"containerId\":\"47415583-2d75-4b72-9c46-dfd29b47d82a\",\"activeInstanceId\":\"83bca290-3006-4058-af49-a97b1e1fd00d\",\"progress\":0.4572191314113892}",
+          "events": "17",
+          "tick": "192",
+          "idle": "true",
+          "reduced": "false",
+          "size": "1422x982"
+        },
+        {
+          "coffeeUnderlay": "journey-v1",
+          "mountId": "1792677002027-szq15",
+          "chapter": "5",
+          "stage": "roast",
+          "reading": "{\"containerId\":\"47415583-2d75-4b72-9c46-dfd29b47d82a\",\"activeInstanceId\":\"5093abd6-eba9-43cc-a54a-ad2eb13648e6\",\"progress\":0.6145245583409732}",
+          "events": "19",
+          "tick": "268",
+          "idle": "true",
+          "reduced": "false",
+          "size": "1422x982"
+        },
+        {
+          "coffeeUnderlay": "journey-v1",
+          "mountId": "1792677002027-szq15",
+          "chapter": "6",
+          "stage": "solution",
+          "reading": "{\"containerId\":\"47415583-2d75-4b72-9c46-dfd29b47d82a\",\"activeInstanceId\":\"b1a166da-1cc4-4f39-a8ba-dc5c15bd39ba\",\"progress\":0.71717496102349}",
+          "events": "21",
+          "tick": "347",
+          "idle": "true",
+          "reduced": "false",
+          "size": "1422x982"
+        },
+        {
+          "coffeeUnderlay": "journey-v1",
+          "mountId": "1792677002027-szq15",
+          "chapter": "7",
+          "stage": "return",
+          "reading": "{\"containerId\":\"47415583-2d75-4b72-9c46-dfd29b47d82a\",\"activeInstanceId\":\"8ad1964b-3a7a-4a92-a59c-259924f7b485\",\"progress\":0.925575946335311}",
+          "events": "23",
+          "tick": "417",
+          "idle": "true",
+          "reduced": "false",
+          "size": "1422x982"
+        }
+      ],
+      "geometry": {
+        "width": 1440,
+        "scroll": 1440,
+        "paper": [
+          {
+            "client": 1440,
+            "scroll": 1440
+          }
+        ]
+      },
+      "u03": {
+        "svg": 3,
+        "matrix": [
+          "保留",
+          "已去除¹",
+          "已去除¹",
+          "保留",
+          "去除",
+          "保留不等",
+          "保留",
+          "保留",
+          "保留",
+          "保留",
+          "保留",
+          "保留"
+        ],
+        "overflow": false,
+        "returnState": true
+      },
+      "u05": {
+        "midpoint": 50,
+        "images": [
+          {
+            "complete": true,
+            "width": 1254
+          },
+          {
+            "complete": true,
+            "width": 1254
+          },
+          {
+            "complete": true,
+            "width": 1254
+          }
+        ]
+      },
+      "u06": {
+        "waterLab": "",
+        "mode": "dilute",
+        "extraction": "true",
+        "playing": "false",
+        "added": "100",
+        "solute": "3",
+        "total": "300",
+        "concentration": "1.00",
+        "particles": "72",
+        "step": "1",
+        "progress": "0.398",
+        "shownAdded": "100.00",
+        "visibleParticles": "72"
+      },
+      "labels": [
+        {
+          "text": "同一份溶解物，更多液体稀释示意",
+          "size": "12px"
+        },
+        {
+          "text": "咖啡来源溶解物清水粉体",
+          "size": "12px"
+        },
+        {
+          "text": "1浸润2溶出3滤开",
+          "size": "16px"
+        },
+        {
+          "text": "点与颜色用于解释物质关系，大小、速度与色深均为示意。",
+          "size": "11px"
+        }
+      ],
+      "u06Idle": true,
+      "u06Return": true,
+      "allImages": [
+        [
+          {
+            "complete": true,
+            "width": 1536
+          },
+          {
+            "complete": true,
+            "width": 1254
+          },
+          {
+            "complete": true,
+            "width": 1371
+          },
+          {
+            "complete": true,
+            "width": 1440
+          },
+          {
+            "complete": true,
+            "width": 1440
+          },
+          {
+            "complete": true,
+            "width": 1440
+          },
+          {
+            "complete": true,
+            "width": 1440
+          },
+          {
+            "complete": true,
+            "width": 1536
+          }
+        ],
+        [
+          {
+            "complete": true,
+            "width": 1254
+          },
+          {
+            "complete": true,
+            "width": 1420
+          },
+          {
+            "complete": true,
+            "width": 1420
+          }
+        ],
+        [
+          {
+            "complete": true,
+            "width": 1254
+          },
+          {
+            "complete": true,
+            "width": 1254
+          },
+          {
+            "complete": true,
+            "width": 1254
+          }
+        ],
+        [],
+        [],
+        []
+      ]
+    },
+    {
+      "width": 390,
+      "chapters": [
+        {
+          "coffeeUnderlay": "journey-v1",
+          "mountId": "1792677002027-szq15",
+          "chapter": "1",
+          "stage": "cup",
+          "reading": "{\"containerId\":\"47415583-2d75-4b72-9c46-dfd29b47d82a\",\"activeInstanceId\":\"5b629c9b-d44b-4fe6-a156-ed4d3b03880d\",\"progress\":0.0037037572881552104}",
+          "events": "46",
+          "tick": "862",
+          "idle": "true",
+          "reduced": "false",
+          "size": "372x826"
+        },
+        {
+          "coffeeUnderlay": "journey-v1",
+          "mountId": "1792677002027-szq15",
+          "chapter": "2",
+          "stage": "fruit",
+          "reading": "{\"containerId\":\"47415583-2d75-4b72-9c46-dfd29b47d82a\",\"activeInstanceId\":\"b3d345ba-f2c8-4c52-add1-2aa477d6a241\",\"progress\":0.12079299337506198}",
+          "events": "48",
+          "tick": "954",
+          "idle": "true",
+          "reduced": "false",
+          "size": "372x826"
+        },
+        {
+          "coffeeUnderlay": "journey-v1",
+          "mountId": "1792677002027-szq15",
+          "chapter": "3",
+          "stage": "layers",
+          "reading": "{\"containerId\":\"47415583-2d75-4b72-9c46-dfd29b47d82a\",\"activeInstanceId\":\"a8add446-cdcf-4007-824f-f0449a24912a\",\"progress\":0.28619942681199356}",
+          "events": "50",
+          "tick": "1048",
+          "idle": "true",
+          "reduced": "false",
+          "size": "372x826"
+        },
+        {
+          "coffeeUnderlay": "journey-v1",
+          "mountId": "1792677002027-szq15",
+          "chapter": "4",
+          "stage": "green",
+          "reading": "{\"containerId\":\"47415583-2d75-4b72-9c46-dfd29b47d82a\",\"activeInstanceId\":\"83bca290-3006-4058-af49-a97b1e1fd00d\",\"progress\":0.4660000078915283}",
+          "events": "52",
+          "tick": "1141",
+          "idle": "true",
+          "reduced": "false",
+          "size": "372x826"
+        },
+        {
+          "coffeeUnderlay": "journey-v1",
+          "mountId": "1792677002027-szq15",
+          "chapter": "5",
+          "stage": "roast",
+          "reading": "{\"containerId\":\"47415583-2d75-4b72-9c46-dfd29b47d82a\",\"activeInstanceId\":\"5093abd6-eba9-43cc-a54a-ad2eb13648e6\",\"progress\":0.6088471923915145}",
+          "events": "54",
+          "tick": "1235",
+          "idle": "true",
+          "reduced": "false",
+          "size": "372x826"
+        },
+        {
+          "coffeeUnderlay": "journey-v1",
+          "mountId": "1792677002027-szq15",
+          "chapter": "6",
+          "stage": "solution",
+          "reading": "{\"containerId\":\"47415583-2d75-4b72-9c46-dfd29b47d82a\",\"activeInstanceId\":\"b1a166da-1cc4-4f39-a8ba-dc5c15bd39ba\",\"progress\":0.6881412688788374}",
+          "events": "56",
+          "tick": "1332",
+          "idle": "true",
+          "reduced": "false",
+          "size": "372x826"
+        },
+        {
+          "coffeeUnderlay": "journey-v1",
+          "mountId": "1792677002027-szq15",
+          "chapter": "7",
+          "stage": "return",
+          "reading": "{\"containerId\":\"47415583-2d75-4b72-9c46-dfd29b47d82a\",\"activeInstanceId\":\"8ad1964b-3a7a-4a92-a59c-259924f7b485\",\"progress\":0.8909219804053352}",
+          "events": "58",
+          "tick": "1429",
+          "idle": "true",
+          "reduced": "false",
+          "size": "372x826"
+        }
+      ],
+      "geometry": {
+        "width": 390,
+        "scroll": 390,
+        "paper": [
+          {
+            "client": 390,
+            "scroll": 390
+          }
+        ]
+      },
+      "u03": {
+        "svg": 3,
+        "matrix": [
+          "保留",
+          "已去除¹",
+          "已去除¹",
+          "保留",
+          "去除",
+          "保留不等",
+          "保留",
+          "保留",
+          "保留",
+          "保留",
+          "保留",
+          "保留"
+        ],
+        "overflow": false,
+        "returnState": true
+      },
+      "u05": {
+        "midpoint": 50,
+        "images": [
+          {
+            "complete": true,
+            "width": 1254
+          },
+          {
+            "complete": true,
+            "width": 1254
+          },
+          {
+            "complete": true,
+            "width": 1254
+          }
+        ]
+      },
+      "u06": {
+        "waterLab": "",
+        "mode": "dilute",
+        "extraction": "true",
+        "playing": "false",
+        "added": "100",
+        "solute": "3",
+        "total": "300",
+        "concentration": "1.00",
+        "particles": "72",
+        "step": "1",
+        "progress": "0.394",
+        "shownAdded": "100.00",
+        "visibleParticles": "72"
+      },
+      "labels": [
+        {
+          "text": "同一份溶解物，更多液体稀释示意",
+          "size": "13px"
+        },
+        {
+          "text": "咖啡来源溶解物清水粉体",
+          "size": "13px"
+        },
+        {
+          "text": "1浸润2溶出3滤开",
+          "size": "15px"
+        },
+        {
+          "text": "点与颜色用于解释物质关系，大小、速度与色深均为示意。",
+          "size": "12px"
+        }
+      ],
+      "u06Idle": true,
+      "u06Return": true,
+      "allImages": [
+        [
+          {
+            "complete": true,
+            "width": 1536
+          },
+          {
+            "complete": true,
+            "width": 1254
+          },
+          {
+            "complete": true,
+            "width": 1371
+          },
+          {
+            "complete": true,
+            "width": 1440
+          },
+          {
+            "complete": true,
+            "width": 1440
+          },
+          {
+            "complete": true,
+            "width": 1440
+          },
+          {
+            "complete": true,
+            "width": 1440
+          },
+          {
+            "complete": true,
+            "width": 1536
+          }
+        ],
+        [
+          {
+            "complete": true,
+            "width": 1254
+          },
+          {
+            "complete": true,
+            "width": 1420
+          },
+          {
+            "complete": true,
+            "width": 1420
+          }
+        ],
+        [
+          {
+            "complete": true,
+            "width": 1254
+          },
+          {
+            "complete": true,
+            "width": 1254
+          },
+          {
+            "complete": true,
+            "width": 1254
+          }
+        ],
+        [],
+        [],
+        []
+      ]
+    }
+  ],
+  "errors": [],
+  "httpRequests": [],
+  "mountId": "1792677002027-szq15",
+  "fastLatestWins": true,
+  "reverseWheel": true,
+  "reducedStopped": true,
+  "sameMount": true,
+  "diagnosticVisible": false,
+  "passed": true
+}

@@ -367,7 +367,7 @@ export function installWorkbenchToolServices(context: { getMainWindow(): Browser
     build: { build: (request, signal) => buildWorkbenchDocumentExport(request, signal) },
     renderPdf: async (html, signal) => {
       signal?.throwIfAborted()
-      const bytes = await renderPdfFromHtml(html, context.getMainWindow() ?? undefined)
+      const bytes = await renderPdfFromHtml(html, context.getMainWindow() ?? undefined, signal)
       signal?.throwIfAborted()
       return bytes
     },

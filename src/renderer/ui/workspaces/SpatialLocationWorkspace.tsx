@@ -65,6 +65,7 @@ export interface SpatialLocationWorkspaceProps {
     commitInput?(): Promise<void>
     commit(): Promise<void>
     cancel(): void
+    preserve?(): Promise<boolean>
     undo(): void
     redo(): void
     report(message: string): void
@@ -211,6 +212,7 @@ export function SpatialLocationWorkspace(props: SpatialLocationWorkspaceProps) {
     commitInput: props.contentEditor?.commitInput,
     setComposing: props.contentEditor?.setComposing ? active => props.contentEditor!.setComposing!(active) : undefined,
     commit: () => props.contentEditor?.commit() ?? Promise.resolve(), cancel: () => props.contentEditor?.cancel(),
+    preserve: props.contentEditor?.preserve,
     undo: () => props.contentEditor?.undo(), redo: () => props.contentEditor?.redo(), host: () => viewport.current,
     report: message => props.contentEditor?.report(message),
     onSelectField: (spot, activate, read) => authorInteraction.selectNativeField(spot, activate, read),

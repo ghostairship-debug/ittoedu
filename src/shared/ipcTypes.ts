@@ -209,7 +209,10 @@ export interface DesktopAPI {
     suggestedName: string
     html: string
     projectPath?: string
+    requestId?: string
   }): Promise<{ path: string } | null>
+  cancelPdfExport?(input: { requestId: string }): Promise<boolean>
+  onPdfExportPrepared?(handler: (input: { requestId: string }) => void): () => void
   setPreviewNetworkPolicy(input: PreviewNetworkPolicyInput): Promise<void>
   releasePreviewNetworkPolicy(input: { leaseId: string }): Promise<void>
   createComponentBootstrap?(input: ComponentBootstrapInput): Promise<ComponentBootstrapLease>
@@ -292,6 +295,8 @@ export const IPC_CHANNELS = {
   exportWebPackage: 'export:write-web-package',
   exportBinary: 'export:write-binary',
   exportPdf: 'export:write-pdf',
+  cancelPdfExport: 'export:cancel-pdf',
+  pdfExportPrepared: 'export:pdf-prepared',
   documentExportBuildRequest: 'document-export:build-request',
   documentExportBuildReply: 'document-export:build-reply',
   frozenDeliveryBuild: 'document-export:frozen-build',

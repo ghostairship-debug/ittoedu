@@ -28,12 +28,13 @@ import { prepareMediaResource } from './admittedMediaResource'
 import { createBlankCourseProjectV10 } from '../../core/course/createCourseProjectV10'
 import { InMemoryComponentCompilation } from '../../core/components/compilation/InMemoryComponentCompilation'
 import { createEsbuildComponentCompiler } from './contentApply/compilation/esbuildComponentCompiler'
-import { ContentApplyService } from './contentApply/applyService'
+import { ContentApplyService, type ContentApplyPlanOptions } from './contentApply/applyService'
 import { readComponentProjectFileInput, prepareComponentProjectFileSource } from './projectFiles/componentPlatformFileInput'
 import { AgentFileService } from './execution/AgentFileService'
 import { HostArtifactDeliveryService } from './execution/HostArtifactDeliveryService'
 import { verifyContentResourceDiagnostic } from './contentApply/resources/verifyContentResourceDiagnostic'
 import { app } from 'electron'
+import { diagnosticLog } from '../diagnosticLog'
 import { DocumentInputRecovery } from './DocumentInputRecovery'
 import type { MediaFileDraftInput } from '../../shared/workbench/mediaFiles'
 import { matchesSavedDocument } from './execution/savedDocumentBinding'
@@ -104,7 +105,7 @@ export class DocumentHostService {
             this.pendingSourceSaveObservations.set(session, { ...observation, epoch })
         }
       },
-      onBindingRecovered: state => this.inputs.refresh(state) })
+      onBindingRecovered: state => this.refreshInputBinding(state) })
     this.registry = new DocumentRegistry({ persistence: this.journal, drivers: this.drivers, createId: randomUUID, bindingKey: binding => canonicalKey(binding.path),
       onClosed: () => { if (this.registry.size === 0) this.compilation.clear() } })
     this.compilation = new InMemoryComponentCompilation(createEsbuildComponentCompiler())
@@ -121,12 +122,12 @@ export class DocumentHostService {
           },
         }),
         prepareSource: prepareComponentProjectFileSource,
-        plan: input => new ContentApplyService({
+        plan: (input, options?: ContentApplyPlanOptions) => new ContentApplyService({
           session: { project: () => input.baseline.model.project, resources: () => input.baseline.model.resources,
             async dispatch() { throw new Error('工程内容规划不能提交正式状态') } },
           measure: async request => (await import('./contentApply/measurement/ElectronHtmlDesignMeasurement.js')).measureHtmlAtDesignViewport(request),
           compilation: this.compilation,
-        }).plan(input.request),
+        }).plan(input.request, undefined, options),
         apply: input => new ContentApplyService({
           session: { project: () => input.baseline.model.project,
             resources: () => input.baseline.model.resources,
@@ -207,6 +208,17 @@ export class DocumentHostService {
     }
   }
 
+  /** Binding metadata helps locate raw input; its maintenance cannot undo a
+   * completed save or make an already usable recovered document unavailable. */
+  private async refreshInputBinding(owner: Parameters<DocumentInputRecovery['refresh']>[0]): Promise<void> {
+    try { await this.inputs.refresh(owner) }
+    catch (error) {
+      void diagnosticLog.append({ source: 'main', message: '输入恢复记录的位置更新未完成，原始输入继续保留。',
+        stack: error instanceof Error ? error.stack : undefined,
+        details: { documentId: owner.documentId, operation: 'input-binding-refresh' } }).catch(() => undefined)
+    }
+  }
+
   bootstrapCourse(): Promise<DocumentSnapshot> {
     const live = this.registry.list().find(snapshot => snapshot.model.kind === 'course-v10')
     if (live) return Promise.resolve(live)
@@ -228,7 +240,9 @@ export class DocumentHostService {
     const snapshot = await this.registry.get(documentId).drain()
     if (snapshot.epoch !== epoch) throw new Error('输入所属文档已关闭或重开，原恢复记录未覆盖')
     const model = snapshot.model
-    if ((drafts.advanced ?? []).some(record => model.kind !== 'course-v10' || record.projectId !== model.project.id || record.documentId !== documentId || record.epoch !== epoch)
+    if ((drafts.advanced ?? []).some(record => record.documentId !== documentId || record.epoch !== epoch
+      || (model.kind === 'course-v10' ? record.projectId !== model.project.id
+        : (model.kind !== 'text' && model.kind !== 'markdown') || record.kind !== 'source' || record.projectId !== documentId))
       || [...(drafts.sourceConflicts ?? []), ...(drafts.sourceConflict ? [drafts.sourceConflict] : [])].some(record => model.kind === 'course-v10' || record.documentId !== documentId || record.epoch !== epoch)
       || (drafts.flow ?? []).some(record => model.kind !== 'course-v10' || record.projectId !== model.project.id || record.documentId && record.documentId !== documentId || record.documentEpoch !== epoch))
       throw new Error('原始输入不属于当前文档，原恢复记录未覆盖')
@@ -281,7 +295,7 @@ export class DocumentHostService {
           const owner = head ? { documentId: head.documentId, epoch: head.epoch, binding: head.binding,
             model: head.kind === 'course-v10' ? { kind: head.kind, project: { id: head.projectId! } } : { kind: head.kind } }
             : event.type === 'changed' ? event.snapshot : undefined
-          if (owner) void this.inputs.refresh(owner).catch(() => undefined)
+          if (owner) void this.refreshInputBinding(owner)
         }
         if (event.type === 'closed') {
           this.subscribed.delete(event.documentId)
@@ -531,8 +545,9 @@ export class DocumentHostService {
         current = await lease.acknowledgeSave(proof)
       })
     }
-    const revision = current?.revision ?? (await this.journal.inspect(documentId))?.revision
-    if (revision === undefined) return null
+    // Closing/discarding the authoring document does not invalidate the original
+    // disk publication. A retained proof can be queried without reopening it.
+    const revision = current?.revision ?? (await this.journal.inspect(documentId))?.revision ?? proof.savedRevision
     return { status: 'saved', documentId, epoch: proof.epoch, path: proof.binding.path,
       savedRevision: proof.savedRevision, currentRevision: revision, fileVersion: proof.binding.version,
       dirty: revision !== proof.savedRevision, warnings: [...(proof.warnings ?? []), ...(revision === proof.savedRevision ? [] : ['原操作已保存；之后的修改未由该操作保存'])] }
@@ -551,6 +566,7 @@ export class DocumentHostService {
 
   async saveToPath(documentId: string, filename?: string, overwriteConfirmed = false, onProgress?: DocumentSaveObserver, saveIdentity?: DocumentSaveIdentity): Promise<DocumentSnapshot> {
     const session = this.registry.get(documentId), initial = session.readIdentity(), saveId = randomUUID()
+    const identity = saveIdentity ?? { runId: saveId, operationId: saveId, requestDigest: documentDigest({ documentId, saveId, filename }) }
     const base = { saveId, documentId, epoch: initial.epoch }
     let observedRevision = initial.revision, terminal = false, enteredSession = false
     let savingProjectId: string | undefined
@@ -589,9 +605,23 @@ export class DocumentHostService {
       else { terminal = true; this.publishSave({ ...base, documentName, time: Date.now(), status: 'failed', revision: progress.revision, error: progress.error instanceof Error ? progress.error.message : String(progress.error) }) }
     }
     return this.fileCoordinator.withFileAccess(async () => {
-      const saved = await this.saveFile(documentId, filename, overwriteConfirmed, observer, saveIdentity)
+      let saved: DocumentSnapshot
+      try { saved = await this.saveFile(documentId, filename, overwriteConfirmed, observer, identity) }
+      catch (error) {
+        // The original Session/Registry save has exited before acquiring its file
+        // lease. Query the same publication; never reissue an uncertain disk save.
+        if (!enteredSession || !(error instanceof DocumentSaveFailure) || error.publication !== 'unknown') throw error
+        try {
+          const receipt = await this.lookupSave(documentId, identity)
+          if (!receipt || receipt.savedRevision === undefined || !this.registry.has(documentId) || this.registry.get(documentId) !== session) throw error
+          saved = await session.drain()
+          if (saved.binding.kind !== 'file' || saved.binding.path !== receipt.path || saved.binding.version !== receipt.fileVersion) throw error
+          observer({ status: 'saved', savedRevision: receipt.savedRevision, currentRevision: saved.revision,
+            binding: saved.binding, warnings: [...(receipt.warnings ?? [])] })
+        } catch { throw error }
+      }
       if (saved.binding.kind === 'file') await this.files.acknowledgeDocumentSave(saved.binding.path, saved.model.kind, saved.binding.version)
-      await this.inputs.refresh(saved)
+      await this.refreshInputBinding(saved)
       return saved
     }).catch(error => {
       this.pendingSourceSaveObservations.delete(session)
@@ -674,7 +704,7 @@ export class DocumentHostService {
       case 'close': return this.fileCoordinator.withFileAccess(async () => {
         this.fileCoordinator.assertResolved([], [input.documentId])
         const snapshot = await this.registry.get(input.documentId).drain()
-        await this.inputs.refresh(snapshot)
+        await this.refreshInputBinding(snapshot)
         await this.registry.close(input.documentId, { discardDirty: input.discardDirty, expected: input.expected ?? { epoch: snapshot.epoch, revision: snapshot.revision } })
         // Raw inputs survive normal close and formal discard until individually adopted or explicitly resolved.
         await this.journal.discard(input.documentId)
@@ -776,7 +806,7 @@ export class DocumentHostService {
           state.savedRevision = null
         }
         const restored = this.attach(await this.registry.restore(state))
-        await this.inputs.refresh(restored)
+        await this.refreshInputBinding(restored)
         return restored
       })
       case 'discard-recovery': return this.fileCoordinator.withFileAccess(async () => {

@@ -13,29 +13,33 @@ interface EncodedJournalValue {
 const isUint8Array = (value: unknown): value is Uint8Array => ArrayBuffer.isView(value)
   && Object.prototype.toString.call(value) === '[object Uint8Array]'
 
-function mapJournalResources(type: 'checkpoint', input: DurableDocumentState, resources: (value: DocumentResources) => DocumentResources, shareSavedText?: boolean): DurableDocumentState
-function mapJournalResources(type: 'transition', input: DocumentStateTransition, resources: (value: DocumentResources) => DocumentResources, shareSavedText?: boolean): DocumentStateTransition
+function mapJournalResources(type: 'checkpoint', input: DurableDocumentState, resources: (value: DocumentResources) => DocumentResources, shareSavedText?: boolean, retainInvalidHistory?: boolean): DurableDocumentState
+function mapJournalResources(type: 'transition', input: DocumentStateTransition, resources: (value: DocumentResources) => DocumentResources, shareSavedText?: boolean, retainInvalidHistory?: boolean): DocumentStateTransition
 function mapJournalResources(type: 'checkpoint' | 'transition', input: DurableDocumentState | DocumentStateTransition,
-  resources: (value: DocumentResources) => DocumentResources, shareSavedText?: boolean): DurableDocumentState | DocumentStateTransition
+  resources: (value: DocumentResources) => DocumentResources, shareSavedText?: boolean, retainInvalidHistory?: boolean): DurableDocumentState | DocumentStateTransition
 function mapJournalResources(type: 'checkpoint' | 'transition', input: DurableDocumentState | DocumentStateTransition,
-  resources: (value: DocumentResources) => DocumentResources, shareSavedText = false): DurableDocumentState | DocumentStateTransition {
+  resources: (value: DocumentResources) => DocumentResources, shareSavedText = false, retainInvalidHistory = false): DurableDocumentState | DocumentStateTransition {
+  const optional = <T>(value: T, map: (value: T) => T): T => {
+    try { return map(value) } catch (error) { if (!retainInvalidHistory) throw error; return value }
+  }
   const models = new WeakMap<DocumentModel, DocumentModel>()
   const model = (value: DocumentModel): DocumentModel => {
     let result = models.get(value)
     if (!result) { result = { ...value, resources: resources(value.resources) }; models.set(value, result) }
     return result
   }
-  const effect = (value: DocumentAcceptedChange): DocumentAcceptedChange => value.kind === 'replace'
+  const mapEffect = (value: DocumentAcceptedChange): DocumentAcceptedChange => value.kind === 'replace'
     ? { ...value, before: model(value.before), after: model(value.after) }
     : { ...value, beforeResources: resources(value.beforeResources), afterResources: resources(value.afterResources) }
-  const entry = (value: DocumentHistoryEntry): DocumentHistoryEntry => ({ ...value,
+  const effect = (value: DocumentAcceptedChange): DocumentAcceptedChange => optional(value, mapEffect)
+  const entry = (value: DocumentHistoryEntry): DocumentHistoryEntry => optional(value, value => ({ ...value,
     ...(value.before ? { before: model(value.before) } : {}), ...(value.after ? { after: model(value.after) } : {}),
-    ...(value.effects ? { effects: value.effects.map(effect) } : {}) })
-  const operation = (value: DurableDocumentState['operations'][number]): DurableDocumentState['operations'][number] => ({ ...value,
+    ...(value.effects ? { effects: value.effects.map(effect) } : {}) }))
+  const operation = (value: DurableDocumentState['operations'][number]): DurableDocumentState['operations'][number] => optional(value, value => ({ ...value,
     ...(value.before ? { before: model(value.before) } : {}), ...(value.after ? { after: model(value.after) } : {}),
     ...(value.effect ? { effect: effect(value.effect) } : {}),
     ...(value.sourceChange?.kind === 'edits' ? { sourceChange: { ...value.sourceChange,
-      beforeResources: resources(value.sourceChange.beforeResources), afterResources: resources(value.sourceChange.afterResources) } } : {}) })
+      beforeResources: resources(value.sourceChange.beforeResources), afterResources: resources(value.sourceChange.afterResources) } } : {}) }))
   let value: DurableDocumentState | DocumentStateTransition
   if (type === 'checkpoint') {
     const state = input as DurableDocumentState
@@ -46,14 +50,14 @@ function mapJournalResources(type: 'checkpoint' | 'transition', input: DurableDo
       && saved?.kind === state.model.kind && saved.source === state.model.source && saved.resources === state.model.resources) {
       models.set(saved, current)
     }
-    value = { ...state, model: current, ...(saved ? { savedModel: model(saved) } : {}),
+    value = { ...state, model: current, ...(saved ? { savedModel: optional(saved, model) } : {}),
       past: state.past.map(entry), future: state.future.map(entry), operations: state.operations.map(operation) }
   } else {
     const transition = input as DocumentStateTransition
     const history = transition.history
     value = { ...transition,
-      ...(transition.modelChange ? { modelChange: effect(transition.modelChange) } : {}),
-      ...(transition.savedModel && 'model' in transition.savedModel ? { savedModel: { model: model(transition.savedModel.model) } } : {}),
+      ...(transition.modelChange ? { modelChange: mapEffect(transition.modelChange) } : {}),
+      ...(transition.savedModel && 'model' in transition.savedModel ? { savedModel: { model: optional(transition.savedModel.model, model) } } : {}),
       ...(transition.operation ? { operation: operation(transition.operation) } : {}),
       ...(history?.type === 'push' ? { history: { ...history, entry: entry(history.entry) } }
         : history?.type === 'amend' ? { history: { ...history, effects: history.effects.map(effect) } }
@@ -177,8 +181,8 @@ export class DocumentJournalDecoder {
     decoder.readHeader()
     const value = decoder.readValue()
     return outer.type === 'checkpoint'
-      ? { type: 'checkpoint', value: mapJournalResources('checkpoint', value, resources => this.resources(resources)) }
-      : { type: 'transition', value: mapJournalResources('transition', value, resources => this.resources(resources)) }
+      ? { type: 'checkpoint', value: mapJournalResources('checkpoint', value, resources => this.resources(resources), false, true) }
+      : { type: 'transition', value: mapJournalResources('transition', value, resources => this.resources(resources), false, true) }
   }
 
   writer(): DocumentJournalCodec { return new DocumentJournalCodec(this.buffers) }

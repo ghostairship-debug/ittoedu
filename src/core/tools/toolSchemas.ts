@@ -25,6 +25,8 @@ export const textFormatInputSchema = z.object({ target: semanticId, style: docum
 export const objectLayoutInputSchema = z.object({ targets: z.array(semanticId).min(1), intent: z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('align'), alignment: z.enum(['left', 'center', 'right', 'top', 'middle', 'bottom']) }).strict(),
   z.object({ kind: z.literal('distribute'), axis: z.enum(['horizontal', 'vertical']) }).strict(),
+  z.object({ kind: z.literal('columns'), columns: z.array(z.array(semanticId)).min(2).optional(),
+    ratios: z.array(z.number().positive()).min(2).optional(), gap: z.number().nonnegative().optional() }).strict(),
 ]) }).strict()
 export const teacherEnsureInputSchema = z.object({ target: semanticId }).strict()
 export const surfaceRecipeInputSchema = z.object({ target: semanticId, recipeId: z.enum(RECIPE_CATALOG.map(recipe => recipe.id)),
@@ -39,9 +41,12 @@ const objectInsertOptionsSchema = z.object({ kind: z.enum(['text', 'formula', 's
   click: clickInteractionInputSchema.optional().describe('同次绑定正式点击规则；location-go 的 value 使用已观察目的页面句柄或路径；scene.next/scene.previous无需value，audio-play 使用已配置声音。'),
   text: z.string().optional(), shapeType: shapeDataSchema.shape.shapeType.optional(), chartType: z.enum(['bar', 'line', 'area', 'pie', 'donut']).optional(),
   table: tableContentInputSchema.optional().describe('表格的完整可见文字矩阵 {rows:[[...]],headerRowCount?}；软件分配行列/单元格身份，仅 kind=table 使用。'),
+  chart: chartTableDataSchema.optional().describe('图表分类与系列数值；软件分配分类、系列和点身份，仅 kind=chart 使用。'),
   appearance: professionalAppearanceInputSchema.optional().describe('可选初始专业外观，和 object.update 的 appearance 同义；只覆盖提供字段，省略时保留人工插入默认。文字/公式支持 fontSize、color、bold、lineHeight、shadows 等；图形、表格、图表使用其公开专业 style 字段，图形使用 fillColor、borderColor 等实际字段。input 当前不支持 appearance。'),
   x: z.number().finite().optional(), y: z.number().finite().optional(), width: z.number().positive().optional(), height: z.number().positive().optional(),
   center: z.object({ x: z.number().finite(), y: z.number().finite() }).strict().optional(), index: z.number().int().nonnegative().optional(),
+  after: semanticId.optional().describe('同一插入容器内已观察的整对象句柄，在该对象之后插入。'),
+  at: semanticId.optional().describe('已观察的Flow正文光标或文字选区句柄；保所选内容，在逻辑末端拆段插入。'),
   destination: z.enum(['document', 'paper']).optional(),
 }).strict()
 export const objectInsertInputSchema = z.union([
@@ -49,6 +54,10 @@ export const objectInsertInputSchema = z.union([
   objectInsertOptionsSchema.extend({ project: semanticId.optional(), path: semanticId }).strict(),
 ]).superRefine((value, context) => {
   if (value.table && value.kind !== 'table') context.addIssue({ code: 'custom', path: ['table'], message: 'table 内容仅用于插入表格' })
+  if (value.chart && value.kind !== 'chart') context.addIssue({ code: 'custom', path: ['chart'], message: 'chart 内容仅用于插入图表' })
+  if ([value.index, value.after, value.at].filter(value => value !== undefined).length > 1)
+    context.addIssue({ code: 'custom', message: 'index、after、at 只能指定一种插入位置' })
+  if (value.at && value.destination === 'paper') context.addIssue({ code: 'custom', path: ['at'], message: '正文光标只能用于正文插入' })
 })
 const tableShape = tableNativeContentObjectSchema.shape
 const tableEditSchema = z.discriminatedUnion('kind', [

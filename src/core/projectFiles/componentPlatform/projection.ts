@@ -7,7 +7,7 @@ import { prepareComponentAuthorSource, componentAuthorSourceModules, componentAu
 import { componentSourceFileText } from '../../components/compilation/componentCompilationInput'
 import { htmlDocumentKind } from '../../../shared/html/documentKind'
 import { createCourseSurface } from '../../course/courseSurfaceStructure'
-import { projectFlowDocument } from '../../components/document/flowDocumentProjection'
+import { projectFlowDocument, type FlowProjectionDiagnostic } from '../../components/document/flowDocumentProjection'
 import { serializeDocumentMarkdown, type MarkdownDocument } from '../../../shared/document/markdown'
 import { inlineHtml, serializeFlowHtml } from '../../../shared/document/html'
 import { componentAssetIds, sourceAssetIds, sourceModuleBindings } from '../../components/library/references'
@@ -525,18 +525,23 @@ export function componentProjectFiles(project: CourseProjectV10, resources: Docu
         { content: () => json(observed().source) }))
     }
     if (surface.kind === 'flow') {
-      const document = once(() => projectFlowDocument(project, surface.id))
+      const diagnostics: FlowProjectionDiagnostic[] = []
+      const document = once(() => projectFlowDocument(project, surface.id, diagnostics))
       const objectPaths = Object.fromEntries(files.flatMap(file => file.target?.kind === 'instance' && !file.binding && (file.kind === 'data' || file.kind === 'html') ? [[file.target.instanceId, file.path]] : []))
+      const note = (base: string) => {
+        document()
+        return [base, ...diagnostics.map(diagnostic => `${objectPaths[diagnostic.instanceId] ?? diagnostic.instanceId}：${diagnostic.message}`)].join('\n')
+      }
       const context = { assets: project.assets, packageName: (id: string) => id,
         instanceHtml: (id: string, childrenHtml?: string) => `<guoling-instance path="${(objectPaths[id] ?? '').replace(/&/g, '&amp;').replace(/"/g, '&quot;')}"${childrenHtml === undefined ? '' : ' data-flow-layout-group="true"'}>${childrenHtml ?? ''}</guoling-instance>` }
       files.push(deferredFile({ path: `${base}.body.html`, kind: 'html',
-        binding: { kind: 'flow', surfaceId: surface.id, format: 'html', get document() { return document() }, objectPaths },
-        note: '连续正文源文；专业文本、公式、表格、图表保可编辑语义，正式对象引用路径由软件维护。浮层和人工 frame 保留。' },
-        { content: () => serializeFlowHtml({ title: surface.title, blocks: document().content.blocks }, context) }))
+        binding: { kind: 'flow', surfaceId: surface.id, format: 'html', get document() { return document() }, objectPaths } },
+        { content: () => serializeFlowHtml({ title: surface.title, blocks: document().content.blocks }, context),
+          note: () => note('连续正文源文；专业文本、公式、表格、图表保可编辑语义，正式对象引用路径由软件维护。浮层和人工 frame 保留。') }))
       files.push(deferredFile({ path: `${base}.body.md`, kind: 'source',
-        binding: { kind: 'flow', surfaceId: surface.id, format: 'markdown', get document() { return document() }, objectPaths },
-        note: '正文 Markdown 投影；软件保留身份和专业字段，修改不覆盖浮层、行为或人工 frame。' },
-        { content: () => serializeDocumentMarkdown(document()) }))
+        binding: { kind: 'flow', surfaceId: surface.id, format: 'markdown', get document() { return document() }, objectPaths } },
+        { content: () => serializeDocumentMarkdown(document()),
+          note: () => note('正文 Markdown 投影；软件保留身份和专业字段，修改不覆盖浮层、行为或人工 frame。') }))
     }
   }
   const usedPaths = new Set(files.map(file => file.path))

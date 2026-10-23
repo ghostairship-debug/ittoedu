@@ -1,0 +1,23 @@
+[
+  {
+    "token": "cw-resource:bf21f1f3c12b8e71c3be87d2bf8b6f582565b7ce336e6979f3ef3dc73ac4ba42",
+    "assetId": "asset_9df1cfc6-452c-4e77-ad31-fa740c76cafe",
+    "relative": "assets/asset_9df1cfc6-452c-4e77-ad31-fa740c76cafe.webp",
+    "mimeType": "image/webp",
+    "sha256": "bf21f1f3c12b8e71c3be87d2bf8b6f582565b7ce336e6979f3ef3dc73ac4ba42"
+  },
+  {
+    "token": "cw-resource:9e4d43b239008c9e91dd8f947b19f8d0858c9a7fa4bfe4fac256c3b98c36df14",
+    "assetId": "asset_703c90fc-6dd3-47be-b5c5-3d0866a74ca0",
+    "relative": "assets/asset_703c90fc-6dd3-47be-b5c5-3d0866a74ca0.webp",
+    "mimeType": "image/webp",
+    "sha256": "9e4d43b239008c9e91dd8f947b19f8d0858c9a7fa4bfe4fac256c3b98c36df14"
+  },
+  {
+    "token": "cw-resource:49317b7e4b7295e0a6962b3074b2990c9c73e4c45ba27e1ff72c698360f279fd",
+    "assetId": "asset_b7752a11-a6db-4d2f-aa84-a31d5949ed08",
+    "relative": "assets/asset_b7752a11-a6db-4d2f-aa84-a31d5949ed08.webp",
+    "mimeType": "image/webp",
+    "sha256": "49317b7e4b7295e0a6962b3074b2990c9c73e4c45ba27e1ff72c698360f279fd"
+  }
+]

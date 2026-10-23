@@ -54,3 +54,21 @@ scratch/
 # Local archived evidence, profiles and recovery material stay in this checkout,
 # but are not product sources or remote Git payloads.
 docs/archive/local/
+
+# Coffee v07 local sessions and recovery snapshots stay on this computer.
+docs/creative-production/works/coffee-journey/design/v07/authoring/assemble-01/
+docs/creative-production/works/coffee-journey/design/v07/authoring/author-check-*/
+docs/creative-production/works/coffee-journey/design/v07/authoring/cold-check-*/
+docs/creative-production/works/coffee-journey/design/v07/authoring/composition-polish-*/
+docs/creative-production/works/coffee-journey/design/v07/authoring/delivery-cold-*/
+docs/creative-production/works/coffee-journey/design/v07/authoring/final-assembly-*/
+docs/creative-production/works/coffee-journey/design/v07/authoring/final-cold-*/
+docs/creative-production/works/coffee-journey/design/v07/authoring/inspect-01/
+docs/creative-production/works/coffee-journey/design/v07/authoring/reading-guard-*/
+docs/creative-production/works/coffee-journey/design/v07/authoring/runtime-snapshot/
+docs/creative-production/works/coffee-journey/design/v07/authoring/before-final-pass/
+docs/creative-production/works/coffee-journey/design/v07/authoring/*-files.json
+docs/creative-production/works/coffee-journey/design/v07/authoring/*-project.json
+
+# Keep revision exports locally; the editable work and final offline export are tracked.
+docs/creative-production/works/coffee-journey/design/v08/native/coffee-journey-v08-r*.html

@@ -1,9 +1,17 @@
 // @vitest-environment node
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AppState } from '../../src/main/appState'
+import type { DocumentSnapshot } from '../../src/shared/workbench/document'
 import { IPC_CHANNELS } from '../../src/shared/ipcTypes'
 
-const controls = vi.hoisted(() => ({ choice: 1, recoveryChoice: 0, dirty: true, crashed: false, clearRecovery: vi.fn(async () => undefined), clearFrames: vi.fn(), releaseLeases: vi.fn() }))
+type MessageBoxArguments = [Electron.MessageBoxOptions] | [Electron.BrowserWindow, Electron.MessageBoxOptions]
+
+const controls = vi.hoisted(() => ({
+  choice: 1, recoveryChoice: 0, dirty: true, crashed: false,
+  documents: [] as DocumentSnapshot[], order: [] as string[], barrierDepth: 0, maxBarrierDepth: 0,
+  stopExecution: vi.fn(), stopExternal: vi.fn(), operate: vi.fn(),
+  clearRecovery: vi.fn(async () => undefined), clearFrames: vi.fn(), releaseLeases: vi.fn(),
+}))
 vi.mock('electron', async () => {
   const { EventEmitter } = await import('node:events')
   const os = await import('node:os')
@@ -40,12 +48,19 @@ vi.mock('../../src/main/windowVisibility', () => ({ BACKGROUND_E2E_WINDOW_ORIGIN
 
 import { ipcMain, dialog } from 'electron'
 vi.mock('../../src/main/workbench/documentHost', () => ({
-  documentHost: () => ({ registry: { list: () => [], get: () => ({ drain: async () => undefined }) },
-    tools: { withWriteTaskBarrier: async (_ids: string[], work: () => Promise<unknown>) => work() } }),
+  documentHost: () => ({
+    registry: { list: () => controls.documents, get: (id: string) => ({ drain: async () => { controls.order.push('drain'); return controls.documents.find(document => document.documentId === id) } }) },
+    tools: { withWriteTaskBarrier: async (_ids: string[], work: () => Promise<unknown>) => {
+      controls.order.push('barrier-enter')
+      controls.maxBarrierDepth = Math.max(controls.maxBarrierDepth, ++controls.barrierDepth)
+      try { return await work() } finally { controls.barrierDepth--; controls.order.push('barrier-exit') }
+    } },
+    operate: controls.operate,
+  }),
 }))
 
-vi.mock('../../src/main/workbench/execution/ExecutionDesktopService', () => ({ executionDesktopService: async () => ({ stopTasksForDocument: vi.fn() }) }))
-vi.mock('../../src/main/workbench/external/externalDesktopService', () => ({ externalMcpService: async () => ({ stopForDocument: vi.fn() }) }))
+vi.mock('../../src/main/workbench/execution/ExecutionDesktopService', () => ({ executionDesktopService: async () => ({ stopTasksForDocument: controls.stopExecution }) }))
+vi.mock('../../src/main/workbench/external/externalDesktopService', () => ({ externalMcpService: async () => ({ stopForDocument: controls.stopExternal }) }))
 
 import { createMainWindow } from '../../src/main/createWindow'
 
@@ -56,10 +71,119 @@ async function openWindow() {
 }
 function requestId(window: { webContents: { send: unknown } }): string { return vi.mocked(window.webContents.send as (...args: unknown[]) => void).mock.calls.at(-1)?.[1] as string }
 async function settle() { await vi.advanceTimersByTimeAsync(0) }
-beforeEach(() => { vi.useFakeTimers(); controls.choice = 1; controls.recoveryChoice = 0; controls.dirty = true; controls.crashed = false; vi.mocked(dialog.showMessageBox).mockClear(); controls.clearRecovery.mockClear(); controls.clearFrames.mockReset(); controls.releaseLeases.mockReset() })
+beforeEach(() => {
+  vi.useFakeTimers(); controls.choice = 1; controls.recoveryChoice = 0; controls.dirty = true; controls.crashed = false
+  controls.documents = []; controls.order = []; controls.barrierDepth = 0; controls.maxBarrierDepth = 0
+  controls.stopExecution.mockReset().mockImplementation(async () => { controls.order.push('stop-execution') })
+  controls.stopExternal.mockReset().mockImplementation(async () => { controls.order.push('stop-external') })
+  controls.operate.mockReset()
+  vi.mocked(dialog.showMessageBox).mockReset().mockImplementation(async (...args: MessageBoxArguments) => {
+    const options = args.length === 1 ? args[0] : args[1]
+    return { response: options.title === '保存未完成的修改？' ? controls.choice : controls.recoveryChoice, checkboxChecked: false }
+  })
+  controls.clearRecovery.mockClear(); controls.clearFrames.mockReset(); controls.releaseLeases.mockReset()
+})
 afterEach(() => { ipcMain.removeAllListeners(); vi.useRealTimers() })
 
 describe('window close recovery handshake', () => {
+  it.each(['preserve', 'save', 'discard'] as const)('waits for return-to-editing from an open recovery dialog after the %s renderer is ready', async mode => {
+    controls.choice = mode === 'save' ? 0 : 1; controls.dirty = mode !== 'preserve'
+    let choose!: (result: { response: number; checkboxChecked: boolean }) => void
+    vi.mocked(dialog.showMessageBox).mockImplementation(async (...args: MessageBoxArguments): Promise<Electron.MessageBoxReturnValue> => {
+      const options = args.length === 1 ? args[0] : args[1]
+      if (options.title === '保存未完成的修改？') return { response: controls.choice, checkboxChecked: false }
+      return new Promise(resolve => { choose = resolve })
+    })
+    const { window, state } = await openWindow()
+    const contents = window.webContents
+    window.close(); await settle()
+    const request = requestId(window)
+    await vi.advanceTimersByTimeAsync(3_000)
+    const resultChannel = mode === 'preserve' ? IPC_CHANNELS.preserveAndCloseResult : mode === 'save' ? IPC_CHANNELS.saveAndCloseResult : IPC_CHANNELS.discardAndCloseResult
+    ipcMain.emit(resultChannel, { sender: contents }, request, true)
+    await settle()
+    expect(window.isDestroyed()).toBe(false)
+    expect(state.setDirty).not.toHaveBeenCalled()
+    choose({ response: 0, checkboxChecked: false }); await settle()
+    expect(window.isDestroyed()).toBe(false)
+    expect(contents.send).toHaveBeenLastCalledWith(IPC_CHANNELS.requestResumeClose)
+    expect(controls.operate).not.toHaveBeenCalled()
+  })
+  it.each([
+    { recoveryChoice: 0, trigger: 'close' },
+    { recoveryChoice: 2, trigger: 'unresponsive' },
+  ] as const)('waits for recovery choice $recoveryChoice opened by $trigger while discard writers are stopping', async ({ recoveryChoice, trigger }) => {
+    controls.documents = [{ documentId: 'live-document', epoch: 'epoch', revision: 1, dirty: true }] as DocumentSnapshot[]
+    let stopped!: () => void
+    controls.stopExecution.mockImplementationOnce(async () => {
+      controls.order.push('stop-execution')
+      await new Promise<void>(resolve => { stopped = resolve })
+    })
+    let choose!: (result: { response: number; checkboxChecked: boolean }) => void
+    vi.mocked(dialog.showMessageBox).mockImplementation(async (...args: MessageBoxArguments): Promise<Electron.MessageBoxReturnValue> => {
+      const options = args.length === 1 ? args[0] : args[1]
+      if (options.title === '保存未完成的修改？') return { response: 1, checkboxChecked: false }
+      return new Promise(resolve => { choose = resolve })
+    })
+    const { window, state } = await openWindow()
+    const contents = window.webContents
+    window.close(); await settle()
+    ipcMain.emit(IPC_CHANNELS.discardAndCloseResult, { sender: contents }, requestId(window), true)
+    await settle()
+    expect(controls.stopExecution).toHaveBeenCalledOnce()
+    if (trigger === 'close') window.close()
+    else window.emit('unresponsive')
+    await settle()
+    expect(dialog.showMessageBox).toHaveBeenLastCalledWith(window, expect.objectContaining({ title: '关闭前保全尚未完成' }))
+    stopped(); await settle()
+    expect(window.isDestroyed()).toBe(false)
+    expect(controls.operate).not.toHaveBeenCalled()
+    choose({ response: recoveryChoice, checkboxChecked: false }); await settle()
+    expect(window.isDestroyed()).toBe(recoveryChoice === 2)
+    expect(controls.operate).not.toHaveBeenCalled()
+    expect(controls.clearRecovery).not.toHaveBeenCalled()
+    expect(state.setDirty).not.toHaveBeenCalled()
+    expect(controls.maxBarrierDepth).toBe(1)
+    if (recoveryChoice === 0) expect(contents.send).toHaveBeenLastCalledWith(IPC_CHANNELS.requestResumeClose)
+    else expect(controls.order.slice(-5)).toEqual(['barrier-enter', 'stop-execution', 'stop-external', 'drain', 'barrier-exit'])
+  })
+  it('finishes the original close attempt before forcing recovery through stop, barrier and drain', async () => {
+    controls.crashed = true; controls.recoveryChoice = 2
+    controls.documents = [{ documentId: 'live-document', epoch: 'epoch', revision: 1, dirty: true }] as DocumentSnapshot[]
+    let stopped!: () => void
+    controls.stopExecution.mockImplementation(async () => {
+      controls.order.push('stop-execution')
+      await new Promise<void>(resolve => { stopped = resolve })
+    })
+    const { window } = await openWindow()
+    window.on('closed', () => { controls.order.push('closed') })
+    window.close(); await settle()
+    expect(window.isDestroyed()).toBe(false)
+    expect(controls.stopExecution).toHaveBeenCalledWith('live-document')
+    expect(controls.maxBarrierDepth).toBe(1)
+    expect(controls.order).toEqual(['drain', 'barrier-enter', 'barrier-exit', 'barrier-enter', 'stop-execution'])
+    expect(controls.operate).not.toHaveBeenCalled()
+    stopped(); await settle()
+    expect(window.isDestroyed()).toBe(true)
+    expect(controls.order.slice(-4)).toEqual(['stop-external', 'drain', 'barrier-exit', 'closed'])
+    expect(controls.operate).not.toHaveBeenCalled()
+    expect(controls.clearRecovery).not.toHaveBeenCalled()
+  })
+  it('keeps the window open when stopping a forced recovery close fails', async () => {
+    controls.crashed = true; controls.recoveryChoice = 2
+    controls.documents = [{ documentId: 'live-document', epoch: 'epoch', revision: 1, dirty: true }] as DocumentSnapshot[]
+    controls.stopExecution.mockRejectedValueOnce(new Error('stop failed'))
+    const report = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    try {
+      const { window } = await openWindow()
+      window.close(); await settle()
+      expect(window.isDestroyed()).toBe(false)
+      expect(window.webContents.send).toHaveBeenLastCalledWith(IPC_CHANNELS.requestResumeClose)
+      expect(controls.operate).not.toHaveBeenCalled()
+      expect(controls.clearRecovery).not.toHaveBeenCalled()
+      expect(report).toHaveBeenCalledWith(expect.stringContaining('窗口保持打开'), expect.any(Error))
+    } finally { report.mockRestore() }
+  })
   it('skips a crashed renderer and closes only after an explicit confirmed-recovery choice', async () => {
     controls.crashed = true
     const { window, state } = await openWindow()

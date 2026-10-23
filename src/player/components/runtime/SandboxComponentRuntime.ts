@@ -22,6 +22,7 @@ import { createWebResourceUrlLease } from '../../../components/web/resourceUrlLe
 import { installCourseNavigationReady } from '../../../components/web/courseNavigation'
 import { createDomAuthoring, domAuthoringFactorySource } from '../../../components/web/authoringDom'
 import { installOwnedDocumentAuthoring, installAuthoringInputArbitration, authoringCaretOffset, type OwnedDocumentBlobCarriers } from '../../../components/web/ownedDocumentAuthoring'
+import { createAuthoringFrameGeometry } from '../../../components/web/authoringFrame'
 import { ownedDocumentExecutionSource } from '../../../components/web/ownedDocumentIdentity'
 import { domTextOverrideRealmSource, type DomTextOverrideController } from '../../lightEdit/domTextOverrides'
 import type { LightEditTextOverride } from '../../../shared/contracts/runtime/lightEdit'
@@ -49,7 +50,7 @@ export function componentAuthorPaintAtPoint(root: Element, x: number, y: number)
 }
 
 /** Serialized trusted bridge only. Author code arrives through its dedicated port. */
-function contentRealmBridge(nonce: string, fragmentBox: { resourceFactory: typeof createWebResourceUrlLease; navigationReady: typeof installCourseNavigationReady; isMeasured: typeof isMeasuredWebFragmentBox; extent: typeof measuredFragmentExtent; refreshResources: typeof refreshWebResourceReferences; fragments: typeof createComponentFragmentProjection; authoring: typeof createDomAuthoring; paintAt: typeof componentAuthorPaintAtPoint; clientMatrix: typeof componentClientMatrix; ownedAuthoring: typeof installOwnedDocumentAuthoring; input: typeof installAuthoringInputArbitration; caret: typeof authoringCaretOffset; textOverrides(roots: readonly Node[], rules: readonly LightEditTextOverride[]): DomTextOverrideController }, authoredDocument?: { release(): void; resourceLease?: ReturnType<typeof createWebResourceUrlLease>; blobCarriers?: OwnedDocumentBlobCarriers; transportFragment?: boolean; setActivity?(value: { active: boolean; visible: boolean; playing: boolean }): void; onDiagnostic?(listener: (message: string) => void): () => void }) {
+function contentRealmBridge(nonce: string, fragmentBox: { resourceFactory: typeof createWebResourceUrlLease; navigationReady: typeof installCourseNavigationReady; isMeasured: typeof isMeasuredWebFragmentBox; extent: typeof measuredFragmentExtent; refreshResources: typeof refreshWebResourceReferences; fragments: typeof createComponentFragmentProjection; authoring: typeof createDomAuthoring; paintAt: typeof componentAuthorPaintAtPoint; clientMatrix: typeof componentClientMatrix; ownedAuthoring: typeof installOwnedDocumentAuthoring; input: typeof installAuthoringInputArbitration; caret: typeof authoringCaretOffset; frameGeometry: typeof createAuthoringFrameGeometry; textOverrides(roots: readonly Node[], rules: readonly LightEditTextOverride[]): DomTextOverrideController }, authoredDocument?: { release(): void; resourceLease?: ReturnType<typeof createWebResourceUrlLease>; blobCarriers?: OwnedDocumentBlobCarriers; transportFragment?: boolean; setActivity?(value: { active: boolean; visible: boolean; playing: boolean }): void; onDiagnostic?(listener: (message: string) => void): () => void }) {
   const resourceLease = authoredDocument?.resourceLease ?? fragmentBox.resourceFactory(window)
   const navigationReady = fragmentBox.navigationReady(window)
   const runtimeInstance = (value: ComponentInstance): ComponentInstance => ({ ...value, data: JSON.parse(resourceLease.project(JSON.stringify(value.data))) })
@@ -138,8 +139,10 @@ function contentRealmBridge(nonce: string, fragmentBox: { resourceFactory: typeo
       return
     }
     if (!fragmentDefaults || authoredDocument && !authoredDocument.transportFragment) return
+    // This carrier uses viewport coordinates. Keep its root out of document
+    // scrolling when the host Flow places the component below the viewport.
     fragmentDefaults.textContent = sourceViewport
-      ? `html,body{width:100%;height:100%;margin:0;overflow:hidden}#component-root{position:absolute!important;left:${-sourceViewport.left}px!important;top:${-sourceViewport.top}px!important;width:${sourceViewport.width}px!important;height:${layoutInput?.mode === 'flow-content' ? 'auto' : `${sourceViewport.height}px`}!important;margin:0}`
+      ? `html,body{width:100%;height:100%;margin:0;overflow:hidden}#component-root{position:fixed!important;left:${-sourceViewport.left}px!important;top:${-sourceViewport.top}px!important;width:${sourceViewport.width}px!important;height:${layoutInput?.mode === 'flow-content' ? 'auto' : `${sourceViewport.height}px`}!important;margin:0}`
       : `html,body,#component-root{width:100%;height:${layoutInput?.mode === 'flow-content' ? 'auto' : '100%'};margin:0}`
     // This body is a synthetic fragment carrier. Keep descendant margins inside
     // its measured box so natural Flow reports the whole visible content extent.
@@ -736,7 +739,7 @@ function contentRealmBridge(nonce: string, fragmentBox: { resourceFactory: typeo
               x: point.x + measuredPaintOrigin.left, y: point.y + measuredPaintOrigin.top }),
             onSelection: selection => send({ type: 'authoring.selection', ...selection }),
             onHover: authorKey => send({ type: 'authoring.hover', authorKey }),
-          })
+          }, fragmentBox.frameGeometry)
           cleanups.add(() => { ownedAuthoring?.dispose(); ownedAuthoring = undefined })
           contentAuthoring = fragmentBox.authoring(documentRoot ? document.documentElement : root, {
             records: () => Object.fromEntries(Object.entries(instance.authoring?.records ?? {}).filter(([, record]) => !record.scope?.['document:path'])),
@@ -1073,7 +1076,7 @@ export async function preparePublishedNativeComponent(artifact: CompiledComponen
   // The author module still arrives over a dedicated port and is loaded by the child.
   const realmClientMatrix = `(function(){const ${multiplyMatrices.name}=(${multiplyMatrices.toString()});const ${transformPoint.name}=(${transformPoint.toString()});return (${componentClientMatrix.toString()});})()`
   const bridge = (programs?: import('../../../components/web/authoredDocumentBootstrap').AuthoredDocumentPrograms) =>
-    `(function(){${programs ? `const authored=${authoredDocumentProgramsSource(programs)};` : ''}(${contentRealmBridge.toString()})(${JSON.stringify(nonce)}, {resourceFactory:(${createWebResourceUrlLease.toString()}),navigationReady:(${installCourseNavigationReady.toString()}),isMeasured:(${isMeasuredWebFragmentBox.toString()}),extent:(${measuredFragmentExtent.toString()}),fragments:(${createComponentFragmentProjection.toString()}),refreshResources:(${refreshWebResourceReferences.toString()}),authoring:${domAuthoringFactorySource()},paintAt:(root,x,y)=>(${componentPaintStack.toString()})(root,x,y).length>0,clientMatrix:${realmClientMatrix},ownedAuthoring:(${installOwnedDocumentAuthoring.toString()}),input:(${installAuthoringInputArbitration.toString()}),caret:(${authoringCaretOffset.toString()}),textOverrides:(roots,rules)=>{${domTextOverrideRealmSource()}return createPageTextOverrides(roots,rules)}}${programs ? ',authored' : ''})})()`
+    `(function(){${programs ? `const authored=${authoredDocumentProgramsSource(programs)};` : ''}(${contentRealmBridge.toString()})(${JSON.stringify(nonce)}, {resourceFactory:(${createWebResourceUrlLease.toString()}),navigationReady:(${installCourseNavigationReady.toString()}),isMeasured:(${isMeasuredWebFragmentBox.toString()}),extent:(${measuredFragmentExtent.toString()}),fragments:(${createComponentFragmentProjection.toString()}),refreshResources:(${refreshWebResourceReferences.toString()}),authoring:${domAuthoringFactorySource()},paintAt:(root,x,y)=>(${componentPaintStack.toString()})(root,x,y).length>0,clientMatrix:${realmClientMatrix},ownedAuthoring:(${installOwnedDocumentAuthoring.toString()}),input:(${installAuthoringInputArbitration.toString()}),caret:(${authoringCaretOffset.toString()}),frameGeometry:(${createAuthoringFrameGeometry.toString()}),textOverrides:(roots,rules)=>{${domTextOverrideRealmSource()}return createPageTextOverrides(roots,rules)}}${programs ? ',authored' : ''})})()`
   let runtimeBuiltinKey = snapshots.builtinKey, sourceWebDocument = false
   const pendingDocumentKeys: Record<string, string> = {}
   const readAuthorHtml = (instance: ComponentInstance | undefined): string | undefined => {

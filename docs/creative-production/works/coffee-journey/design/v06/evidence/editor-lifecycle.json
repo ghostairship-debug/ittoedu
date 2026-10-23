@@ -1,0 +1,41 @@
+{
+  "edit": {
+    "coffeeUnderlay": "journey-v1",
+    "mountId": "1792674892190-7e3h2",
+    "chapter": "1",
+    "stage": "cup",
+    "reading": "{\"containerId\":\"47415583-2d75-4b72-9c46-dfd29b47d82a\",\"activeInstanceId\":\"5b629c9b-d44b-4fe6-a156-ed4d3b03880d\",\"progress\":0}",
+    "events": "2",
+    "tick": "3",
+    "idle": "true",
+    "reduced": "false",
+    "size": "1340x897",
+    "suspended": "true"
+  },
+  "try": {
+    "coffeeUnderlay": "journey-v1",
+    "mountId": "1792674892190-7e3h2",
+    "chapter": "1",
+    "stage": "cup",
+    "reading": "{\"containerId\":\"47415583-2d75-4b72-9c46-dfd29b47d82a\",\"activeInstanceId\":\"5b629c9b-d44b-4fe6-a156-ed4d3b03880d\",\"progress\":0}",
+    "events": "4",
+    "tick": "6",
+    "idle": "false",
+    "reduced": "false",
+    "size": "1340x897",
+    "suspended": "false"
+  },
+  "editAgain": {
+    "coffeeUnderlay": "journey-v1",
+    "mountId": "1792674892190-7e3h2",
+    "chapter": "1",
+    "stage": "cup",
+    "reading": "{\"containerId\":\"47415583-2d75-4b72-9c46-dfd29b47d82a\",\"activeInstanceId\":\"5b629c9b-d44b-4fe6-a156-ed4d3b03880d\",\"progress\":0}",
+    "events": "5",
+    "tick": "8",
+    "idle": "true",
+    "reduced": "false",
+    "size": "1340x897",
+    "suspended": "true"
+  }
+}

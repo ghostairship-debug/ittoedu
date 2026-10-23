@@ -161,6 +161,14 @@ describe('component library model', () => {
       requiresTrustConfirmation: true,
     })
   })
+
+  it('uses the same multi-term purpose matcher while retaining library facets', () => {
+    const entries = [catalogEntry(1, { name: '演示图表', tags: ['数据'], subject: ['数学'] }),
+      catalogEntry(2, { name: '柱形图', tags: ['比较数据'], subject: ['数学'] })]
+    const query = { query: '柱形图 数据', subject: '数学', schoolStage: '', category: '' }
+    expect(filterComponentLibraryPackages(entries, query)).toEqual([entries[1], entries[0]])
+    expect(filterComponentLibraryPackages(entries, { ...query, subject: '语文' })).toEqual([])
+  })
 })
 
 describe('built-in component catalog trust', () => {

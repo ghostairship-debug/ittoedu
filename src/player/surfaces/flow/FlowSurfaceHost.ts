@@ -29,6 +29,7 @@ import {
   resolveFlowMediaLayoutProjection,
 } from '../../../shared/flowMediaLayout'
 import { ShapeNode } from '../../../shared/contracts/native-v1'
+import { createFlowReadingNavigation } from '../../../shared/flowReading'
 
 
 import { nativeRenderInputFromPublishedItem, paintPublishedNativeRenderInput } from '../native/publishedNativeRendering'
@@ -206,6 +207,10 @@ export class FlowSurfaceHost {
   #content: HTMLElement | null = null
   #controllerPlane: HTMLElement | null = null
   #article: HTMLElement | null = null
+  #readingNavigation = createFlowReadingNavigation(() => {
+    const article = this.#article, body = article?.querySelector<HTMLElement>('.flow-runtime-reading')
+    return article && body ? { scroll: article, body } : null
+  }, id => this.#article?.querySelector<HTMLElement>(`#${cssEscape(id)}`))
   #globalUnderlay: HTMLElement | null = null
   #surfaceUnderlay: HTMLElement | null = null
   #surfaceOverlay: HTMLElement | null = null
@@ -476,6 +481,7 @@ export class FlowSurfaceHost {
   }
 
   async suspend(): Promise<void> {
+    this.#readingNavigation.cancel()
     this.#invalidateInteractions()
     this.#active = false
     if (this.#controller instanceof TeacherControllerComponentHost) this.#controller.suspend()
@@ -570,6 +576,7 @@ export class FlowSurfaceHost {
   }
 
   destroy(): Promise<void> {
+    this.#readingNavigation.dispose()
     return this.#enqueue(async () => {
       this.#viewportObserver?.disconnect()
       this.#viewportObserver = null
@@ -907,6 +914,7 @@ export class FlowSurfaceHost {
   }
 
   #render(): void {
+    this.#readingNavigation.cancel()
     if (
       !this.#root
       || !this.#globalUnderlay
@@ -1305,7 +1313,7 @@ export class FlowSurfaceHost {
         return { width: overlay.clientWidth || CANVAS_WIDTH, height: overlay.clientHeight || CANVAS_HEIGHT }
       },
       getConstraintCanvas: () => {
-        const chrome = this.#options.playbackView?.chrome?.controllerInsets
+        const chrome = this.#options.playbackView?.chrome?.insets
         return { width: (overlay.clientWidth || CANVAS_WIDTH) - (chrome?.right ?? 0),
           height: (overlay.clientHeight || CANVAS_HEIGHT) - (chrome?.bottom ?? 0) }
       },
@@ -1361,7 +1369,7 @@ export class FlowSurfaceHost {
   #controllerFrame(item: PublishedTeacherControllerItem) {
     const overlay = this.#controllerPlane ?? this.#overlay
     return projectFlowComponentControllerFrame(item.frame,
-      { width: overlay?.clientWidth || CANVAS_WIDTH, height: overlay?.clientHeight || CANVAS_HEIGHT }, this.#options.playbackView?.chrome?.controllerInsets)
+      { width: overlay?.clientWidth || CANVAS_WIDTH, height: overlay?.clientHeight || CANVAS_HEIGHT }, this.#options.playbackView?.chrome?.insets)
   }
 
   #syncTeacherControllerSession(geometryOnly = false): void {
@@ -1473,11 +1481,7 @@ export class FlowSurfaceHost {
   }
 
   #scrollToAnchor(anchorId: string): void {
-    const target = this.#article?.querySelector<HTMLElement>(`#${cssEscape(anchorId)}`)
-    for (let ancestor = target?.parentElement; ancestor; ancestor = ancestor.parentElement) {
-      if (ancestor.tagName === 'DETAILS') (ancestor as HTMLDetailsElement).open = true
-    }
-    target?.scrollIntoView({ block: 'start' })
+    void this.#readingNavigation.goToInstance(anchorId)
   }
 }
 

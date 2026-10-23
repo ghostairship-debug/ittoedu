@@ -85,6 +85,14 @@ export function ElementAiCard({ cardKey, capture, onClose, onRebind }: { cardKey
     {question && <ExecutionQuestionCard pending={question} onAnswer={answer => elementCards.answer(cardKey, question.runId, question.callId, answer)} />}
     {approval && <ExecutionApprovalCard pending={approval} onDecide={decision => elementCards.approve(cardKey, approval.runId, approval.callId, decision)} />}
     {(error || card.error || card.textLost) && <p className="element-ai-card__failure" role="alert">{error || card.error || card.textLost}</p>}
+    {card.refreshError && <div className="element-ai-card__failure" role="alert">
+      <p>{card.refreshError}</p>
+      <div className="element-ai-card__actions">
+        <button type="button" onClick={() => elementCards.retryRefresh(cardKey)}>重试读取任务状态</button>
+        {!text && <button type="button" disabled={sending || card.closing || card.unconfirmed}
+          onClick={() => elementCards.dismiss(cardKey)}>收起卡片（任务保留）</button>}
+      </div>
+    </div>}
     </div>
     <form className="element-ai-card__form" onSubmit={event => { event.preventDefault(); void send() }}>
       <textarea ref={input} aria-label="AI 修改要求" value={draft} rows={2}

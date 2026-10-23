@@ -4,7 +4,7 @@ import { componentSurface, componentContainers, resolveComponentPresentation, ty
 import type { ComponentEdit } from '../../shared/contracts/component-platform/operations'
 import { CourseV10Driver } from '../../core/drivers/CourseV10Driver'
 import { createBlankCourseProjectV10 } from '../../core/course/createCourseProjectV10'
-import { DocumentAckUnknownError, DocumentBlockedInputError, DocumentProjection } from './DocumentProjection'
+import { DocumentAckUnknownError, DocumentBlockedInputError, DocumentProjection, type DocumentInputOperationResolution } from './DocumentProjection'
 import { captureComponentOperation, presentationComponentEdits, equalComponentValue, componentValueAt } from '../../core/drivers/courseV10Operations'
 import type { ComponentOperationBatch } from '../../shared/contracts/component-platform/operations'
 import { containerEditingPath, normalizeEditingContext } from './containerEditingContext'
@@ -21,18 +21,24 @@ export interface CapturedCourseTarget {
   readonly surfaceId: string | null
   readonly rootInstanceId?: string | null
   readonly editingContainerId?: string | null
+  readonly editingPlane?: 'underlay' | 'overlay'
   readonly instanceIds: readonly string[]
   readonly instanceId: string | null
   readonly activation?: number
   readonly selectionIdentity?: string
 }
 
+/** Foreground qualification is primitive view state, never a retained model. */
+export type CapturedCourseViewScope = Pick<CapturedCourseTarget,
+  'documentId' | 'epoch' | 'surfaceId' | 'activeStateId' | 'activation' | 'selectionIdentity' | 'instanceIds'
+  | 'rootInstanceId' | 'editingContainerId' | 'editingPlane'>
+
 export interface CapturedComponentOperation extends ComponentOperationBatch {
   readonly documentId: string
   readonly epoch: string
 }
 
-type CourseComponentInputResolution = 'ready' | 'applied' | 'pending'
+export type CourseComponentInputResolution = 'ready' | 'applied' | 'pending'
 type CourseComponentInputResolver = (action: 'retry' | 'cancel') => Promise<CourseComponentInputResolution>
 
 /** Runtime-only capability for the exact operation owned by a retained input. */
@@ -58,12 +64,32 @@ export function isCourseComponentInputFailure(value: unknown): value is CourseCo
     && typeof value.resolveInput === 'function'
 }
 
+/** The caller already owns the raw input (or has reverted its gesture preview).
+ * End only this proposal. Unknown results still use the original receipt and may
+ * remain pending; a non-input error says nothing about another pending proposal. */
+export async function settleCourseComponentInput(error: unknown): Promise<CourseComponentInputResolution> {
+  return isCourseComponentInputFailure(error) ? error.resolveInput('cancel') : 'ready'
+}
+
 export interface CourseAgentUndoTarget {
   readonly documentId: string
   readonly epoch: string
   readonly expectedTopOperationId: string
   readonly projection: DocumentProjection
   readonly navigation: number
+}
+
+/** Read/settle identity for an input whose original control may no longer exist. */
+export interface CourseUnconfirmedInputIdentity {
+  readonly documentId: string
+  readonly epoch: string
+  readonly operationId: string
+}
+
+/** Renderer foreground fact only; the Main document was already created/opened. */
+export interface CourseDocumentActivationResult {
+  readonly documentId: string
+  readonly activated: boolean
 }
 
 export interface CourseV10ViewState {
@@ -91,10 +117,13 @@ export interface CourseV10ViewState {
   error: string | null
 }
 
-export function capturedCourseViewIsCurrent(view: CourseV10ViewState, target: CapturedCourseTarget): boolean {
+export function capturedCourseViewIsCurrent(view: CourseV10ViewState, target: CapturedCourseViewScope): boolean {
   return view.activeDocumentId === target.documentId && view.snapshot?.epoch === target.epoch
     && view.surfaceId === target.surfaceId && view.activeStateId === target.activeStateId
     && (target.activation === undefined || target.activation === view.activation)
+    && (!('rootInstanceId' in target) || target.rootInstanceId === view.rootInstanceId)
+    && (!('editingContainerId' in target) || target.editingContainerId === view.editingContainerId)
+    && (!('editingPlane' in target) || target.editingPlane === view.editingPlane)
     && (target.selectionIdentity === undefined || target.selectionIdentity === interactionSelectionIdentity(view.interactionSelection))
     && view.selectedInstanceIds.length === target.instanceIds.length
     && view.selectedInstanceIds.every((id, index) => id === target.instanceIds[index])
@@ -230,11 +259,47 @@ export class CourseV10DocumentBridge {
     if (!value) throw new Error('课件文档尚未打开')
     return value
   }
-  async activate(documentId: string): Promise<void> {
-    const navigation = ++this.navigation
-    await this.activateAtNavigation(documentId, navigation)
+  captureUnconfirmedInput(documentId = this.state.activeDocumentId ?? ''): CourseUnconfirmedInputIdentity | null {
+    const view = this.projections.get(documentId)?.read(), operationId = view?.error?.operationId, epoch = view?.committed?.epoch
+    return operationId && epoch ? Object.freeze({ documentId, epoch, operationId }) : null
   }
-  private async activateAtNavigation(documentId: string, navigation: number): Promise<void> {
+  private unconfirmedInputProjection(target: CourseUnconfirmedInputIdentity): DocumentProjection {
+    const projection = this.projections.get(target.documentId)
+    if (!projection || projection.read().committed?.epoch !== target.epoch) throw new Error('原输入的文档会话已改变，请重新核实当前文档')
+    return projection
+  }
+  /** This is a query of the original receipt, never a replay or a new proposal. */
+  async queryUnconfirmedInput(target: CourseUnconfirmedInputIdentity): Promise<DocumentInputOperationResolution> {
+    const projection = this.unconfirmedInputProjection(target)
+    const outcome = await projection.queryInputResolution(target.operationId, { refresh: false })
+    if (this.unconfirmedInputProjection(target) !== projection) throw new Error('核实输入期间文档连接已改变')
+    return outcome
+  }
+  /** The explicit caller has preserved raw input before ending this exact
+   * unapplied proposal. Pending/unknown and every other input keep their owners. */
+  async endUnconfirmedInput(target: CourseUnconfirmedInputIdentity): Promise<CourseComponentInputResolution> {
+    const projection = this.unconfirmedInputProjection(target), outcome = await this.queryUnconfirmedInput(target)
+    if (outcome.status === 'pending' || outcome.status === 'missing') return 'pending'
+    if (outcome.status === 'settled' && 'revision' in outcome.result) return 'applied'
+    if (this.unconfirmedInputProjection(target) !== projection) throw new Error('核实输入期间文档连接已改变')
+    if (outcome.status === 'unsubmitted') await projection.releaseUnsubmittedOperation(target.operationId)
+    else await projection.releaseRejectedOperation(target.operationId)
+    return 'ready'
+  }
+  async activate(documentId: string, activateIf?: () => boolean): Promise<boolean> {
+    const navigation = ++this.navigation
+    return this.activateAtNavigation(documentId, navigation, activateIf)
+  }
+  captureViewScope(): () => boolean {
+    const documentId = this.state.activeDocumentId
+    if (!documentId) return () => true
+    const { epoch, surfaceId, activeStateId, activation, selectionIdentity, instanceIds, rootInstanceId,
+      editingContainerId, editingPlane } = this.captureOwnedTarget(documentId)
+    const scope: CapturedCourseViewScope = { documentId, epoch, surfaceId, activeStateId, activation, selectionIdentity,
+      instanceIds, rootInstanceId, editingContainerId, editingPlane }
+    return () => capturedCourseViewIsCurrent(this.state, scope)
+  }
+  private async activateAtNavigation(documentId: string, navigation: number, activateIf?: () => boolean): Promise<boolean> {
     let projection = this.projections.get(documentId)
     if (!projection) {
       let pending = this.attaching.get(documentId)
@@ -251,20 +316,27 @@ export class CourseV10DocumentBridge {
       }
       projection = await pending
     }
-    if (navigation !== this.navigation) { this.publish(); return }
+    // Creation/opening owns its Main result, but the user still owns foreground
+    // navigation while it and this attachment are in flight.
+    if (navigation !== this.navigation || activateIf?.() === false) {
+      this.publish(); return false
+    }
     this.publish({ activeDocumentId: projection.documentId, activation: this.state.activation + 1 })
+    return true
   }
   async create(model: Extract<DocumentModel, { kind: 'course-v10' }> = {
     kind: 'course-v10', project: createBlankCourseProjectV10(), resources: { assets: {}, components: {} },
-  }): Promise<void> {
-    const host = this.host(), navigation = ++this.navigation
+  }, activateIf?: () => boolean): Promise<CourseDocumentActivationResult> {
+    const host = this.host(), navigation = ++this.navigation, scopeIsCurrent = this.captureViewScope()
     const snapshot = await host.create(model, `${model.project.title}.glx`)
-    if (host === this.api) await this.activateAtNavigation(snapshot.documentId, navigation)
+    const activated = host === this.api && await this.activateAtNavigation(snapshot.documentId, navigation, () => scopeIsCurrent() && activateIf?.() !== false)
+    return { documentId: snapshot.documentId, activated }
   }
-  async open(path: string): Promise<void> {
-    const host = this.host(), navigation = ++this.navigation
+  async open(path: string, activateIf?: () => boolean): Promise<CourseDocumentActivationResult> {
+    const host = this.host(), navigation = ++this.navigation, scopeIsCurrent = this.captureViewScope()
     const snapshot = await host.open(path)
-    if (host === this.api) await this.activateAtNavigation(snapshot.documentId, navigation)
+    const activated = host === this.api && await this.activateAtNavigation(snapshot.documentId, navigation, () => scopeIsCurrent() && activateIf?.() !== false)
+    return { documentId: snapshot.documentId, activated }
   }
   async edit(edits: ComponentEdit[], historyGroup?: string, documentId?: string) {
     return this.editCaptured(this.capture(edits, this.captureOwnedTarget(documentId)), historyGroup)
@@ -288,6 +360,7 @@ export class CourseV10DocumentBridge {
       editingProject: this.state.activeDocumentId === documentId && this.state.project === project
         ? this.state.editingProject ?? project : projectContainerPresentationStates(project, selection?.presentationStates ?? {}), activeStateId, surfaceId,
       rootInstanceId: selection?.rootInstanceId ?? null, editingContainerId: selection?.editingContainerId ?? null,
+      editingPlane: selection?.editingPlane,
       instanceIds: [...interactionInstanceIds(selection?.target)], instanceId: interactionInstanceIds(selection?.target)[0] ?? null,
       selectionIdentity: interactionSelectionIdentity(selection?.target) }
   }
@@ -304,6 +377,8 @@ export class CourseV10DocumentBridge {
     const { documentId, epoch, ...command } = captured
     const projection = this.projection(documentId)
     if (projection.read().committed?.epoch !== epoch) throw new Error('捕获的文档会话已关闭，请重新开始编辑')
+    if (projection.read().error?.kind === 'disconnected' && !projection.read().pending.length)
+      await projection.recoverConnectionIfIdle()
     // Existing failures must be resolved by their input owners before another proposal is queued.
     if (projection.read().error) throw new Error(projection.read().error!.message)
     let result: DocumentOperationResult
@@ -339,6 +414,14 @@ export class CourseV10DocumentBridge {
     }
     const resolve = async (action: 'retry' | 'cancel'): Promise<CourseComponentInputResolution> => {
       assertCurrent()
+      // A definite refusal or an envelope never sent to Main needs no extra
+      // read merely to stop owning it. Retrying still reads and checks the target.
+      if (action === 'cancel' && (rejected || unsubmitted)) {
+        if (unsubmitted) await projection.releaseUnsubmittedOperation(operationId)
+        else await projection.releaseRejectedOperation(operationId)
+        assertCurrent()
+        return 'ready'
+      }
       const outcome = await projection.queryInputResolution(operationId)
       assertCurrent()
       if (outcome.status === 'pending') return 'pending'

@@ -1,6 +1,6 @@
 import type { ComponentInstance, CourseProjectV10 } from '../../../shared/contracts/component-platform'
 import { componentPaintStyle, applyComponentPaintStyle } from '../../../player/components/componentPlacementStyle'
-import { isNativeFlowLayoutGroup, nativeFlowItemStyle } from '../../../shared/flowNativeLayout'
+import { isNativeFlowLayoutGroup, nativeFlowItemStyle, flowStickyStyle } from '../../../shared/flowNativeLayout'
 import { equalComponentValue } from '../../../core/drivers/courseV10Operations'
 import { textAppearanceSchema, textSizingSchema } from '../../../components/text/data'
 import { textAppearanceStyles } from '../../../components/text/render'
@@ -80,8 +80,9 @@ export function createFlowBlockPaint(paper: HTMLElement, surfaceId: string, read
       entry = { input, textInput: input.text, tableInput: input.table, text,
         table: builtin === 'guoling.table' ? previous?.table && equalComponentValue(previous.tableInput, input.table) ? previous.table : tablePaint(data) : undefined,
         display: typeof display === 'string' ? display : undefined,
-        native: element.dataset.flowBodyBlock !== 'course-instance' && nativeParent
-          ? { display: 'block', minWidth: '0px', boxSizing: 'border-box', margin: '0px', ...nativeFlowItemStyle(instance) } : {} }
+        native: element.dataset.flowBodyBlock !== 'course-instance'
+          ? { ...(nativeParent ? { display: 'block', minWidth: '0px', boxSizing: 'border-box', margin: '0px', ...nativeFlowItemStyle(instance) } : {}),
+            ...flowStickyStyle(instance) } : {} }
       entries.set(element, entry)
     }
     mutate(() => {

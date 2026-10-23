@@ -1,6 +1,7 @@
 import { createDomAuthoring, domAuthoringFactorySource } from '../../components/web/authoringDom'
 import { installHtmlBlobCapture, type HtmlBlobCaptureEntry } from '../../components/web/htmlBlobCapture'
-import { installAuthoringInputArbitration } from '../../components/web/ownedDocumentAuthoring'
+import { installAuthoringInputArbitration, authoringCaretOffset } from '../../components/web/ownedDocumentAuthoring'
+import { createAuthoringFrameGeometry } from '../../components/web/authoringFrame'
 import type { ComponentAuthorRecord, ComponentAuthorScope } from '../contracts/component-platform/runtime'
 import type { HtmlPreviewRequest } from '../workbench/htmlPreview'
 import { decodeHtmlEntities, indexHtmlElements, scanHtmlSource } from './htmlSourceScanner'
@@ -9,17 +10,19 @@ import { mapSrcsetUrls } from './responsiveImage'
 type HtmlPreviewTargetReport = Extract<HtmlPreviewRequest, { type: 'html-preview.resolve-target' }>['targets'][number]
 
 export type HtmlFrameSources = Record<string, { html: string; base: string; resources?: Record<string, string> }>
+export type HtmlFrameTargetEvent = { event: 'targets' | 'edit-targets'; targets: HtmlPreviewTargetReport[] }
+  | { event: 'selection'; handle: string; anchor: number; focus: number; word?: boolean }
 export interface HtmlFrameAuthoringBridge {
   setRecords(records: Record<string, ComponentAuthorRecord>): void
   setSources(sources: HtmlFrameSources): void
   setEditMode(enabled: boolean): void
   setVisibility(active: boolean): void
   refresh(): void
-  confirm(handles: string[]): void
+  confirm(handles: string[], scanId?: string): void
   select(handle: string | null, editable: boolean): void
   previewGeometry(authorKey: string, geometry: ComponentAuthorRecord['overrides']['geometry'] | null): void
   isRemoteHandle(handle: string): boolean
-  onTargets(listener: (event: { event: 'targets' | 'edit-targets'; targets: HtmlPreviewTargetReport[] }) => void): () => void
+  onTargets(listener: (event: HtmlFrameTargetEvent) => void): () => void
   shadowRoot(host: Element): ShadowRoot | null | undefined
   resourceReference(value: string, relativeBase?: string): string | undefined
   resolveResource(value: string): string | undefined
@@ -43,14 +46,17 @@ export function neededHtmlFrameSources(scope: ComponentAuthorScope | undefined, 
 /** The bridge runs with page privileges only. Its source is also embedded in saved HTML. */
 export function installHtmlFrameAuthoring(factory: typeof createDomAuthoring, targetDocument: Document = document,
   inputFactory: typeof installAuthoringInputArbitration = installAuthoringInputArbitration, replaceExisting = false,
-  captureFactory: typeof installHtmlBlobCapture = installHtmlBlobCapture): HtmlFrameAuthoringBridge {
+  captureFactory: typeof installHtmlBlobCapture = installHtmlBlobCapture,
+  frameFactory: typeof createAuthoringFrameGeometry = createAuthoringFrameGeometry,
+  caretFactory: typeof authoringCaretOffset = authoringCaretOffset): HtmlFrameAuthoringBridge {
   const win = targetDocument.defaultView as Window & typeof globalThis & { __cwHtmlFrameAuthoring?: HtmlFrameAuthoringBridge }
   const previous = win.__cwHtmlFrameAuthoring
   if (previous && !replaceExisting) return previous
   const initialControl = previous?.controlState?.()
   previous?.dispose()
   const doc = targetDocument, protocol = 'cw-html-frame-authoring', roots = new WeakMap<Element, ShadowRoot>()
-  const listeners = new Set<(event: { event: 'targets' | 'edit-targets'; targets: HtmlPreviewTargetReport[] }) => void>()
+  const listeners = new Set<(event: HtmlFrameTargetEvent) => void>()
+  const frameGeometry = frameFactory()
   const children = new Map<HTMLIFrameElement, { route: string; source: string; sources: string[]; ready: boolean; aliasesSent?: boolean; token?: string; deltaState?: boolean; recordsVersion?: number; sourcesVersion?: number }>()
   const remoteHandles = new Set<string>(), handles = new WeakMap<Node, string>(), nodes = new Map<string, Node>()
   const selectedRoots = new Map<EventTarget, () => void>()
@@ -64,7 +70,9 @@ export function installHtmlFrameAuthoring(factory: typeof createDomAuthoring, ta
   const fileAliases = new Map<string, string>(), fileUrls = new Map<string, string>()
   let route = '', sourceChain: string[] = [], base = doc.baseURI, observe = false, editMode = initialControl?.editMode ?? false, visible = initialControl?.visible ?? true
   let adapter: ReturnType<typeof createDomAuthoring> | undefined, disposed = false, scanQueued = false, childrenDirty = false, serial = 0, selected: string | null = null
-  let marker: HTMLDivElement | undefined
+  let marker: HTMLDivElement | undefined, confirmationScan: string | undefined
+  const confirmed = new Set<string>()
+  let selectingText: { node: Node; handle: string; anchor: number } | undefined
   const pausedMedia = new Set<HTMLMediaElement>(), pausedAnimations = new Set<Animation>()
   const token = Math.random().toString(36).slice(2)
   const restore: Array<() => void> = []
@@ -172,6 +180,11 @@ export function installHtmlFrameAuthoring(factory: typeof createDomAuthoring, ta
     if (route) win.parent.postMessage({ protocol, type: 'targets', event, targets }, '*')
     else for (const listener of listeners) listener({ event, targets })
   }
+  const emitSelection = (selection: { handle: string; anchor: number; focus: number; word?: boolean }) => {
+    if (disposed) return
+    if (route) win.parent.postMessage({ protocol, type: 'selection', ...selection }, '*')
+    else for (const listener of listeners) listener({ event: 'selection', ...selection })
+  }
   const childState = (frame: HTMLIFrameElement) => {
     const persisted = frame.getAttribute('data-cw-frame-source')
     let source = frameSources.get(frame) ?? persisted ?? frame.getAttribute('src') ?? ''
@@ -204,20 +217,25 @@ export function installHtmlFrameAuthoring(factory: typeof createDomAuthoring, ta
     if (!bounds.width || !bounds.height) return undefined
     let handle = handles.get(node)
     if (!handle) { handle = `html-frame-${token}-${++serial}`; handles.set(node, handle); nodes.set(handle, node) }
+    const textStyle = adapter?.textStyle(node)
     return { handle, kind: value.record.kind, domPath: [], sectionOrder: null,
       rawText: isImage(node) ? node.getAttribute('src') ?? '' : node.nodeValue ?? '', attributeName: isImage(node) ? 'src' : null,
       rect: bounds, scriptCreated: true, authoring: { authorKey: value.authorKey, record: value.record }, bindingStatus: value.bindingStatus,
-      geometry: adapter?.geometry(node), ...(value.textStyle ? { textStyle: value.textStyle } : {}) }
+      geometry: adapter?.geometry(node), ...(textStyle ? { textStyle } : {}) }
   }
   const draw = () => {
     marker?.remove(); marker = undefined
-    if (!editMode || !visible || !selected) return
-    const node = nodes.get(selected)
-    if (!node?.isConnected) return
-    const bounds = localRect(node), element = doc.createElement('div')
-    element.dataset.htmlPreviewEditMarkers = ''
-    element.style.cssText = `position:fixed!important;pointer-events:none!important;z-index:2147483647!important;box-sizing:border-box!important;left:${bounds.x}px!important;top:${bounds.y}px!important;width:${bounds.width}px!important;height:${bounds.height}px!important;border:2px solid #2563eb!important;`
-    doc.documentElement.append(element); marker = element
+    if (!editMode || !visible) return
+    const root = doc.createElement('div'); root.dataset.htmlPreviewEditMarkers = ''
+    root.style.cssText = 'position:fixed!important;inset:0!important;pointer-events:none!important;z-index:2147483647!important;'
+    for (const handle of new Set([...confirmed, ...(selected ? [selected] : [])])) {
+      const node = nodes.get(handle)
+      if (!node?.isConnected || !adapter?.visible(node)) continue
+      const bounds = localRect(node), element = doc.createElement('div'), active = handle === selected
+      element.style.cssText = `position:absolute!important;pointer-events:none!important;box-sizing:border-box!important;left:${bounds.x}px!important;top:${bounds.y}px!important;width:${bounds.width}px!important;height:${bounds.height}px!important;border:${active ? '2px solid #2563eb' : '1px dashed rgba(37,99,235,.55)'}!important;`
+      root.append(element)
+    }
+    if (root.childElementCount) { doc.documentElement.append(root); marker = root }
   }
   const scan = () => {
     scanQueued = false
@@ -231,26 +249,34 @@ export function installHtmlFrameAuthoring(factory: typeof createDomAuthoring, ta
     if (scanQueued || disposed || !visible || !editMode || !adapter) return
     scanQueued = true; win.requestAnimationFrame(scan)
   }
-  const clicked = (event: Event) => {
+  const clicked = (event: Event, point?: { x: number; y: number }, word = false) => {
     const pointer = event as MouseEvent
     if (!adapter || !editMode || !visible || pointer.button !== 0) return
+    const x = point?.x ?? pointer.clientX, y = point?.y ?? pointer.clientY
     const target = pointer.composedPath()[0] as Node | undefined
     let node: Node | undefined = isImage(target) ? target : undefined
     if (!node) {
-      const position = doc.caretPositionFromPoint?.(pointer.clientX, pointer.clientY)
-      const range = (doc as Document & { caretRangeFromPoint?(x: number, y: number): Range | null }).caretRangeFromPoint?.(pointer.clientX, pointer.clientY)
+      const position = doc.caretPositionFromPoint?.(x, y)
+      const range = (doc as Document & { caretRangeFromPoint?(x: number, y: number): Range | null }).caretRangeFromPoint?.(x, y)
       const text = position?.offsetNode ?? range?.startContainer
       if (text?.nodeType === 3 && target?.contains(text)) node = text
     }
     if (!node) for (const value of adapter.scan()) {
       if (value.record.kind !== 'text' || !target?.contains(value.node)) continue
       const bounds = localRect(value.node)
-      if (pointer.clientX >= bounds.x && pointer.clientX <= bounds.x + bounds.width && pointer.clientY >= bounds.y && pointer.clientY <= bounds.y + bounds.height) { node = value.node; break }
+      if (x >= bounds.x && x <= bounds.x + bounds.width && y >= bounds.y && y <= bounds.y + bounds.height) { node = value.node; break }
     }
-    if (!node) node = adapter.hit?.(pointer.clientX, pointer.clientY)?.node
+    if (!node) node = adapter.hit?.(x, y)?.node
     const value = node && report(node)
     if (!value) return
-    selected = value.handle; draw(); emit('targets', [value]); event.preventDefault(); event.stopImmediatePropagation()
+    const offset = node && caretFactory(doc, node, x, y)
+    selectingText = node && offset !== undefined ? { node, handle: value.handle, anchor: offset } : undefined
+    if (offset !== undefined) value.selection = { anchor: offset, focus: offset, ...(word || event.type === 'dblclick' ? { word: true } : {}) }
+    const wasSelected = selected === value.handle
+    selected = value.handle; draw()
+    if (wasSelected && value.selection) emitSelection({ handle: value.handle, ...value.selection })
+    else emit('targets', [value])
+    event.preventDefault(); event.stopImmediatePropagation()
   }
   // Accessible child documents keep the top preview's author target owner;
   // opaque children report through their existing local adapter and bridge.
@@ -262,11 +288,15 @@ export function installHtmlFrameAuthoring(factory: typeof createDomAuthoring, ta
     select: (point, event, word) => {
       const owner = (win as Window & { __cwHtmlPreviewInputOwner?: Parameters<typeof inputFactory>[1] }).__cwHtmlPreviewInputOwner
       if (owner?.editing()) owner.select(point, event, word)
-      else clicked(event)
+      else clicked(event, point, word)
     },
     extend: (point, event) => {
       const owner = (win as Window & { __cwHtmlPreviewInputOwner?: Parameters<typeof inputFactory>[1] }).__cwHtmlPreviewInputOwner
       if (owner?.editing()) owner.extend?.(point, event)
+      else if (selectingText && editMode && visible) {
+        const focus = caretFactory(doc, selectingText.node, point.x, point.y)
+        if (focus !== undefined) emitSelection({ handle: selectingText.handle, anchor: selectingText.anchor, focus })
+      }
     },
   })
   restore.push(releaseInput)
@@ -282,6 +312,7 @@ export function installHtmlFrameAuthoring(factory: typeof createDomAuthoring, ta
   }
   const configureAdapter = () => {
     adapter?.dispose(); adapter = undefined
+    confirmed.clear(); selected = null; selectingText = undefined; draw()
     if (!observe || !doc.documentElement) { attachEvents(); return }
     adapter = factory(doc.documentElement, { records: () => records,
       scope: { 'html:frame': route, 'html:sources': JSON.stringify(sourceChain) }, shadowRoot: host => roots.get(host) ?? host.shadowRoot,
@@ -290,7 +321,7 @@ export function installHtmlFrameAuthoring(factory: typeof createDomAuthoring, ta
     adapter.setActive(visible)
     attachEvents(); schedule()
   }
-  const sourceScript = () => `(${installHtmlFrameAuthoring.toString()})((${factory.toString()}),undefined,(${inputFactory.toString()}),true,(${captureFactory.toString()}));`
+  const sourceScript = () => `(${installHtmlFrameAuthoring.toString()})((${factory.toString()}),undefined,(${inputFactory.toString()}),true,(${captureFactory.toString()}),(${frameFactory.toString()}),(${caretFactory.toString()}));`
   // The portable bootstrap has no module loader; retain the shared srcset
   // candidate semantics here rather than splitting data URL commas.
   const mapSrcset = (srcset: string, resolve: (value: string) => string | undefined) => {
@@ -451,7 +482,9 @@ export function installHtmlFrameAuthoring(factory: typeof createDomAuthoring, ta
           }
           for (const state of children.values()) state.aliasesSent = false
         }
-        observe = Boolean(value.observe); editMode = Boolean(value.editMode); setVisible(Boolean(value.visible))
+        observe = Boolean(value.observe)
+        if (editMode !== Boolean(value.editMode)) { confirmed.clear(); confirmationScan = undefined; selectingText = undefined }
+        editMode = Boolean(value.editMode); setVisible(Boolean(value.visible))
         if (changed) configureAdapter(); else if (changedRecords) adapter?.refresh()
         if (visible) schedule()
         if (visible) syncChildren(); else childrenDirty = true
@@ -460,7 +493,7 @@ export function installHtmlFrameAuthoring(factory: typeof createDomAuthoring, ta
           recordsVersion: previous.recordsVersion, sourcesVersion: previous.sourcesVersion }); sendState(frame) }
         return
       }
-      if (value.type === 'confirm') { schedule(); broadcast('confirm', { handles: value.handles }); return }
+      if (value.type === 'confirm') { applyConfirmation(value.handles, value.scanId); return }
       if (value.type === 'select') { selected = nodes.has(value.handle) ? value.handle : null; adapter?.suppressText(selected && value.editable ? nodes.get(selected) : undefined); draw(); broadcast('select', { handle: value.handle, editable: value.editable }); return }
       if (value.type === 'preview') { adapter?.previewGeometry(value.authorKey, value.geometry ?? null); draw(); broadcast('preview', { authorKey: value.authorKey, geometry: value.geometry }); return }
     }
@@ -473,18 +506,30 @@ export function installHtmlFrameAuthoring(factory: typeof createDomAuthoring, ta
       state.deltaState = value.deltaState === true
       state.ready = true; sendState(frame); return
     }
+    if (value.type === 'selection' && typeof value.handle === 'string'
+      && Number.isSafeInteger(value.anchor) && value.anchor >= 0 && Number.isSafeInteger(value.focus) && value.focus >= 0) {
+      emitSelection({ handle: value.handle, anchor: value.anchor, focus: value.focus, ...(value.word === true ? { word: true } : {}) })
+      return
+    }
     if (value.type === 'targets' && (value.event === 'targets' || value.event === 'edit-targets') && Array.isArray(value.targets)) {
-      const bounds = frame.getBoundingClientRect(), sx = bounds.width / (frame.offsetWidth || bounds.width || 1), sy = bounds.height / (frame.offsetHeight || bounds.height || 1)
+      const map = frameGeometry.frameMatrix(frame)
+      if (!map) return
       const targets = value.targets.slice(0, 64).map((target: HtmlPreviewTargetReport) => {
         remoteHandles.add(target.handle)
-        const rect = { x: bounds.x + (frame.clientLeft + target.rect.x) * sx, y: bounds.y + (frame.clientTop + target.rect.y) * sy, width: target.rect.width * sx, height: target.rect.height * sy }
-        const map = [sx, 0, 0, sy, bounds.x + frame.clientLeft * sx, bounds.y + frame.clientTop * sy]
+        const rect = frameGeometry.transformRect(target.rect, map)
         const geometry = target.geometry
         const parent = geometry?.parentToInstance
-        return { ...target, rect, ...(geometry && parent ? { geometry: { ...geometry, parentToInstance: [map[0]! * parent[0], map[3]! * parent[1], map[0]! * parent[2], map[3]! * parent[3], map[0]! * parent[4] + map[4]!, map[3]! * parent[5] + map[5]!] } } : {}) }
+        const textStyle = frameGeometry.transformTextStyle(target.textStyle, map)
+        return { ...target, rect, ...(textStyle ? { textStyle } : {}),
+          ...(geometry && parent ? { geometry: { ...geometry, parentToInstance: frameGeometry.multiply(map, parent) } } : {}) }
       }) as HtmlPreviewTargetReport[]
       emit(value.event, targets)
     }
+  }
+  const applyConfirmation = (handles: string[], scanId?: string) => {
+    if (scanId !== undefined && scanId !== confirmationScan) { confirmed.clear(); confirmationScan = scanId }
+    for (const handle of handles) if (nodes.has(handle)) confirmed.add(handle)
+    draw(); broadcast('confirm', { handles, scanId })
   }
   win.addEventListener('message', message)
   const observer = new win.MutationObserver(changes => {
@@ -502,13 +547,16 @@ export function installHtmlFrameAuthoring(factory: typeof createDomAuthoring, ta
     syncChildren(); schedule()
   })
   observer.observe(doc, { subtree: true, childList: true })
+  win.addEventListener('scroll', schedule, true)
+  win.addEventListener('resize', schedule)
   const api: HtmlFrameAuthoringBridge = {
     setRecords(value) { records = value; recordsVersion++; adapter?.refresh(); for (const frame of children.keys()) sendState(frame); schedule() },
     setSources(value) { sources = value; sourcesVersion++; registerResources(); for (const frame of children.keys()) sendState(frame) },
-    setEditMode(value) { editMode = value; if (!value) adapter?.suppressText(); for (const frame of children.keys()) sendState(frame); schedule(); draw() },
+    setEditMode(value) { if (editMode !== value) { confirmed.clear(); confirmationScan = undefined; selectingText = undefined }
+      editMode = value; if (!value) adapter?.suppressText(); for (const frame of children.keys()) sendState(frame); schedule(); draw() },
     setVisibility(value) { setVisible(value); for (const frame of children.keys()) sendState(frame); draw() },
     refresh() { adapter?.refresh(); syncChildren(); for (const frame of children.keys()) sendState(frame); schedule() },
-    confirm(handles) { broadcast('confirm', { handles }) },
+    confirm(handles, scanId) { applyConfirmation(handles, scanId) },
     select(handle, editable) { selected = nodes.has(handle ?? '') ? handle : null; adapter?.suppressText(selected && editable ? nodes.get(selected) : undefined); draw(); broadcast('select', { handle, editable }) },
     previewGeometry(authorKey, geometry) { adapter?.previewGeometry(authorKey, geometry ?? null); broadcast('preview', { authorKey, geometry }); draw() },
     isRemoteHandle(handle) { return remoteHandles.has(handle) },
@@ -520,11 +568,12 @@ export function installHtmlFrameAuthoring(factory: typeof createDomAuthoring, ta
     controlState: () => ({ editMode, visible }),
     dispose() {
       if (disposed) return; disposed = true; observer.disconnect(); win.removeEventListener('message', message)
+      win.removeEventListener('scroll', schedule, true); win.removeEventListener('resize', schedule)
       for (const release of selectedRoots.values()) release(); adapter?.dispose(); marker?.remove()
       blobCapture?.dispose()
       for (const frame of replayUrls.keys()) releaseReplay(frame, true)
       for (const release of restore.reverse()) release(); children.clear(); listeners.clear(); nodes.clear(); selectedRoots.clear()
-      pausedMedia.clear(); pausedAnimations.clear()
+      pausedMedia.clear(); pausedAnimations.clear(); confirmed.clear(); selectingText = undefined
       if (win.__cwHtmlFrameAuthoring === api) delete win.__cwHtmlFrameAuthoring
     },
   }
@@ -539,14 +588,14 @@ export function installHtmlFrameAuthoring(factory: typeof createDomAuthoring, ta
 }
 
 export function htmlFrameAuthoringBootstrapSource(): string {
-  return `(${installHtmlFrameAuthoring.toString()})(${domAuthoringFactorySource()},undefined,(${installAuthoringInputArbitration.toString()}),true,(${installHtmlBlobCapture.toString()}));`.replace(/<\/script/gi, '<\\/script')
+  return `(${installHtmlFrameAuthoring.toString()})(${domAuthoringFactorySource()},undefined,(${installAuthoringInputArbitration.toString()}),true,(${installHtmlBlobCapture.toString()}),(${createAuthoringFrameGeometry.toString()}),(${authoringCaretOffset.toString()}));`.replace(/<\/script/gi, '<\\/script')
 }
 
 /** Inject the same ordinary DOM bridge before authored scripts, retaining source outside software additions. */
 export function decorateHtmlFrameAuthoring(source: string, bootstrap = htmlFrameAuthoringBootstrapSource(), options: { sources?: HtmlFrameSources; base?: string; resources?: Record<string, string> } = {},
-  changes?: Array<{ from: number; to: number; inserted: number }>): string {
+  changes?: Array<{ from: number; to: number; inserted: number }>, preparedTokens?: readonly import('./htmlSourceScanner').HtmlSourceToken[]): string {
   const marker = 'cw-html-frame-bootstrap'
-  const tokens = scanHtmlSource(source).tokens
+  const tokens = preparedTokens ?? scanHtmlSource(source).tokens
   const installed = source.includes(marker) ? indexHtmlElements(source, tokens).elements
     .filter(element => element.name === 'script' && element.id === marker && element.endTag) : []
   const patches: Array<{ start: number; end: number; value: string }> = []

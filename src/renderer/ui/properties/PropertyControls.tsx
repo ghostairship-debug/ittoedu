@@ -1,5 +1,5 @@
 import { Check, ChevronDown } from 'lucide-react'
-import { isCourseComponentInputFailure, type CourseComponentInputFailure } from '../../documents/CourseV10DocumentBridge'
+import { isCourseComponentInputFailure, settleCourseComponentInput, type CourseComponentInputFailure } from '../../documents/CourseV10DocumentBridge'
 import {
   createContext,
   Fragment,
@@ -30,12 +30,12 @@ export interface PropertyDraftRecovery {
   readonly baseline?: string
   readonly composing: boolean
 }
-interface PropertyCommitFailure {
+export interface PropertyCommitFailure {
   readonly error: CourseComponentInputFailure
   readonly value: string
   readonly bindingKey: string
   readonly label: string
-  readonly kind: 'text' | 'number'
+  readonly kind: PropertyDraftRecovery['kind']
 }
 
 export interface PropertyDraftResume {
@@ -47,12 +47,14 @@ export interface PropertyDraftResume {
 interface PropertyDraftPort {
   hasDirty(): boolean
   readDraft(): PropertyDraftRecovery
+  /** A live browser composition, distinct from an unfinished recovered input. */
+  isComposing?(): boolean
   inFlight?(): Promise<boolean> | undefined
   commitFailure?(): PropertyCommitFailure | undefined
   restoreDraft?(draft: PropertyDraftRecovery, resume?: PropertyDraftResume): void | boolean
 }
 type PropertyDraftEntry = { flush: PropertyDraftFlush; read: () => PropertyDraftRecovery | null; dirty: () => boolean;
-  pending?: () => Promise<boolean> | undefined; commitFailure?: () => PropertyCommitFailure | undefined; restore?: (draft: PropertyDraftRecovery) => void | boolean; mounted?: boolean }
+  composing?: () => boolean; pending?: () => Promise<boolean> | undefined; commitFailure?: () => PropertyCommitFailure | undefined; restore?: (draft: PropertyDraftRecovery) => void | boolean; mounted?: boolean }
 const pendingPropertyDrafts = new Set<PropertyDraftEntry>()
 const propertyDraftListeners = new Set<() => void>()
 const suspendedPropertyDocuments = new Set<string>()
@@ -124,33 +126,50 @@ export function restorePropertiesDrafts(documentId: string, records: readonly Pr
 }
 
 /** Saving commits focused property drafts without moving focus. IME retains its native composition. */
-export async function flushPropertiesDrafts(documentId?: string): Promise<boolean> {
+export async function flushPropertiesDrafts(documentId?: string, mode: 'apply' | 'preserve' = 'apply'): Promise<boolean> {
   let complete = true
   for (const entry of [...pendingPropertyDrafts]) {
     if (!belongsToDocument(entry, documentId)) continue
+    // An unmounted field is retained input, not an instruction to replay it on
+    // save or while starting another field. An already admitted write still
+    // owns its ACK and the document bridge keeps any unknown outcome guarded.
+    if (entry.mounted === false) {
+      await entry.pending?.()
+      if (!entry.dirty()) pendingPropertyDrafts.delete(entry)
+      continue
+    }
     const before = entry.read()?.raw
     let finished = await entry.flush()
     // A newer edit arriving during the ACK is new work, not a retry of the old command.
     if (!finished && entry.dirty() && before !== entry.read()?.raw) finished = await entry.flush()
-    if (!finished) complete = false
-    if (entry.mounted === false && !entry.dirty()) pendingPropertyDrafts.delete(entry)
+    // The document lifecycle durably preserves these exact raw records before
+    // leaving or saving confirmed content. Incomplete local values need not
+    // block unrelated work, but an active composition or admitted write does.
+    const retained = !finished && mode === 'preserve' && entry.dirty() && !entry.pending?.() && entry.read()
+    if (!finished && (!retained || (entry.composing?.() ?? retained.composing))) complete = false
+    if (!entry.dirty() && entry.mounted !== true) pendingPropertyDrafts.delete(entry)
   }
   notifyPropertyDrafts()
   return complete
 }
 
-export function usePropertyDraftFlush(flush: PropertyDraftFlush, port?: PropertyDraftPort): void {
+export function usePropertyDraftFlush(flush: PropertyDraftFlush, port?: PropertyDraftPort, isComposing?: () => boolean): void {
   const binding = useContext(PropertyDraftBindingContext)?.key ?? 'unbound'
-  const current = useRef({ flush, port, binding })
-  current.current = { flush, port, binding }
+  const current = useRef({ flush, port, binding, isComposing })
+  current.current = { flush, port, binding, isComposing }
   const lastDraft = useRef('')
+  const lastComposition = useRef(false)
+  const lastPending = useRef<Promise<boolean> | undefined>(undefined)
+  const mountedEntry = useRef<PropertyDraftEntry | null>(null)
   useLayoutEffect(() => {
     const entry: PropertyDraftEntry = { flush: () => current.current.flush(),
       read: () => current.current.port?.readDraft() ?? { bindingKey: current.current.binding, label: '', kind: 'text', raw: '', composing: false },
       dirty: () => current.current.port?.hasDirty() ?? false,
+      composing: () => current.current.isComposing?.() ?? current.current.port?.isComposing?.() ?? current.current.port?.readDraft().composing ?? false,
       pending: () => current.current.port?.inFlight?.(),
       commitFailure: () => current.current.port?.commitFailure?.(),
       restore: record => current.current.port?.restoreDraft?.(record), mounted: true }
+    mountedEntry.current = entry
     const target = entry.read()
     if (target && current.current.port?.restoreDraft) {
       for (const saved of [...pendingPropertyDrafts]) {
@@ -165,6 +184,7 @@ export function usePropertyDraftFlush(flush: PropertyDraftFlush, port?: Property
     }
     pendingPropertyDrafts.add(entry)
     return () => {
+      if (mountedEntry.current === entry) mountedEntry.current = null
       entry.mounted = false
       // A panel disappearing is navigation, not permission to discard its input.
       if (!entry.dirty() || !bindingParts(entry.read()?.bindingKey ?? '')) pendingPropertyDrafts.delete(entry)
@@ -172,8 +192,23 @@ export function usePropertyDraftFlush(flush: PropertyDraftFlush, port?: Property
     }
   }, [])
   useLayoutEffect(() => {
+    // Closing the previous document can remove this registration before React
+    // rebinds a reused text control to the next document. Its mounted lifetime
+    // still owns the registration, so restore it after that render.
+    const entry = mountedEntry.current
+    if (entry?.mounted && !pendingPropertyDrafts.has(entry)) pendingPropertyDrafts.add(entry)
     const next = port?.hasDirty() ? JSON.stringify(port.readDraft()) : ''
-    if (lastDraft.current !== next) { lastDraft.current = next; notifyPropertyDrafts() }
+    const composing = entry?.composing?.() ?? false, pending = entry?.pending?.()
+    if (lastPending.current !== pending) {
+      lastPending.current = pending
+      // ACK rejection may leave raw, baseline and composition unchanged, and
+      // a parked owner no longer renders. Both outcomes still end its lease.
+      void pending?.then(notifyPropertyDrafts, notifyPropertyDrafts)
+      notifyPropertyDrafts()
+    }
+    if (lastDraft.current !== next || lastComposition.current !== composing) {
+      lastDraft.current = next; lastComposition.current = composing; notifyPropertyDrafts()
+    }
   })
 }
 
@@ -203,9 +238,28 @@ export function PropertyDraftBoundary({
   onStale: () => void
   children: ReactNode
 }) {
+  const [, refresh] = useState(0)
+  const shown = useRef({ bindingKey, children, onStale })
+  const owns = (record: PropertyDraftRecovery | null) => {
+    if (!record) return false
+    if (record.bindingKey === shown.current.bindingKey) return true
+    const base = bindingParts(shown.current.bindingKey), field = bindingParts(record.bindingKey)
+    return Boolean(field && (field[0] === shown.current.bindingKey || base && field.length >= base.length
+      && JSON.stringify(field.slice(0, base.length)) === JSON.stringify(base)))
+  }
+  const switching = shown.current.bindingKey !== bindingKey
+  const composing = switching && [...pendingPropertyDrafts].some(entry => entry.mounted !== false && owns(entry.read()) && entry.composing?.())
+  // Ordinary typing does not make every field boundary scan/rerender. A
+  // boundary needs registry notifications only while it awaits an IME handoff.
+  useLayoutEffect(() => composing ? subscribePropertiesDrafts(() => refresh(version => version + 1)) : undefined, [composing, bindingKey])
+  // A different target gets its own controls immediately. The previous
+  // registry owner retains raw and admitted ACKs; only a real IME needs its
+  // existing input DOM until compositionend. Never freeze on old recovery.
+  if (shown.current.bindingKey === bindingKey || !composing) shown.current = { bindingKey, children, onStale }
+  const active = shown.current
   return (
-    <PropertyDraftBindingContext.Provider value={{ key: bindingKey, onStale }}>
-      {children}
+    <PropertyDraftBindingContext.Provider key={active.bindingKey} value={{ key: active.bindingKey, onStale: active.onStale }}>
+      {active.children}
     </PropertyDraftBindingContext.Provider>
   )
 }
@@ -392,6 +446,7 @@ function BufferedPropertyInput({
     const finish = () => {
       session.failure = undefined
       session.failureEdited = false
+      setCommitError('')
       session.baseline = next
       if (session.draft === next && session.phase !== 'composing' && session.phase !== 'blur-pending') session.phase = 'idle'
       setSessionEpoch(epoch => epoch + 1)
@@ -400,6 +455,8 @@ function BufferedPropertyInput({
     const fail = (error: unknown) => {
       if (isCourseComponentInputFailure(error)) { session.failure = { error, value: next, bindingKey: session.bindingKey, label, kind: type }; session.failureEdited = false }
       setCommitError(error instanceof Error ? error.message : String(error))
+      if (isCourseComponentInputFailure(error)) return settleCourseComponentInput(error).then(outcome => outcome === 'applied' && session.failure?.error === error ? finish() : false,
+        reason => { setCommitError(reason instanceof Error ? reason.message : String(reason)); return false })
       return false
     }
     if (!changed && !session.failure) return finish()
@@ -464,6 +521,7 @@ function BufferedPropertyInput({
   }, {
     hasDirty: () => resumeRequired.current || Boolean(sessionRef.current.pending) || Boolean(sessionRef.current.failure) || sessionRef.current.draft !== sessionRef.current.baseline
       || sessionRef.current.phase === 'composing' || sessionRef.current.phase === 'blur-pending',
+    isComposing: () => sessionRef.current.phase === 'composing' || sessionRef.current.phase === 'blur-pending',
     inFlight: () => sessionRef.current.pending,
     commitFailure: () => sessionRef.current.failure,
     readDraft: () => ({ bindingKey: sessionRef.current.bindingKey, label, kind: type, raw: sessionRef.current.draft,
@@ -663,7 +721,7 @@ export function RangeField({
     onStale: draftBinding?.onStale,
   }
   const sessionRef = useRef<{ active: boolean; bindingKey: string; baseline: number; draft: number; staleNotified: boolean;
-    onChange: (value: number) => void | Promise<void>; pending?: Promise<boolean> }>({
+    onChange: (value: number) => void | Promise<void>; pending?: Promise<boolean>; failure?: PropertyCommitFailure }>({
     active: false,
     bindingKey: currentBindingKey,
     baseline: value,
@@ -672,7 +730,7 @@ export function RangeField({
     onChange,
   })
   const stale = sessionRef.current.active && (sessionRef.current.bindingKey !== currentBindingKey
-    || (value !== sessionRef.current.baseline && value !== sessionRef.current.draft))
+    || (value !== sessionRef.current.baseline && value !== sessionRef.current.draft && String(value) !== sessionRef.current.failure?.value))
 
   useLayoutEffect(() => {
     const session = sessionRef.current
@@ -692,7 +750,7 @@ export function RangeField({
   }, [currentBindingKey, draft, onChange, value])
 
   const sessionIsStale = () => sessionRef.current.active && (sessionRef.current.bindingKey !== currentRef.current.bindingKey
-    || (currentRef.current.value !== sessionRef.current.baseline && currentRef.current.value !== sessionRef.current.draft))
+    || (currentRef.current.value !== sessionRef.current.baseline && currentRef.current.value !== sessionRef.current.draft && String(currentRef.current.value) !== sessionRef.current.failure?.value))
   const rejectStale = () => {
     const session = sessionRef.current
     if (!sessionIsStale()) return false
@@ -707,6 +765,7 @@ export function RangeField({
     const current = currentRef.current
     session.active = false
     session.pending = undefined
+    session.failure = undefined
     session.bindingKey = current.bindingKey
     session.baseline = current.value
     session.draft = current.value
@@ -733,10 +792,11 @@ export function RangeField({
     sessionRef.current.draft = next
     setDraft(next)
   }
-  const commit = (next: number): boolean | Promise<boolean> => {
+  const commit = (next: number, explicit = false): boolean | Promise<boolean> => {
     const session = sessionRef.current
     if (propertyDraftSuspended(session.bindingKey)) return false
     if (session.pending) return session.pending
+    if (session.failure && !explicit) return false
     if (!session.active) return true
     if (rejectStale()) return false
     const clamped = Math.min(max, Math.max(min, next))
@@ -745,15 +805,33 @@ export function RangeField({
     session.draft = clamped
     session.staleNotified = false
     setDraft(clamped)
-    const finish = () => { session.baseline = clamped; if (session.draft === clamped) session.active = false
+    const finish = () => { session.failure = undefined; session.baseline = clamped; if (session.draft === clamped) session.active = false
       setCommitError(''); setSessionEpoch(epoch => epoch + 1); return !session.active }
-    const fail = (error: unknown) => { setCommitError(error instanceof Error ? error.message : String(error)); return false }
+    const fail = (error: unknown) => {
+      if (isCourseComponentInputFailure(error)) session.failure = { error, value: String(clamped), bindingKey: session.bindingKey, label, kind: 'range' }
+      setCommitError(error instanceof Error ? error.message : String(error))
+      return isCourseComponentInputFailure(error) ? settleCourseComponentInput(error).then(outcome => outcome === 'applied' && session.failure?.error === error ? finish() : false,
+        reason => { setCommitError(reason instanceof Error ? reason.message : String(reason)); return false }) : false
+    }
     try {
-      const result = changed ? callback(clamped) : undefined
+      const failure = session.failure
+      const result = failure ? failure.error.resolveInput('retry').then(outcome => {
+        if (outcome === 'pending') { setCommitError(failure.error.message); return false }
+        if (session.failure !== failure || session.bindingKey !== currentRef.current.bindingKey || propertyDraftSuspended(session.bindingKey)) return false
+        if (outcome === 'applied') {
+          session.failure = undefined; session.baseline = Number(failure.value)
+          // A newer value is separate input and is never acknowledged by the old operation.
+          if (session.draft !== clamped || String(clamped) !== failure.value) { setCommitError(''); return false }
+          return true
+        }
+        if (session.draft !== clamped || rejectStale()) return false
+        session.failure = undefined
+        return changed ? Promise.resolve(currentRef.current.onChange(clamped)).then(() => true) : true
+      }) : changed ? callback(clamped) : undefined
       if (!result) return finish()
-      const pending = Promise.resolve(result).then(() => {
+      const pending = Promise.resolve(result).then(applied => {
         if (session.pending !== pending) return true
-        session.pending = undefined; return finish()
+        session.pending = undefined; return applied === false ? false : finish()
       }, error => {
         if (session.pending !== pending) return false
         session.pending = undefined; return fail(error)
@@ -761,19 +839,54 @@ export function RangeField({
       session.pending = pending; return pending
     } catch (error) { return fail(error) }
   }
+  const cancel = () => {
+    const session = sessionRef.current
+    if (session.pending) return
+    const failure = session.failure
+    if (!failure) { rebaseCurrent(); return }
+    const raw = session.draft
+    const pending = failure.error.resolveInput('cancel').then(outcome => {
+      if (outcome === 'pending') { setCommitError(failure.error.message); return false }
+      if (session.failure !== failure || session.draft !== raw) return false
+      session.failure = undefined; rebaseCurrent(); return true
+    }, error => { setCommitError(error instanceof Error ? error.message : String(error)); return false })
+      .finally(() => { if (session.pending === pending) session.pending = undefined })
+    session.pending = pending
+  }
   usePropertyDraftFlush(() => {
     if (!sessionRef.current.active) return true
     if (rejectStale()) return false
     return commit(sessionRef.current.draft)
   }, {
-    hasDirty: () => Boolean(sessionRef.current.pending) || sessionRef.current.active && sessionRef.current.draft !== sessionRef.current.baseline,
+    hasDirty: () => Boolean(sessionRef.current.pending) || Boolean(sessionRef.current.failure) || sessionRef.current.active && sessionRef.current.draft !== sessionRef.current.baseline,
+    inFlight: () => sessionRef.current.pending,
+    commitFailure: () => sessionRef.current.failure,
     readDraft: () => ({ bindingKey: sessionRef.current.bindingKey, label, kind: 'range', raw: String(sessionRef.current.draft),
       baseline: String(sessionRef.current.baseline), composing: false }),
-    restoreDraft: record => {
+    restoreDraft: (record, resume) => {
       sessionRef.current.active = true
       sessionRef.current.bindingKey = record.bindingKey
       sessionRef.current.baseline = Number(record.baseline ?? value)
       sessionRef.current.draft = Number(record.raw)
+      const sameSession = resume?.readDraft()?.bindingKey === currentBindingKey
+      const adoptFailure = () => {
+        const failure = sameSession ? resume?.commitFailure?.() : undefined
+        sessionRef.current.failure = failure?.bindingKey === currentBindingKey && failure.label === label && failure.kind === 'range' ? failure : undefined
+        if (sessionRef.current.failure) setCommitError(sessionRef.current.failure.error.message)
+      }
+      adoptFailure()
+      if (sameSession && resume?.pending) {
+        const pending = resume.pending.then(ready => {
+          if (sessionRef.current.pending !== pending) return ready
+          sessionRef.current.pending = undefined; adoptFailure()
+          const previous = resume.readDraft()
+          if (previous?.baseline !== undefined) sessionRef.current.baseline = Number(previous.baseline)
+          if (ready && sessionRef.current.draft === sessionRef.current.baseline) sessionRef.current.active = false
+          setSessionEpoch(epoch => epoch + 1)
+          return !sessionRef.current.active && !sessionRef.current.failure
+        })
+        sessionRef.current.pending = pending
+      }
       setDraft(sessionRef.current.draft)
     },
   })
@@ -791,11 +904,11 @@ export function RangeField({
         title={stale ? '属性草稿对应的编辑目标已经改变，请按 Esc 放弃草稿后重试。' : undefined}
         onFocus={beginSession}
         onPointerDown={beginSession}
-        onKeyDown={event => { if (event.key === 'Escape') { event.preventDefault(); rebaseCurrent() } else beginSession() }}
+        onKeyDown={event => { if (event.key === 'Escape') { event.preventDefault(); cancel() } else beginSession() }}
         onChange={(event) => updateDraft(Number(event.target.value))}
-        onPointerUp={(event) => commit(Number(event.currentTarget.value))}
-        onPointerCancel={(event) => commit(Number(event.currentTarget.value))}
-        onKeyUp={(event) => commit(Number(event.currentTarget.value))}
+        onPointerUp={(event) => commit(Number(event.currentTarget.value), true)}
+        onPointerCancel={(event) => commit(Number(event.currentTarget.value), true)}
+        onKeyUp={(event) => { if (event.key !== 'Escape') commit(Number(event.currentTarget.value), true) }}
         onBlur={(event) => commit(Number(event.currentTarget.value))}
       />
       {commitError && <small role="alert">{commitError}</small>}
@@ -1031,6 +1144,7 @@ export function TextContentTextarea({
   }, {
     hasDirty: () => resumeRequired.current || sessionRef.current.draft !== sessionRef.current.baseline
       || sessionRef.current.phase === 'composing' || sessionRef.current.phase === 'blur-pending',
+    isComposing: () => sessionRef.current.phase === 'composing' || sessionRef.current.phase === 'blur-pending',
     readDraft: () => ({ bindingKey: sessionRef.current.bindingKey, label, kind: 'text', raw: sessionRef.current.draft,
       baseline: sessionRef.current.baseline, composing: resumeRequired.current || sessionRef.current.phase === 'composing' || sessionRef.current.phase === 'blur-pending' }),
     restoreDraft: record => {
@@ -1386,7 +1500,9 @@ export function FontFamilyPicker({ value, placeholder, onCommit }: {
     }
     const fail = (error: unknown) => {
       if (isCourseComponentInputFailure(error)) { session.failure = { error, value: next, bindingKey: session.bindingKey, label: '字体', kind: 'text' }; session.failureEdited = false }
-      setCommitError(error instanceof Error ? error.message : String(error)); return false
+      setCommitError(error instanceof Error ? error.message : String(error))
+      return isCourseComponentInputFailure(error) ? settleCourseComponentInput(error).then(outcome => outcome === 'applied' && session.failure?.error === error ? finish() : false,
+        reason => { setCommitError(reason instanceof Error ? reason.message : String(reason)); return false }) : false
     }
     try {
       const failure = session.failure
@@ -1439,6 +1555,7 @@ export function FontFamilyPicker({ value, placeholder, onCommit }: {
   }, {
     hasDirty: () => resumeRequired.current || Boolean(sessionRef.current.pending) || Boolean(sessionRef.current.failure) || sessionRef.current.draft !== sessionRef.current.baseline
       || sessionRef.current.phase === 'composing' || sessionRef.current.phase === 'blur-pending',
+    isComposing: () => sessionRef.current.phase === 'composing' || sessionRef.current.phase === 'blur-pending',
     inFlight: () => sessionRef.current.pending,
     commitFailure: () => sessionRef.current.failure,
     readDraft: () => ({ bindingKey: sessionRef.current.bindingKey, label: '字体', kind: 'text', raw: sessionRef.current.draft,

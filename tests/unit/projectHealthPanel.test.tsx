@@ -50,7 +50,7 @@ it('collects the latest V10 project/resources only while open and locates a real
   expect(screen.getByRole('dialog', { name: '工程检查' })).toBeInTheDocument()
   expect(screen.getByRole('heading', { name: '错误 · 演示页 · 缺图页' })).toBeInTheDocument()
   const issue = screen.getAllByText('image-asset-reference-missing')[0].closest('li')!
-  fireEvent.click(within(issue).getByRole('button', { name: '定位' }))
+  await act(async () => { fireEvent.click(within(issue).getByRole('button', { name: '定位' })) })
   expect(useEditorStore.getState().courseView).toMatchObject({ surfaceId: 'slide', selectedInstanceId: 'picture' })
   expect(useEditorStore.getState().activeTab).toBe('properties')
   expect(onClose).toHaveBeenCalledOnce()

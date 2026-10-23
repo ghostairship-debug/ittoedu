@@ -1,6 +1,6 @@
 import { componentContainers } from '../../../shared/contracts/component-platform/project'
 export type FlowInsertDestination = 'document' | 'paper'
-export type FlowInsertKind = DocumentBlockKind | 'formula' | 'image' | 'video' | 'audio' | 'component' | 'text-box' | 'shape'
+export type FlowInsertKind = DocumentBlockKind | 'formula' | 'chart' | 'image' | 'video' | 'audio' | 'component' | 'text-box' | 'shape'
 
 export interface FlowInsertCommand {
   readonly destination: FlowInsertDestination
@@ -11,6 +11,7 @@ export interface FlowInsertCommand {
 export const FLOW_DOCUMENT_INSERT_COMMANDS: readonly FlowInsertCommand[] = [
   ...DOCUMENT_BLOCK_KINDS.map(({ kind, label }) => ({ destination: 'document' as const, kind, label })),
   { destination: 'document', kind: 'formula', label: '公式' },
+  { destination: 'document', kind: 'chart', label: '图表' },
   { destination: 'document', kind: 'image', label: '图片' },
   { destination: 'document', kind: 'video', label: '视频' },
   { destination: 'document', kind: 'audio', label: '音频' },
@@ -34,7 +35,9 @@ import { DOCUMENT_BLOCK_DEFINITION, documentBlockData } from '../../../component
 import { DOCUMENT_BLOCK_KINDS, createDocumentBlock, type DocumentBlockKind } from '../../document/documentBlockCommands'
 import { TEXT_DEFINITION } from '../../../components/text/adapters'
 import { createTextComponentData } from '../../../components/text/data'
-import { captureFlowMenuPage, type FlowMenuPageCapture } from '../../document/flowWorkspaceRegistry'
+import { captureFlowMenuPage, drainFlowWorkspace, type FlowMenuPageCapture } from '../../document/flowWorkspaceRegistry'
+import { DocumentInsertionTargetError, documentInsertionBlockId } from '../../../shared/document/blockInsertion'
+import { projectFlowDocument } from '../../../core/components/document/flowDocumentProjection'
 import { flowMenuPaperPlacement } from './flowMenuPaperPlacement'
 import { containerChildIds, owningContainer } from '../../../shared/contracts/component-platform/project'
 import { captureCourseInsertionTarget, commitCourseInsertion, insertCourseElement, insertCourseLibraryAsset, courseAuthorData,
@@ -42,16 +45,41 @@ import { captureCourseInsertionTarget, commitCourseInsertion, insertCourseElemen
 
 
 export type CapturedFlowMenuTarget = CapturedCourseTarget & { flowMenuPage?: Extract<FlowMenuPageCapture, { ok: true }> }
-export function captureFlowMenuTarget(kernel: EditorStoreKernel): CapturedFlowMenuTarget {
+export function captureFlowMenuTarget(kernel: EditorStoreKernel, captureInsertion = true): CapturedFlowMenuTarget {
   const target = captureCourseInsertionTarget(kernel)
   if (componentContainers(target.project).find(surface => surface.id === target.surfaceId)?.kind !== 'flow') throw new Error('请先选择讲义页面')
-  const page = captureFlowMenuPage()
+  const page = captureFlowMenuPage(captureInsertion)
   if (!page.ok) throw new Error(page.reason)
-  if (page.documentId !== target.documentId || page.surfaceId !== target.surfaceId) throw new Error('讲义插入位置已改变，请重新选择')
+  if (page.documentId !== target.documentId || page.surfaceId !== target.surfaceId || page.epoch && page.epoch !== target.epoch) {
+    page.insertionSelection?.release()
+    throw new DocumentInsertionTargetError('讲义插入位置已改变，请重新选择')
+  }
   return { ...target, flowMenuPage: page }
 }
+export function releaseFlowMenuTarget(target: CapturedFlowMenuTarget): void { target.flowMenuPage?.insertionSelection?.release() }
+export function flowInsertionBoundaryBlockId(target: CapturedFlowMenuTarget): string | null {
+  const content = target.surfaceId ? projectFlowDocument(target.project, target.surfaceId).content : undefined
+  const selection = target.flowMenuPage?.insertionSelection?.read(content)
+  return selection && target.surfaceId ? documentInsertionBlockId(projectFlowDocument(target.project, target.surfaceId).content, selection)
+    : target.flowMenuPage?.selectedBlockId ?? null
+}
+/** The input owner must finish its ACK before a new formal baseline is read. */
+export async function refreshFlowMenuTarget(kernel: EditorStoreKernel, captured: CapturedFlowMenuTarget): Promise<CapturedFlowMenuTarget> {
+  const input = captured.flowMenuPage?.insertionSelection
+  const ready = input?.drain ? { ok: await input.drain() } : await drainFlowWorkspace(captured.documentId)
+  if (!ready.ok) throw new DocumentInsertionTargetError(ready.reason ?? '原讲义输入尚未确认，请完成输入后重新选择位置')
+  let target: CapturedCourseTarget
+  try { await kernel.bridge.drain([captured.documentId]); target = kernel.captureTarget(captured.documentId) }
+  catch { throw new DocumentInsertionTargetError('原讲义已关闭，请重新打开并选择插入位置') }
+  if (target.epoch !== captured.epoch || target.project.id !== captured.project.id || target.surfaceId !== captured.surfaceId
+    || target.rootInstanceId !== captured.rootInstanceId || target.editingContainerId !== captured.editingContainerId || target.activeStateId !== captured.activeStateId) {
+    throw new DocumentInsertionTargetError('原讲义编辑范围已改变，请在原讲义重新选择插入位置')
+  }
+  captured.flowMenuPage?.insertionSelection?.read(target.surfaceId ? projectFlowDocument(target.project, target.surfaceId).content : undefined)
+  return { ...target, flowMenuPage: captured.flowMenuPage }
+}
 export interface FlowInsertionOptions extends CourseInsertionOptions { assetId?: string }
-/** Resolve once at menu activation, before a picker or library request can change the selection. */
+/** Resolve the mapped bookmark after the input ACK; explicit block-boundary callers keep their placement. */
 export function resolveFlowMenuInsertionOptions(target: CapturedFlowMenuTarget, command: FlowInsertCommand, options: FlowInsertionOptions = {}): FlowInsertionOptions {
   const page = target.flowMenuPage
   if (!page) return { ...options, destination: command.destination }
@@ -60,6 +88,10 @@ export function resolveFlowMenuInsertionOptions(target: CapturedFlowMenuTarget, 
     const { frame } = flowMenuPaperPlacement(page, preferred)
     return { ...options, destination: 'paper', x: options.x ?? frame.x, y: options.y ?? frame.y,
       ...(options.width === undefined ? {} : { width: frame.width }), ...(options.height === undefined ? {} : { height: frame.height }) }
+  }
+  if (options.flowSelection !== undefined || page.insertionSelection && options.container === undefined && options.index === undefined) {
+    return { ...options, destination: 'document', flowSelection: options.flowSelection !== undefined ? options.flowSelection
+      : page.insertionSelection!.read(projectFlowDocument(target.project, page.surfaceId).content) }
   }
   const selected = page.selectedBlockId
   const container = selected ? owningContainer(target.project, selected) : { kind: 'surface' as const, surfaceId: page.surfaceId }
@@ -78,7 +110,7 @@ export async function insertFlowMenu(kernel: EditorStoreKernel, target: Captured
   }
   if (command.kind === 'component') throw new Error('请选择组件库条目后使用组件库的原目标插入入口')
   if (command.kind === 'text-box') return insertCourseElement(kernel, target, 'text', placement)
-  if (command.kind === 'shape' || command.kind === 'table' || command.kind === 'formula') return insertCourseElement(kernel, target, command.kind, placement)
+  if (command.kind === 'shape' || command.kind === 'table' || command.kind === 'formula' || command.kind === 'chart') return insertCourseElement(kernel, target, command.kind, placement)
   if (!DOCUMENT_BLOCK_KINDS.some(value => value.kind === command.kind)) throw new Error(`未知讲义插入类型：${command.kind}`)
   const defaultText = { heading: '新标题', list: '列表内容', callout: '提示内容', section: '新章节' }
   const block = createDocumentBlock(command.kind as DocumentBlockKind, () => `block_${nanoid()}`,

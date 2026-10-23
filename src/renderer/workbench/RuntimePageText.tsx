@@ -17,7 +17,7 @@ export function RuntimePageTextList({ itemId, onError }: { itemId: string; onErr
       <p className="runtime-page-text__hint">逐字段修改只影响对应作者字段；同文的不同字段分别保留。</p>
       <ul className="runtime-page-text__list">
         {entries.map(({ id, spot, text }, index) => <li key={id ?? spot.id}>
-          <PropertyDraftBoundary bindingKey={JSON.stringify([...binding, 'field', id ?? spot.id, spot.initialValue])}
+          <PropertyDraftBoundary bindingKey={JSON.stringify([...binding, 'field', id ?? spot.id])}
             onStale={() => onError('作者字段的目标或原文已改变；输入已保留。')}>
             <PageTextRow label={`作者字段 ${index + 1}：${text}`} original={text} current={text} disabled={view.locked}
               capture={() => runtimeLightEditCommands.capturePageText(view.documentId, spot)}

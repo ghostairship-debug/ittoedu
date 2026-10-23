@@ -799,7 +799,7 @@ export class ExecutionDesktopService {
     const conflict = () => new DesktopOperationError('execution-recovery-binding-conflict', '恢复稿与已打开文件冲突',
       '上次任务的未保存修改仍在恢复稿中，但同一文件已被另一个文档会话打开。',
       '请先处理已打开文件和恢复稿，再继续原任务；未保存修改未被覆盖。')
-    const recoverable = await this.options.documents.internalAPI.recoverable()
+    const recoverable = await this.options.documents.internalAPI.recoverySummaries!()
     for (const recovery of recoverable.filter(snapshot => trusted.has(snapshot.documentId))) {
       const live = this.options.documents.registry.list()
       const recoveryPath = recovery.binding.kind === 'file' ? recovery.binding.path : null

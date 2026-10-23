@@ -8,6 +8,7 @@ import { applyComponentOperation, captureComponentOperation } from '../../src/co
 import { createTextComponentData, textComponentDataSchema } from '../../src/components/text/data'
 import { serializeDocumentMarkdown, parseDocumentMarkdown } from '../../src/shared/document/markdown'
 import { documentContentSchema } from '../../src/shared/document/content'
+import { createImageData } from '../../src/components/image/data'
 import type { CourseProjectV10 } from '../../src/shared/contracts/component-platform'
 
 function fixture(): CourseProjectV10 {
@@ -57,16 +58,40 @@ describe('native reading groups remain one continuous author projection', () => 
     } finally { editor.destroy(); host.remove() }
   })
 
-  it('keeps free/framed and program groups atomic and validates descendant identity in expanded projections', () => {
+  it('keeps a free/framed group atomic while a program child only owns its own boundary', () => {
     const project = fixture()
     expect(isFlowReadingGroup(project, 'reading')).toBe(true)
     project.instances.reading.frame = { width: 900, height: 500, transform: [1, 0, 0, 1, 0, 0] }
     expect(projectFlowDocument(project, 'flow').content.blocks[0]).not.toHaveProperty('blocks')
     delete project.instances.reading.frame
     project.instances.first.implementationOverride = { kind: 'source', entry: 'index.js', files: { 'index.js': 'export default {}' } } as any
-    expect(isFlowReadingGroup(project, 'reading')).toBe(false)
+    expect(isFlowReadingGroup(project, 'reading')).toBe(true)
+    const reading = projectFlowDocument(project, 'flow').content.blocks[0]
+    expect(reading).toMatchObject({ type: 'course-instance', blocks: [
+      { id: 'first', type: 'course-instance' }, { id: 'second', type: 'paragraph' },
+    ] })
     expect(() => documentContentSchema.parse({ blocks: [{ id: 'group', type: 'course-instance', blocks: [
       { id: 'same', type: 'paragraph', content: { inlines: [] } }, { id: 'same', type: 'paragraph', content: { inlines: [] } },
     ] }] })).toThrow(/重复身份/)
+  })
+
+  it('projects framed native text and a pure media grid without changing authored geometry or opaque children', () => {
+    const project = fixture()
+    project.instances.first.frame = { width: 400, height: 80, transform: [1, 0, 0, 1, 20, 30] }
+    project.instances.second.implementationOverride = { kind: 'source', language: 'javascript', source: 'export default { mount() {} }' }
+    project.instances.second.childIds = ['opaque-child']
+    project.instances['opaque-child'] = { id: 'opaque-child', definitionId: 'text', data: JSON.parse(JSON.stringify(createTextComponentData('Program-owned child'))) }
+    const initial = projectFlowDocument(project, 'flow'), content = structuredClone(initial.content)
+    const group = content.blocks[0]
+    if (group.type !== 'course-instance' || !group.blocks || group.blocks[0].type !== 'paragraph') throw new Error('Expected native reading text')
+    group.blocks[0].content.inlines = [{ type: 'text', text: 'Changed native text' }]
+    const changed = applyComponentOperation(project, captureComponentOperation(project, flowDocumentEdits(project, 'flow', content.blocks)))
+    expect(changed.instances.first.frame).toEqual(project.instances.first.frame)
+    expect(changed.instances.second).toEqual(project.instances.second)
+    expect(changed.instances['opaque-child']).toEqual(project.instances['opaque-child'])
+    project.definitions.image = { id: 'image', role: 'content', implementation: { kind: 'builtin', key: 'guoling.image' } }
+    project.instances.reading.childIds = ['picture']
+    project.instances.picture = { id: 'picture', definitionId: 'image', data: JSON.parse(JSON.stringify(createImageData('picture-asset'))) }
+    expect(projectFlowDocument(project, 'flow').content.blocks[0]).toMatchObject({ type: 'course-instance', blocks: [{ type: 'media', id: 'picture' }] })
   })
 })

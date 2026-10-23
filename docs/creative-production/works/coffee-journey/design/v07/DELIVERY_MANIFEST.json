@@ -1,0 +1,333 @@
+{
+  "manifestVersion": 1,
+  "workId": "coffee-journey",
+  "version": "v07",
+  "date": "2026-10-23",
+  "revision": 215,
+  "status": "creative-reference-r215-technical-closeout-owner-art-approval-pending",
+  "schemaVersion": 11,
+  "core": {
+    "glx": {
+      "path": "native/coffee-journey-v07.glx",
+      "bytes": 9976378,
+      "sha256": "2a4511903738bacdaf78c20e68858f6ff766d26a34f83b354c5c21925aca6d9f"
+    },
+    "offlineHtml": {
+      "path": "native/coffee-journey-v07-offline.html",
+      "bytes": 22361920,
+      "sha256": "ed5a16024209641e1c9e7940ef89bf496233d25197505e67be823ee143647adc"
+    },
+    "objectIndex": {
+      "path": "native/OBJECT_INDEX.json",
+      "bytes": 184851,
+      "sha256": "fe12f02304ee90e009a9d598847f2fef2fa61adb2b6f999b3ad67f653bdac2a1"
+    },
+    "instances": 183,
+    "identityPreserved": true
+  },
+  "historical": {
+    "v06": {
+      "path": "v06/native/coffee-journey-v06.glx",
+      "bytes": 7759510,
+      "sha256": "e4a7e1e051891a9381fe9dbd878668a6e83b9956f64a81733a8d164cf343a525"
+    },
+    "v05": {
+      "path": "v05/native/coffee-journey-v05.glx",
+      "bytes": 6969845,
+      "sha256": "e3303319b283afe4284628adb07a06e00251435569cd37268ad9171426e5ab90"
+    },
+    "sugarDemo": "../v06/reuse/solute-study/solute-study.glx (r34; no v07 rewrite)"
+  },
+  "validation": {
+    "revision": 215,
+    "instanceCount": 183,
+    "sourceFiles": 14,
+    "materialFiles": 21,
+    "motionFrames": 50,
+    "motionDesktop": 30,
+    "motionMobile": 20,
+    "desktopChapters": 7,
+    "mobileChapters": 7,
+    "offlineErrors": 0,
+    "offlineNetworkRequests": 0,
+    "materialImages": 6,
+    "artReviewAccepted": true,
+    "corpusHasStableNativeIds": true,
+    "coldOpenEqual": true,
+    "exportWarnings": 0,
+    "existingV06Sha": "e4a7e1e051891a9381fe9dbd878668a6e83b9956f64a81733a8d164cf343a525",
+    "existingV05Sha": "e3303319b283afe4284628adb07a06e00251435569cd37268ad9171426e5ab90"
+  },
+  "materials": [
+    {
+      "path": "assets/source/cup.png",
+      "bytes": 1213562,
+      "sha256": "84ca08e56f0f323faa9789f99f534f9ab024c1769d777ac8a262bf2ea19e2703"
+    },
+    {
+      "path": "assets/source/cherry.png",
+      "bytes": 1333429,
+      "sha256": "7df85ca690a751aa3ab2df4d60a0e1b8f4ae2535a413493a34e6a37168cb04d9"
+    },
+    {
+      "path": "assets/source/section.png",
+      "bytes": 1564181,
+      "sha256": "32156b6a26ac4e159583d965828ac791a0563b637b53c46a9a11b2b17d76e39a"
+    },
+    {
+      "path": "assets/source/green.png",
+      "bytes": 1822258,
+      "sha256": "6ee8b924376cf8bca4acc38f356fd8760dbcbceeaef9a2521cb852b1428c9e54"
+    },
+    {
+      "path": "assets/source/gold.png",
+      "bytes": 1648229,
+      "sha256": "c71598547b6ce6a916e629fc523e255af94e7ad56dc3a901f6c430f696ffd587"
+    },
+    {
+      "path": "assets/source/roast.png",
+      "bytes": 1827922,
+      "sha256": "2f81092e9120f16d19bdee990341c23f3a32f6ba4f299d58c8d0acb4d81f89f4"
+    },
+    {
+      "path": "assets/runtime/cup.webp",
+      "bytes": 95718,
+      "sha256": "7f0ae3853e6a11d4a542aa5dc844ebc211916260fb52771285434d60d6e26e23"
+    },
+    {
+      "path": "assets/runtime/cherry.webp",
+      "bytes": 170712,
+      "sha256": "7817a53ae7811dee568042a63c73898115364f88c568af4d291b9e439b245ea4"
+    },
+    {
+      "path": "assets/runtime/section.webp",
+      "bytes": 204996,
+      "sha256": "5c8205da22bc4d1f98ada06a720a88b1a43114d1ca572c5cea4f569414357660"
+    },
+    {
+      "path": "assets/runtime/green.webp",
+      "bytes": 210668,
+      "sha256": "ce930d1ac9b06944abfd121a0f1c69d155211b7e475b8363ddef7af6dae695e1"
+    },
+    {
+      "path": "assets/runtime/gold.webp",
+      "bytes": 166210,
+      "sha256": "1ceda13840fb2f23b7b06e4a2fddc0e6ecb827ff68015f145662b2a0cc65a717"
+    },
+    {
+      "path": "assets/runtime/roast.webp",
+      "bytes": 187972,
+      "sha256": "bc5e65b7abbc0a0630cc75f846a7f5d8d4b9ac1d10b4ee49ef10b87b61ce1e6e"
+    },
+    {
+      "path": "programs/u03/assets/natural-section.webp",
+      "bytes": 217516,
+      "sha256": "677f50362a56d467adcefe5a224757eb6f63874ea768f164d4cbdf5d37b78ccc"
+    },
+    {
+      "path": "programs/u03/assets/natural-layers.svg",
+      "bytes": 661,
+      "sha256": "46d82c882adb2f9908e9330b2a9e4bf2f037e6a772ec317e3c83f75c603048c7"
+    },
+    {
+      "path": "programs/u03/assets/natural.webp",
+      "bytes": 207752,
+      "sha256": "3745f43ab2fd881c9e65c12520e01a21cf60f683bfc769996c4e986d35da542c"
+    },
+    {
+      "path": "programs/u03/assets/washed-section.webp",
+      "bytes": 102148,
+      "sha256": "d9e690f4c3775f82d64ca2fd011638b8576be7604cc3249191cb3c7f38414c50"
+    },
+    {
+      "path": "programs/u03/assets/washed-layers.svg",
+      "bytes": 1102,
+      "sha256": "def7d66c1a051837723b5752033a1ca8bd2cf66a5117ecd9df36d919f2965d1c"
+    },
+    {
+      "path": "programs/u03/assets/washed.webp",
+      "bytes": 275184,
+      "sha256": "ed84157944269f1a86ad23fb354b6c9bd4488cacbc01b05d3e7e1cce3f335ea7"
+    },
+    {
+      "path": "programs/u03/assets/honey-section.webp",
+      "bytes": 111944,
+      "sha256": "bcb59a1daee763e6cd771a00d6fe3b047968dccff91dd0fe6df2f10ff68e8a62"
+    },
+    {
+      "path": "programs/u03/assets/honey-layers.svg",
+      "bytes": 1103,
+      "sha256": "5d21f5c3fa323d3b6c9e27e226e479fd45431dbdab85add5a4e6f4bd9282f74c"
+    },
+    {
+      "path": "programs/u03/assets/honey.webp",
+      "bytes": 255870,
+      "sha256": "bb81c2bdc9aab822a19610e692235450ae1aa9f3bccefa6a6d2d278a1d4d1a2a"
+    }
+  ],
+  "editableSources": [
+    {
+      "path": "art-studies-offline.html",
+      "bytes": 1408143,
+      "sha256": "0c5ba5a766823860f32e9600e81b6ccadfb41d243751ceb6be15825cca44eeae"
+    },
+    {
+      "path": "background-runtime.js",
+      "bytes": 24386,
+      "sha256": "e5eb1255cebb4cb511fd1ba335e4092e55014333e5c9e655aa55ac58d25d5818"
+    },
+    {
+      "path": "background-stages.js",
+      "bytes": 3545,
+      "sha256": "0b85785217e2cb753c242559775b14983cdb589024ca320cc7420bb9e1fb1db3"
+    },
+    {
+      "path": "background-entry.js",
+      "bytes": 988,
+      "sha256": "18b8773565959575bd6f81c1f7e5382ff1e23c281a7f59d9f9e6917067a5d6d2"
+    },
+    {
+      "path": "background-assets.css",
+      "bytes": 377,
+      "sha256": "7263a73067b03a42af72a73e543f82752d727dbcde93dbdf4f412443f00ff73e"
+    },
+    {
+      "path": "ASSET_PROMPTS.json",
+      "bytes": 6889,
+      "sha256": "09c56441ff5d09449b6422f7d5c294d115573d0ad6868fadd9860c4163b5bf9a"
+    },
+    {
+      "path": "programs/u03/build_u03.py",
+      "bytes": 23293,
+      "sha256": "15398a41822de00c36f8832d9c09fc4cb3e2b7b76523b7d66a65ff352bdaee30"
+    },
+    {
+      "path": "programs/u03/u03.html",
+      "bytes": 29011,
+      "sha256": "136d81ff7da8dbc64eef77ee9dd5779573bd049cd1a1502ff50acfe47c4734d8"
+    },
+    {
+      "path": "programs/u03/u03.css",
+      "bytes": 10412,
+      "sha256": "944bba1f363b368edc80052cae92a58271aad34e7bcd7f87deb053f05da7b912"
+    },
+    {
+      "path": "programs/u03/u03.js",
+      "bytes": 5284,
+      "sha256": "11e89e846058a25117ae106a1a409128d883bbab7835afbbf07d125a33aca7b1"
+    },
+    {
+      "path": "programs/u03/content.json",
+      "bytes": 2163,
+      "sha256": "b1fefb61dbcbe08780c16c9aa358acc6d2359a20ef1ea50dfa09ed14e39fa095"
+    }
+  ],
+  "featuredScreenshots": [
+    {
+      "path": "previews/material-reference-final.png",
+      "bytes": 2516761,
+      "sha256": "55ec4c563b215b0961e7ad0e59ef27e4c568debd288083aff016690f4d94ba8b"
+    },
+    {
+      "path": "previews/motion-contact-1440.png",
+      "bytes": 1449917,
+      "sha256": "a1c01de53538ee91797afce82b57b3e554b63b468db737b455f29e342aeade3a"
+    },
+    {
+      "path": "previews/motion-contact-390.png",
+      "bytes": 2959396,
+      "sha256": "53b9ce6b3c2a734fec1727497fb151c764b5e7a8ac5dddd0e6ffa14b618a6819"
+    },
+    {
+      "path": "previews/transition-contact-sheet.png",
+      "bytes": 2495690,
+      "sha256": "a18504a6e5302a6038cb8d5a8b02113b7521a7c677face6ae322f68bd891864d"
+    },
+    {
+      "path": "previews/final-1440-u03-compare.png",
+      "bytes": 475269,
+      "sha256": "c48bcd2fa13ef67af622cd26452d353c6ccb17966060b432a839341da04e7d82"
+    },
+    {
+      "path": "previews/final-390-u03-compare.png",
+      "bytes": 108210,
+      "sha256": "af8688d8bf5c94d2af258522f15f191706f6708c2eb3eb69047a3dc798e41fed"
+    }
+  ],
+  "documentedSources": [
+    {
+      "path": "README.md",
+      "bytes": 2962,
+      "sha256": "2fd39e8be14d14b6dfe0d625b7508e28e53dde4a130c2fa1784cb870fa039ad7"
+    },
+    {
+      "path": "ASSETS.md",
+      "bytes": 4027,
+      "sha256": "e0382c6588bdc09e9755595e5451687d18328da3000c27bd2ea00753679ecf76"
+    },
+    {
+      "path": "BACKGROUND_RUNTIME.md",
+      "bytes": 5096,
+      "sha256": "7a924ecf2af3a1198b916eb5a3af41fad00232bf1bfdf94af1eb4fbf8c8150dd"
+    },
+    {
+      "path": "REFERENCE_CASES.md",
+      "bytes": 7502,
+      "sha256": "27338df050fe81db1d93c62e44754638a2b9c6f31fa377917cf40e06e9679c9d"
+    },
+    {
+      "path": "VERIFICATION.md",
+      "bytes": 7031,
+      "sha256": "a6a3a4d66c6558b1174841b4abecd3d4ecca9a501847232d011ed1805f1fc93b"
+    },
+    {
+      "path": "CLOSEOUT.md",
+      "bytes": 3359,
+      "sha256": "6ffd2137adbf1156c148b697df9f4ba21a04e2f9cd865b1cba1a114bad983fcb"
+    },
+    {
+      "path": "previews/README.md",
+      "bytes": 3059,
+      "sha256": "cc9034f750a448b327a528cdbfa07c4dff5238a4da9194bf8bbad69db7096935"
+    },
+    {
+      "path": "programs/u03/INTEGRATION.md",
+      "bytes": 3665,
+      "sha256": "a03e0e6c278faf4c1585022666f2c99d27da6ef78e18b14378b5307171f508a9"
+    },
+    {
+      "path": "../../README.md",
+      "bytes": 3461,
+      "sha256": "684491eaa8588729777fa3296edc2bc2ac0c5dab680b350c833bac9196c53450"
+    },
+    {
+      "path": "../../handoff/NEXT_PASS.md",
+      "bytes": 3819,
+      "sha256": "407b96a371363b62f018df623435859b4b373221062cff93f467de618f64d762"
+    }
+  ],
+  "motionEvidence": {
+    "desktop": 30,
+    "mobile": 20,
+    "actualNavigation": "evidence/final-motion-frames.json",
+    "samples": "previews/motion/",
+    "standaloneArtStudy": "art-studies-offline.html"
+  },
+  "evidence": [
+    "evidence/final-cold-open.json",
+    "evidence/final-offline-verification.json",
+    "evidence/final-motion-frames.json",
+    "evidence/final-reduced-motion.json",
+    "evidence/final-assembly-preservation.json",
+    "evidence/final-author-roundtrip-and-cold.json",
+    "evidence/u03-material-review.json",
+    "evidence/material-continuity.json",
+    "evidence/visual-acceptance.json"
+  ],
+  "limitations": [
+    "Owner visual sign-off pending",
+    "390px Chromium is not a physical device / Safari test",
+    "Audio trigger/state tested, not subjective loudspeaker listening",
+    "AI-generated specimen images are illustrations, not measured botany"
+  ]
+}

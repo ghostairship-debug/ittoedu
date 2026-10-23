@@ -50,8 +50,9 @@ it('shows preserved pending input when its builtin became ready while the source
   const resources = { assets: {}, components: {} }, model = { kind: 'course-v10' as const, project, resources }
   const view = { activeDocumentId: 'recovery-document', documents: [{ documentId: 'recovery-document', epoch: 'epoch', model }],
     views: [{ documentId: 'recovery-document', model }] } as unknown as CourseV10ViewState
-  const bridge = { read: () => view, subscribe: () => () => {}, captureTarget: () => ({ documentId: 'recovery-document', epoch: 'epoch',
-    project, editingProject: project, resources, surfaceId: null, activeStateId: null, instanceIds: ['text'], instanceId: 'text' }) } as unknown as CourseV10DocumentBridge
+  const capture = () => ({ documentId: 'recovery-document', epoch: 'epoch', project, editingProject: project, resources,
+    surfaceId: null, activeStateId: null, instanceIds: ['text'], instanceId: 'text' })
+  const bridge = { read: () => view, subscribe: () => () => {}, captureTarget: capture, captureOwnedTarget: capture } as unknown as CourseV10DocumentBridge
   const show = () => render(<ComponentSourceEditor bridge={bridge} instance={project.instances.text} implementation={project.definitions.text.implementation} report={vi.fn()} />)
   const first = show()
   fireEvent.change(screen.getByLabelText('组件实现源码'), { target: { value: 'export default { marker: "preserved-input" }' } })

@@ -29,7 +29,7 @@ export function WorkspaceContentHost({ props, layout, editorFocus, enterEditor, 
   const chrome = useContentEditorMode(activeFileTab?.documentId ?? null, editorFocus, enterEditor, exitEditor);
   const showDocumentHeader = (activeFileTab?.kind === 'material' || activeFileTab?.kind === 'media') && !editorFocus;
   const pptx = usePptxPicker(file => {
-    void actions.run(async () => { await actions.newCourseFromPptx(file); layout.setContentClosed(false); actions.setMobilePane('workbench') });
+    void actions.run(async () => { if (!await actions.newCourseFromPptx(file)) return; layout.setContentClosed(false); actions.setMobilePane('workbench') });
   });
   const openActiveExternal = async () => {
     if (!activeFileTab) return;
@@ -115,7 +115,7 @@ export function WorkspaceContentHost({ props, layout, editorFocus, enterEditor, 
         <div
           key={tab.id}
           hidden={tabs.activeTab !== tab.id}
-          className={`lesson-file-tab${tab.kind === "document" && /\.html?$/i.test(tab.path || tab.name) ? " lesson-file-tab--html" : ""}`}
+          className={`lesson-file-tab${tab.kind === "document" && /\.html?$/i.test(tab.path || tab.name) ? " lesson-file-tab--html" : tab.kind === "document" && /\.(md|markdown)$/i.test(tab.path || tab.name) ? " lesson-file-tab--markdown" : ""}`}
         >
           {tab.kind === "document" ? (
             tab.lesson && relativeFile(tab.lesson, tab.path) ? (

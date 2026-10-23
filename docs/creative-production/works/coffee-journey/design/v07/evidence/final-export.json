@@ -1,0 +1,14 @@
+{
+  "kind": "read",
+  "data": {
+    "status": "written",
+    "documentId": "047bbcfc-6de3-4481-82a8-7214ebcdf86f",
+    "epoch": "8d7c06a4-b0ab-4d34-880b-1348d7838659",
+    "format": "html-offline",
+    "exportedRevision": 215,
+    "currentRevision": 215,
+    "warnings": [],
+    "path": "D:\\果铃工作台\\docs\\creative-production\\works\\coffee-journey\\design\\v07\\native\\coffee-journey-v07-offline.html",
+    "fileVersion": "ed5a16024209641e1c9e7940ef89bf496233d25197505e67be823ee143647adc"
+  }
+}

@@ -4,13 +4,18 @@ import type { ComponentLibraryEntry } from '../../shared/contracts/component-pla
 import type { DesktopAPI, OpenBinaryFileResult, SelectedBinaryBatchFile, SelectedFileBatch } from '../../shared/ipcTypes'
 import type { EditorStoreKernel } from '../store/editorStoreKernel'
 import type { CapturedCourseTarget } from '../documents/CourseV10DocumentBridge'
+import { settleCourseComponentInput } from '../documents/CourseV10DocumentBridge'
 import { extractComponentLibraryEntry } from '../../core/components/library'
 import { exportComponentLibraryArchive, importComponentLibraryArchive } from '../../core/components/library/archive'
 import { captureComponentPackageReplacementTarget, commitComponentReplacementAtTarget, type ComponentPackageReplacementTarget } from '../components/commitComponentPackageAuthoring'
-import { insertComponentPackagesAtTarget } from '../components/insertComponentPackages'
+import { insertComponentPackagesAtTarget, type ComponentLibraryAddOptions } from '../components/insertComponentPackages'
+import { loadBuiltInWorkAsset } from '../../core/components/library/workAssets'
 import type { CourseInsertionOptions } from '../media/commitCourseMediaAuthoring'
 import { selectProjectLibraryDefinitions } from '../components/componentLibraryModel'
 import { inspectComponentLibraryUpdate, type ComponentLibraryUpdateReview } from '../../core/components/library/updateSource'
+import { componentSurface } from '../../shared/contracts/component-platform/project'
+import { captureFlowMenuPage } from '../document/flowWorkspaceRegistry'
+import { refreshFlowMenuTarget, releaseFlowMenuTarget, resolveFlowMenuInsertionOptions, type CapturedFlowMenuTarget } from '../ui/flow/flowInsertCommands'
 
 type CatalogPackageReference = Parameters<DesktopAPI['readComponentCatalogPackage']>[0]
 const catalogPackageReference = ({ sourceId, packageId, version }: AvailableComponentCatalogPackage): CatalogPackageReference =>
@@ -42,7 +47,7 @@ export interface ComponentLibraryApi {
   importExternalPackages(): void
   replacePackage(packageId: string): void
   refreshCatalog(): void
-  addCatalogPackages(entries: AvailableComponentCatalogPackage[]): Promise<boolean>
+  addCatalogPackages(entries: AvailableComponentCatalogPackage[], options?: ComponentLibraryAddOptions): Promise<boolean>
   prepareCatalogPackage(entry: AvailableComponentCatalogPackage): Promise<ComponentLibraryEntry | null>
   requestCatalogUpdate(entry: AvailableComponentCatalogPackage): void
   confirmReplacement(): void
@@ -53,6 +58,26 @@ export interface ComponentLibraryApi {
   deleteCatalogPackage(entry: AvailableComponentCatalogPackage): Promise<void>
 }
 const EMPTY: ComponentCatalogSnapshot = { sources: [], packages: [], issues: [] }
+/** The existing Flow input owns the bookmark; this adapter only holds it across package reads. */
+function captureLibraryInsertion(ports: ComponentLibraryPorts) {
+  const target = ports.kernel.captureTarget(), placement = ports.capturePlacement?.(target) ?? {}
+  const page = !placement.container && placement.destination !== 'paper' && target.surfaceId
+    && componentSurface(target.project, target.surfaceId)?.kind === 'flow' ? captureFlowMenuPage(true) : undefined
+  const flow: CapturedFlowMenuTarget | undefined = page?.ok && page.documentId === target.documentId
+    && page.surfaceId === target.surfaceId && (!page.epoch || page.epoch === target.epoch) ? { ...target, flowMenuPage: page } : undefined
+  if (page?.ok && !flow) page.insertionSelection?.release()
+  return {
+    scope: JSON.stringify([target.documentId, target.epoch, target.surfaceId, target.activeStateId,
+      target.rootInstanceId, target.editingContainerId, target.activation, target.selectionIdentity, target.instanceIds]),
+    release: () => { if (flow) releaseFlowMenuTarget(flow) },
+    async prepare(entries: readonly ComponentLibraryEntry[], options: ComponentLibraryAddOptions = {}) {
+      if (!flow || !entries.some(entry => entry.kind !== 'page' && entry.kind !== 'structure' || options.placement === 'local')) return { target, placement }
+      const refreshed = await refreshFlowMenuTarget(ports.kernel, flow)
+      return { target: refreshed, placement: resolveFlowMenuInsertionOptions(refreshed,
+        { kind: 'component', destination: 'document', label: '组件' }, placement) }
+    },
+  }
+}
 export function useComponentLibrary(ports: ComponentLibraryPorts): ComponentLibraryApi {
   const current = useRef(ports); current.current = ports
   const view = useSyncExternalStore(ports.kernel.bridge.subscribe, ports.kernel.readView, ports.kernel.readView)
@@ -60,6 +85,11 @@ export function useComponentLibrary(ports: ComponentLibraryPorts): ComponentLibr
   const [replacementRequest, setReplacement] = useState<ComponentPackageReplacementRequest | null>(null)
   const [catalogUpdateRequest, setUpdate] = useState<CatalogPackageUpdateRequest | null>(null)
   const catalogUpdateGeneration = useRef(0)
+  const replacementCommit = useRef<ComponentPackageReplacementRequest | null>(null)
+  const updateCommit = useRef<CatalogPackageUpdateRequest | null>(null)
+  const replacementFailure = useRef<{ request: ComponentPackageReplacementRequest; error: unknown } | null>(null)
+  const updateFailure = useRef<{ request: CatalogPackageUpdateRequest; error: unknown } | null>(null)
+  const insertionFailure = useRef<{ key: string; error: unknown } | null>(null)
   const installedEntries = useMemo((): InstalledComponentLibraryEntry[] => {
     const project = view.project
     if (!project) return []
@@ -81,28 +111,66 @@ export function useComponentLibrary(ports: ComponentLibraryPorts): ComponentLibr
       return archive.entry
     }, '组件条目读取失败，原工程保留。') ?? null
   }, [])
-  const addCatalogPackages = useCallback(async (entries: AvailableComponentCatalogPackage[]) => {
-    const target = current.current.kernel.captureTarget()
-    const placement = current.current.capturePlacement?.(target) ?? {}
+  const addCatalogPackages = useCallback(async (entries: AvailableComponentCatalogPackage[], options: ComponentLibraryAddOptions = {}) => {
+    const input = captureLibraryInsertion(current.current)
+    const key = JSON.stringify([options.attemptId ?? crypto.randomUUID(), input.scope,
+      entries.map(({ sourceId, packageId, version }) => [sourceId, packageId, version]), options])
+    if (insertionFailure.current) {
+      try {
+      const previous = insertionFailure.current, outcome = await settleCourseComponentInput(previous.error)
+      if (outcome === 'pending') throw new Error('上一次添加结果仍在核实，所选内容保留，请稍后重试。')
+      insertionFailure.current = null
+      if (outcome === 'applied' && previous.key === key) { input.release(); return true }
+      } catch (error) { input.release(); throw error }
+    }
+    let failure: { error: unknown } | undefined
     const completed = await current.current.runBusy(async () => {
+      try {
       const prepared: ComponentLibraryEntry[] = []
+      for (const id of options.builtInAssetIds ?? []) {
+        const asset = await loadBuiltInWorkAsset(id)
+        if (!asset) throw new Error('资产已不存在，请刷新后重试。')
+        prepared.push(asset)
+      }
       for (const entry of entries) {
         const file = await current.current.readCatalogPackage(catalogPackageReference(entry))
         const archive = importComponentLibraryArchive(file.bytes)
         if (archive.entry.id !== entry.packageId || archive.version !== entry.version) throw new Error('目录条目身份已改变，请刷新。')
         prepared.push(archive.entry)
       }
-      const result = await insertComponentPackagesAtTarget(current.current.kernel, target, prepared, placement)
-      if (!result.ok) throw new Error(result.reason)
-      current.current.commitStatus(`已添加 ${entries.length} 个组件到原画布`)
+      const { target, placement } = await input.prepare(prepared, options)
+      const result = await insertComponentPackagesAtTarget(current.current.kernel, target, prepared, {
+        ...placement,
+        ...(options.placement ? { placement: options.placement } : {}),
+        ...(options.includeTeacherController ? { includeTeacherController: true } : {}),
+        ...(target.instanceId ? { targetBindings: { navigation: target.instanceId } } : {}),
+      })
+      if (!result.ok) {
+        const error = result.inputFailure ?? new Error(result.reason)
+        if (result.inputFailure) {
+          insertionFailure.current = { key, error }
+          const outcome = await settleCourseComponentInput(error)
+          if (outcome !== 'pending') insertionFailure.current = null
+          if (outcome === 'applied') return true
+        }
+        throw error
+      }
+      current.current.commitStatus(`已应用 ${prepared.length + (options.includeTeacherController ? 1 : 0)} 个组件与资产`)
       return true
-    }, '组件添加未完成。')
+      } catch (error) { failure = { error }; throw error }
+    }, '组件添加未完成。').finally(input.release)
+    if (failure) throw failure.error
     return completed === true
   }, [])
   const importExternalPackages = useCallback(() => {
-    const target = current.current.kernel.captureTarget()
-    const placement = current.current.capturePlacement?.(target) ?? {}
+    const input = captureLibraryInsertion(current.current)
     void current.current.runBusy(async () => {
+      if (insertionFailure.current) {
+        const outcome = await settleCourseComponentInput(insertionFailure.current.error)
+        if (outcome === 'pending') throw new Error('上一次添加结果仍在核实，原文件保留，请稍后重试。')
+        insertionFailure.current = null
+        if (outcome === 'applied') current.current.commitStatus('上一次组件添加已经完成')
+      }
       const batch = await current.current.selectComponentPackages()
       if (!batch) return
       const entries: ComponentLibraryEntry[] = [], problems = batch.rejected.map(item => `${item.name}：${item.message}`)
@@ -114,12 +182,22 @@ export function useComponentLibrary(ports: ComponentLibraryPorts): ComponentLibr
         } catch (error) { problems.push(`${file.name}：${error instanceof Error ? error.message : String(error)}`) }
       }
       if (entries.length) {
+        const { target, placement } = await input.prepare(entries)
         const result = await insertComponentPackagesAtTarget(current.current.kernel, target, entries, placement)
-        if (!result.ok) throw new Error(result.reason)
+        if (!result.ok) {
+          const error = result.inputFailure ?? new Error(result.reason)
+          if (result.inputFailure) {
+            insertionFailure.current = { key: 'external', error }
+            const outcome = await settleCourseComponentInput(error)
+            if (outcome !== 'pending') insertionFailure.current = null
+            if (outcome === 'applied') { current.current.commitStatus(`已添加 ${entries.length} 个外部组件`); return }
+          }
+          throw error
+        }
         current.current.commitStatus(`已添加 ${entries.length} 个外部组件`)
       }
       if (problems.length) current.current.reportError(problems.join('\n'))
-    }, '外部组件读取失败，原件保留。')
+    }, '外部组件读取失败，原件保留。').finally(input.release)
   }, [])
   const replacePackage = useCallback((id: string) => {
     const target = captureComponentPackageReplacementTarget(current.current.kernel, id)
@@ -133,13 +211,29 @@ export function useComponentLibrary(ports: ComponentLibraryPorts): ComponentLibr
     }, '替换组件读取失败，原版本保留。')
   }, [])
   const confirmReplacement = useCallback(() => {
-    const request = replacementRequest; setReplacement(null)
-    if (!request) return
+    const request = replacementRequest
+    if (!request || replacementCommit.current === request) return
+    replacementCommit.current = request
     void current.current.runBusy(async () => {
+      try {
+      if (replacementFailure.current) {
+        const pending = replacementFailure.current, outcome = await settleCourseComponentInput(pending.error)
+        if (outcome === 'pending') throw new Error('上一次替换结果仍在核实，审阅内容已保留，请稍后重试。')
+        replacementFailure.current = null
+        if (outcome === 'applied' && pending.request === request) { setReplacement(current => current === request ? null : current); return }
+      }
       const result = await commitComponentReplacementAtTarget(current.current.kernel, request.target, request.packageData,
         { replaceLocalSource: request.sourceReview.localSourceModified })
-      if (!result.ok) throw new Error(result.reason)
-    }, '组件替换失败，原版本保留。')
+      if (!result.ok) {
+        const error = result.inputFailure ?? new Error(result.reason)
+        replacementFailure.current = { request, error }
+        const outcome = await settleCourseComponentInput(error)
+        if (outcome !== 'applied') throw error
+        replacementFailure.current = null
+      }
+      setReplacement(current => current === request ? null : current)
+      } finally { if (replacementCommit.current === request) replacementCommit.current = null }
+    }, '组件替换失败，原版本保留。').finally(() => { if (replacementCommit.current === request) replacementCommit.current = null })
   }, [replacementRequest])
   const requestCatalogUpdate = useCallback((entry: AvailableComponentCatalogPackage) => {
     const target = captureComponentPackageReplacementTarget(current.current.kernel, entry.packageId,true)
@@ -156,13 +250,29 @@ export function useComponentLibrary(ports: ComponentLibraryPorts): ComponentLibr
     }, '组件更新准备失败，原版本保留。')
   }, [])
   const confirmCatalogUpdate = useCallback(() => {
-    const request = catalogUpdateRequest; setUpdate(null)
-    if (!request) return
+    const request = catalogUpdateRequest
+    if (!request || updateCommit.current === request) return
+    updateCommit.current = request
     void current.current.runBusy(async () => {
+      try {
+      if (updateFailure.current) {
+        const pending = updateFailure.current, outcome = await settleCourseComponentInput(pending.error)
+        if (outcome === 'pending') throw new Error('上一次更新结果仍在核实，审阅内容已保留，请稍后重试。')
+        updateFailure.current = null
+        if (outcome === 'applied' && pending.request === request) { setUpdate(current => current === request ? null : current); return }
+      }
       const result = await commitComponentReplacementAtTarget(current.current.kernel, request.target, request.packageData,
         { replaceLocalSource: request.sourceReview.localSourceModified })
-      if (!result.ok) throw new Error(result.reason)
-    }, '组件更新失败。')
+      if (!result.ok) {
+        const error = result.inputFailure ?? new Error(result.reason)
+        updateFailure.current = { request, error }
+        const outcome = await settleCourseComponentInput(error)
+        if (outcome !== 'applied') throw error
+        updateFailure.current = null
+      }
+      setUpdate(current => current === request ? null : current)
+      } finally { if (updateCommit.current === request) updateCommit.current = null }
+    }, '组件更新失败。').finally(() => { if (updateCommit.current === request) updateCommit.current = null })
   }, [catalogUpdateRequest])
   const extractSelection = useCallback(async (title: string, kind: ComponentLibraryEntry['kind'] = 'objects', surfaceIds?: readonly string[]) => {
     const kernel = current.current.kernel, target: CapturedCourseTarget = kernel.captureTarget()

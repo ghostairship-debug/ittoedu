@@ -106,6 +106,8 @@ export interface DocumentSnapshot {
   /** Transient facts from this session, not journal availability. */
   saveError?: string | null
   recovered?: boolean
+  /** A bounded recovery retained the original input and isolated unusable optional history. */
+  recoveryDiagnostics?: string[]
   /** Recovery candidate backed only by retained unsubmitted input; restoring opens a new formal document. */
   rawInputOnly?: boolean
   recoverable: boolean
@@ -192,6 +194,8 @@ export interface DurableDocumentState {
   savedRevision: number | null
   /** Last acknowledged disk model, kept separate from later local edits. */
   savedModel?: DocumentModel
+  /** Actual recovery degradation and the retained original's location; never author content. */
+  recoveryDiagnostics?: string[]
   /** Read-boundary identity relation for this legacy work; internal recovery metadata, never author content. */
   courseProjectMigrationIds?: WorkProjectMigrationMap
   binding: DocumentBinding
@@ -200,7 +204,9 @@ export interface DurableDocumentState {
   future: DocumentHistoryEntry[]
   operations: { operationId: string; digest: string; result: DocumentOperationResult; actor?: DocumentOperation['actor']; runId?: string;
     before?: DocumentModel; after?: DocumentModel;
-    textChanges?: DocumentTextChanges; sourceChange?: DocumentSourceChange; effect?: DocumentAcceptedChange }[]
+    textChanges?: DocumentTextChanges; sourceChange?: DocumentSourceChange; effect?: DocumentAcceptedChange;
+    /** Receipt identity/result still prevent replay; its optional history payload is archived. */
+    historyUnavailable?: boolean }[]
   stoppedRuns: string[]
 }
 
@@ -237,6 +243,8 @@ export interface DocumentDriver {
 /** No filesystem, Electron, DOM or renderer dependency is permitted in the core. */
 export interface DocumentPersistence {
   append(state: DurableDocumentState): Promise<void>
+  /** Preserve the exact original before a degraded restore can replace its checkpoint. */
+  preserveRecovery?(state: DurableDocumentState): Promise<string>
   /** Session-only immutable input. Codec writes this small transition;
    * checkpoint is encoded only when a standalone record is required, never cloned per input. */
   appendTransition?(transition: DocumentStateTransition, checkpoint: DurableDocumentState): Promise<void>

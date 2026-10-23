@@ -1,0 +1,191 @@
+[
+  {
+    "kind": "read",
+    "data": {
+      "path": "components/11-underlay-poc.js.source/underlay-poc.js",
+      "type": "source",
+      "documentId": "4d167364-5040-41c4-bebe-58449fce0926",
+      "epoch": "30b90aa2-f69a-4a65-94ef-d5ba1da1b101",
+      "revision": 214,
+      "currentRevision": 214,
+      "basis": "current",
+      "summary": "源码，988 字符",
+      "references": [
+        {
+          "path": "references/component-api5.md",
+          "type": "reference"
+        }
+      ],
+      "content": "import './background-assets.css';\nimport implementation from './background-runtime.js';\n\n// CSS url() is the host's supported binary resource closure. The probe stays inside\n// this component; it never inspects the host document or controls navigation.\nexport default {\n mount(context){\n  const doc=context.root.ownerDocument,probe=doc.createElement('i');\n  probe.className='coffee-v07-material-resources';probe.hidden=true;context.root.append(probe);\n  const style=doc.defaultView.getComputedStyle(probe),assets={};\n  for(const name of ['cup','cherry','section','green','gold','roast']){\n   const value=style.getPropertyValue('--coffee-v07-'+name).trim();\n   assets[name]=value.replace(/^url\\([\"']?/,'').replace(/[\"']?\\)$/,'');\n  }\n  probe.remove();\n  const decorate=instance=>({...instance,data:{...instance.data,assets}});\n  const mounted=implementation.mount({...context,instance:decorate(context.instance)});\n  return {...mounted,update(next){mounted.update(decorate(next))}};\n }\n};\n",
+      "complete": true,
+      "note": "共享定义的作者入口；应用后使用此定义的实例一起更新。"
+    }
+  },
+  {
+    "kind": "read",
+    "data": {
+      "path": "components/11-underlay-poc.js.source/underlay-poc.js",
+      "commit": "committed",
+      "usability": "unverified",
+      "delivery": "not_requested",
+      "diagnostics": [],
+      "insertedIds": [],
+      "receipt": {
+        "status": "applied",
+        "documentId": "4d167364-5040-41c4-bebe-58449fce0926",
+        "operationId": "tool:601122af2b2e02a4a5fc539141013a4cda163304160f95a1a9f76a8e91cd0fe6",
+        "beforeRevision": 214,
+        "revision": 215,
+        "persistence": "recoverable",
+        "appliedChanges": {
+          "affectedTargets": [],
+          "changes": []
+        }
+      },
+      "files": [
+        {
+          "path": "components/11-underlay-poc.js.definition.json",
+          "type": "data",
+          "summary": "content underlay-poc.js",
+          "note": "共享定义的名称、角色与专业数据合同；内部身份和源码文件引用由软件维护。"
+        },
+        {
+          "path": "components/11-underlay-poc.js.source/underlay-poc.js",
+          "type": "source",
+          "summary": "源码，988 字符",
+          "references": [
+            {
+              "path": "references/component-api5.md",
+              "type": "reference"
+            }
+          ],
+          "note": "共享定义的作者入口；应用后使用此定义的实例一起更新。",
+          "complete": false,
+          "revision": 215,
+          "currentRevision": 215
+        },
+        {
+          "path": "components/11-underlay-poc.js.source/background-entry.js",
+          "type": "source",
+          "summary": "源码，988 字符",
+          "references": [
+            {
+              "path": "references/component-api5.md",
+              "type": "reference"
+            }
+          ],
+          "note": "共享定义的作者入口；应用后使用此定义的实例一起更新。"
+        },
+        {
+          "path": "components/11-underlay-poc.js.source/background-assets.css",
+          "type": "source",
+          "summary": "源码，377 字符",
+          "references": [
+            {
+              "path": "references/component-api5.md",
+              "type": "reference"
+            }
+          ],
+          "note": "共享定义的作者入口；应用后使用此定义的实例一起更新。"
+        },
+        {
+          "path": "components/11-underlay-poc.js.source/background-runtime.js",
+          "type": "source",
+          "summary": "源码，24386 字符",
+          "references": [
+            {
+              "path": "references/component-api5.md",
+              "type": "reference"
+            }
+          ],
+          "note": "共享定义的作者入口；应用后使用此定义的实例一起更新。"
+        },
+        {
+          "path": "components/11-underlay-poc.js.source/assets/runtime/cup.webp",
+          "type": "asset",
+          "summary": "application/octet-stream，95718 字节",
+          "references": [
+            {
+              "path": "references/component-api5.md",
+              "type": "reference"
+            }
+          ],
+          "note": "共享定义的作者入口；应用后使用此定义的实例一起更新。"
+        },
+        {
+          "path": "components/11-underlay-poc.js.source/assets/runtime/cherry.webp",
+          "type": "asset",
+          "summary": "application/octet-stream，170712 字节",
+          "references": [
+            {
+              "path": "references/component-api5.md",
+              "type": "reference"
+            }
+          ],
+          "note": "共享定义的作者入口；应用后使用此定义的实例一起更新。"
+        },
+        {
+          "path": "components/11-underlay-poc.js.source/assets/runtime/section.webp",
+          "type": "asset",
+          "summary": "application/octet-stream，204996 字节",
+          "references": [
+            {
+              "path": "references/component-api5.md",
+              "type": "reference"
+            }
+          ],
+          "note": "共享定义的作者入口；应用后使用此定义的实例一起更新。"
+        },
+        {
+          "path": "components/11-underlay-poc.js.source/assets/runtime/green.webp",
+          "type": "asset",
+          "summary": "application/octet-stream，210668 字节",
+          "references": [
+            {
+              "path": "references/component-api5.md",
+              "type": "reference"
+            }
+          ],
+          "note": "共享定义的作者入口；应用后使用此定义的实例一起更新。"
+        },
+        {
+          "path": "components/11-underlay-poc.js.source/assets/runtime/gold.webp",
+          "type": "asset",
+          "summary": "application/octet-stream，166210 字节",
+          "references": [
+            {
+              "path": "references/component-api5.md",
+              "type": "reference"
+            }
+          ],
+          "note": "共享定义的作者入口；应用后使用此定义的实例一起更新。"
+        },
+        {
+          "path": "components/11-underlay-poc.js.source/assets/runtime/roast.webp",
+          "type": "asset",
+          "summary": "application/octet-stream，187972 字节",
+          "references": [
+            {
+              "path": "references/component-api5.md",
+              "type": "reference"
+            }
+          ],
+          "note": "共享定义的作者入口；应用后使用此定义的实例一起更新。"
+        },
+        {
+          "path": "components/11-underlay-poc.js.source/background-stages.js",
+          "type": "source",
+          "summary": "源码，3545 字符",
+          "references": [
+            {
+              "path": "references/component-api5.md",
+              "type": "reference"
+            }
+          ],
+          "note": "共享定义的作者入口；应用后使用此定义的实例一起更新。"
+        }
+      ],
+      "currentRevision": 215
+    }
+  }
+]

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import type { LessonMaterialList, LessonMaterialRead, LessonMaterialRecord, MaterialExtraction } from '../../shared/materialExtraction'
-import type { LessonMaterialSelectResult, LessonMaterialPdfInput } from '../../shared/lessonMaterialDesktop'
+import type { LessonMaterialSelectResult, LessonMaterialPdfInput, LessonMaterialOfficeInput } from '../../shared/lessonMaterialDesktop'
 import { extractMaterial } from '../project/materialExtraction'
 
 export interface LessonMaterialBrowserProps {
@@ -12,6 +12,7 @@ export interface LessonMaterialBrowserProps {
   list(): Promise<LessonMaterialList>
   importMaterial(input: { title: string; original: Uint8Array; extraction: MaterialExtraction }): Promise<LessonMaterialRecord>
   importPdf?(input: Omit<LessonMaterialPdfInput, 'requestId'>, options: { signal: AbortSignal; onProgress: (page: number, total: number) => void }): Promise<LessonMaterialRecord>
+  extractOffice?(input: Omit<LessonMaterialOfficeInput, 'requestId'>, options: { signal: AbortSignal; onProgress: (page: number, total: number) => void }): Promise<MaterialExtraction>
   read(input: { id: string; extractionVersion: string; fragmentIds: string[] }): Promise<LessonMaterialRead>
 }
 function Images({ assets }: { assets: LessonMaterialRead['assets'] }) {
@@ -74,7 +75,12 @@ export function LessonMaterialBrowser(props: LessonMaterialBrowserProps) {
                     onProgress: (page, total) => { if (token === generation.current && !controller.signal.aborted) setProgress(`${source.title}：第 ${page} / ${total} 页`) },
                   })
                 } else {
-                  const extraction = await extractMaterial(original, source.title)
+                  const office = /\.(docx|pptx)$/i.test(source.title)
+                  if (office && !currentApi.extractOffice) throw new Error('Office 材料隔离提取服务不可用，请重新打开应用')
+                  const extraction = office
+                    ? await currentApi.extractOffice!({ title: source.title, original }, { signal: controller.signal,
+                      onProgress: (page, total) => { if (token === generation.current && !controller.signal.aborted) setProgress(`${source.title}：第 ${page} / ${total} 页`) } })
+                    : await extractMaterial(original, source.title, { signal: controller.signal })
                   if (token !== generation.current || controller.signal.aborted) break
                   await currentApi.importMaterial({ title: source.title, original, extraction })
                 }

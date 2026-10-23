@@ -6,12 +6,12 @@ import { useCourseV10Runtime } from '../../components/CourseV10RuntimeView'
 import { requestComponentAuthorHit, visibleComponentAuthorHit, type VisibleComponentAuthorHit } from '../../components/componentAuthorHit'
 import { authorSpotEdits, authorSpotImageEdits } from '../../componentPlatform/surfaces/slide/authorSpots'
 import { authorFieldIdentity, interactionSelectionIdentity, selectionMatchesSpot } from '../../documents/interactionSelection'
-import { useEditorStore } from '../../store/editorStore'
+import { selectActiveSlideContentEdit, useEditorStore } from '../../store/editorStore'
 import type { ImportedImageAsset } from '../../project/assetManager'
 import { flowContentClientMatrix } from '../flow/flowParagraphLayout'
 import { ProfessionalContentEditor } from './ProfessionalContentEditor'
 import { AUTHOR_FIELD_ACTION_EVENT, requestObjectContextMenu, type AuthorFieldActionRequest } from '../../editing/commands/objectContextMenu'
-import { nativeTextSpotFromElement } from '../../authoring/professionalContentFields'
+import { nativeTextClientRect, nativeTextSpotFromElement } from '../../authoring/professionalContentFields'
 import { authorSpotValue } from '../../../core/components/authoring/componentAuthorEdits'
 import type { PlainTextSelectionIntent } from '../CanvasPlainTextEditor'
 
@@ -31,14 +31,15 @@ export function useComponentAuthorInteraction({ root, documentId, surfaceId, ena
   const runtime = useCourseV10Runtime()
   const bridge = useEditorStore(state => state.courseBridge)
   const selection = useEditorStore(state => state.courseView.interactionSelection)
-  const draft = useEditorStore(state => state.slideContentEdit)
+  const draft = useEditorStore(selectActiveSlideContentEdit)
   const [spots, setSpots] = useState<readonly ComponentAuthorSpot[]>(() => runtime.world.authorSpots())
   const latest = useRef({ runtime, documentId, surfaceId, enabled, selectImage, report, contextKey })
   latest.current = { runtime, documentId, surfaceId, enabled, selectImage, report, contextKey }
   const intent = useRef(0)
   const caret = useRef<GeometryPoint | undefined>(undefined)
   const fieldCaret = useRef<FieldCaretIntent | undefined>(undefined)
-  const [realmSelection, setRealmSelection] = useState<{ instanceId: string; authorKey: string; value: PlainTextSelectionIntent } | null>(null)
+  const [realmSelection, setRealmSelection] = useState<{ instanceId: string; authorKey?: string; value: PlainTextSelectionIntent } | null>(null)
+  const nativeGesture = useRef<{ instanceId: string; authorKey?: string; pointerId: number; anchor: GeometryPoint; moved: boolean } | null>(null)
   const nativeObservation = useRef<NativeFieldObservation | undefined>(undefined)
   useEffect(() => {
     const update = () => setSpots(runtime.world.authorSpots())
@@ -48,6 +49,19 @@ export function useComponentAuthorInteraction({ root, documentId, surfaceId, ena
   }, [runtime.world])
   useEffect(() => { nativeObservation.current = undefined; fieldCaret.current = undefined; setRealmSelection(null); return () => { ++intent.current } }, [documentId, surfaceId, contextKey])
   useEffect(() => { if (!enabled) fieldCaret.current = undefined; return () => { ++intent.current } }, [enabled])
+  useEffect(() => {
+    const move = (event: PointerEvent) => {
+      const gesture = nativeGesture.current
+      if (!gesture || gesture.pointerId !== event.pointerId) return
+      const point = { x: event.clientX, y: event.clientY }
+      if (!gesture.moved && Math.hypot(point.x - gesture.anchor.x, point.y - gesture.anchor.y) < 3) return
+      gesture.moved = true
+      setRealmSelection({ instanceId: gesture.instanceId, authorKey: gesture.authorKey, value: { anchorPoint: gesture.anchor, point } })
+    }
+    const end = (event: PointerEvent) => { move(event); nativeGesture.current = null }
+    window.addEventListener('pointermove', move, true); window.addEventListener('pointerup', end, true); window.addEventListener('pointercancel', end, true)
+    return () => { nativeGesture.current = null; window.removeEventListener('pointermove', move, true); window.removeEventListener('pointerup', end, true); window.removeEventListener('pointercancel', end, true) }
+  }, [enabled, documentId, surfaceId, contextKey])
   // Disposable view hints consume the registered fields and the existing layout;
   // they own neither author identities nor input/drag operations.
   useEffect(() => {
@@ -73,7 +87,6 @@ export function useComponentAuthorInteraction({ root, documentId, surfaceId, ena
         const active = hovered?.instanceId === spot.instanceId && hovered.authorKey === spot.authorKey
         mark.dataset.hovered = String(active); mark.dataset.authorAffordance = spot.kind
         Object.assign(mark.style, { left: `${left - outer.left}px`, top: `${top - outer.top}px`, width: `${width}px`, height: `${height}px` })
-        mark.textContent = active ? spot.kind === 'text' ? '文字 · 点此编辑' : '图片 · 点此选中' : ''
       }
       for (const [id, mark] of marks) if (!shown.has(id)) { mark.remove(); marks.delete(id) }
     }
@@ -293,7 +306,7 @@ export function useComponentAuthorInteraction({ root, documentId, surfaceId, ena
       if (event.button === 0) void beginRegisteredSpot(id, localPoint, undefined, visible.authorKey)
       return true
     }
-    const slot = target.closest<HTMLElement>('[data-document-path]'), rect = slot?.getBoundingClientRect()
+    const slot = target.closest<HTMLElement>('[data-document-path]'), rect = slot && nativeTextClientRect(slot)
     const topLeft = rect && transformPoint(inverse, { x: rect.left, y: rect.top }), bottomRight = rect && transformPoint(inverse, { x: rect.right, y: rect.bottom })
     const native = topLeft && bottomRight ? nativeTextSpotFromElement(owner.runtime.project, id, target, {
       width: Math.max(1, bottomRight.x - topLeft.x), height: Math.max(1, bottomRight.y - topLeft.y),
@@ -304,6 +317,8 @@ export function useComponentAuthorInteraction({ root, documentId, surfaceId, ena
     if (event.button === 2) return true
     caret.current = { x: event.clientX, y: event.clientY }
     if (native) {
+      setRealmSelection(null)
+      nativeGesture.current = { instanceId: id, authorKey: native.authorKey, pointerId: event.pointerId, anchor: caret.current, moved: false }
       const originalPath = slot?.dataset.documentPath, cellId = slot?.closest<HTMLElement>('[data-table-cell-id]')?.dataset.tableCellId
       const currentView = bridge.read()
       nativeObservation.current = { documentId: owner.documentId, epoch: currentView.snapshot?.epoch, contextKey: owner.contextKey,
@@ -381,11 +396,11 @@ export function useComponentAuthorInteraction({ root, documentId, surfaceId, ena
     && pendingCaret.fieldIdentity === authorFieldIdentity(ownedDraft.instanceId, ownedDraft.authorSpot)
     ? Math.min(pendingCaret.offset, (ownedDraft.spotText ?? '').length) : undefined
   const state = () => useEditorStore.getState()
-  const editor = ownedDraft ? <ProfessionalContentEditor project={runtime.project} draft={ownedDraft}
+  const editor = ownedDraft ? <ProfessionalContentEditor project={runtime.project} draft={ownedDraft} floatingToolbar
     selectionIntent={realmSelection?.instanceId === ownedDraft.instanceId && realmSelection.authorKey === ownedDraft.authorSpot?.authorKey ? realmSelection.value : undefined}
     target={() => ownedDraft.authorSpot ? runtime.world.contentElement?.(ownedDraft.instanceId) : runtime.world.targetElement?.(ownedDraft.instanceId)}
     update={(...args) => state().updateSlideDataDraft(...args)} updateSpot={(...args) => state().updateSlideSpotDraft(...args)}
     commit={() => state().commitSlideContentEdit()} commitInput={() => state().commitSlideContentInput()}
-    cancel={() => state().cancelTextEdit()} undo={async () => { await state().undo() }} redo={async () => { await state().redo() }} report={report} clientPoint={caret.current} caretOffset={caretOffset} /> : null
+    cancel={() => state().cancelTextEdit()} preserve={() => state().retainTextEdit()} undo={async () => { await state().undo() }} redo={async () => { await state().redo() }} report={report} clientPoint={caret.current} caretOffset={caretOffset} /> : null
   return { selectedSpot, authorBounds, activate, replace, beginNative, fieldIsCurrent, selectNativeField, beginRegisteredSpot, pointerFromElement, contextMenuFromElement, openContextMenu, editor }
 }

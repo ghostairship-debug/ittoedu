@@ -376,6 +376,8 @@ export function mountHtmlPreviewAgent(doc: Document, inheritedTracking?: Runtime
       dirtyRoots.clear(); discoveryFull = false; discoveryDirty = false
     }
     scanId = `edit-scan-${++scanSerial}`
+    frameBridge.confirm([], scanId)
+    frameBridge.refresh()
     candidates.clear()
     const reports = readAuthoring(() => {
       const reports: HtmlPreviewTargetReport[] = []
@@ -415,6 +417,7 @@ export function mountHtmlPreviewAgent(doc: Document, inheritedTracking?: Runtime
   }
   const stopFrameTargets = frameBridge.onTargets(message => {
     if (!editMode || !visible || !loadId) return
+    if (message.event === 'selection') { send(message); return }
     if (message.event === 'targets') send({ event: 'targets', targets: message.targets })
     else {
       for (const target of message.targets) candidates.add(target.handle)
@@ -649,18 +652,26 @@ export function mountHtmlPreviewAgent(doc: Document, inheritedTracking?: Runtime
     if (message.type === 'html-preview.visibility' && typeof message.active === 'boolean') { setVisible(message.active); return }
     if (message.type === 'html-preview.edit-mode' && typeof message.enabled === 'boolean'
       && typeof message.requestId === 'string' && message.requestId.length > 0 && message.requestId.length <= 256) {
-      editMode = message.enabled
-      authoring.suppressText()
-      selected = null; hovered = null; confirmed.clear()
-      if (editMode) discoverTargets()
-      else { scanId = ''; if (discoveryFrame) win.cancelAnimationFrame(discoveryFrame); discoveryFrame = 0; drawMarkers() }
-      send({ event: 'edit-mode-ready', requestId: message.requestId, enabled: editMode })
-      frameBridge.setEditMode(editMode)
+      const previousMode = editMode
+      try {
+        editMode = message.enabled
+        authoring.suppressText()
+        selected = null; hovered = null; confirmed.clear()
+        if (editMode) discoverTargets()
+        else { scanId = ''; if (discoveryFrame) win.cancelAnimationFrame(discoveryFrame); discoveryFrame = 0; drawMarkers() }
+        frameBridge.setEditMode(editMode)
+        send({ event: 'edit-mode-ready', requestId: message.requestId, enabled: editMode })
+      } catch (error) {
+        editMode = previousMode
+        try { frameBridge.setEditMode(previousMode) } catch { /* Report the original preparation failure, not a second rollback error. */ }
+        send({ event: 'edit-mode-error', requestId: message.requestId, enabled: message.enabled,
+          message: error instanceof Error ? error.message : '预览编辑未能准备完成，可重试或在源码中继续。' })
+      }
     }
     if (message.type === 'html-preview.refresh-targets') scheduleDiscovery()
     if (message.type === 'html-preview.confirm-targets' && editMode && message.scanId === scanId && Array.isArray(message.handles)) {
       for (const handle of message.handles) if (candidates.has(handle)) confirmed.add(handle)
-      frameBridge.confirm(message.handles)
+      frameBridge.confirm(message.handles, scanId)
       drawMarkers()
     }
     if (message.type === 'html-preview.selection' && editMode) {

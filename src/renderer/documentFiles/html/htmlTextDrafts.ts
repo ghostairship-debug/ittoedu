@@ -13,6 +13,8 @@ export interface HtmlTextDraft {
   readonly original: string
   readonly value: string
   readonly issue?: string
+  /** Different recovered alternatives are kept for a person to choose, never replayed together. */
+  readonly alternative?: boolean
   readonly authoring?: { authorKey: string; record: ComponentAuthorRecord }
   readonly sourceAuthoring?: { authorKey: string; record: ComponentAuthorRecord }
 }
@@ -85,6 +87,23 @@ export class HtmlTextDrafts {
   }
   private wasPrepared(id: number): boolean { return this.prepared.some(value => value.drafts.some(draft => draft.id === id)) }
 
+  restore(records: readonly Omit<HtmlTextDraft, 'id'>[]): void {
+    const drafts = [...this.drafts]
+    for (const record of records) {
+      if (drafts.some(draft => draft.source === record.source && draft.from === record.from && draft.to === record.to
+        && draft.original === record.original && draft.value === record.value
+        && equalComponentValue(draft.authoring ?? draft.sourceAuthoring ?? null, record.authoring ?? record.sourceAuthoring ?? null))) continue
+      const sameTarget = (draft: HtmlTextDraft) => record.authoring
+        ? draft.authoring?.authorKey === record.authoring.authorKey
+        : !draft.authoring && draft.source === record.source && draft.from === record.from && draft.to === record.to
+      const alternative = drafts.some(sameTarget)
+      if (alternative) for (let index = 0; index < drafts.length; index++) if (sameTarget(drafts[index]!))
+        drafts[index] = { ...drafts[index]!, alternative: true, issue: '此处有多份未应用文字稿，均已保留；请选择需要的内容。' }
+      drafts.push({ ...record, id: ++this.sequence, ...(alternative ? { alternative: true, issue: '此处有多份未应用文字稿，均已保留；请选择需要的内容。' } : {}) })
+    }
+    if (drafts.length !== this.drafts.length) this.publish(drafts)
+  }
+
   /** A repeated flush can receive the optimistic source of an earlier submission.
    * Use that known span without treating its projection as a committed receipt. */
   private rangeForSave(draft: HtmlTextDraft, source: string) {
@@ -147,27 +166,46 @@ export class HtmlTextDrafts {
       })
       this.prepared.splice(0, acknowledged + 1)
     }
-    const next = drafts.map(draft => {
+    const next = drafts.flatMap(draft => {
+      if (draft.alternative) return [draft]
+      // Recovery can outlive the input's successful commit. Compare against the
+      // exact intended value before treating that own change as a conflict.
+      try {
+        const intended = draft.authoring ? null : draft.source.slice(0, draft.from)
+          + encoded(draft.value, draft.source, draft.source.slice(draft.from, draft.to)) + draft.source.slice(draft.to)
+        if (draft.authoring) {
+          const records = this.analysis?.source === source ? this.analysis.authoring.authoringRecords : readHtmlAuthoringRecords(source)
+          const record = records[draft.authoring.authorKey]
+          if (record?.overrides.text === draft.value && equalComponentValue(record.binding, draft.authoring.record.binding)
+            && equalComponentValue(record.scope ?? {}, draft.authoring.record.scope ?? {})) return []
+        } else if (intended !== null) {
+          const value = encoded(draft.value, draft.source, draft.source.slice(draft.from, draft.to))
+          const range = mapMarkdownRange(intended, source, { kind: 'markdown-range', from: draft.from, to: draft.from + value.length })
+          if (source.slice(range.from, range.to) === value) return []
+        }
+      } catch { /* The intended value is not in the current source; retain the original input. */ }
       try {
         const range = this.mapped(draft, source)
-        return draft.source === source && !draft.issue ? draft : { ...draft, source, from: range.from, to: range.to, issue: undefined }
+        return [draft.source === source && !draft.issue ? draft : { ...draft, source, from: range.from, to: range.to, issue: undefined }]
       } catch {
-        return draft.issue ? draft : { ...draft, issue: sourceChanged }
+        return [draft.issue ? draft : { ...draft, issue: sourceChanged }]
       }
     })
     if (next.length !== this.drafts.length || next.some((draft, index) => draft !== this.drafts[index])) this.publish(next)
   }
 
-  prepare(source: string, sourceChangeHints?: Array<{ from: number; to: number; inserted: number }>): { ready: boolean; source: string } {
+  prepare(source: string, sourceChangeHints?: Array<{ from: number; to: number; inserted: number }>, retained = false): { ready: boolean; source: string } {
     const located = this.drafts.map(draft => {
+      if (draft.alternative) return draft
       try { return { ...draft, ...this.rangeForSave(draft, source), issue: undefined } }
       catch { return { ...draft, issue: sourceChanged } }
     })
     const next = this.drafts.map((draft, index) => draft.issue === located[index]!.issue
       ? draft : { ...draft, issue: located[index]!.issue })
     if (next.some((draft, index) => draft !== this.drafts[index])) this.publish(next)
-    if (located.some(draft => draft.issue)) return { ready: false, source }
-    const sorted = located.filter(draft => !draft.authoring).sort((a, b) => a.from - b.from)
+    if (!retained && located.some(draft => draft.issue)) return { ready: false, source }
+    const applicable = located.filter(draft => !draft.issue)
+    const sorted = applicable.filter(draft => !draft.authoring).sort((a, b) => a.from - b.from)
     const submitted: PreparedTextDrafts['drafts'] = []
     const staticChanges: Array<{ from: number; to: number; inserted: number }> = []
     let result = '', position = 0
@@ -182,7 +220,7 @@ export class HtmlTextDrafts {
     }
     result += source.slice(position)
     sourceChangeHints?.push(...staticChanges.reverse())
-    const dynamic = located.filter(draft => draft.authoring)
+    const dynamic = applicable.filter(draft => draft.authoring)
     if (dynamic.length || sorted.some(draft => draft.sourceAuthoring)) {
       const records = readHtmlAuthoringRecords(result)
       let changed = false

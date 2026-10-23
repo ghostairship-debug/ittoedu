@@ -319,6 +319,7 @@ let workspaceFileEventGeneration = 0
 let stopExportBuildListeners: (() => void) | undefined
 let frozenDeliveryBuilds: FrozenDocumentExportService | undefined
 const pptxImportJobs = new Map<string, AbortController>()
+const pdfExportJobs = new Map<string, AbortController>()
 let htmlPreview: HtmlPreviewService | undefined
 let htmlPreviewClosedCleanup: (() => void) | undefined
 export function releaseAllHtmlPreviewLeases(): void { htmlPreview?.releaseAll() }
@@ -1137,11 +1138,32 @@ export function registerIpcHandlers(context: IpcContext): void {
       message: '无法生成 PDF 文档。',
       suggestion: '请减少大图片数量，或改存到其他位置后重试。',
     },
-    async (_event, args) => {
-      const input = htmlSchema.parse(requireSingleArgument(args))
-      return exportPdfFromHtml(requireWindow(context), input.suggestedName, input.html, input.projectPath)
+    async (event, args) => {
+      const input = htmlSchema.extend({ requestId: z.string().uuid().optional() }).parse(requireSingleArgument(args))
+      const window = requireWindow(context), requestId = input.requestId ?? randomUUID()
+      const key = `${event.sender.id}:${requestId}`
+      if (pdfExportJobs.has(key)) throw new Error('此 PDF 导出仍在进行')
+      const controller = new AbortController(), abort = () => controller.abort(new Error('PDF 导出已取消'))
+      pdfExportJobs.set(key, controller)
+      window.once('closed', abort)
+      try {
+        return await exportPdfFromHtml(window, input.suggestedName, input.html, input.projectPath, {
+          signal: controller.signal,
+          onPrepared: () => { if (input.requestId && !event.sender.isDestroyed()) event.sender.send(IPC_CHANNELS.pdfExportPrepared, { requestId }) },
+        })
+      } finally { window.removeListener('closed', abort); pdfExportJobs.delete(key) }
     },
   )
+
+  registerSafeHandler(IPC_CHANNELS.cancelPdfExport, context, {
+    code: 'PDF_CANCEL_FAILED', title: 'PDF 取消未完成', message: '未能取消 PDF 导出。', suggestion: '已写出的文件保持不变。',
+  }, (event, args) => {
+    const input = z.object({ requestId: z.string().uuid() }).strict().parse(requireSingleArgument(args))
+    const controller = pdfExportJobs.get(`${event.sender.id}:${input.requestId}`)
+    if (!controller) return false
+    controller.abort(new Error('PDF 导出已取消'))
+    return true
+  })
 
   registerSafeHandler(
     IPC_CHANNELS.setPreviewNetworkPolicy,
@@ -1270,6 +1292,8 @@ export function unregisterIpcHandlers(): void {
   frozenDeliveryBuilds?.dispose(); frozenDeliveryBuilds = undefined
   for (const controller of pptxImportJobs.values()) controller.abort(new Error('PPTX 导入服务已关闭'))
   pptxImportJobs.clear()
+  for (const controller of pdfExportJobs.values()) controller.abort(new Error('PDF 导出服务已关闭'))
+  pdfExportJobs.clear()
   stopExportBuildListeners?.(); stopExportBuildListeners = undefined
   disposeWorkbenchExportPort()
   htmlPreviewClosedCleanup?.(); htmlPreviewClosedCleanup = undefined

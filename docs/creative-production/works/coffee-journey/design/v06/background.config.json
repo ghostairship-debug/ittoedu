@@ -1,0 +1,41 @@
+{
+  "chapters": [
+    {
+      "targetId": "5b629c9b-d44b-4fe6-a156-ed4d3b03880d",
+      "number": "01",
+      "label": "杯中"
+    },
+    {
+      "targetId": "b3d345ba-f2c8-4c52-add1-2aa477d6a241",
+      "number": "02",
+      "label": "生长"
+    },
+    {
+      "targetId": "a8add446-cdcf-4007-824f-f0449a24912a",
+      "number": "03",
+      "label": "处理"
+    },
+    {
+      "targetId": "83bca290-3006-4058-af49-a97b1e1fd00d",
+      "number": "04",
+      "label": "交接"
+    },
+    {
+      "targetId": "5093abd6-eba9-43cc-a54a-ad2eb13648e6",
+      "number": "05",
+      "label": "烘焙"
+    },
+    {
+      "targetId": "b1a166da-1cc4-4f39-a8ba-dc5c15bd39ba",
+      "number": "06",
+      "label": "水"
+    },
+    {
+      "targetId": "8ad1964b-3a7a-4a92-a59c-259924f7b485",
+      "number": "07",
+      "label": "回味"
+    }
+  ],
+  "originTarget": "4d4b2b29-0afe-4e4c-94fe-17cc6524a3c2",
+  "durationMs": 1350
+}

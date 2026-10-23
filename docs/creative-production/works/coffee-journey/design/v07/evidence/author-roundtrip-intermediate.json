@@ -1,0 +1,104 @@
+{
+  "date": "2026-10-23T04:07:16.894Z",
+  "preservation": {
+    "instances": 183,
+    "allInstanceAndDefinitionIdsPreserved": true,
+    "rootAndGlobalPreserved": true,
+    "otherInstancesDeepEqual": true,
+    "changedInstances": [
+      "8bc2720a-0b46-439a-98c1-dc505b1cb456"
+    ],
+    "v06Hash": "e4a7e1e051891a9381fe9dbd878668a6e83b9956f64a81733a8d164cf343a525"
+  },
+  "nativeEdit": {
+    "instanceId": "dd6eb479-a0f3-4284-8f56-af846f15f328",
+    "receipt": {
+      "status": "applied",
+      "documentId": "8dc53f3f-e7ef-4cba-911c-1805095166dd",
+      "operationId": "coffee-v07-native-edit-roundtrip-1792728453091-1",
+      "beforeRevision": 207,
+      "revision": 208,
+      "persistence": "recoverable",
+      "appliedChanges": {
+        "changes": [
+          {
+            "path": [
+              "instances",
+              "dd6eb479-a0f3-4284-8f56-af846f15f328",
+              "data",
+              "content"
+            ],
+            "exists": true,
+            "value": {
+              "inlines": [
+                {
+                  "type": "text",
+                  "text": "此刻，它只是你手边的一杯。把目光往前推，会遇见一颗红色果实、一片土地，还有许多双手。〔v07验收〕",
+                  "style": {
+                    "color": "#525a4e",
+                    "bold": false,
+                    "italic": false,
+                    "emphasis": false
+                  }
+                }
+              ]
+            }
+          }
+        ],
+        "affectedTargets": [
+          "dd6eb479-a0f3-4284-8f56-af846f15f328"
+        ]
+      }
+    },
+    "neighboursUnchanged": true,
+    "undo": true,
+    "redo": true,
+    "restored": true
+  },
+  "trial": {
+    "dataset": {
+      "coffeeUnderlay": "journey-v07",
+      "mountId": "1792728449579-wh51k",
+      "chapter": "4",
+      "phase": "3.00000",
+      "stage": "green",
+      "idle": "true",
+      "reduced": "false",
+      "motionId": "1",
+      "motionProgress": "1",
+      "motionStatus": "completed",
+      "scrollTop": "4884.5",
+      "paperPhase": "3.00000",
+      "reading": "{\"containerId\":\"47415583-2d75-4b72-9c46-dfd29b47d82a\",\"activeInstanceId\":\"83bca290-3006-4058-af49-a97b1e1fd00d\",\"progress\":0.5001675982569781}",
+      "tick": "4",
+      "size": "1340x897",
+      "assetsReady": "6",
+      "suspended": "false"
+    },
+    "rect": {
+      "x": 0,
+      "y": 0,
+      "width": 1340,
+      "height": 897,
+      "top": 0,
+      "right": 1340,
+      "bottom": 897,
+      "left": 0
+    },
+    "viewport": {
+      "width": 1340,
+      "height": 897
+    }
+  },
+  "editorLifecycle": {
+    "sameMount": true,
+    "suspendResume": true
+  },
+  "save": {
+    "revision": 211,
+    "path": "D:\\果铃工作台\\docs\\creative-production\\works\\coffee-journey\\design\\v07\\native\\coffee-journey-v07.glx",
+    "dirty": false
+  },
+  "oldPid": 30608,
+  "warmErrors": []
+}

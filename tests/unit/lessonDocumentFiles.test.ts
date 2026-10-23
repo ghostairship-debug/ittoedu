@@ -2,7 +2,7 @@
 import { promises as fs } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createTestLessonDocumentFiles as createLessonDocumentFiles } from '../helpers/markdownDocumentHost'
 import type { DocumentFileRef } from '../../src/shared/document/ports'
 import { lessonDocumentRequestSchema } from '../../src/shared/lessonDocumentDesktop'
@@ -22,6 +22,28 @@ describe('lessonDocumentFiles real disk', () => {
     await fs.rm(resolved, { recursive: true, force: true })
   })
   const save = (source: string, expectedVersion: Awaited<ReturnType<typeof files.openDocument>>['version'] | null = null, operationId = source) => files.saveDocument({ ref, source, expectedVersion, operationId, attachments: [] })
+  it('opens the target recovery without decoding unrelated recovery models', async () => {
+    await save('磁盘稿')
+    const disk = await files.openDocument(ref)
+    await files.preserveDraft(ref, '未保存稿', disk.version)
+    const restarted = createLessonDocumentFiles({ recoveryDirectory: path.join(directory, 'recovery'), validateTarget: async () => {} })
+    const legacy = vi.spyOn(restarted.documents, 'recoverable').mockRejectedValue(new Error('无关文档恢复记录无法解码'))
+    expect((await restarted.openDocument(ref)).source).toBe('未保存稿')
+    expect(await fs.readFile(path.join(lessonDirectory, 'plan.md'), 'utf8')).toBe('磁盘稿')
+    expect(legacy).not.toHaveBeenCalled()
+  })
+  it('reports a target recovery failure without opening its older saved file', async () => {
+    await save('磁盘稿')
+    const disk = await files.openDocument(ref)
+    await files.preserveDraft(ref, '未保存稿', disk.version)
+    const restarted = createLessonDocumentFiles({ recoveryDirectory: path.join(directory, 'recovery'), validateTarget: async () => {} })
+    const recovery = (await restarted.documents.recoverySummaries!())[0]!
+    const restore = vi.spyOn(restarted.documents, 'restore').mockRejectedValue(new Error('目标恢复记录无法解码，原记录保留'))
+    const open = vi.spyOn(restarted.documents, 'open')
+    await expect(restarted.openDocument(ref)).rejects.toThrow('目标恢复记录无法解码，原记录保留')
+    expect(restore).toHaveBeenCalledWith(recovery.documentId)
+    expect(open).not.toHaveBeenCalled()
+  })
   it('reads a subdirectory Markdown resource from its actual file directory before the document exists', async () => {
     const subdirectory = path.join(lessonDirectory, 'sub')
     await fs.mkdir(subdirectory)

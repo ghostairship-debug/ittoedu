@@ -18,6 +18,8 @@ export interface FlowDocumentRecoveryPort {
   write(record: FlowDocumentRecoveryRecord, target: FlowDocumentRecoveryTarget): Promise<void>
   clear(target: FlowDocumentRecoveryTarget): Promise<void>
   claim(target: FlowDocumentRecoveryTarget, record: FlowDocumentRecoveryCandidate): Promise<void>
+  /** Retire active input occupancy only after its exact raw record is durably retained. */
+  retain?(record: FlowDocumentRecoveryRecord, target: FlowDocumentRecoveryTarget): Promise<void>
 }
 /** Flow owns input adaptation; the document host owns recovery identity and persistence. */
 export function createFlowDocumentRecoveryPort(host: Pick<DocumentHostAPI, 'readAuthoringDrafts' | 'writeAuthoringDrafts' | 'claimAuthoringDrafts'>): FlowDocumentRecoveryPort {
@@ -45,6 +47,19 @@ export function createFlowDocumentRecoveryPort(host: Pick<DocumentHostAPI, 'read
       await host.claimAuthoringDrafts(target.documentId, documentEpoch(target), [record.recovery])
       const key = scope(target)
       unadopted.set(key, (unadopted.get(key) ?? []).filter(candidate => candidate.id !== record.recovery.id || candidate.digest !== record.recovery.digest))
+    },
+    async retain(record, target) {
+      const saved = await host.readAuthoringDrafts(target.documentId)
+      const claims = (saved?.recoveryRecords ?? []).filter(candidate => candidate.kind === 'flow'
+        && 'source' in candidate.value && 'surfaceId' in candidate.value && 'revision' in candidate.value
+        && candidate.value.source === record.source && candidate.value.surfaceId === record.surfaceId
+        && candidate.value.revision === record.revision && 'projectId' in candidate.value && candidate.value.projectId === record.projectId)
+        .map(({ id, digest }) => ({ id, digest }))
+      if (!claims.length) throw new Error('正文原稿尚未确认保全，当前输入继续保留')
+      const key = scope(target), previous = unadopted.get(key) ?? []
+      const retainedRecords = [...previous, ...claims].filter((claim, index, values) => values.findIndex(value => value.id === claim.id && value.digest === claim.digest) === index)
+      await host.writeAuthoringDrafts(target.documentId, { flow: [], flowSurfaceId: target.surfaceId, retainedRecords }, documentEpoch(target))
+      unadopted.set(key, retainedRecords)
     },
   }
 }

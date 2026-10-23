@@ -90,9 +90,80 @@ export function createDomAuthoring(root: HTMLElement, options: {
     if (start < value.length) result.push(value.slice(start))
     return result
   }
-  const visible = (node: Target) => {
-    const style = win.getComputedStyle(elementOf(node))
-    return style.visibility !== 'hidden' && style.visibility !== 'collapse' && style.display !== 'none'
+  const visible = (node: Node) => {
+    if (node.nodeType !== 1 && node.nodeType !== 3) return false
+    const element = elementOf(node as Target), style = win.getComputedStyle(element)
+    if (style.visibility === 'hidden' || style.visibility === 'collapse') return false
+    const paintedColor = (value: string) => Boolean(value && value !== 'none' && value !== 'transparent'
+      && !/^rgba\([^)]*,\s*0(?:\.0+)?\s*\)$/.test(value) && !/\/\s*0(?:\.0+)?\s*\)$/.test(value))
+    if (node.nodeType === 3) {
+      if (!node.textContent?.trim()) return false
+      const paint = element.namespaceURI === 'http://www.w3.org/2000/svg'
+        ? paintedColor(style.fill) && Number(style.fillOpacity || '1') > 0
+          || paintedColor(style.stroke) && Number(style.strokeOpacity || '1') > 0 && parseFloat(style.strokeWidth || '1') > 0
+        : paintedColor(style.getPropertyValue('-webkit-text-fill-color') || style.color)
+          || Boolean(style.textShadow && style.textShadow !== 'none')
+      if (!paint) return false
+    }
+    const range = node.nodeType === 3 ? doc.createRange() : undefined
+    range?.selectNodeContents(node)
+    const rect = range ? range.getBoundingClientRect?.() : element.getBoundingClientRect()
+    let left = rect?.left ?? -Infinity, top = rect?.top ?? -Infinity
+    let right = rect?.right ?? Infinity, bottom = rect?.bottom ?? Infinity
+    const clip = (x: number, y: number, width: number, height: number, horizontal = true, vertical = true) => {
+      if (horizontal) { left = Math.max(left, x); right = Math.min(right, x + width) }
+      if (vertical) { top = Math.max(top, y); bottom = Math.min(bottom, y + height) }
+    }
+    const establishesPositionedBlock = (css: CSSStyleDeclaration) => Boolean(
+      css.transform && css.transform !== 'none' || css.perspective && css.perspective !== 'none'
+      || css.filter && css.filter !== 'none' || css.backdropFilter && css.backdropFilter !== 'none'
+      || css.translate && css.translate !== 'none' || css.rotate && css.rotate !== 'none' || css.scale && css.scale !== 'none'
+      || /(?:^|\s)(?:layout|paint|strict|content)(?:\s|$)/.test(css.contain)
+      || /(?:^|,|\s)(?:transform|perspective|filter)(?:\s|,|$)/.test(css.willChange))
+    const containingBlock = (positioned: Element, fixed: boolean): Element => {
+      for (let parent = parentOf(positioned); parent; parent = parentOf(parent)) {
+        const css = win.getComputedStyle(parent)
+        if (establishesPositionedBlock(css) || !fixed && css.position && css.position !== 'static') return parent
+      }
+      return doc.documentElement
+    }
+    // Out-of-flow descendants escape overflow boxes between themselves and
+    // their actual containing block. Opacity, clip-path and display still apply.
+    let overflowContainingBlock: Element | undefined
+    const rootStyle = win.getComputedStyle(doc.documentElement)
+    const bodyOverflowOnViewport = rootStyle.overflowX === 'visible' && rootStyle.overflowY === 'visible'
+      || !rootStyle.overflowX && !rootStyle.overflowY
+    for (let current: Element | null = element; current; current = parentOf(current)) {
+      const css = win.getComputedStyle(current)
+      // Match the paint reader: zero-opacity ancestors leave layout boxes but no content.
+      if (css.display === 'none' || css.opacity !== '' && Number(css.opacity) === 0 || css.contentVisibility === 'hidden') return false
+      const box = current.getBoundingClientRect()
+      const sx = current instanceof win.HTMLElement && current.offsetWidth ? box.width / current.offsetWidth : 1
+      const sy = current instanceof win.HTMLElement && current.offsetHeight ? box.height / current.offsetHeight : 1
+      if (current === overflowContainingBlock) overflowContainingBlock = undefined
+      const horizontal = /^(hidden|clip|auto|scroll)$/.test(css.overflowX), vertical = /^(hidden|clip|auto|scroll)$/.test(css.overflowY)
+      if (horizontal || vertical) {
+        const viewport = current === doc.documentElement || current === doc.body && bodyOverflowOnViewport
+        if (viewport) clip(0, 0, win.innerWidth, win.innerHeight, horizontal, vertical)
+        else if (!overflowContainingBlock) clip(box.left, box.top, box.width, box.height, horizontal, vertical)
+      }
+      const oldClip = /^(?:absolute|fixed)$/.test(css.position) && /^rect\(([^)]+)\)$/.exec(css.clip)
+      if (oldClip) {
+        const edges = oldClip[1]!.split(/[\s,]+/).filter(Boolean).map((value, index) => value === 'auto'
+          ? index === 1 ? box.width / sx : index === 2 ? box.height / sy : 0 : parseFloat(value))
+        if (edges.length === 4 && edges.every(Number.isFinite)) clip(box.left + edges[3]! * sx, box.top + edges[0]! * sy, (edges[1]! - edges[3]!) * sx, (edges[2]! - edges[0]!) * sy)
+      }
+      const inset = /^inset\(([^)]+)\)$/.exec(css.clipPath)
+      if (inset) {
+        const values = inset[1]!.split(/\s+round\s+/)[0]!.trim().split(/\s+/)
+        const edges = [values[0], values[1] ?? values[0], values[2] ?? values[0], values[3] ?? values[1] ?? values[0]]
+          .map((value, index) => parseFloat(value!) * (value!.endsWith('%') ? (index % 2 ? box.width : box.height) / 100 : index % 2 ? sx : sy))
+        if (edges.every(Number.isFinite)) clip(box.left + edges[3]!, box.top + edges[0]!, box.width - edges[1]! - edges[3]!, box.height - edges[0]! - edges[2]!)
+      }
+      if (left >= right || top >= bottom) return false
+      if (!overflowContainingBlock && (css.position === 'fixed' || css.position === 'absolute')) overflowContainingBlock = containingBlock(current, css.position === 'fixed')
+    }
+    return true
   }
   const contextValueOf = (element: Container) => {
     if (lookup?.contexts.has(element)) return lookup.contexts.get(element)!
@@ -637,7 +708,7 @@ export function createDomAuthoring(root: HTMLElement, options: {
     if (node.nodeType !== 3) return undefined
     const element = elementOf(node as Text), style = win.getComputedStyle(element)
     const result = Object.fromEntries(['font-family', 'font-size', 'color', 'font-weight', 'font-style', 'text-decoration-line',
-      'background-color', 'text-align', 'line-height', 'letter-spacing', 'word-spacing', 'text-transform', 'fill'].map(name => [name, style.getPropertyValue(name)]))
+      'background-color', 'text-align', 'line-height', 'letter-spacing', 'word-spacing', 'text-transform', 'white-space', 'fill'].map(name => [name, style.getPropertyValue(name)]))
     const linear = element instanceof win.HTMLElement ? linearTransform(element) : undefined
     if (linear) { result.transform = `matrix(${linear.join(',')})`; result['transform-origin'] = '0 0' }
     const siblings = [...element.childNodes].filter(child => child.nodeType === 1 || child.textContent?.trim())
@@ -656,6 +727,8 @@ export function createDomAuthoring(root: HTMLElement, options: {
     /** Pause observation only. Explicit reads/record application retain their existing semantics. */
     setActive,
     roots: contentRoots,
+    /** Paint visibility only; hidden source content and its author records remain intact. */
+    visible,
     /** Discovery enumerates content only; callers request binding and geometry for consumed targets. */
     targets(scope: Node = root): Array<Text | HTMLImageElement> {
       if (scope === doc) scope = root

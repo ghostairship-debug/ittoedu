@@ -3,7 +3,7 @@ import { componentDefinitionBuiltinKey, owningContainer } from './contracts/comp
 import { componentLayoutInput } from '../components/web/measuredFragmentBox'
 import { flowObjectExtent } from '../core/components/geometry/flowObjectExtent'
 import { resolveFlowMediaLayoutProjection, type FlowMediaLayoutWidths } from './flowMediaLayout'
-import { isNativeFlowLayoutGroup, nativeFlowContainerStyle, nativeFlowItemStyle, nativeFlowMediaBlockSize } from './flowNativeLayout'
+import { isNativeFlowLayoutGroup, nativeFlowContainerStyle, nativeFlowItemStyle, nativeFlowMediaBlockSize, flowStickyStyle } from './flowNativeLayout'
 
 export interface ComponentOuterPresentationInput {
   placement: 'free' | 'flow'
@@ -25,6 +25,16 @@ export interface ComponentOuterPresentation {
   stageStyle: Record<string, string>
   contentStyle: Record<string, string>
   childrenStyle: Record<string, string>
+  containerSizing: { naturalHeight: boolean; blockSize: string } | null
+}
+
+/** The parent owns the outer box; a Flow container's design size is never its content height. */
+export function resolveComponentContainerSizing(instance: ComponentInstance, placement: 'free' | 'flow') {
+  if (!instance.container) return null
+  const style = nativeFlowItemStyle(instance), height = style.blockSize ?? style.height
+  const explicitHeight = height && height !== 'auto' ? height : undefined
+  const naturalHeight = placement === 'flow' && instance.container.kind === 'flow' && !instance.frame && !explicitHeight
+  return { naturalHeight, blockSize: naturalHeight ? 'auto' : explicitHeight ?? `${instance.frame?.height ?? instance.container.designSize?.height ?? 320}px` }
 }
 
 /** Global Web input uses the existing native document paint owner in every player. */
@@ -72,6 +82,7 @@ export function resolveComponentOuterPresentation(project: CourseProjectV10, ins
   const section = documentBlock && data.type === 'section'
     ? resolveSectionPresentation({ collapsedByDefault: data.collapsedByDefault === true }, input.purpose) : null
   const flow = input.placement === 'flow'
+  const containerSizing = resolveComponentContainerSizing(instance, input.placement)
   const nativeLayout = flow && isNativeFlowLayoutGroup(instance, definition)
   const owner = flow ? owningContainer(project, instance.id) : null
   const parent = owner?.kind === 'instance' ? project.instances[owner.instanceId] : undefined
@@ -80,7 +91,7 @@ export function resolveComponentOuterPresentation(project: CourseProjectV10, ins
   const layoutInput = componentLayoutInput(instance, { project, kind: program ? 'program' : flow ? 'flow' : 'free-frame', inlineSize: input.inlineSize, definition, viewport: program ? input.viewport : unframedExtent ?? undefined })
   const naturalFlow = flow && layoutInput.mode === 'flow-content'
   const media = ['guoling.image', 'guoling.video', 'guoling.audio'].includes(key ?? '')
-  const localAssembly = flow && layoutInput.mode === 'flow-viewport' && !documentBlock
+  const localAssembly = flow && layoutInput.mode === 'flow-viewport' && !documentBlock && !instance.container
   const extent = localAssembly ? flowObjectExtent(project, instance.id, layoutInput) : null
   const scale = extent && extent.width > 0 ? (media ? input.inlineSize / extent.width : Math.min(1, input.inlineSize / extent.width)) : 1
   const childrenPlacement = flow && (documentBlock || nativeLayout) ? 'flow' : 'free'
@@ -142,5 +153,18 @@ export function resolveComponentOuterPresentation(project: CourseProjectV10, ins
     Object.assign(stageStyle, { position: 'relative', inset: '', width: '100%', height: '100%' })
     Object.assign(contentStyle, { position: 'relative', inset: '', left: '0px', top: '0px', width: '100%', height: '100%', transform: 'none' })
   }
-  return { layoutInput, naturalFlow, localAssembly, extent, scale, childrenPlacement, section, outerStyle, stageStyle, contentStyle, childrenStyle }
+  if (containerSizing) {
+    if (flow) outerStyle.height = containerSizing.blockSize
+    Object.assign(stageStyle, { position: 'relative', width: '100%', height: containerSizing.naturalHeight ? 'auto' : '100%' })
+    Object.assign(contentStyle, { position: 'relative', inset: '', left: '0px', top: '0px', width: '100%', height: containerSizing.naturalHeight ? 'auto' : '100%', transform: 'none' })
+    Object.assign(childrenStyle, { position: containerSizing.naturalHeight ? 'relative' : 'absolute', inset: containerSizing.naturalHeight ? '' : '0px',
+      left: '0px', top: '0px', width: '100%', height: containerSizing.naturalHeight ? 'auto' : '100%', transform: 'none', display: 'block' })
+  }
+  if (flow) {
+    const sticky = flowStickyStyle(instance)
+    // Preserve authored shorthand/longhand order when replacing default top/left.
+    for (const name of Object.keys(sticky)) delete outerStyle[name]
+    Object.assign(outerStyle, sticky)
+  }
+  return { layoutInput, naturalFlow, localAssembly, extent, scale, childrenPlacement, section, outerStyle, stageStyle, contentStyle, childrenStyle, containerSizing }
 }

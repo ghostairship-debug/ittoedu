@@ -10,7 +10,7 @@ import { afterAll, afterEach, beforeAll, expect, it, vi } from 'vitest'
 import { DocumentHostService } from '../../src/main/workbench/DocumentHostService'
 import { prepareDocumentWindowClose } from '../../src/main/workbench/documentCloseCoordinator'
 import { useEditorStore, selectHasUnsavedCourseDocuments } from '../../src/renderer/store/editorStore'
-import { useCourseProjectLifecycle, type CourseProjectLifecyclePorts } from '../../src/renderer/app/useCourseProjectLifecycle'
+import { adaptCourseDocumentActivation, useCourseProjectLifecycle, type CourseProjectLifecyclePorts } from '../../src/renderer/app/useCourseProjectLifecycle'
 import { useMediaImport, type MediaImportPorts } from '../../src/renderer/app/useMediaImport'
 import { encodeImageTransformPng } from '../../src/shared/imageTransform'
 import type { DocumentHostAPI } from '../../src/shared/workbench/desktop'
@@ -49,6 +49,7 @@ it('keeps delayed media in its captured document, saves after switching, and res
     subscribe: listener => host.subscribeEvents(listener) }
   const read = useEditorStore.getState
   await read().connectCourseDocuments(api)
+  await read().createCourseDocument('slide')
   const firstDocumentId = read().courseView.activeDocumentId!, firstSurfaceId = read().courseView.surfaceId!
   let release!: (files: SelectedFileBatch<SelectedImageBatchFile>) => void
   const selected = new Promise<SelectedFileBatch<SelectedImageBatchFile>>(resolve => { release = resolve })
@@ -96,7 +97,8 @@ it('keeps delayed media in its captured document, saves after switching, and res
   let preserve!: () => Promise<boolean>
   const ports: CourseProjectLifecyclePorts = {
     documents: { ready: () => read().connectCourseDocuments(api), snapshot: () => read().courseView.snapshot,
-      create: (kind, canvas) => read().createCourseDocument(kind, canvas), open: file => read().openCourseDocument(file),
+      create: async (kind, canvas, activateIf) => adaptCourseDocumentActivation(await read().createCourseDocument(kind, canvas, activateIf), activateIf),
+      open: async (file, activateIf) => adaptCourseDocumentActivation(await read().openCourseDocument(file, activateIf), activateIf),
       save: saveAs => read().saveCourseDocument(saveAs), drain: () => read().drainCourseDocument() },
     captureIdentity() { const view = read().courseView; return { projectId: view.project!.id, revision: view.project!.revision,
       documentId: view.activeDocumentId!, epoch: view.snapshot!.epoch } },

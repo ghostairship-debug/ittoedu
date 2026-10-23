@@ -60,6 +60,8 @@ export interface ComponentCatalogSourceSnapshot {
 }
 
 export interface AvailableComponentCatalogPackage extends ComponentCatalogPackage {
+  /** Source location is independent from the trust required for automatic agent use. */
+  sourceKind?: 'built-in' | 'personal' | 'external'
   sourceId: string
   sourceLabel: string
   sourceTrust: ComponentCatalogTrust

@@ -1,0 +1,152 @@
+{
+  "generated": "2026-10-23",
+  "method": "ImageGen transparent photographic material assets; original alpha retained",
+  "assets": {
+    "green": {
+      "source": "assets/source/green.png",
+      "runtime": "assets/runtime/green.webp",
+      "width": 1254,
+      "height": 1254,
+      "hasAlpha": true,
+      "sourceBytes": 1822258,
+      "runtimeBytes": 210668
+    },
+    "gold": {
+      "source": "assets/source/gold.png",
+      "runtime": "assets/runtime/gold.webp",
+      "width": 1254,
+      "height": 1254,
+      "hasAlpha": true,
+      "sourceBytes": 1648229,
+      "runtimeBytes": 166210
+    },
+    "roast": {
+      "source": "assets/source/roast.png",
+      "runtime": "assets/runtime/roast.webp",
+      "width": 1254,
+      "height": 1254,
+      "hasAlpha": true,
+      "sourceBytes": 1827922,
+      "runtimeBytes": 187972
+    },
+    "cup": {
+      "source": "assets/source/cup.png",
+      "runtime": "assets/runtime/cup.webp",
+      "width": 1254,
+      "height": 1254,
+      "hasAlpha": true,
+      "sourceBytes": 1213562,
+      "runtimeBytes": 95718
+    },
+    "cherry": {
+      "source": "assets/source/cherry.png",
+      "runtime": "assets/runtime/cherry.webp",
+      "width": 1254,
+      "height": 1254,
+      "hasAlpha": true,
+      "sourceBytes": 1333429,
+      "runtimeBytes": 170712
+    },
+    "section": {
+      "source": "assets/source/section.png",
+      "runtime": "assets/runtime/section.webp",
+      "width": 1254,
+      "height": 1254,
+      "hasAlpha": true,
+      "sourceBytes": 1564181,
+      "runtimeBytes": 204996
+    }
+  },
+  "preparation": {
+    "date": "2026-10-23T03:48:18.144Z",
+    "alphaDustThreshold": 8,
+    "roastRegistration": "alpha bounding-box affine registration to green, original PNGs unchanged",
+    "transforms": {
+      "green": {
+        "x": 0,
+        "y": 0,
+        "sx": 1,
+        "sy": 1,
+        "box": {
+          "x": 268,
+          "y": 98,
+          "w": 729,
+          "h": 1066
+        }
+      },
+      "gold": {
+        "x": 3.8119891008174704,
+        "y": 2.3588785046729015,
+        "sx": 0.9931880108991825,
+        "sy": 0.9962616822429906,
+        "box": {
+          "x": 266,
+          "y": 96,
+          "w": 734,
+          "h": 1070
+        },
+        "reference": {
+          "x": 268,
+          "y": 98,
+          "w": 729,
+          "h": 1066
+        }
+      },
+      "roast": {
+        "x": 2.45702592087315,
+        "y": 2.3588785046729015,
+        "sx": 0.9945429740791268,
+        "sy": 0.9962616822429906,
+        "box": {
+          "x": 267,
+          "y": 96,
+          "w": 733,
+          "h": 1070
+        },
+        "reference": {
+          "x": 268,
+          "y": 98,
+          "w": 729,
+          "h": 1066
+        }
+      },
+      "cup": {
+        "x": 0,
+        "y": 0,
+        "sx": 1,
+        "sy": 1,
+        "box": {
+          "x": 102,
+          "y": 166,
+          "w": 1120,
+          "h": 924
+        }
+      },
+      "cherry": {
+        "x": 0,
+        "y": 0,
+        "sx": 1,
+        "sy": 1,
+        "box": {
+          "x": 237,
+          "y": 98,
+          "w": 804,
+          "h": 1058
+        }
+      },
+      "section": {
+        "x": 0,
+        "y": 0,
+        "sx": 1,
+        "sy": 1,
+        "box": {
+          "x": 235,
+          "y": 97,
+          "w": 816,
+          "h": 1059
+        }
+      }
+    },
+    "diagramScale": "all three 900px canvases share one crop and one seed geometry; tissue thickness is illustrative"
+  }
+}

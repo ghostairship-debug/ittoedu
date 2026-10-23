@@ -17,7 +17,7 @@ export function slideSelectionChrome(targets: readonly FreeObjectTarget[], scale
   return { corners, points: { nw, n, ne, e: mid(ne, se), se, s, sw, w: mid(nw, sw), rotate: rotation } }
 }
 /** Chrome only. All handles route through the workspace's single affine owner. */
-export function SlideLayerSelectionOverlay({ targets, scale, surfaceToPointer, lineHandles }: { targets: readonly FreeObjectTarget[]; scale: number; surfaceToPointer?: AffineMatrix; lineHandles?: boolean }) {
+export function SlideLayerSelectionOverlay({ targets, scale, surfaceToPointer, lineHandles, movable }: { targets: readonly FreeObjectTarget[]; scale: number; surfaceToPointer?: AffineMatrix; lineHandles?: boolean; movable?: boolean }) {
   const overlay = slideSelectionChrome(surfaceToPointer ? targets.map(target => ({ ...target, parentToSurface: multiplyMatrices(surfaceToPointer, target.parentToSurface) })) : targets, surfaceToPointer ? 1 : scale)
   if (!overlay) return null
   const pixelScale = surfaceToPointer ? 1 : scale
@@ -25,6 +25,8 @@ export function SlideLayerSelectionOverlay({ targets, scale, surfaceToPointer, l
   return <div className="teacher-controller-overlay" data-testid="slide-layer-selection-overlay" aria-hidden="true" style={{ position: surfaceToPointer ? 'fixed' : 'absolute', inset: 0, pointerEvents: 'none' }}>
     <svg width="100%" height="100%" style={{ overflow: 'visible', position: 'absolute' }}>
       <polygon points={overlay.corners.map(p => p.x + ',' + p.y).join(' ')} fill="none" stroke="#2563eb" strokeWidth={1 / pixelScale} />
+      {movable && <polygon data-handle="move" points={overlay.corners.map(p => p.x + ',' + p.y).join(' ')} fill="none" stroke="transparent"
+        strokeWidth={8 / pixelScale} style={{ pointerEvents: 'stroke', cursor: 'move' }} />}
       <line x1={overlay.points.n.x} y1={overlay.points.n.y} x2={overlay.points.rotate.x} y2={overlay.points.rotate.y} stroke="#2563eb" strokeWidth={1 / pixelScale} />
     </svg>
     {(Object.entries(overlay.points) as [FreeResizeHandle | 'rotate', GeometryPoint][]).filter(([direction]) => !lineHandles || direction === 'rotate').map(([direction, p]) => <div key={direction}

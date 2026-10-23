@@ -1,0 +1,43 @@
+{
+  "revision": 215,
+  "date": "2026-10-23",
+  "accepted": true,
+  "reviewer": "Main creative agent; multi-pass direct visual inspection, not external human sign-off",
+  "scope": "Reference-quality photographic materials, six continuous transitions, native Flow integration and readable editorial presentation",
+  "viewed": [
+    "previews/material-reference-final.png",
+    "previews/motion-contact-1440.png",
+    "previews/motion-contact-390.png",
+    "previews/motion/1440-u05-u06-025.png",
+    "previews/motion/1440-u05-u06-050.png",
+    "previews/motion/1440-u04-u05-075.png",
+    "previews/final-390-u02.png",
+    "previews/final-390-u07.png",
+    "previews/final-390-u03-compare.png",
+    "previews/final-390-u06-dilution.png",
+    "previews/u03-material-1280-compare.png",
+    "previews/u03-material-390-detail.png"
+  ],
+  "transitionReview": [
+    {"from":"U01","to":"U02","decision":"accepted","observation":"Cup liquid lifts into an intermediate dark volume before red fruit material resolves. Photographic lighting and visual center remain coherent; this is an editorial transformation, not a literal physical process."},
+    {"from":"U02","to":"U03","decision":"accepted","observation":"Skin halves retain fruit silhouette while separating; the inner pair remains in place. Tissue appearance is materially consistent with the source fruit."},
+    {"from":"U03","to":"U04","decision":"accepted","observation":"Outer tissue withdraws and one seed turns through an edge-on pose. It is intentionally a face-turn rather than a transparent superposition of incompatible shapes."},
+    {"from":"U04","to":"U05","decision":"accepted","observation":"Registered green/golden/roasted material retains contour and crease continuity. Final real-page review confirms separate light and dark reading fields during the transition."},
+    {"from":"U05","to":"U06","decision":"accepted","observation":"Source-textured fragments emerge from the bean and gather around the shared liquid form. Previously dark U06 introductory text is now on its own light field before entering the viewport."},
+    {"from":"U06","to":"U07","decision":"accepted","observation":"Liquid translates to the original coffee plane; rim and ceramic reappear around it. The final cup returns to the opening material without a separate object reset."}
+  ],
+  "resolvedDuringReview": [
+    "Transparent-edge accumulation and texture resampling changed at material boundaries; corrected with premultiplied compositing and a common sampling grid.",
+    "Some desktop objects were excessively cropped or crossed text; moved into chapter-specific negative space.",
+    "Phone chapter labels collided with the existing pinned navigation; native U01 and U05 layout padding refined without changing navigation ownership.",
+    "Whole-screen paper interpolation failed when dark U05 and light U06 coexisted; replaced with content-coordinate color regions consuming the same public reading facts.",
+    "Phone ambient objects overlapped long notes during manual scroll; added a component-owned edge mask while preserving full source materials."
+  ],
+  "limitations": [
+    "Mobile ambient objects are deliberately cropped into an edge rail; full material study and desktop layout show complete objects.",
+    "Scientific material images are AI-generated explanatory illustrations, not measured specimens.",
+    "Visual acceptance is the creative agent's assessment, not the user's final aesthetic sign-off.",
+    "Physical phones, Safari and subjective audio listening were not tested.",
+    "A major content/typography reflow or a new theme requires recalibration and a new reading-boundary review."
+  ]
+}

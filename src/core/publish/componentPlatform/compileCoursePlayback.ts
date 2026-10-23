@@ -35,7 +35,9 @@ export async function compileCoursePlayback(payload:PublishedCourseV3,options:{d
   else artifact.diagnostics.push({code:'compiled-native-source-unavailable',message:'局部程序没有可交付的源码编译成品；原件保留在作者工程',instanceId})
   return {...implementation,source:key,workspace:undefined,dependencies:undefined,moduleBindings:undefined,compiled:undefined}
  }
- for(const [id,definition]of Object.entries(artifact.course.definitions))if(definition.implementation.kind==='source')definition.implementation=source(payload.definitions[id].implementation,`definition:${id}`)!
+ // Match Published's effective implementation selection; overridden templates have no runtime consumer.
+ const effectiveDefinitions=new Set(versions.flatMap(version=>Object.values(version.instances).filter(instance=>!instance.implementationOverride).map(instance=>instance.definitionId)))
+ for(const [id,definition]of Object.entries(artifact.course.definitions))if(effectiveDefinitions.has(id)&&definition.implementation.kind==='source')definition.implementation=source(payload.definitions[id].implementation,`definition:${id}`)!
  const staticInstance=(instance:PublishedInstance,key:string)=>staticKeys.has(key)&&!allDocumentTextSlots(instance.data).some(slot=>inlineComponentIds(slot.content).length)
  const hasContainerProgram=(instance:PublishedInstance,model:CourseProjectV10)=>{const implementation=instance.implementationOverride??model.definitions[instance.definitionId]?.implementation;return implementation?.kind==='source'||implementation?.kind==='builtin'&&['guoling.web','guoling.html-program'].includes(implementation.key)}
  // A program may place its existing native children through inline.mount. Their

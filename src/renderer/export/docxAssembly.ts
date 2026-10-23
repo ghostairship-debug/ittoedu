@@ -79,6 +79,7 @@ interface BuildContext {
   report: FlowDocxReportItem[]
   layerReport: FlowDocxLayerReportItem[]
   images: ImagePart[]
+  assetImages: Map<string, ImagePart>
   nextRelationshipId: number
   nextDrawingId: number
   numberedLists: Array<{ id: number; start: number }>
@@ -126,6 +127,9 @@ function numberingXml(context: BuildContext): string {
 
 /** Authored text styles are CSS pixels; OOXML sizes and offsets are half-points. */
 const wordHalfPoints = (pixels: number): number => Math.round(pixels * 72 / 96 * 2)
+const WORD_DOCUMENT_TITLE_HALF_POINTS = 40
+/** The title uses Word's normal line box; reserve it when a first image fills a page. */
+export const WORD_DOCUMENT_TITLE_LINE_HEIGHT_PX = WORD_DOCUMENT_TITLE_HALF_POINTS / 1.5 * 1.2
 
 function run(text: string, options: TextRunStyle = {}): string {
   const preserve = /^\s|\s$|\s{2}/.test(text) ? ' xml:space="preserve"' : ''
@@ -247,14 +251,14 @@ function croppedImageAspect(bytes: Uint8Array, mimeType: string, crop: FlowImage
   return sourceRect.width / sourceRect.height
 }
 
-function inlineImageDrawing(label: string, image: ImagePart, drawingId: number, aspect = 16 / 9, maxHeight = Infinity, crop?: FlowImageCrop & { width?: number; height?: number; sourceRect?: { x: number; y: number; width: number; height: number } }): string {
+function inlineImageDrawing(label: string, image: ImagePart, drawingId: number, aspect = 16 / 9, maxHeight = Infinity, crop?: FlowImageCrop & { width?: number; height?: number; pageBreakBefore?: boolean; sourceRect?: { x: number; y: number; width: number; height: number } }): string {
   const width = Math.min(560, maxHeight * aspect, crop?.width ?? Infinity, (crop?.height ?? Infinity) * aspect)
   const height = Math.round(width / aspect)
   const cx = Math.round(width * 9_525)
   const cy = Math.round(height * 9_525)
   const source = crop?.sourceRect ?? (crop?.crop ? flowMediaCropGeometry({ width: 1, height: 1 }, crop).sourceRect : null)
   const srcRectXml = source ? `<a:srcRect l="${Math.round(source.x * 100_000)}" t="${Math.round(source.y * 100_000)}" r="${Math.round((1 - source.x - source.width) * 100_000)}" b="${Math.round((1 - source.y - source.height) * 100_000)}"/>` : ''
-  return `<w:p><w:pPr><w:jc w:val="center"/></w:pPr><w:r><w:drawing><wp:inline distT="0" distB="0" distL="0" distR="0"><wp:extent cx="${cx}" cy="${cy}"/><wp:docPr id="${drawingId}" name="${xml(label)}" descr="${xml(label)}"/><a:graphic xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:pic xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:nvPicPr><pic:cNvPr id="${drawingId}" name="${xml(image.path)}"/><pic:cNvPicPr/></pic:nvPicPr><pic:blipFill><a:blip r:embed="${image.relationshipId}"/>${srcRectXml}<a:stretch><a:fillRect/></a:stretch></pic:blipFill><pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="${cx}" cy="${cy}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr></pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r></w:p>`
+  return `<w:p><w:pPr><w:jc w:val="center"/>${crop?.pageBreakBefore ? '<w:pageBreakBefore/>' : ''}</w:pPr><w:r><w:drawing><wp:inline distT="0" distB="0" distL="0" distR="0"><wp:extent cx="${cx}" cy="${cy}"/><wp:docPr id="${drawingId}" name="${xml(label)}" descr="${xml(label)}"/><a:graphic xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:pic xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:nvPicPr><pic:cNvPr id="${drawingId}" name="${xml(image.path)}"/><pic:cNvPicPr/></pic:nvPicPr><pic:blipFill><a:blip r:embed="${image.relationshipId}"/>${srcRectXml}<a:stretch><a:fillRect/></a:stretch></pic:blipFill><pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="${cx}" cy="${cy}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr></pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r></w:p>`
 }
 
 export interface WordDrawingAnchor {
@@ -626,10 +630,14 @@ function renderPrintNode(
         const extension = asset ? imageExtension(asset.mimeType) : null
         const dimensions = asset && extension ? flowImageDimensions(asset.bytes, asset.mimeType) : undefined
         if (asset && extension && dimensions) {
-          const relationshipId = `rId${context.nextRelationshipId++}`
-          const path = `media/image${context.images.length + 1}.${extension}`
-          const image: ImagePart = { relationshipId, path, mimeType: asset.mimeType, bytes: asset.bytes }
-          context.images.push(image)
+          // Capture page slices share one frozen asset. Cropping and drawing
+          // identity belong to each occurrence; the package bytes do not.
+          let image = context.assetImages.get(node.assetId)
+          if (!image) {
+            image = { relationshipId: `rId${context.nextRelationshipId++}`, path: `media/image${context.images.length + 1}.${extension}`,
+              mimeType: asset.mimeType, bytes: asset.bytes }
+            context.images.push(image); context.assetImages.set(node.assetId, image)
+          }
           context.report.push({
             blockId: node.blockId,
             disposition: 'preserved',
@@ -638,8 +646,7 @@ function renderPrintNode(
           const aspect = node.sourceRect && node.width && node.height ? node.width / node.height : node.crop ? croppedImageAspect(asset.bytes, asset.mimeType, node)
             : node.width && node.height ? node.width / node.height
               : dimensions ? dimensions.width / dimensions.height : 16 / 9
-          const pageBreak = node.pageBreakBefore ? '<w:p><w:r><w:br w:type="page"/></w:r></w:p>' : ''
-          return `${pageBreak}${leadingContent ? `<w:p>${leadingContent}</w:p>` : ''}${inlineImageDrawing(node.fallbackLabel, image, context.nextDrawingId++, aspect, node.height ? context.chartMaxHeight : Infinity, node)}${
+          return `${leadingContent ? `<w:p>${leadingContent}</w:p>` : ''}${inlineImageDrawing(node.fallbackLabel, image, context.nextDrawingId++, aspect, node.height ? context.chartMaxHeight : Infinity, node)}${
             node.caption ? paragraph(node.caption, { style: 'Caption' }) : ''
           }`
         }
@@ -673,7 +680,7 @@ function renderPrintNode(
   }
 }
 
-const STYLES = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:docDefaults><w:rPrDefault><w:rPr><w:rFonts w:ascii="Microsoft YaHei" w:eastAsia="Microsoft YaHei" w:hAnsi="Microsoft YaHei"/><w:sz w:val="22"/></w:rPr></w:rPrDefault></w:docDefaults><w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/></w:style><w:style w:type="paragraph" w:styleId="Title"><w:name w:val="Title"/><w:rPr><w:b/><w:sz w:val="40"/></w:rPr></w:style>'
+const STYLES = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:docDefaults><w:rPrDefault><w:rPr><w:rFonts w:ascii="Microsoft YaHei" w:eastAsia="Microsoft YaHei" w:hAnsi="Microsoft YaHei"/><w:sz w:val="22"/></w:rPr></w:rPrDefault></w:docDefaults><w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/></w:style><w:style w:type="paragraph" w:styleId="Title"><w:name w:val="Title"/><w:rPr><w:b/><w:sz w:val="${WORD_DOCUMENT_TITLE_HALF_POINTS}"/></w:rPr></w:style>`
   + Array.from({ length: 6 }, (_, index) => `<w:style w:type="paragraph" w:styleId="Heading${index + 1}"><w:name w:val="heading ${index + 1}"/><w:basedOn w:val="Normal"/><w:next w:val="Normal"/><w:qFormat/><w:pPr><w:keepNext/><w:spacing w:before="${320 - index * 20}" w:after="120"/><w:outlineLvl w:val="${index}"/></w:pPr><w:rPr><w:b/><w:sz w:val="${34 - index * 2}"/></w:rPr></w:style>`).join('')
   + '<w:style w:type="paragraph" w:styleId="Quote"><w:name w:val="Quote"/><w:pPr><w:ind w:left="480" w:right="480"/></w:pPr><w:rPr><w:i/><w:color w:val="475569"/></w:rPr></w:style><w:style w:type="paragraph" w:styleId="Caption"><w:name w:val="Caption"/><w:pPr><w:jc w:val="center"/></w:pPr><w:rPr><w:i/><w:color w:val="64748B"/></w:rPr></w:style><w:style w:type="paragraph" w:styleId="CalloutTitle"><w:name w:val="Callout Title"/><w:pPr><w:shd w:fill="EAF3FF"/></w:pPr></w:style><w:style w:type="paragraph" w:styleId="CalloutText"><w:name w:val="Callout Text"/><w:pPr><w:ind w:left="240"/><w:shd w:fill="F4F8FF"/></w:pPr></w:style><w:style w:type="paragraph" w:styleId="FormulaFallback"><w:name w:val="Formula Fallback"/><w:rPr><w:i/><w:color w:val="7C3AED"/></w:rPr></w:style><w:style w:type="paragraph" w:styleId="Code"><w:name w:val="Code"/><w:pPr><w:shd w:fill="F1F5F9"/></w:pPr><w:rPr><w:rFonts w:ascii="Consolas" w:eastAsia="Microsoft YaHei" w:hAnsi="Consolas"/></w:rPr></w:style><w:style w:type="table" w:styleId="TableGrid"><w:name w:val="Table Grid"/><w:tblPr><w:tblBorders><w:top w:val="single" w:sz="4" w:color="B8C2D1"/><w:left w:val="single" w:sz="4" w:color="B8C2D1"/><w:bottom w:val="single" w:sz="4" w:color="B8C2D1"/><w:right w:val="single" w:sz="4" w:color="B8C2D1"/><w:insideH w:val="single" w:sz="4" w:color="B8C2D1"/><w:insideV w:val="single" w:sz="4" w:color="B8C2D1"/></w:tblBorders></w:tblPr></w:style></w:styles>'
 
@@ -771,6 +778,7 @@ export function buildFlowDocxPartsFromPlan(
     report: [],
     layerReport: [],
     images: [],
+    assetImages: new Map(),
     nextRelationshipId: 3,
     nextDrawingId: 1,
     numberedLists: [],
@@ -820,6 +828,7 @@ export function buildFlowDocxFromProjection(
     report: [],
     layerReport: [...projection.layerReport],
     images: [],
+    assetImages: new Map(),
     nextRelationshipId: 3,
     nextDrawingId: 1,
     numberedLists: [],

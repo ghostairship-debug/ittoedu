@@ -1,0 +1,15 @@
+{
+  "cssInlineMatchesExport": true,
+  "jsInlineMatchesExport": true,
+  "methodsMetadataMatches": true,
+  "svgGeometryMatches": true,
+  "svgIdPrefixes": "asset-*, compare-*, detail-* intentionally differ to avoid collisions",
+  "htmlBytes": 44590,
+  "htmlSha256": "ed1bba192c257462b6f2d7709ec220bfcc896d609f5bbd1900364a369b323dfa",
+  "missingLocalPhotoDependencies": [
+    "assets/natural.webp",
+    "assets/washed.webp",
+    "assets/honey.webp"
+  ],
+  "cleanRegenerationMatchesAllSevenOutputs": true
+}

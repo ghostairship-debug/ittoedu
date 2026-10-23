@@ -1,0 +1,1097 @@
+{
+  "startedAt": "2026-10-22T13:53:57.395Z",
+  "input": "D:\\果铃工作台\\docs\\creative-production\\works\\coffee-journey\\design\\v06\\reuse\\solute-study\\solute-study-offline.html",
+  "scope": "Formal single-file offline HTML, read-only; no GLX modification",
+  "passed": true,
+  "records": [
+    {
+      "scenario": "input",
+      "name": "formal export exists",
+      "passed": true,
+      "detail": {
+        "htmlPath": "D:\\果铃工作台\\docs\\creative-production\\works\\coffee-journey\\design\\v06\\reuse\\solute-study\\solute-study-offline.html"
+      },
+      "at": "2026-10-22T13:53:57.396Z"
+    },
+    {
+      "scenario": "1440",
+      "name": "three native chapter buttons",
+      "passed": true,
+      "detail": {
+        "buttonCount": 3
+      },
+      "at": "2026-10-22T13:53:58.316Z"
+    },
+    {
+      "scenario": "1440",
+      "name": "one persistent global background",
+      "passed": true,
+      "detail": {
+        "globalCount": 1,
+        "mountId": "1792677238087-2v8d0"
+      },
+      "at": "2026-10-22T13:53:58.932Z"
+    },
+    {
+      "scenario": "1440",
+      "name": "chapter 1 background and idle",
+      "passed": true,
+      "detail": {
+        "coffeeUnderlay": "journey-v1",
+        "mountId": "1792677238087-2v8d0",
+        "chapter": "1",
+        "stage": "crystal",
+        "reading": "{\"containerId\":\"eec78b8e-0324-4c04-8dbf-fdd50b1de6a7\",\"activeInstanceId\":\"ca1efa48-27a3-4517-89ea-175c3d215142\",\"progress\":0.010098539656491863}",
+        "events": "8",
+        "tick": "49",
+        "idle": "true",
+        "reduced": "false",
+        "size": "1422x982"
+      },
+      "at": "2026-10-22T13:53:59.004Z"
+    },
+    {
+      "scenario": "1440",
+      "name": "chapter 1 same background mount",
+      "passed": true,
+      "detail": {
+        "expected": "1792677238087-2v8d0",
+        "actual": "1792677238087-2v8d0"
+      },
+      "at": "2026-10-22T13:53:59.004Z"
+    },
+    {
+      "scenario": "1440",
+      "name": "chapter 2 background and idle",
+      "passed": true,
+      "detail": {
+        "coffeeUnderlay": "journey-v1",
+        "mountId": "1792677238087-2v8d0",
+        "chapter": "2",
+        "stage": "dissolved",
+        "reading": "{\"containerId\":\"eec78b8e-0324-4c04-8dbf-fdd50b1de6a7\",\"activeInstanceId\":\"923db1a3-613f-43fd-b76f-76a9278cc0f4\",\"progress\":0.41404012591616635}",
+        "events": "10",
+        "tick": "123",
+        "idle": "true",
+        "reduced": "false",
+        "size": "1422x982"
+      },
+      "at": "2026-10-22T13:54:00.760Z"
+    },
+    {
+      "scenario": "1440",
+      "name": "chapter 2 same background mount",
+      "passed": true,
+      "detail": {
+        "expected": "1792677238087-2v8d0",
+        "actual": "1792677238087-2v8d0"
+      },
+      "at": "2026-10-22T13:54:00.761Z"
+    },
+    {
+      "scenario": "1440",
+      "name": "initial 30 g / 300 g / 10 percent / 72 markers",
+      "passed": true,
+      "detail": {
+        "data": {
+          "waterLab": "",
+          "mode": "dilute",
+          "extraction": "false",
+          "playing": "false",
+          "added": "0",
+          "solute": "30",
+          "total": "300",
+          "concentration": "10.00",
+          "particles": "72",
+          "shownAdded": "0.00",
+          "visibleParticles": "72"
+        },
+        "concentration": "10.00",
+        "total": "300",
+        "solute": "30",
+        "slider": "0"
+      },
+      "at": "2026-10-22T13:54:01.736Z"
+    },
+    {
+      "scenario": "1440",
+      "name": "sugar uses dilution mode",
+      "passed": true,
+      "detail": {
+        "waterLab": "",
+        "mode": "dilute",
+        "extraction": "false",
+        "playing": "false",
+        "added": "0",
+        "solute": "30",
+        "total": "300",
+        "concentration": "10.00",
+        "particles": "72",
+        "shownAdded": "0.00",
+        "visibleParticles": "72"
+      },
+      "at": "2026-10-22T13:54:01.736Z"
+    },
+    {
+      "scenario": "1440",
+      "name": "add 300 g gives 600 g / 5 percent / fixed 30 g and 72 markers",
+      "passed": true,
+      "detail": {
+        "data": {
+          "waterLab": "",
+          "mode": "dilute",
+          "extraction": "false",
+          "playing": "false",
+          "added": "300",
+          "solute": "30",
+          "total": "600",
+          "concentration": "5.00",
+          "particles": "72",
+          "shownAdded": "300.00",
+          "visibleParticles": "72"
+        },
+        "concentration": "5.00",
+        "total": "600",
+        "solute": "30",
+        "slider": "300"
+      },
+      "at": "2026-10-22T13:54:02.489Z"
+    },
+    {
+      "scenario": "1440",
+      "name": "reset returns original sugar concentration",
+      "passed": true,
+      "detail": {
+        "data": {
+          "waterLab": "",
+          "mode": "dilute",
+          "extraction": "false",
+          "playing": "false",
+          "added": "0",
+          "solute": "30",
+          "total": "300",
+          "concentration": "10.00",
+          "particles": "72",
+          "shownAdded": "0.00",
+          "visibleParticles": "72"
+        },
+        "concentration": "10.00",
+        "total": "300",
+        "solute": "30",
+        "slider": "0"
+      },
+      "at": "2026-10-22T13:54:04.096Z"
+    },
+    {
+      "scenario": "1440",
+      "name": "keyboard End sets maximum added water",
+      "passed": true,
+      "detail": {
+        "data": {
+          "waterLab": "",
+          "mode": "dilute",
+          "extraction": "false",
+          "playing": "false",
+          "added": "300",
+          "solute": "30",
+          "total": "600",
+          "concentration": "5.00",
+          "particles": "72",
+          "shownAdded": "300.00",
+          "visibleParticles": "72"
+        },
+        "concentration": "5.00",
+        "total": "600",
+        "solute": "30",
+        "slider": "300"
+      },
+      "at": "2026-10-22T13:54:04.876Z"
+    },
+    {
+      "scenario": "1440",
+      "name": "chapter 3 background and idle",
+      "passed": true,
+      "detail": {
+        "coffeeUnderlay": "journey-v1",
+        "mountId": "1792677238087-2v8d0",
+        "chapter": "3",
+        "stage": "distributed",
+        "reading": "{\"containerId\":\"eec78b8e-0324-4c04-8dbf-fdd50b1de6a7\",\"activeInstanceId\":\"a5030d3f-9275-4563-b495-bc94e8bf3d97\",\"progress\":0.9997554259926943}",
+        "events": "17",
+        "tick": "182",
+        "idle": "true",
+        "reduced": "false",
+        "size": "1422x982"
+      },
+      "at": "2026-10-22T13:54:06.067Z"
+    },
+    {
+      "scenario": "1440",
+      "name": "chapter 3 same background mount",
+      "passed": true,
+      "detail": {
+        "expected": "1792677238087-2v8d0",
+        "actual": "1792677238087-2v8d0"
+      },
+      "at": "2026-10-22T13:54:06.067Z"
+    },
+    {
+      "scenario": "1440",
+      "name": "chapter 2 background and idle",
+      "passed": true,
+      "detail": {
+        "coffeeUnderlay": "journey-v1",
+        "mountId": "1792677238087-2v8d0",
+        "chapter": "2",
+        "stage": "dissolved",
+        "reading": "{\"containerId\":\"eec78b8e-0324-4c04-8dbf-fdd50b1de6a7\",\"activeInstanceId\":\"923db1a3-613f-43fd-b76f-76a9278cc0f4\",\"progress\":0.41404012591616635}",
+        "events": "19",
+        "tick": "252",
+        "idle": "true",
+        "reduced": "false",
+        "size": "1422x982"
+      },
+      "at": "2026-10-22T13:54:07.713Z"
+    },
+    {
+      "scenario": "1440",
+      "name": "chapter 2 same background mount",
+      "passed": true,
+      "detail": {
+        "expected": "1792677238087-2v8d0",
+        "actual": "1792677238087-2v8d0"
+      },
+      "at": "2026-10-22T13:54:07.713Z"
+    },
+    {
+      "scenario": "1440",
+      "name": "leave chapter 3 then return 2 preserves water state",
+      "passed": true,
+      "detail": {
+        "data": {
+          "waterLab": "",
+          "mode": "dilute",
+          "extraction": "false",
+          "playing": "false",
+          "added": "300",
+          "solute": "30",
+          "total": "600",
+          "concentration": "5.00",
+          "particles": "72",
+          "shownAdded": "300.00",
+          "visibleParticles": "72"
+        },
+        "concentration": "5.00",
+        "total": "600",
+        "solute": "30",
+        "slider": "300"
+      },
+      "at": "2026-10-22T13:54:08.085Z"
+    },
+    {
+      "scenario": "1440",
+      "name": "static water runtime stops rAF",
+      "passed": true,
+      "detail": {
+        "before": {
+          "count": 128,
+          "documentId": "1792677237835-0.4260146904775881"
+        },
+        "after": {
+          "count": 128,
+          "documentId": "1792677237835-0.4260146904775881"
+        }
+      },
+      "at": "2026-10-22T13:54:09.454Z"
+    },
+    {
+      "scenario": "1440",
+      "name": "static background stops ticks",
+      "passed": true,
+      "detail": {
+        "before": {
+          "coffeeUnderlay": "journey-v1",
+          "mountId": "1792677238087-2v8d0",
+          "chapter": "2",
+          "stage": "dissolved",
+          "reading": "{\"containerId\":\"eec78b8e-0324-4c04-8dbf-fdd50b1de6a7\",\"activeInstanceId\":\"923db1a3-613f-43fd-b76f-76a9278cc0f4\",\"progress\":0.5003826399791718}",
+          "events": "21",
+          "tick": "252",
+          "idle": "true",
+          "reduced": "false",
+          "size": "1422x982"
+        },
+        "after": {
+          "coffeeUnderlay": "journey-v1",
+          "mountId": "1792677238087-2v8d0",
+          "chapter": "2",
+          "stage": "dissolved",
+          "reading": "{\"containerId\":\"eec78b8e-0324-4c04-8dbf-fdd50b1de6a7\",\"activeInstanceId\":\"923db1a3-613f-43fd-b76f-76a9278cc0f4\",\"progress\":0.5003826399791718}",
+          "events": "21",
+          "tick": "252",
+          "idle": "true",
+          "reduced": "false",
+          "size": "1422x982"
+        }
+      },
+      "at": "2026-10-22T13:54:09.789Z"
+    },
+    {
+      "scenario": "390",
+      "name": "three native chapter buttons",
+      "passed": true,
+      "detail": {
+        "buttonCount": 3
+      },
+      "at": "2026-10-22T13:54:10.620Z"
+    },
+    {
+      "scenario": "390",
+      "name": "one persistent global background",
+      "passed": true,
+      "detail": {
+        "globalCount": 1,
+        "mountId": "1792677250491-vct3a"
+      },
+      "at": "2026-10-22T13:54:11.417Z"
+    },
+    {
+      "scenario": "390",
+      "name": "chapter 1 background and idle",
+      "passed": true,
+      "detail": {
+        "coffeeUnderlay": "journey-v1",
+        "mountId": "1792677250491-vct3a",
+        "chapter": "1",
+        "stage": "crystal",
+        "reading": "{\"containerId\":\"eec78b8e-0324-4c04-8dbf-fdd50b1de6a7\",\"activeInstanceId\":\"ca1efa48-27a3-4517-89ea-175c3d215142\",\"progress\":0.009315933885981703}",
+        "events": "8",
+        "tick": "53",
+        "idle": "true",
+        "reduced": "false",
+        "size": "372x826"
+      },
+      "at": "2026-10-22T13:54:11.521Z"
+    },
+    {
+      "scenario": "390",
+      "name": "chapter 1 same background mount",
+      "passed": true,
+      "detail": {
+        "expected": "1792677250491-vct3a",
+        "actual": "1792677250491-vct3a"
+      },
+      "at": "2026-10-22T13:54:11.521Z"
+    },
+    {
+      "scenario": "390",
+      "name": "chapter 2 background and idle",
+      "passed": true,
+      "detail": {
+        "coffeeUnderlay": "journey-v1",
+        "mountId": "1792677250491-vct3a",
+        "chapter": "2",
+        "stage": "dissolved",
+        "reading": "{\"containerId\":\"eec78b8e-0324-4c04-8dbf-fdd50b1de6a7\",\"activeInstanceId\":\"923db1a3-613f-43fd-b76f-76a9278cc0f4\",\"progress\":0.3237287025378642}",
+        "events": "10",
+        "tick": "132",
+        "idle": "true",
+        "reduced": "false",
+        "size": "372x826"
+      },
+      "at": "2026-10-22T13:54:12.880Z"
+    },
+    {
+      "scenario": "390",
+      "name": "chapter 2 same background mount",
+      "passed": true,
+      "detail": {
+        "expected": "1792677250491-vct3a",
+        "actual": "1792677250491-vct3a"
+      },
+      "at": "2026-10-22T13:54:12.880Z"
+    },
+    {
+      "scenario": "390",
+      "name": "initial 30 g / 300 g / 10 percent / 72 markers",
+      "passed": true,
+      "detail": {
+        "data": {
+          "waterLab": "",
+          "mode": "dilute",
+          "extraction": "false",
+          "playing": "false",
+          "added": "0",
+          "solute": "30",
+          "total": "300",
+          "concentration": "10.00",
+          "particles": "72",
+          "shownAdded": "0.00",
+          "visibleParticles": "72"
+        },
+        "concentration": "10.00",
+        "total": "300",
+        "solute": "30",
+        "slider": "0"
+      },
+      "at": "2026-10-22T13:54:13.341Z"
+    },
+    {
+      "scenario": "390",
+      "name": "sugar uses dilution mode",
+      "passed": true,
+      "detail": {
+        "waterLab": "",
+        "mode": "dilute",
+        "extraction": "false",
+        "playing": "false",
+        "added": "0",
+        "solute": "30",
+        "total": "300",
+        "concentration": "10.00",
+        "particles": "72",
+        "shownAdded": "0.00",
+        "visibleParticles": "72"
+      },
+      "at": "2026-10-22T13:54:13.341Z"
+    },
+    {
+      "scenario": "390",
+      "name": "add 300 g gives 600 g / 5 percent / fixed 30 g and 72 markers",
+      "passed": true,
+      "detail": {
+        "data": {
+          "waterLab": "",
+          "mode": "dilute",
+          "extraction": "false",
+          "playing": "false",
+          "added": "300",
+          "solute": "30",
+          "total": "600",
+          "concentration": "5.00",
+          "particles": "72",
+          "shownAdded": "300.00",
+          "visibleParticles": "72"
+        },
+        "concentration": "5.00",
+        "total": "600",
+        "solute": "30",
+        "slider": "300"
+      },
+      "at": "2026-10-22T13:54:14.065Z"
+    },
+    {
+      "scenario": "390",
+      "name": "viewport position .water-figure",
+      "passed": true,
+      "detail": {
+        "x": 36,
+        "y": 85.671875,
+        "width": 318,
+        "height": 471.890625
+      },
+      "at": "2026-10-22T13:54:14.552Z"
+    },
+    {
+      "scenario": "390",
+      "name": "viewport position .dilution-controls",
+      "passed": true,
+      "detail": {
+        "x": 36,
+        "y": 85.90625,
+        "width": 318,
+        "height": 205.5
+      },
+      "at": "2026-10-22T13:54:15.208Z"
+    },
+    {
+      "scenario": "390",
+      "name": "reset returns original sugar concentration",
+      "passed": true,
+      "detail": {
+        "data": {
+          "waterLab": "",
+          "mode": "dilute",
+          "extraction": "false",
+          "playing": "false",
+          "added": "0",
+          "solute": "30",
+          "total": "300",
+          "concentration": "10.00",
+          "particles": "72",
+          "shownAdded": "0.00",
+          "visibleParticles": "72"
+        },
+        "concentration": "10.00",
+        "total": "300",
+        "solute": "30",
+        "slider": "0"
+      },
+      "at": "2026-10-22T13:54:16.090Z"
+    },
+    {
+      "scenario": "390",
+      "name": "keyboard End sets maximum added water",
+      "passed": true,
+      "detail": {
+        "data": {
+          "waterLab": "",
+          "mode": "dilute",
+          "extraction": "false",
+          "playing": "false",
+          "added": "300",
+          "solute": "30",
+          "total": "600",
+          "concentration": "5.00",
+          "particles": "72",
+          "shownAdded": "300.00",
+          "visibleParticles": "72"
+        },
+        "concentration": "5.00",
+        "total": "600",
+        "solute": "30",
+        "slider": "300"
+      },
+      "at": "2026-10-22T13:54:16.827Z"
+    },
+    {
+      "scenario": "390",
+      "name": "chapter 3 background and idle",
+      "passed": true,
+      "detail": {
+        "coffeeUnderlay": "journey-v1",
+        "mountId": "1792677250491-vct3a",
+        "chapter": "3",
+        "stage": "distributed",
+        "reading": "{\"containerId\":\"eec78b8e-0324-4c04-8dbf-fdd50b1de6a7\",\"activeInstanceId\":\"a5030d3f-9275-4563-b495-bc94e8bf3d97\",\"progress\":1}",
+        "events": "21",
+        "tick": "210",
+        "idle": "true",
+        "reduced": "false",
+        "size": "372x826"
+      },
+      "at": "2026-10-22T13:54:18.073Z"
+    },
+    {
+      "scenario": "390",
+      "name": "chapter 3 same background mount",
+      "passed": true,
+      "detail": {
+        "expected": "1792677250491-vct3a",
+        "actual": "1792677250491-vct3a"
+      },
+      "at": "2026-10-22T13:54:18.073Z"
+    },
+    {
+      "scenario": "390",
+      "name": "chapter 2 background and idle",
+      "passed": true,
+      "detail": {
+        "coffeeUnderlay": "journey-v1",
+        "mountId": "1792677250491-vct3a",
+        "chapter": "2",
+        "stage": "dissolved",
+        "reading": "{\"containerId\":\"eec78b8e-0324-4c04-8dbf-fdd50b1de6a7\",\"activeInstanceId\":\"923db1a3-613f-43fd-b76f-76a9278cc0f4\",\"progress\":0.3237287025378642}",
+        "events": "23",
+        "tick": "288",
+        "idle": "true",
+        "reduced": "false",
+        "size": "372x826"
+      },
+      "at": "2026-10-22T13:54:19.366Z"
+    },
+    {
+      "scenario": "390",
+      "name": "chapter 2 same background mount",
+      "passed": true,
+      "detail": {
+        "expected": "1792677250491-vct3a",
+        "actual": "1792677250491-vct3a"
+      },
+      "at": "2026-10-22T13:54:19.366Z"
+    },
+    {
+      "scenario": "390",
+      "name": "leave chapter 3 then return 2 preserves water state",
+      "passed": true,
+      "detail": {
+        "data": {
+          "waterLab": "",
+          "mode": "dilute",
+          "extraction": "false",
+          "playing": "false",
+          "added": "300",
+          "solute": "30",
+          "total": "600",
+          "concentration": "5.00",
+          "particles": "72",
+          "shownAdded": "300.00",
+          "visibleParticles": "72"
+        },
+        "concentration": "5.00",
+        "total": "600",
+        "solute": "30",
+        "slider": "300"
+      },
+      "at": "2026-10-22T13:54:19.772Z"
+    },
+    {
+      "scenario": "390",
+      "name": "static water runtime stops rAF",
+      "passed": true,
+      "detail": {
+        "before": {
+          "count": 127,
+          "documentId": "1792677250238-0.2128616896485639"
+        },
+        "after": {
+          "count": 127,
+          "documentId": "1792677250238-0.2128616896485639"
+        }
+      },
+      "at": "2026-10-22T13:54:21.204Z"
+    },
+    {
+      "scenario": "390",
+      "name": "static background stops ticks",
+      "passed": true,
+      "detail": {
+        "before": {
+          "coffeeUnderlay": "journey-v1",
+          "mountId": "1792677250491-vct3a",
+          "chapter": "2",
+          "stage": "dissolved",
+          "reading": "{\"containerId\":\"eec78b8e-0324-4c04-8dbf-fdd50b1de6a7\",\"activeInstanceId\":\"923db1a3-613f-43fd-b76f-76a9278cc0f4\",\"progress\":0.40384573395730683}",
+          "events": "25",
+          "tick": "288",
+          "idle": "true",
+          "reduced": "false",
+          "size": "372x826"
+        },
+        "after": {
+          "coffeeUnderlay": "journey-v1",
+          "mountId": "1792677250491-vct3a",
+          "chapter": "2",
+          "stage": "dissolved",
+          "reading": "{\"containerId\":\"eec78b8e-0324-4c04-8dbf-fdd50b1de6a7\",\"activeInstanceId\":\"923db1a3-613f-43fd-b76f-76a9278cc0f4\",\"progress\":0.40384573395730683}",
+          "events": "25",
+          "tick": "288",
+          "idle": "true",
+          "reduced": "false",
+          "size": "372x826"
+        }
+      },
+      "at": "2026-10-22T13:54:21.551Z"
+    },
+    {
+      "scenario": "390-reduced",
+      "name": "three native chapter buttons",
+      "passed": true,
+      "detail": {
+        "buttonCount": 3
+      },
+      "at": "2026-10-22T13:54:22.432Z"
+    },
+    {
+      "scenario": "390-reduced",
+      "name": "one persistent global background",
+      "passed": true,
+      "detail": {
+        "globalCount": 1,
+        "mountId": "1792677262304-yg8n3"
+      },
+      "at": "2026-10-22T13:54:22.498Z"
+    },
+    {
+      "scenario": "390-reduced",
+      "name": "chapter 1 background and idle",
+      "passed": true,
+      "detail": {
+        "coffeeUnderlay": "journey-v1",
+        "mountId": "1792677262304-yg8n3",
+        "chapter": "1",
+        "stage": "crystal",
+        "reading": "{\"containerId\":\"eec78b8e-0324-4c04-8dbf-fdd50b1de6a7\",\"activeInstanceId\":\"ca1efa48-27a3-4517-89ea-175c3d215142\",\"progress\":0.009315933885981703}",
+        "events": "8",
+        "tick": "5",
+        "idle": "true",
+        "reduced": "true",
+        "size": "372x826"
+      },
+      "at": "2026-10-22T13:54:22.599Z"
+    },
+    {
+      "scenario": "390-reduced",
+      "name": "chapter 1 same background mount",
+      "passed": true,
+      "detail": {
+        "expected": "1792677262304-yg8n3",
+        "actual": "1792677262304-yg8n3"
+      },
+      "at": "2026-10-22T13:54:22.599Z"
+    },
+    {
+      "scenario": "390-reduced",
+      "name": "chapter 2 background and idle",
+      "passed": true,
+      "detail": {
+        "coffeeUnderlay": "journey-v1",
+        "mountId": "1792677262304-yg8n3",
+        "chapter": "2",
+        "stage": "dissolved",
+        "reading": "{\"containerId\":\"eec78b8e-0324-4c04-8dbf-fdd50b1de6a7\",\"activeInstanceId\":\"923db1a3-613f-43fd-b76f-76a9278cc0f4\",\"progress\":0.3237287025378642}",
+        "events": "10",
+        "tick": "6",
+        "idle": "true",
+        "reduced": "true",
+        "size": "372x826"
+      },
+      "at": "2026-10-22T13:54:22.692Z"
+    },
+    {
+      "scenario": "390-reduced",
+      "name": "chapter 2 same background mount",
+      "passed": true,
+      "detail": {
+        "expected": "1792677262304-yg8n3",
+        "actual": "1792677262304-yg8n3"
+      },
+      "at": "2026-10-22T13:54:22.692Z"
+    },
+    {
+      "scenario": "390-reduced",
+      "name": "background honors reduced motion",
+      "passed": true,
+      "detail": {
+        "coffeeUnderlay": "journey-v1",
+        "mountId": "1792677262304-yg8n3",
+        "chapter": "2",
+        "stage": "dissolved",
+        "reading": "{\"containerId\":\"eec78b8e-0324-4c04-8dbf-fdd50b1de6a7\",\"activeInstanceId\":\"923db1a3-613f-43fd-b76f-76a9278cc0f4\",\"progress\":0.3237287025378642}",
+        "events": "10",
+        "tick": "6",
+        "idle": "true",
+        "reduced": "true",
+        "size": "372x826"
+      },
+      "at": "2026-10-22T13:54:22.692Z"
+    },
+    {
+      "scenario": "390-reduced",
+      "name": "reduced-mode initial sugar values",
+      "passed": true,
+      "detail": {
+        "data": {
+          "waterLab": "",
+          "mode": "dilute",
+          "extraction": "false",
+          "playing": "false",
+          "added": "0",
+          "solute": "30",
+          "total": "300",
+          "concentration": "10.00",
+          "particles": "72",
+          "shownAdded": "0.00",
+          "visibleParticles": "72"
+        },
+        "concentration": "10.00",
+        "total": "300",
+        "solute": "30",
+        "slider": "0"
+      },
+      "at": "2026-10-22T13:54:23.040Z"
+    },
+    {
+      "scenario": "390-reduced",
+      "name": "reduced-mode water updates without tween",
+      "passed": true,
+      "detail": {
+        "data": {
+          "waterLab": "",
+          "mode": "dilute",
+          "extraction": "false",
+          "playing": "false",
+          "added": "300",
+          "solute": "30",
+          "total": "600",
+          "concentration": "5.00",
+          "particles": "72",
+          "shownAdded": "300.00",
+          "visibleParticles": "72"
+        },
+        "concentration": "5.00",
+        "total": "600",
+        "solute": "30",
+        "slider": "300"
+      },
+      "at": "2026-10-22T13:54:23.211Z"
+    },
+    {
+      "scenario": "390-reduced",
+      "name": "reduced-mode fixed sugar and markers",
+      "passed": true,
+      "detail": {
+        "data": {
+          "waterLab": "",
+          "mode": "dilute",
+          "extraction": "false",
+          "playing": "false",
+          "added": "300",
+          "solute": "30",
+          "total": "600",
+          "concentration": "5.00",
+          "particles": "72",
+          "shownAdded": "300.00",
+          "visibleParticles": "72"
+        },
+        "concentration": "5.00",
+        "total": "600",
+        "solute": "30",
+        "slider": "300"
+      },
+      "at": "2026-10-22T13:54:23.345Z"
+    },
+    {
+      "scenario": "390-reduced",
+      "name": "chapter 3 background and idle",
+      "passed": true,
+      "detail": {
+        "coffeeUnderlay": "journey-v1",
+        "mountId": "1792677262304-yg8n3",
+        "chapter": "3",
+        "stage": "distributed",
+        "reading": "{\"containerId\":\"eec78b8e-0324-4c04-8dbf-fdd50b1de6a7\",\"activeInstanceId\":\"a5030d3f-9275-4563-b495-bc94e8bf3d97\",\"progress\":1}",
+        "events": "15",
+        "tick": "7",
+        "idle": "true",
+        "reduced": "true",
+        "size": "372x826"
+      },
+      "at": "2026-10-22T13:54:23.582Z"
+    },
+    {
+      "scenario": "390-reduced",
+      "name": "chapter 3 same background mount",
+      "passed": true,
+      "detail": {
+        "expected": "1792677262304-yg8n3",
+        "actual": "1792677262304-yg8n3"
+      },
+      "at": "2026-10-22T13:54:23.582Z"
+    },
+    {
+      "scenario": "390-reduced",
+      "name": "chapter 2 background and idle",
+      "passed": true,
+      "detail": {
+        "coffeeUnderlay": "journey-v1",
+        "mountId": "1792677262304-yg8n3",
+        "chapter": "2",
+        "stage": "dissolved",
+        "reading": "{\"containerId\":\"eec78b8e-0324-4c04-8dbf-fdd50b1de6a7\",\"activeInstanceId\":\"923db1a3-613f-43fd-b76f-76a9278cc0f4\",\"progress\":0.3237287025378642}",
+        "events": "17",
+        "tick": "8",
+        "idle": "true",
+        "reduced": "true",
+        "size": "372x826"
+      },
+      "at": "2026-10-22T13:54:23.757Z"
+    },
+    {
+      "scenario": "390-reduced",
+      "name": "chapter 2 same background mount",
+      "passed": true,
+      "detail": {
+        "expected": "1792677262304-yg8n3",
+        "actual": "1792677262304-yg8n3"
+      },
+      "at": "2026-10-22T13:54:23.757Z"
+    },
+    {
+      "scenario": "390-reduced",
+      "name": "reduced-mode return retains values",
+      "passed": true,
+      "detail": {
+        "data": {
+          "waterLab": "",
+          "mode": "dilute",
+          "extraction": "false",
+          "playing": "false",
+          "added": "300",
+          "solute": "30",
+          "total": "600",
+          "concentration": "5.00",
+          "particles": "72",
+          "shownAdded": "300.00",
+          "visibleParticles": "72"
+        },
+        "concentration": "5.00",
+        "total": "600",
+        "solute": "30",
+        "slider": "300"
+      },
+      "at": "2026-10-22T13:54:24.117Z"
+    },
+    {
+      "scenario": "390-reduced",
+      "name": "static water runtime stops rAF",
+      "passed": true,
+      "detail": {
+        "before": {
+          "count": 3,
+          "documentId": "1792677262006-0.9621259103636001"
+        },
+        "after": {
+          "count": 3,
+          "documentId": "1792677262006-0.9621259103636001"
+        }
+      },
+      "at": "2026-10-22T13:54:25.492Z"
+    },
+    {
+      "scenario": "390-reduced",
+      "name": "static background stops ticks",
+      "passed": true,
+      "detail": {
+        "before": {
+          "coffeeUnderlay": "journey-v1",
+          "mountId": "1792677262304-yg8n3",
+          "chapter": "2",
+          "stage": "dissolved",
+          "reading": "{\"containerId\":\"eec78b8e-0324-4c04-8dbf-fdd50b1de6a7\",\"activeInstanceId\":\"923db1a3-613f-43fd-b76f-76a9278cc0f4\",\"progress\":0.40384573395730683}",
+          "events": "19",
+          "tick": "8",
+          "idle": "true",
+          "reduced": "true",
+          "size": "372x826"
+        },
+        "after": {
+          "coffeeUnderlay": "journey-v1",
+          "mountId": "1792677262304-yg8n3",
+          "chapter": "2",
+          "stage": "dissolved",
+          "reading": "{\"containerId\":\"eec78b8e-0324-4c04-8dbf-fdd50b1de6a7\",\"activeInstanceId\":\"923db1a3-613f-43fd-b76f-76a9278cc0f4\",\"progress\":0.40384573395730683}",
+          "events": "19",
+          "tick": "8",
+          "idle": "true",
+          "reduced": "true",
+          "size": "372x826"
+        }
+      },
+      "at": "2026-10-22T13:54:25.856Z"
+    },
+    {
+      "scenario": "offline",
+      "name": "no HTTP requests attempted",
+      "passed": true,
+      "detail": [],
+      "at": "2026-10-22T13:54:25.863Z"
+    },
+    {
+      "scenario": "resources",
+      "name": "no failed assets; document-navigation aborts remain recorded",
+      "passed": true,
+      "detail": {
+        "unexpectedFailures": [],
+        "allFailedRequests": []
+      },
+      "at": "2026-10-22T13:54:25.863Z"
+    },
+    {
+      "scenario": "errors",
+      "name": "no browser or scenario errors",
+      "passed": true,
+      "detail": [],
+      "at": "2026-10-22T13:54:25.863Z"
+    }
+  ],
+  "errors": [],
+  "httpRequests": [],
+  "failedRequests": [],
+  "transientRetries": [],
+  "screenshots": [
+    {
+      "scenario": "1440",
+      "kind": "actual-viewport",
+      "path": "D:\\果铃工作台\\docs\\creative-production\\works\\coffee-journey\\design\\v06\\previews\\reuse-1440-chapter-01.png",
+      "viewport": {
+        "width": 1440,
+        "height": 1000
+      }
+    },
+    {
+      "scenario": "1440",
+      "kind": "actual-viewport",
+      "path": "D:\\果铃工作台\\docs\\creative-production\\works\\coffee-journey\\design\\v06\\previews\\reuse-1440-chapter-02.png",
+      "viewport": {
+        "width": 1440,
+        "height": 1000
+      }
+    },
+    {
+      "scenario": "1440",
+      "kind": "actual-viewport",
+      "path": "D:\\果铃工作台\\docs\\creative-production\\works\\coffee-journey\\design\\v06\\previews\\reuse-1440-program.png",
+      "viewport": {
+        "width": 1440,
+        "height": 1000
+      }
+    },
+    {
+      "scenario": "1440",
+      "kind": "actual-viewport",
+      "path": "D:\\果铃工作台\\docs\\creative-production\\works\\coffee-journey\\design\\v06\\previews\\reuse-1440-chapter-03.png",
+      "viewport": {
+        "width": 1440,
+        "height": 1000
+      }
+    },
+    {
+      "scenario": "390",
+      "kind": "actual-viewport",
+      "path": "D:\\果铃工作台\\docs\\creative-production\\works\\coffee-journey\\design\\v06\\previews\\reuse-390-chapter-01.png",
+      "viewport": {
+        "width": 390,
+        "height": 844
+      }
+    },
+    {
+      "scenario": "390",
+      "kind": "actual-viewport",
+      "path": "D:\\果铃工作台\\docs\\creative-production\\works\\coffee-journey\\design\\v06\\previews\\reuse-390-chapter-02.png",
+      "viewport": {
+        "width": 390,
+        "height": 844
+      }
+    },
+    {
+      "scenario": "390",
+      "kind": "actual-viewport",
+      "path": "D:\\果铃工作台\\docs\\creative-production\\works\\coffee-journey\\design\\v06\\previews\\reuse-390-diagram.png",
+      "viewport": {
+        "width": 390,
+        "height": 844
+      }
+    },
+    {
+      "scenario": "390",
+      "kind": "actual-viewport",
+      "path": "D:\\果铃工作台\\docs\\creative-production\\works\\coffee-journey\\design\\v06\\previews\\reuse-390-controls.png",
+      "viewport": {
+        "width": 390,
+        "height": 844
+      }
+    },
+    {
+      "scenario": "390",
+      "kind": "actual-viewport",
+      "path": "D:\\果铃工作台\\docs\\creative-production\\works\\coffee-journey\\design\\v06\\previews\\reuse-390-chapter-03.png",
+      "viewport": {
+        "width": 390,
+        "height": 844
+      }
+    }
+  ],
+  "browser": "149.0.7827.55",
+  "finishedAt": "2026-10-22T13:54:25.863Z"
+}

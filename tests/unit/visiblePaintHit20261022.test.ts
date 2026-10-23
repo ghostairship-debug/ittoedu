@@ -60,6 +60,56 @@ it('descends only into the visible nested document', async () => {
   expect(result).toEqual({ covered: false, shown: 'Nested' })
 })
 
+it('reports only visible author content and restores the same hidden leaves when they are shown', async () => {
+  await html(`<style>.sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap}</style>
+    <p>Visible</p><img id="photo" src="photo.png" style="opacity:0;width:240px;height:120px">
+    <span id="screen-reader" class="sr-only">Hidden screen-reader label</span>
+    <div id="parent" style="opacity:0"><span>Hidden parent text</span></div>
+    <span id="transparent" style="color:transparent">Transparent text</span>
+    <span id="inset" style="clip-path:inset(50%);display:block">Clipped inset text</span>
+    <div style="width:10px;height:10px;overflow:hidden"><span style="display:block;transform:translateX(100px)">Outside clip</span></div>`)
+  const result = await page.evaluate(() => {
+    const factory = new Function(`return ${(window as any).HitLab.domAuthoringFactorySource()}`)()
+    const author = factory(document.documentElement, { records: () => ({}) })
+    const hidden = author.scan().map((value: any) => value.initialValue)
+    for (const id of ['photo', 'parent']) document.getElementById(id)!.style.opacity = '1'
+    document.getElementById('screen-reader')!.className = ''
+    document.getElementById('transparent')!.style.color = 'black'
+    document.getElementById('inset')!.style.clipPath = 'none'
+    const shown = author.scan().map((value: any) => value.initialValue)
+    const leaf = author.scan().find((value: any) => value.initialValue === 'Hidden parent text')
+    author.suppressText(leaf.authorKey)
+    const editingStillRegistered = author.scan().some((value: any) => value.authorKey === leaf.authorKey)
+    author.dispose(); return { hidden, shown, editingStillRegistered }
+  })
+  expect(result.hidden).toEqual(['Visible'])
+  expect(result.shown).toEqual(['Visible', 'photo.png', 'Hidden screen-reader label', 'Hidden parent text', 'Transparent text', 'Clipped inset text'])
+  expect(result.editingStillRegistered).toBe(true)
+})
+
+it('does not report content of a zero-opacity nested carrier and restores it when visible', async () => {
+  await html(`<iframe id="child" style="opacity:0;width:240px;height:120px" srcdoc="<p>Nested hidden text</p>"></iframe>`)
+  await page.locator('iframe').contentFrame().locator('p').waitFor()
+  const result = await page.evaluate(() => {
+    const lab = (window as any).HitLab, author = lab.createNestedDomAuthoring(document.documentElement, lab.createDomAuthoring, { records: () => ({}) })
+    const hidden = author.scan().map((value: any) => value.initialValue)
+    document.getElementById('child')!.style.opacity = '1'
+    const shown = author.scan().map((value: any) => value.initialValue)
+    author.dispose(); return { hidden, shown }
+  })
+  expect(result).toEqual({ hidden: [], shown: ['Nested hidden text'] })
+})
+
+it('keeps visible text inside a scaled clip in its viewport coordinates', async () => {
+  await html(`<div style="position:absolute;left:20px;top:20px;width:120px;height:40px;clip:rect(0,120px,40px,0);transform:scale(2);transform-origin:0 0">
+    <span style="position:absolute;left:80px;top:4px">Visible scaled</span></div>`)
+  const shown = await page.evaluate(() => {
+    const author = (window as any).HitLab.createDomAuthoring(document.documentElement, { records: () => ({}) })
+    const result = author.scan().map((value: any) => value.initialValue); author.dispose(); return result
+  })
+  expect(shown).toEqual(['Visible scaled'])
+})
+
 it('keeps Surface paint blocking Underlay and preserves an object outer background when its realm is transparent', async () => {
   await html(`<div data-component-instance="under" class="box" style="background:green"></div>
     <div id="surface" class="box" style="background:white;pointer-events:none"></div>

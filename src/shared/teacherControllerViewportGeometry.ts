@@ -18,13 +18,16 @@ export function teacherControllerReferenceSize(project: CourseProjectV10): FlowS
   return { width: STAGE_VIEWPORT_WIDTH, height: STAGE_VIEWPORT_HEIGHT }
 }
 
-/** Direct HUD projection: no content fit, paper scroll, observation or world camera enters this matrix. */
+/** All viewport-pinned globals share the complete viewport, independent of input handling. */
 export function createTeacherControllerHudGeometry(input: {
   referenceSize: FlowSize; viewportRect: { x: number; y: number; width: number; height: number }
-  controllerInsets?: { right: number; bottom: number }
-}) { return createStageGeometry(input.referenceSize, { ...input.viewportRect,
-  width: Math.max(0, input.viewportRect.width - (input.controllerInsets?.right ?? 0)),
-  height: Math.max(0, input.viewportRect.height - (input.controllerInsets?.bottom ?? 0)) }) }
+}) {
+  return createStageGeometry(input.referenceSize, input.viewportRect)
+}
+
+function viewportStretch(style: CourseProjectV10['instances'][string]['style']) {
+  return { width: style?.width === '100%', height: style?.height === '100%' }
+}
 
 export type TeacherControllerDisplayPort = Pick<TeacherControllerPort, 'read' | 'subscribe' | 'setCollapsed' | 'forInstance' | 'subscribePlacement'> & {
   placement?(): { x: number; y: number }
@@ -103,30 +106,31 @@ export function teacherControllerIsCollapsed(project: CourseProjectV10, id: stri
   return Boolean(config.collapsible && (port?.read().collapsed ?? config.defaultCollapsed))
 }
 
+/** Resolve CSS viewport sizes once for painting, session dragging and author inverse mapping. */
+export function resolveGlobalViewportLayout(project: CourseProjectV10, id: string, geometry: TeacherControllerHudGeometry, locationId = '') {
+  const instance = project.instances[id], source = instance?.frame
+  if (!source) return undefined
+  const size = geometry.viewportRect, stretch = viewportStretch(instance.style), cssPixels = stretch.width || stretch.height
+  const frame: ComponentFrame = cssPixels
+    ? { width: stretch.width ? size.width : source.width, height: stretch.height ? size.height : source.height, transform: [...source.transform] }
+    : { ...source, transform: [...multiplyMatrices(geometry.authorToViewport, source.transform)] }
+  if (!cssPixels) { frame.transform[4] -= size.x; frame.transform[5] -= size.y }
+  return { frame, cssPixels, expandedWidth: stretch.width ? size.width : teacherControllerExpandedWidth(project, id, locationId) }
+}
+
 /** Author frames remain unchanged. HUD consumers render the returned frames directly in their HUD layer. */
 export function projectTeacherControllerInstances(project: CourseProjectV10, hud: TeacherControllerHudGeometry,
   port?: TeacherControllerDisplayPort): CourseProjectV10 {
-  const size = hud.viewportRect
-  if (size.width <= 0 || size.height <= 0) return project
   let instances = project.instances
   for (const id of [...project.global.underlay, ...project.global.overlay]) {
     const instance = project.instances[id], frame = instance?.frame
     if (!frame || !isViewportComponent(project, id)) continue
+    const geometry = hud, size = geometry.viewportRect
+    if (size.width <= 0 || size.height <= 0) continue
     const instancePort = port?.forInstance?.(id) ?? port, offset = instancePort?.placement?.() ?? { x: 0, y: 0 }
-    const origin = { x: hud.viewportRect.x, y: hud.viewportRect.y }
-    const projected: ComponentFrame = { ...frame, transform: [...multiplyMatrices(hud.authorToViewport, frame.transform)] }
-    const localFrame = { ...projected, transform: [...projected.transform] as ComponentFrame['transform'] }
-    localFrame.transform[4] -= origin.x; localFrame.transform[5] -= origin.y
-    // Explicit full-width HUD uses viewport CSS pixels, so labels remain readable
-    // when the work's reference canvas and the actual viewport differ.
-    const stretch = instance.style?.width === '100%' && frame.transform[0] === 1 && frame.transform[1] === 0
-      && frame.transform[2] === 0 && frame.transform[3] === 1
-    if (stretch) {
-      localFrame.width = size.width; localFrame.height = frame.height
-      localFrame.transform = [1, 0, 0, 1, 0, frame.transform[5]]
-    }
-    const shown = teacherControllerViewportFrame(localFrame, size, offset, teacherControllerIsCollapsed(project, id, port),
-      stretch ? size.width : teacherControllerExpandedWidth(project, id, port?.read().locationId ?? ''))
+    const origin = { x: size.x, y: size.y }
+    const layout = resolveGlobalViewportLayout(project, id, geometry, port?.read().locationId ?? '')!
+    const shown = teacherControllerViewportFrame(layout.frame, size, offset, teacherControllerIsCollapsed(project, id, port), layout.expandedWidth)
     shown.transform[4] += origin.x; shown.transform[5] += origin.y
     if (instances === project.instances) instances = { ...instances }
     instances[id] = { ...instance, frame: shown }
@@ -141,18 +145,21 @@ export function restoreTeacherControllerFrameEdits(edits: ComponentEdit[], origi
     if (edit.type !== 'frame.set' || !edit.frame || !isViewportComponent(original, edit.instanceId)) return edit
     const source = original.instances[edit.instanceId]?.frame, before = display.instances[edit.instanceId]?.frame
     if (!source || !before) return edit
-    const matrix = hud.viewportToAuthor
+    const geometry = hud
+    const layout = resolveGlobalViewportLayout(original, edit.instanceId, geometry, port?.read().locationId ?? '')!, { cssPixels } = layout
+    const matrix = cssPixels ? [1, 0, 0, 1, -geometry.viewportRect.x, -geometry.viewportRect.y] as ComponentFrame['transform'] : geometry.viewportToAuthor
     const start = multiplyMatrices(matrix, before.transform), next = multiplyMatrices(matrix, edit.frame.transform)
     const placement = (port?.forInstance?.(edit.instanceId) ?? port)?.placement?.() ?? offset
-    const authorOffset = { x: placement.x / hud.scale, y: placement.y / hud.scale }
+    const scale = cssPixels ? 1 : geometry.scale
+    const authorOffset = { x: placement.x / scale, y: placement.y / scale }
     const transform = [...source.transform] as ComponentFrame['transform']
     const collapsed = teacherControllerIsCollapsed(original, edit.instanceId, port)
-    const expandedWidth = teacherControllerExpandedWidth(original, edit.instanceId, port?.read().locationId ?? '')
+    const expandedWidth = layout.expandedWidth
     const firstColumnChanged = Math.abs(next[0] - start[0]) > 0.000001 || Math.abs(next[1] - start[1]) > 0.000001
     const secondColumnChanged = Math.abs(next[2] - start[2]) > 0.000001 || Math.abs(next[3] - start[3]) > 0.000001
     if (firstColumnChanged) { const ratio = collapsed ? 1 : before.width / expandedWidth; transform[0] = next[0] * ratio; transform[1] = next[1] * ratio }
-    if (secondColumnChanged) { const ratio = collapsed ? 1 : before.height / source.height; transform[2] = next[2] * ratio; transform[3] = next[3] * ratio }
-    const shift = collapsedTranslation({ ...source, transform }, collapsed, expandedWidth)
+    if (secondColumnChanged) { const ratio = collapsed ? 1 : before.height / layout.frame.height; transform[2] = next[2] * ratio; transform[3] = next[3] * ratio }
+    const shift = collapsedTranslation({ ...layout.frame, transform }, collapsed, expandedWidth)
     const changesX = Math.abs(next[0] - start[0]) > 0.000001 || Math.abs(next[2] - start[2]) > 0.000001
     const changesY = Math.abs(next[1] - start[1]) > 0.000001 || Math.abs(next[3] - start[3]) > 0.000001
     if (Math.abs(next[4] - start[4]) > 0.000001 || changesX) transform[4] = next[4] - authorOffset.x - shift.x

@@ -5,9 +5,9 @@ import type { ComponentAuthorSpot } from '../../src/shared/contracts/component-p
 import { useComponentAuthorInteraction } from '../../src/renderer/ui/workspaces/useComponentAuthorInteraction'
 import { authorFieldIdentity } from '../../src/renderer/documents/interactionSelection'
 
-const h = vi.hoisted(() => ({ view: {} as any, state: {} as any, runtime: {} as any, hit: vi.fn() }))
+const h = vi.hoisted(() => ({ view: {} as any, state: {} as any, runtime: {} as any, hit: vi.fn(), visible: vi.fn() }))
 vi.mock('../../src/renderer/components/CourseV10RuntimeView', () => ({ useCourseV10Runtime: () => h.runtime }))
-vi.mock('../../src/renderer/components/componentAuthorHit', () => ({ requestComponentAuthorHit: h.hit }))
+vi.mock('../../src/renderer/components/componentAuthorHit', () => ({ requestComponentAuthorHit: h.hit, visibleComponentAuthorHit: h.visible }))
 vi.mock('../../src/shared/contracts/component-platform/project', async importOriginal => ({
   ...await importOriginal<typeof import('../../src/shared/contracts/component-platform/project')>(), componentIsLocked: () => false,
 }))
@@ -47,6 +47,7 @@ beforeEach(() => {
     authorSpots: () => fields, subscribeAuthorSpots: () => () => undefined, contentElement: (id: string) => elements.get(id),
   } }
   h.hit.mockReset()
+  h.visible.mockReset()
 })
 
 describe('a realm caret reaches the same professional plain-text input', () => {
@@ -220,6 +221,8 @@ describe('a registered field reserves its right pointer before the existing cont
     const field: ComponentAuthorSpot = { ...fields[0]!, kind: 'image', dataPath: ['assetId'], initialValue: 'asset-old' }
     h.runtime.world.authorSpots = () => [field]
     h.hit.mockResolvedValue({ authorKey: field.authorKey, painted: true })
+    // This case exercises event/menu ownership; browser paint has already resolved this exact field.
+    h.visible.mockResolvedValue({ instanceId: field.instanceId, authorKey: field.authorKey })
     const element = document.createElement('main'), host = h.runtime.world.contentElement('a')
     host.dataset.componentInstance = 'a'; host.setAttribute('contenteditable', 'false')
     host.style.width = '200px'; host.style.height = '50px'

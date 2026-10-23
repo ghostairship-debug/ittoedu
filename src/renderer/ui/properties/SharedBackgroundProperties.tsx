@@ -7,7 +7,8 @@ import type {
   EffectiveBackgroundOwner,
 } from '../../../shared/effectiveBackground'
 import { ColorInput } from '../ColorInput'
-import { SelectField, usePropertyDraftBindingKey, usePropertyDraftFlush, type PropertyDraftResume } from './PropertyControls'
+import { SelectField, usePropertyDraftBindingKey, usePropertyDraftFlush, type PropertyDraftResume, type PropertyCommitFailure } from './PropertyControls'
+import { isCourseComponentInputFailure, settleCourseComponentInput } from '../../documents/CourseV10DocumentBridge'
 
 export const EFFECTIVE_BACKGROUND_SOURCE_LABEL: Record<EffectiveBackgroundOwner, string> = {
   course: '课程',
@@ -98,29 +99,47 @@ export function SharedBackgroundProperties({
   const bindingKey = usePropertyDraftBindingKey(), baseline = JSON.stringify({ color, assetId, mode: mode?.value })
   const [, refresh] = useState(0)
   const upload = useRef<{ bindingKey: string; baseline: string; name: string; mimeType: string; bytes?: Uint8Array;
-    read?: () => Promise<Uint8Array>; commit?: SharedBackgroundImportHandler; resume?: PropertyDraftResume; pending?: Promise<boolean>; error?: string } | null>(null)
+    read?: () => Promise<Uint8Array>; commit?: SharedBackgroundImportHandler; resume?: PropertyDraftResume; pending?: Promise<boolean>; error?: string; failure?: PropertyCommitFailure } | null>(null)
   const imageAssets = Object.values(assets).filter((asset) => asset.kind === 'image')
   const isInheritMode = mode?.value === 'inherit'
   const colorInherited = inherit?.color.inherited ?? false
   const assetInherited = inherit?.asset.inherited ?? false
 
-  const applyUpload = (): Promise<boolean> => {
+  const applyUpload = (explicit = false): Promise<boolean> => {
     const draft = upload.current
     if (!draft) return Promise.resolve(true)
     if (draft.pending) return draft.pending
+    if (draft.failure && !explicit) return Promise.resolve(false)
+    const input = fileInputRef.current
+    const finish = () => {
+      draft.failure = undefined
+      if (upload.current === draft) upload.current = null
+      // This node belongs to this upload even if its panel was retired while
+      // IO ran. Never clear the newly mounted target's native file input.
+      if (input) input.value = ''
+      return true
+    }
     draft.pending = Promise.resolve().then(async () => {
       try {
+        if (draft.failure) {
+          const outcome = await draft.failure.error.resolveInput('retry')
+          if (outcome === 'pending') return false
+          if (outcome === 'applied') return finish()
+          draft.failure = undefined
+          draft.commit = undefined
+        }
         if (draft.resume) {
           const complete = await (draft.resume.pending ?? draft.resume.flush())
           if (!complete) {
             const raw = draft.resume.readDraft()?.raw
             const saved = raw ? JSON.parse(raw) : null
             if (Array.isArray(saved?.bytes)) draft.bytes = new Uint8Array(saved.bytes)
-            draft.resume = { ...draft.resume, pending: undefined }
+            const failure = draft.resume.commitFailure?.()
+            if (failure?.bindingKey === draft.bindingKey) { draft.failure = failure; draft.resume = undefined }
+            else draft.resume = { ...draft.resume, pending: undefined }
             throw new Error('原上传未完成；图片输入已保留，可重试上传。')
           }
-          if (upload.current === draft) { upload.current = null; if (fileInputRef.current) fileInputRef.current.value = '' }
-          return true
+          return finish()
         }
         draft.bytes ??= await draft.read?.()
         if (!draft.bytes) throw new Error('原图片尚未读取完成，请重新选择文件。')
@@ -130,15 +149,28 @@ export function SharedBackgroundProperties({
         }
         if (!draft.commit) throw new Error('当前背景暂不能上传；图片输入已保留。')
         await draft.commit({ name: draft.name, mimeType: draft.mimeType, bytes: draft.bytes })
-        if (upload.current === draft) { upload.current = null; if (fileInputRef.current) fileInputRef.current.value = '' }
-        return true
-      } catch (error) { draft.error = error instanceof Error ? error.message : String(error); return false }
+        return finish()
+      } catch (error) {
+        draft.error = error instanceof Error ? error.message : String(error)
+        if (isCourseComponentInputFailure(error)) {
+          draft.failure = { error, value: JSON.stringify({ name: draft.name, mimeType: draft.mimeType, bytes: draft.bytes ? Array.from(draft.bytes) : null }),
+            bindingKey: draft.bindingKey, label: `${testId}:图片上传`, kind: 'structured' }
+          try {
+            const outcome = await settleCourseComponentInput(error)
+            if (outcome === 'applied') return finish()
+            if (outcome === 'ready') { draft.failure = undefined; draft.commit = undefined }
+          }
+          catch (failure) { draft.error = failure instanceof Error ? failure.message : String(failure) }
+        }
+        return false
+      }
     }).finally(() => { draft.pending = undefined; refresh(value => value + 1) })
     return draft.pending
   }
   usePropertyDraftFlush(applyUpload, {
     hasDirty: () => Boolean(upload.current),
     inFlight: () => upload.current?.pending,
+    commitFailure: () => upload.current?.failure,
     readDraft: () => ({ bindingKey: upload.current?.bindingKey ?? bindingKey, label: `${testId}:图片上传`, kind: 'structured',
       raw: JSON.stringify(upload.current ? { name: upload.current.name, mimeType: upload.current.mimeType, bytes: upload.current.bytes ? Array.from(upload.current.bytes) : null } : null),
       baseline: upload.current?.baseline ?? baseline, composing: false }),
@@ -149,7 +181,8 @@ export function SharedBackgroundProperties({
         if (resume?.pending || !Array.isArray(value.bytes)) {
           if (!resume) return false
           upload.current = { bindingKey: record.bindingKey, baseline: record.baseline ?? baseline, name: value.name, mimeType: value.mimeType,
-            bytes: Array.isArray(value.bytes) ? new Uint8Array(value.bytes) : undefined, resume, error: resume.pending ? undefined : '图片输入已保留，点击重试上传。' }
+            bytes: Array.isArray(value.bytes) ? new Uint8Array(value.bytes) : undefined, resume, error: resume.pending ? undefined : '图片输入已保留，点击重试上传。',
+            failure: resume.readDraft()?.bindingKey === record.bindingKey ? resume.commitFailure?.() : undefined }
           // This is the original user-started IO, not a replay of a recovered command.
           if (resume.pending) void applyUpload()
           refresh(value => value + 1)
@@ -165,11 +198,15 @@ export function SharedBackgroundProperties({
   const onFileInputChange = (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.currentTarget.files?.[0]
     if (!file || !onImportAsset) return
+    // The single upload slot must not lose the bytes or identity of an
+    // admitted/unknown operation. Other targets have their own mounted owner.
+    if (upload.current?.pending || upload.current?.failure) return
     try {
       const commit = onImportAsset.capture?.() ?? onImportAsset
       upload.current = { bindingKey, baseline, name: file.name, mimeType: file.type || 'image/png', commit,
         read: async () => new Uint8Array(await file.arrayBuffer()) }
       void applyUpload()
+      refresh(value => value + 1)
     } catch (error) {
       upload.current = { bindingKey, baseline, name: file.name, mimeType: file.type || 'image/png', read: async () => new Uint8Array(await file.arrayBuffer()),
         error: error instanceof Error ? error.message : String(error) }
@@ -252,6 +289,7 @@ export function SharedBackgroundProperties({
               ref={fileInputRef}
               type="file"
               hidden
+              disabled={Boolean(upload.current?.pending || upload.current?.failure)}
               accept="image/*"
               data-testid={`${testId}-asset-file-input`}
               onChange={onFileInputChange}
@@ -259,13 +297,14 @@ export function SharedBackgroundProperties({
             <button
               type="button"
               className="secondary-button"
+              disabled={Boolean(upload.current?.pending || upload.current?.failure)}
               data-testid={`${testId}-asset-upload`}
               onClick={() => fileInputRef.current?.click()}
             >
               <ImageIcon size={14} />从文件上传…
             </button>
             {upload.current && <p className="property-hint" role="status">{upload.current.name}：{upload.current.error ?? '正在读取并上传…'}
-              {upload.current.error && <button type="button" className="link-button" onClick={() => { void applyUpload() }}>重试上传</button>}
+              {upload.current.error && <button type="button" className="link-button" onClick={() => { void applyUpload(true) }}>重试上传</button>}
             </p>}
           </>
         )}

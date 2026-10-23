@@ -23,7 +23,9 @@ export interface CourseDocumentsPort {
   activation?: number
   documents: readonly DocumentSnapshot[]
   activeDocumentId: string | null
-  activate(documentId: string): Promise<void>
+  /** Reads the current course view/selection scope without changing it. */
+  captureScope?(): () => boolean
+  activate(documentId: string, activateIf?: () => boolean): Promise<void | boolean>
   close(documentId: string): Promise<boolean>
 }
 export interface ActiveDocumentTarget {
@@ -37,8 +39,12 @@ export interface DocumentTabsController {
   createText(name?: string): Promise<void>
   tabs: LessonFileTab[]
   activeTab: string
+  /** Reads the existing navigation request identity without starting a navigation. */
+  captureNavigationIdentity(): string
+  cancelNavigation(): void
+  showCurrentCourse(foreground?: () => boolean): void
   setActiveTab(tab: string): void
-  focusDocument(documentId: string): Promise<void>
+  focusDocument(documentId: string): Promise<void | boolean>
   openTab(tab: Omit<LessonFileTab, 'dirty' | 'id' | 'documentId'>): Promise<void>
   closeTab(tab: LessonFileTab): Promise<boolean>
   removeTab(path: string): void
@@ -78,6 +84,15 @@ export function useDocumentTabsController({ documentPort, courseDocuments, media
   const previousCourse = useRef<string | null>(null)
   const previousActivation = useRef<number | undefined>(undefined)
   const pendingCourse = useRef<{ id: string; ticket: number } | null>(null)
+  function cancelNavigation() { ++navigation.current; pendingCourse.current = null }
+  function showCurrentCourse(foreground?: () => boolean) {
+    if (foreground?.() === false) return
+    const course = courseRef.current, active = course?.activeDocumentId
+    if (!active || !course.documents.some(snapshot => snapshot.documentId === active)) return
+    if (!foreground) cancelNavigation()
+    else pendingCourse.current = null
+    setActive(active)
+  }
   function setActiveTab(id: string) {
     const course = courseRef.current
     if (id === 'course') {
@@ -88,9 +103,14 @@ export function useDocumentTabsController({ documentPort, courseDocuments, media
     const ticket = ++navigation.current
     const tab = tabsRef.current.find(value => value.id === id)
     if (tab?.kind === 'course' && course) {
-      pendingCourse.current = { id, ticket }
-      void course.activate(id).then(() => { if (ticket === navigation.current) setActive(id) }).catch(() => { /* The course lifecycle retains the draft and reports its error. */ })
-    } else setActive(id)
+      const pending = { id, ticket }; pendingCourse.current = pending
+      const isCurrent = () => ticket === navigation.current
+      const scope = course.captureScope?.()
+      const canActivate = () => isCurrent() && scope?.() !== false
+      void course.activate(id, canActivate).then(activated => { if (activated !== false && isCurrent()) setActive(id) })
+        .catch(() => { /* The course lifecycle retains the draft and reports its error. */ })
+        .finally(() => { if (pendingCourse.current === pending) pendingCourse.current = null })
+    } else { pendingCourse.current = null; setActive(id) }
   }
   useEffect(() => {
     const snapshots = courseDocuments?.documents ?? []
@@ -103,7 +123,10 @@ export function useDocumentTabsController({ documentPort, courseDocuments, media
     const active = courseDocuments?.activeDocumentId ?? null
     if ((active !== previousCourse.current || courseDocuments?.activation !== previousActivation.current) && snapshots.some(item => item.documentId === active)) {
       const pending = pendingCourse.current
-      if (!pending || pending.id !== active || pending.ticket === navigation.current) setActive(active!)
+      const explicit = pending?.id === active && pending.ticket === navigation.current
+      const current = activeTabRef.current
+      const showingCourse = !current || tabsRef.current.some(tab => tab.id === current && tab.kind === 'course')
+      if (explicit || !pending && showingCourse) setActive(active!)
       if (pending?.id === active) pendingCourse.current = null
     }
     previousCourse.current = active
@@ -162,6 +185,7 @@ export function useDocumentTabsController({ documentPort, courseDocuments, media
     return 'document'
   }
   async function disposeDocuments() {
+    cancelNavigation()
     for (const editor of documents.current.values()) editor.session.dispose()
     documents.current.clear()
     mediaEditors.current.clear()
@@ -233,13 +257,20 @@ export function useDocumentTabsController({ documentPort, courseDocuments, media
     const api = documentPort.documents
     if (!api) throw new Error('文档服务尚未连接')
     const ticket = ++navigation.current
+    pendingCourse.current = null
+    const isCurrent = () => ticket === navigation.current
+    const scope = courseRef.current?.captureScope?.()
+    const canActivate = () => isCurrent() && scope?.() !== false
     const snapshot = await api.read(documentId)
+    if (!canActivate()) return false
     if (snapshot.model.kind === 'course-v10') {
-      if (ticket !== navigation.current) return
       if (!courseRef.current) throw new Error('果铃工程视图尚未连接')
-      pendingCourse.current = { id: documentId, ticket }
-      await courseRef.current.activate(documentId)
-      if (ticket === navigation.current) setActive(documentId)
+      const pending = { id: documentId, ticket }; pendingCourse.current = pending
+      try {
+        const activated = await courseRef.current.activate(documentId, canActivate)
+        if (activated !== false && isCurrent()) { setActive(documentId); return true }
+        return false
+      } finally { if (pendingCourse.current === pending) pendingCourse.current = null }
       return
     }
     if (!tabsRef.current.some(tab => tab.id === documentId)) {
@@ -247,7 +278,8 @@ export function useDocumentTabsController({ documentPort, courseDocuments, media
       const name = snapshot.binding.kind === 'file' ? path.split(/[\\/]/).pop()! : snapshot.binding.suggestedName
       setTabs(current => current.some(tab => tab.id === documentId) ? current : [...current, { id: documentId, documentId, path, name, kind: 'document', dirty: snapshot.dirty, lesson: null }])
     }
-    if (ticket === navigation.current) setActiveTab(documentId)
+    if (isCurrent()) { setActive(documentId); return true }
+    return false
   }
   async function closeTab(tab: LessonFileTab) {
     if (tab.kind === 'course') {
@@ -302,7 +334,7 @@ export function useDocumentTabsController({ documentPort, courseDocuments, media
     tabsRef.current = relocate(tabsRef.current)
     setTabs(relocate)
   }), [])
-  useEffect(() => () => { for (const stop of subscriptions.current.values()) stop() }, [])
+  useEffect(() => () => { cancelNavigation(); for (const stop of subscriptions.current.values()) stop() }, [])
   /**
    * 每个 path 一个身份稳定的 ref 回调。内联 `ref={editor => registerEditor(tab.path, editor)}` 每次
    * 重渲染都是新函数，React 会先用 null 调旧回调（delete）再用实例调新回调（set）——同键被删后重新插入，
@@ -382,7 +414,7 @@ export function useDocumentTabsController({ documentPort, courseDocuments, media
     }
     return drafts
   }
-  return { tabs, activeTab, isCourseActive: tabs.some(tab => tab.id === activeTab && tab.kind === 'course'), createMarkdown, createText, setActiveTab, focusDocument, openTab, closeTab, removeTab, registerEditor, editorRef, mediaEditorRef, mediaFiles: requestMediaFiles, updateMediaSnapshot, updateDirty, flushAll, saveActiveDocument, drainAll, captureMediaDrafts, preserveAll, hasDirtyInputs, suspendForClose, resumeAfterCloseCancelled, closeAll, disposeDocuments, activeDocumentTarget, selectionChanged, sendContextualCommand }
+  return { tabs, activeTab, captureNavigationIdentity: () => String(navigation.current), cancelNavigation, showCurrentCourse, isCourseActive: tabs.some(tab => tab.id === activeTab && tab.kind === 'course'), createMarkdown, createText, setActiveTab, focusDocument, openTab, closeTab, removeTab, registerEditor, editorRef, mediaEditorRef, mediaFiles: requestMediaFiles, updateMediaSnapshot, updateDirty, flushAll, saveActiveDocument, drainAll, captureMediaDrafts, preserveAll, hasDirtyInputs, suspendForClose, resumeAfterCloseCancelled, closeAll, disposeDocuments, activeDocumentTarget, selectionChanged, sendContextualCommand }
 }
 
 function normalized(value: string) { return value.replace(/\\/g, '/').toLowerCase() }

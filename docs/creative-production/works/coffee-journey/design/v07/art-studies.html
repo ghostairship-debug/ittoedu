@@ -1,0 +1,12 @@
+<!doctype html><html lang="zh"><meta charset="utf-8"><title>咖啡形态 · v07 转场工作台</title>
+<style>body{margin:0;background:#f5f1e7;color:#253328;font:14px system-ui}header{padding:22px 30px;border-bottom:1px solid #d0c9b8;display:flex;align-items:center;gap:24px}h1{font:25px Georgia;margin:0}input{width:400px}button{padding:8px 18px}#stages{display:grid;grid-template-columns:repeat(5,300px);gap:4px;padding:12px;width:1516px}figure{margin:0}canvas{display:block;width:300px;height:310px}figcaption{padding:6px 10px 16px;color:#5f6758;background:#f5f1e7}#full{display:none;width:100vw;height:calc(100vh - 84px)}.full #stages{display:none}.full #full{display:block}</style>
+<header><h1>一杯咖啡的远行 · 六段材料转化</h1><button id="toggle">单帧 / 联系表</button><input id="phase" type="range" min="0" max="6" step="0.002" value="0"><span id="value">0.00</span></header><main id="stages"></main><canvas id="full"></canvas>
+<script type="module">
+import {createCoffeeRenderer} from './background-runtime.js';
+const names=['液面 → 果实','果皮打开','主种子离开组织','焙色与纹理','豆体 → 碎粒与液体','液面 → 杯体'];
+const assets=Object.fromEntries(['cup','cherry','section','green','gold','roast'].map(k=>[k,'./assets/runtime/'+k+'.webp']));
+let ready=0;const renders=[];
+for(let row=0;row<6;row++)for(const q of [0,.25,.5,.75,1]){const fig=document.createElement('figure'),cv=document.createElement('canvas');cv.width=300;cv.height=310;const caption=document.createElement('figcaption');caption.textContent=names[row]+' · '+q*100+'%';fig.append(cv,caption);document.querySelector('#stages').append(fig);const p=row+q;let r=createCoffeeRenderer(cv,assets,()=>{r.draw(p,{centered:true,width:300,height:310});ready++;document.body.dataset.loaded=String(ready)});r.draw(p,{centered:true,width:300,height:310});renders.push(r)}
+const f=document.querySelector('#full');const full=createCoffeeRenderer(f,assets,()=>paint());function paint(){const p=Number(document.querySelector('#phase').value);document.querySelector('#value').textContent=p.toFixed(2);full.draw(p,{width:innerWidth,height:innerHeight-84});}
+document.querySelector('#phase').oninput=paint;document.querySelector('#toggle').onclick=()=>{document.body.classList.toggle('full');paint()};window.addEventListener('resize',paint);window.art={set(p){document.querySelector('#phase').value=p;paint()},renderers:renders,full};
+</script></html>

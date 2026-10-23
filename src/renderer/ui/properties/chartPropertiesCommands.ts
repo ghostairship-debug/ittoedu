@@ -2,6 +2,7 @@ import { chartDataSchema, type ChartData } from '../../../components/chart/data'
 import { changeChartType, patchChartStyle } from '../../../components/chart/contentOperations'
 import { editChartData } from '../../../components/chart/edit'
 import type { ChartPropertiesCommands } from './ChartProperties'
+import { isCourseComponentInputFailure, settleCourseComponentInput } from '../../documents/CourseV10DocumentBridge'
 
 /** Value-only editor adapter; target/revision/history are owned by its caller. */
 export function createChartPropertiesCommands(
@@ -11,11 +12,17 @@ export function createChartPropertiesCommands(
 ): ChartPropertiesCommands {
   const apply = (build: () => ChartData): string | null | Promise<string | null> => {
     try { return commit(chartDataSchema.parse(build())) }
-    catch (error) { return error instanceof Error ? error.message : '图表数据无效' }
+    catch (error) { if (isCourseComponentInputFailure(error)) throw error; return error instanceof Error ? error.message : '图表数据无效' }
   }
   const run = (build: () => ChartData): Promise<void> => {
-    const pending = Promise.resolve(apply(build)).then(error => { if (error) throw new Error(error) })
-    void pending.catch(error => report(error instanceof Error ? error.message : String(error)))
+    const pending = Promise.resolve().then(() => apply(build)).then(error => { if (error) throw new Error(error) }).catch(async error => {
+      // Selects/toggles have no retained text field. Their definite refusal
+      // still ends here; an unknown result only queries its original proposal.
+      await settleCourseComponentInput(error)
+      report(error instanceof Error ? error.message : String(error))
+      throw error
+    })
+    void pending.catch(() => {})
     return pending
   }
   return {

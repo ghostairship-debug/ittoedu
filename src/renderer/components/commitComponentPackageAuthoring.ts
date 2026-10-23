@@ -3,6 +3,7 @@ import type { ComponentEdit } from '../../shared/contracts/component-platform/op
 import { extractComponentLibraryEntry } from '../../core/components/library'
 import { exportComponentLibraryArchive } from '../../core/components/library/archive'
 import type { CapturedCourseTarget } from '../documents/CourseV10DocumentBridge'
+import { isCourseComponentInputFailure, settleCourseComponentInput } from '../documents/CourseV10DocumentBridge'
 import type { EditorStoreKernel } from '../store/editorStoreKernel'
 import { collectCourseComponentPackageUsage, planCourseComponentPackageReplacement } from './courseComponentPackageTransactions'
 import { captureComponentInsertionTarget, insertComponentDefinitionAtTarget, insertComponentPackagesAtTarget } from './insertComponentPackages'
@@ -12,7 +13,7 @@ import type { ComponentLibraryUpdateOptions } from '../../core/components/librar
 export type ComponentAuthoringPorts = EditorStoreKernel
 export interface ComponentPackageReplacementTarget { captured: CapturedCourseTarget; packageId: string }
 export type ComponentPackageSourceTarget = ComponentPackageReplacementTarget
-export type ComponentPackageReplacementCommitResult = { ok: boolean; reason?: string }
+export type ComponentPackageReplacementCommitResult = { ok: boolean; reason?: string; inputFailure?: unknown }
 export type ComponentLightEditCommitResult = { ok: boolean; reason?: string }
 export function captureComponentPackageReplacementTarget(kernel: EditorStoreKernel, packageId: string,libraryPackage=false): ComponentPackageReplacementTarget | null {
   const captured = kernel.captureTarget()
@@ -26,17 +27,27 @@ export async function commitComponentReplacementAtTarget(kernel: EditorStoreKern
     await kernel.editCaptured(kernel.capture(edits, target.captured))
     kernel.setFeedback({ statusMessage: `已替换“${entry.title}”，实例内容与位置保留`, errorMessage: null })
     return { ok: true }
-  } catch (error) { return { ok: false, reason: error instanceof Error ? error.message : String(error) } }
+  } catch (error) { return { ok: false, reason: error instanceof Error ? error.message : String(error),
+    ...(isCourseComponentInputFailure(error) ? { inputFailure: error } : {}) } }
 }
 export function createComponentAuthoringActions(kernel: EditorStoreKernel) {
   const commit = async (edits: ComponentEdit[], message: string) => {
     try { await kernel.edit(edits); kernel.setFeedback({ statusMessage: message, errorMessage: null }); return true }
-    catch (error) { kernel.setFeedback({ errorMessage: error instanceof Error ? error.message : String(error) }); return false }
+    catch (error) {
+      // A one-shot removal has no raw text to discard: the unchanged formal
+      // definition remains the recovery content. End only this proposal.
+      try {
+        if (await settleCourseComponentInput(error) === 'applied') {
+          kernel.setFeedback({ statusMessage: message, errorMessage: null }); return true
+        }
+      } catch { /* The original operation remains available for later receipt lookup. */ }
+      kernel.setFeedback({ errorMessage: error instanceof Error ? error.message : String(error) }); return false
+    }
   }
   return {
     captureComponentInsertionTarget: () => captureComponentInsertionTarget(kernel),
     insertComponentPackagesAtTarget: (target: CapturedCourseTarget, entries: readonly ComponentLibraryEntry[]) => insertComponentPackagesAtTarget(kernel, target, entries),
-    addExternalComponentNode: (definitionId: string) => insertComponentDefinitionAtTarget(kernel, kernel.captureTarget(), definitionId),
+    addExternalComponentNode: (definitionId: string, sourceInstanceId?: string) => insertComponentDefinitionAtTarget(kernel, kernel.captureTarget(), definitionId, undefined, { sourceInstanceId }),
     captureComponentPackageReplacementTarget: (id: string) => captureComponentPackageReplacementTarget(kernel, id),
     replaceComponentPackageAtTarget: (target: ComponentPackageReplacementTarget, entry: ComponentLibraryEntry) => commitComponentReplacementAtTarget(kernel, target, entry),
     async deleteComponentPackage(id: string) {

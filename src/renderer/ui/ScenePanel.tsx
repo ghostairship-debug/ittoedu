@@ -14,6 +14,7 @@ import { plainDocumentText } from '../../shared/document/content'
 import { selectEditingScope, selectHasDirtyCourseContentDraft, useEditorStore, type EditorState } from '../store/editorStore'
 import { AddCourseContentMenu } from './AddCourseContentMenu'
 import { ConfirmDialog } from './ConfirmDialog'
+import { changeCourseEditingScope } from './courseEditingScope'
 
 /** Navigation rows derive from formal surfaces and real component/camera targets. */
 export interface CourseTreeNode {
@@ -197,22 +198,21 @@ export function ScenePanel() {
   if (!project || !treeView || !layout || !view.activeDocumentId) return null
   const documentId = view.activeDocumentId
   const activeCameraFrameId = spatialViews[documentId]?.[view.surfaceId ?? '']?.activeCameraFrameId ?? null
-  const activate = (node: CourseTreeNode) => {
+  const activate = async (node: CourseTreeNode) => {
     const state = useEditorStore.getState()
     if (state.courseView.activeDocumentId !== documentId) return
-    if (node.kind === 'container') {
-      void state.commitTextEdit().then(() => {
-        if (useEditorStore.getState().courseView.activeDocumentId !== documentId) return
-        if (node.rootInstanceId && state.courseView.rootInstanceId !== node.rootInstanceId) state.courseBridge.selectSurface(documentId, node.rootInstanceId)
+    await state.navigateCourseView(() => {
+      if (node.kind === 'container') {
+        if (node.rootInstanceId && state.courseBridge.read().rootInstanceId !== node.rootInstanceId) state.courseBridge.selectSurface(documentId, node.rootInstanceId)
         state.courseBridge.enterContainer(documentId, node.surfaceId); state.setEditingScope('scene')
-      }).catch(error => state.setError(String(error)))
-      return
-    }
-    state.courseBridge.selectSurface(documentId, node.surfaceId)
-    state.setEditingScope('scene')
-    if (node.frameId) state.activateSpatialCameraFrame(node.surfaceId, node.frameId)
-    else if (node.instanceId) state.activateFlowHeading(node.surfaceId, node.instanceId)
-    else if (node.kind === 'spatial-page') state.activateSpatialCameraFrame(node.surfaceId, null)
+        return
+      }
+      state.courseBridge.selectSurface(documentId, node.surfaceId)
+      state.setEditingScope('scene')
+      if (node.frameId) state.activateSpatialCameraFrame(node.surfaceId, node.frameId)
+      else if (node.instanceId) state.activateFlowHeading(node.surfaceId, node.instanceId)
+      else if (node.kind === 'spatial-page') state.activateSpatialCameraFrame(node.surfaceId, null)
+    })
   }
   const add = (action: 'scene' | 'slide-page' | 'flow-page' | 'spatial-page') => {
     const state = useEditorStore.getState()
@@ -247,7 +247,7 @@ export function ScenePanel() {
   const globalLayerCount = project.global.underlay.length + project.global.overlay.length
   return <aside className="panel scene-panel" aria-label="课程结构">
     <div className="panel-header"><h2 className="panel-title">课程共享</h2></div>
-    <div className="global-layer-entry-wrap"><button type="button" className={'global-layer-entry' + (editingScope === 'global' ? ' global-layer-entry--active' : '')} aria-pressed={editingScope === 'global'} data-testid="global-layer-entry" onClick={() => useEditorStore.getState().setEditingScope('global')}>
+    <div className="global-layer-entry-wrap"><button type="button" className={'global-layer-entry' + (editingScope === 'global' ? ' global-layer-entry--active' : '')} aria-pressed={editingScope === 'global'} data-testid="global-layer-entry" onClick={() => { void changeCourseEditingScope('global') }}>
       <span className="global-layer-entry__icon"><Globe2 size={19} /></span><span className="global-layer-entry__content"><strong>全局层（整课）</strong><small>{globalLayerCount} 个元素</small></span><Layers3 size={16} /></button></div>
     <div className="scene-panel__divider" role="separator" /><div className="panel-header panel-header--course-structure"><h2 className="panel-title">课程结构</h2>
       <AddCourseContentMenu layout={layout} onPrimary={() => add(layout.primary.action)}

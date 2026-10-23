@@ -42,11 +42,10 @@ export function SceneStateButtons({ documentId, surfaceId, compact = false }: { 
   const select = async (stateId: string | null) => {
     const state = useEditorStore.getState()
     if (state.courseView.activeDocumentId !== documentId) return
-    try {
-      const target = state.courseBridge.captureTarget(documentId)
-      await state.setActivePresentationState(stateId, { ...target, surfaceId })
+    await state.navigateCourseView(() => {
+      state.courseBridge.selectPresentationState(documentId, stateId, surfaceId)
       state.setEditingScope('scene')
-    } catch (error) { state.setError(error instanceof Error ? error.message : String(error)) }
+    })
   }
   const add = () => { const target = capture(); if (target) void useEditorStore.getState().addPresentationState(undefined, target) }
   const duplicate = (stateId: string) => { const target = capture(); if (target) void useEditorStore.getState().duplicatePresentationState(stateId, target) }
@@ -58,7 +57,6 @@ export function SceneStateButtons({ documentId, surfaceId, compact = false }: { 
   const request = (kind: 'delete' | 'reset', stateId: string, title: string) => { const target = capture(); if (target) setPending({ kind, id: stateId, title, target }) }
   const openStateMenu = (event: ReactMouseEvent, stateId: string | null, title: string) => {
     event.preventDefault(); event.stopPropagation()
-    select(stateId)
     menu.open({ x: event.clientX, y: event.clientY }, '状态操作', stateCommands(stateId === null, {
       add, duplicate: () => { if (stateId) duplicate(stateId) },
       rename: () => { if (stateId) startRename(stateId, title) },
@@ -111,8 +109,8 @@ export function SceneStateButtons({ documentId, surfaceId, compact = false }: { 
     <button type="button" className="bottom-scene-card__tool" aria-label="新建场景状态" title="新建场景状态" onClick={add}><Plus size={13} /></button>
     <button type="button" className="bottom-scene-card__tool" aria-label="状态操作" title="状态操作" aria-haspopup="menu"
       onClick={event => openStateMenu(event, activeState?.id ?? null, activeState?.title ?? '母版')}><MoreHorizontal size={13} /></button>
-    <button type="button" className="bottom-scene-card__tool" aria-label="删除当前状态" title="删除当前状态" disabled={!activeState}
-      onClick={() => activeState && request('delete', activeState.id, activeState.title)}><Trash2 size={13} /></button>
+    <button type="button" className="bottom-scene-card__tool bottom-scene-card__tool--delete" aria-label="删除当前状态" title="只删除当前命名状态，保留整页内容和母版" disabled={!activeState}
+      onClick={() => activeState && request('delete', activeState.id, activeState.title)}><Trash2 size={13} /><span>删除状态</span></button>
     {buttons}{menu.element}{confirmation}</div>
   return <section className="scene-state-strip" aria-label="场景状态">
     <header className="scene-state-strip__header"><div className="scene-state-strip__title"><strong>场景状态</strong><span>{activeState ? '正在编辑“' + activeState.title + '”的覆盖值' : '正在编辑母版；修改会被所有状态继承'}</span></div>

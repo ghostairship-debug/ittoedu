@@ -201,6 +201,10 @@ export const htmlPreviewPageMessageSchema = z.discriminatedUnion('event', [
     enabled: z.boolean(),
   }).strict(),
   z.object({
+    event: z.literal('edit-mode-error'), protocol: z.literal(1), leaseId: id, loadId: id,
+    seq: z.number().int().nonnegative(), requestId: id, enabled: z.boolean(), message: z.string(),
+  }).strict(),
+  z.object({
     event: z.literal('page'),
     protocol: z.literal(1),
     leaseId: id,

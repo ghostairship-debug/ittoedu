@@ -8,9 +8,10 @@ export type { AdvancedDraftRecovery } from '../../shared/workbench/desktop'
 export interface AdvancedDraftIssue { documentId: string; epoch: string; message: string }
 export interface CourseDraftProvider {
   hasDirty(documentId?: string): boolean
-  prepare(documentId: string): Promise<AdvancedDraftIssue[]>
+  prepare(documentId: string, mode?: 'apply' | 'preserve'): Promise<AdvancedDraftIssue[]>
   preserve(documentId: string): AdvancedDraftRecovery[]
-  restore(documentId: string, record: AdvancedDraftRecovery): void
+  /** Applied input can be consumed; a planner-rebased input stays in preserve at its original logical target. */
+  restore(documentId: string, record: AdvancedDraftRecovery): 'consumed' | 'adopted' | void
   release(documentId: string): void
 }
 type Lifecycle = { providers: Map<AdvancedDraftRecovery['kind'], CourseDraftProvider>; listeners: Set<() => void>; pending: Map<string, AdvancedDraftRecovery[]> }
@@ -32,6 +33,12 @@ function keepPending(value: Lifecycle, record: AdvancedDraftRecovery): void {
 function providerHasInput(provider: CourseDraftProvider, record: AdvancedDraftRecovery): boolean {
   return provider.preserve(record.documentId).some(current => sameDraftInput(current, record))
 }
+function restoreProviderInput(provider: CourseDraftProvider, record: AdvancedDraftRecovery): boolean {
+  if (providerHasInput(provider, record)) return true
+  const restored = provider.restore(record.documentId, record)
+  return restored === 'consumed' || providerHasInput(provider, record)
+    || restored === 'adopted' && provider.preserve(record.documentId).some(candidate => draftKey(candidate) === draftKey(record))
+}
 function state(bridge: CourseV10DocumentBridge): Lifecycle {
   let value = lifecycles.get(bridge)
   if (!value) { value = { providers: new Map(), listeners: new Set(), pending: new Map() }; lifecycles.set(bridge, value) }
@@ -46,8 +53,7 @@ export function registerCourseDraftProvider(bridge: CourseV10DocumentBridge, kin
     try {
       const current = provider.preserve(record.documentId).filter(candidate => draftKey(candidate) === key)
       if (current.length && !current.every(candidate => sameDraftInput(candidate, record))) continue
-      if (!providerHasInput(provider, record)) provider.restore(record.documentId, record)
-      if (providerHasInput(provider, record)) value.pending.delete(key)
+      if (restoreProviderInput(provider, record)) value.pending.delete(key)
     } catch { /* Keep raw input when its original target is unavailable. */ }
   }
 }
@@ -60,11 +66,12 @@ export function courseDraftLifecycle(bridge: CourseV10DocumentBridge) {
       return [...value.pending.values()].flat().some(record => !documentId || record.documentId === documentId)
         || [...value.providers.values()].some(provider => provider.hasDirty(documentId))
     },
-    async prepare(documentId: string): Promise<{ ready: boolean; issues: AdvancedDraftIssue[] }> {
+    async prepare(documentId: string, mode: 'apply' | 'preserve' = 'apply'): Promise<{ ready: boolean; issues: AdvancedDraftIssue[] }> {
       const issues: AdvancedDraftIssue[] = []
-      for (const provider of value.providers.values()) issues.push(...await provider.prepare(documentId))
-      for (const records of value.pending.values()) if (records[0]?.documentId === documentId) issues.push({ documentId, epoch: records[0].epoch,
-        message: records.length > 1 ? '同一高级编辑位置有多份不同恢复稿，原文均已保留，请选择后接续。' : '高级编辑恢复稿已保留，请打开对应编辑入口修正。' })
+      for (const provider of value.providers.values()) issues.push(...await provider.prepare(documentId, mode))
+      // Pending records already belong to this recovery owner. Their presence is
+      // not unfinished activity in an unrelated editor, and preservation below
+      // keeps every alternative until its original owner explicitly adopts it.
       return { ready: !issues.length, issues }
     },
     preserve(documentId: string): AdvancedDraftRecovery[] {
@@ -94,8 +101,7 @@ export function courseDraftLifecycle(bridge: CourseV10DocumentBridge) {
         }
         try {
           if (provider) {
-            if (!providerHasInput(provider, record)) provider.restore(documentId, record)
-            if (providerHasInput(provider, record)) value.pending.delete(key)
+            if (restoreProviderInput(provider, record)) value.pending.delete(key)
             else {
               keepPending(value, record)
               issues.push({ documentId, epoch: target.epoch, message: '恢复入口尚未接续原输入，原稿仍保留。' })
@@ -121,7 +127,7 @@ export function courseDraftLifecycle(bridge: CourseV10DocumentBridge) {
 }
 
 export interface CourseInputRecoveryAdapter {
-  preserveFlow(documentIds: readonly string[]): Promise<boolean>
+  preserveFlow(documentIds: readonly string[], retain?: boolean): Promise<boolean>
   suspendFlow(epochs: readonly string[]): void
   resumeFlow(epochs: readonly string[]): void
 }
@@ -133,7 +139,7 @@ interface CourseInputCapture {
 }
 interface CourseInputPorts {
   capture(documentId: string): CourseInputCapture
-  drain(documentId: string): Promise<unknown>
+  drain(documentId: string, mode: 'save' | 'preserve'): Promise<unknown>
   restore(documentId: string, epoch: string, records: AuthoringDraftRecovery): { advanced: AdvancedDraftRecovery[]; properties: PropertyDraftRecovery[] }
   suspend(documentIds: readonly string[]): void
   resume(documentIds: readonly string[]): void
@@ -209,6 +215,20 @@ export function createCourseInputLifecycle(bridge: CourseV10DocumentBridge, port
       host = api; recovery = adapter
     },
     restore,
+    /** View the existing raw-input owners; opening this view never applies or clears input. */
+    readDrafts(documentIds: readonly string[] = ids()): readonly {
+      readonly documentId: string
+      readonly projectTitle?: string
+      readonly advanced: readonly AdvancedDraftRecovery[]
+      readonly properties: readonly PropertyDraftRecovery[]
+    }[] {
+      const open = new Set(ids())
+      return documentIds.filter(documentId => open.has(documentId)).map(documentId => {
+        const { snapshot, records } = ports.capture(documentId)
+        return { documentId, ...(snapshot.model.kind === 'course-v10' ? { projectTitle: snapshot.model.project.title } : {}),
+          advanced: records.advanced, properties: records.properties }
+      })
+    },
     hasDirty(documentIds: readonly string[] = ids()): boolean {
       return documentIds.filter(id => ids().includes(id)).some(id => {
         const current = ports.capture(id)
@@ -219,17 +239,18 @@ export function createCourseInputLifecycle(bridge: CourseV10DocumentBridge, port
       try {
         for (const documentId of documentIds.filter(id => ids().includes(id))) {
           await restore(documentId)
-          let issue: unknown
-          try { await ports.drain(documentId) } catch (error) { issue = error }
-          if (mode === 'save' && issue) throw issue
+          // The input owner can retain its own unapplied draft and report ready
+          // for preservation. A genuine drain failure is never excused by some
+          // other provider's old raw record or by a nonempty recovery file.
+          await ports.drain(documentId, mode)
           const captured = ports.capture(documentId)
+          if (captured.flowDraft && !recovery) throw new Error('正文原稿恢复服务未连接，当前输入继续保留')
           await persist(documentId, captured.records, captured.snapshot.epoch)
-          if (recovery && !await recovery.preserveFlow([documentId])) return false
+          if (recovery && !await recovery.preserveFlow([documentId], mode === 'preserve')) return false
           await bridge.flushInput([documentId])
           const current = assertEpoch(documentId, captured.snapshot.epoch)
           if (!equalComponentValue(captured.records, current.records) || current.flowDraft !== captured.flowDraft)
             throw new Error('保全期间又有新输入，原稿仍保留；请完成本次输入后再关闭')
-          if (issue) ports.status('未完成的输入已保存在本机恢复稿中')
         }
         return true
       } catch (error) { ports.error(error instanceof Error ? error.message : '输入尚未保全，已取消关闭'); return false }

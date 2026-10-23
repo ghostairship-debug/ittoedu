@@ -4,7 +4,7 @@ import type { CourseDocumentsPort } from '../lessonWorkspace/controller/useDocum
 import { forwardRef, useEffect, useMemo, useRef, useImperativeHandle, useState, type ReactNode } from 'react'
 import type { LessonWorkspace } from '../../shared/lessonWorkspace'
 import { LessonWorkspaceShell, type LessonWorkspaceShellHandle } from '../lessonWorkspace/LessonWorkspaceShell'
-import { importLessonMaterialPdf } from '../lessonMaterials/lessonMaterialPdfImport'
+import { extractLessonMaterialOffice, importLessonMaterialPdf } from '../lessonMaterials/lessonMaterialPdfImport'
 import { LessonMaterialBrowser } from '../lessonMaterials/LessonMaterialBrowser'
 import type { LessonAuthoringMaterialSelection } from '../../shared/lessonAuthoring'
 import { createDesktopDocumentPort } from './lessonDocumentPort'
@@ -18,9 +18,9 @@ export interface LessonWorkspaceHostProps {
   projectPath: string | null
   captureCourseDocument?(writable: boolean, prepare?: boolean): Promise<ExecutionDocumentReference[]>
   prepareCourseDocuments?(documentIds?: readonly string[]): Promise<void>
-  onOpenProject(path: string): Promise<boolean>
-  onNewProject(): Promise<boolean>
-  onNewProjectFromPptx?(file: { name: string; bytes: Uint8Array }): Promise<boolean>
+  onOpenProject(path: string, foreground?: () => boolean): Promise<boolean>
+  onNewProject(foreground?: () => boolean): Promise<boolean>
+  onNewProjectFromPptx?(file: { name: string; bytes: Uint8Array }, signal?: AbortSignal, foreground?: () => boolean): Promise<boolean>
   onDirtyChange?(dirty: boolean): void
   onActiveDocumentChange?(active: { kind: 'document' | 'material' | 'course'; name: string } | null): void
   documents?: DocumentHostAPI
@@ -34,12 +34,14 @@ export const LessonWorkspaceHost = forwardRef<LessonWorkspaceShellHandle, Lesson
   const shell = useRef<LessonWorkspaceShellHandle>(null)
   const assistant = useRef<ExecutionAssistantHandle>(null)
   useImperativeHandle(ref, () => ({
+    captureNavigationIdentity: () => shell.current?.captureNavigationIdentity() ?? '',
+    cancelNavigation: () => shell.current?.cancelNavigation(),
     captureMediaDrafts: (source, kind) => {
       if (!shell.current) throw new Error('文档视图尚未就绪')
       return shell.current.captureMediaDrafts(source, kind)
     },
-    showProject: () => shell.current?.showProject(),
-    detachLesson: () => shell.current?.detachLesson(),
+    showProject: foreground => shell.current?.showProject(foreground),
+    detachLesson: foreground => shell.current?.detachLesson(foreground),
     flushAll: () => shell.current?.flushAll() ?? Promise.resolve(true),
     saveActiveDocument: () => shell.current?.saveActiveDocument() ?? Promise.resolve('none'),
     closeAll: () => shell.current?.closeAll() ?? Promise.resolve(true),
@@ -78,10 +80,12 @@ export const LessonWorkspaceHost = forwardRef<LessonWorkspaceShellHandle, Lesson
       onSelect={(record, fragmentIds) => setSelections(current => ({ ...current, [key]: [...(current[key] ?? []).filter(item => item.id !== record.id), ...(fragmentIds.length ? [{ id: record.id, extractionVersion: record.extractionVersion, fragmentIds }] : [])] }))}
       selectSource={() => service.selectSource(sourcePath ? { path: sourcePath } : undefined)}
       importPdf={(input, options) => importLessonMaterialPdf(service, target, input, options)}
+      extractOffice={(input, options) => extractLessonMaterialOffice(service, input, options)}
       list={() => service.list(target)} importMaterial={input => service.importMaterial(target, input)} read={input => service.read(target, input)} />
   }
   return <><LessonWorkspaceShell ref={shell} {...props} onBeforeWorkspaceChange={async () => { await assistant.current?.preserveDraft() }} lessonOperation={api.lesson} workspaceFiles={api.workspaceFiles} documentPort={port}
-    toolbarExtras={<>{props.toolbarExtras}<WorkspaceRecoveryPanel api={documents!} onRestored={id => shell.current?.focusDocument(id) ?? Promise.reject(new Error('文档视图尚未就绪'))} /></>}
+    toolbarExtras={<>{props.toolbarExtras}<WorkspaceRecoveryPanel api={documents!} captureNavigationIdentity={() => shell.current?.captureNavigationIdentity() ?? ''}
+      onRestored={id => shell.current?.focusDocument(id) ?? Promise.reject(new Error('文档视图尚未就绪'))} /></>}
     renderAssistant={(root, documentTarget, isCourse, drainDocuments, lesson) => {
       const lessonKey = lesson ? lesson.identity.normalizedDirectory + ':' + lesson.identity.lessonId : null
       activeLessonKey.current = lessonKey
@@ -101,7 +105,7 @@ export const LessonWorkspaceHost = forwardRef<LessonWorkspaceShellHandle, Lesson
         }
         return { target, selections: chosen }
       }}
-      onLocateDocument={id => shell.current?.focusDocument(id) ?? Promise.resolve()}
+      onLocateDocument={async id => { await shell.current?.focusDocument(id) }}
       prepareSend={(ids = []) => prepareSendDocuments(ids, {
         read: id => api.documents!.read(id), drainDocuments, prepareCourses: props.prepareCourseDocuments,
         reportFailure: (error, context) => api.reportDiagnostic({ source: 'renderer',

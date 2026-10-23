@@ -191,9 +191,7 @@ export async function mountPublishedCourseV4(value: unknown, root: HTMLElement, 
       return !signal.aborted && !stopped && Boolean(model.resources.assets[id])
     },
     onObservation: options.capture ? undefined : (id, observation) => {
-      const unregister = navigation.registerObservation(id, observation)
-      const unsubscribe = observation.subscribe?.(navigation.changed)
-      return () => { unsubscribe?.(); unregister() }
+      return navigation.registerObservation(id, observation)
     },
     onCamera: (id, camera) => {
       const spatial = componentSurface(model.project, id)?.spatial

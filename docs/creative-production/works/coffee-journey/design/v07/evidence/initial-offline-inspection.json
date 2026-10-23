@@ -1,0 +1,61 @@
+{
+  "records": [
+    {
+      "coffeeUnderlay": "journey-v07",
+      "mountId": "1792687482032-djh28",
+      "chapter": "4",
+      "phase": "3.00000",
+      "stage": "green",
+      "idle": "true",
+      "reduced": "false",
+      "motionId": "1",
+      "motionProgress": "1",
+      "reading": "{\"containerId\":\"47415583-2d75-4b72-9c46-dfd29b47d82a\",\"activeInstanceId\":\"83bca290-3006-4058-af49-a97b1e1fd00d\",\"progress\":0.4719162807887518}",
+      "tick": "15",
+      "size": "1440x1000",
+      "assetsReady": "6"
+    },
+    {
+      "coffeeUnderlay": "journey-v07",
+      "mountId": "1792687482032-djh28",
+      "chapter": "6",
+      "phase": "5.00000",
+      "stage": "solution",
+      "idle": "true",
+      "reduced": "false",
+      "motionId": "2",
+      "motionProgress": "1",
+      "reading": "{\"containerId\":\"47415583-2d75-4b72-9c46-dfd29b47d82a\",\"activeInstanceId\":\"b1a166da-1cc4-4f39-a8ba-dc5c15bd39ba\",\"progress\":0.7318721104008525}",
+      "tick": "24",
+      "size": "1440x1000",
+      "assetsReady": "6"
+    }
+  ],
+  "geometry": {
+    "root": {
+      "x": 0,
+      "y": 0,
+      "width": 1440,
+      "height": 1000,
+      "top": 0,
+      "right": 1440,
+      "bottom": 1000,
+      "left": 0
+    },
+    "window": {
+      "w": 1440,
+      "h": 1000
+    },
+    "canvas": {
+      "x": 0,
+      "y": 0,
+      "width": 1440,
+      "height": 1000,
+      "top": 0,
+      "right": 1440,
+      "bottom": 1000,
+      "left": 0
+    }
+  },
+  "errors": []
+}

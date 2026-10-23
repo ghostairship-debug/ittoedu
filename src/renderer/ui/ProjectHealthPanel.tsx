@@ -101,10 +101,12 @@ function OpenProjectHealthPanel({
     if (!current) return
     const route = resolveCourseProjectHealthRoute(current, diagnostic)
     if (!route.available) { store.setStatus(route.reason); return }
-    selectCourseProjectDiagnosticRoute(store.courseKernel, route, store.setEditingScope)
-    store.setActiveTab(route.tab)
-    store.setStatus(`已定位：${diagnostic.message}`)
-    onClose()
+    void store.navigateCourseView(() => {
+      selectCourseProjectDiagnosticRoute(store.courseKernel, route, store.setEditingScope)
+      store.setActiveTab(route.tab)
+      store.setStatus(`已定位：${diagnostic.message}`)
+      onClose()
+    })
   }
 
   return (

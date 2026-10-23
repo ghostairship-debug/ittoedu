@@ -19,7 +19,6 @@ import type {
 } from '../../src/shared/courseProjectTypes'
 import { APP_E2E_TEMP_DIRECTORY_NAME } from '../../src/shared/constants'
 import { projectFlowComponentControllerFrame } from '../../src/shared/flowViewportGeometry'
-import { playbackControllerInsets } from '../../src/shared/playbackViewGeometry'
 import { BACKGROUND_E2E_ENV } from '../../src/main/windowVisibility'
 import { expectBackgroundWindowsIsolated } from './expectBackgroundWindowsIsolated'
 import { showEditorPanel } from './r18NativeAuthoringFixture'
@@ -801,7 +800,7 @@ test('Wave B ownership and controller contracts survive one real Mixed session',
         return { viewport: { width: element.clientWidth, height: element.clientHeight },
           native: { right: scroll.offsetWidth - scroll.clientWidth, bottom: scroll.offsetHeight - scroll.clientHeight } }
       })
-      const flowFrameGeometry = projectFlowComponentControllerFrame(controller.frame, flowGeometry.viewport, playbackControllerInsets(flowGeometry.native))
+      const flowFrameGeometry = projectFlowComponentControllerFrame(controller.frame, flowGeometry.viewport, flowGeometry.native)
       const flowAuthored = { left: flowFrameGeometry.x, top: flowFrameGeometry.y }
       const flowFrame = previewControllerFrame(flow, 'flow', controller.layerItemId)
       await expect((await controllerRoot(flowFrame)).getByRole('button', {

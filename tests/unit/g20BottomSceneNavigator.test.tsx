@@ -2,7 +2,7 @@ import { beforeAll as prepareProgramSourceForTests } from 'vitest'
 import { loadBuiltinComponentSource } from '../../src/core/components/source/builtinSources'
 prepareProgramSourceForTests(async () => { await loadBuiltinComponentSource('guoling.html-program') })
 import { componentSurfaces } from '../../src/shared/contracts/component-platform/project'
-import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, expect, it, vi } from 'vitest'
 import { useEditorStore } from '../../src/renderer/store/editorStore'
 import { CourseEditorChromeContext } from '../../src/renderer/documents/CourseEditorChromeContext'
@@ -26,6 +26,60 @@ async function fixture() {
   const documentId = store().courseView.activeDocumentId!, session = host.registry.get(documentId)
   return { documentId, session, secondSlide, stateId, spatialId }
 }
+it('exposes a stationary global-layer entry in the light workbench and returns to the same Flow content after draft ACK', async () => {
+  const h = await fixture(), flow = buildBottomSceneCards(store().courseView.project!).find(card => card.kind === 'flow')!
+  act(() => { store().courseBridge.selectSurface(h.documentId, flow.key); store().setEditingScope('scene') })
+  const before = h.session.read(), view = store().courseView
+  let accept!: () => void
+  const accepted = new Promise<void>(resolve => { accept = resolve })
+  const commit = store().commitTextEdit
+  const pending = vi.fn(async () => { await accepted; await commit() })
+  useEditorStore.setState({ commitTextEdit: pending })
+  try {
+    render(<CourseEditorChromeContext.Provider value={{ documentId: h.documentId, mode: 'light', setMode() {} }}><CourseBottomNavigation documentId={h.documentId} /></CourseEditorChromeContext.Provider>)
+    const entry = screen.getByRole('button', { name: '全局层（整课）' })
+    expect(entry.closest('ol')).toBeNull()
+    act(() => { fireEvent.click(entry) })
+    expect(pending).toHaveBeenCalledOnce()
+    expect(store().editingScope).toBe('scene')
+    await act(async () => { accept(); await accepted })
+    await waitFor(() => expect(store().editingScope).toBe('global'))
+    expect(store().courseView).toMatchObject({ rootInstanceId: view.rootInstanceId, surfaceId: view.surfaceId, editingContainerId: view.editingContainerId })
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: '返回当前内容' })) })
+    await waitFor(() => expect(store().editingScope).toBe('scene'))
+    expect(store().courseView.surfaceId).toBe(flow.key)
+    expect(h.session.read()).toEqual(before)
+  } finally { useEditorStore.setState({ commitTextEdit: commit }) }
+})
+it('keeps the original scope after a rejected draft and does not retarget a late scope change after navigation', async () => {
+  const h = await fixture(), flow = buildBottomSceneCards(store().courseView.project!).find(card => card.kind === 'flow')!
+  act(() => { store().courseBridge.selectSurface(h.documentId, flow.key); store().setEditingScope('scene') })
+  const before = h.session.read(), commit = store().commitTextEdit
+  const pending = vi.fn<() => Promise<void>>().mockRejectedValueOnce(new Error('正文尚未提交'))
+  useEditorStore.setState({ commitTextEdit: pending })
+  try {
+    render(<BottomSceneNavigator documentId={h.documentId} />)
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: '全局层（整课）' })) })
+    expect(store().editingScope).toBe('scene')
+    expect(store().errorMessage).toBe('正文尚未提交')
+    act(() => { store().setEditingScope('global') })
+    pending.mockRejectedValueOnce(new Error('全局输入未提交'))
+    await act(async () => { fireEvent.click(within(screen.getByTestId(`bottom-scene-${h.secondSlide}`)).getByRole('button', { name: /页面 / })) })
+    expect(store().editingScope).toBe('global')
+    expect(store().courseView.surfaceId).toBe(flow.key)
+    expect(store().errorMessage).toBe('全局输入未提交')
+    act(() => { store().setEditingScope('scene') })
+    let accept!: () => void
+    const accepted = new Promise<void>(resolve => { accept = resolve })
+    pending.mockImplementation(async () => { await accepted; await commit() })
+    act(() => { fireEvent.click(screen.getByRole('button', { name: '全局层（整课）' })) })
+    act(() => { store().courseBridge.selectSurface(h.documentId, h.secondSlide) })
+    await act(async () => { accept(); await accepted })
+    expect(store().editingScope).toBe('scene')
+    expect(store().courseView.surfaceId).toBe(h.secondSlide)
+    expect(h.session.read()).toEqual(before)
+  } finally { useEditorStore.setState({ commitTextEdit: commit, errorMessage: null }) }
+})
 it('uses the formal surface order and exact state/camera targets without navigation History, retaining light/deep rails', async () => {
   const h = await fixture(), before = h.session.read(), cards = buildBottomSceneCards(store().courseView.project!)
   expect(cards.map(card => card.kind)).toEqual(['slide', 'slide', 'flow', 'spatial'])

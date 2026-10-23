@@ -8,7 +8,7 @@ type TeacherNavigationAction =
   | { type: 'scene.next' }
   | { type: 'scene.replay' }
   | { type: 'course.restart' }
-  | { type: 'scene.go'; sceneId: string; targetStateId?: string; targetInstanceId?: string }
+  | { type: 'scene.go'; sceneId: string; targetStateId?: string; targetInstanceId?: string; targetKind?: 'object' | 'chapter' }
 
 type UnboundTeacherControllerAction =
   | (TeacherNavigationAction & ComponentNavigationMotion)
@@ -23,7 +23,7 @@ const navigationMotion = { transition: componentNavigationTransitionSchema.optio
 export const teacherControllerActionSchema: z.ZodType<TeacherControllerAction> = z.union([
   z.object({ type: z.enum(['step.previous', 'step.next', 'scene.previous', 'scene.next', 'scene.replay', 'course.restart']), ...navigationMotion }).strict(),
   z.object({ type: z.enum(['scene.open-picker', 'audio.toggle-mute', 'player.fullscreen.toggle']), ...containerTarget }).strict(),
-  z.object({ type: z.literal('scene.go'), sceneId: z.string().min(1), targetStateId: z.string().optional(), targetInstanceId: z.string().min(1).optional(), ...navigationMotion }).strict(),
+  z.object({ type: z.literal('scene.go'), sceneId: z.string().min(1), targetStateId: z.string().optional(), targetInstanceId: z.string().min(1).optional(), targetKind: z.enum(['object', 'chapter']).optional(), ...navigationMotion }).strict(),
   z.object({ type: z.literal('camera.present'), pose: componentCameraPoseSchema, motion: componentCameraMotionSchema.optional(), ...containerTarget }).strict(),
 ])
 export interface ComponentFlowReading {
@@ -31,6 +31,23 @@ export interface ComponentFlowReading {
   activeInstanceId: string | null
   /** Fraction of the actual article read, clamped to 0..1; a fully visible article is 1. */
   progress: number
+}
+/** A finite presentation owned by the mounted Flow, never author data.
+ * Capture the current visual appearance when id changes, then sample progress.
+ */
+export interface ComponentFlowNavigationMotion {
+  containerId: string
+  id: number
+  kind: 'object' | 'chapter'
+  status: 'running' | 'completed' | 'cancelled'
+  fromInstanceId: string | null
+  targetInstanceId: string | null
+  startScrollTop: number
+  targetScrollTop: number
+  scrollTop: number
+  progress: number
+  elapsedMs: number
+  durationMs: number
 }
 export interface TeacherControllerSnapshot {
   locationId: string | null
@@ -43,6 +60,8 @@ export interface TeacherControllerSnapshot {
   progress: { sceneIndex: number; sceneCount: number; stepIndex: number; stepCount: number; sceneName: string; stepName: string } | null
   /** Live Flow position; never persisted in the project or History. */
   reading?: ComponentFlowReading
+  /** Optional transient motion; reading keeps reporting actual geometry. */
+  flowMotion?: ComponentFlowNavigationMotion
   /** Unset until the session overrides the authored initial state. */
   collapsed?: boolean
   zoom: number

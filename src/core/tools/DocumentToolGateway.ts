@@ -1,5 +1,6 @@
 import { componentSurfaces, componentContainers } from '../../shared/contracts/component-platform/project'
 import { isNativeProjectFilename, nativeProjectStem } from '../../shared/nativeProjectFile'
+import { createProjectDefinitionDiscoveryEntries, type ComponentDiscoveryEntry } from '../../shared/componentDiscovery'
 import { mapAcknowledgedComponentRange, mapAcknowledgedRange, type ComponentTextSplice, type SourceSplice } from './ToolReadCoverage'
 import { HostToolCoordinator, hostToolRegistration, imageInput, isHostToolName, type HostToolServices } from './HostToolServices'
 import { workbenchServiceRegistration, workbenchServiceSchemas } from './WorkbenchServiceTools'
@@ -34,6 +35,8 @@ import { duplicateSurfaceEdits } from '../course/courseSurfaceStructure'
 import { RECIPE_CATALOG, planCourseRecipeEdits } from '../course/courseRecipeEdits'
 import { inspectCourseRemixSlots, planCourseStyleRemixEdits, planCourseProductivityEdits } from '../course/courseProductivityEdits'
 import { prepareCourseElementEdits, prepareCourseTeacherControllerEdits } from '../course/courseElementInsertion'
+import { prepareFlowBodyInsertion } from '../course/courseFlowInsertion'
+import { prepareCourseFlowColumns } from '../course/courseFlowLayoutEdits'
 import { courseGeometryEdits } from '../course/courseGeometryEdits'
 import { courseObjectRemovalEdits, courseObjectOrder, courseObjectOrderEdits, courseObjectMoveEdits, courseGlobalPlacementEdits, createCourseObjectPastePlanningBatch } from '../course/courseObjectEdits'
 import { flowPlacementEdits, flowBodyLayoutEdits, flowReadingOrderEdits } from '../course/courseFlowEdits'
@@ -54,11 +57,12 @@ import { prepareComponentImageApplication, prepareComponentMediaApplication } fr
 import { extractComponentLibraryApplication, prepareComponentLibraryApplication } from './componentLibraryApplication'
 import { planCourseComponentPackageReplacement } from '../components/library/replacement'
 import { documentTextContentSchema, documentTextLength, plainDocumentText } from '../../shared/document/content'
+import { flowInsertionSelection } from './ToolTargets'
 import { documentReplacementEdits } from '../../shared/document/textInteraction'
 import { projectFileRegistration } from './ProjectFileTools'
 import { skillReadInputSchema } from './SkillTools'
 import { ComponentProjectFileCoordinator, componentProjectSettings, componentProjectFileSchemas, componentProjectFiles, componentProjectSurfaceId, componentFileContentSource, canonicalComponentFileEdits, type ComponentProjectSnapshot, type ComponentProjectFileInput, type ComponentProjectFile, type ComponentProjectFileScope } from '../projectFiles/componentPlatform'
-import type { ContentApplyRequest, ContentApplyResult, ContentApplySource, ContentApplyIntent, ContentApplyDiagnostic, ContentApplyPlan } from '../contentApply/planning/types'
+import type { ContentApplyRequest, ContentApplyResult, ContentApplySource, ContentApplyIntent, ContentApplyDiagnostic, ContentApplyPlan, ContentApplyPlanOptions } from '../contentApply/planning/types'
 import { readHtmlAuthoringRecords } from '../../shared/html/htmlAuthoringRecords'
 import { planAggregateMarkdownTextEdit } from '../../shared/document/aggregateTextEdit'
 import type { SpatialViewportCapture } from '../../shared/workbench/spatialViewport'
@@ -166,7 +170,7 @@ export interface DocumentToolGatewayOptions { prepareImage?: PrepareImageResourc
   prepareSpatialViewport?(documentId: string, surfaceId: string): Promise<SpatialViewportCapture>
   prepareInput?(documentId: string): Promise<void>
   componentContent?: {
-    plan?(input: { baseline: ComponentProjectSnapshot; request: ContentApplyRequest }): Promise<ContentApplyPlan>
+    plan?(input: { baseline: ComponentProjectSnapshot; request: ContentApplyRequest }, options?: ContentApplyPlanOptions): Promise<ContentApplyPlan>
     verifyDiagnostic?(snapshot: ComponentProjectSnapshot, diagnostic: Pick<ContentApplyDiagnostic, 'code' | 'instanceId' | 'reference'>): Promise<{
       state: 'resolved' | 'unresolved' | 'unknown'; code: string; instanceId?: string; reference?: string; assetId?: string; reason: string }>
     apply(input: { baseline: ComponentProjectSnapshot; request: ContentApplyRequest; operationId: string; requestDigest: string; runId: string; runLeaseId: string; actor: ToolRunGrant['actor']; readExpectations?: ComponentExpectation[]; assertActive(): void }): Promise<ContentApplyResult>
@@ -227,6 +231,7 @@ export class DocumentToolGateway implements ToolGateway {
       active: (runId, documentId, epoch) => { const run = this.run(runId); if (run.stopped) throw new ToolError('run-stopped', '任务已停止'); const current = this.registry.get(documentId).readIdentity(); this.authorizeDocument(run, current); if (current.epoch !== epoch) throw new ToolError('stale-epoch', '文档会话已改变') },
       ownsDocument: (runId, documentId) => this.run(runId).grant.documents.some(document => document.documentId === documentId),
       documentIds: runId => this.run(runId).grant.documents.map(document => document.documentId),
+      projectDiscovery: runId => this.projectDiscovery(runId),
       taskTargetContext: (runId, target, resumeContext) => this.taskTargetContext(runId, target, resumeContext),
       ownsReceiptDocument: (runId, documentId) => {
         const run = this.run(runId)
@@ -371,15 +376,15 @@ export class DocumentToolGateway implements ToolGateway {
       assertActive()
       try {
         const prepared = (edits.length || operation.candidateTarget) && operation.reprepare ? await operation.reprepare({ ...current, model: model as ComponentProjectSnapshot['model'] }) : operation
-        const plan = await port.plan(prepared)
+        const plan = await port.plan(prepared, { deferTextRelationships: true })
         assertActive()
         if (model.kind !== 'course-v10') throw new Error('工程格式已变化')
         // Candidate application may follow earlier edits; the original observed expectations remain below.
-        const command = captureComponentOperation(model.project, plan.command.edits)
+        const command = captureComponentOperation(model.project, plan.command.edits, [], { deferTextRelationships: true })
         // File batches retain usable siblings when a local professional-data candidate is invalid.
         model = await driver.apply(model, command)
         for (const item of operation.candidateTarget ? [] : plan.command.expected) if (!expected.has(JSON.stringify(item.path))) expected.set(JSON.stringify(item.path), item)
-        edits.push(...plan.command.edits); usable.push(index)
+        edits.push(...command.edits); usable.push(index)
         operation.acknowledge?.(plan.command)
         results.push({ commit: 'not_committed', usability: plan.usability, delivery: 'not_requested', input: operation.request,
           insertedIds: plan.insertedIds, diagnostics: plan.diagnostics })
@@ -412,6 +417,7 @@ export class DocumentToolGateway implements ToolGateway {
     const command = captureComponentOperation(current.model.project, combined)
     command.expected = [...new Map([...command.expected, ...expected.values(), ...this.contentReadExpectations(runId, current)]
       .map(item => [JSON.stringify(item.path), item])).values()]
+    model = await driver.apply(current.model, command)
     assertActive()
     let receipt: Awaited<ReturnType<typeof session.execute>>
     try {
@@ -1983,15 +1989,17 @@ export class DocumentToolGateway implements ToolGateway {
   }
 
   private async useLibraryComponent(runId: string, operationId: string, requestDigest: string,
-    input: { packageId: string; version?: string; project?: string; path: string; rootIds?: string[] }): Promise<ToolResult> {
+    input: { packageId: string; version?: string; sourceId?: string; project?: string; path: string; rootIds?: string[] }): Promise<ToolResult> {
     const current = await this.componentProjectDocument(runId, input.project, 'write')
     const { snapshot, file } = this.componentProjectFiles.captureFile(runId, current, input.path, false, input.project)
     if (file.observedState) throw new ToolError('state-placement-unsupported', '组件库图结构插入属于基础内容；请明确选择基础页面或对象目标。')
     const placement = this.componentAssetPlacement(snapshot, file)
-    const component = await this.hostTools.libraryComponent(runId, input.packageId, input.version)
+    const component = await this.hostTools.libraryComponent(runId, input.packageId, input.version, input.sourceId)
     if (component.status !== 'ready') return { kind: 'read', data: component }
     const planned = prepareComponentLibraryApplication(snapshot.model.project, component.entry, {
-      container: placement.container, index: placement.index, rootIds: input.rootIds, createId: kind => `${kind}_${this.createId()}` })
+      container: placement.container, index: placement.index, rootIds: input.rootIds,
+      ...(file.target?.kind === 'instance' ? { targetBindings: { navigation: file.target.instanceId } } : {}),
+      createId: kind => `${kind}_${this.createId()}` })
     const result=await this.commitComponentAsset(runId, operationId, requestDigest, snapshot, planned.command, [input.path])
     return result.kind==='document-operation' && planned.diagnostics.length ? {...result,advisories:planned.diagnostics.map(value=>({step:1,code:'authoring-preserved' as const,message:value.message}))}:result
   }
@@ -2169,6 +2177,24 @@ export class DocumentToolGateway implements ToolGateway {
     if (access === 'write' && !this.canWrite(run, snapshot, { kind: 'document' }) && !writableSelection)
       throw new ToolError('not-authorized', '本次任务没有整份作品或所选内容的写权限')
     return snapshot
+  }
+
+  private async projectDiscovery(runId: string): Promise<readonly ComponentDiscoveryEntry[]> {
+    const run = this.run(runId), entries: ComponentDiscoveryEntry[] = []
+    if (run.stopped) throw new ToolError('run-stopped', '任务已停止')
+    // A document grant is the existing read boundary; writable selections do not narrow it.
+    for (const document of run.grant.documents) {
+      const snapshot = await this.registry.get(document.documentId).drain()
+      if (run.stopped) throw new ToolError('run-stopped', '任务已停止')
+      this.authorizeDocument(run, snapshot)
+      if (snapshot.model.kind !== 'course-v10') continue
+      const project = snapshot.model.project
+      const reference = snapshot.binding.kind === 'file' ? snapshot.binding.path : snapshot.binding.suggestedName
+      entries.push(...createProjectDefinitionDiscoveryEntries(project, {
+        definitionIds: Object.keys(project.definitions), instanceIds: Object.keys(project.instances),
+      }).map(entry => ({ ...entry, project: reference })))
+    }
+    return entries
   }
 
   private componentProjectScope(runId: string, selector: string | undefined, snapshot: ComponentProjectSnapshot): ComponentProjectFileScope {
@@ -2542,6 +2568,11 @@ export class DocumentToolGateway implements ToolGateway {
       if (command.type === 'component-platform.apply') pastePlanning.applied(command.edits)
       return next
     }
+    // Intermediate commands validate the working model; relationships settle on the final batch.
+    const captureWorkingOperation: typeof captureComponentOperation = (project, edits, readPaths) =>
+      captureComponentOperation(project, edits, readPaths, { deferTextRelationships: true })
+    const mapWorkingPresentation: typeof presentationComponentEdits = (project, surfaceId, stateId, edits) =>
+      presentationComponentEdits(project, surfaceId, stateId, edits, { deferTextRelationships: true })
     const finalTargets: ToolTarget[] = []
     const sourceSplices: SourceSplice[] = []
     const componentEdits: ComponentEdit[] = []
@@ -2601,33 +2632,88 @@ export class DocumentToolGateway implements ToolGateway {
             || value.surfaceId !== surfaceId || (value.stateId ?? null) !== (stateId ?? null)))
             throw new ToolError('invalid-target', '对齐需要同页同展示状态的整对象')
           const project = resolveComponentPresentation(model.project, target.surfaceId, target.stateId ?? null)
-          const edits = presentationComponentEdits(model.project, target.surfaceId, target.stateId ?? null,
-            courseGeometryEdits(project, selected.map(value => (value as Extract<ToolTarget, { kind: 'course-instance' }>).instanceId), mutation.input.intent))
-          const command = captureComponentOperation(model.project, edits)
-          model = await applyPlanned(command); componentEdits.push(...edits)
+          const instanceIds = selected.map(value => (value as Extract<ToolTarget, { kind: 'course-instance' }>).instanceId)
+          let nextTarget: ToolTarget = target
+          let planned: ComponentEdit[]
+          if (mutation.input.intent.kind === 'columns') {
+            const owner = owningContainer(project, instanceIds[0])
+            const ownerTarget: ToolTarget = owner?.kind === 'instance' ? { kind: 'course-instance', surfaceId, instanceId: owner.instanceId, stateId }
+              : owner?.kind === 'surface' ? { kind: 'course-surface', surfaceId: owner.surfaceId, stateId } : { kind: 'document' }
+            if (!owner || !this.canWrite(run, snapshot, ownerTarget)) throw new ToolError('not-authorized', '分栏需要所选正文容器的结构修改权限')
+            const observed = new Map(mutation.input.targets.map((id, index) => [id, instanceIds[index]]))
+            const columns = mutation.input.intent.columns?.map(column => column.map(id => {
+              const instanceId = observed.get(id)
+              if (!instanceId) throw new ToolError('invalid-target', '各列只能引用targets中已观察的对象句柄')
+              return instanceId
+            }))
+            const prepared = prepareCourseFlowColumns(project, { surfaceId, instanceIds, columns,
+              ratios: mutation.input.intent.ratios, gap: mutation.input.intent.gap }, this.createId)
+            planned = prepared.edits
+            nextTarget = { kind: 'course-instance', surfaceId, instanceId: prepared.groupId, stateId }
+          } else planned = courseGeometryEdits(project, instanceIds, mutation.input.intent)
+          const edits = mapWorkingPresentation(model.project, target.surfaceId, target.stateId ?? null, planned)
+          const command = captureWorkingOperation(model.project, edits)
+          model = await applyPlanned(command); componentEdits.push(...command.edits)
           for (const expected of command.expected) componentReadPaths.set(JSON.stringify(expected.path), expected.path)
-          finalTargets.push(target)
+          finalTargets.push(nextTarget)
           continue
         }
         if (mutation.name === 'object.insert' || mutation.name === 'teacher.ensure') {
           if (target.kind !== 'course-surface' && (target.kind !== 'course-instance' || target.authorField || target.dataPath || target.from !== undefined))
             throw new ToolError('invalid-target', '专业插入需要已观察页面或容器，当前目标不是插入容器。可对文档使用 listChildren 取得页面 target，再把返回的页面 target 用于 object.insert；未修改原文档。')
           if (mutation.name === 'teacher.ensure' && target.kind !== 'course-surface') throw new ToolError('invalid-target', '教师控制台需要已观察页面')
-          const project = resolveComponentPresentation(model.project, target.surfaceId, target.stateId ?? null)
+          let project = resolveComponentPresentation(model.project, target.surfaceId, target.stateId ?? null)
           if (target.kind === 'course-instance' && !project.instances[target.instanceId]?.childIds) throw new ToolError('invalid-target', '所选对象不是容器')
           if (target.kind === 'course-instance' && componentIsLocked(project, target.instanceId)) throw new ToolError('locked-target', '容器已锁定，请先解锁')
-          const container: ComponentContainer = target.kind === 'course-instance' ? { kind: 'instance', instanceId: target.instanceId } : { kind: 'surface', surfaceId: target.surfaceId }
+          let container: ComponentContainer = target.kind === 'course-instance' ? { kind: 'instance', instanceId: target.instanceId } : { kind: 'surface', surfaceId: target.surfaceId }
+          let index = mutation.name === 'object.insert' ? mutation.input.index : undefined
+          if (mutation.name === 'object.insert' && mutation.input.after) {
+            const position = this.handle(runId, mutation.input.after)
+            if (position.documentId !== snapshot.documentId) throw new ToolError('cross-document-batch', '插入位置必须属于同一文档')
+            const after = this.resolve(position, snapshot, false, true)
+            if (after.kind !== 'course-instance' || after.authorField || after.dataPath || after.from !== undefined
+              || after.surfaceId !== target.surfaceId || (after.stateId ?? null) !== (target.stateId ?? null))
+              throw new ToolError('invalid-target', 'after需要同一展示状态中的整对象句柄')
+            const children = containerChildIds(project, container), offset = children.indexOf(after.instanceId)
+            if (offset < 0) throw new ToolError('invalid-target', 'after对象已不在目标插入容器中，请重新定位')
+            index = offset + 1
+          }
+          if (mutation.name === 'object.insert' && mutation.input.at) {
+            const insertionSurfaceId = target.surfaceId
+            if (componentContainers(project).find(value => value.id === insertionSurfaceId)?.kind !== 'flow')
+              throw new ToolError('invalid-target', 'at只用于Flow正文插入')
+            const position = this.handle(runId, mutation.input.at)
+            if (position.documentId !== snapshot.documentId) throw new ToolError('cross-document-batch', '插入光标必须属于同一文档')
+            const observed = this.resolve(position, snapshot, false, true)
+            const mapped = mapExternalCourseTextTarget(snapshot.model, model, observed)
+            const selection = flowInsertionSelection(model, target.surfaceId, mapped, target.stateId)
+            const split = prepareFlowBodyInsertion(project, target.surfaceId, selection, { deferTextRelationshipCleanup: true })
+            const preparedOwner: ToolTarget = split.container.kind === 'instance'
+              ? { kind: 'course-instance', surfaceId: target.surfaceId, instanceId: split.container.instanceId, stateId: target.stateId }
+              : { kind: 'course-surface', surfaceId: target.surfaceId, stateId: target.stateId }
+            if (!containsTarget(target, preparedOwner, model) || !this.canWrite(run, snapshot, preparedOwner))
+              throw new ToolError('not-authorized', '正文插入位置不属于本次授权的目标容器')
+            if (split.edits.length) {
+              const splitEdits = mapWorkingPresentation(model.project, target.surfaceId, target.stateId ?? null, split.edits)
+              const splitCommand = captureWorkingOperation(model.project, splitEdits)
+              model = await applyPlanned(splitCommand); componentEdits.push(...splitCommand.edits)
+              for (const expected of splitCommand.expected) componentReadPaths.set(JSON.stringify(expected.path), expected.path)
+              if (model.kind !== 'course-v10') throw new Error('正文插入改变了文档格式')
+              project = resolveComponentPresentation(model.project, target.surfaceId, target.stateId ?? null)
+            }
+            container = split.container; index = split.index
+          }
           const prepared = mutation.name === 'teacher.ensure' ? prepareCourseTeacherControllerEdits(project, target.surfaceId)
-            : prepareCourseElementEdits(project, target.surfaceId, null, mutation.input.kind, { ...mutation.input, container })
+            : prepareCourseElementEdits(project, target.surfaceId, null, mutation.input.kind, { ...mutation.input, container, index })
           for (const edit of prepared.edits) if (edit.type === 'instance.insert') {
             const owner: ToolTarget = edit.container.kind === 'global' || edit.container.kind === 'project' ? { kind: 'document' } : edit.container.kind === 'surface'
               ? { kind: 'course-surface', surfaceId: edit.container.surfaceId, stateId: target.stateId }
               : { kind: 'course-instance', surfaceId: target.surfaceId, instanceId: edit.container.instanceId, stateId: target.stateId }
             if (!this.canWrite(run, snapshot, owner)) throw new ToolError('not-authorized', '插入容器不属于本次授权范围')
           }
-          const edits = presentationComponentEdits(model.project, target.surfaceId, target.stateId ?? null, prepared.edits)
-          const command = captureComponentOperation(model.project, edits)
-          model = await applyPlanned(command); componentEdits.push(...edits)
+          const edits = mapWorkingPresentation(model.project, target.surfaceId, target.stateId ?? null, prepared.edits)
+          const command = captureWorkingOperation(model.project, edits)
+          model = await applyPlanned(command); componentEdits.push(...command.edits)
           for (const expected of command.expected) componentReadPaths.set(JSON.stringify(expected.path), expected.path)
           const insertedTarget: Extract<ToolTarget, { kind: 'course-instance' }> = {
             kind: 'course-instance', surfaceId: target.surfaceId, instanceId: prepared.instanceIds[0]!, stateId: target.stateId,
@@ -2635,11 +2721,11 @@ export class DocumentToolGateway implements ToolGateway {
           if (mutation.name === 'object.insert' && mutation.input.appearance !== undefined) {
             // Reuse post-insert appearance semantics, including the captured presentation state.
             const insertedModel = model as Extract<DocumentModel, { kind: 'course-v10' }>
-            const appearanceEdits = presentationComponentEdits(insertedModel.project, target.surfaceId, target.stateId ?? null,
+            const appearanceEdits = mapWorkingPresentation(insertedModel.project, target.surfaceId, target.stateId ?? null,
               courseInstanceAppearanceEdits(insertedModel, insertedTarget, mutation.input.appearance))
             if (appearanceEdits.length) {
-              const appearanceCommand = captureComponentOperation(insertedModel.project, appearanceEdits)
-              model = await applyPlanned(appearanceCommand); componentEdits.push(...appearanceEdits)
+              const appearanceCommand = captureWorkingOperation(insertedModel.project, appearanceEdits)
+              model = await applyPlanned(appearanceCommand); componentEdits.push(...appearanceCommand.edits)
               for (const expected of appearanceCommand.expected) componentReadPaths.set(JSON.stringify(expected.path), expected.path)
             }
           }
@@ -2647,11 +2733,11 @@ export class DocumentToolGateway implements ToolGateway {
             const click = mutation.input.click
             const insertedModel = model as Extract<DocumentModel, { kind: 'course-v10' }>
             const project = resolveComponentPresentation(insertedModel.project, target.surfaceId, target.stateId ?? null)
-            const clickEdits = presentationComponentEdits(insertedModel.project, target.surfaceId, target.stateId ?? null,
+            const clickEdits = mapWorkingPresentation(insertedModel.project, target.surfaceId, target.stateId ?? null,
               componentClickInteractionEdits({ project, surfaceId: target.surfaceId, activeStateId: target.stateId ?? null,
                 instanceId: insertedTarget.instanceId }, click.action, click.value, references))
-            const clickCommand = captureComponentOperation(insertedModel.project, clickEdits)
-            model = await applyPlanned(clickCommand); componentEdits.push(...clickEdits)
+            const clickCommand = captureWorkingOperation(insertedModel.project, clickEdits)
+            model = await applyPlanned(clickCommand); componentEdits.push(...clickCommand.edits)
             for (const expected of clickCommand.expected) componentReadPaths.set(JSON.stringify(expected.path), expected.path)
           }
           finalTargets.push(insertedTarget)
@@ -2674,10 +2760,10 @@ export class DocumentToolGateway implements ToolGateway {
             const result = planCourseProductivityEdits(project, target.surfaceId, mutation.input.request)
             edits = result.edits
             advisories.push(...result.unsupported.map(message => ({ step: i + 1, code: 'authoring-preserved' as const, message })))
-            if(mutation.input.request.scope!=='course')edits = presentationComponentEdits(model.project, target.surfaceId, target.stateId ?? null, edits)
+            if(mutation.input.request.scope!=='course')edits = mapWorkingPresentation(model.project, target.surfaceId, target.stateId ?? null, edits)
           }
-          const command = captureComponentOperation(model.project, edits, readPaths)
-          model = await applyPlanned(command); componentEdits.push(...edits)
+          const command = captureWorkingOperation(model.project, edits, readPaths)
+          model = await applyPlanned(command); componentEdits.push(...command.edits)
           for (const expected of command.expected) componentReadPaths.set(JSON.stringify(expected.path), expected.path)
           finalTargets.push(nextTarget)
           continue
@@ -2717,7 +2803,7 @@ export class DocumentToolGateway implements ToolGateway {
                 edits = componentRuleEdits(project, owner, rules, references)
               }
             }
-            edits = presentationComponentEdits(model.project, surfaceId, stateId, edits)
+            edits = mapWorkingPresentation(model.project, surfaceId, stateId, edits)
           } else {
             if (target.kind !== 'document') throw new ToolError('invalid-target', '课程逻辑与声音设置需要整课目标')
             if (mutation.name === 'course.logic') {
@@ -2740,8 +2826,8 @@ export class DocumentToolGateway implements ToolGateway {
                 }))
             }
           }
-          const command = captureComponentOperation(model.project, edits)
-          model = await applyPlanned(command); componentEdits.push(...edits)
+          const command = captureWorkingOperation(model.project, edits)
+          model = await applyPlanned(command); componentEdits.push(...command.edits)
           for (const expected of command.expected) componentReadPaths.set(JSON.stringify(expected.path), expected.path)
           finalTargets.push(target)
           continue
@@ -2762,9 +2848,9 @@ export class DocumentToolGateway implements ToolGateway {
           const settings = { ...mutation.input.settings, background: prepared.background }, resources = prepared.resources
           const edits = [...resources, ...(mutation.name === 'course.configure' ? courseSettingsEdits(model.project, settings)
             : surfaceSettingsEdits(model.project, (target as Extract<ToolTarget, { kind: 'course-surface' }>).surfaceId, settings))]
-          const command = captureComponentOperation(model.project, edits)
+          const command = captureWorkingOperation(model.project, edits)
           model = await applyPlanned(command)
-          componentEdits.push(...edits)
+          componentEdits.push(...command.edits)
           for (const expected of command.expected) componentReadPaths.set(JSON.stringify(expected.path), expected.path)
           finalTargets.push(target)
           continue
@@ -2772,8 +2858,8 @@ export class DocumentToolGateway implements ToolGateway {
         if (mutation.name === 'surface.duplicate') {
           if (target.kind !== 'course-surface') throw new ToolError('invalid-target', '复制页面需要已观察页面目标')
           if (!this.canWrite(run, snapshot, { kind: 'document' })) throw new ToolError('not-authorized', '复制页面需要整课授权')
-          const copy = duplicateSurfaceEdits(model.project, target.surfaceId, this.createId), command = captureComponentOperation(model.project, copy.edits, copy.readPaths)
-          model = await applyPlanned(command); componentEdits.push(...copy.edits)
+          const copy = duplicateSurfaceEdits(model.project, target.surfaceId, this.createId), command = captureWorkingOperation(model.project, copy.edits, copy.readPaths)
+          model = await applyPlanned(command); componentEdits.push(...command.edits)
           for (const expected of command.expected) componentReadPaths.set(JSON.stringify(expected.path), expected.path)
           finalTargets.push({ kind: 'course-surface', surfaceId: copy.surfaceId })
           continue
@@ -2782,9 +2868,9 @@ export class DocumentToolGateway implements ToolGateway {
           if (target.kind !== 'course-surface') throw new ToolError('invalid-target', '命名状态需要已授权演示页面目标')
           if (target.stateId !== undefined) throw new ToolError('invalid-target', '管理命名状态需要整页句柄；请从文档列出页面后操作')
           const edits = coursePresentationEdits(model.project, target, mutation.input, this.createId)
-          const command = captureComponentOperation(model.project, edits)
+          const command = captureWorkingOperation(model.project, edits)
           model = await applyPlanned(command)
-          componentEdits.push(...edits)
+          componentEdits.push(...command.edits)
           for (const expected of command.expected) componentReadPaths.set(JSON.stringify(expected.path), expected.path)
           finalTargets.push(target)
           continue
@@ -2801,7 +2887,7 @@ export class DocumentToolGateway implements ToolGateway {
           const media = await this.hostTools.readMediaSource(runId, reference)
           const source = media.source ?? this.images.get(reference)?.source
           const prepared = await prepareComponentMediaApplication({ snapshot: { ...snapshot, model }, target, media,
-            mode: 'insert', fit: mutation.input.fit, frame: mutation.input.frame, source,
+            mode: 'insert', fit: mutation.input.fit, frame: mutation.input.frame, source, deferTextRelationships: true,
             ...(instanceContainer && target.kind === 'course-instance' ? { container: { kind: 'instance' as const, instanceId: target.instanceId } } : {}) },
           { prepareMedia, createId: this.createId })
           model = await applyPlanned(prepared.command)
@@ -2819,7 +2905,7 @@ export class DocumentToolGateway implements ToolGateway {
             : await this.hostTools.readMediaSource(runId, reference)
           const source = media.source ?? this.images.get(reference)?.source
           const prepared = await prepareComponentMediaApplication({ snapshot: { ...snapshot, model }, target, media,
-            mode: 'replace', fit: mutation.input.fit, source }, { prepareMedia, createId: this.createId })
+            mode: 'replace', fit: mutation.input.fit, source, deferTextRelationships: true }, { prepareMedia, createId: this.createId })
           model = await applyPlanned(prepared.command)
           componentEdits.push(...prepared.command.edits)
           for (const expected of prepared.command.expected) componentReadPaths.set(JSON.stringify(expected.path), expected.path)
@@ -2831,9 +2917,10 @@ export class DocumentToolGateway implements ToolGateway {
           target = mapExternalCourseTextTarget(snapshot.model, model, target) as typeof target
           for (const path of courseAuthorFieldReadPaths(model, target)) componentReadPaths.set(JSON.stringify(path), path)
           const before = model, edits = replaceCourseAuthorField(model, target, mutation.input.content)
-          const mapped = presentationComponentEdits(model.project, target.surfaceId, target.stateId ?? null, edits)
-          model = await applyPlanned(captureComponentOperation(model.project, mapped))
-          componentEdits.push(...mapped)
+          const mapped = mapWorkingPresentation(model.project, target.surfaceId, target.stateId ?? null, edits)
+          const command = captureWorkingOperation(model.project, mapped)
+          model = await applyPlanned(command)
+          componentEdits.push(...command.edits)
           // Earlier batch results still address their own fields after this
           // source edit shifts them. An ambiguous mapping aborts before commit.
           for (let previous = 0; previous < finalTargets.length; previous++)
@@ -3009,10 +3096,11 @@ export class DocumentToolGateway implements ToolGateway {
             continue
           }
         }
-        const mapped = mapPresentation ? presentationComponentEdits(model.project, target.surfaceId, target.stateId ?? null, edits) : edits
-        for (const expected of captureComponentOperation(model.project, edits, readPaths).expected) componentReadPaths.set(JSON.stringify(expected.path), expected.path)
-        model = await applyPlanned(captureComponentOperation(model.project, mapped, readPaths))
-        componentEdits.push(...mapped)
+        const mapped = mapPresentation ? mapWorkingPresentation(model.project, target.surfaceId, target.stateId ?? null, edits) : edits
+        for (const expected of captureWorkingOperation(model.project, edits, readPaths).expected) componentReadPaths.set(JSON.stringify(expected.path), expected.path)
+        const command = captureWorkingOperation(model.project, mapped, readPaths)
+        model = await applyPlanned(command)
+        componentEdits.push(...command.edits)
         if (mutation.name === 'text.replace') target = courseInstanceTextTarget(model, target)
         if (splice) {
           const textAfter = readCourseInstanceText(model, target)!
@@ -3064,6 +3152,7 @@ export class DocumentToolGateway implements ToolGateway {
       command = captureComponentOperation(project, componentEdits)
       command.expected = [...new Map([...command.expected, ...[...componentReadPaths.values()].map(path => ({ path, ...componentValueAt(project, path) })), ...readExpectations]
         .map(expected => [JSON.stringify(expected.path), expected])).values()]
+      model = await driver.apply(snapshot.model, command)
     } else if (isSourceDocumentModel(model)) command = { type: 'markdown.replace', source: model.source, resources: model.resources }
     else throw new ToolError('unsupported-document', '当前文档格式不受支持')
     const acknowledgedTargets = new Map<string, ToolTarget>()

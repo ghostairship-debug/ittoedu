@@ -5,6 +5,17 @@
 /* HTML consumes the remaining tab height; other document formats retain natural scrolling. */
 .lesson-file-tab--html { display:flex; flex-direction:column; overflow:hidden; }
 .lesson-file-tab--html[hidden] { display:none; }
+.lesson-file-tab.lesson-file-tab--markdown { display:flex; flex-direction:column; min-width:0; padding:0; overflow:hidden; }
+.lesson-file-tab--markdown[hidden] { display:none; }
+.lesson-document-editor--markdown { display:flex; flex:1; flex-direction:column; min-width:0; min-height:0; overflow:hidden; }
+.lesson-document-editor--markdown > header { display:flex; flex:none; align-items:center; flex-wrap:wrap; gap:6px; margin:0; padding:4px 8px; font-size:12px; background:var(--panel-bg,#fff); }
+.lesson-document-editor--markdown > header > strong { display:none; }
+.lesson-document-editor--markdown > header > button { display:inline-flex; align-items:center; min-height:28px; padding:3px 6px; }
+.lesson-document-editor--markdown > header > label { display:flex; align-items:center; gap:3px; }
+.lesson-document-editor__markdown-toolbar { flex:none; min-width:0; z-index:2; }
+.lesson-document-editor__markdown-toolbar .shared-document-toolbar { position:static; border-bottom:1px solid var(--border,#d9d6ce); }
+.lesson-document-editor__markdown-body { flex:1; min-height:0; min-width:0; overflow:auto; }
+.lesson-document-editor--markdown > [role=alert],.lesson-document-editor--markdown > aside { flex:none; max-height:35%; overflow:auto; }
 .lesson-document-editor--html,
 .lesson-document-editor__html-body,
 .html-document-editor,

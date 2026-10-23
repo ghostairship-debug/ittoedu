@@ -1,0 +1,92 @@
+{
+  "result": {
+    "joins": [
+      {
+        "phase": 1,
+        "meanChannelDifference": 0.511005291005291,
+        "pixelsOver10": 927,
+        "maxChannelDifference": 75
+      },
+      {
+        "phase": 2,
+        "meanChannelDifference": 0.4898658352229781,
+        "pixelsOver10": 1602,
+        "maxChannelDifference": 210
+      },
+      {
+        "phase": 3,
+        "meanChannelDifference": 0,
+        "pixelsOver10": 0,
+        "maxChannelDifference": 0
+      },
+      {
+        "phase": 4,
+        "meanChannelDifference": 0.4275680272108843,
+        "pixelsOver10": 1103,
+        "maxChannelDifference": 122
+      },
+      {
+        "phase": 5,
+        "meanChannelDifference": 0,
+        "pixelsOver10": 0,
+        "maxChannelDifference": 0
+      }
+    ],
+    "determinism": [
+      {
+        "phase": 0.33,
+        "meanChannelDifference": 0,
+        "pixelsOver10": 0,
+        "maxChannelDifference": 0
+      },
+      {
+        "phase": 1.43,
+        "meanChannelDifference": 0,
+        "pixelsOver10": 0,
+        "maxChannelDifference": 0
+      },
+      {
+        "phase": 2.51,
+        "meanChannelDifference": 0,
+        "pixelsOver10": 0,
+        "maxChannelDifference": 0
+      },
+      {
+        "phase": 3.66,
+        "meanChannelDifference": 0,
+        "pixelsOver10": 0,
+        "maxChannelDifference": 0
+      },
+      {
+        "phase": 4.35,
+        "meanChannelDifference": 0,
+        "pixelsOver10": 0,
+        "maxChannelDifference": 0
+      },
+      {
+        "phase": 5.56,
+        "meanChannelDifference": 0,
+        "pixelsOver10": 0,
+        "maxChannelDifference": 0
+      }
+    ],
+    "timing": {
+      "samples": 121,
+      "medianMs": 2.1999999955296516,
+      "p95Ms": 8.200000002980232,
+      "maxMs": 67.79999999701977,
+      "canvas": "420x420, DPR1, component-only"
+    },
+    "lifecycle": {
+      "idleStable": true,
+      "connected": 1,
+      "suspendedListeners": 0,
+      "suspendedStable": true,
+      "resumedPhase": 4,
+      "resumedListeners": 1,
+      "disposedListeners": 0,
+      "disposedChildren": 0
+    }
+  },
+  "errors": []
+}

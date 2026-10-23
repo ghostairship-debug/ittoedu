@@ -35,7 +35,11 @@ export async function prepareComponentOutputRegion(input: {
     if (!frame || !camera) throw new Error(`捕获镜头已不存在：${spatialFrameId}`)
     camera.set(spatialFramePose(frame, player.viewport(surfaceId) ?? surface.designSize ?? { width: 960, height: 640 }, componentSurfaceGeometryTargets(publishedComponentModel(payload).project, surfaceId)))
   }
-  const container = Boolean(instanceId && payload.instances[instanceId]?.container)
+  const instance = instanceId ? payload.instances[instanceId] : undefined
+  const container = Boolean(instance?.container)
+  // A layout group's professional content and its authored children are sibling
+  // projection roots. Its local picture owns both, just as a nested container does.
+  const subtree = container || Boolean(instance?.childIds?.length)
   const localTarget = instanceId ? player.runtime.targetElement(instanceId) : undefined
   let containerTarget = localTarget
   if (container && instanceId) for (let parent = localTarget?.parentElement; parent && parent !== root; parent = parent.parentElement) {
@@ -43,7 +47,7 @@ export async function prepareComponentOutputRegion(input: {
   }
   // A container's runtime target is its inner viewport. Its own authored paint,
   // border and opacity belong to the ordinary instance outer around that view.
-  const element = instanceId ? container ? containerTarget : player.runtime.contentElement(instanceId)
+  const element = instanceId ? subtree ? containerTarget : player.runtime.contentElement(instanceId)
     : payload.rootIds.includes(surfaceId) ? root : player.runtime.targetElement(surfaceId)
   if (!element) throw new Error(`捕获组件没有运行内容：${instanceId}`)
   await player.waitForCaptureReady(element)
@@ -55,7 +59,10 @@ export async function prepareComponentOutputRegion(input: {
     local.dataset.componentLocalCapture = instanceId
     const frame = payload.instances[instanceId]?.frame
     const width = frame?.width ?? target.offsetWidth, height = frame?.height ?? target.offsetHeight
-    const scale = Math.min(1, root.clientWidth / Math.max(1, width), root.clientHeight / Math.max(1, height))
+    // A long reading region must retain readable pixels. The isolated capture
+    // host expands to this local region; only width fitting belongs here.
+    const scale = Math.min(1, root.clientWidth / Math.max(1, width))
+    root.style.overflow = 'visible'
     Object.assign(local.style, { position: 'absolute', left: '0px', top: '0px', width: `${width}px`, height: `${height}px`,
       transform: `scale(${scale})`, transformOrigin: '0 0', background: 'transparent', zIndex: '10' })
     root.append(local)
@@ -67,6 +74,16 @@ export async function prepareComponentOutputRegion(input: {
     // Flow's reading-lane fitting also belongs to its projection, never the
     // instance-local Office bitmap. The authored local frame remains 1:1.
     Object.assign(element.style, { position: 'absolute', inset: '0px', width: '100%', height: '100%', transform: 'none', translate: 'none', rotate: 'none', scale: 'none' })
+    if (subtree && target.dataset.componentObject === instanceId) {
+      // Both direct roots share the Flow fit. Undo that projection fit for the
+      // complete group, retaining the authored transforms of their descendants.
+      const stage = target.firstElementChild as HTMLElement | null
+      if (stage) {
+        Object.assign(stage.style, { position: 'absolute', inset: '0px', width: '100%', height: '100%', transform: 'none', translate: 'none', rotate: 'none', scale: 'none' })
+        for (const child of stage.children) Object.assign((child as HTMLElement).style,
+          { width: '100%', height: '100%', left: '0px', top: '0px', transform: 'none', translate: 'none', rotate: 'none', scale: 'none' })
+      }
+    }
     // The Flow stage can still have a fitted extent/height between target and
     // content. Reset that projection wrapper too, so 100% means the local frame.
     for (let wrapper = element === target ? null : element.parentElement; wrapper && wrapper !== target; wrapper = wrapper.parentElement) {
@@ -75,7 +92,7 @@ export async function prepareComponentOutputRegion(input: {
     player.runtime.afterProjectionMutation()
     for (const outer of root.querySelectorAll<HTMLElement>('[data-component-object],[data-component-instance-id]')) {
       const ownerId = outer.dataset.componentObject ?? outer.dataset.componentInstanceId
-      if (ownerId !== instanceId && !outer.contains(target) && !(container && target.contains(outer))) outer.hidden = true
+      if (ownerId !== instanceId && !outer.contains(target) && !(subtree && target.contains(outer))) outer.hidden = true
     }
     if (!omitted.has(instanceId)) target.hidden = false
     // Reparenting native media can restart decoding. Prepare the final local

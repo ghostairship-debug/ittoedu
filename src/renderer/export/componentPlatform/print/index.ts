@@ -17,6 +17,12 @@ import { collectComponentAssetCredits, withCourseCreditsPage } from '../../cours
 import { outputImageDimensions } from '../../outputImage'
 import { applyComponentBackgroundPaint, componentBackgroundAssetIds } from '../../../../shared/componentBackgroundPaint'
 import { componentOutputSurface } from '../presentation'
+import { componentReadingLayout } from '../document/layout'
+import { resolveComponentOuterPresentation } from '../../../../shared/componentPresentation'
+import { applyComponentPaintStyle } from '../../../../player/components/componentPlacementStyle'
+import type { CourseProjectV10 } from '../../../../shared/contracts/component-platform/project'
+import { prepareBundledFontEmbedding, resolveEmbeddedBundledFonts, bundledFontDataUrlCss,
+  bundledFontNoticeHtmlComment, unavailableEmbeddedBundledFontFamilies } from '../../bundledFontEmbedding'
 
 export interface ComponentPrintOutputOptions extends ComponentDocumentOutputOptions {
   pageId?: string
@@ -91,8 +97,18 @@ export async function buildComponentPrintHtml(document: ComponentExportDocument,
   const page = resolveFlowDocxPageBox(pageSize, orientation)
   const width = page.maxContentWidthPx
   const name = pdfPrintPageName(surface.id)
-  const css = flowPrintCss(name, width, resolvePrintPageSize(pageSize, orientation).cssSize)
+  await prepareBundledFontEmbedding(document)
+  const fonts = resolveEmbeddedBundledFonts(document)
+  for (const family of unavailableEmbeddedBundledFontFamilies(document, fonts)) diagnostics.push({
+    surfaceId: surface.id, instanceId: '', code: 'bundled-font-unavailable',
+    message: `内置字体 ${family} 的实际字节未能读取；内容继续打印，该字体使用本机后备，排版可能不同。`,
+  })
+  const css = flowPrintCss(name, width, resolvePrintPageSize(pageSize, orientation).cssSize) + bundledFontDataUrlCss(fonts)
+  const layout = componentReadingLayout(projection, width)
+  const readingBlocks = new Map(projection.blocks.map(block => [block.instance.id, block]))
   const blocks = new Map<string, HTMLElement>()
+  const childHolders = new Map<string, HTMLElement>()
+  const paginatedCaptures = new Set<string>()
   const note = (block: ComponentReadingBlock, code: string, message: string, assetId?: string) => {
     diagnostics.push({ surfaceId: surface.id, instanceId: block.instance.id, code, message, ...(assetId ? { assetId } : {}) })
     return `<aside class="output-diagnostic" data-output-diagnostic="${x(code)}">[${x(block.instance.id)}] ${x(message)}</aside>`
@@ -102,17 +118,30 @@ export async function buildComponentPrintHtml(document: ComponentExportDocument,
       const image = await options.captureInstance?.({ document, surfaceId: surface.id, instanceId: block.instance.id, state: 'author-initial' })
       if (!image) return undefined
       diagnostics.push({ surfaceId: surface.id, instanceId: block.instance.id, code: 'actual-static-capture', message: '程序区域按实际初态图面打印；源码与数据保留在工程。' })
-      return `<img data-output-capture="true" src="${x(bytesToDataUrl(image.bytes, image.mimeType))}" width="${image.width}" height="${image.height}" alt="${x(block.instance.id)}"/>`
+      const source = x(bytesToDataUrl(image.bytes, image.mimeType))
+      const available = layout.widths.get(block.instance.id) ?? width
+      const scale = Math.min(1, available / image.width), renderedWidth = image.width * scale, renderedHeight = image.height * scale
+      if (block.floatingPlacement || renderedHeight <= page.maxContentHeightPx - 32) return `<img data-output-capture="true" src="${source}" width="${image.width}" height="${image.height}" alt="${x(block.instance.id)}"/>`
+      paginatedCaptures.add(block.instance.id)
+      // An img/SVG is monolithic in paged media. A normal block fragments in
+      // the browser's existing page flow; slice paints one continuous bitmap
+      // across those fragments, including space left after preceding text.
+      return `<div data-output-capture="true" role="img" aria-label="${x(block.instance.id)}" style="width:${renderedWidth}px;height:${renderedHeight}px;break-inside:auto;box-decoration-break:slice;background-image:url(&quot;${source}&quot;);background-size:100% 100%;background-repeat:no-repeat"></div>`
     } catch (error) { return note(block, 'capture-failed', `实际图面捕获失败：${error instanceof Error ? error.message : String(error)}`) }
   }
   for (const block of projection.blocks) {
+    const parentBlock = block.parentId ? readingBlocks.get(block.parentId) : undefined
+    const width = parentBlock?.kind === 'layout' && parentBlock.mode === 'free'
+      ? block.instance.frame?.width ?? layout.widths.get(block.instance.id) ?? page.maxContentWidthPx
+      : layout.widths.get(block.instance.id) ?? page.maxContentWidthPx
     let html = ''
     switch (block.kind) {
+      case 'layout': break
       case 'document-block': {
         const source = documentBlockOutputAdapter.html(globalThis.document, block.instance.data, block.instance.id)
         if (block.data.type === 'code' && block.data.language === 'mermaid') {
           const diagram = await capture(block)
-          html = diagram?.startsWith('<img ') ? diagram : source + (diagram ?? note(block, 'mermaid-capture-missing', 'Mermaid 未获得实际图示；保留原代码，其他正文继续输出。'))
+          html = diagram?.includes('data-output-capture="true"') ? diagram : source + (diagram ?? note(block, 'mermaid-capture-missing', 'Mermaid 未获得实际图示；保留原代码，其他正文继续输出。'))
         } else html = source
         break
       }
@@ -156,7 +185,7 @@ export async function buildComponentPrintHtml(document: ComponentExportDocument,
         const geometry = source ? cropGeometry({ ...data, frame: { width: w, height: h }, source }).whole : { x: 0, y: 0, width: w, height: h }
         const clip = clampCrop(data.crop)
         const f = data.filters
-        html += `<figure style="width:${w}px;height:${h}px;overflow:hidden;position:relative;border-radius:${data.cornerRadius}px;filter:brightness(${f.brightness}) contrast(${f.contrast}) saturate(${f.saturation}) grayscale(${f.grayscale}) blur(${f.blur}px)"><img src="${x(url)}" alt="${x(data.alt)}" style="position:absolute;max-width:none;left:${geometry.x}px;top:${geometry.y}px;width:${geometry.width}px;height:${geometry.height}px;object-fit:${data.fit === 'stretch' ? 'fill' : data.fit};clip-path:inset(${clip.top * 100}% ${clip.right * 100}% ${clip.bottom * 100}% ${clip.left * 100}%);transform-origin:0 0;transform:translate(${data.flipX ? '100%' : '0'},${data.flipY ? '100%' : '0'}) scale(${data.flipX ? -1 : 1},${data.flipY ? -1 : 1})"/></figure>`; break
+        html += `<figure style="margin:0;width:${w}px;height:${h}px;overflow:hidden;position:relative;border-radius:${data.cornerRadius}px;filter:brightness(${f.brightness}) contrast(${f.contrast}) saturate(${f.saturation}) grayscale(${f.grayscale}) blur(${f.blur}px)"><img src="${x(url)}" alt="${x(data.alt)}" style="position:absolute;max-width:none;left:${geometry.x}px;top:${geometry.y}px;width:${geometry.width}px;height:${geometry.height}px;object-fit:${data.fit === 'stretch' ? 'fill' : data.fit};clip-path:inset(${clip.top * 100}% ${clip.right * 100}% ${clip.bottom * 100}% ${clip.left * 100}%);transform-origin:0 0;transform:translate(${data.flipX ? '100%' : '0'},${data.flipY ? '100%' : '0'}) scale(${data.flipX ? -1 : 1},${data.flipY ? -1 : 1})"/></figure>`; break
       }
       case 'shape': {
         const w = Math.min(width, block.instance.frame?.width ?? 320), h = block.instance.frame?.height ?? 160
@@ -173,19 +202,38 @@ export async function buildComponentPrintHtml(document: ComponentExportDocument,
     const element = globalThis.document.createElement('section')
     element.dataset.componentOutput = block.instance.id
     element.className = `component-output component-output-${block.kind}`
+    const presentation = resolveComponentOuterPresentation(document as CourseProjectV10, block.instance, {
+      placement: parentBlock?.kind === 'layout' && parentBlock.mode === 'free' ? 'free' : 'flow',
+      purpose: 'author', inlineSize: width, flowLayout: projection.surface.flow?.layout,
+    })
+    applyComponentPaintStyle(element, block.instance, document.definitions[block.instance.definitionId])
+    Object.assign(element.style, presentation.outerStyle, { minWidth: '0px' })
+    if (paginatedCaptures.has(block.instance.id)) Object.assign(element.style, { height: 'auto', minHeight: '0px', maxHeight: 'none', overflow: 'visible' })
+    element.style.removeProperty('opacity')
     element.innerHTML = html
+    // The chart adapter's 100% block size belongs to a fixed runtime viewport.
+    // A reading print block grows around the SVG and its editable-data appendix.
+    if (block.kind === 'chart') element.querySelector('svg')?.style.setProperty('height', 'auto')
     if (block.instance.flowLayout?.caption) {
       const caption = globalThis.document.createElement('figcaption'); caption.innerHTML = renderDocumentText(block.instance.flowLayout.caption); element.append(caption)
     }
     // Local capture pixels have already consumed the instance opacity, while
     // native content and captions consume the full authored ancestor chain.
+    let opacityParent = parentBlock
+    while (opacityParent && opacityParent.kind !== 'layout') opacityParent = opacityParent.parentId ? readingBlocks.get(opacityParent.parentId) : undefined
+    const ancestorOpacity = opacityParent?.outputOpacity ?? 1
     for (const child of Array.from(element.children)) {
-      const opacity = block.outputOpacity === 0 ? 0 : child.hasAttribute('data-output-capture') ? block.outputInheritedOpacity : block.outputOpacity
+      const opacity = block.outputOpacity === 0 || ancestorOpacity === 0 ? 0 : (child.hasAttribute('data-output-capture') ? block.outputInheritedOpacity : block.outputOpacity) / ancestorOpacity
       if (opacity < 1) (child as HTMLElement).style.opacity = String(opacity)
     }
-    const layout = block.instance.flowLayout
-    if (layout?.wrap && layout.wrap !== 'none') element.style.float = layout.wrap
-    if (layout?.width) element.style.maxWidth = `${Math.min(width, layout.width === 'wide' ? projection.surface.flow?.layout.wideContentWidth ?? width : layout.width === 'full-width' ? width : projection.surface.flow?.layout.readingWidth ?? width)}px`
+    if (block.kind === 'layout') {
+      element.style.opacity = String(ancestorOpacity ? block.outputOpacity / ancestorOpacity : 0)
+      const stage = globalThis.document.createElement('div'), children = globalThis.document.createElement('div')
+      Object.assign(stage.style, presentation.stageStyle)
+      Object.assign(children.style, presentation.childrenStyle, { pointerEvents: 'auto' })
+      stage.append(...Array.from(element.childNodes), children); element.append(stage)
+      childHolders.set(block.instance.id, children)
+    }
     blocks.set(block.instance.id, element)
   }
   const body = globalThis.document.createElement('main')
@@ -193,8 +241,15 @@ export async function buildComponentPrintHtml(document: ComponentExportDocument,
   body.dataset.componentPrintRoot = name
   body.style.page = name
   body.style.minHeight = `${page.maxContentHeightPx}px`
+  // Keep the title's margins inside this page box instead of collapsing beyond
+  // its full-page minimum height and producing an otherwise empty trailing page.
+  body.style.display = 'flow-root'
   const title = globalThis.document.createElement('h1'); title.textContent = projection.title; body.append(title)
-  for (const block of projection.blocks) if (!block.floatingPlacement) body.append(blocks.get(block.instance.id)!)
+  for (const block of projection.blocks) {
+    const parent = block.parentId && blocks.get(block.parentId)
+    if (parent) (childHolders.get(block.parentId!) ?? parent).append(blocks.get(block.instance.id)!)
+    else if (!block.floatingPlacement) body.append(blocks.get(block.instance.id)!)
+  }
   // Measure the same semantic print body to resolve paragraph anchors with the shared rule.
   let paragraphRects: FlowParagraphBlockRect[] = []
   if (projection.blocks.some(block => block.floatingPlacement?.space === 'paper' && block.floatingPlacement.paragraphAnchor)) {
@@ -218,6 +273,7 @@ export async function buildComponentPrintHtml(document: ComponentExportDocument,
     const element = blocks.get(block.instance.id)!, frame = block.outputFrame ?? block.instance.frame
     const placement: ComponentFlowPlacement | undefined = block.floatingPlacement
     if (!placement) continue
+    if (block.parentId && blocks.get(block.parentId)?.contains(element)) continue
     if (!frame) { element.insertAdjacentHTML('afterbegin', note(block, 'floating-frame-missing', '浮层缺少正式 frame；专业内容保留供修复。')); body.append(element); continue }
     const anchor = placement.paragraphAnchor
     const matrix = [...frame.transform]
@@ -251,6 +307,6 @@ export async function buildComponentPrintHtml(document: ComponentExportDocument,
   }
   body.style.setProperty('--component-reading-width', `${projection.surface.flow?.layout.readingWidth ?? width}px`)
   body.style.setProperty('--component-wide-width', `${projection.surface.flow?.layout.wideContentWidth ?? width}px`)
-  return { html: withCourseCreditsPage(`<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><title>${x(projection.title)}</title><style>${css}</style></head><body>${body.outerHTML}</body></html>`, collectComponentAssetCredits(document.assets)), diagnostics,
-    fidelity: diagnostics.some(value => ['asset-missing', 'asset-read-failed', 'asset-decode-failed', 'capture-missing', 'capture-failed', 'mermaid-capture-missing', 'custom-visual-missing', 'professional-data-invalid', 'shape-capture-missing', 'image-feather-capture-missing', 'image-crop-dimensions-missing', 'floating-frame-missing', 'floating-anchor-unresolved', 'viewport-print-placement', 'print-media-playback', 'video-frame-missing'].includes(value.code)) ? 'partial' as const : 'complete' as const }
+  return { html: withCourseCreditsPage(`<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><title>${x(projection.title)}</title><style>${css}</style>${bundledFontNoticeHtmlComment(fonts)}</head><body>${body.outerHTML}</body></html>`, collectComponentAssetCredits(document.assets)), diagnostics,
+    fidelity: diagnostics.some(value => ['asset-missing', 'asset-read-failed', 'asset-decode-failed', 'capture-missing', 'capture-failed', 'mermaid-capture-missing', 'custom-visual-missing', 'professional-data-invalid', 'shape-capture-missing', 'image-feather-capture-missing', 'image-crop-dimensions-missing', 'floating-frame-missing', 'floating-anchor-unresolved', 'viewport-print-placement', 'print-media-playback', 'video-frame-missing', 'bundled-font-unavailable'].includes(value.code)) ? 'partial' as const : 'complete' as const }
 }

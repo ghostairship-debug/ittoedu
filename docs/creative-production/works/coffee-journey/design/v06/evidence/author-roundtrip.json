@@ -1,0 +1,71 @@
+{
+  "date": "2026-10-22T13:46:39.694Z",
+  "native": {
+    "instanceId": "dd6eb479-a0f3-4284-8f56-af846f15f328",
+    "original": "此刻，它只是你手边的一杯。把目光往前推，会遇见一颗红色果实、一片土地，还有许多双手。",
+    "revisionBefore": 198,
+    "commit": {
+      "status": "applied",
+      "documentId": "7fe04848-f529-483c-9ba0-e17c55221b2a",
+      "operationId": "coffee-final-native-precision-validation-1792676799809-20",
+      "beforeRevision": 198,
+      "revision": 199,
+      "persistence": "recoverable",
+      "appliedChanges": {
+        "changes": [
+          {
+            "path": [
+              "instances",
+              "dd6eb479-a0f3-4284-8f56-af846f15f328",
+              "data",
+              "content"
+            ],
+            "exists": true,
+            "value": {
+              "inlines": [
+                {
+                  "type": "text",
+                  "text": "此刻，它只是你手边的一杯。把目光往前推，会遇见一颗红色果实、一片土地，还有许多双手。〔验收〕",
+                  "style": {
+                    "color": "#525a4e",
+                    "bold": false,
+                    "italic": false,
+                    "emphasis": false
+                  }
+                }
+              ]
+            }
+          }
+        ],
+        "affectedTargets": [
+          "dd6eb479-a0f3-4284-8f56-af846f15f328"
+        ]
+      }
+    },
+    "neighboursUnchanged": true,
+    "undo": true,
+    "redo": true,
+    "restored": true
+  },
+  "reuse": {
+    "parameterEdit": {
+      "baseMass": 360,
+      "soluteMass": 30,
+      "percent": "8.33",
+      "path": "pages/01-一份糖的去向/02-编组/03-HTML 程序.content.html"
+    },
+    "undo": true,
+    "redo": true,
+    "restored": true
+  },
+  "coffeeSave": {
+    "revision": 202,
+    "path": "D:\\果铃工作台\\docs\\creative-production\\works\\coffee-journey\\design\\v06\\native\\coffee-journey-v06.glx",
+    "dirty": false
+  },
+  "sugarSave": {
+    "revision": 32,
+    "path": "D:\\果铃工作台\\docs\\creative-production\\works\\coffee-journey\\design\\v06\\reuse\\solute-study\\solute-study.glx",
+    "dirty": false
+  }
+}

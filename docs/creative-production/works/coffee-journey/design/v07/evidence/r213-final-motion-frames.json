@@ -1,0 +1,1188 @@
+[
+  {
+    "width": 1440,
+    "transitions": [
+      {
+        "from": 1,
+        "to": 2,
+        "samples": [
+          {
+            "requested": 0,
+            "phase": 0,
+            "progress": 1,
+            "scrollTop": 132,
+            "reading": {
+              "containerId": "47415583-2d75-4b72-9c46-dfd29b47d82a",
+              "activeInstanceId": "5b629c9b-d44b-4fe6-a156-ed4d3b03880d",
+              "progress": 0.015156435295405167
+            },
+            "motionId": "1",
+            "mountId": "1792729085155-on59v",
+            "paperPhase": 0,
+            "file": "1440-u01-u02-000.png"
+          },
+          {
+            "requested": 0.25,
+            "phase": 0.31807,
+            "progress": 0.31806699615595824,
+            "scrollTop": 494,
+            "reading": {
+              "containerId": "47415583-2d75-4b72-9c46-dfd29b47d82a",
+              "activeInstanceId": "5b629c9b-d44b-4fe6-a156-ed4d3b03880d",
+              "progress": 0.056721810878258734
+            },
+            "motionId": "2",
+            "mountId": "1792729085155-on59v",
+            "paperPhase": 0,
+            "file": "1440-u01-u02-025.png"
+          },
+          {
+            "requested": 0.5,
+            "phase": 0.51312,
+            "progress": 0.5131246567819879,
+            "scrollTop": 716,
+            "reading": {
+              "containerId": "47415583-2d75-4b72-9c46-dfd29b47d82a",
+              "activeInstanceId": "5b629c9b-d44b-4fe6-a156-ed4d3b03880d",
+              "progress": 0.08221217932962196
+            },
+            "motionId": "2",
+            "mountId": "1792729085155-on59v",
+            "paperPhase": 0,
+            "file": "1440-u01-u02-050.png"
+          },
+          {
+            "requested": 0.75,
+            "phase": 0.78375,
+            "progress": 0.7837451949478309,
+            "scrollTop": 1024,
+            "reading": {
+              "containerId": "47415583-2d75-4b72-9c46-dfd29b47d82a",
+              "activeInstanceId": "4d4b2b29-0afe-4e4c-94fe-17cc6524a3c2",
+              "progress": 0.1175771950189007
+            },
+            "motionId": "2",
+            "mountId": "1792729085155-on59v",
+            "paperPhase": 0.47798,
+            "file": "1440-u01-u02-075.png"
+          },
+          {
+            "requested": 1,
+            "phase": 1,
+            "progress": 1,
+            "scrollTop": 1270,
+            "reading": {
+              "containerId": "47415583-2d75-4b72-9c46-dfd29b47d82a",
+              "activeInstanceId": "b3d345ba-f2c8-4c52-add1-2aa477d6a241",
+              "progress": 0.1458232789785194
+            },
+            "motionId": "2",
+            "mountId": "1792729085155-on59v",
+            "paperPhase": 1,
+            "file": "1440-u01-u02-100.png"
+          }
+        ]
+      },
+      {
+        "from": 2,
+        "to": 3,
+        "samples": [
+          {
+            "requested": 0,
+            "phase": 1,
+            "progress": 1,
+            "scrollTop": 1270,
+            "reading": {
+              "containerId": "47415583-2d75-4b72-9c46-dfd29b47d82a",
+              "activeInstanceId": "b3d345ba-f2c8-4c52-add1-2aa477d6a241",
+              "progress": 0.1458232789785194
+            },
+            "motionId": "3",
+            "mountId": "1792729085155-on59v",
+            "paperPhase": 1,
+            "file": "1440-u02-u03-000.png"
+          },
+          {
+            "requested": 0.25,
+            "phase": 1.26613,
+            "progress": 0.266133121882405,
+            "scrollTop": 1721,
+            "reading": {
+              "containerId": "47415583-2d75-4b72-9c46-dfd29b47d82a",
+              "activeInstanceId": "b3d345ba-f2c8-4c52-add1-2aa477d6a241",
+              "progress": 0.1976077662378204
+            },
+            "motionId": "4",
+            "mountId": "1792729085155-on59v",
+            "paperPhase": 1,
+            "file": "1440-u02-u03-025.png"
+          },
+          {
+            "requested": 0.5,
+            "phase": 1.52282,
+            "progress": 0.5228247139419309,
+            "scrollTop": 2156,
+            "reading": {
+              "containerId": "47415583-2d75-4b72-9c46-dfd29b47d82a",
+              "activeInstanceId": "b3d345ba-f2c8-4c52-add1-2aa477d6a241",
+              "progress": 0.24755510982495108
+            },
+            "motionId": "4",
+            "mountId": "1792729085155-on59v",
+            "paperPhase": 1,
+            "file": "1440-u02-u03-050.png"
+          },
+          {
+            "requested": 0.75,
+            "phase": 1.76122,
+            "progress": 0.7612233419696285,
+            "scrollTop": 2560,
+            "reading": {
+              "containerId": "47415583-2d75-4b72-9c46-dfd29b47d82a",
+              "activeInstanceId": "b3d345ba-f2c8-4c52-add1-2aa477d6a241",
+              "progress": 0.29394298754725173
+            },
+            "motionId": "4",
+            "mountId": "1792729085155-on59v",
+            "paperPhase": 1.3973,
+            "file": "1440-u02-u03-075.png"
+          },
+          {
+            "requested": 1,
+            "phase": 2,
+            "progress": 1,
+            "scrollTop": 2965,
+            "reading": {
+              "containerId": "47415583-2d75-4b72-9c46-dfd29b47d82a",
+              "activeInstanceId": "a8add446-cdcf-4007-824f-f0449a24912a",
+              "progress": 0.34044568674906306
+            },
+            "motionId": "4",
+            "mountId": "1792729085155-on59v",
+            "paperPhase": 2,
+            "file": "1440-u02-u03-100.png"
+          }
+        ]
+      },
+      {
+        "from": 3,
+        "to": 4,
+        "samples": [
+          {
+            "requested": 0,
+            "phase": 2,
+            "progress": 1,
+            "scrollTop": 2965,
+            "reading": {
+              "containerId": "47415583-2d75-4b72-9c46-dfd29b47d82a",
+              "activeInstanceId": "a8add446-cdcf-4007-824f-f0449a24912a",
+              "progress": 0.34044568674906306
+            },
+            "motionId": "5",
+            "mountId": "1792729085155-on59v",
+            "paperPhase": 2,
+            "file": "1440-u03-u04-000.png"
+          },
+          {
+            "requested": 0.25,
+            "phase": 2.28997,
+            "progress": 0.2899721600524046,
+            "scrollTop": 3297,
+            "reading": {
+              "containerId": "47415583-2d75-4b72-9c46-dfd29b47d82a",
+              "activeInstanceId": "a8add446-cdcf-4007-824f-f0449a24912a",
+              "progress": 0.37856641794659723
+            },
+            "motionId": "6",
+            "mountId": "1792729085155-on59v",
+            "paperPhase": 2,
+            "file": "1440-u03-u04-025.png"
+          },
+          {
+            "requested": 0.5,
+            "phase": 2.57383,
+            "progress": 0.5738304492603308,
+            "scrollTop": 3622,
+            "reading": {
+              "containerId": "47415583-2d75-4b72-9c46-dfd29b47d82a",
+              "activeInstanceId": "a8add446-cdcf-4007-824f-f0449a24912a",
+              "progress": 0.4158833987875569
+            },
+            "motionId": "6",
+            "mountId": "1792729085155-on59v",
+            "paperPhase": 2,
+            "file": "1440-u03-u04-050.png"
+          },
+          {
+            "requested": 0.75,
+            "phase": 2.77035,
+            "progress": 0.7703477264042797,
+            "scrollTop": 3847,
+            "reading": {
+              "containerId": "47415583-2d75-4b72-9c46-dfd29b47d82a",
+              "activeInstanceId": "a8add446-cdcf-4007-824f-f0449a24912a",
+              "progress": 0.4417182316774521
+            },
+            "motionId": "6",
+            "mountId": "1792729085155-on59v",
+            "paperPhase": 2.42987,
+            "file": "1440-u03-u04-075.png"
+          },
+          {
+            "requested": 1,
+            "phase": 3,
+            "progress": 1,
+            "scrollTop": 4110,
+            "reading": {
+              "containerId": "47415583-2d75-4b72-9c46-dfd29b47d82a",
+              "activeInstanceId": "83bca290-3006-4058-af49-a97b1e1fd00d",
+              "progress": 0.4719162807887518
+            },
+            "motionId": "6",
+            "mountId": "1792729085155-on59v",
+            "paperPhase": 3,
+            "file": "1440-u03-u04-100.png"
+          }
+        ]
+      },
+      {
+        "from": 4,
+        "to": 5,
+        "samples": [
+          {
+            "requested": 0,
+            "phase": 3,
+            "progress": 1,
+            "scrollTop": 4110,
+            "reading": {
+              "containerId": "47415583-2d75-4b72-9c46-dfd29b47d82a",
+              "activeInstanceId": "83bca290-3006-4058-af49-a97b1e1fd00d",
+              "progress": 0.4719162807887518
+            },
+            "motionId": "7",
+            "mountId": "1792729085155-on59v",
+            "paperPhase": 3,
+            "file": "1440-u04-u05-000.png"
+          },
+          {
+            "requested": 0.25,
+            "phase": 3.26079,
+            "progress": 0.26078725614683135,
+            "scrollTop": 4463,
+            "reading": {
+              "containerId": "47415583-2d75-4b72-9c46-dfd29b47d82a",
+              "activeInstanceId": "83bca290-3006-4058-af49-a97b1e1fd00d",
+              "progress": 0.5124482630560095
+            },
+            "motionId": "8",
+            "mountId": "1792729085155-on59v",
+            "paperPhase": 3,
+            "file": "1440-u04-u05-025.png"
+          },
+          {
+            "requested": 0.5,
+            "phase": 3.53857,
+            "progress": 0.538566316518527,
+            "scrollTop": 4839,
+            "reading": {
+              "containerId": "47415583-2d75-4b72-9c46-dfd29b47d82a",
+              "activeInstanceId": "83bca290-3006-4058-af49-a97b1e1fd00d",
+              "progress": 0.5556211393520122
+            },
+            "motionId": "8",
+            "mountId": "1792729085155-on59v",
+            "paperPhase": 3,
+            "file": "1440-u04-u05-050.png"
+          },
+          {
+            "requested": 0.75,
+            "phase": 3.78679,
+            "progress": 0.7867944130208935,
+            "scrollTop": 5175,
+            "reading": {
+              "containerId": "47415583-2d75-4b72-9c46-dfd29b47d82a",
+              "activeInstanceId": "5e8ef2fb-8c7e-40fa-bb34-6025f180f663",
+              "progress": 0.594201156467589
+            },
+            "motionId": "8",
+            "mountId": "1792729085155-on59v",
+            "paperPhase": 3.48771,
+            "file": "1440-u04-u05-075.png"
+          },
+          {
+            "requested": 1,
+            "phase": 4,
+            "progress": 1,
+            "scrollTop": 5464,
+            "reading": {
+              "containerId": "47415583-2d75-4b72-9c46-dfd29b47d82a",
+              "activeInstanceId": "5093abd6-eba9-43cc-a54a-ad2eb13648e6",
+              "progress": 0.6273845640461654
+            },
+            "motionId": "8",
+            "mountId": "1792729085155-on59v",
+            "paperPhase": 4,
+            "file": "1440-u04-u05-100.png"
+          }
+        ]
+      },
+      {
+        "from": 5,
+        "to": 6,
+        "samples": [
+          {
+            "requested": 0,
+            "phase": 4,
+            "progress": 1,
+            "scrollTop": 5464,
+            "reading": {
+              "containerId": "47415583-2d75-4b72-9c46-dfd29b47d82a",
+              "activeInstanceId": "5093abd6-eba9-43cc-a54a-ad2eb13648e6",
+              "progress": 0.6273845640461654
+            },
+            "motionId": "9",
+            "mountId": "1792729085155-on59v",
+            "paperPhase": 4,
+            "file": "1440-u05-u06-000.png"
+          },
+          {
+            "requested": 0.25,
+            "phase": 4.28254,
+            "progress": 0.28254371800597794,
+            "scrollTop": 5721,
+            "reading": {
+              "containerId": "47415583-2d75-4b72-9c46-dfd29b47d82a",
+              "activeInstanceId": "5093abd6-eba9-43cc-a54a-ad2eb13648e6",
+              "progress": 0.6568936842804012
+            },
+            "motionId": "10",
+            "mountId": "1792729085155-on59v",
+            "paperPhase": 4,
+            "file": "1440-u05-u06-025.png"
+          },
+          {
+            "requested": 0.5,
+            "phase": 4.50022,
+            "progress": 0.5002233139794551,
+            "scrollTop": 5919,
+            "reading": {
+              "containerId": "47415583-2d75-4b72-9c46-dfd29b47d82a",
+              "activeInstanceId": "5093abd6-eba9-43cc-a54a-ad2eb13648e6",
+              "progress": 0.679628337223509
+            },
+            "motionId": "10",
+            "mountId": "1792729085155-on59v",
+            "paperPhase": 4,
+            "file": "1440-u05-u06-050.png"
+          },
+          {
+            "requested": 0.75,
+            "phase": 4.79376,
+            "progress": 0.7937609509739925,
+            "scrollTop": 6186,
+            "reading": {
+              "containerId": "47415583-2d75-4b72-9c46-dfd29b47d82a",
+              "activeInstanceId": "5093abd6-eba9-43cc-a54a-ad2eb13648e6",
+              "progress": 0.7102856722528512
+            },
+            "motionId": "10",
+            "mountId": "1792729085155-on59v",
+            "paperPhase": 4.51217,
+            "file": "1440-u05-u06-075.png"
+          },
+          {
+            "requested": 1,
+            "phase": 5,
+            "progress": 1,
+            "scrollTop": 6374,
+            "reading": {
+              "containerId": "47415583-2d75-4b72-9c46-dfd29b47d82a",
+              "activeInstanceId": "b1a166da-1cc4-4f39-a8ba-dc5c15bd39ba",
+              "progress": 0.7318721104008525
+            },
+            "motionId": "10",
+            "mountId": "1792729085155-on59v",
+            "paperPhase": 5,
+            "file": "1440-u05-u06-100.png"
+          }
+        ]
+      },
+      {
+        "from": 6,
+        "to": 7,
+        "samples": [
+          {
+            "requested": 0,
+            "phase": 5,
+            "progress": 1,
+            "scrollTop": 6374,
+            "reading": {
+              "containerId": "47415583-2d75-4b72-9c46-dfd29b47d82a",
+              "activeInstanceId": "b1a166da-1cc4-4f39-a8ba-dc5c15bd39ba",
+              "progress": 0.7318721104008525
+            },
+            "motionId": "11",
+            "mountId": "1792729085155-on59v",
+            "paperPhase": 5,
+            "file": "1440-u06-u07-000.png"
+          },
+          {
+            "requested": 0.25,
+            "phase": 5.2601,
+            "progress": 0.260097639937662,
+            "scrollTop": 6846,
+            "reading": {
+              "containerId": "47415583-2d75-4b72-9c46-dfd29b47d82a",
+              "activeInstanceId": "b1a166da-1cc4-4f39-a8ba-dc5c15bd39ba",
+              "progress": 0.7860678487298771
+            },
+            "motionId": "12",
+            "mountId": "1792729085155-on59v",
+            "paperPhase": 5,
+            "file": "1440-u06-u07-025.png"
+          },
+          {
+            "requested": 0.5,
+            "phase": 5.51248,
+            "progress": 0.5124805193686984,
+            "scrollTop": 7304,
+            "reading": {
+              "containerId": "47415583-2d75-4b72-9c46-dfd29b47d82a",
+              "activeInstanceId": "b1a166da-1cc4-4f39-a8ba-dc5c15bd39ba",
+              "progress": 0.8386560863457526
+            },
+            "motionId": "12",
+            "mountId": "1792729085155-on59v",
+            "paperPhase": 5,
+            "file": "1440-u06-u07-050.png"
+          },
+          {
+            "requested": 0.75,
+            "phase": 5.79352,
+            "progress": 0.7935182235386298,
+            "scrollTop": 7814,
+            "reading": {
+              "containerId": "47415583-2d75-4b72-9c46-dfd29b47d82a",
+              "activeInstanceId": "b1a166da-1cc4-4f39-a8ba-dc5c15bd39ba",
+              "progress": 0.8972150408961816
+            },
+            "motionId": "12",
+            "mountId": "1792729085155-on59v",
+            "paperPhase": 5.5121,
+            "file": "1440-u06-u07-075.png"
+          },
+          {
+            "requested": 1,
+            "phase": 6,
+            "progress": 1,
+            "scrollTop": 8189,
+            "reading": {
+              "containerId": "47415583-2d75-4b72-9c46-dfd29b47d82a",
+              "activeInstanceId": "8ad1964b-3a7a-4a92-a59c-259924f7b485",
+              "progress": 0.9402730957126736
+            },
+            "motionId": "12",
+            "mountId": "1792729085155-on59v",
+            "paperPhase": 6,
+            "file": "1440-u06-u07-100.png"
+          }
+        ]
+      }
+    ],
+    "rapid": [
+      {
+        "type": "reverse",
+        "before": {
+          "coffeeUnderlay": "journey-v07",
+          "mountId": "1792729085155-on59v",
+          "chapter": "4",
+          "phase": "3.48008",
+          "stage": "green",
+          "idle": "false",
+          "reduced": "false",
+          "motionId": "14",
+          "motionProgress": "0.5800139247404626",
+          "motionStatus": "running",
+          "scrollTop": "4805",
+          "paperPhase": "3.00000",
+          "reading": "{\"containerId\":\"47415583-2d75-4b72-9c46-dfd29b47d82a\",\"activeInstanceId\":\"83bca290-3006-4058-af49-a97b1e1fd00d\",\"progress\":0.5517172090486502}",
+          "tick": "198",
+          "size": "1440x1000",
+          "assetsReady": "6"
+        },
+        "after": {
+          "coffeeUnderlay": "journey-v07",
+          "mountId": "1792729085155-on59v",
+          "chapter": "4",
+          "phase": "3.48008",
+          "stage": "green",
+          "idle": "false",
+          "reduced": "false",
+          "motionId": "15",
+          "motionProgress": "0",
+          "motionStatus": "running",
+          "scrollTop": "4805",
+          "paperPhase": "3.00000",
+          "reading": "{\"containerId\":\"47415583-2d75-4b72-9c46-dfd29b47d82a\",\"activeInstanceId\":\"83bca290-3006-4058-af49-a97b1e1fd00d\",\"progress\":0.5517172090486502}",
+          "tick": "200",
+          "size": "1440x1000",
+          "assetsReady": "6"
+        }
+      },
+      {
+        "type": "fast-sequence-2-6-3",
+        "final": {
+          "coffeeUnderlay": "journey-v07",
+          "mountId": "1792729085155-on59v",
+          "chapter": "3",
+          "phase": "2.00000",
+          "stage": "peel",
+          "idle": "true",
+          "reduced": "false",
+          "motionId": "17",
+          "motionProgress": "1",
+          "motionStatus": "completed",
+          "scrollTop": "2965",
+          "paperPhase": "2.00000",
+          "reading": "{\"containerId\":\"47415583-2d75-4b72-9c46-dfd29b47d82a\",\"activeInstanceId\":\"a8add446-cdcf-4007-824f-f0449a24912a\",\"progress\":0.34044568674906306}",
+          "tick": "234",
+          "size": "1440x1000",
+          "assetsReady": "6"
+        }
+      }
+    ],
+    "errors": [],
+    "idleStopped": true,
+    "manualTakeover": {
+      "before": {
+        "coffeeUnderlay": "journey-v07",
+        "mountId": "1792729085155-on59v",
+        "chapter": "6",
+        "phase": "4.52082",
+        "stage": "solution",
+        "idle": "false",
+        "reduced": "false",
+        "motionId": "18",
+        "motionProgress": "0.6302042672074708",
+        "motionStatus": "running",
+        "scrollTop": "6257",
+        "paperPhase": "4.77624",
+        "reading": "{\"containerId\":\"47415583-2d75-4b72-9c46-dfd29b47d82a\",\"activeInstanceId\":\"b1a166da-1cc4-4f39-a8ba-dc5c15bd39ba\",\"progress\":0.7184379972981071}",
+        "tick": "245",
+        "size": "1440x1000",
+        "assetsReady": "6"
+      },
+      "after": {
+        "coffeeUnderlay": "journey-v07",
+        "mountId": "1792729085155-on59v",
+        "chapter": "5",
+        "phase": "4.52082",
+        "stage": "solution",
+        "idle": "true",
+        "reduced": "false",
+        "motionId": "18",
+        "motionProgress": "0.6302042672074708",
+        "motionStatus": "cancelled",
+        "scrollTop": "6257",
+        "paperPhase": "4.52082",
+        "reading": "{\"containerId\":\"47415583-2d75-4b72-9c46-dfd29b47d82a\",\"activeInstanceId\":\"5093abd6-eba9-43cc-a54a-ad2eb13648e6\",\"progress\":0.6931772718057652}",
+        "tick": "246",
+        "size": "1440x1000",
+        "assetsReady": "6"
+      }
+    }
+  },
+  {
+    "width": 390,
+    "transitions": [
+      {
+        "from": 1,
+        "to": 2,
+        "samples": [
+          {
+            "requested": 0,
+            "phase": 0,
+            "progress": 1,
+            "scrollTop": 108,
+            "reading": {
+              "containerId": "47415583-2d75-4b72-9c46-dfd29b47d82a",
+              "activeInstanceId": "5b629c9b-d44b-4fe6-a156-ed4d3b03880d",
+              "progress": 0.0099229934363533
+            },
+            "motionId": "1",
+            "mountId": "1792729136449-21pa5",
+            "paperPhase": 0,
+            "file": null
+          },
+          {
+            "requested": 0.25,
+            "phase": 0.27247,
+            "progress": 0.2724742099230391,
+            "scrollTop": 524,
+            "reading": {
+              "containerId": "47415583-2d75-4b72-9c46-dfd29b47d82a",
+              "activeInstanceId": "5b629c9b-d44b-4fe6-a156-ed4d3b03880d",
+              "progress": 0.04814489408008453
+            },
+            "motionId": "2",
+            "mountId": "1792729136449-21pa5",
+            "paperPhase": 0,
+            "file": null
+          },
+          {
+            "requested": 0.5,
+            "phase": 0.52202,
+            "progress": 0.5220239069919764,
+            "scrollTop": 905,
+            "reading": {
+              "containerId": "47415583-2d75-4b72-9c46-dfd29b47d82a",
+              "activeInstanceId": "5b629c9b-d44b-4fe6-a156-ed4d3b03880d",
+              "progress": 0.08315100981388644
+            },
+            "motionId": "2",
+            "mountId": "1792729136449-21pa5",
+            "paperPhase": 0,
+            "file": null
+          },
+          {
+            "requested": 0.75,
+            "phase": 0.75585,
+            "progress": 0.7558539381038153,
+            "scrollTop": 1262,
+            "reading": {
+              "containerId": "47415583-2d75-4b72-9c46-dfd29b47d82a",
+              "activeInstanceId": "4d4b2b29-0afe-4e4c-94fe-17cc6524a3c2",
+              "progress": 0.1159520158951654
+            },
+            "motionId": "2",
+            "mountId": "1792729136449-21pa5",
+            "paperPhase": 0.41887,
+            "file": null
+          },
+          {
+            "requested": 1,
+            "phase": 1,
+            "progress": 1,
+            "scrollTop": 1635,
+            "reading": {
+              "containerId": "47415583-2d75-4b72-9c46-dfd29b47d82a",
+              "activeInstanceId": "b3d345ba-f2c8-4c52-add1-2aa477d6a241",
+              "progress": 0.15022309507812634
+            },
+            "motionId": "2",
+            "mountId": "1792729136449-21pa5",
+            "paperPhase": 1,
+            "file": null
+          }
+        ]
+      },
+      {
+        "from": 2,
+        "to": 3,
+        "samples": [
+          {
+            "requested": 0,
+            "phase": 1,
+            "progress": 1,
+            "scrollTop": 1635,
+            "reading": {
+              "containerId": "47415583-2d75-4b72-9c46-dfd29b47d82a",
+              "activeInstanceId": "b3d345ba-f2c8-4c52-add1-2aa477d6a241",
+              "progress": 0.15022309507812634
+            },
+            "motionId": "3",
+            "mountId": "1792729136449-21pa5",
+            "paperPhase": 1,
+            "file": "390-u02-u03-000.png"
+          },
+          {
+            "requested": 0.25,
+            "phase": 1.32693,
+            "progress": 0.3269336971705162,
+            "scrollTop": 2264,
+            "reading": {
+              "containerId": "47415583-2d75-4b72-9c46-dfd29b47d82a",
+              "activeInstanceId": "b3d345ba-f2c8-4c52-add1-2aa477d6a241",
+              "progress": 0.2080153438879988
+            },
+            "motionId": "4",
+            "mountId": "1792729136449-21pa5",
+            "paperPhase": 1,
+            "file": "390-u02-u03-025.png"
+          },
+          {
+            "requested": 0.5,
+            "phase": 1.54576,
+            "progress": 0.5457557742910047,
+            "scrollTop": 2685,
+            "reading": {
+              "containerId": "47415583-2d75-4b72-9c46-dfd29b47d82a",
+              "activeInstanceId": "b3d345ba-f2c8-4c52-add1-2aa477d6a241",
+              "progress": 0.24669664237600564
+            },
+            "motionId": "4",
+            "mountId": "1792729136449-21pa5",
+            "paperPhase": 1,
+            "file": "390-u02-u03-050.png"
+          },
+          {
+            "requested": 0.75,
+            "phase": 1.75626,
+            "progress": 0.7562615729461066,
+            "scrollTop": 3090,
+            "reading": {
+              "containerId": "47415583-2d75-4b72-9c46-dfd29b47d82a",
+              "activeInstanceId": "b3d345ba-f2c8-4c52-add1-2aa477d6a241",
+              "progress": 0.2839078677623305
+            },
+            "motionId": "4",
+            "mountId": "1792729136449-21pa5",
+            "paperPhase": 1.39675,
+            "file": "390-u02-u03-075.png"
+          },
+          {
+            "requested": 1,
+            "phase": 2,
+            "progress": 1,
+            "scrollTop": 3559,
+            "reading": {
+              "containerId": "47415583-2d75-4b72-9c46-dfd29b47d82a",
+              "activeInstanceId": "a8add446-cdcf-4007-824f-f0449a24912a",
+              "progress": 0.32699938555538327
+            },
+            "motionId": "4",
+            "mountId": "1792729136449-21pa5",
+            "paperPhase": 2,
+            "file": "390-u02-u03-100.png"
+          }
+        ]
+      },
+      {
+        "from": 3,
+        "to": 4,
+        "samples": [
+          {
+            "requested": 0,
+            "phase": 2,
+            "progress": 1,
+            "scrollTop": 3559,
+            "reading": {
+              "containerId": "47415583-2d75-4b72-9c46-dfd29b47d82a",
+              "activeInstanceId": "a8add446-cdcf-4007-824f-f0449a24912a",
+              "progress": 0.32699938555538327
+            },
+            "motionId": "5",
+            "mountId": "1792729136449-21pa5",
+            "paperPhase": 2,
+            "file": null
+          },
+          {
+            "requested": 0.25,
+            "phase": 2.25551,
+            "progress": 0.2555131726737914,
+            "scrollTop": 3918,
+            "reading": {
+              "containerId": "47415583-2d75-4b72-9c46-dfd29b47d82a",
+              "activeInstanceId": "a8add446-cdcf-4007-824f-f0449a24912a",
+              "progress": 0.3599841507743725
+            },
+            "motionId": "6",
+            "mountId": "1792729136449-21pa5",
+            "paperPhase": 2,
+            "file": null
+          },
+          {
+            "requested": 0.5,
+            "phase": 2.51672,
+            "progress": 0.5167202322038233,
+            "scrollTop": 4285,
+            "reading": {
+              "containerId": "47415583-2d75-4b72-9c46-dfd29b47d82a",
+              "activeInstanceId": "a8add446-cdcf-4007-824f-f0449a24912a",
+              "progress": 0.3937039525442027
+            },
+            "motionId": "6",
+            "mountId": "1792729136449-21pa5",
+            "paperPhase": 2,
+            "file": null
+          },
+          {
+            "requested": 0.75,
+            "phase": 2.758,
+            "progress": 0.7579986877370136,
+            "scrollTop": 4624,
+            "reading": {
+              "containerId": "47415583-2d75-4b72-9c46-dfd29b47d82a",
+              "activeInstanceId": "a8add446-cdcf-4007-824f-f0449a24912a",
+              "progress": 0.4248511263860894
+            },
+            "motionId": "6",
+            "mountId": "1792729136449-21pa5",
+            "paperPhase": 2.39371,
+            "file": null
+          },
+          {
+            "requested": 1,
+            "phase": 3,
+            "progress": 1,
+            "scrollTop": 4964,
+            "reading": {
+              "containerId": "47415583-2d75-4b72-9c46-dfd29b47d82a",
+              "activeInstanceId": "83bca290-3006-4058-af49-a97b1e1fd00d",
+              "progress": 0.4560901797968313
+            },
+            "motionId": "6",
+            "mountId": "1792729136449-21pa5",
+            "paperPhase": 3,
+            "file": null
+          }
+        ]
+      },
+      {
+        "from": 4,
+        "to": 5,
+        "samples": [
+          {
+            "requested": 0,
+            "phase": 3,
+            "progress": 1,
+            "scrollTop": 4964,
+            "reading": {
+              "containerId": "47415583-2d75-4b72-9c46-dfd29b47d82a",
+              "activeInstanceId": "83bca290-3006-4058-af49-a97b1e1fd00d",
+              "progress": 0.4560901797968313
+            },
+            "motionId": "7",
+            "mountId": "1792729136449-21pa5",
+            "paperPhase": 3,
+            "file": "390-u04-u05-000.png"
+          },
+          {
+            "requested": 0.25,
+            "phase": 3.31998,
+            "progress": 0.3199791835103664,
+            "scrollTop": 5502,
+            "reading": {
+              "containerId": "47415583-2d75-4b72-9c46-dfd29b47d82a",
+              "activeInstanceId": "83bca290-3006-4058-af49-a97b1e1fd00d",
+              "progress": 0.5055213878408875
+            },
+            "motionId": "8",
+            "mountId": "1792729136449-21pa5",
+            "paperPhase": 3,
+            "file": "390-u04-u05-025.png"
+          },
+          {
+            "requested": 0.5,
+            "phase": 3.55074,
+            "progress": 0.5507448400197014,
+            "scrollTop": 5890,
+            "reading": {
+              "containerId": "47415583-2d75-4b72-9c46-dfd29b47d82a",
+              "activeInstanceId": "83bca290-3006-4058-af49-a97b1e1fd00d",
+              "progress": 0.5411706605566753
+            },
+            "motionId": "8",
+            "mountId": "1792729136449-21pa5",
+            "paperPhase": 3,
+            "file": "390-u04-u05-050.png"
+          },
+          {
+            "requested": 0.75,
+            "phase": 3.76783,
+            "progress": 0.7678310890555448,
+            "scrollTop": 6255,
+            "reading": {
+              "containerId": "47415583-2d75-4b72-9c46-dfd29b47d82a",
+              "activeInstanceId": "61087d4b-a58d-4442-b15c-63762f47d11e",
+              "progress": 0.5747067031887952
+            },
+            "motionId": "8",
+            "mountId": "1792729136449-21pa5",
+            "paperPhase": 3.41226,
+            "file": "390-u04-u05-075.png"
+          },
+          {
+            "requested": 1,
+            "phase": 4,
+            "progress": 1,
+            "scrollTop": 6645,
+            "reading": {
+              "containerId": "47415583-2d75-4b72-9c46-dfd29b47d82a",
+              "activeInstanceId": "5093abd6-eba9-43cc-a54a-ad2eb13648e6",
+              "progress": 0.6105397350422933
+            },
+            "motionId": "8",
+            "mountId": "1792729136449-21pa5",
+            "paperPhase": 4,
+            "file": "390-u04-u05-100.png"
+          }
+        ]
+      },
+      {
+        "from": 5,
+        "to": 6,
+        "samples": [
+          {
+            "requested": 0,
+            "phase": 4,
+            "progress": 1,
+            "scrollTop": 6645,
+            "reading": {
+              "containerId": "47415583-2d75-4b72-9c46-dfd29b47d82a",
+              "activeInstanceId": "5093abd6-eba9-43cc-a54a-ad2eb13648e6",
+              "progress": 0.6105397350422933
+            },
+            "motionId": "9",
+            "mountId": "1792729136449-21pa5",
+            "paperPhase": 4,
+            "file": "390-u05-u06-000.png"
+          },
+          {
+            "requested": 0.25,
+            "phase": 4.26003,
+            "progress": 0.260030986182692,
+            "scrollTop": 6902,
+            "reading": {
+              "containerId": "47415583-2d75-4b72-9c46-dfd29b47d82a",
+              "activeInstanceId": "5093abd6-eba9-43cc-a54a-ad2eb13648e6",
+              "progress": 0.63415278423806
+            },
+            "motionId": "10",
+            "mountId": "1792729136449-21pa5",
+            "paperPhase": 4,
+            "file": "390-u05-u06-025.png"
+          },
+          {
+            "requested": 0.5,
+            "phase": 4.55042,
+            "progress": 0.5504157839820406,
+            "scrollTop": 7189,
+            "reading": {
+              "containerId": "47415583-2d75-4b72-9c46-dfd29b47d82a",
+              "activeInstanceId": "5093abd6-eba9-43cc-a54a-ad2eb13648e6",
+              "progress": 0.6605222204994803
+            },
+            "motionId": "10",
+            "mountId": "1792729136449-21pa5",
+            "paperPhase": 4,
+            "file": "390-u05-u06-050.png"
+          },
+          {
+            "requested": 0.75,
+            "phase": 4.75277,
+            "progress": 0.752774528093085,
+            "scrollTop": 7389,
+            "reading": {
+              "containerId": "47415583-2d75-4b72-9c46-dfd29b47d82a",
+              "activeInstanceId": "5093abd6-eba9-43cc-a54a-ad2eb13648e6",
+              "progress": 0.6788981342705049
+            },
+            "motionId": "10",
+            "mountId": "1792729136449-21pa5",
+            "paperPhase": 4.42,
+            "file": "390-u05-u06-075.png"
+          },
+          {
+            "requested": 1,
+            "phase": 5,
+            "progress": 1,
+            "scrollTop": 7633,
+            "reading": {
+              "containerId": "47415583-2d75-4b72-9c46-dfd29b47d82a",
+              "activeInstanceId": "b1a166da-1cc4-4f39-a8ba-dc5c15bd39ba",
+              "progress": 0.7013167490711549
+            },
+            "motionId": "10",
+            "mountId": "1792729136449-21pa5",
+            "paperPhase": 5,
+            "file": "390-u05-u06-100.png"
+          }
+        ]
+      },
+      {
+        "from": 6,
+        "to": 7,
+        "samples": [
+          {
+            "requested": 0,
+            "phase": 5,
+            "progress": 1,
+            "scrollTop": 7633,
+            "reading": {
+              "containerId": "47415583-2d75-4b72-9c46-dfd29b47d82a",
+              "activeInstanceId": "b1a166da-1cc4-4f39-a8ba-dc5c15bd39ba",
+              "progress": 0.7013167490711549
+            },
+            "motionId": "11",
+            "mountId": "1792729136449-21pa5",
+            "paperPhase": 5,
+            "file": "390-u06-u07-000.png"
+          },
+          {
+            "requested": 0.25,
+            "phase": 5.31833,
+            "progress": 0.3183315203120897,
+            "scrollTop": 8296,
+            "reading": {
+              "containerId": "47415583-2d75-4b72-9c46-dfd29b47d82a",
+              "activeInstanceId": "b1a166da-1cc4-4f39-a8ba-dc5c15bd39ba",
+              "progress": 0.7622329032221016
+            },
+            "motionId": "12",
+            "mountId": "1792729136449-21pa5",
+            "paperPhase": 5,
+            "file": "390-u06-u07-025.png"
+          },
+          {
+            "requested": 0.5,
+            "phase": 5.53391,
+            "progress": 0.5339135001312878,
+            "scrollTop": 8745,
+            "reading": {
+              "containerId": "47415583-2d75-4b72-9c46-dfd29b47d82a",
+              "activeInstanceId": "b1a166da-1cc4-4f39-a8ba-dc5c15bd39ba",
+              "progress": 0.803486829638052
+            },
+            "motionId": "12",
+            "mountId": "1792729136449-21pa5",
+            "paperPhase": 5,
+            "file": "390-u06-u07-050.png"
+          },
+          {
+            "requested": 0.75,
+            "phase": 5.78311,
+            "progress": 0.7831051427285345,
+            "scrollTop": 9264,
+            "reading": {
+              "containerId": "47415583-2d75-4b72-9c46-dfd29b47d82a",
+              "activeInstanceId": "b1a166da-1cc4-4f39-a8ba-dc5c15bd39ba",
+              "progress": 0.8511723258738608
+            },
+            "motionId": "12",
+            "mountId": "1792729136449-21pa5",
+            "paperPhase": 5.48405,
+            "file": "390-u06-u07-075.png"
+          },
+          {
+            "requested": 1,
+            "phase": 6,
+            "progress": 1,
+            "scrollTop": 9716,
+            "reading": {
+              "containerId": "47415583-2d75-4b72-9c46-dfd29b47d82a",
+              "activeInstanceId": "8ad1964b-3a7a-4a92-a59c-259924f7b485",
+              "progress": 0.8927018909963765
+            },
+            "motionId": "12",
+            "mountId": "1792729136449-21pa5",
+            "paperPhase": 6,
+            "file": "390-u06-u07-100.png"
+          }
+        ]
+      }
+    ],
+    "rapid": [
+      {
+        "type": "reverse",
+        "before": {
+          "coffeeUnderlay": "journey-v07",
+          "mountId": "1792729136449-21pa5",
+          "chapter": "4",
+          "phase": "3.22303",
+          "stage": "green",
+          "idle": "false",
+          "reduced": "false",
+          "motionId": "14",
+          "motionProgress": "0.5371713869847697",
+          "motionStatus": "running",
+          "scrollTop": "5269",
+          "paperPhase": "3.00000",
+          "reading": "{\"containerId\":\"47415583-2d75-4b72-9c46-dfd29b47d82a\",\"activeInstanceId\":\"83bca290-3006-4058-af49-a97b1e1fd00d\",\"progress\":0.48411344829764386}",
+          "tick": "220",
+          "size": "390x844",
+          "assetsReady": "6"
+        },
+        "after": {
+          "coffeeUnderlay": "journey-v07",
+          "mountId": "1792729136449-21pa5",
+          "chapter": "4",
+          "phase": "3.22303",
+          "stage": "green",
+          "idle": "false",
+          "reduced": "false",
+          "motionId": "15",
+          "motionProgress": "0",
+          "motionStatus": "running",
+          "scrollTop": "5269",
+          "paperPhase": "3.00000",
+          "reading": "{\"containerId\":\"47415583-2d75-4b72-9c46-dfd29b47d82a\",\"activeInstanceId\":\"83bca290-3006-4058-af49-a97b1e1fd00d\",\"progress\":0.48411344829764386}",
+          "tick": "222",
+          "size": "390x844",
+          "assetsReady": "6"
+        }
+      },
+      {
+        "type": "fast-sequence-2-6-3",
+        "final": {
+          "coffeeUnderlay": "journey-v07",
+          "mountId": "1792729136449-21pa5",
+          "chapter": "3",
+          "phase": "2.00000",
+          "stage": "peel",
+          "idle": "true",
+          "reduced": "false",
+          "motionId": "17",
+          "motionProgress": "1",
+          "motionStatus": "completed",
+          "scrollTop": "3559",
+          "paperPhase": "2.00000",
+          "reading": "{\"containerId\":\"47415583-2d75-4b72-9c46-dfd29b47d82a\",\"activeInstanceId\":\"a8add446-cdcf-4007-824f-f0449a24912a\",\"progress\":0.32699938555538327}",
+          "tick": "258",
+          "size": "390x844",
+          "assetsReady": "6"
+        }
+      }
+    ],
+    "errors": [],
+    "idleStopped": true,
+    "manualTakeover": {
+      "before": {
+        "coffeeUnderlay": "journey-v07",
+        "mountId": "1792729136449-21pa5",
+        "chapter": "5",
+        "phase": "4.33306",
+        "stage": "roast",
+        "idle": "false",
+        "reduced": "false",
+        "motionId": "18",
+        "motionProgress": "0.5832637533595072",
+        "motionStatus": "running",
+        "scrollTop": "7150",
+        "paperPhase": "4.00000",
+        "reading": "{\"containerId\":\"47415583-2d75-4b72-9c46-dfd29b47d82a\",\"activeInstanceId\":\"5093abd6-eba9-43cc-a54a-ad2eb13648e6\",\"progress\":0.6569389173141305}",
+        "tick": "269",
+        "size": "390x844",
+        "assetsReady": "6"
+      },
+      "after": {
+        "coffeeUnderlay": "journey-v07",
+        "mountId": "1792729136449-21pa5",
+        "chapter": "5",
+        "phase": "4.48833",
+        "stage": "roast",
+        "idle": "true",
+        "reduced": "false",
+        "motionId": "18",
+        "motionProgress": "0.6220830340759991",
+        "motionStatus": "cancelled",
+        "scrollTop": "7169",
+        "paperPhase": "4.48833",
+        "reading": "{\"containerId\":\"47415583-2d75-4b72-9c46-dfd29b47d82a\",\"activeInstanceId\":\"5093abd6-eba9-43cc-a54a-ad2eb13648e6\",\"progress\":0.6586846291223778}",
+        "tick": "271",
+        "size": "390x844",
+        "assetsReady": "6"
+      }
+    }
+  }
+]

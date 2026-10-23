@@ -18,6 +18,7 @@ import { componentOutputPresentation, componentOutputSurface } from '../presenta
 import { audioDataSchema, videoDataSchema, type MediaData } from '../../../../components/media'
 import type { FlowDocxPageSize, FlowDocxOrientation } from '../../flowPageBox'
 import { componentDefinitionBuiltinKey } from '../../../../shared/contracts/component-platform/project'
+import { isNativeFlowLayoutGroup } from '../../../../shared/flowNativeLayout'
 
 /** Format consumers receive a captured formal document, never editor or session state. */
 export type ComponentExportDocument = CourseProjectV10 | PublishedCourseV3
@@ -50,6 +51,7 @@ export interface ComponentOutputDiagnostic {
   assetId?: string
 }
 type ProfessionalBlock =
+  | { kind: 'layout'; mode: 'flow' | 'free' }
   | { kind: 'document-block'; data: DocumentBlock }
   | { kind: 'media'; mediaKind: 'audio' | 'video'; data: MediaData }
   | { kind: 'text'; data: TextComponentData }
@@ -59,7 +61,7 @@ type ProfessionalBlock =
   | { kind: 'image'; data: ImageData }
   | { kind: 'shape'; data: ShapeData }
   | { kind: 'static'; label: string; lines: string[]; captureRequired: boolean }
-export type ComponentReadingBlock = ProfessionalBlock & { instance: ComponentInstance; outputOpacity: number; outputInheritedOpacity: number; globalPlane?: 'underlay' | 'overlay'; floatingPlacement?: ComponentFlowPlacement; outputFrame?: ComponentFrame; floatingAnchorFrame?: ComponentFrame }
+export type ComponentReadingBlock = ProfessionalBlock & { instance: ComponentInstance; parentId?: string; outputOpacity: number; outputInheritedOpacity: number; globalPlane?: 'underlay' | 'overlay'; floatingPlacement?: ComponentFlowPlacement; outputFrame?: ComponentFrame; floatingAnchorFrame?: ComponentFrame }
 export interface ComponentReadingProjection {
   title: string
   surface: ComponentSurface
@@ -77,7 +79,7 @@ export function buildComponentReadingProjection(document: ComponentExportDocumen
   const projection: ComponentReadingProjection = { title: surface.title || document.title, surface, blocks: [], diagnostics: [] }
   const diagnostic = (instance: ComponentInstance, code: string, message: string, implementation?: ComponentImplementation) =>
     projection.diagnostics.push({ surfaceId, instanceId: instance.id, code, message, ...(implementation ? { implementation } : {}) })
-  const walk = (id: string, globalPlane?: 'underlay' | 'overlay', parent: AffineMatrix = [1, 0, 0, 1, 0, 0], inheritedPlacement?: ComponentFlowPlacement, inheritedAnchorFrame?: ComponentFrame, inheritedOpacity = 1) => {
+  const walk = (id: string, globalPlane?: 'underlay' | 'overlay', parent: AffineMatrix = [1, 0, 0, 1, 0, 0], inheritedPlacement?: ComponentFlowPlacement, inheritedAnchorFrame?: ComponentFrame, inheritedOpacity = 1, parentId?: string) => {
     const instance = document.instances[id]
     if (!instance) throw new Error(`导出引用的组件不存在：${id}`)
     if (!isComponentVisibleAtSurface(instance, surfaceId)) return
@@ -103,6 +105,9 @@ export function buildComponentReadingProjection(document: ComponentExportDocumen
         block = { kind: 'static', label: instance.name ?? definition.title ?? instance.id, lines: [], captureRequired: true }
         diagnostic(instance, 'container-static-capture', '局部容器保留其实际视口图面，内部布局和镜头不按外层阅读流重新排版。')
       } else switch (key) {
+        case 'guoling.group': block = implementation.kind === 'source'
+          ? { kind: 'static', label: instance.name ?? definition.title ?? instance.id, lines: [], captureRequired: true }
+          : { kind: 'layout', mode: isNativeFlowLayoutGroup(instance, definition) ? 'flow' : 'free' }; break
         case 'guoling.document-block': block = { kind: 'document-block', data: documentBlockOutputAdapter.block(instance.data, instance.id) }; break
         case 'guoling.audio': block = { kind: 'media', mediaKind: 'audio', data: audioDataSchema.parse(instance.data) }; break
         case 'guoling.video': block = { kind: 'media', mediaKind: 'video', data: videoDataSchema.parse(instance.data) }; break
@@ -137,15 +142,15 @@ export function buildComponentReadingProjection(document: ComponentExportDocumen
     }
     if (block) {
       const outputFrame: ComponentFrame | undefined = floatingPlacement && instance.frame ? { ...instance.frame, transform: [...matrix] } : undefined
-      projection.blocks.push({ ...block, instance, outputOpacity, outputInheritedOpacity: inheritedOpacity, ...(globalPlane ? { globalPlane } : {}),
+      projection.blocks.push({ ...block, instance, ...(parentId ? { parentId } : {}), outputOpacity, outputInheritedOpacity: inheritedOpacity, ...(globalPlane ? { globalPlane } : {}),
         ...(floatingPlacement ? { floatingPlacement, ...(floatingAnchorFrame ? { floatingAnchorFrame } : {}), ...(outputFrame ? { outputFrame } : {}) } : {}) })
       if (block.kind === 'static' && !block.captureRequired) diagnostic(instance, 'static-interaction', '打印保留题面／说明和作者初值，不带学生临时答案或互动。')
     }
     // A container owns its descendants' layout and camera. Its actual capture
     // includes them; emitting the same children in the outer flow would duplicate
     // content and discard that local projection.
-    if (instance.container) return
-    instance.childIds?.forEach(child => walk(child, globalPlane, matrix, floatingPlacement, floatingAnchorFrame, outputOpacity))
+    if (instance.container || block?.kind === 'static' && block.captureRequired) return
+    instance.childIds?.forEach(child => walk(child, globalPlane, matrix, floatingPlacement, floatingAnchorFrame, outputOpacity, block ? instance.id : parentId))
   }
   const global = (plane: 'underlay' | 'overlay') => {
     for (const id of document.global[plane]) {

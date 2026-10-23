@@ -18,7 +18,7 @@ export function componentLibraryHost(project: CourseProjectV10, container: Compo
 }
 
 /** Purpose metadata reaches the existing placement/action consumers, rather than becoming a catalog-only label. */
-export function planComponentLibraryUsage(project: CourseProjectV10, entry: ComponentLibraryEntry, options: InsertLibraryOptions): {
+export function planComponentLibraryUsage(project: CourseProjectV10, entry: Pick<ComponentLibraryEntry, 'usage'>, options: InsertLibraryOptions): {
   edits: ComponentEdit[]; container?: ComponentContainer; index?: number; background?: boolean; flowBackground?: boolean; attachmentOnly?: boolean
 } {
   const usage = entry.usage, host = componentLibraryHost(project, options.container)

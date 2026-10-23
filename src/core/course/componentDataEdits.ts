@@ -1,6 +1,4 @@
-import { componentTextRelationshipCleanupEdits } from './componentTextRelationshipEdits'
-export { componentTextRelationshipCleanupEdits } from './componentTextRelationshipEdits'
-import { remapDocumentData, documentComponentDataVersions, type TextRangeProjection } from '../../shared/document/textInteraction'
+import { remapDocumentData, type TextRangeProjection } from '../../shared/document/textInteraction'
 import type { ComponentEdit, CourseProjectV10, JsonValue } from '../../shared/contracts/component-platform'
 import { componentDefinitionBuiltinKey, resolveComponentPresentation } from '../../shared/contracts/component-platform/project'
 import { componentRuleEdits, interactionBehavior, componentInteractionDataSchema } from '../../shared/componentInteractionData'
@@ -147,7 +145,7 @@ export function componentDataEdits(project: CourseProjectV10, target: ComponentD
     if (owner && interactionBehavior(effective, owner)?.id === instance.id)
       return componentRuleEdits(effective, owner, componentInteractionDataSchema.parse(next).rules)
   }
-  return [...fields.map((field): ComponentEdit => ({ type: 'data.set', instanceId: instance.id, ...field })), ...componentTextRelationshipCleanupEdits(effective, instance.id, next, documentComponentDataVersions(project, instance.id, { ...target, data: next }))]
+  return fields.map((field): ComponentEdit => ({ type: 'data.set', instanceId: instance.id, ...field }))
 }
 
 export function componentTableDataEdits(project: CourseProjectV10, target: ComponentDataTarget, edit: TableEdit): ComponentEdit[] {

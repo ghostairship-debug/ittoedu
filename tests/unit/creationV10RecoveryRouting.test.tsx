@@ -37,7 +37,7 @@ it('opens a durable V10 recovery in the course bridge and preserves its saved fi
     const restore = vi.spyOn(restarted.documents, 'restore')
     const save = vi.spyOn(restarted.documents, 'save')
     await bridge.connect(restarted.documents)
-    const activate = vi.fn((documentId: string) => bridge.activate(documentId))
+    const activate = vi.fn((documentId: string, activateIf?: () => boolean) => bridge.activate(documentId, activateIf))
     const unavailable = async (): Promise<never> => { throw new Error('The course must not enter the legacy document file editor') }
     const port: RecoverableDocumentFilePort = { documents: restarted.documents,
       openDocument: unavailable, saveDocument: unavailable, watchDocument: () => () => {} }
@@ -60,7 +60,7 @@ it('opens a durable V10 recovery in the course bridge and preserves its saved fi
       expect(tabs.isCourseActive).toBe(true)
     })
     expect(restore).toHaveBeenCalledExactlyOnceWith(draft.documentId)
-    expect(activate).toHaveBeenCalledExactlyOnceWith(draft.documentId)
+    expect(activate).toHaveBeenCalledExactlyOnceWith(draft.documentId, expect.any(Function))
     expect(tabs.tabs.filter(tab => tab.documentId === draft.documentId)).toEqual([
       expect.objectContaining({ kind: 'course', path: filename, dirty: true }),
     ])

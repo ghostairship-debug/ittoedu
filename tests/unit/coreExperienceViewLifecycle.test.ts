@@ -36,7 +36,7 @@ async function fixture() {
   const api: DocumentHostAPI = { ...documentHostAPI(host), bootstrapCourse: async () => snapshot }
   const bridge = new CourseV10DocumentBridge(); bridges.push(bridge); await bridge.connect(api)
   let records: AuthoringDraftRecovery = { advanced: [], properties: [] }
-  const error = vi.fn(), drain = vi.fn(async () => { await bridge.drain([snapshot.documentId]) })
+  const error = vi.fn(), drain = vi.fn(async (documentId = snapshot.documentId, _mode?: 'save' | 'preserve') => { await bridge.drain([documentId]) })
   const recovery = { preserveFlow: vi.fn(async () => true), suspendFlow: vi.fn(), resumeFlow: vi.fn() }
   const lifecycle = createCourseInputLifecycle(bridge, {
     capture(id) { return { snapshot: bridge.read().documents.find(value => value.documentId === id)!, records: structuredClone(records), flowDraft: null } },
@@ -63,9 +63,13 @@ describe('document input owner and Main close boundary', () => {
       expect(reads).toHaveBeenCalledWith(f.snapshot.documentId)
     } finally { stop() }
   })
-  it('preserves a refused input for its document epoch and refuses Save without moving History', async () => {
+  it('persists input explicitly retained by its owner and does not excuse a genuine failed drain', async () => {
     const f = await fixture(); f.setDraft()
-    f.drain.mockRejectedValue(new Error('正文提交已拒绝'))
+    f.drain.mockImplementation(async (_documentId, mode) => {
+      if (mode === 'save') throw new Error('正文提交已拒绝')
+      // This owner's exact raw is in capture().records; it explicitly accepts
+      // preservation rather than asking Lifecycle to swallow an arbitrary error.
+    })
     const ready = await f.lifecycle.prepare([f.snapshot.documentId], 'preserve')
     expect(f.error.mock.calls).toEqual([])
     expect(ready).toBe(true)
@@ -111,7 +115,9 @@ describe('document input owner and Main close boundary', () => {
   it('offers ordinary Discard for an unfinished property draft while strict Save remains refused', async () => {
     const f = await fixture()
     await f.host.saveToPath(f.snapshot.documentId, path.join(f.root, 'clean.h5lesson'))
-    f.setDraft(); f.drain.mockRejectedValue(new Error('正文提交已拒绝'))
+    f.setDraft(); f.drain.mockImplementation(async (_documentId, mode) => {
+      if (mode === 'save') throw new Error('正文提交已拒绝')
+    })
     const choose = vi.fn(async () => 'save' as 'save' | 'discard'), save = vi.fn(async () => null)
     const close = vi.fn(async (snapshot: typeof f.snapshot, discardDirty: boolean) => {
       await f.host.operate({ type: 'close', documentId: snapshot.documentId, discardDirty,

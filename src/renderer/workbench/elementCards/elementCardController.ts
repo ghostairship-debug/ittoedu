@@ -53,6 +53,8 @@ export interface ElementCardView {
   question: PendingQuestion | null
   approval: PendingApproval | null
   error: string
+  /** A failed read leaves task state intact and can be retried. */
+  refreshError: string
   draft: string
   restrictToSelection: boolean
   closing: boolean
@@ -101,6 +103,7 @@ interface CardRecord {
   catchingUp?: boolean
   catchUpPending?: boolean
   refreshTicket?: number
+  refreshError?: string
 }
 
 /** One card per element: an object, or a document block, of one document. */
@@ -185,7 +188,7 @@ export class ElementCardController {
       key, kind: card.kind, dismissed: Boolean(card.dismissed), anchor: card.anchor, textLost: card.kind === 'text' && card.content === null ? TEXT_LOST : null, documentId: card.documentId, workspaceId: card.workspaceId, epoch: card.capture?.epoch, label: card.label, target: card.target,
       entries: card.entries, projection: card.projection, restrictToSelection: card.restrictToSelection === true,
       busy: Boolean(card.sends.size || card.closing || card.unconfirmed || card.entries.some(entry => entry.state === 'sending' || entry.state === 'queued' || entry.state === 'running')),
-      question: pendingQuestion(card.projection), approval: pendingApproval(card.projection), error: card.error, draft: card.draft, closing: card.closing, unconfirmed: Boolean(card.unconfirmed), ...steps(card.entries),
+      question: pendingQuestion(card.projection), approval: pendingApproval(card.projection), error: card.error, refreshError: card.refreshError ?? '', draft: card.draft, closing: card.closing, unconfirmed: Boolean(card.unconfirmed), ...steps(card.entries),
     }
     this.views.set(key, view)
     return view
@@ -206,7 +209,8 @@ export class ElementCardController {
   }
   dismiss(key: string) {
     const card = this.cards.get(key), view = this.view(key)
-    if (!card || !view || view.busy || view.question || view.approval) return
+    if (!card || !view || card.sends.size || card.closing || card.unconfirmed
+      || (card.kind !== 'element' || !card.refreshError) && (view.busy || view.question || view.approval)) return
     card.dismissed = true; this.notify(); void this.flushDrafts().catch(error => { card.error = String(error); this.notify() })
   }
 
@@ -612,6 +616,7 @@ export class ElementCardController {
     })().catch(() => { card.error = '任务过程暂不可读取，已有内容保留。'; this.notify() }).finally(() => { card.catchingUp = false; if (card.catchUpPending) this.catchUp(card) })
   }
   /** Re-reads the card's submissions, runs and replies after a run changed. */
+  retryRefresh(key: string) { this.refresh(key) }
   private refresh(key: string, changedRunId?: string) {
     const api = this.ports.execution(), card = this.cards.get(key)
     const conversation = card?.conversation
@@ -626,29 +631,46 @@ export class ElementCardController {
       if (latest && latest.revision >= card.conversation.revision) card.conversation = latest
       for (const submission of submissions) {
         const previous = card.entries.find(entry => entry.submissionId === submission.submissionId)
-        if (changedRunId && submission.runId !== changedRunId && previous) continue
+        if (changedRunId && !card.refreshError && submission.runId !== changedRunId && previous) continue
         const run = submission.runId ? await api.run(submission.runId) : null
         if (this.cards.get(key) !== card || card.refreshTicket !== ticket) return
         this.applySubmission(card, submission, run ?? undefined, false)
       }
+      card.refreshError = undefined
       this.notify()
-      await this.readChanges(card)
-    })().catch(() => undefined)
+      await this.readChanges(card, ticket, conversation.conversationId)
+    })().catch(() => {
+      if (this.cards.get(key) !== card || card.refreshTicket !== ticket) return
+      card.refreshError = '任务状态暂不可读取，显示的是上次读取结果；任务可能仍在运行。'
+      this.notify()
+    })
   }
   /** Asks Main what each ended request changed; Main records it just after the run ends, so a pending answer is asked again. */
-  private async readChanges(card: CardRecord, attempt = 0): Promise<void> {
+  private async readChanges(card: CardRecord, ticket: number, conversationId: string, attempt = 0): Promise<void> {
     const api = this.ports.execution()
     if (!api?.elementChange) return
-    let pending = false
-    for (const entry of card.entries) {
-      if (!TERMINAL.has(entry.state) || entry.change && entry.change.state !== 'pending') continue
-      const change = await api.elementChange(entry.submissionId)
-      pending ||= change.state === 'pending'
-      if (this.latestTextEntry(card)?.submissionId === entry.submissionId) this.followText(card, change)
-      this.patchEntry(card, entry.submissionId, { change }, false)
+    const current = () => this.cards.get(card.key) === card && card.refreshTicket === ticket
+      && card.conversation?.conversationId === conversationId && this.ports.execution() === api
+    if (!current()) return
+    try {
+      let pending = false
+      for (const entry of card.entries) {
+        if (!TERMINAL.has(entry.state) || entry.change && entry.change.state !== 'pending') continue
+        const change = await api.elementChange(entry.submissionId)
+        if (!current()) return
+        const latest = card.entries.find(value => value.submissionId === entry.submissionId)
+        if (!latest || latest.change && latest.change.state !== 'pending') continue
+        pending ||= change.state === 'pending'
+        if (this.latestTextEntry(card)?.submissionId === entry.submissionId) this.followText(card, change)
+        this.patchEntry(card, entry.submissionId, { change }, false)
+      }
+      this.notify()
+      if (pending && attempt < 20) setTimeout(() => { void this.readChanges(card, ticket, conversationId, attempt + 1) }, 150)
+    } catch {
+      if (!current()) return
+      card.refreshError = '修改结果暂不可读取，任务和已有内容保留；请重试读取任务状态。'
+      this.notify()
     }
-    this.notify()
-    if (pending && attempt < 20 && this.cards.get(card.key) === card) setTimeout(() => { void this.readChanges(card, attempt + 1).catch(() => undefined) }, 150)
   }
   private applySubmission(card: CardRecord, submission: ExecutionSubmissionRecord, run?: ExecutionRunRecord | null, notify = true) {
     const state: ElementCardEntryState = submission.state === 'failed' ? 'failed' : submission.state === 'cancelled' ? 'cancelled'

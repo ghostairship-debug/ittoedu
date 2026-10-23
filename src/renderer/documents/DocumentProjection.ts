@@ -3,6 +3,7 @@ import type { DocumentCommand, DocumentDriver, DocumentHostEvent, DocumentModel,
 import { applyDocumentModelUpdate } from '../../core/documents/documentStateEffects'
 import { MarkdownDriver } from '../../core/drivers/MarkdownDriver'
 import { TextDriver } from '../../core/drivers/TextDriver'
+import { retainDocumentResourceBytes } from '../../core/drivers/resources'
 import { captureComponentOperation, componentValueAt, ComponentOperationConflict, equalComponentValue } from '../../core/drivers/courseV10Operations'
 import type { ComponentAppliedChanges, ComponentEdit, ComponentOperationBatch } from '../../shared/contracts/component-platform/operations'
 import type { JsonValue } from '../../shared/contracts/component-platform/project'
@@ -91,6 +92,7 @@ export class DocumentProjection {
   private attachment = 0
   private refresh?: Promise<void>
   private refreshRequested = false
+  private connectionRecovery?: Promise<void>
 
   constructor(private readonly api: DocumentHostAPI, readonly documentId: string, private readonly driver?: DocumentDriver) {}
 
@@ -141,14 +143,27 @@ export class DocumentProjection {
     if (this.ownOperations.has(operationId ?? '')) this.observedOwnRevision = Math.max(this.observedOwnRevision, snapshot.revision)
     const own = this.queue.find(entry => entry.operationId === operationId)
     if (own) own.appliedRevision = snapshot.revision
-    // A Session revision identifies immutable content. A read/save-state refresh
-    // must not replace unchanged resource buffers and restart their consumers.
-    const sameModel = previous?.epoch === snapshot.epoch && previous.revision === snapshot.revision
+    // Content revisions do not cover save-prepared resource updates. An accepted
+    // delta (or a newer complete head) must not be replaced with the old model.
+    const sameContent = previous?.epoch === snapshot.epoch && previous.revision === snapshot.revision
       && previous.model.kind === snapshot.model.kind
+    const sameHead = sameContent && previous.sequence !== undefined && previous.sequence === snapshot.sequence
+    let model = snapshot.model
+    let sameModel = sameContent && (model === previous.model || sameHead)
+    if (sameContent && !sameModel) {
+      const resources = retainDocumentResourceBytes(model.resources, previous.model.resources)
+      const sameFiles = (left: Record<string, Uint8Array>, right: Record<string, Uint8Array>) =>
+        Object.keys(left).length === Object.keys(right).length && Object.entries(left).every(([key, bytes]) => bytes === right[key])
+      const sameResources = sameFiles(resources.assets, previous.model.resources.assets)
+        && Object.keys(resources.components).length === Object.keys(previous.model.resources.components).length
+        && Object.entries(resources.components).every(([key, files]) => sameFiles(files, previous.model.resources.components[key] ?? {}))
+      sameModel = sameResources
+      model = sameResources ? previous.model : { ...model, resources }
+    }
     const { model: _model, ...metadata } = snapshot
     if (!sameModel) ++this.projectionVersion
-    this.update({ committed: sameModel ? { ...structuredClone(metadata), model: previous.model }
-      : owned ? snapshot : structuredClone(snapshot) })
+    this.update({ committed: sameModel && previous ? { ...structuredClone(metadata), model: previous.model }
+      : { ...(owned ? metadata : structuredClone(metadata)), model: owned || sameContent ? model : structuredClone(model) } })
     this.consumeChanges(operationId, snapshot.revision, appliedChanges)
     if (snapshot.model.kind === 'course-v10' && (!this.queue.length || snapshot.epoch === this.expectedEpoch)) {
       if (this.queue.length || this.composition) void this.scheduleComponentRebase()
@@ -371,9 +386,14 @@ export class DocumentProjection {
         const receipt = await this.api.lookup(this.documentId, entry.operationId)
         if (receipt && successful(receipt)) this.acknowledge(entry, receipt)
         else if (receipt) { this.refuse(entry, receipt); break }
-        else if (entry.status === 'unknown') entry.status = 'queued'
+        // Missing is not proof that dispatch did not commit. Keep the original
+        // unknown envelope; reconnect must never turn it into a replay.
       }
       const current = this.state.committed!
+      if (this.queue.some(entry => entry.status === 'unknown' || entry.status === 'sending')) {
+        this.update({ connected: true })
+        return current
+      }
       if (current.model.kind === 'course-v10' && current.epoch === this.expectedEpoch) {
         this.expectedRevision = current.revision
         const retainedRejection = this.queue.some(entry => entry.status === 'rejected') || this.state.error?.kind === 'rejected'
@@ -640,11 +660,31 @@ export class DocumentProjection {
   }
   private async flushInputForPrecommit(): Promise<void> {
     if (this.closeSuspended) throw new Error('正在关闭文档，输入已保留')
+    if (this.state.error?.kind === 'disconnected' && !this.queue.length) await this.recoverConnectionIfIdle()
     if (this.previewTail) await this.previewTail
     if (this.composition && !this.composition.active && !this.state.error) await this.endComposition()
     while (this.worker) await this.worker
     if (this.state.error || this.queue.length || this.composition || !this.state.committed || !this.state.connected)
       throw new Error(this.state.error?.message ?? (this.composition ? '文本组合输入尚未确认' : '文档输入尚未确认'))
+  }
+  /** A failed read with no outstanding input is a connection problem, not an
+   * operation to retry. Keep its existing subscription and only refresh facts. */
+  async recoverConnectionIfIdle(): Promise<void> {
+    if (this.connectionRecovery) return this.connectionRecovery
+    const error = this.state.error
+    if (this.disposed || this.closeSuspended || error?.kind !== 'disconnected' || this.queue.length
+      || this.composition || this.state.retainedComposition || this.state.retainedDraftOnly) return
+    const attachment = this.attachment, epoch = this.state.committed?.epoch
+    const task = (async () => {
+      const snapshot = await this.api.read(this.documentId)
+      if (this.disposed || this.closeSuspended || attachment !== this.attachment) return
+      if (snapshot.epoch !== epoch) throw new Error('原文档会话已改变，请重新打开文档')
+      this.accept(snapshot, undefined, false, undefined, true)
+      if (this.state.error === error && !this.queue.length && !this.composition)
+        this.update({ connected: true, error: null })
+    })()
+    this.connectionRecovery = task
+    try { await task } finally { if (this.connectionRecovery === task) this.connectionRecovery = undefined }
   }
   /** The precommit owner reads the same authority while its own gate is held. */
   async drainForPrecommit(): Promise<DocumentSnapshot> {
@@ -660,7 +700,7 @@ export class DocumentProjection {
   }
   /** Inspect only this input's original operation. Unlike reattach, this never
    * requeues or starts other input, and a missing unknown receipt stays unknown. */
-  async queryInputResolution(operationId: string): Promise<DocumentInputOperationResolution> {
+  async queryInputResolution(operationId: string, options: { refresh?: boolean } = {}): Promise<DocumentInputOperationResolution> {
     if (this.previewTail) await this.previewTail
     while (this.worker) await this.worker
     const epoch = this.state.committed?.epoch, attachment = this.attachment
@@ -679,6 +719,11 @@ export class DocumentProjection {
     if (receipt && (receipt.operationId !== operationId || receipt.documentId !== this.documentId)) throw new Error('文档操作回执身份不匹配')
     // Record the definite outcome even if refreshing the authoritative head fails.
     if (entry && receipt && !successful(receipt)) this.refuse(entry, receipt)
+    // Ending a certified zero-write proposal does not depend on reading another
+    // snapshot. A successful/unknown operation still follows the normal lookup
+    // and authoritative-head confirmation before its ACK can be consumed.
+    if (options.refresh === false && (unsubmitted || receipt && !successful(receipt)))
+      return unsubmitted ? { status: 'unsubmitted' } : { status: 'settled', result: receipt! }
     const snapshot = await this.api.read(this.documentId)
     assertCurrent()
     if (snapshot.documentId !== this.documentId || snapshot.epoch !== epoch
@@ -716,8 +761,10 @@ export class DocumentProjection {
     this.queue.splice(index, 1)
     ++this.projectionVersion
     this.update({ error: this.queue.length ? { kind: 'conflict', code: 'pending-input', operationId: this.queue[0]!.operationId,
-      message: '其他未确认输入仍保留，请处理后继续。' } : null })
-    await this.scheduleComponentRebase()
+      message: '其他未确认输入仍保留，请处理后继续。' } : !this.state.connected
+      ? { kind: 'disconnected', code: 'snapshot-unavailable', message: '当前文档暂未连接，请重试读取；原输入仍保留。' } : null,
+      ...(!this.queue.length && !this.composition ? { draft: null, retainedDraftOnly: false } : {}) })
+    if (this.state.committed?.model.kind === 'course-v10') await this.scheduleComponentRebase()
   }
 
   /** Explicit user resolution only; never called by an incoming event or reconnect. */

@@ -48,7 +48,7 @@ it('CA177 focus read and close ACK preserve the current tab chosen during their 
   expect(result.current.tabs.some(tab => tab.id === a)).toBe(false)
   const readGate = deferred(), readStarted = deferred(), originalRead = h.api.read
   h.api.read = async id => { readStarted.resolve(); await readGate.promise; return originalRead(id) }
-  let focusing!: Promise<void>
+  let focusing!: Promise<void | boolean>
   act(() => { focusing = result.current.focusDocument(c) }); await readStarted.promise
   await act(async () => { result.current.setActiveTab(b); await Promise.resolve() })
   await act(async () => { readGate.resolve(); await focusing })

@@ -8,7 +8,8 @@ type RecoveryItem = { snapshot: DocumentRecoverySummary; restored: boolean; erro
 
 export interface WorkspaceRecoveryPanelProps {
   api: RecoveryAPI
-  onRestored(documentId: string): Promise<void>
+  onRestored(documentId: string): Promise<void | boolean>
+  captureNavigationIdentity?(): string
 }
 
 function nameOf(snapshot: DocumentRecoverySummary): string {
@@ -29,7 +30,7 @@ function message(error: unknown, fallback: string): string {
 }
 
 /** Main's recovery journals are the only source of draft discovery and mutation. */
-export function WorkspaceRecoveryPanel({ api, onRestored }: WorkspaceRecoveryPanelProps) {
+export function WorkspaceRecoveryPanel({ api, onRestored, captureNavigationIdentity }: WorkspaceRecoveryPanelProps) {
   const [items, setItems] = useState<RecoveryItem[]>([])
   const [loadError, setLoadError] = useState<string | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
@@ -38,6 +39,7 @@ export function WorkspaceRecoveryPanel({ api, onRestored }: WorkspaceRecoveryPan
   const inFlight = useRef<string | null>(null)
   const request = useRef(0)
   const operationGeneration = useRef(0)
+  const navigationReader = useRef(captureNavigationIdentity); navigationReader.current = captureNavigationIdentity
 
   const refresh = useCallback(async () => {
     const ticket = ++request.current
@@ -77,9 +79,16 @@ export function WorkspaceRecoveryPanel({ api, onRestored }: WorkspaceRecoveryPan
     return () => { window.removeEventListener('pointerdown', dismiss); window.removeEventListener('keydown', escape) }
   }, [open])
 
-  const navigate = async (documentId: string) => {
+  const navigationIsCurrent = (identity: string | undefined) => identity === undefined || navigationReader.current?.() === identity
+  const navigate = async (documentId: string, identity: string | undefined) => {
+    if (!navigationIsCurrent(identity)) return
     try {
-      await onRestored(documentId)
+      const navigation = onRestored(documentId)
+      // The existing focus owner claims its tab ticket as it starts. A later
+      // user navigation must not consume this row's manual-open opportunity.
+      const requested = navigationReader.current?.()
+      const focused = await navigation
+      if (focused === false || !navigationIsCurrent(requested)) return
       setItems(current => current.filter(item => item.snapshot.documentId !== documentId))
     } catch (error) {
       setItems(current => current.map(item => item.snapshot.documentId === documentId
@@ -89,20 +98,22 @@ export function WorkspaceRecoveryPanel({ api, onRestored }: WorkspaceRecoveryPan
 
   const restore = async (documentId: string, alreadyRestored: boolean, mode?: 'unbound' | 'saved') => {
     if (inFlight.current) return
+    const navigation = navigationReader.current?.()
     inFlight.current = documentId; operationGeneration.current++; setBusy(documentId)
     try {
       if (!alreadyRestored) {
         const snapshot = mode ? await api.restore(documentId, mode) : await api.restore(documentId)
         if (mode === 'saved' || snapshot.documentId !== documentId) {
           operationGeneration.current++
-          setItems(current => current.filter(item => item.snapshot.documentId !== documentId))
-          await onRestored(snapshot.documentId)
+          setItems(current => current.filter(item => item.snapshot.documentId !== snapshot.documentId || item.snapshot.documentId === documentId)
+            .map(item => item.snapshot.documentId === documentId ? { snapshot: recoverySummary(snapshot), restored: true, error: null } : item))
+          await navigate(snapshot.documentId, navigation)
           return
         }
         operationGeneration.current++
         setItems(current => current.map(item => item.snapshot.documentId === documentId ? { ...item, restored: true, error: null } : item))
       }
-      await navigate(documentId)
+      await navigate(documentId, navigation)
     } catch (error) {
       setItems(current => current.map(item => item.snapshot.documentId === documentId
         ? { ...item, error: `恢复失败：${message(error, '请稍后重试')}` } : item))

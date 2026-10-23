@@ -1,5 +1,5 @@
 import { componentSurface } from '../../shared/contracts/component-platform/project'
-import { MoreHorizontal, Plus } from 'lucide-react'
+import { Globe2, MoreHorizontal, Plus, Trash2 } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState, type DragEvent as ReactDragEvent, type MouseEvent as ReactMouseEvent } from 'react'
 import type { ComponentSurface, CourseProjectV10 } from '../../shared/contracts/component-platform/project'
 import type { CapturedComponentOperation, CapturedCourseTarget } from '../documents/CourseV10DocumentBridge'
@@ -12,12 +12,17 @@ import { ConfirmDialog } from './ConfirmDialog'
 import { buildCourseTreeView, type CourseTreeNode } from './ScenePanel'
 import { SceneStateStrip, SceneStateButtons } from './SceneStateStrip'
 import { SceneThumbnail } from './SceneThumbnail'
+import { changeCourseEditingScope } from './courseEditingScope'
 import './bottomSceneNavigator.css'
 
 type NavigatorCard = { key: string; page: CourseTreeNode; number: number } & (
   | { kind: ComponentSurface['kind']; surface: Readonly<ComponentSurface> }
   | { kind: 'program'; surface?: never }
 )
+const deleteScopeName = (card: NavigatorCard) => card.kind === 'slide' ? '整个演示场景'
+  : card.kind === 'flow' ? '流式页' : card.kind === 'spatial' ? '无限画布' : '整个程序'
+const deleteScopeContents = (card: NavigatorCard) => card.kind === 'slide' ? '页内全部对象和命名状态'
+  : card.kind === 'flow' ? '全部正文、对象和局部区域' : card.kind === 'spatial' ? '全部对象和镜头' : '全部程序内容'
 /** The rail consumes the same actual root directory as the tree and runtime navigation. */
 export function buildBottomSceneCards(project: CourseProjectV10): NavigatorCard[] {
   return buildCourseTreeView(project).pages.map((page, index) => {
@@ -54,6 +59,7 @@ function RenameField({ label, value, onCommit, onCancel }: { label: string; valu
 export function BottomSceneNavigator({ documentId }: { documentId: string | null }) {
   const view = useEditorStore(state => state.courseView)
   const editingScope = useEditorStore(state => state.editingScope)
+  const canvasMode = useEditorStore(state => state.canvasMode)
   const spatialViews = useEditorStore(state => state.spatialViewStates)
   const track = useRef<HTMLOListElement>(null)
   const cards = useMemo(() => view.project ? buildBottomSceneCards(view.project) : [], [view.project])
@@ -70,21 +76,23 @@ export function BottomSceneNavigator({ documentId }: { documentId: string | null
     if (state.courseView.activeDocumentId !== documentId) { state.setError('文档已切换，请在当前 果铃工程重新选择页面。'); return null }
     return state
   }
-  const goTo = (node: CourseTreeNode) => {
+  const goTo = async (node: CourseTreeNode) => {
     const state = liveStore()
     const project = state?.courseView.project
     if (!state || !project || !project.rootIds.includes(node.surfaceId) && !componentSurface(project, node.surfaceId)) return
-    if (node.kind === 'container') {
-      if (node.rootInstanceId && state.courseView.rootInstanceId !== node.rootInstanceId) state.courseBridge.selectSurface(documentId, node.rootInstanceId)
-      state.courseBridge.enterContainer(documentId, node.surfaceId)
+    await state.navigateCourseView(() => {
+      if (node.kind === 'container') {
+        if (node.rootInstanceId && state.courseBridge.read().rootInstanceId !== node.rootInstanceId) state.courseBridge.selectSurface(documentId, node.rootInstanceId)
+        state.courseBridge.enterContainer(documentId, node.surfaceId)
+        state.setEditingScope('scene')
+        return
+      }
+      state.courseBridge.selectSurface(documentId, node.surfaceId)
       state.setEditingScope('scene')
-      return
-    }
-    state.courseBridge.selectSurface(documentId, node.surfaceId)
-    state.setEditingScope('scene')
-    if (node.instanceId) state.activateFlowHeading(node.surfaceId, node.instanceId)
-    else if (node.frameId) state.activateSpatialCameraFrame(node.surfaceId, node.frameId)
-    else if (node.kind === 'spatial-page') state.activateSpatialCameraFrame(node.surfaceId, null)
+      if (node.instanceId) state.activateFlowHeading(node.surfaceId, node.instanceId)
+      else if (node.frameId) state.activateSpatialCameraFrame(node.surfaceId, node.frameId)
+      else if (node.kind === 'spatial-page') state.activateSpatialCameraFrame(node.surfaceId, null)
+    })
   }
   const moveSurface = (surfaceId: string, toIndex: number) => {
     const ids = [...project.rootIds], from = ids.indexOf(surfaceId)
@@ -97,14 +105,10 @@ export function BottomSceneNavigator({ documentId }: { documentId: string | null
         .catch(error => state.setError(error instanceof Error ? error.message : String(error)))
     else void state.reorderCourseSurfaces(ids)
   }
-  const activateResult = (result: { ok: boolean; activatedLocationId?: string }) => {
-    const state = liveStore()
-    if (state && result.ok && result.activatedLocationId) { state.courseBridge.selectSurface(documentId, result.activatedLocationId); state.setEditingScope('scene') }
-  }
   const addPage = (kind: NewPageKind, surfaceId?: string) => {
     const state = liveStore()
     if (!state) return
-    void state.addCourseContent(kind, { surfaceId: surfaceId ?? view.surfaceId ?? undefined }).then(activateResult)
+    void state.addCourseContent(kind, { surfaceId: surfaceId ?? view.surfaceId ?? undefined })
   }
   const requestDelete = (card: NavigatorCard) => {
     const state = liveStore()
@@ -132,7 +136,7 @@ export function BottomSceneNavigator({ documentId }: { documentId: string | null
     ]
     return pageCardCommands({ kind: card.kind === 'slide' ? 'scene' : 'page', index, count: cards.length, deleteBlocked: project.rootIds.length <= 1 ? LAST_COURSE_PAGE_REASON : null }, {
       addScene: () => addPage('scene', card.key),
-      duplicate: () => { const state = liveStore(); if (state) void state.duplicateCourseLocation(card.key).then(activateResult) },
+      duplicate: () => { const state = liveStore(); if (state) void state.duplicateCourseLocation(card.key) },
       rename: () => setRenaming(card.key), remove: () => requestDelete(card), move: delta => moveSurface(card.key, index + delta),
     })
   }
@@ -170,7 +174,15 @@ export function BottomSceneNavigator({ documentId }: { documentId: string | null
     onDragEnd: () => setDrag(null),
     'data-drop-target': drag?.over === card.key || undefined,
   })
-  return <nav className="bottom-scene-nav" aria-label="场景与页面导航"><ol ref={track} className="bottom-scene-nav__track">
+  const globalEditing = editingScope === 'global'
+  return <nav className="bottom-scene-nav" aria-label="场景与页面导航">
+    <button type="button" className="bottom-scene-nav__scope" aria-label={globalEditing ? '返回当前内容' : '全局层（整课）'}
+      aria-pressed={globalEditing} disabled={canvasMode === 'run'} title={canvasMode === 'run' ? '请先返回编辑模式' : globalEditing ? '返回进入全局层前的当前内容' : '编辑跨页面共用的全局元素'}
+      onClick={() => { if (liveStore()) void changeCourseEditingScope(globalEditing ? 'scene' : 'global') }}>
+      <Globe2 size={20} aria-hidden="true" /><strong>{globalEditing ? '返回当前内容' : '全局层'}</strong>
+      <small>{globalEditing ? '正在编辑全局层' : `${project.global.underlay.length + project.global.overlay.length} 个整课元素`}</small>
+    </button>
+    <ol ref={track} className="bottom-scene-nav__track">
     {cards.map(card => {
       const active = (view.rootInstanceId ?? view.surfaceId) === card.key && editingScope !== 'global'
       const localActive = view.surfaceId === card.key && editingScope !== 'global'
@@ -182,10 +194,14 @@ export function BottomSceneNavigator({ documentId }: { documentId: string | null
         data-current-card={active} data-kind={card.kind} data-testid={(card.kind === 'slide' ? 'bottom-scene-' : card.kind === 'program' ? 'bottom-program-' : 'bottom-page-') + card.key}
         onClick={event => { if (!(event.target as Element).closest('button, input')) goTo(card.page) }}
         onContextMenu={event => openMenu(event, card.kind === 'program' ? '程序操作' : '页面操作', cardCommands(card))} {...dragProps(card)}>
-        <button type="button" className="bottom-scene-card__main" aria-current={active ? 'page' : undefined} aria-label={(card.kind === 'program' ? '程序 ' : '页面 ') + card.number + '：' + card.page.label} onClick={() => goTo(card.page)}>
+        <div className="bottom-scene-card__header"><button type="button" className="bottom-scene-card__main" aria-current={active ? 'page' : undefined} aria-label={(card.kind === 'program' ? '程序 ' : '页面 ') + card.number + '：' + card.page.label} onClick={() => goTo(card.page)}>
           {card.kind === 'slide' ? <SceneThumbnail locationId={card.key} /> : <span className="bottom-scene-card__surface-mark" aria-hidden="true">{card.kind === 'flow' ? '文' : card.kind === 'program' ? '程' : '空'}</span>}
           <span className="bottom-scene-card__identity"><small>{String(card.number).padStart(2, '0')} · {card.kind === 'slide' ? '演示页' : card.kind === 'flow' ? '流式布局' : card.kind === 'program' ? '程序' : '无限画布'}</small>{!renamingCard && <strong title={card.page.label}>{card.page.label}</strong>}</span>
-        </button>
+        </button><button type="button" className="bottom-scene-card__delete" aria-label={`删除${deleteScopeName(card)}：${card.page.label}`}
+          title={project.rootIds.length <= 1 ? LAST_COURSE_PAGE_REASON : `删除${deleteScopeName(card)}及${deleteScopeContents(card)}`}
+          disabled={canvasMode === 'run' || project.rootIds.length <= 1} onClick={() => requestDelete(card)}>
+          <Trash2 size={12} aria-hidden="true" /><span>{card.kind === 'program' ? '删除程序' : '删除整页'}</span>
+        </button></div>
         {renamingCard && <RenameField label={card.kind === 'program' ? '程序名称' : '页面名称'} value={card.page.label} onCommit={name => { setRenaming(null); renameCard(card, name) }} onCancel={() => setRenaming(null)} />}
         {card.kind === 'slide' ? <SceneStateButtons documentId={documentId} surfaceId={card.key} compact /> : <div className="bottom-scene-card__children" role="group" aria-label={card.page.label + '的' + (card.kind === 'flow' ? '标题与章节' : card.kind === 'program' ? '容器' : '镜头')}>
           {card.kind === 'spatial' && <>
@@ -215,7 +231,7 @@ export function BottomSceneNavigator({ documentId }: { documentId: string | null
       menu.open({ x: rect.left, y: rect.top - 4, above: true }, '新建页面', newPageCommands(kind => addPage(kind)))
     }}><Plus size={18} aria-hidden="true" /></button></li>
   </ol>{menu.element}
-  <ConfirmDialog open={pendingDelete !== null} title={pendingDelete?.card.kind === 'program' ? '删除程序？' : '删除页面？'} message={pendingDelete ? '“' + pendingDelete.card.page.label + '”及其中的全部对象将被删除。此操作可以撤销。' : ''} confirmLabel={pendingDelete?.card.kind === 'program' ? '删除程序' : '删除页面'} danger onCancel={() => setPendingDelete(null)} onConfirm={() => {
+  <ConfirmDialog open={pendingDelete !== null} title={pendingDelete ? `删除${deleteScopeName(pendingDelete.card)}？` : '删除整页？'} message={pendingDelete ? `“${pendingDelete.card.page.label}”的${deleteScopeContents(pendingDelete.card)}将被删除。此操作可以撤销。` : ''} confirmLabel={pendingDelete?.card.kind === 'program' ? '删除程序' : '删除整页'} danger onCancel={() => setPendingDelete(null)} onConfirm={() => {
     const pending = pendingDelete; setPendingDelete(null)
     if (pending) {
       const state = liveStore()

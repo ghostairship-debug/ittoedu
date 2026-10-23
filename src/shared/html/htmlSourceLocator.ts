@@ -119,12 +119,14 @@ function locateTarget(source: string, report: HtmlPreviewTargetReport, identity:
   read: () => ReturnType<typeof prepareSource>): HtmlPreviewResolvedTarget {
   if (report.scriptCreated) return rejection(report.handle, 'script-created')
   const parsed = read(), { scan, index } = parsed
-  if (scan.diagnostics.length) return rejection(report.handle, 'not-unique')
   const tree = parsed.tree()
   const target = tree && pathToSource(tree, report.domPath)
   if (!target || target.sourceIndex === null) return rejection(report.handle, 'not-unique')
   const selected = target.sourceIndex
   const element = index.elements[selected]!
+  // A malformed later sibling does not erase the parser-proven source span
+  // of this element. Only diagnostics overlapping this target invalidate it.
+  if (scan.diagnostics.some(value => value.span.start < element.full.end && value.span.end > element.full.start)) return rejection(report.handle, 'not-unique')
   if (!element.endTag && !element.voidElement && !element.selfClosing) return rejection(report.handle, 'not-unique')
   if (renderedSectionOrder(target) !== report.sectionOrder) return rejection(report.handle, 'not-unique')
   let valueSpan: { start: number; end: number } | null = null

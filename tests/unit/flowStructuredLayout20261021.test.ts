@@ -206,9 +206,9 @@ it('reads current container observations without storing author state and stretc
   position = { activeInstanceId: 'last', progress: 1 }
   expect(navigation.read().reading).toEqual({ containerId: 'flow', ...position })
   const hud = createTeacherControllerHudGeometry({ referenceSize: { width: 1280, height: 720 },
-    viewportRect: { x: 0, y: 0, width: 390, height: 844 }, controllerInsets: { right: 30, bottom: 0 } })
+    viewportRect: { x: 0, y: 0, width: 390, height: 844 } })
   const display = projectTeacherControllerInstances(project, hud, navigation)
-  expect(display.instances.nav.frame).toEqual({ width: 360, height: 48, transform: [1, 0, 0, 1, 0, 0] })
+  expect(display.instances.nav.frame).toEqual({ width: 390, height: 48, transform: [1, 0, 0, 1, 0, 0] })
   expect(project).toEqual(before)
   off()
   expect(navigation.read().reading).toBeUndefined()

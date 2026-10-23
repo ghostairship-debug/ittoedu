@@ -7,6 +7,7 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import path from 'node:path'
 import { tmpdir } from 'node:os'
 import { ComponentSourceEditor, captureComponentSourceSession, componentSourceSessionEdits, independentComponentSourceEdits } from '../../src/renderer/components/ComponentSourceEditor'
+import { courseDraftLifecycle } from '../../src/renderer/authoring/courseDraftLifecycle'
 import { CourseV10DocumentBridge } from '../../src/renderer/documents/CourseV10DocumentBridge'
 import { DocumentHostService } from '../../src/main/workbench/DocumentHostService'
 import type { CourseProjectV10 } from '../../src/shared/contracts/component-platform'
@@ -153,6 +154,15 @@ it('waits for ACK and keeps a rejected shared draft on its original document acr
   expect(decode(h.bridge.captureTarget().resources.components['shared-files']['helper.js'])).toBe(helper)
   await h.act(async () => { await h.bridge.activate(other.documentId); h.bridge.selectInstances(other.documentId, ['b'], 'page') })
   await h.act(async () => { reject(new Error('ACK rejected')) })
+  // The failed input remains owned by A; it must not occupy B's source editor.
+  await h.waitFor(() => expect(h.screen.getByRole('textbox', { name: '组件实现源码' })).toHaveValue(source))
+  expect(h.screen.getByRole('button', { name: '保存实现' })).not.toBeDisabled()
+  expect(courseDraftLifecycle(h.bridge).preserve(h.initial.documentId)).toEqual([expect.objectContaining({
+    documentId: before.documentId, epoch: before.epoch, payload: expect.objectContaining({
+      value: expect.objectContaining({ files: expect.objectContaining({ 'helper.js': expect.objectContaining({ text: changed }) }) }),
+    }),
+  })])
+  await h.act(async () => { await h.bridge.activate(h.initial.documentId); h.bridge.selectInstances(h.initial.documentId, ['a'], 'page') })
   await h.waitFor(() => expect(h.screen.getByText(/未应用：ACK rejected；源码草稿已保留/)).toBeInTheDocument())
   expect((h.screen.getByRole('textbox', { name: '组件实现源码' }) as HTMLTextAreaElement).value).toBe(changed)
   expect(apply.mock.calls[0][0]).toMatchObject({ documentId: before.documentId, epoch: before.epoch })
@@ -164,6 +174,7 @@ it('waits for ACK and keeps a rejected shared draft on its original document acr
   h.fireEvent.click(h.screen.getByRole('button', { name: '载入当前基线并保留草稿' }))
   expect((h.screen.getByRole('textbox', { name: '组件实现源码' }) as HTMLTextAreaElement).value).toBe(changed)
   h.fireEvent.click(h.screen.getByRole('button', { name: '保存实现' }))
+  await h.act(async () => { await h.bridge.activate(other.documentId); h.bridge.selectInstances(other.documentId, ['b'], 'page') })
   await h.waitFor(() => expect(decode(h.bridge.read().views.find(view => view.documentId === h.initial.documentId)!.model.resources.components['shared-files']['helper.js'])).toBe(changed))
   await h.bridge.drain([h.initial.documentId])
   expect(h.bridge.read().activeDocumentId).toBe(other.documentId)

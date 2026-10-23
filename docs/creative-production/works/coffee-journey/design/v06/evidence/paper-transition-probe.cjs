@@ -1,0 +1,33 @@
+const fs=require('fs'),vm=require('vm'),assert=require('assert/strict'),crypto=require('crypto');
+const source=fs.readFileSync(process.argv[2]||require('node:path').join(__dirname,'../background-runtime.js'),'utf8');
+assert(source.includes('Math.max(1,Math.min(duration,Number(instance.data.paperDurationMs)||180))'));
+const candidate=source.replace('graphic(current,q);','root.dataset.current=JSON.stringify(current);graphic(current,q);').replace('export default','module.exports =');
+function setup(paperDurationMs){
+ let now=10000,id=0,cleanup,sub,off=0;const queue=new Map(),listeners={},grad={addColorStop(){}};
+ const ctx=new Proxy({createImageData:(w,h)=>({data:new Uint8ClampedArray(w*h*4)}),createPattern:()=>({}),createLinearGradient:()=>grad,createRadialGradient:()=>grad,globalAlpha:1},{get:(o,k)=>k in o?o[k]:()=>{}});
+ const media={matches:false,addEventListener:(n,f)=>listeners.media=f,removeEventListener:()=>delete listeners.media};
+ const doc={defaultView:{devicePixelRatio:1,matchMedia:()=>media},hidden:false,createElement:()=>({style:{},getContext:()=>ctx,setAttribute(){}}),addEventListener:(n,f)=>listeners[n]=f,removeEventListener:n=>delete listeners[n]};
+ const root={ownerDocument:doc,clientWidth:1000,clientHeight:800,dataset:{},style:{},append(){},replaceChildren(){}};
+ const ids=['a','b','c','d','e','f','g'];
+ const state={locationId:'flow',scenes:[{id:'flow',targets:ids.map(id=>({id}))}],reading:{activeInstanceId:'e'}};
+ const port={read:()=>state,subscribe:f=>{sub=f;return()=>{off++;sub=null}}};
+ const sandbox={module:{exports:{}},Path2D:class {},ResizeObserver:class {observe(){}disconnect(){}},performance:{now:()=>now},requestAnimationFrame:f=>{queue.set(++id,f);return id},cancelAnimationFrame:i=>queue.delete(i),Uint8ClampedArray};
+ vm.runInNewContext(candidate,sandbox);
+ const data={chapters:ids.map(targetId=>({targetId}))};if(paperDurationMs!==undefined)data.paperDurationMs=paperDurationMs;
+ const runtime=sandbox.module.exports.mount({root,teacherController:port,instance:{data},scope:{cleanup:f=>cleanup=f}});
+ return {runtime,media,queue,root,read:()=>JSON.parse(root.dataset.current),go:x=>{state.reading.activeInstanceId=x;sub()},frame:t=>{now=t;const jobs=[...queue.values()];queue.clear();for(const f of jobs)f(t)},time:t=>{now=t},close:()=>{runtime.dispose();cleanup();return{raf:queue.size,off,listeners:Object.keys(listeners)}}};
+}
+const p=setup(),facts={sourceSha256:crypto.createHash('sha256').update(source).digest('hex')};assert.deepEqual(p.read().base,[23,29,25]);p.go('f');
+p.frame(10090);facts.at90={base:p.read().base,tint:p.read().tint,objectSize:p.read().size,raf:p.queue.size};
+p.frame(10180);facts.at180={base:p.read().base,objectSize:p.read().size,raf:p.queue.size};assert.deepEqual(p.read().base,[225,237,230]);assert(p.read().size<190);
+p.frame(10350);facts.at350={base:p.read().base,objectSize:p.read().size,raf:p.queue.size};
+const painted=p.read();p.go('d');assert.deepEqual(p.read().base,painted.base);assert.equal(p.read().x,painted.x);facts.interruptContinuous=true;
+p.frame(10440);const painted2=p.read();p.go('e');assert.deepEqual(p.read().base,painted2.base);facts.reverseContinuous=true;
+p.frame(11115);facts.darkAt675={base:p.read().base,raf:p.queue.size};assert.notDeepEqual(p.read().base,[23,29,25]);
+p.frame(11790);assert.deepEqual(p.read().base,[23,29,25]);facts.finalIdle=p.root.dataset.idle;assert.equal(p.queue.size,0);
+p.go('f');p.frame(11830);p.runtime.suspend();assert.deepEqual(p.read().base,[225,237,230]);facts.suspendRaf=p.queue.size;assert.equal(p.queue.size,0);facts.cleanup=p.close();
+const long=setup(3000);long.go('f');long.frame(11350);facts.longConfig={base:long.read().base,idle:long.root.dataset.idle,raf:long.queue.size};assert.deepEqual(long.read().base,[225,237,230]);assert.equal(long.queue.size,0);long.close();
+const zero=setup(0);zero.go('f');zero.frame(10180);facts.zeroUsesDefault180={base:zero.read().base,raf:zero.queue.size};assert.deepEqual(zero.read().base,[225,237,230]);zero.close();
+const negative=setup(-100);negative.go('f');negative.frame(10001);facts.negativeClampedTo1={base:negative.read().base,raf:negative.queue.size};assert.deepEqual(negative.read().base,[225,237,230]);negative.close();
+const reduced=setup();reduced.media.matches=true;reduced.go('f');facts.reduced={base:reduced.read().base,raf:reduced.queue.size};assert.deepEqual(reduced.read().base,[225,237,230]);assert.equal(reduced.queue.size,0);reduced.close();
+console.log(JSON.stringify(facts,null,2));

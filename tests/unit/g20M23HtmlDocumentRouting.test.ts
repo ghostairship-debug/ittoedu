@@ -7,8 +7,7 @@ import type { DocumentHostService } from '../../src/main/workbench/DocumentHostS
 import type { DocumentSnapshot } from '../../src/shared/workbench/document'
 import { saveDocumentWithDialog } from '../../src/main/workbench/documentSaveDialog'
 import { explorerContextCommands, explorerNewCommands, type ExplorerCommandPorts } from '../../src/renderer/lessonWorkspace/view/explorerCommands'
-import { HtmlDocumentEditor } from '../../src/renderer/documentFiles/html/HtmlDocumentEditor'
-import type { PlainTextDocumentEditorHandle } from '../../src/renderer/documentFiles/PlainTextDocumentEditor'
+import { HtmlDocumentEditor, type HtmlDocumentEditorHandle } from '../../src/renderer/documentFiles/html/HtmlDocumentEditor'
 import { WorkspaceFilesTree } from '../../src/renderer/lessonWorkspace/view/WorkspaceFilesTree'
 import type { WorkspaceFilesAPI, WorkspaceFilesRequest } from '../../src/shared/workbench/workspaceFiles'
 import { EditorView } from '@codemirror/view'
@@ -49,7 +48,7 @@ it('keeps source input through view changes and mounts the latest canonical sour
     ? { leaseId: 'lease', documentId: 'doc', epoch: 'epoch', revision: 1, bindingVersion: 1, loadId: 'load', url: 'courseware-preview://source-demand.app/page.html' }
     : { released: true })
   Object.defineProperty(window, 'desktopAPI', { configurable: true, value: { workspaceFiles } })
-  const ref = createRef<PlainTextDocumentEditorHandle>(), onDraft = vi.fn()
+  const ref = createRef<HtmlDocumentEditorHandle>(), onDraft = vi.fn()
   const props = { ref, tabId: 'tab', committed: committed(original), source: original, onDraft, onUndo: vi.fn(), onRedo: vi.fn() }
   const mounted = render(createElement(HtmlDocumentEditor, props))
   await screen.findByTitle('HTML 预览')
@@ -119,7 +118,7 @@ it('retains light-edit input through hiding, source view and reload, including t
     return { released: true }
   })
   Object.defineProperty(window, 'desktopAPI', { configurable: true, value: { workspaceFiles } })
-  const ref = createRef<PlainTextDocumentEditorHandle>()
+  const ref = createRef<HtmlDocumentEditorHandle>()
   const props = { ref, active: true, tabId: 'tab', committed: snapshot(original), source: original,
     onDraft: vi.fn(), onUndo: vi.fn(), onRedo: vi.fn(), onPendingDraftChange: vi.fn() }
   const mounted = render(createElement(HtmlDocumentEditor, props))
@@ -154,7 +153,7 @@ it('retains light-edit input through hiding, source view and reload, including t
   fireEvent.compositionStart(input)
   expect(ref.current!.flush().ready).toBe(false)
   fireEvent.compositionEnd(input)
-  let flushed!: ReturnType<PlainTextDocumentEditorHandle['flush']>
+  let flushed!: ReturnType<HtmlDocumentEditorHandle['flush']>
   act(() => { flushed = ref.current!.flush() })
   expect(flushed).toEqual({ ready: true, source: '<p>new &lt; &amp; &gt;</p>' })
   expect(props.onPendingDraftChange).toHaveBeenLastCalledWith(true)
@@ -162,7 +161,7 @@ it('retains light-edit input through hiding, source view and reload, including t
   mounted.rerender(createElement(HtmlDocumentEditor, { ...props, source: flushed.source }))
   expect(props.onPendingDraftChange).toHaveBeenLastCalledWith(true)
   fireEvent.change(screen.getByRole('textbox', { name: 'HTML 文字' }), { target: { value: 'typed after save' } })
-  let newer!: ReturnType<PlainTextDocumentEditorHandle['flush']>
+  let newer!: ReturnType<HtmlDocumentEditorHandle['flush']>
   act(() => { newer = ref.current!.flush() })
   expect(newer).toEqual({ ready: true, source: '<p>typed after save</p>' })
   mounted.rerender(createElement(HtmlDocumentEditor, { ...props, source: newer.source, committed: snapshot(flushed.source, 2) }))
@@ -182,7 +181,7 @@ it('keeps a conflicting draft accessible when its source text changes and blocks
   Object.defineProperty(window, 'desktopAPI', { configurable: true, value: { workspaceFiles } })
   const committed = { documentId: 'doc', epoch: 'epoch', revision: 1, model: { kind: 'text', source: '<p>old</p>', resources: { assets: {}, components: {} } },
     binding: { kind: 'file', path: '/lesson/page.html', version: 'v1', bindingVersion: 1 } } as DocumentSnapshot
-  const ref = createRef<PlainTextDocumentEditorHandle>()
+  const ref = createRef<HtmlDocumentEditorHandle>()
   const props = { ref, tabId: 'tab', committed, source: '<p>old</p>', onDraft: vi.fn(), onUndo: vi.fn(), onRedo: vi.fn() }
   const mounted = render(createElement(HtmlDocumentEditor, props))
   const frame = await screen.findByTitle('HTML 预览') as HTMLIFrameElement

@@ -1,0 +1,140 @@
+{
+  "version": 1,
+  "coordinateSystem": "SVG viewBox coordinates for authored imageLayout; Source-local CSS viewport coordinates for live helper bounds",
+  "visibleSubjectDefinition": "Bounding box of decoded pixels with alpha > 8. Very faint alpha=1 outliers are recorded separately and excluded; image pixels are unchanged.",
+  "boundsConvention": "x/y inclusive; right/bottom exclusive",
+  "assets": {
+    "natural": {
+      "asset": "cherry-material.webp",
+      "intrinsic": {
+        "width": 1254,
+        "height": 1254
+      },
+      "viewBox": {
+        "x": 0,
+        "y": 0,
+        "width": 600,
+        "height": 480
+      },
+      "imageLayout": {
+        "x": 80,
+        "y": 14,
+        "width": 440,
+        "height": 440
+      },
+      "preserveAspectRatio": "xMidYMid meet",
+      "alphaThreshold": 8,
+      "alphaTest": "alpha > 8 (0–255)",
+      "alphaBounds": {
+        "x": 203,
+        "y": 74,
+        "width": 848,
+        "height": 1110,
+        "rightExclusive": 1051,
+        "bottomExclusive": 1184
+      },
+      "strictNonzeroAlphaBounds": {
+        "x": 162,
+        "y": 45,
+        "width": 1060,
+        "height": 1170
+      },
+      "cropNormalized": {
+        "x": 0.16188197767145135,
+        "y": 0.05901116427432217,
+        "width": 0.6762360446570973,
+        "height": 0.8851674641148325
+      }
+    },
+    "washed": {
+      "asset": "parchment-material.webp",
+      "intrinsic": {
+        "width": 1254,
+        "height": 1254
+      },
+      "viewBox": {
+        "x": 0,
+        "y": 0,
+        "width": 600,
+        "height": 480
+      },
+      "imageLayout": {
+        "x": 185,
+        "y": 135,
+        "width": 230,
+        "height": 230
+      },
+      "preserveAspectRatio": "xMidYMid meet",
+      "alphaThreshold": 8,
+      "alphaTest": "alpha > 8 (0–255)",
+      "alphaBounds": {
+        "x": 106,
+        "y": 110,
+        "width": 1051,
+        "height": 1018,
+        "rightExclusive": 1157,
+        "bottomExclusive": 1128
+      },
+      "strictNonzeroAlphaBounds": {
+        "x": 0,
+        "y": 6,
+        "width": 1234,
+        "height": 1248
+      },
+      "cropNormalized": {
+        "x": 0.08452950558213716,
+        "y": 0.08771929824561403,
+        "width": 0.8381180223285486,
+        "height": 0.8118022328548644
+      }
+    },
+    "honey": {
+      "asset": "mucilage-material.webp",
+      "intrinsic": {
+        "width": 1254,
+        "height": 1254
+      },
+      "viewBox": {
+        "x": 0,
+        "y": 0,
+        "width": 600,
+        "height": 480
+      },
+      "imageLayout": {
+        "x": 185,
+        "y": 135,
+        "width": 230,
+        "height": 230
+      },
+      "preserveAspectRatio": "xMidYMid meet",
+      "alphaThreshold": 8,
+      "alphaTest": "alpha > 8 (0–255)",
+      "alphaBounds": {
+        "x": 104,
+        "y": 107,
+        "width": 1058,
+        "height": 1023,
+        "rightExclusive": 1162,
+        "bottomExclusive": 1130
+      },
+      "strictNonzeroAlphaBounds": {
+        "x": 0,
+        "y": 29,
+        "width": 1230,
+        "height": 1225
+      },
+      "cropNormalized": {
+        "x": 0.08293460925039872,
+        "y": 0.08532695374800638,
+        "width": 0.8437001594896332,
+        "height": 0.8157894736842105
+      }
+    }
+  },
+  "placementFormula": {
+    "imageWidth": "visibleWidth / cropNormalized.width",
+    "imageHeight": "visibleHeight / cropNormalized.height",
+    "imageX": "visibleX - cropNormalized.x * imageWidth",
+    "imageY": "visibleY - cropNormalized.y * imageHeight"
+  }
+}

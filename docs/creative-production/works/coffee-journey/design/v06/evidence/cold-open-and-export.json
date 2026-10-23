@@ -1,0 +1,47 @@
+{
+  "date": "2026-10-22T14:00:34.195Z",
+  "coffee": {
+    "revision": 204,
+    "oldPid": 66956,
+    "newPid": 52580,
+    "fullProjectEqual": true,
+    "dirty": false,
+    "instances": 183,
+    "export": {
+      "kind": "read",
+      "data": {
+        "status": "written",
+        "documentId": "7575098a-ac25-471b-aafe-b313f2aa0823",
+        "epoch": "617ee875-18c9-4cf9-b63a-0d39c2f3c6dd",
+        "format": "html-offline",
+        "exportedRevision": 204,
+        "currentRevision": 204,
+        "warnings": [],
+        "path": "D:\\果铃工作台\\docs\\creative-production\\works\\coffee-journey\\design\\v06\\native\\coffee-journey-v06-offline.html",
+        "fileVersion": "70139fa7a3d3c120f0de11ec0e34fdbd4b9d850f939c209f272a2ed53952577b"
+      }
+    }
+  },
+  "sugar": {
+    "revision": 34,
+    "oldPid": 67656,
+    "newPid": 55708,
+    "fullProjectEqual": true,
+    "dirty": false,
+    "instances": 15,
+    "export": {
+      "kind": "read",
+      "data": {
+        "status": "written",
+        "documentId": "40c5b40c-c60e-48f5-b6c2-e113f7d82287",
+        "epoch": "805c6abf-3fb9-488c-bc80-7c2f740c56ca",
+        "format": "html-offline",
+        "exportedRevision": 34,
+        "currentRevision": 34,
+        "warnings": [],
+        "path": "D:\\果铃工作台\\docs\\creative-production\\works\\coffee-journey\\design\\v06\\reuse\\solute-study\\solute-study-offline.html",
+        "fileVersion": "47e2b0db6b7eeb93696ca09232d844e7283f595bbe99f18c64ffa71946dfd256"
+      }
+    }
+  }
+}

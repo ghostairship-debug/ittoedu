@@ -71,6 +71,8 @@ const IPC_CHANNELS = {
   exportWebPackage: 'export:write-web-package',
   exportBinary: 'export:write-binary',
   exportPdf: 'export:write-pdf',
+  cancelPdfExport: 'export:cancel-pdf',
+  pdfExportPrepared: 'export:pdf-prepared',
   documentExportBuildRequest: 'document-export:build-request',
   documentExportBuildReply: 'document-export:build-reply',
   frozenDeliveryBuild: 'document-export:frozen-build',
@@ -333,6 +335,7 @@ const desktopAPI = Object.freeze<DesktopAPI>({
     selectSource: input => invoke(IPC_CHANNELS.lessonMaterial, { operation: 'select', ...input }),
     importMaterial: (target, input) => invoke(IPC_CHANNELS.lessonMaterial, { operation: 'import', target, input }),
     importPdf: (target, input) => invoke(IPC_CHANNELS.lessonMaterial, { operation: 'import-pdf', target, input }),
+    extractOffice: input => invoke(IPC_CHANNELS.lessonMaterial, { operation: 'extract-office', input }),
     cancelImport: requestId => invoke(IPC_CHANNELS.lessonMaterial, { operation: 'cancel-import', requestId }),
     subscribeImportProgress(listener) {
       const receive = (_event: Electron.IpcRendererEvent, progress: LessonMaterialImportProgress) => listener(progress)
@@ -407,6 +410,14 @@ const desktopAPI = Object.freeze<DesktopAPI>({
   exportWebPackage: (input) => invoke(IPC_CHANNELS.exportWebPackage, input),
   exportBinary: (input) => invoke(IPC_CHANNELS.exportBinary, input),
   exportPdf: (input) => invoke(IPC_CHANNELS.exportPdf, input),
+  cancelPdfExport: input => invoke(IPC_CHANNELS.cancelPdfExport, input),
+  onPdfExportPrepared: handler => {
+    const listener = (_event: Electron.IpcRendererEvent, input: unknown) => {
+      if (input && typeof input === 'object' && 'requestId' in input && typeof input.requestId === 'string') handler({ requestId: input.requestId })
+    }
+    ipcRenderer.on(IPC_CHANNELS.pdfExportPrepared, listener)
+    return () => ipcRenderer.removeListener(IPC_CHANNELS.pdfExportPrepared, listener)
+  },
   onDocumentExportBuildRequest: handler => {
     const listener = (_event: Electron.IpcRendererEvent, request: unknown) => {
       if (request && typeof request === 'object' && 'requestId' in request && typeof request.requestId === 'string')

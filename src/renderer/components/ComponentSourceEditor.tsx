@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type Keyboa
 import type { ComponentEdit, ComponentImplementation, ComponentInstance } from '../../shared/contracts/component-platform'
 import type { DocumentResources } from '../../shared/workbench/document'
 import type { CapturedCourseTarget, CourseV10DocumentBridge } from '../documents/CourseV10DocumentBridge'
-import { CourseComponentApplyError } from '../documents/CourseV10DocumentBridge'
+import { isCourseComponentInputFailure, settleCourseComponentInput, type CourseComponentInputFailure } from '../documents/CourseV10DocumentBridge'
 import type { ComponentSourceEditTarget } from '../../core/components/source/sourceAuthoringEdits'
 import { componentAuthorSourceDependencyPaths, componentAuthorSourceEdits, componentAuthorSourceModules, prepareComponentAuthorSource, resolveComponentAuthorSourceDependencyPaths, type ComponentAuthorSource } from '../../core/components/source/componentAuthorSource'
 import { notifyCourseDrafts, registerCourseDraftProvider, type AdvancedDraftIssue, type AdvancedDraftRecovery } from '../authoring/courseDraftLifecycle'
@@ -16,7 +16,7 @@ type SourceSession = { target: CapturedCourseTarget; instanceId: string; scope: 
 type SourceDraft = { key: string; name: string; value: SourceValue; session: SourceSession | null;
   dependencyId?: string; moduleReplacements?: Map<string, string>;
   version: number; busy: boolean; composing: boolean; newPath: string; message: string | null; listeners: Set<() => void>; pending?: Promise<boolean>;
-  recoveryBaseline?: SourceValue; blocked?: string; resumeRequired?: boolean; rejectedOperationId?: string }
+  recoveryBaseline?: SourceValue; blocked?: string; resumeRequired?: boolean; active?: boolean; activeOwner?: { isCurrent(key: string): boolean }; failure?: CourseComponentInputFailure }
 // One local draft owner per bridge/author target. Panel unmount never applies or discards source.
 const drafts = new WeakMap<CourseV10DocumentBridge, Map<string, SourceDraft>>()
 const encode = (text: string) => new TextEncoder().encode(text)
@@ -73,6 +73,12 @@ function publishSourceDraft(bridge: CourseV10DocumentBridge, draft: SourceDraft)
   for (const notify of draft.listeners) notify()
   notifyCourseDrafts(bridge)
 }
+function parkSourceDraft(bridge: CourseV10DocumentBridge, draft: SourceDraft, detached = false) {
+  draft.active = false
+  if (detached && draft.composing) { draft.resumeRequired = true; draft.composing = false }
+  if (!draft.composing) draft.activeOwner = undefined
+  publishSourceDraft(bridge, draft)
+}
 /** The source owner reports input that could not be prepared; the close owner can preserve it. */
 export function componentSourceCloseIssue(bridge: CourseV10DocumentBridge, documentIds?: readonly string[]): {
   documentId: string; epoch: string; instanceId: string; message: string
@@ -117,7 +123,7 @@ function resetDraft(draft: SourceDraft, value: SourceValue, preserveSelection = 
   draft.value = preserveSelection && Object.hasOwn(value.files, selected) ? { ...value, selected } : value
   draft.session = null; draft.newPath = ''; draft.message = null
   draft.recoveryBaseline = undefined; draft.blocked = undefined; draft.resumeRequired = undefined
-  draft.rejectedOperationId = undefined
+  draft.active = false; draft.activeOwner = undefined; draft.failure = undefined
 }
 function rebaseSourceDraft(value: SourceValue, baseline: SourceValue, fresh: SourceValue): SourceValue {
   const files = { ...fresh.files }
@@ -132,11 +138,31 @@ function rebaseSourceDraft(value: SourceValue, baseline: SourceValue, fresh: Sou
     files, selected: Object.hasOwn(files, value.selected) ? value.selected : fresh.selected }
 }
 
+function consumeAppliedSourceDraft(bridge: CourseV10DocumentBridge, draft: SourceDraft, session: SourceSession, restore = false): boolean {
+  let current = captureComponentSourceSession(bridge, session.target.documentId, session.instanceId,
+    session.scope.kind, session.scope.kind === 'definition' ? session.scope.definition.id : undefined, true, restore ? undefined : session.dependencyId)
+  if (!restore && session.dependencyId && session.dependencyPaths?.length) {
+    const dependencyId = current.prepared && resolveComponentAuthorSourceDependencyPaths(current.target.project, current.prepared,
+      session.dependencyPaths, current.target.resources)
+    if (!dependencyId) return false
+    if (dependencyId !== current.dependencyId) current = captureComponentSourceSession(bridge, session.target.documentId, session.instanceId,
+      session.scope.kind, session.scope.kind === 'definition' ? session.scope.definition.id : undefined, true, dependencyId)
+  }
+  if (current.target.epoch !== session.target.epoch) return false
+  const currentValue = readSource(current.implementation, current.target.resources)
+  if (!restore && (!sourceValuesEqual(draft.value, currentValue) || draft.newPath)) return false
+  resetDraft(draft, restore ? currentValue : draft.value)
+  draft.dependencyId = current.dependencyId
+  draft.message = restore ? '已恢复默认实现。' : '实现已应用到课件。'
+  return true
+}
+
 async function applySourceDraft(bridge: CourseV10DocumentBridge, draft: SourceDraft, restore = false): Promise<boolean> {
   if (draft.pending) return draft.pending
-  const session = draft.session
-  if (!session) return true
-  const fail = (message: string) => { draft.message = message; publishSourceDraft(bridge, draft); return false }
+  const initialSession = draft.session
+  if (!initialSession) return true
+  let session: SourceSession = initialSession
+  const fail = (message: string) => { draft.message = message; if (!draft.composing) draft.active = false; publishSourceDraft(bridge, draft); return false }
   if (draft.blocked && !restore) return fail(draft.blocked)
   if (draft.resumeRequired && !restore) return fail('上次输入尚未结束；原输入已恢复，请继续编辑后保存。')
   if (draft.composing) return fail('输入法组合尚未结束；原输入已保留。')
@@ -147,6 +173,21 @@ async function applySourceDraft(bridge: CourseV10DocumentBridge, draft: SourceDr
     // Keep single-flight ownership even when validation or a no-op finishes synchronously.
     await Promise.resolve()
     try {
+      if (draft.failure) {
+        const outcome = await draft.failure.resolveInput(restore ? 'cancel' : 'retry')
+        if (outcome === 'pending') return fail('上次应用的结果尚待确认；源码原稿仍保留，可稍后重试。')
+        draft.failure = undefined
+        if (restore) {
+          const current = captureComponentSourceSession(bridge, session.target.documentId, session.instanceId,
+            session.scope.kind, session.scope.kind === 'definition' ? session.scope.definition.id : undefined, true)
+          if (current.target.epoch !== session.target.epoch) return fail('原文档会话已改变；源码草稿仍保留。')
+          session = current; draft.session = current
+        } else if (outcome === 'applied') {
+          if (consumeAppliedSourceDraft(bridge, draft, session)) return true
+          draft.blocked = '上次修改已应用，当前源码又有变化；原输入已保留，请载入当前基线后核对。'
+          return fail(draft.blocked)
+        }
+      }
       // Restoring a local override can expose its default builtin again. Prepare
       // that source before accepting the operation, rather than failing its UI rebaseline afterwards.
       if (restore) {
@@ -183,7 +224,15 @@ async function applySourceDraft(bridge: CourseV10DocumentBridge, draft: SourceDr
       draft.message = restore ? '已恢复默认实现。' : result?.status === 'applied' ? '实现已应用到课件。' : '源码未改变，无需应用。'
       return !sourceDraftDirty({ ...draft, busy: false })
     } catch (error) {
-      if (error instanceof CourseComponentApplyError) draft.rejectedOperationId = error.operationId
+      if (isCourseComponentInputFailure(error)) {
+        draft.failure = error
+        try {
+          if (await settleCourseComponentInput(error) === 'applied') {
+            if (draft.session === session && draft.version === version && consumeAppliedSourceDraft(bridge, draft, session, restore)) return true
+            return fail('上次修改已确认应用；待核对的源码输入仍保留，请载入当前基线后继续。')
+          }
+        } catch { /* The raw files and exact resolver remain owned by this draft. */ }
+      }
       return fail(`未应用：${error instanceof Error ? error.message : String(error)}；源码草稿已保留。`)
     }
     finally { draft.busy = false; draft.pending = undefined; publishSourceDraft(bridge, draft) }
@@ -201,11 +250,16 @@ function restoreSourceValue(value: ReturnType<typeof sourceRecoveryValue>): Sour
 function sourceLifecycle(bridge: CourseV10DocumentBridge, cache: Map<string, SourceDraft>) {
   registerCourseDraftProvider(bridge, 'source', {
     hasDirty: documentId => [...cache.values()].some(draft => (!documentId || draft.session?.target.documentId === documentId) && sourceDraftDirty(draft)),
-    async prepare(documentId) {
+    async prepare(documentId, mode = 'apply') {
       const issues: AdvancedDraftIssue[] = []
-      for (const draft of cache.values()) if (draft.session?.target.documentId === documentId && sourceDraftDirty(draft)) {
+      for (const draft of cache.values()) if (draft.session?.target.documentId === documentId && sourceDraftDirty(draft) && (draft.active || draft.pending || draft.composing)) {
+        if (draft.active && draft.activeOwner && !draft.activeOwner.isCurrent(draft.key)) parkSourceDraft(bridge, draft)
         const session = draft.session
-        if (!await applySourceDraft(bridge, draft)) issues.push({ documentId, epoch: session.target.epoch, message: draft.message ?? '源码草稿尚未应用。' })
+        if (draft.composing) issues.push({ documentId, epoch: session.target.epoch, message: '源码输入法组合尚未结束；原输入已保留。' })
+        else if (!draft.active && !draft.pending) continue
+        else if (!await applySourceDraft(bridge, draft)
+          && (mode === 'apply' || draft.session !== session || !sourceDraftDirty(draft) || draft.composing || draft.pending))
+          issues.push({ documentId, epoch: session.target.epoch, message: draft.message ?? '源码草稿尚未应用。' })
       }
       return issues
     },
@@ -237,6 +291,13 @@ function sourceLifecycle(bridge: CourseV10DocumentBridge, cache: Map<string, Sou
       if (existing?.session || existing?.busy || existing?.composing) return
       // Preserve the object observed by mounted controls, including their subscriptions.
       const draft = existing ?? freshDraft(key, saved.name, restoreSourceValue(saved.value))
+      const currentValue = readSource(session.implementation, session.target.resources)
+      if (!missingDependency && !saved.newPath && sourceValuesEqual(restoreSourceValue(saved.value), currentValue)) {
+        resetDraft(draft, currentValue, false); draft.name = saved.name
+        cache.set(key, draft)
+        for (const notify of draft.listeners) notify()
+        return 'consumed' as const
+      }
       resetDraft(draft, restoreSourceValue(saved.value), false); draft.name = saved.name
       // Recovered text remains input until the user resumes editing or explicitly saves it.
       draft.session = session; draft.dependencyId = session.dependencyId; draft.newPath = saved.newPath; draft.version++; draft.resumeRequired = saved.composing
@@ -301,7 +362,11 @@ export function ComponentSourceEditor({ instance, implementation, bridge, report
     return draft
   }
   const draftRef = useRef<SourceDraft>(getDraft())
-  if (draftRef.current.key !== key && !draftRef.current.session && !draftRef.current.busy && !draftRef.current.composing) draftRef.current = getDraft()
+  const panel = useRef<HTMLDetailsElement>(null)
+  const currentKey = useRef(key); currentKey.current = key
+  const inputOwner = useRef({ isCurrent: (candidate: string) => currentKey.current === candidate && draftRef.current.key === candidate && Boolean(panel.current?.isConnected)
+    && !panel.current?.closest('[hidden],[inert],details:not([open])') })
+  if (draftRef.current.key !== key && !draftRef.current.composing) draftRef.current = getDraft()
   const draft = draftRef.current, value = draft.value
   const authorSource = draft.session?.prepared ?? prepared
   const moduleProject = draft.session?.target.project ?? model?.project
@@ -313,7 +378,12 @@ export function ComponentSourceEditor({ instance, implementation, bridge, report
   const render = () => publishSourceDraft(bridge, draft)
   useEffect(() => {
     const notify = () => refresh(version => version + 1)
-    draft.listeners.add(notify); return () => { draft.listeners.delete(notify) }
+    draft.listeners.add(notify)
+    return () => {
+      draft.listeners.delete(notify)
+      if (draft.activeOwner !== inputOwner.current) return
+      parkSourceDraft(bridge, draft, true)
+    }
   }, [draft])
   useEffect(() => {
     // Subscribe the mounted control before the existing provider adopts pending
@@ -331,6 +401,7 @@ export function ComponentSourceEditor({ instance, implementation, bridge, report
   const unavailable = !!instance && !prepared, stale = !!draft.session && draft.key !== key
   const disabled = draft.busy || locked || unavailable && !draft.session
   const capture = () => {
+    draft.active = true; draft.activeOwner = inputOwner.current
     if (draft.session) return draft.session
     if (!instance) throw new Error('当前没有源码目标，请选择对象或创建运行时。')
     draft.session = captureComponentSourceSession(bridge, owner, instance.id, scope, undefined, false, draft.dependencyId)
@@ -345,9 +416,9 @@ export function ComponentSourceEditor({ instance, implementation, bridge, report
   const nativeHistory = (event: KeyboardEvent) => {
     if ((event.ctrlKey || event.metaKey) && ['z', 'y'].includes(event.key.toLowerCase())) event.stopPropagation()
   }
-  const save = async (restore = false) => {
+  const save = async (restore = false, acceptRetained = false) => {
     if (disabled || draft.composing) return
-    try { capture() } catch (error) { draft.message = String(error); render(); return }
+    try { capture(); if (acceptRetained) draft.resumeRequired = false } catch (error) { draft.message = String(error); render(); return }
     if (!await applySourceDraft(bridge, draft, restore) && draft.message) report(draft.message)
   }
   const selectModule = async (dependencyId?: string) => {
@@ -376,10 +447,16 @@ export function ComponentSourceEditor({ instance, implementation, bridge, report
   }
   const loadBaseline = async () => {
     if (!draft.session || disabled || draft.composing) return
+    const ownerAtStart = inputOwner.current
+    draft.activeOwner = ownerAtStart
     draft.busy = true; render()
     try {
       const previous = draft.session
-      if (draft.rejectedOperationId) await bridge.releaseRejectedSourceOperation(previous.target.documentId, previous.target.epoch, draft.rejectedOperationId)
+      if (draft.failure) {
+        const outcome = await draft.failure.resolveInput('cancel')
+        if (outcome === 'pending') { draft.message = '上次应用的结果尚待确认；源码原稿仍保留。'; return }
+        draft.failure = undefined
+      }
       const definitionId = previous.scope.kind === 'definition' ? previous.scope.definition.id : undefined
       const current = bridge.read().documents.find(snapshot => snapshot.documentId === previous.target.documentId)?.model
       if (current?.kind === 'course-v10') {
@@ -398,7 +475,10 @@ export function ComponentSourceEditor({ instance, implementation, bridge, report
       }
       if (previous.dependencyId && !next.implementation) throw new Error('原源码模块已不存在；原输入已保留，请恢复对应依赖后再载入。')
       draft.value = rebaseSourceDraft(draft.value, draft.recoveryBaseline ?? readSource(previous.implementation, previous.target.resources), readSource(next.implementation, next.target.resources))
-      draft.session = next; draft.dependencyId = next.dependencyId; draft.recoveryBaseline = undefined; draft.blocked = undefined; draft.rejectedOperationId = undefined; draft.version++; draft.message = '已载入当前基线并保留各文件草稿，请检查后重新应用。'
+      draft.session = next; draft.dependencyId = next.dependencyId; draft.recoveryBaseline = undefined; draft.blocked = undefined
+      draft.active = draft.activeOwner === ownerAtStart && ownerAtStart.isCurrent(draft.key)
+      if (!draft.active) draft.activeOwner = undefined
+      draft.version++; draft.message = '已载入当前基线并保留各文件草稿，请检查后重新应用。'
     } catch (error) { draft.message = String(error) }
     finally { draft.busy = false; render() }
   }
@@ -412,7 +492,7 @@ export function ComponentSourceEditor({ instance, implementation, bridge, report
   }
   if (!instance && !draft.session) return null
   const file = value.files[value.selected], names = Object.keys(value.files)
-  return <details open onKeyDownCapture={nativeHistory} onBlurCapture={event => {
+  return <details ref={panel} open onKeyDownCapture={nativeHistory} onBlurCapture={event => {
     if (!event.currentTarget.contains(event.relatedTarget as Node | null) && draft.session) void save()
   }}><summary>{scope === 'definition' ? '共享定义源码' : '组件实现源码'}</summary>
     {stale && <p role="status">草稿属于“{draft.name}”；应用只修改原文档与原{draft.session?.scope.kind === 'definition' ? '共享定义' : '对象'}。</p>}
@@ -453,20 +533,45 @@ export function ComponentSourceEditor({ instance, implementation, bridge, report
       <textarea aria-label={name === value.selected ? '组件实现源码' : undefined} value={value.files[name].text ?? ''} readOnly={disabled}
         onChange={event => change({ ...draft.value, files: { ...draft.value.files, [name]: { text: event.target.value, bytes: encode(event.target.value) } } })}
         onCompositionStart={() => { try { capture(); draft.composing = true; render() } catch (error) { draft.message = String(error); render() } }}
-        onCompositionEnd={() => { setTimeout(() => { draft.composing = false; render(); void save() }, 0) }}
+        onCompositionEnd={() => { setTimeout(() => {
+          if (draftRef.current !== draft || draft.activeOwner !== inputOwner.current || !draft.listeners.size) return
+          draft.composing = false; draft.resumeRequired = false
+          if (!inputOwner.current.isCurrent(draft.key)) { parkSourceDraft(bridge, draft); return }
+          render(); void save()
+        }, 0) }}
         spellCheck={false} wrap="off" className="developer-code-editor" style={{ width: '100%', minHeight: 240, fontFamily: 'monospace' }} />
     </div>)}
     {!file && <p>此组件还没有源码文件。</p>}
-    <button disabled={disabled || draft.composing} onClick={() => void save()}>保存实现</button>
-    {scope === 'instance' && <button disabled={disabled || draft.composing} onClick={() => void save(true)}>恢复默认实现</button>}
+    <button disabled={disabled || draft.composing} onClick={() => void save(false, true)}>保存实现</button>
+    {scope === 'instance' && <button disabled={disabled || draft.composing} onClick={() => void save(true, true)}>恢复默认实现</button>}
     {draft.session && <button disabled={disabled || draft.composing} onClick={loadBaseline}>载入当前基线并保留草稿</button>}
-    <button disabled={draft.busy || draft.composing} onClick={() => {
-      const initial = active.current.initial, selected = draft.value.selected
-      const next = draft.key === key && Object.hasOwn(initial.files, selected) ? { ...initial, selected } : initial
-      const dependencyId = draft.key === key ? draft.dependencyId : undefined
-      cache!.delete(draft.key); draftRef.current = { ...freshDraft(key, instance?.name ?? instance?.id ?? '', next), dependencyId }
-      cache!.set(key, draftRef.current); render()
-    }}>放弃草稿</button>
+    <button disabled={draft.busy || draft.composing} onClick={() => { void (async () => {
+      const initialAtStart = active.current.initial, valueAtStart = draft.value, version = draft.version, pathAtStart = draft.newPath
+      draft.busy = true; render()
+      try {
+        if (draft.failure) {
+          const outcome = await draft.failure.resolveInput('cancel')
+          if (outcome === 'pending') { draft.message = '上次应用的结果尚待确认；原稿仍保留，请稍后重试。'; return }
+          draft.failure = undefined
+        }
+        if (draft.value !== valueAtStart || draft.version !== version || draft.newPath !== pathAtStart) {
+          draft.message = '处理期间又有新输入；源码原稿仍保留。'; return
+        }
+        let initial = initialAtStart
+        if (draft.session && draft.key === key) {
+          const session = draft.session, fresh = captureComponentSourceSession(bridge, session.target.documentId, session.instanceId,
+            session.scope.kind, session.scope.kind === 'definition' ? session.scope.definition.id : undefined, true, session.dependencyId)
+          initial = readSource(fresh.implementation, fresh.target.resources)
+        }
+        const selected = draft.value.selected
+        const next = draft.key === key && Object.hasOwn(initial.files, selected) ? { ...initial, selected } : initial
+        const dependencyId = draft.key === key ? draft.dependencyId : undefined
+        const replacement = { ...freshDraft(key, instance?.name ?? instance?.id ?? '', next), dependencyId }
+        cache!.delete(draft.key); cache!.set(key, replacement)
+        if (draftRef.current === draft) draftRef.current = replacement
+      } catch (error) { draft.message = error instanceof Error ? error.message : String(error) }
+      finally { draft.busy = false; render() }
+    })() }}>放弃草稿</button>
     {draft.message && <p role="status">{draft.message}</p>}
   </details>
 }

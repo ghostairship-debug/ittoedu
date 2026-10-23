@@ -48,7 +48,7 @@ export function WorkspaceFilesTree({ directory, files, operation, refreshVersion
   const [clipboard, setClipboard] = useState<{ workspaceId: string; ids: string[]; type: 'copy' | 'move' }>()
   const [copyVersion, setCopyVersion] = useState<'disk' | 'current'>('disk')
   const [menu, setMenu] = useState<{ x: number; y: number; directoryEntryId: string; htmlImport: 'pick' | 'selected' | null; sourceEntryId?: string }>(), [dropTarget, setDropTarget] = useState<string>()
-  const active = useRef<RegisteredWorkspaceRoot | undefined>(undefined), epoch = useRef(0), lock = useRef(false)
+  const active = useRef<RegisteredWorkspaceRoot | undefined>(undefined), epoch = useRef(0), lock = useRef<number | null>(null)
   const scopeTicket = useRef(0)
   const saveDirectoryListener = useRef(onSaveDirectoryChange); saveDirectoryListener.current = onSaveDirectoryChange
   const directoryLoads = useRef(new Map<string, DirectoryLoad>())
@@ -100,6 +100,7 @@ export function WorkspaceFilesTree({ directory, files, operation, refreshVersion
   useEffect(() => {
     const generation = ++epoch.current
     directoryLoads.current.clear()
+    lock.current = null; dialogTarget.current = null
     const watchId = crypto.randomUUID()
     let watched: RegisteredWorkspaceRoot | undefined
     const releaseWatch = (current: RegisteredWorkspaceRoot) => { void files({ type: 'unwatch', workspaceId: current.workspaceId, watchId }).catch(() => {}) }
@@ -156,12 +157,16 @@ export function WorkspaceFilesTree({ directory, files, operation, refreshVersion
     }
   }, [load])
   const refreshRef = useRef(refresh); refreshRef.current = refresh
-  useEffect(() => { void refresh().catch(reason => setError(message(reason))) }, [refreshVersion, refresh])
+  useEffect(() => { const generation = epoch.current; void refresh().catch(reason => { if (generation === epoch.current) setError(message(reason)) }) }, [refreshVersion, refresh])
   const subscribe = window.desktopAPI?.onWorkspaceFilesChanged ?? files.subscribe
-  useEffect(() => subscribe?.(event => { if (event.workspaceId === active.current?.workspaceId) void refreshRef.current(event.changedPaths).catch(reason => setError(message(reason))) }), [subscribe])
+  useEffect(() => subscribe?.(event => {
+    if (event.workspaceId !== active.current?.workspaceId) return
+    const generation = epoch.current
+    void refreshRef.current(event.changedPaths).catch(reason => { if (generation === epoch.current) setError(message(reason)) })
+  }), [subscribe])
   // Compatibility for read-only test/embedded ports without a push subscription; desktop uses the watcher.
   useEffect(() => { if (subscribe) return; const timer = setInterval(() => { void refreshRef.current().catch(() => {}) }, 2500); return () => clearInterval(timer) }, [subscribe])
-  const close = () => { setDialog(undefined); setRetry(undefined); setMenu(undefined); setError('') }
+  const close = () => { dialogTarget.current = null; setDialog(undefined); setRetry(undefined); setMenu(undefined); setError('') }
   useLayoutEffect(() => {
     if (dialog) {
       const input = dialogRef.current?.querySelector<HTMLInputElement>('input[aria-label="文件名称"]')
@@ -210,9 +215,16 @@ export function WorkspaceFilesTree({ directory, files, operation, refreshVersion
   }
   const browse = async (id: string) => {
     if (!root) return
+    const generation = epoch.current, target = dialogTarget.current
+    const current = () => generation === epoch.current && target === dialogTarget.current
     setDestination(id); await load(id, root)
+    if (!current()) return
     const page: Entry[] = []; let cursor: string | undefined
-    do { const next = await files({ type: 'list', workspaceId: root.workspaceId, directoryEntryId: id, cursor, limit: 200 }); page.push(...next.entries.filter((entry): entry is Entry => entry.status === 'accessible' && entry.kind === 'directory')); cursor = next.nextCursor } while (cursor)
+    do {
+      const next = await files({ type: 'list', workspaceId: root.workspaceId, directoryEntryId: id, cursor, limit: 200 })
+      if (!current()) return
+      page.push(...next.entries.filter((entry): entry is Entry => entry.status === 'accessible' && entry.kind === 'directory')); cursor = next.nextCursor
+    } while (cursor)
     setDestinations(value => [...value, ...page.filter(entry => !value.some(item => item.id === entry.entryId)).map(entry => ({ id: entry.entryId, name: entry.name }))])
   }
   const revealItem = useCallback(async (detail: RevealInExplorerDetail) => {
@@ -307,6 +319,7 @@ export function WorkspaceFilesTree({ directory, files, operation, refreshVersion
     dialogReturnFocus.current = document.activeElement instanceof HTMLElement ? document.activeElement : null
     dialogTarget.current = root ? { workspaceId: root.workspaceId, generation: epoch.current,
       sourceEntryIds: selected.map(row => row.entry.entryId), directoryEntryId: targetDirectory } : null
+    const target = dialogTarget.current, generation = epoch.current
     setMenu(undefined); setError(''); setResults(undefined); setRetry(undefined)
     if (type === 'rename') {
       setName(single?.name ?? '')
@@ -316,6 +329,7 @@ export function WorkspaceFilesTree({ directory, files, operation, refreshVersion
       let entries = targetDir ? pagesRef.current[targetDir] : undefined
       if (!entries && targetDir && root) {
         entries = await load(targetDir, root)
+        if (generation !== epoch.current || target !== dialogTarget.current) return
       }
       setName(type === 'create-html' ? uniqueFilename('新建 HTML 文档', '.html', entries) : computeDefaultName(type, entries))
       if (type === 'create-course') setCanvasPreset(SLIDE_CANVAS_PRESETS[0]!.id)
@@ -327,9 +341,9 @@ export function WorkspaceFilesTree({ directory, files, operation, refreshVersion
     if ((type === 'copy' || type === 'move') && root) { setCopyVersion('disk'); setDestinations([{ id: root.rootEntryId, name: directory }]); await browse(root.rootEntryId) }
   }
   const run = async (request: WorkspaceFilesRequest) => {
-    if (!root || lock.current) return
+    if (!root || !('workspaceId' in request) || request.workspaceId !== active.current?.workspaceId || lock.current === epoch.current) return
     const generation = epoch.current
-    lock.current = true; setBusy(true); setError(''); setMenu(undefined); setRetry(undefined)
+    lock.current = generation; setBusy(true); setError(''); setMenu(undefined); setRetry(undefined)
     try {
       const result = await files(request) as WorkspaceOperationResult
       if (generation !== epoch.current) return
@@ -348,12 +362,13 @@ export function WorkspaceFilesTree({ directory, files, operation, refreshVersion
       if (request.type === 'trash') setSelection(value => new Set([...value].filter(id => !successes.has(id))))
       if (request.type === 'move' || request.type === 'copy' || request.type === 'create-markdown' || request.type === 'create-course' || request.type === 'create-text' || request.type === 'mkdir' || request.type === 'import-files') {
         setExpanded(value => new Set([...value, request.targetDirectoryId])); await load(request.targetDirectoryId, root)
+        if (generation !== epoch.current) return result
         if (request.type === 'move') { setParentId(request.targetDirectoryId); onSaveDirectoryChange?.({ workspaceId: root.workspaceId, directoryEntryId: request.targetDirectoryId }) }
       }
       if (request.type === 'move') setClipboard(value => value ? { ...value, ids: value.ids.filter(id => !successes.has(id)) } : value)
       try { await refresh() }
       finally {
-        if (result.status === 'success') {
+        if (generation === epoch.current && result.status === 'success') {
           setDialog(undefined)
           if (request.type === 'create-markdown' || request.type === 'create-course' || request.type === 'create-text') {
             const item = result.items.find(i => i.status === 'success' && i.targetPath)
@@ -366,7 +381,7 @@ export function WorkspaceFilesTree({ directory, files, operation, refreshVersion
       }
       return result
     } catch (reason) { if (generation === epoch.current) setError(message(reason)) }
-    finally { lock.current = false; if (generation === epoch.current) setBusy(false) }
+    finally { if (lock.current === generation) lock.current = null; if (generation === epoch.current) setBusy(false) }
   }
   const common = () => ({ operationId: crypto.randomUUID(), workspaceId: root!.workspaceId })
   const submit = () => {

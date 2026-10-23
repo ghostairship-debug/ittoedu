@@ -1,9 +1,7 @@
 import { componentContainers, componentSurface } from '../../../shared/contracts/component-platform/project'
-import type { ComponentContainer, ComponentDefinition, ComponentEdit, ComponentSpatialAuthoring, ComponentSpatialPose, JsonValue } from '../../../shared/contracts/component-platform'
-import { createTextData, createFormulaData, TEXT_DEFINITION, FORMULA_DEFINITION } from '../../../components/text'
-import { defaultShapeData, SHAPE_DEFINITION, shapeDataSchema } from '../../../components/shape'
-import { createTableData, TABLE_DEFINITION } from '../../../components/table'
-import { createChartData, CHART_DEFINITION, chartDataSchema } from '../../../components/chart'
+import type { ComponentContainer, ComponentEdit, ComponentSpatialAuthoring, ComponentSpatialPose } from '../../../shared/contracts/component-platform'
+import { prepareCourseElementEdits, type CourseElementKind, type CourseInsertionOptions } from '../../../core/course/courseElementInsertion'
+import { professionalElementDefaultSize } from '../../../core/course/professionalElementDefaults'
 import type { CapturedCourseTarget } from '../../documents/CourseV10DocumentBridge'
 import type { EditorStoreKernel } from '../editorStoreKernel'
 import { fitSpatialComponentWorld } from '../../componentPlatform/surfaces/spatial/cameraCommands'
@@ -52,7 +50,7 @@ export function createSpatialAuthoringSlice(kernel: EditorStoreKernel, ports: {
   }).catch(error => {
     kernel.setFeedback({ errorMessage: error instanceof Error ? error.message : String(error), statusMessage: null }); throw error
   })
-  const insert = async (definition: ComponentDefinition, data: unknown, width: number, height: number, x?: number, y?: number) => {
+  const insert = async (kind: CourseElementKind, options: CourseInsertionOptions = {}, x?: number, y?: number) => {
     const frozen = target(), surface = componentContainers(frozen.project).find(value => value.id === frozen.surfaceId && value.kind === 'spatial')
     if (!surface) throw new Error('请先选择一个空间页面')
     const view = read(surface.id, frozen.documentId), global = view.scope === 'global'
@@ -60,35 +58,27 @@ export function createSpatialAuthoringSlice(kernel: EditorStoreKernel, ports: {
     const children = global ? frozen.project.global.overlay : surface.childIds
     const design = surface.designSize ?? { width: 1280, height: 720 }
     const center = global ? { x: design.width / 2, y: design.height / 2 } : view.camera
+    const { width, height } = professionalElementDefaultSize(kind, 'spatial-authoring')
     // Preserve mature Spatial's staggered placement around the observed camera.
     const slot = x === undefined && y === undefined ? children.length % 24 : 0
-    const frame = { width, height, transform: [1, 0, 0, 1, x ?? center.x - width / 2 + slot % 6 * 20,
-      y ?? center.y - height / 2 + Math.floor(slot / 6) * 20] as [number, number, number, number, number, number] }
-    const id = crypto.randomUUID(), edits: ComponentEdit[] = []
-    if (!frozen.project.definitions[definition.id]) edits.push({ type: 'definition.set', definition })
-    edits.push({ type: 'instance.insert', container, index: children.length, rootIds: [id],
-      instances: [{ id, definitionId: definition.id, data: JSON.parse(JSON.stringify(data)) as JsonValue, frame }] })
+    const prepared = prepareCourseElementEdits(frozen.project, surface.id, null, kind, { ...options, origin: 'spatial-authoring', container,
+      index: children.length, x: x ?? center.x - width / 2 + slot % 6 * 20, y: y ?? center.y - height / 2 + Math.floor(slot / 6) * 20 })
+    const id = prepared.instanceIds[0]!
     await ports.content?.commit()
-    await apply(edits, frozen, '已添加内容')
+    await apply(prepared.edits, frozen, '已添加内容')
     kernel.selectInstances([id], surface.id, frozen.documentId)
     return id
   }
   const addShapeNode = (type: string, x?: number, y?: number) =>
-    insert(SHAPE_DEFINITION, shapeDataSchema.parse(defaultShapeData(type as Parameters<typeof defaultShapeData>[0])), 320, 180, x, y)
+    insert('shape', { shapeType: type as CourseInsertionOptions['shapeType'] }, x, y)
   const actions = {
-    addTextNode: (x?: number, y?: number) => insert(TEXT_DEFINITION, createTextData('双击编辑文字'), 320, 80, x, y),
-    addFormulaNode: (x?: number, y?: number) => insert(FORMULA_DEFINITION, createFormulaData(crypto.randomUUID(), 'x^2'), 420, 160, x, y),
+    addTextNode: (x?: number, y?: number) => insert('text', {}, x, y),
+    addFormulaNode: (x?: number, y?: number) => insert('formula', {}, x, y),
     addRectangleNode: (x?: number, y?: number) => addShapeNode('rectangle', x, y),
     addShapeNode,
-    addTableNode: (x?: number, y?: number) => insert(TABLE_DEFINITION, createTableData(), 560, 360, x, y),
+    addTableNode: (x?: number, y?: number) => insert('table', {}, x, y),
     addChartNode(type: 'bar' | 'line' | 'area' | 'pie' | 'donut' = 'bar', x?: number, y?: number) {
-      const initial = createChartData()
-      const style = type === 'pie' || type === 'donut'
-        ? { backgroundColor: initial.style.backgroundColor, backgroundOpacity: initial.style.backgroundOpacity,
-          fontFamily: initial.style.fontFamily, fontSize: initial.style.fontSize, textColor: initial.style.textColor,
-          showLegend: initial.style.showLegend, legendPosition: initial.style.legendPosition, showDataLabels: initial.style.showDataLabels,
-          ...(type === 'donut' ? { holeSize: 50 } : {}) } : initial.style
-      return insert(CHART_DEFINITION, chartDataSchema.parse({ ...initial, chartType: type, style }), 560, 360, x, y)
+      return insert('chart', { chartType: type }, x, y)
     },
     beginTextEdit: (instanceId: string, source?: 'canvas' | 'properties') => ports.content?.begin(instanceId, source),
     commitTextEdit: () => ports.content?.commit() ?? Promise.resolve(),

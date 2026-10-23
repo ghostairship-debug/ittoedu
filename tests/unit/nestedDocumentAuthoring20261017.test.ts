@@ -6,6 +6,7 @@ import { expect, it } from 'vitest'
 import { domAuthoringFactorySource, createDomAuthoring } from '../../src/components/web/authoringDom'
 import { authoredDocumentBootstrap, authoredDocumentProgramsSource } from '../../src/components/web/authoredDocumentBootstrap'
 import { installOwnedDocumentAuthoring } from '../../src/components/web/ownedDocumentAuthoring'
+import { createAuthoringFrameGeometry } from '../../src/components/web/authoringFrame'
 import { createBlankCourseProjectV10 } from '../../src/core/course/createCourseProjectV10'
 import { authorSpotEdits } from '../../src/core/components/authoring/componentAuthorEdits'
 import { DocumentSession } from '../../src/core/documents/DocumentSession'
@@ -61,7 +62,7 @@ async function mount(page: Page, html: string, records: Record<string, Component
       q.owner=(${installOwnedDocumentAuthoring.toString()})(${JSON.stringify(programs.property)},'',${domAuthoringFactorySource()},{
         records:()=>q.records,resources:()=>q.resources,bindings:()=>q.bindings,observe:true,
         onDoubleClick:point=>q.doubleClicks.push(point)
-      });`,
+      },(${createAuthoringFrameGeometry.toString()}));`,
   })
   await page.locator('#root').evaluate((element, source) => { (element as HTMLIFrameElement).srcdoc = source }, prepared)
   const root = page.frameLocator('#root'), child = root.frameLocator('#child'), grandchild = child.frameLocator('#grandchild')

@@ -1,0 +1,374 @@
+[
+  [
+    {
+      "kind": "read",
+      "data": {
+        "path": "pages/01-一杯咖啡的远行/09-编组/01-编组/04-编组/01-HTML 程序.content.html",
+        "type": "html",
+        "viewport": {
+          "width": 1280,
+          "height": 900
+        },
+        "documentId": "7fe04848-f529-483c-9ba0-e17c55221b2a",
+        "epoch": "41e1b124-164b-4714-8792-8774048aa560",
+        "revision": 193,
+        "currentRevision": 193,
+        "basis": "current",
+        "summary": "从材料，到液体 / A SMALL TRANSFER 水声 关 01 进入水 02 水再多一点 从粉体，到液体 萃取示意 水接触粉体 咖啡来源溶解物 清水 粉体 1 浸润 2 溶出 3 滤开 3 克 · 咖啡来源溶解物 始终不变 点与颜色用于解释物质关系，大小、速度与色深均为示意。 01 / 浸润 水先走近， 再带走一部分。 水接触咖啡粉，部分可溶物进入液体",
+        "content": "<!doctype html>\n<html lang=\"zh-CN\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>水，带走一部分 · 杯中的小实验</title><style>@charset \"UTF-8\";\n:root{--paper:#eeece2;--ink:#242b24;--muted:#697064;--line:#c9ccbe;--red:#9e3329;--green:#263f32;--dark:#10130f;--copper:#d2a278;--serif:\"Noto Serif CJK SC\",\"Source Han Serif SC\",\"Songti SC\",\"STSong\",\"SimSun\",serif;--sans:\"Noto Sans CJK SC\",\"PingFang SC\",\"Microsoft YaHei\",sans-serif}\n*{box-sizing:border-box}html{scroll-behavior:smooth;scroll-padding-top:80px}body{margin:0;color:var(--ink);background:transparent;font-family:var(--sans);font-size:16px;line-height:1.85}img{display:block;max-width:100%;height:auto}figure,p,h1,h2,h3{margin:0}button,a,input,summary{-webkit-tap-highlight-color:transparent}button{color:inherit;font:inherit}a{color:inherit;text-underline-offset:4px}button,summary{cursor:pointer}button{border:0;background:none}a:focus-visible,button:focus-visible,summary:focus-visible,input:focus-visible{outline:2px solid var(--red);outline-offset:5px}button:disabled{cursor:default}::selection{background:#d8bc9e;color:#20291f}.serif{font-family:var(--serif);font-weight:400}.eyebrow{font:11px/1.5 var(--sans);letter-spacing:.15em;text-transform:uppercase}.small{font:12px/1.8 var(--sans);color:var(--muted)}.wrap{width:min(1280px,calc(100% - 112px));margin-inline:auto}.sr-only{position:absolute!important;width:1px;height:1px;padding:0;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}.rule{height:1px;background:var(--line)}.chapter-num{font:italic 28px/1 Georgia,serif;color:var(--red)}.link-button{font:12px var(--sans);padding:10px 0;border-bottom:1px solid currentColor}.chapter-label{display:flex;align-items:center;gap:14px}.chapter-label .eyebrow{letter-spacing:.12em}details>summary{list-style:none}details>summary::-webkit-details-marker{display:none}details>summary::after{content:'＋';float:right;margin-left:18px}details[open]>summary::after{content:'−'}\n@media(max-width:720px){.wrap{width:calc(100% - 40px)}body{font-size:15px}.chapter-num{font-size:24px}html{scroll-padding-top:66px}}\n@media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}*,*::before,*::after{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}}\n</style><style>html,body.water-page{background:transparent!important;color:var(--study-ink,#273d36);margin:0;overflow-x:hidden}\n.water-lab{--study-paper:#e8eeea;--study-ink:#273d36;--study-muted:#65756d;--study-liquid:#a86f3a;--study-water:#86b6bd;max-width:1200px;margin:auto;padding:28px 42px 34px;box-sizing:border-box;background:transparent;font-family:var(--sans,\"Microsoft YaHei\",sans-serif)}\n.water-lab *{box-sizing:border-box}.water-lab button{cursor:pointer;border:0;background:none;color:inherit}.water-lab [hidden]{display:none!important}.water-lab :focus-visible{outline:2px solid #a17d4d;outline-offset:5px}\n.water-top{display:flex;justify-content:space-between;gap:18px;align-items:center}.water-kicker{font:11px/1.7 var(--sans,sans-serif);letter-spacing:.1em;color:#587062;margin:0}.sound-toggle{font:12px var(--sans,sans-serif);min-height:40px;border-bottom:1px solid #8a9e94!important;padding:9px 0;color:#526f61!important;white-space:nowrap}.sound-toggle[aria-pressed=true]{color:#8d582a!important;border-color:#9a673b!important}\n.water-tabs{display:flex;gap:34px;border-bottom:1px solid #8fa79166;margin-top:15px}.water-tabs button{min-height:48px;padding:12px 0 14px;font:15px var(--serif,\"SimSun\",serif);color:#718474;border-bottom:2px solid transparent}.water-tabs button[aria-pressed=true]{border-color:#375e46;color:#25452e}\n.water-grid{display:grid;grid-template-columns:minmax(0,1.25fr) minmax(0,1fr);gap:46px;align-items:center;padding-top:26px;min-height:490px}.water-figure{position:relative;min-width:0;margin:0;padding:18px 20px 17px;border:1px solid #66806d30;border-radius:22px;background:radial-gradient(ellipse at 35% 42%,#fffdf75c,transparent 70%),linear-gradient(135deg,#fafff52b,#ceded321);box-shadow:0 10px 28px #2f4f3210,inset 0 1px 0 #ffffff7a}\n.diagram-heading{display:flex;align-items:center;justify-content:space-between;gap:14px;font-size:12px;line-height:1.5;color:#42634a}.diagram-heading strong{font-weight:500}.diagram-heading>span{color:#6a8172;font-size:10px;letter-spacing:.1em;white-space:nowrap}.diagram-canvas-wrap{position:relative;margin:0 -6px}.water-figure canvas{display:block;width:100%;height:auto;aspect-ratio:660/610}.diagram-change{position:absolute;right:0;top:18px;max-width:130px;color:#55786b;font:12px/1.5 var(--sans,sans-serif);padding:7px 10px;border:1px solid #7894843a;border-radius:30px;background:#f0f7efb0}\n.water-legend{display:flex;justify-content:center;gap:17px;flex-wrap:wrap;margin:-7px 0 0;color:#516a58;font-size:12px;line-height:1.7}.water-legend>span{display:inline-flex;align-items:center;gap:7px}.legend-particle{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--study-liquid);box-shadow:inset -2px -2px 2px #62432666}.legend-water{display:inline-block;width:7px;height:11px;border-radius:60% 40% 60% 40%;background:var(--study-water);transform:rotate(-30deg)}.legend-ground{display:inline-block;width:8px;height:8px;background:#786044;transform:rotate(30deg);border-radius:2px}\n.diagram-invariant{display:flex;justify-content:center;align-items:center;gap:10px;margin:14px auto 0;width:fit-content;padding:8px 16px;border:1px solid #aebfab66;border-radius:12px;color:#405a43;background:#f7f7e77d;font-size:12px;line-height:1.5}.diagram-invariant strong{font:24px/1 Georgia,serif;color:#7c4c28;font-variant-numeric:tabular-nums}.diagram-invariant>span:last-child{border-left:1px solid #aebfab;padding-left:10px;font-size:11px;color:#627867}\n.stage-track{display:flex;justify-content:center;align-items:center;gap:0;margin:14px 0 0;padding:0;list-style:none}.stage-track li{display:flex;align-items:center;font:12px/1.5 var(--sans,sans-serif);color:#798c7b;white-space:nowrap}.stage-track li:not(:last-child)::after{content:'';width:24px;height:1px;background:#aebdaf;margin:0 10px}.stage-track b{width:19px;height:19px;display:inline-flex;align-items:center;justify-content:center;border:1px solid #99ad9b;border-radius:50%;font-size:10px;font-weight:400;margin-right:6px}.stage-track li[data-active=true]{color:#365e42}.stage-track li[data-active=true] b{background:#466b50;border-color:#466b50;color:#f3f5e8}.stage-track li[data-complete=true] b{background:#75957b40}\n.water-figure figcaption{font:11px/1.8 var(--sans,sans-serif);color:#697f6d;text-align:left;margin-top:15px;padding-top:12px;border-top:1px solid #8ca38e38}\n.water-counter{display:block;font:italic 14px Georgia,\"SimSun\",serif;color:#607c69;margin-bottom:20px}.water-response h3{font:400 36px/1.55 var(--serif,\"SimSun\",serif);letter-spacing:.02em;margin:0 0 20px}.water-response p{font:15px/2 var(--serif,\"SimSun\",serif);color:#4b6655;max-width:26em;margin:0}.water-action{font:14px var(--serif,serif);color:#304d3e!important;border-bottom:1px solid #526e5d!important;padding:12px 0;min-height:44px;margin-top:26px;display:block}.water-text-button{font:13px var(--sans,sans-serif);color:#55715c!important;padding:12px 0;min-height:44px;margin-top:6px;display:block}\n.concentration{margin:5px 0 24px;line-height:1;color:#8a582b}.concentration output{font:400 72px/1 Georgia,serif;letter-spacing:-.045em;font-variant-numeric:tabular-nums}.concentration>span{font:24px Georgia,serif;margin-left:7px}.concentration small{display:block;font:12px/1.8 var(--sans,sans-serif);color:#5a7260;letter-spacing:.02em;margin-top:10px}.water-readings{display:grid;grid-template-columns:1fr 1fr;gap:20px;border-top:1px solid #97af9c66;padding-top:18px;margin:0 0 21px}.water-readings dt{font:12px/1.7 var(--sans,sans-serif);color:#627b6a}.water-readings dd{margin:7px 0 0;font:30px/1.2 Georgia,serif;color:#355340;font-variant-numeric:tabular-nums}.water-readings dd small{font:11px var(--sans,sans-serif);margin-left:7px;color:#637b67}.water-response .water-response-copy{font:13px/1.9 var(--sans,sans-serif);color:#55715c}\n.dilution-controls{margin:25px auto 0;width:min(850px,100%);padding-top:24px;border-top:1px solid #8ca78f70}.dilution-control-top{display:flex;justify-content:space-between;align-items:center;gap:20px}.dilution-control-top label{font:15px var(--serif,serif)}.dilution-control-top label output{color:#8a582b;font:24px Georgia,serif;margin-left:10px;font-variant-numeric:tabular-nums}.dilution-control-top [data-presets]{display:flex;gap:24px}.dilution-control-top button{font:13px var(--sans,sans-serif);padding:10px 0;min-height:44px;color:#718676;border-bottom:1px solid transparent}.dilution-control-top button[aria-pressed=true]{color:#355941;border-color:#5b7d63}\n.dilution-controls input{width:100%;height:42px;appearance:none;-webkit-appearance:none;background:transparent;accent-color:#4d765a;cursor:ew-resize;margin:10px 0 0}.dilution-controls input::-webkit-slider-runnable-track{height:3px;border-radius:4px;background:linear-gradient(90deg,#92683d,#8aabaa)}.dilution-controls input::-webkit-slider-thumb{appearance:none;-webkit-appearance:none;width:23px;height:23px;background:#edf2e8;border:2px solid #4b7255;border-radius:50%;margin-top:-10px;box-shadow:0 0 0 5px #4b725514}.dilution-controls input::-moz-range-track{height:3px;background:#91a99a}.dilution-controls input::-moz-range-thumb{width:21px;height:21px;background:#edf2e8;border:2px solid #4b7255;border-radius:50%}\n.water-control-foot{display:flex;justify-content:space-between;gap:20px;align-items:center;font:11px/1.8 var(--sans,sans-serif);color:#617a69}.water-control-foot button{font:12px var(--sans,sans-serif);white-space:nowrap;padding:12px 0;min-height:44px}.water-assumption{max-width:850px;margin:24px auto 0;font:11px/1.9 var(--sans,sans-serif);color:#657d6a}.water-lab[data-extraction=false] .water-tabs{display:none}.water-lab[data-extraction=false] .water-grid{padding-top:25px}\n@media(max-width:800px){.water-lab{padding:22px 20px 26px}.water-grid{grid-template-columns:1fr;gap:24px;min-height:0;padding-top:22px}.water-figure{padding:15px 16px 14px;border-radius:18px;max-width:530px;width:100%;margin:auto}.water-figure canvas{max-height:none}.diagram-heading{font-size:12px}.diagram-heading>span{font-size:10px}.diagram-change{font-size:11px;max-width:118px;right:0;top:10px;padding:6px 9px}.water-legend{font-size:12px;gap:14px;margin-top:-5px}.water-figure figcaption{font-size:11px;line-height:1.8}.water-counter{font-size:13px;margin-bottom:12px}.water-response h3{font-size:29px;line-height:1.45;margin-bottom:15px}.water-response p{font-size:14px;line-height:1.9;max-width:none}.water-action{margin-top:16px}.water-text-button{margin-top:2px}.water-tabs{gap:28px;margin-top:12px}.water-tabs button{font-size:14px}.water-kicker{font-size:10px;letter-spacing:.03em}.sound-toggle{font-size:11px}.concentration{margin:15px 0 20px}.concentration output{font-size:64px}.concentration small{font-size:12px}.water-readings{gap:18px;padding-top:15px;margin-bottom:18px}.water-readings dd{font-size:29px}.water-readings dt{font-size:12px}.water-readings dd small{display:inline;margin-left:6px}.water-response .water-response-copy{font-size:13px}.dilution-controls{margin-top:22px;padding-top:18px}.dilution-control-top{display:block}.dilution-control-top [data-presets]{margin-top:7px;gap:28px}.water-assumption{font-size:11px;margin-top:20px}.water-control-foot{font-size:11px;gap:15px}.stage-track li{font-size:11px}.stage-track li:not(:last-child)::after{width:17px;margin:0 8px}.diagram-invariant{font-size:11px;gap:8px;padding:8px 12px}.diagram-invariant strong{font-size:22px}}\n@media(max-width:420px){.water-lab{padding-inline:16px}.water-top{gap:10px}.water-kicker{max-width:235px}.water-figure{padding-inline:13px}.water-readings dd small{font-size:11px}.water-response h3{font-size:28px}.water-legend{gap:11px}.diagram-heading>span{letter-spacing:.03em}.stage-track li:not(:last-child)::after{width:11px;margin:0 7px}.diagram-invariant>span:last-child{font-size:10px}}\n@media(prefers-reduced-motion:reduce){.water-lab *{scroll-behavior:auto}}\n</style></head>\n<body class=\"water-page\"><main class=\"water-lab\" data-water-lab data-mode=\"extract\">\n  <div class=\"water-top\"><p class=\"water-kicker\" data-kicker>从材料，到液体 / A SMALL TRANSFER</p><button type=\"button\" class=\"sound-toggle\" data-sound aria-pressed=\"false\" title=\"由程序合成的轻水声，仅在主动播放或加水时出现\">水声 关</button></div>\n  <div class=\"water-tabs\" role=\"group\" aria-label=\"观察阶段\"><button type=\"button\" data-mode-button=\"extract\" aria-pressed=\"true\">01　进入水</button><button type=\"button\" data-mode-button=\"dilute\" aria-pressed=\"false\">02　水再多一点</button></div>\n  <div class=\"water-grid\"><figure class=\"water-figure\">\n    <div class=\"diagram-heading\"><strong data-diagram-title>从粉体，到液体</strong><span data-diagram-mode>萃取示意</span></div>\n    <div class=\"diagram-canvas-wrap\"><canvas width=\"660\" height=\"610\" data-water-canvas role=\"img\" aria-label=\"粉体中的部分物质进入水里；移走粉渣后，添加清水只改变杯中浓度\"></canvas><span class=\"diagram-change\" data-diagram-change>水接触粉体</span></div>\n    <div class=\"water-legend\" aria-label=\"图例\"><span><i class=\"legend-particle\" aria-hidden=\"true\"></i><span data-legend-solute>咖啡来源溶解物</span></span><span><i class=\"legend-water\" aria-hidden=\"true\"></i>清水</span><span data-extract-legend><i class=\"legend-ground\" aria-hidden=\"true\"></i>粉体</span></div>\n    <ol class=\"stage-track\" data-stage-track aria-label=\"萃取阶段\"><li data-stage=\"0\" data-active=\"true\"><b>1</b>浸润</li><li data-stage=\"1\"><b>2</b>溶出</li><li data-stage=\"2\"><b>3</b>滤开</li></ol>\n    <div class=\"diagram-invariant\" data-diagram-invariant hidden><strong data-invariant-number>3</strong><span>克 · <span data-invariant-label>咖啡来源溶解物</span></span><span>始终不变</span></div>\n    <figcaption data-figure-caption>点与颜色用于解释物质关系，大小、速度与色深均为示意。</figcaption>\n  </figure>\n  <div class=\"water-response\"><div data-extract-copy><span class=\"water-counter\" data-step>01 / 浸润</span><h3 data-step-title>水先走近，<br>再带走一部分。</h3><p data-step-copy>水接触咖啡粉，部分可溶物进入液体。粉体仍然留在原处。</p><button class=\"water-action\" type=\"button\" data-replay>看水经过一次 →</button><button class=\"water-text-button\" type=\"button\" data-next>粉渣滤开以后，会怎样？ ↗</button></div>\n  <div data-dilute-copy hidden><span class=\"water-counter\" data-filtered-label>粉渣已经移开</span><h3 data-dilute-title>再加一点水，<br>什么没有变？</h3><div class=\"concentration\"><output data-concentration>1.50</output><span>%</span><small data-concentration-label>杯中溶解物的质量分数</small></div><dl class=\"water-readings\"><div><dt data-total-label>饮品总质量</dt><dd><output data-total>200</output><small>克</small></dd></div><div><dt data-solute-label>咖啡来源溶解物</dt><dd><output data-solute>3</output><small>克 · 不变</small></dd></div></dl><p class=\"water-response-copy\" data-result>溶解物仍是 3 克。加入清水后，它分布在更多液体里。</p></div></div></div>\n  <div class=\"dilution-controls\" data-controls hidden><div class=\"dilution-control-top\"><label for=\"water-range\">添加的清水 <output data-added>0</output> 克</label><div data-presets role=\"group\" aria-label=\"选择加水量\"><button type=\"button\" data-add=\"0\" aria-pressed=\"true\">原杯</button><button type=\"button\" data-add=\"50\" aria-pressed=\"false\">＋50 克</button><button type=\"button\" data-add=\"100\" aria-pressed=\"false\">＋100 克</button></div></div><input id=\"water-range\" type=\"range\" min=\"0\" max=\"100\" value=\"0\" step=\"1\" aria-label=\"添加的清水克数\"><div class=\"water-control-foot\"><span>拖动比较不同加水量；向回拖动表示重设情形。</span><button type=\"button\" data-reset>重置 ↺</button></div></div>\n  <p class=\"water-assumption\" data-assumption>设定：滤净的 200 克饮品含 3 克咖啡来源可溶物。清水不额外带入这类物质，忽略蒸发、洒出与反应。</p><p class=\"sr-only\" data-water-live aria-live=\"polite\"></p>\n</main><script>window.WATER_STUDY={\n  id:'coffee-journey-v05-water',baseMass:200,soluteMass:3,maxAdded:100,defaultAdded:0,particleCount:72,initialMode:'extract',durationMs:7600,\n  palette:{paper:'#e8eeea',ink:'#273d36',muted:'#65756d',liquid:'#a86f3a',particle:'#674226',water:'#86b6bd'},\n  text:{pageTitle:'水，带走一部分 · 杯中的小实验',canvasLabel:'粉体中的部分物质进入水里；移走粉渣后，添加清水只改变杯中浓度',kicker:'从材料，到液体 / A SMALL TRANSFER',diluteTitle:'再加一点水，<br>什么没有变？',filtered:'粉渣已经移开',solute:'咖啡来源溶解物',total:'饮品总质量',fraction:'杯中溶解物的质量分数',result:'溶解物仍是 {solute} 克。加入清水后，它分布在更多液体里。',assumption:'设定：滤净的 200 克饮品含 3 克咖啡来源可溶物。清水不额外带入这类物质，忽略蒸发、洒出与反应。',caption:'点与颜色用于解释物质关系，大小、速度与色深均为示意。',presets:['原杯','＋50 克','＋100 克']},\n  extraction:{enabled:true,steps:[\n    {at:0,no:'01 / 浸润',title:'水先走近，<br>再带走一部分。',copy:'水接触咖啡粉，部分可溶物进入液体。粉体仍然留在原处。'},\n    {at:.32,no:'02 / 溶出',title:'有些留下，<br>有些进入水里。',copy:'水与咖啡粉接触，部分物质从材料中迁移到液体。画面只解释关系，不计算真实萃取速度。'},\n    {at:.76,no:'03 / 滤开',title:'现在，<br>把粉渣留在外面。',copy:'移开粉渣后，这杯饮品已有自己的浓度。接下来添加清水，就可以单独观察稀释。'}\n  ]}\n};\n</script><script>(()=>{'use strict';\nconst cfg=window.WATER_STUDY,root=document.querySelector('[data-water-lab]');if(!cfg||!root)return;\nconst $=q=>root.querySelector(q),canvas=$('[data-water-canvas]'),ctx=canvas.getContext('2d'),slider=$('#water-range'),replay=$('[data-replay]');\nconst preference=matchMedia('(prefers-reduced-motion: reduce)'),clamp=(v,a,b)=>Math.min(b,Math.max(a,Number(v)||0));\nlet reduced=preference.matches,mode=cfg.initialMode||'dilute',added=clamp(cfg.defaultAdded,0,cfg.maxAdded),shownAdded=added,progress=.08,playing=false,raf=0,last=0,start=0,visible=true,audioOn=false,audioContext=null,audioNodes=[],pourUntil=0;\nconst text=cfg.text,palette=cfg.palette,storageKey=cfg.id+':reading',W=660,H=610;\nif(text.pageTitle)document.title=text.pageTitle;if(text.canvasLabel)canvas.setAttribute('aria-label',text.canvasLabel);\ntry{const saved=JSON.parse(sessionStorage.getItem(storageKey)||'null');if(saved){added=shownAdded=clamp(saved.added,0,cfg.maxAdded);mode=saved.mode==='extract'&&cfg.extraction.enabled?'extract':'dilute';progress=clamp(saved.progress,0,1)}}catch{}\nif(!cfg.extraction.enabled)mode='dilute';root.dataset.extraction=String(cfg.extraction.enabled);\nfor(const [selector,key]of [['[data-kicker]','kicker'],['[data-filtered-label]','filtered'],['[data-solute-label]','solute'],['[data-total-label]','total'],['[data-concentration-label]','fraction'],['[data-assumption]','assumption'],['[data-figure-caption]','caption']])$(selector).textContent=text[key];\n$('[data-dilute-title]').innerHTML=text.diluteTitle;slider.max=String(cfg.maxAdded);\n// The work-level Global Underlay owns the page. Only local diagram glass/paper may paint.\ndocument.documentElement.style.background='transparent';document.body.style.background='transparent';root.style.background='transparent';\nroot.style.setProperty('--study-paper',palette.paper);root.style.setProperty('--study-ink',palette.ink);root.style.setProperty('--study-muted',palette.muted);root.style.setProperty('--study-liquid',palette.liquid);root.style.setProperty('--study-water',palette.water);\nconst presets=[...root.querySelectorAll('[data-add]')];presets.forEach((b,i)=>{b.dataset.add=String(Math.round(i*cfg.maxAdded/2));b.textContent=text.presets[i]});\n$('[data-legend-solute]').textContent=text.solute;\nfunction remember(){try{sessionStorage.setItem(storageKey,JSON.stringify({mode,added,progress}))}catch{}}\nfunction height(){if(parent!==window)parent.postMessage({type:'coffee:height',height:Math.ceil(document.body.scrollHeight)},'*')}\nfunction readout(){const total=cfg.baseMass+added,percent=100*cfg.soluteMass/total;slider.value=String(added);slider.setAttribute('aria-valuetext',`添加清水${added}克，浓度${percent.toFixed(2)}%`);$('[data-concentration]').textContent=percent.toFixed(2);$('[data-total]').textContent=String(total);$('[data-solute]').textContent=String(cfg.soluteMass);$('[data-added]').textContent=String(added);$('[data-result]').textContent=text.result.replace('{solute}',String(cfg.soluteMass));presets.forEach(b=>b.setAttribute('aria-pressed',String(Number(b.dataset.add)===added)));root.dataset.added=String(added);root.dataset.solute=String(cfg.soluteMass);root.dataset.total=String(total);root.dataset.concentration=percent.toFixed(2);root.dataset.particles=String(cfg.particleCount);$('[data-diagram-title]').textContent=mode==='extract'?'从粉体，到液体':'同一份溶解物，更多液体';$('[data-diagram-mode]').textContent=mode==='extract'?'萃取示意':'稀释示意';$('[data-invariant-number]').textContent=String(cfg.soluteMass);$('[data-invariant-label]').textContent=text.solute;$('[data-diagram-change]').textContent=added?`清水 +${added} 克`:'未添加清水';$('[data-extract-legend]').hidden=mode!=='extract';$('[data-diagram-invariant]').hidden=mode==='extract';$('[data-stage-track]').hidden=mode!=='extract';if(mode==='dilute')$('[data-water-live]').te",
+        "complete": false,
+        "offset": 0,
+        "total": 33960,
+        "nextOffset": 20459
+      }
+    },
+    {
+      "kind": "read",
+      "data": {
+        "path": "pages/01-一杯咖啡的远行/09-编组/01-编组/04-编组/01-HTML 程序.content.html",
+        "commit": "committed",
+        "usability": "partial",
+        "delivery": "not_requested",
+        "diagnostics": [
+          {
+            "level": "warning",
+            "code": "unsupported-dynamic-url-sink",
+            "message": "无法静态证明该脚本的资源引用闭合，已原样保留；脚本里的本地文件引用不会被打包，请内联资源或改为可解析的静态媒体引用；这是静态依赖分析未覆盖的动态内容，未证明运行失败，请以真实预览和运行错误为准",
+            "repairable": true
+          },
+          {
+            "level": "warning",
+            "code": "dynamic-html-preserved",
+            "message": "innerHTML 的动态内容保留原代码执行；运行时生成的资源未作静态收集；这是静态依赖分析未覆盖的动态内容，未证明运行失败，请以真实预览和运行错误为准",
+            "repairable": true
+          },
+          {
+            "level": "warning",
+            "code": "unsupported-dynamic-url-sink",
+            "message": "无法静态解析 style.setProperty 的资源内容；这是静态依赖分析未覆盖的动态内容，未证明运行失败，请以真实预览和运行错误为准",
+            "repairable": true
+          },
+          {
+            "level": "warning",
+            "code": "unsupported-dynamic-url-sink",
+            "message": "无法静态解析 style.setProperty 的资源内容；这是静态依赖分析未覆盖的动态内容，未证明运行失败，请以真实预览和运行错误为准",
+            "repairable": true
+          },
+          {
+            "level": "warning",
+            "code": "unsupported-dynamic-url-sink",
+            "message": "无法静态解析 style.setProperty 的资源内容；这是静态依赖分析未覆盖的动态内容，未证明运行失败，请以真实预览和运行错误为准",
+            "repairable": true
+          },
+          {
+            "level": "warning",
+            "code": "unsupported-dynamic-url-sink",
+            "message": "无法静态解析 style.setProperty 的资源内容；这是静态依赖分析未覆盖的动态内容，未证明运行失败，请以真实预览和运行错误为准",
+            "repairable": true
+          },
+          {
+            "level": "warning",
+            "code": "unsupported-dynamic-url-sink",
+            "message": "无法静态解析 style.setProperty 的资源内容；这是静态依赖分析未覆盖的动态内容，未证明运行失败，请以真实预览和运行错误为准",
+            "repairable": true
+          },
+          {
+            "level": "warning",
+            "code": "dynamic-html-preserved",
+            "message": "innerHTML 的动态内容保留原代码执行；运行时生成的资源未作静态收集；这是静态依赖分析未覆盖的动态内容，未证明运行失败，请以真实预览和运行错误为准",
+            "repairable": true
+          },
+          {
+            "level": "warning",
+            "code": "unsupported-dynamic-url-sink",
+            "message": "无法静态确定计算属性写入是否为资源入口；这是静态依赖分析未覆盖的动态内容，未证明运行失败，请以真实预览和运行错误为准",
+            "repairable": true
+          },
+          {
+            "level": "warning",
+            "code": "unsupported-dynamic-url-sink",
+            "message": "无法静态证明该脚本的资源引用闭合，已原样保留；脚本里的本地文件引用不会被打包，请内联资源或改为可解析的静态媒体引用；这是静态依赖分析未覆盖的动态内容，未证明运行失败，请以真实预览和运行错误为准",
+            "instanceId": "8f45751d-9cc3-49dd-ba88-c645759f022c",
+            "repairable": true
+          },
+          {
+            "level": "warning",
+            "code": "dynamic-html-preserved",
+            "message": "innerHTML 的动态内容保留原代码执行；运行时生成的资源未作静态收集；这是静态依赖分析未覆盖的动态内容，未证明运行失败，请以真实预览和运行错误为准",
+            "instanceId": "8f45751d-9cc3-49dd-ba88-c645759f022c",
+            "repairable": true
+          },
+          {
+            "level": "warning",
+            "code": "unsupported-dynamic-url-sink",
+            "message": "无法静态解析 style.setProperty 的资源内容；这是静态依赖分析未覆盖的动态内容，未证明运行失败，请以真实预览和运行错误为准",
+            "instanceId": "8f45751d-9cc3-49dd-ba88-c645759f022c",
+            "repairable": true
+          },
+          {
+            "level": "warning",
+            "code": "unsupported-dynamic-url-sink",
+            "message": "无法静态解析 style.setProperty 的资源内容；这是静态依赖分析未覆盖的动态内容，未证明运行失败，请以真实预览和运行错误为准",
+            "instanceId": "8f45751d-9cc3-49dd-ba88-c645759f022c",
+            "repairable": true
+          },
+          {
+            "level": "warning",
+            "code": "unsupported-dynamic-url-sink",
+            "message": "无法静态解析 style.setProperty 的资源内容；这是静态依赖分析未覆盖的动态内容，未证明运行失败，请以真实预览和运行错误为准",
+            "instanceId": "8f45751d-9cc3-49dd-ba88-c645759f022c",
+            "repairable": true
+          },
+          {
+            "level": "warning",
+            "code": "unsupported-dynamic-url-sink",
+            "message": "无法静态解析 style.setProperty 的资源内容；这是静态依赖分析未覆盖的动态内容，未证明运行失败，请以真实预览和运行错误为准",
+            "instanceId": "8f45751d-9cc3-49dd-ba88-c645759f022c",
+            "repairable": true
+          },
+          {
+            "level": "warning",
+            "code": "unsupported-dynamic-url-sink",
+            "message": "无法静态解析 style.setProperty 的资源内容；这是静态依赖分析未覆盖的动态内容，未证明运行失败，请以真实预览和运行错误为准",
+            "instanceId": "8f45751d-9cc3-49dd-ba88-c645759f022c",
+            "repairable": true
+          },
+          {
+            "level": "warning",
+            "code": "dynamic-html-preserved",
+            "message": "innerHTML 的动态内容保留原代码执行；运行时生成的资源未作静态收集；这是静态依赖分析未覆盖的动态内容，未证明运行失败，请以真实预览和运行错误为准",
+            "instanceId": "8f45751d-9cc3-49dd-ba88-c645759f022c",
+            "repairable": true
+          },
+          {
+            "level": "warning",
+            "code": "unsupported-dynamic-url-sink",
+            "message": "无法静态确定计算属性写入是否为资源入口；这是静态依赖分析未覆盖的动态内容，未证明运行失败，请以真实预览和运行错误为准",
+            "instanceId": "8f45751d-9cc3-49dd-ba88-c645759f022c",
+            "repairable": true
+          }
+        ],
+        "insertedIds": [],
+        "receipt": {
+          "status": "applied",
+          "documentId": "7fe04848-f529-483c-9ba0-e17c55221b2a",
+          "operationId": "tool:0e8c18503a31b29b6a07ff2cf1b23e4e1a7ae31c810287ccadd4e8cbd0a4abc5",
+          "beforeRevision": 193,
+          "revision": 194,
+          "persistence": "recoverable",
+          "appliedChanges": {
+            "affectedTargets": [
+              "8f45751d-9cc3-49dd-ba88-c645759f022c"
+            ],
+            "changes": [
+              {
+                "path": [
+                  "instances",
+                  "8f45751d-9cc3-49dd-ba88-c645759f022c",
+                  "data"
+                ],
+                "exists": true
+              },
+              {
+                "path": [
+                  "assets"
+                ],
+                "exists": true
+              }
+            ]
+          }
+        },
+        "viewport": {
+          "width": 1280,
+          "height": 900
+        }
+      }
+    }
+  ],
+  [
+    {
+      "kind": "read",
+      "data": {
+        "path": "pages/01-一份糖的去向/02-编组/03-HTML 程序.content.html",
+        "type": "html",
+        "viewport": {
+          "width": 1280,
+          "height": 720
+        },
+        "documentId": "c21167e8-df4b-4764-be2c-5ba576075e9c",
+        "epoch": "7bb293f2-aea6-45a7-98ab-fa7acfeaf193",
+        "revision": 27,
+        "currentRevision": 27,
+        "basis": "current",
+        "summary": "从材料，到液体 / A SMALL TRANSFER 水声 关 01 进入水 02 水再多一点 从粉体，到液体 萃取示意 水接触粉体 咖啡来源溶解物 清水 粉体 1 浸润 2 溶出 3 滤开 3 克 · 咖啡来源溶解物 始终不变 点与颜色用于解释物质关系，大小、速度与色深均为示意。 01 / 浸润 水先走近， 再带走一部分。 水接触咖啡粉，部分可溶物进入液体",
+        "content": "<!doctype html>\n<html lang=\"zh-CN\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>水，带走一部分 · 杯中的小实验</title><style>@charset \"UTF-8\";\n:root{--paper:#eeece2;--ink:#242b24;--muted:#697064;--line:#c9ccbe;--red:#9e3329;--green:#263f32;--dark:#10130f;--copper:#d2a278;--serif:\"Noto Serif CJK SC\",\"Source Han Serif SC\",\"Songti SC\",\"STSong\",\"SimSun\",serif;--sans:\"Noto Sans CJK SC\",\"PingFang SC\",\"Microsoft YaHei\",sans-serif}\n*{box-sizing:border-box}html{scroll-behavior:smooth;scroll-padding-top:80px}body{margin:0;color:var(--ink);background:transparent;font-family:var(--sans);font-size:16px;line-height:1.85}img{display:block;max-width:100%;height:auto}figure,p,h1,h2,h3{margin:0}button,a,input,summary{-webkit-tap-highlight-color:transparent}button{color:inherit;font:inherit}a{color:inherit;text-underline-offset:4px}button,summary{cursor:pointer}button{border:0;background:none}a:focus-visible,button:focus-visible,summary:focus-visible,input:focus-visible{outline:2px solid var(--red);outline-offset:5px}button:disabled{cursor:default}::selection{background:#d8bc9e;color:#20291f}.serif{font-family:var(--serif);font-weight:400}.eyebrow{font:11px/1.5 var(--sans);letter-spacing:.15em;text-transform:uppercase}.small{font:12px/1.8 var(--sans);color:var(--muted)}.wrap{width:min(1280px,calc(100% - 112px));margin-inline:auto}.sr-only{position:absolute!important;width:1px;height:1px;padding:0;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}.rule{height:1px;background:var(--line)}.chapter-num{font:italic 28px/1 Georgia,serif;color:var(--red)}.link-button{font:12px var(--sans);padding:10px 0;border-bottom:1px solid currentColor}.chapter-label{display:flex;align-items:center;gap:14px}.chapter-label .eyebrow{letter-spacing:.12em}details>summary{list-style:none}details>summary::-webkit-details-marker{display:none}details>summary::after{content:'＋';float:right;margin-left:18px}details[open]>summary::after{content:'−'}\n@media(max-width:720px){.wrap{width:calc(100% - 40px)}body{font-size:15px}.chapter-num{font-size:24px}html{scroll-padding-top:66px}}\n@media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}*,*::before,*::after{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}}\n</style><style>html,body.water-page{background:transparent!important;color:var(--study-ink,#273d36);margin:0;overflow-x:hidden}\n.water-lab{--study-paper:#e8eeea;--study-ink:#273d36;--study-muted:#65756d;--study-liquid:#a86f3a;--study-water:#86b6bd;max-width:1200px;margin:auto;padding:28px 42px 34px;box-sizing:border-box;background:transparent;font-family:var(--sans,\"Microsoft YaHei\",sans-serif)}\n.water-lab *{box-sizing:border-box}.water-lab button{cursor:pointer;border:0;background:none;color:inherit}.water-lab [hidden]{display:none!important}.water-lab :focus-visible{outline:2px solid #a17d4d;outline-offset:5px}\n.water-top{display:flex;justify-content:space-between;gap:18px;align-items:center}.water-kicker{font:11px/1.7 var(--sans,sans-serif);letter-spacing:.1em;color:#587062;margin:0}.sound-toggle{font:12px var(--sans,sans-serif);min-height:40px;border-bottom:1px solid #8a9e94!important;padding:9px 0;color:#526f61!important;white-space:nowrap}.sound-toggle[aria-pressed=true]{color:#8d582a!important;border-color:#9a673b!important}\n.water-tabs{display:flex;gap:34px;border-bottom:1px solid #8fa79166;margin-top:15px}.water-tabs button{min-height:48px;padding:12px 0 14px;font:15px var(--serif,\"SimSun\",serif);color:#718474;border-bottom:2px solid transparent}.water-tabs button[aria-pressed=true]{border-color:#375e46;color:#25452e}\n.water-grid{display:grid;grid-template-columns:minmax(0,1.25fr) minmax(0,1fr);gap:46px;align-items:center;padding-top:26px;min-height:490px}.water-figure{position:relative;min-width:0;margin:0;padding:18px 20px 17px;border:1px solid #66806d30;border-radius:22px;background:radial-gradient(ellipse at 35% 42%,#fffdf75c,transparent 70%),linear-gradient(135deg,#fafff52b,#ceded321);box-shadow:0 10px 28px #2f4f3210,inset 0 1px 0 #ffffff7a}\n.diagram-heading{display:flex;align-items:center;justify-content:space-between;gap:14px;font-size:12px;line-height:1.5;color:#42634a}.diagram-heading strong{font-weight:500}.diagram-heading>span{color:#6a8172;font-size:10px;letter-spacing:.1em;white-space:nowrap}.diagram-canvas-wrap{position:relative;margin:0 -6px}.water-figure canvas{display:block;width:100%;height:auto;aspect-ratio:660/610}.diagram-change{position:absolute;right:0;top:18px;max-width:130px;color:#55786b;font:12px/1.5 var(--sans,sans-serif);padding:7px 10px;border:1px solid #7894843a;border-radius:30px;background:#f0f7efb0}\n.water-legend{display:flex;justify-content:center;gap:17px;flex-wrap:wrap;margin:-7px 0 0;color:#516a58;font-size:12px;line-height:1.7}.water-legend>span{display:inline-flex;align-items:center;gap:7px}.legend-particle{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--study-liquid);box-shadow:inset -2px -2px 2px #62432666}.legend-water{display:inline-block;width:7px;height:11px;border-radius:60% 40% 60% 40%;background:var(--study-water);transform:rotate(-30deg)}.legend-ground{display:inline-block;width:8px;height:8px;background:#786044;transform:rotate(30deg);border-radius:2px}\n.diagram-invariant{display:flex;justify-content:center;align-items:center;gap:10px;margin:14px auto 0;width:fit-content;padding:8px 16px;border:1px solid #aebfab66;border-radius:12px;color:#405a43;background:#f7f7e77d;font-size:12px;line-height:1.5}.diagram-invariant strong{font:24px/1 Georgia,serif;color:#7c4c28;font-variant-numeric:tabular-nums}.diagram-invariant>span:last-child{border-left:1px solid #aebfab;padding-left:10px;font-size:11px;color:#627867}\n.stage-track{display:flex;justify-content:center;align-items:center;gap:0;margin:14px 0 0;padding:0;list-style:none}.stage-track li{display:flex;align-items:center;font:12px/1.5 var(--sans,sans-serif);color:#798c7b;white-space:nowrap}.stage-track li:not(:last-child)::after{content:'';width:24px;height:1px;background:#aebdaf;margin:0 10px}.stage-track b{width:19px;height:19px;display:inline-flex;align-items:center;justify-content:center;border:1px solid #99ad9b;border-radius:50%;font-size:10px;font-weight:400;margin-right:6px}.stage-track li[data-active=true]{color:#365e42}.stage-track li[data-active=true] b{background:#466b50;border-color:#466b50;color:#f3f5e8}.stage-track li[data-complete=true] b{background:#75957b40}\n.water-figure figcaption{font:11px/1.8 var(--sans,sans-serif);color:#697f6d;text-align:left;margin-top:15px;padding-top:12px;border-top:1px solid #8ca38e38}\n.water-counter{display:block;font:italic 14px Georgia,\"SimSun\",serif;color:#607c69;margin-bottom:20px}.water-response h3{font:400 36px/1.55 var(--serif,\"SimSun\",serif);letter-spacing:.02em;margin:0 0 20px}.water-response p{font:15px/2 var(--serif,\"SimSun\",serif);color:#4b6655;max-width:26em;margin:0}.water-action{font:14px var(--serif,serif);color:#304d3e!important;border-bottom:1px solid #526e5d!important;padding:12px 0;min-height:44px;margin-top:26px;display:block}.water-text-button{font:13px var(--sans,sans-serif);color:#55715c!important;padding:12px 0;min-height:44px;margin-top:6px;display:block}\n.concentration{margin:5px 0 24px;line-height:1;color:#8a582b}.concentration output{font:400 72px/1 Georgia,serif;letter-spacing:-.045em;font-variant-numeric:tabular-nums}.concentration>span{font:24px Georgia,serif;margin-left:7px}.concentration small{display:block;font:12px/1.8 var(--sans,sans-serif);color:#5a7260;letter-spacing:.02em;margin-top:10px}.water-readings{display:grid;grid-template-columns:1fr 1fr;gap:20px;border-top:1px solid #97af9c66;padding-top:18px;margin:0 0 21px}.water-readings dt{font:12px/1.7 var(--sans,sans-serif);color:#627b6a}.water-readings dd{margin:7px 0 0;font:30px/1.2 Georgia,serif;color:#355340;font-variant-numeric:tabular-nums}.water-readings dd small{font:11px var(--sans,sans-serif);margin-left:7px;color:#637b67}.water-response .water-response-copy{font:13px/1.9 var(--sans,sans-serif);color:#55715c}\n.dilution-controls{margin:25px auto 0;width:min(850px,100%);padding-top:24px;border-top:1px solid #8ca78f70}.dilution-control-top{display:flex;justify-content:space-between;align-items:center;gap:20px}.dilution-control-top label{font:15px var(--serif,serif)}.dilution-control-top label output{color:#8a582b;font:24px Georgia,serif;margin-left:10px;font-variant-numeric:tabular-nums}.dilution-control-top [data-presets]{display:flex;gap:24px}.dilution-control-top button{font:13px var(--sans,sans-serif);padding:10px 0;min-height:44px;color:#718676;border-bottom:1px solid transparent}.dilution-control-top button[aria-pressed=true]{color:#355941;border-color:#5b7d63}\n.dilution-controls input{width:100%;height:42px;appearance:none;-webkit-appearance:none;background:transparent;accent-color:#4d765a;cursor:ew-resize;margin:10px 0 0}.dilution-controls input::-webkit-slider-runnable-track{height:3px;border-radius:4px;background:linear-gradient(90deg,#92683d,#8aabaa)}.dilution-controls input::-webkit-slider-thumb{appearance:none;-webkit-appearance:none;width:23px;height:23px;background:#edf2e8;border:2px solid #4b7255;border-radius:50%;margin-top:-10px;box-shadow:0 0 0 5px #4b725514}.dilution-controls input::-moz-range-track{height:3px;background:#91a99a}.dilution-controls input::-moz-range-thumb{width:21px;height:21px;background:#edf2e8;border:2px solid #4b7255;border-radius:50%}\n.water-control-foot{display:flex;justify-content:space-between;gap:20px;align-items:center;font:11px/1.8 var(--sans,sans-serif);color:#617a69}.water-control-foot button{font:12px var(--sans,sans-serif);white-space:nowrap;padding:12px 0;min-height:44px}.water-assumption{max-width:850px;margin:24px auto 0;font:11px/1.9 var(--sans,sans-serif);color:#657d6a}.water-lab[data-extraction=false] .water-tabs{display:none}.water-lab[data-extraction=false] .water-grid{padding-top:25px}\n@media(max-width:800px){.water-lab{padding:22px 20px 26px}.water-grid{grid-template-columns:1fr;gap:24px;min-height:0;padding-top:22px}.water-figure{padding:15px 16px 14px;border-radius:18px;max-width:530px;width:100%;margin:auto}.water-figure canvas{max-height:none}.diagram-heading{font-size:12px}.diagram-heading>span{font-size:10px}.diagram-change{font-size:11px;max-width:118px;right:0;top:10px;padding:6px 9px}.water-legend{font-size:12px;gap:14px;margin-top:-5px}.water-figure figcaption{font-size:11px;line-height:1.8}.water-counter{font-size:13px;margin-bottom:12px}.water-response h3{font-size:29px;line-height:1.45;margin-bottom:15px}.water-response p{font-size:14px;line-height:1.9;max-width:none}.water-action{margin-top:16px}.water-text-button{margin-top:2px}.water-tabs{gap:28px;margin-top:12px}.water-tabs button{font-size:14px}.water-kicker{font-size:10px;letter-spacing:.03em}.sound-toggle{font-size:11px}.concentration{margin:15px 0 20px}.concentration output{font-size:64px}.concentration small{font-size:12px}.water-readings{gap:18px;padding-top:15px;margin-bottom:18px}.water-readings dd{font-size:29px}.water-readings dt{font-size:12px}.water-readings dd small{display:inline;margin-left:6px}.water-response .water-response-copy{font-size:13px}.dilution-controls{margin-top:22px;padding-top:18px}.dilution-control-top{display:block}.dilution-control-top [data-presets]{margin-top:7px;gap:28px}.water-assumption{font-size:11px;margin-top:20px}.water-control-foot{font-size:11px;gap:15px}.stage-track li{font-size:11px}.stage-track li:not(:last-child)::after{width:17px;margin:0 8px}.diagram-invariant{font-size:11px;gap:8px;padding:8px 12px}.diagram-invariant strong{font-size:22px}}\n@media(max-width:420px){.water-lab{padding-inline:16px}.water-top{gap:10px}.water-kicker{max-width:235px}.water-figure{padding-inline:13px}.water-readings dd small{font-size:11px}.water-response h3{font-size:28px}.water-legend{gap:11px}.diagram-heading>span{letter-spacing:.03em}.stage-track li:not(:last-child)::after{width:11px;margin:0 7px}.diagram-invariant>span:last-child{font-size:10px}}\n@media(prefers-reduced-motion:reduce){.water-lab *{scroll-behavior:auto}}\n</style></head>\n<body class=\"water-page\"><main class=\"water-lab\" data-water-lab data-mode=\"extract\">\n  <div class=\"water-top\"><p class=\"water-kicker\" data-kicker>从材料，到液体 / A SMALL TRANSFER</p><button type=\"button\" class=\"sound-toggle\" data-sound aria-pressed=\"false\" title=\"由程序合成的轻水声，仅在主动播放或加水时出现\">水声 关</button></div>\n  <div class=\"water-tabs\" role=\"group\" aria-label=\"观察阶段\"><button type=\"button\" data-mode-button=\"extract\" aria-pressed=\"true\">01　进入水</button><button type=\"button\" data-mode-button=\"dilute\" aria-pressed=\"false\">02　水再多一点</button></div>\n  <div class=\"water-grid\"><figure class=\"water-figure\">\n    <div class=\"diagram-heading\"><strong data-diagram-title>从粉体，到液体</strong><span data-diagram-mode>萃取示意</span></div>\n    <div class=\"diagram-canvas-wrap\"><canvas width=\"660\" height=\"610\" data-water-canvas role=\"img\" aria-label=\"粉体中的部分物质进入水里；移走粉渣后，添加清水只改变杯中浓度\"></canvas><span class=\"diagram-change\" data-diagram-change>水接触粉体</span></div>\n    <div class=\"water-legend\" aria-label=\"图例\"><span><i class=\"legend-particle\" aria-hidden=\"true\"></i><span data-legend-solute>咖啡来源溶解物</span></span><span><i class=\"legend-water\" aria-hidden=\"true\"></i>清水</span><span data-extract-legend><i class=\"legend-ground\" aria-hidden=\"true\"></i>粉体</span></div>\n    <ol class=\"stage-track\" data-stage-track aria-label=\"萃取阶段\"><li data-stage=\"0\" data-active=\"true\"><b>1</b>浸润</li><li data-stage=\"1\"><b>2</b>溶出</li><li data-stage=\"2\"><b>3</b>滤开</li></ol>\n    <div class=\"diagram-invariant\" data-diagram-invariant hidden><strong data-invariant-number>3</strong><span>克 · <span data-invariant-label>咖啡来源溶解物</span></span><span>始终不变</span></div>\n    <figcaption data-figure-caption>点与颜色用于解释物质关系，大小、速度与色深均为示意。</figcaption>\n  </figure>\n  <div class=\"water-response\"><div data-extract-copy><span class=\"water-counter\" data-step>01 / 浸润</span><h3 data-step-title>水先走近，<br>再带走一部分。</h3><p data-step-copy>水接触咖啡粉，部分可溶物进入液体。粉体仍然留在原处。</p><button class=\"water-action\" type=\"button\" data-replay>看水经过一次 →</button><button class=\"water-text-button\" type=\"button\" data-next>粉渣滤开以后，会怎样？ ↗</button></div>\n  <div data-dilute-copy hidden><span class=\"water-counter\" data-filtered-label>粉渣已经移开</span><h3 data-dilute-title>再加一点水，<br>什么没有变？</h3><div class=\"concentration\"><output data-concentration>1.50</output><span>%</span><small data-concentration-label>杯中溶解物的质量分数</small></div><dl class=\"water-readings\"><div><dt data-total-label>饮品总质量</dt><dd><output data-total>200</output><small>克</small></dd></div><div><dt data-solute-label>咖啡来源溶解物</dt><dd><output data-solute>3</output><small>克 · 不变</small></dd></div></dl><p class=\"water-response-copy\" data-result>溶解物仍是 3 克。加入清水后，它分布在更多液体里。</p></div></div></div>\n  <div class=\"dilution-controls\" data-controls hidden><div class=\"dilution-control-top\"><label for=\"water-range\">添加的清水 <output data-added>0</output> 克</label><div data-presets role=\"group\" aria-label=\"选择加水量\"><button type=\"button\" data-add=\"0\" aria-pressed=\"true\">原杯</button><button type=\"button\" data-add=\"50\" aria-pressed=\"false\">＋50 克</button><button type=\"button\" data-add=\"100\" aria-pressed=\"false\">＋100 克</button></div></div><input id=\"water-range\" type=\"range\" min=\"0\" max=\"100\" value=\"0\" step=\"1\" aria-label=\"添加的清水克数\"><div class=\"water-control-foot\"><span>拖动比较不同加水量；向回拖动表示重设情形。</span><button type=\"button\" data-reset>重置 ↺</button></div></div>\n  <p class=\"water-assumption\" data-assumption>设定：滤净的 200 克饮品含 3 克咖啡来源可溶物。清水不额外带入这类物质，忽略蒸发、洒出与反应。</p><p class=\"sr-only\" data-water-live aria-live=\"polite\"></p>\n</main><script>window.WATER_STUDY={\n  id:'reuse-sugar-water-v1',baseMass:300,soluteMass:30,maxAdded:300,defaultAdded:0,particleCount:72,initialMode:'dilute',durationMs:7600,\n  palette:{paper:'#e8eeea',ink:'#273d36',muted:'#65756d',liquid:'#b5a064',particle:'#7d7051',water:'#86b6bd'},\n  text:{pageTitle:'同一份糖，更多的水 · 稀释机制复用',canvasLabel:'固定糖质量为30克，加入清水后，溶液总质量增加，糖的质量分数降低',kicker:'同一份糖，更多的水 / DILUTION STUDY',diluteTitle:'水加进来了，<br>糖去了哪里？',filtered:'糖已经完全溶解',solute:'溶解的糖',total:'糖水总质量',fraction:'糖在溶液中的质量分数',result:'糖仍是 {solute} 克。点的数量没有减少，只是分布在更多糖水里。',assumption:'设定：300 克糖水含 30 克糖，糖已完全溶解。加入纯水，忽略蒸发、洒出与反应；颜色和点的大小仅作示意。',caption:'观察质量关系；不模拟真实分子的尺寸、运动或液体色泽。',presets:['原杯','＋150 克','＋300 克']},\n  extraction:{enabled:false,steps:[]}\n};\n</script><script>(()=>{'use strict';\nconst cfg=window.WATER_STUDY,root=document.querySelector('[data-water-lab]');if(!cfg||!root)return;\nconst $=q=>root.querySelector(q),canvas=$('[data-water-canvas]'),ctx=canvas.getContext('2d'),slider=$('#water-range'),replay=$('[data-replay]');\nconst preference=matchMedia('(prefers-reduced-motion: reduce)'),clamp=(v,a,b)=>Math.min(b,Math.max(a,Number(v)||0));\nlet reduced=preference.matches,mode=cfg.initialMode||'dilute',added=clamp(cfg.defaultAdded,0,cfg.maxAdded),shownAdded=added,progress=.08,playing=false,raf=0,last=0,start=0,visible=true,audioOn=false,audioContext=null,audioNodes=[],pourUntil=0;\nconst text=cfg.text,palette=cfg.palette,storageKey=cfg.id+':reading',W=660,H=610;\nif(text.pageTitle)document.title=text.pageTitle;if(text.canvasLabel)canvas.setAttribute('aria-label',text.canvasLabel);\ntry{const saved=JSON.parse(sessionStorage.getItem(storageKey)||'null');if(saved){added=shownAdded=clamp(saved.added,0,cfg.maxAdded);mode=saved.mode==='extract'&&cfg.extraction.enabled?'extract':'dilute';progress=clamp(saved.progress,0,1)}}catch{}\nif(!cfg.extraction.enabled)mode='dilute';root.dataset.extraction=String(cfg.extraction.enabled);\nfor(const [selector,key]of [['[data-kicker]','kicker'],['[data-filtered-label]','filtered'],['[data-solute-label]','solute'],['[data-total-label]','total'],['[data-concentration-label]','fraction'],['[data-assumption]','assumption'],['[data-figure-caption]','caption']])$(selector).textContent=text[key];\n$('[data-dilute-title]').innerHTML=text.diluteTitle;slider.max=String(cfg.maxAdded);\n// The work-level Global Underlay owns the page. Only local diagram glass/paper may paint.\ndocument.documentElement.style.background='transparent';document.body.style.background='transparent';root.style.background='transparent';\nroot.style.setProperty('--study-paper',palette.paper);root.style.setProperty('--study-ink',palette.ink);root.style.setProperty('--study-muted',palette.muted);root.style.setProperty('--study-liquid',palette.liquid);root.style.setProperty('--study-water',palette.water);\nconst presets=[...root.querySelectorAll('[data-add]')];presets.forEach((b,i)=>{b.dataset.add=String(Math.round(i*cfg.maxAdded/2));b.textContent=text.presets[i]});\n$('[data-legend-solute]').textContent=text.solute;\nfunction remember(){try{sessionStorage.setItem(storageKey,JSON.stringify({mode,added,progress}))}catch{}}\nfunction height(){if(parent!==window)parent.postMessage({type:'coffee:height',height:Math.ceil(document.body.scrollHeight)},'*')}\nfunction readout(){const total=cfg.baseMass+added,percent=100*cfg.soluteMass/total;slider.value=String(added);slider.setAttribute('aria-valuetext',`添加清水${added}克，浓度${percent.toFixed(2)}%`);$('[data-concentration]').textContent=percent.toFixed(2);$('[data-total]').textContent=String(total);$('[data-solute]').textContent=String(cfg.soluteMass);$('[data-added]').textContent=String(added);$('[data-result]').textContent=text.result.replace('{solute}',String(cfg.soluteMass));presets.forEach(b=>b.setAttribute('aria-pressed',String(Number(b.dataset.add)===added)));root.dataset.added=String(added);root.dataset.solute=String(cfg.soluteMass);root.dataset.total=String(total);root.dataset.concentration=percent.toFixed(2);root.dataset.particles=String(cfg.particleCount);$('[data-diagram-title]').textContent=mode==='extract'?'从粉体，到液体':'同一份溶解物，更多液体';$('[data-diagram-mode]').textContent=mode==='extract'?'萃取示意':'稀释示意';$('[data-invariant-number]').textContent=String(cfg.soluteMass);$('[data-invariant-label]').textContent=text.solute;$('[data-diagram-change]').textContent=added?`清水 +${added} 克`:'未添加清水';$('[data-extract-legend]').hidden=mode!=='extract';$('[data-diagram-invariant]').hidden=mode==='extract';$('[data-stage-track]').hidden=mode!=='extract';if(mode==='dilute')$('[data-water-live]').textContent=`${text.total}${total}克，${text.solute}${cfg.soluteMass}克，质量分数${percent.toFixed(2)}%。`}\nfunction step(){if(!cfg.extraction.enabled)return;const s=[...cfg.extraction.steps].reverse().find(s=>progress>=s.at)||cfg.extraction.steps[0],index=cfg.extraction.steps.indexOf(s);$('[data-step]').textContent=s.no;$('[data-step-title]').innerHTML=s.title;$('[data-step-copy]').textContent=s.copy;root.dataset.step=String(index);root.dataset.progress=progress.toFixed(3);root.querySelectorAll('[data-stage]').forEach((el,i)=>{el.dataset.active=String(i===index)",
+        "complete": false,
+        "offset": 0,
+        "total": 33684,
+        "nextOffset": 20741
+      }
+    },
+    {
+      "kind": "read",
+      "data": {
+        "path": "pages/01-一份糖的去向/02-编组/03-HTML 程序.content.html",
+        "commit": "committed",
+        "usability": "partial",
+        "delivery": "not_requested",
+        "diagnostics": [
+          {
+            "level": "warning",
+            "code": "unsupported-dynamic-url-sink",
+            "message": "无法静态证明该脚本的资源引用闭合，已原样保留；脚本里的本地文件引用不会被打包，请内联资源或改为可解析的静态媒体引用；这是静态依赖分析未覆盖的动态内容，未证明运行失败，请以真实预览和运行错误为准",
+            "repairable": true
+          },
+          {
+            "level": "warning",
+            "code": "dynamic-html-preserved",
+            "message": "innerHTML 的动态内容保留原代码执行；运行时生成的资源未作静态收集；这是静态依赖分析未覆盖的动态内容，未证明运行失败，请以真实预览和运行错误为准",
+            "repairable": true
+          },
+          {
+            "level": "warning",
+            "code": "unsupported-dynamic-url-sink",
+            "message": "无法静态解析 style.setProperty 的资源内容；这是静态依赖分析未覆盖的动态内容，未证明运行失败，请以真实预览和运行错误为准",
+            "repairable": true
+          },
+          {
+            "level": "warning",
+            "code": "unsupported-dynamic-url-sink",
+            "message": "无法静态解析 style.setProperty 的资源内容；这是静态依赖分析未覆盖的动态内容，未证明运行失败，请以真实预览和运行错误为准",
+            "repairable": true
+          },
+          {
+            "level": "warning",
+            "code": "unsupported-dynamic-url-sink",
+            "message": "无法静态解析 style.setProperty 的资源内容；这是静态依赖分析未覆盖的动态内容，未证明运行失败，请以真实预览和运行错误为准",
+            "repairable": true
+          },
+          {
+            "level": "warning",
+            "code": "unsupported-dynamic-url-sink",
+            "message": "无法静态解析 style.setProperty 的资源内容；这是静态依赖分析未覆盖的动态内容，未证明运行失败，请以真实预览和运行错误为准",
+            "repairable": true
+          },
+          {
+            "level": "warning",
+            "code": "unsupported-dynamic-url-sink",
+            "message": "无法静态解析 style.setProperty 的资源内容；这是静态依赖分析未覆盖的动态内容，未证明运行失败，请以真实预览和运行错误为准",
+            "repairable": true
+          },
+          {
+            "level": "warning",
+            "code": "dynamic-html-preserved",
+            "message": "innerHTML 的动态内容保留原代码执行；运行时生成的资源未作静态收集；这是静态依赖分析未覆盖的动态内容，未证明运行失败，请以真实预览和运行错误为准",
+            "repairable": true
+          },
+          {
+            "level": "warning",
+            "code": "unsupported-dynamic-url-sink",
+            "message": "无法静态确定计算属性写入是否为资源入口；这是静态依赖分析未覆盖的动态内容，未证明运行失败，请以真实预览和运行错误为准",
+            "repairable": true
+          },
+          {
+            "level": "warning",
+            "code": "unsupported-dynamic-url-sink",
+            "message": "无法静态证明该脚本的资源引用闭合，已原样保留；脚本里的本地文件引用不会被打包，请内联资源或改为可解析的静态媒体引用；这是静态依赖分析未覆盖的动态内容，未证明运行失败，请以真实预览和运行错误为准",
+            "instanceId": "39ce1c9c-0ae0-486f-9c41-c1497158a594",
+            "repairable": true
+          },
+          {
+            "level": "warning",
+            "code": "dynamic-html-preserved",
+            "message": "innerHTML 的动态内容保留原代码执行；运行时生成的资源未作静态收集；这是静态依赖分析未覆盖的动态内容，未证明运行失败，请以真实预览和运行错误为准",
+            "instanceId": "39ce1c9c-0ae0-486f-9c41-c1497158a594",
+            "repairable": true
+          },
+          {
+            "level": "warning",
+            "code": "unsupported-dynamic-url-sink",
+            "message": "无法静态解析 style.setProperty 的资源内容；这是静态依赖分析未覆盖的动态内容，未证明运行失败，请以真实预览和运行错误为准",
+            "instanceId": "39ce1c9c-0ae0-486f-9c41-c1497158a594",
+            "repairable": true
+          },
+          {
+            "level": "warning",
+            "code": "unsupported-dynamic-url-sink",
+            "message": "无法静态解析 style.setProperty 的资源内容；这是静态依赖分析未覆盖的动态内容，未证明运行失败，请以真实预览和运行错误为准",
+            "instanceId": "39ce1c9c-0ae0-486f-9c41-c1497158a594",
+            "repairable": true
+          },
+          {
+            "level": "warning",
+            "code": "unsupported-dynamic-url-sink",
+            "message": "无法静态解析 style.setProperty 的资源内容；这是静态依赖分析未覆盖的动态内容，未证明运行失败，请以真实预览和运行错误为准",
+            "instanceId": "39ce1c9c-0ae0-486f-9c41-c1497158a594",
+            "repairable": true
+          },
+          {
+            "level": "warning",
+            "code": "unsupported-dynamic-url-sink",
+            "message": "无法静态解析 style.setProperty 的资源内容；这是静态依赖分析未覆盖的动态内容，未证明运行失败，请以真实预览和运行错误为准",
+            "instanceId": "39ce1c9c-0ae0-486f-9c41-c1497158a594",
+            "repairable": true
+          },
+          {
+            "level": "warning",
+            "code": "unsupported-dynamic-url-sink",
+            "message": "无法静态解析 style.setProperty 的资源内容；这是静态依赖分析未覆盖的动态内容，未证明运行失败，请以真实预览和运行错误为准",
+            "instanceId": "39ce1c9c-0ae0-486f-9c41-c1497158a594",
+            "repairable": true
+          },
+          {
+            "level": "warning",
+            "code": "dynamic-html-preserved",
+            "message": "innerHTML 的动态内容保留原代码执行；运行时生成的资源未作静态收集；这是静态依赖分析未覆盖的动态内容，未证明运行失败，请以真实预览和运行错误为准",
+            "instanceId": "39ce1c9c-0ae0-486f-9c41-c1497158a594",
+            "repairable": true
+          },
+          {
+            "level": "warning",
+            "code": "unsupported-dynamic-url-sink",
+            "message": "无法静态确定计算属性写入是否为资源入口；这是静态依赖分析未覆盖的动态内容，未证明运行失败，请以真实预览和运行错误为准",
+            "instanceId": "39ce1c9c-0ae0-486f-9c41-c1497158a594",
+            "repairable": true
+          }
+        ],
+        "insertedIds": [],
+        "receipt": {
+          "status": "applied",
+          "documentId": "c21167e8-df4b-4764-be2c-5ba576075e9c",
+          "operationId": "tool:e496ad96d4ac932868059e078ea6bb6717613419b2a9dcb3b7d7a4b5df6ebab1",
+          "beforeRevision": 27,
+          "revision": 28,
+          "persistence": "recoverable",
+          "appliedChanges": {
+            "affectedTargets": [
+              "39ce1c9c-0ae0-486f-9c41-c1497158a594"
+            ],
+            "changes": [
+              {
+                "path": [
+                  "instances",
+                  "39ce1c9c-0ae0-486f-9c41-c1497158a594",
+                  "data"
+                ],
+                "exists": true
+              },
+              {
+                "path": [
+                  "assets"
+                ],
+                "exists": true
+              }
+            ]
+          }
+        },
+        "viewport": {
+          "width": 1280,
+          "height": 720
+        }
+      }
+    }
+  ]
+]

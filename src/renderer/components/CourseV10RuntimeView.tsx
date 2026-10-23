@@ -1,4 +1,5 @@
 import { Component, createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useSyncExternalStore, type ReactNode } from 'react'
+import { resolveComponentContainerSizing } from '../../shared/componentPresentation'
 import type { DocumentModel } from '../../shared/workbench/document'
 import type { ComponentCompilationInput, ComponentCompilationResult } from '../../core/components/compilation/types'
 import type { ComponentPlatformRuntime } from '../../player/components/ComponentPlatformRuntime'
@@ -43,8 +44,8 @@ export interface CourseV10RuntimePorts {
   player: boolean
   world: ComponentPlatformRuntime
   navigation: ComponentNavigationOwner
-  onElement(instanceId: string, element: HTMLElement | null): void
-  onTargetElement(instanceId: string, element: HTMLElement | null): void
+  onElement(instanceId: string, element: HTMLElement | null, expectedDefault?: HTMLElement): void
+  onTargetElement(instanceId: string, element: HTMLElement | null, expectedDefault?: HTMLElement): void
   edit(edits: ComponentEdit[], historyGroup?: string): Promise<unknown>
   onEdits(edits: ComponentEdit[], operation?: DocumentOperation): void
   onComposition(instanceId: string, active: boolean): void
@@ -56,7 +57,7 @@ export interface CourseV10RuntimePorts {
   resetPlayback(playing?: boolean, containerId?: string): Promise<void>
   previewAuthorSpot(id: string, geometry: ComponentAuthorGeometry | null): boolean
   /** A pre-laid-out host delegates a real container to the same local projection. */
-  renderContainer(containerId: string, projection?: CourseProjectV10): ReactNode
+  renderContainer(containerId: string, projection?: CourseProjectV10, placement?: 'free' | 'flow'): ReactNode
   /** Free placement includes authored frames; flow placement continues reading order through document sections. */
   renderInstance(instanceId: string, projection?: CourseProjectV10, placement?: 'free' | 'flow' | 'program'): ReactNode
 }
@@ -334,7 +335,7 @@ export function CourseV10RuntimeView(props: CourseV10RuntimeViewProps) {
     navigation.changed()
   }, [world, navigation, documentId])
   const selectedInstanceIds = props.selectedInstanceIds ?? (selectedInstanceId ? [selectedInstanceId] : [])
-  const renderContainer = (containerId: string, project = renderProject) => <ContainerPreview containerId={containerId} model={{ ...model, project }} world={world} navigation={navigation} report={props.report} />
+  const renderContainer = (containerId: string, project = renderProject, placement: 'free' | 'flow' = 'free') => <ContainerPreview containerId={containerId} model={{ ...model, project }} world={world} navigation={navigation} report={props.report} placement={placement} />
   const ports: CourseV10RuntimePorts = {
     documentId, project: renderProject, resources: model.resources, surfaceId, selectedInstanceId, selectedInstanceIds, player,
     world, navigation, onElement: world.bind, onTargetElement: world.bindTarget, edit, onEdits: flowEdit,
@@ -356,17 +357,21 @@ export function CourseV10RuntimeView(props: CourseV10RuntimeViewProps) {
 }
 
 /** A local view supplies geometry only; its descendants keep this document's one runtime. */
-function ContainerPreview({ containerId, model, world, navigation, report }: {
+function ContainerPreview({ containerId, model, world, navigation, report, placement }: {
   containerId: string; model: Extract<DocumentModel, { kind: 'course-v10' }>; world: ComponentPlatformRuntime
   navigation: ComponentNavigationOwner; report(message: string): void
+  placement: 'free' | 'flow'
 }) {
+  const naturalHeight = resolveComponentContainerSizing(model.project.instances[containerId], placement)?.naturalHeight ?? false
+  const sizing = useRef(naturalHeight)
+  sizing.current = naturalHeight
   const root = useRef<HTMLDivElement>(null), mounted = useRef<ComponentPlayerProjection | null>(null)
   const observationBindings = useRef(new Map<string, { observation: NonNullable<ReturnType<NonNullable<ComponentPlayerProjection['observation']>>>; release(): void }>())
   useLayoutEffect(() => {
     const element = root.current
     if (!element) return
     const controller = new AbortController()
-    const projection = createComponentModelProjection({ root: element, runtime: world, containerId, signal: controller.signal,
+    const projection = createComponentModelProjection({ root: element, runtime: world, containerId, get naturalHeight() { return sizing.current }, signal: controller.signal,
       onCamera: (id, camera) => navigation.registerCamera(id, camera) })
     mounted.current = projection
     return () => {
@@ -393,7 +398,7 @@ function ContainerPreview({ containerId, model, world, navigation, report }: {
       }).catch(error => report(error instanceof Error ? error.message : String(error)))
     } catch (error) { report(error instanceof Error ? error.message : String(error)) }
   }, [model, navigation, report])
-  return <div ref={root} data-component-container-preview={containerId} style={{ position: 'relative', width: '100%', height: '100%', minHeight: 120, minWidth: 0, overflow: 'hidden' }} />
+  return <div ref={root} data-component-container-preview={containerId} style={{ position: 'relative', width: '100%', height: naturalHeight ? 'auto' : '100%', minWidth: 0, overflow: naturalHeight ? 'visible' : 'hidden' }} />
 }
 
 /** React ancestor moves must not reload an already mounted source iframe. */
@@ -404,7 +409,16 @@ class ProjectionMutationBoundary extends Component<{ model: Extract<DocumentMode
     this.initial = props.host.prepareProjection(props.model, props.projectionKey)
   }
   componentDidMount(): void {
+    // StrictMode can remount this same retained host after its unmount parking.
+    this.props.host.runtime.afterProjectionMutation()
     void this.props.host.commitProjection(this.initial).catch(this.props.report)
+  }
+  componentWillUnmount(): void {
+    // Flow's observation session removes a portal ancestor in its layout
+    // cleanup, before descendant NodeViews release their projection refs.
+    // Park while those realms are still connected; the existing retain owner
+    // decides whether this is a replacement mount or the end of the run.
+    this.props.host.runtime.beforeProjectionMutation()
   }
   getSnapshotBeforeUpdate(previous: Readonly<ProjectionMutationBoundary['props']>): ComponentProjectionCommit | null {
     if (previous.host === this.props.host && previous.model.project === this.props.model.project

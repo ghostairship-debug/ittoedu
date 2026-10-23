@@ -13,19 +13,24 @@ export function PptxImportForm({ getContext, onCommit, onClose }: ProductivityDi
   const [preview, setPreview] = useState<{ context: ProductivityContext; draft: PptxImportDraft; name: string; step: DesignProductionStep } | null>(null)
   const [busy, setBusy] = useState(false), [message, setMessage] = useState('')
   const [committing, setCommitting] = useState(false)
+  const [cancelling, setCancelling] = useState(false)
   const sequence = useRef(0)
   const legacyActive = useRef(false)
   const activeRead = useRef<AbortController | null>(null)
-  const stopRead = () => {
+  const stopRead = async () => {
     activeRead.current?.abort(new Error('PPTX 导入已取消')); activeRead.current = null
-    if (legacyActive.current) void window.desktopAPI?.legacyPpt({ operation: 'cancel' }).catch(() => {})
+    const legacy = legacyActive.current
     legacyActive.current = false
+    if (legacy) await window.desktopAPI?.legacyPpt({ operation: 'cancel' })
   }
-  const cancel = () => {
-    sequence.current++; setBusy(false)
-    stopRead()
+  const cancel = async () => {
+    const request = ++sequence.current
+    setCancelling(true)
+    try { await stopRead() }
+    catch (error) { if (sequence.current === request) setMessage(error instanceof Error ? error.message : '取消读取未完成') }
+    finally { if (sequence.current === request) { setBusy(false); setCancelling(false) } }
   }
-  useEffect(() => () => { sequence.current++; stopRead() }, [])
+  useEffect(() => () => { sequence.current++; void stopRead().catch(() => {}) }, [])
   const stage = async (bytes: Uint8Array, filename: string, context: ProductivityContext, request: number, signal: AbortSignal) => {
     const canvas = componentContainers(context.document).find(surface => surface.id === context.target.surfaceId)?.designSize ?? { width: 1280, height: 720 }
     const draft = await parsePptxImportOffThread(bytes, filename, canvas, signal)
@@ -36,22 +41,26 @@ export function PptxImportForm({ getContext, onCommit, onClose }: ProductivityDi
     if (sequence.current === request) setPreview({ context, draft, name, step })
   }
   const read = async (file: File) => {
-    stopRead()
-    const controller = new AbortController(); activeRead.current = controller
     const request = ++sequence.current
-    setPreview(null); setMessage(''); setBusy(true)
+    const controller = new AbortController()
+    setPreview(null); setMessage(''); setBusy(true); setCancelling(false)
     try {
+      await stopRead()
+      if (sequence.current !== request) return
+      activeRead.current = controller
       const context = getContext()
       await stage(new Uint8Array(await file.arrayBuffer()), file.name, context, request, controller.signal)
     } catch (error) { if (sequence.current === request) setMessage(error instanceof Error ? error.message : 'PPTX 无法导入') }
     finally { if (sequence.current === request) { setBusy(false); if (activeRead.current === controller) activeRead.current = null } }
   }
   const readLegacy = async () => {
-    stopRead()
-    const controller = new AbortController(); activeRead.current = controller
     const request = ++sequence.current
-    setPreview(null); setMessage(''); setBusy(true); legacyActive.current = true
+    const controller = new AbortController()
+    setPreview(null); setMessage(''); setBusy(true); setCancelling(false)
     try {
+      await stopRead()
+      if (sequence.current !== request) return
+      activeRead.current = controller; legacyActive.current = true
       const context = getContext()
       if (!window.desktopAPI) throw new Error('旧 PPT 转换需要桌面版及本机 Microsoft PowerPoint；请先另存为 .pptx')
       const converted = await window.desktopAPI.legacyPpt({ operation: 'select' })
@@ -74,8 +83,8 @@ export function PptxImportForm({ getContext, onCommit, onClose }: ProductivityDi
     <p>导入为新的可编辑演示页面。支持文字与上下标、基础形状与线条、普通分组、内嵌 PNG / JPEG、图片颜色替换透明和合并表格；母版与版式装饰保持共享，修改会应用到对应页面。无法转换的对象和简化的效果会在下方列出，确认后仅导入可用内容。普通 PPTX 无需 Office；旧 PPT 由本机 Microsoft PowerPoint 转成临时副本，原文件不会被修改。</p>
     <label>选择 PPTX <input type="file" accept=".pptx" aria-label="选择 PPTX" disabled={busy} onChange={e => { const file = e.target.files?.[0]; if (file) void read(file); e.target.value = '' }} /></label>
     <button type="button" disabled={busy} onClick={() => void readLegacy()}>导入旧版 PPT</button>
-    {busy && !committing && <button type="button" onClick={cancel}>取消读取</button>}
-    {busy && <p role="status">{committing ? '正在导入页面与素材…' : '正在检查页面与素材…'}</p>}
+    {busy && !committing && <button type="button" disabled={cancelling} onClick={() => void cancel()}>{cancelling ? '正在取消读取…' : '取消读取'}</button>}
+    {busy && <p role="status">{committing ? '正在导入页面与素材…' : cancelling ? '正在取消读取，等待转换清理完成…' : '正在检查页面与素材…'}</p>}
     {preview && <div><h3>{preview.name}：{preview.draft.slides.length} 页，{preview.draft.assets.length} 个素材</h3>
       <ul>{preview.draft.slides.map((slide, index) => <li key={index}>第 {slide.sourcePage ?? index + 1} 页：{slide.title} · {slide.items.length} 个页面对象 · {(slide.sharedKeys ?? []).reduce((n, key) => n + (preview.draft.shared?.find(group => group.key === key)?.items.length ?? 0), 0)} 个共享对象</li>)}</ul>
       <ul>{preview.draft.notes.map(note => <li key={note}>{note}</li>)}</ul>

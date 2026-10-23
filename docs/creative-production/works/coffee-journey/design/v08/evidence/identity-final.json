@@ -1,0 +1,324 @@
+{
+  "revision": 247,
+  "baselineRevision": 218,
+  "instances": 190,
+  "definitions": 13,
+  "assets": 80,
+  "retainedOriginalInstances": 183,
+  "missing": {
+    "instances": [],
+    "definitions": [],
+    "assets": []
+  },
+  "originalImages": [
+    {
+      "id": "asset_fed66dc0-bc0e-4336-8f06-d9f7b5d07f4f",
+      "path": "assets/asset_fed66dc0-bc0e-4336-8f06-d9f7b5d07f4f.jpeg",
+      "retained": true,
+      "unchanged": true
+    },
+    {
+      "id": "asset_4aa58f81-2c97-4c2c-999c-c8e25baef9a0",
+      "path": "assets/asset_4aa58f81-2c97-4c2c-999c-c8e25baef9a0.jpeg",
+      "retained": true,
+      "unchanged": true
+    },
+    {
+      "id": "asset_c48a157a-d5ca-436a-88c9-b9706de5fb2b",
+      "path": "assets/asset_c48a157a-d5ca-436a-88c9-b9706de5fb2b.jpeg",
+      "retained": true,
+      "unchanged": true
+    },
+    {
+      "id": "asset_4211216b-bea4-460c-859d-cfc422067169",
+      "path": "assets/asset_4211216b-bea4-460c-859d-cfc422067169.webp",
+      "retained": true,
+      "unchanged": true
+    },
+    {
+      "id": "asset_4a9500bf-b479-46b5-9df7-bfefd904da6b",
+      "path": "assets/asset_4a9500bf-b479-46b5-9df7-bfefd904da6b.webp",
+      "retained": true,
+      "unchanged": true
+    },
+    {
+      "id": "asset_0913eab5-4ffe-43dc-ad48-8122833f08c5",
+      "path": "assets/asset_0913eab5-4ffe-43dc-ad48-8122833f08c5.webp",
+      "retained": true,
+      "unchanged": true
+    },
+    {
+      "id": "asset_0d42046e-b8dc-4f00-87bb-d3e9aa91e2f2",
+      "path": "assets/asset_0d42046e-b8dc-4f00-87bb-d3e9aa91e2f2.svgxml",
+      "retained": true,
+      "unchanged": true
+    },
+    {
+      "id": "asset_67f407d1-d971-4001-b828-b34735382c11",
+      "path": "assets/asset_67f407d1-d971-4001-b828-b34735382c11.svgxml",
+      "retained": true,
+      "unchanged": true
+    },
+    {
+      "id": "asset_d5814f29-ecc8-41ee-8f9c-770baf1f3a98",
+      "path": "assets/asset_d5814f29-ecc8-41ee-8f9c-770baf1f3a98.svgxml",
+      "retained": true,
+      "unchanged": true
+    },
+    {
+      "id": "asset_52fcb460-dd86-4110-8078-7500893c6eac",
+      "path": "assets/asset_52fcb460-dd86-4110-8078-7500893c6eac.jpeg",
+      "retained": true,
+      "unchanged": true
+    },
+    {
+      "id": "asset_d8b7eb5f-a3cb-44c1-8f99-a2959777f572",
+      "path": "assets/asset_d8b7eb5f-a3cb-44c1-8f99-a2959777f572.jpeg",
+      "retained": true,
+      "unchanged": true
+    },
+    {
+      "id": "asset_aef8148e-9dbc-400c-bd02-e09174d6180a",
+      "path": "assets/asset_aef8148e-9dbc-400c-bd02-e09174d6180a.webp",
+      "retained": true,
+      "unchanged": true
+    },
+    {
+      "id": "asset_244aaa59-d94e-47c9-975a-457ba4ede1d2",
+      "path": "assets/asset_244aaa59-d94e-47c9-975a-457ba4ede1d2.webp",
+      "retained": true,
+      "unchanged": true
+    },
+    {
+      "id": "asset_68d42a95-e043-4014-a732-ecf36a000dd2",
+      "path": "assets/asset_68d42a95-e043-4014-a732-ecf36a000dd2.webp",
+      "retained": true,
+      "unchanged": true
+    },
+    {
+      "id": "asset_01c66380-70d5-44e4-a457-dfa54f3c1d75",
+      "path": "assets/asset_01c66380-70d5-44e4-a457-dfa54f3c1d75.webp",
+      "retained": true,
+      "unchanged": true
+    },
+    {
+      "id": "asset_ad7e8538-b285-46e8-94eb-7d973c242193",
+      "path": "assets/asset_ad7e8538-b285-46e8-94eb-7d973c242193.webp",
+      "retained": true,
+      "unchanged": true
+    },
+    {
+      "id": "asset_000f16b5-abe6-4930-a59c-d1cab6cd379c",
+      "path": "assets/asset_000f16b5-abe6-4930-a59c-d1cab6cd379c.webp",
+      "retained": true,
+      "unchanged": true
+    },
+    {
+      "id": "asset_e5485c73-f62a-451f-8247-1612952ce572",
+      "path": "assets/asset_e5485c73-f62a-451f-8247-1612952ce572.svgxml",
+      "retained": true,
+      "unchanged": true
+    },
+    {
+      "id": "asset_cd2af012-466d-4503-9d20-4302e857bc8c",
+      "path": "assets/asset_cd2af012-466d-4503-9d20-4302e857bc8c.svgxml",
+      "retained": true,
+      "unchanged": true
+    },
+    {
+      "id": "asset_c8b94bbb-5132-4d7d-a236-fc1b308177a1",
+      "path": "assets/asset_c8b94bbb-5132-4d7d-a236-fc1b308177a1.svgxml",
+      "retained": true,
+      "unchanged": true
+    },
+    {
+      "id": "asset_9c9b1c38-6470-4132-b6dd-a15148ca724b",
+      "path": "assets/asset_9c9b1c38-6470-4132-b6dd-a15148ca724b.webp",
+      "retained": true,
+      "unchanged": true
+    },
+    {
+      "id": "asset_2c53b98a-ae28-4a54-aad6-00a46ec41432",
+      "path": "assets/asset_2c53b98a-ae28-4a54-aad6-00a46ec41432.webp",
+      "retained": true,
+      "unchanged": true
+    },
+    {
+      "id": "asset_b8c1900b-86c6-4f71-ba50-147022581790",
+      "path": "assets/asset_b8c1900b-86c6-4f71-ba50-147022581790.webp",
+      "retained": true,
+      "unchanged": true
+    },
+    {
+      "id": "asset_a7d49729-c37f-4c84-8d27-1b50cae1c3cc",
+      "path": "assets/asset_a7d49729-c37f-4c84-8d27-1b50cae1c3cc.svgxml",
+      "retained": true,
+      "unchanged": true
+    },
+    {
+      "id": "asset_ac894c14-fa7c-4642-ba27-a45f72129360",
+      "path": "assets/asset_ac894c14-fa7c-4642-ba27-a45f72129360.svgxml",
+      "retained": true,
+      "unchanged": true
+    },
+    {
+      "id": "asset_245fcc24-8bcd-456f-9217-82a93ecd05e9",
+      "path": "assets/asset_245fcc24-8bcd-456f-9217-82a93ecd05e9.svgxml",
+      "retained": true,
+      "unchanged": true
+    },
+    {
+      "id": "asset_80056b4a-1e71-4842-bc3b-bc85e303ef4a",
+      "path": "assets/asset_80056b4a-1e71-4842-bc3b-bc85e303ef4a.webp",
+      "retained": true,
+      "unchanged": true
+    },
+    {
+      "id": "asset_4b72129b-d94d-4acb-bbe1-895869bed1a8",
+      "path": "assets/asset_4b72129b-d94d-4acb-bbe1-895869bed1a8.webp",
+      "retained": true,
+      "unchanged": true
+    },
+    {
+      "id": "asset_cb03c037-b17c-4cc8-9a96-f33faf9ebb27",
+      "path": "assets/asset_cb03c037-b17c-4cc8-9a96-f33faf9ebb27.webp",
+      "retained": true,
+      "unchanged": true
+    },
+    {
+      "id": "asset_c3383cb0-cc65-4c4c-accc-bfe6a0bbf037",
+      "path": "assets/asset_c3383cb0-cc65-4c4c-accc-bfe6a0bbf037.svgxml",
+      "retained": true,
+      "unchanged": true
+    },
+    {
+      "id": "asset_0beab1ab-18c7-417d-8ddc-21636ca7f4fe",
+      "path": "assets/asset_0beab1ab-18c7-417d-8ddc-21636ca7f4fe.svgxml",
+      "retained": true,
+      "unchanged": true
+    },
+    {
+      "id": "asset_cc1e93d5-385e-4833-9509-f5033895ae50",
+      "path": "assets/asset_cc1e93d5-385e-4833-9509-f5033895ae50.svgxml",
+      "retained": true,
+      "unchanged": true
+    },
+    {
+      "id": "asset_9df1cfc6-452c-4e77-ad31-fa740c76cafe",
+      "path": "assets/asset_9df1cfc6-452c-4e77-ad31-fa740c76cafe.webp",
+      "retained": true,
+      "unchanged": true
+    },
+    {
+      "id": "asset_703c90fc-6dd3-47be-b5c5-3d0866a74ca0",
+      "path": "assets/asset_703c90fc-6dd3-47be-b5c5-3d0866a74ca0.webp",
+      "retained": true,
+      "unchanged": true
+    },
+    {
+      "id": "asset_b7752a11-a6db-4d2f-aa84-a31d5949ed08",
+      "path": "assets/asset_b7752a11-a6db-4d2f-aa84-a31d5949ed08.webp",
+      "retained": true,
+      "unchanged": true
+    },
+    {
+      "id": "asset_9f19c0de-0094-4de1-b373-2d8ab2706392",
+      "path": "assets/asset_9f19c0de-0094-4de1-b373-2d8ab2706392.webp",
+      "retained": true,
+      "unchanged": true
+    },
+    {
+      "id": "asset_74125b53-9813-4732-8188-9a5c50185a79",
+      "path": "assets/asset_74125b53-9813-4732-8188-9a5c50185a79.webp",
+      "retained": true,
+      "unchanged": true
+    },
+    {
+      "id": "asset_84cc5715-4dc0-4ec5-a8d7-08d40a2e9e0a",
+      "path": "assets/asset_84cc5715-4dc0-4ec5-a8d7-08d40a2e9e0a.webp",
+      "retained": true,
+      "unchanged": true
+    },
+    {
+      "id": "asset_c50a2e4c-ab89-4dd1-ba62-28731691520e",
+      "path": "assets/asset_c50a2e4c-ab89-4dd1-ba62-28731691520e.webp",
+      "retained": true,
+      "unchanged": true
+    },
+    {
+      "id": "asset_0dc35c7a-4aba-4c67-ab10-93480a01e592",
+      "path": "assets/asset_0dc35c7a-4aba-4c67-ab10-93480a01e592.webp",
+      "retained": true,
+      "unchanged": true
+    },
+    {
+      "id": "asset_73a0ea42-845c-4742-8f98-d1ed4560870b",
+      "path": "assets/asset_73a0ea42-845c-4742-8f98-d1ed4560870b.webp",
+      "retained": true,
+      "unchanged": true
+    },
+    {
+      "id": "asset_a501e289-9092-418a-af5a-dcede8abfbb9",
+      "path": "assets/asset_a501e289-9092-418a-af5a-dcede8abfbb9.webp",
+      "retained": true,
+      "unchanged": true
+    },
+    {
+      "id": "asset_03cd5f60-bfe8-42f7-934e-ab05bb4adcd0",
+      "path": "assets/asset_03cd5f60-bfe8-42f7-934e-ab05bb4adcd0.webp",
+      "retained": true,
+      "unchanged": true
+    },
+    {
+      "id": "asset_c5255c53-9c87-4ea2-a156-a978bca55286",
+      "path": "assets/asset_c5255c53-9c87-4ea2-a156-a978bca55286.webp",
+      "retained": true,
+      "unchanged": true
+    },
+    {
+      "id": "asset_1d935419-0e11-4c72-b395-3baf649e7058",
+      "path": "assets/asset_1d935419-0e11-4c72-b395-3baf649e7058.webp",
+      "retained": true,
+      "unchanged": true
+    },
+    {
+      "id": "asset_9c734f29-1345-4df9-a8b3-34b9a9cf87d4",
+      "path": "assets/asset_9c734f29-1345-4df9-a8b3-34b9a9cf87d4.webp",
+      "retained": true,
+      "unchanged": true
+    },
+    {
+      "id": "asset_342db4b2-cbda-451e-a7e9-ffc552d47b10",
+      "path": "assets/asset_342db4b2-cbda-451e-a7e9-ffc552d47b10.webp",
+      "retained": true,
+      "unchanged": true
+    }
+  ],
+  "cups": {
+    "opening": {
+      "instanceId": "0f19f30b-5bed-4933-af07-311081583f85",
+      "assetId": "asset_9f19c0de-0094-4de1-b373-2d8ab2706392",
+      "sha256": "24bf7fce837f0bfc06237f06e5ee372475d7dcf5740d84a8171255a0c69553c6",
+      "path": "assets/asset_9f19c0de-0094-4de1-b373-2d8ab2706392.webp"
+    },
+    "ending": {
+      "instanceId": "877942f1-2eed-4823-9fab-07f558f824d0",
+      "assetId": "asset_84cc5715-4dc0-4ec5-a8d7-08d40a2e9e0a",
+      "sha256": "24bf7fce837f0bfc06237f06e5ee372475d7dcf5740d84a8171255a0c69553c6",
+      "path": "assets/asset_84cc5715-4dc0-4ec5-a8d7-08d40a2e9e0a.webp"
+    }
+  },
+  "sameCupBytes": true,
+  "originalFiles": {
+    "output\\coffee-v08-formal-u01-20261023\\native\\coffee-v08-u01-proof.glx": {
+      "bytes": 9985583,
+      "sha256": "6fbb1240edb2f69c0ffd905cb2c70d469eb1e36d60c719dd6a4b8d610a62f4bc"
+    },
+    "docs\\creative-production\\works\\coffee-journey\\design\\v07\\native\\coffee-journey-v07.glx": {
+      "bytes": 9976378,
+      "sha256": "2a4511903738bacdaf78c20e68858f6ff766d26a34f83b354c5c21925aca6d9f"
+    }
+  },
+  "passed": true,
+  "portableU05Source": true
+}

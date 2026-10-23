@@ -5,32 +5,49 @@ import { applyComponentOperation } from '../../core/drivers/courseV10Operations'
 import type { ComponentEdit } from '../../shared/contracts/component-platform/operations'
 import type { EditorStoreKernel } from '../store/editorStoreKernel'
 import type { CapturedCourseTarget } from '../documents/CourseV10DocumentBridge'
+import { capturedCourseViewIsCurrent, isCourseComponentInputFailure } from '../documents/CourseV10DocumentBridge'
 import { frameCorners } from '../../core/components/geometry'
+import { DocumentInsertionTargetError } from '../../shared/document/blockInsertion'
+import { importComponentLibraryArchive } from '../../core/components/library/archive'
+import { selectCurrentCatalogPackages } from './componentLibraryModel'
+import type { AvailableComponentCatalogPackage } from '../../shared/componentCatalog'
+import { prepareCourseTeacherControllerEdits } from '../../core/course/courseElementInsertion'
 
-import { resolveCourseInsertionPlacement, type CourseInsertionOptions } from '../media/commitCourseMediaAuthoring'
+import { prepareCourseInsertion, resolveCourseInsertionPlacement, type CourseInsertionOptions } from '../media/commitCourseMediaAuthoring'
 
 export type ComponentInsertionTarget = CapturedCourseTarget
-export type ComponentPackageInsertionOptions = CourseInsertionOptions & Pick<InsertLibraryOptions, 'targetBindings' | 'surfaceBindings' | 'placement'>
+export type ComponentPackageInsertionOptions = CourseInsertionOptions & Pick<InsertLibraryOptions, 'targetBindings' | 'surfaceBindings' | 'placement'> & { includeTeacherController?: boolean }
+export interface ComponentLibraryAddOptions {
+  builtInAssetIds?: readonly string[]; placement?: 'local'; includeTeacherController?: boolean
+  /** Transient UI submission identity; retries keep it, a new choice creates another. Never persisted. */
+  attemptId?: string
+}
 export const captureComponentInsertionTarget = (kernel: EditorStoreKernel) => kernel.captureTarget()
 
-export function componentDefinitionEntry(kernel: EditorStoreKernel, definitionId: string, target?: CapturedCourseTarget): ComponentLibraryEntry {
-  const project = target?.project ?? kernel.readDocument(), definition = project.definitions[definitionId]
+export function componentDefinitionEntry(kernel: EditorStoreKernel, definitionId: string, target?: CapturedCourseTarget, sourceInstanceId?: string): ComponentLibraryEntry {
+  const project = target?.editingProject ?? target?.project ?? kernel.readDocument(), definition = project.definitions[definitionId]
   if (!definition) throw new Error('组件定义已不存在。')
-  const example = Object.values(project.instances).find(instance => instance.definitionId === definitionId)
-  if (!example) throw new Error('此定义没有示例，请从组件库选择一个完整条目。')
+  const selected = target?.instanceIds.filter(id => project.instances[id]?.definitionId === definitionId) ?? []
+  const id = sourceInstanceId ?? (selected.length === 1 ? selected[0] : undefined)
+  const example = id ? project.instances[id] : undefined
+  if (!example || example.definitionId !== definitionId) throw new Error(Object.values(project.instances).some(instance => instance.definitionId === definitionId)
+    ? '请选择要复制的现有实例；工程定义没有独立的新建默认值。' : '此定义没有可复制的实例，请从组件库选择一个完整条目。')
   const resources = target?.resources ?? kernel.readResources()
   return extractComponentLibraryEntry(project, resources, { id: definition.library?.packageId ?? definitionId, title: definition.title ?? definitionId, rootIds: [example.id] }).entry
 }
 
 /** Prepare all library entries against one captured author snapshot and dispatch one C1 history operation. */
 export async function insertComponentPackagesAtTarget(kernel: EditorStoreKernel, target: ComponentInsertionTarget,
-  entries: readonly ComponentLibraryEntry[], options: ComponentPackageInsertionOptions = {}): Promise<{ ok: boolean; reason?: string; layerItemIds?: string[]; diagnostics?: LibraryDiagnostic[] }> {
+  entries: readonly ComponentLibraryEntry[], options: ComponentPackageInsertionOptions = {}): Promise<{ ok: boolean; reason?: string; inputFailure?: unknown; targetInvalid?: boolean; layerItemIds?: string[]; diagnostics?: LibraryDiagnostic[] }> {
   try {
-    if (!entries.length) throw new Error('未选择组件。')
-    const placement = resolveCourseInsertionPlacement(target, options), owner = placement.container
+    if (!entries.length && !options.includeTeacherController) throw new Error('未选择组件。')
+    const prepared = entries.length ? prepareCourseInsertion(target, options) : { target, options, edits: [] }, workingTarget = prepared.target
+    const includeTeacherController = options.includeTeacherController
+    options = prepared.options
+    const placement = resolveCourseInsertionPlacement(workingTarget, options), owner = placement.container
     let nextIndex = placement.index
-    let working: CourseProjectV10 = structuredClone(target.project)
-    const edits: ComponentEdit[] = [], rootIds: string[] = [], diagnostics: LibraryDiagnostic[] = []
+    let working: CourseProjectV10 = structuredClone(workingTarget.project)
+    const edits: ComponentEdit[] = [...prepared.edits], rootIds: string[] = [], diagnostics: LibraryDiagnostic[] = []
     for (const entry of entries) {
       const children = containerChildIds(working, owner)
       if (!children) throw new Error('组件放置目标已不存在。')
@@ -63,15 +80,41 @@ export async function insertComponentPackagesAtTarget(kernel: EditorStoreKernel,
       if (!insertsRoots) nextIndex += insertion.rootIds.length
       working = applyComponentOperation(working, insertion.command)
     }
-    edits.push(...resolveCourseInsertionPlacement(target, options, rootIds).edits)
+    if (rootIds.length) edits.push(...resolveCourseInsertionPlacement(workingTarget, options, rootIds).edits)
+    const teacherIds = includeTeacherController
+      ? (() => {
+        const teacher = prepareCourseTeacherControllerEdits(working, target.surfaceId, 'slide-authoring', target.instanceId)
+        edits.push(...teacher.edits)
+        return teacher.instanceIds
+      })() : []
     await kernel.editCaptured(kernel.capture(edits, target))
-    if (kernel.readView().activeDocumentId === target.documentId) kernel.selectInstances(rootIds, target.surfaceId, target.documentId)
+    const selectedIds = [...rootIds, ...teacherIds]
+    if (capturedCourseViewIsCurrent(kernel.readView(), target)) kernel.selectInstances(selectedIds, target.surfaceId, target.documentId)
     if (diagnostics.length) kernel.setFeedback({ errorMessage: [...new Set(diagnostics.map(item => item.message))].join('\n') })
-    return { ok: true, layerItemIds: rootIds, diagnostics }
-  } catch (error) { return { ok: false, reason: error instanceof Error ? error.message : String(error) } }
+    return { ok: true, layerItemIds: selectedIds, diagnostics }
+  } catch (error) { return { ok: false, reason: error instanceof Error ? error.message : String(error),
+    ...(isCourseComponentInputFailure(error) ? { inputFailure: error } : {}), ...(error instanceof DocumentInsertionTargetError ? { targetInvalid: true } : {}) } }
 }
-export async function insertComponentDefinitionAtTarget(kernel: EditorStoreKernel, target: ComponentInsertionTarget, definitionId: string, presetId?: string, options: CourseInsertionOptions = {}) {
+/** Resource preparation has no document effect; UI may refresh its captured insertion lease after awaiting it. */
+export async function prepareComponentDefinitionEntryAtTarget(kernel: EditorStoreKernel, target: ComponentInsertionTarget, definitionId: string, options: { sourceInstanceId?: string; catalogEntry?: AvailableComponentCatalogPackage } = {}): Promise<ComponentLibraryEntry> {
+    const definition = target.project.definitions[definitionId]
+    if (!definition) throw new Error('组件定义已不存在。')
+    const desktop = typeof window !== 'undefined' ? window.desktopAPI : undefined
+    if (!options.sourceInstanceId && definition.library?.packageId && desktop?.loadComponentCatalog && desktop.readComponentCatalogPackage) {
+      const packages = options.catalogEntry ? [options.catalogEntry] : (await desktop.loadComponentCatalog()).packages
+      const selected = selectCurrentCatalogPackages(packages.filter(entry => entry.packageId === definition.library!.packageId
+        && entry.sourceTrust !== 'prompt' && entry.quality !== 'deprecated'))[0]
+      if (selected) {
+        const file = await desktop.readComponentCatalogPackage({ sourceId: selected.sourceId, packageId: selected.packageId, version: selected.version })
+        const archive = importComponentLibraryArchive(file.bytes)
+        if (archive.entry.id !== selected.packageId || archive.version !== selected.version) throw new Error('目录条目身份已改变，请刷新后重试。')
+        return archive.entry
+      }
+    }
+    return componentDefinitionEntry(kernel, definitionId, target, options.sourceInstanceId)
+}
+export async function insertComponentDefinitionAtTarget(kernel: EditorStoreKernel, target: ComponentInsertionTarget, definitionId: string, presetId?: string, options: CourseInsertionOptions & { sourceInstanceId?: string; catalogEntry?: AvailableComponentCatalogPackage } = {}) {
   if (presetId) return { ok: false, reason: '此 V10 定义没有该预设；请选择库中的完整示例。' }
-  try { return await insertComponentPackagesAtTarget(kernel, target, [componentDefinitionEntry(kernel, definitionId, target)], options) }
+  try { return await insertComponentPackagesAtTarget(kernel, target, [await prepareComponentDefinitionEntryAtTarget(kernel, target, definitionId, options)], options) }
   catch (error) { return { ok: false, reason: error instanceof Error ? error.message : String(error) } }
 }

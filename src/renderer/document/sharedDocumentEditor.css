@@ -62,7 +62,7 @@
 
 
 /* The same full toolbar is used above Flow and in the free-surface floating host. */
-.shared-document-toolbar { align-items: center; font-size: 12px; line-height: 1.4; }
+.shared-document-toolbar { align-items: center; box-sizing: border-box; min-width: 0; flex-wrap: nowrap; gap: 2px; padding: 4px 6px; overflow: visible; font-size: 12px; line-height: 1.4; }
 .shared-document-modes{display:inline-flex;flex:none;gap:0}
 .shared-document-modes button{min-height:28px;padding:3px 8px;border:1px solid #cbd5e1;background:#fff;color:#334155;cursor:pointer}
 .shared-document-modes button:first-child{border-radius:4px 0 0 4px}
@@ -88,11 +88,17 @@
   font: inherit;
   white-space: nowrap;
 }
-.shared-document-toolbar > button { cursor: pointer; }
+.shared-document-toolbar > button { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 26px; min-width: 26px; height: 28px; padding: 3px; cursor: pointer; }
 .shared-document-toolbar > button:hover { background: #eff6ff; color: #1d4ed8; }
 .shared-document-toolbar > button[aria-pressed="true"] { border-color: #93c5fd; background: #dbeafe; color: #1d4ed8; }
 .shared-document-toolbar > label { display: inline-flex; flex: none; align-items: center; gap: 4px; white-space: nowrap; }
-.shared-document-toolbar > label > select { width: 160px; max-width: 100%; }
+.shared-document-toolbar > label > select { width: 112px; max-width: 100%; }
+.shared-document-toolbar > label > input[type=number] { width: 48px; padding: 3px; }
+.shared-document-toolbar > select { width: 76px; min-width: 0; padding: 3px; }
+.document-block-handle > button[draggable=true] { cursor: grab; }
+.document-block-handle > button:active { cursor: grabbing; }
+.document-block-drop-indicator { position: fixed; z-index: 40; height: 2px; pointer-events: none; background: #2563eb; }
+.shared-document-editor--file > div > .ProseMirror { padding-left: 36px; }
 
 /* SelectionQuickBar owns the client-space portal and placement; the host never inherits a text frame's scale. */
 .selection-quick-bar__row:has(> .native-text-toolbar-host) { height: auto; padding: 0; white-space: normal; }

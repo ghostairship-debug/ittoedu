@@ -1,7 +1,7 @@
 import { componentSurface } from '../../../shared/contracts/component-platform/project'
 import { useEffect } from 'react'
 import { useShallow } from 'zustand/react/shallow'
-import { useEditorStore } from '../../store/editorStore'
+import { selectActiveSlideContentEdit, useEditorStore } from '../../store/editorStore'
 import { useCourseV10Runtime } from '../../components/CourseV10RuntimeView'
 import { createSpatialStateCameraPort } from '../../componentPlatform/surfaces/spatial/stateCamera'
 import { initialSpatialSurfaceView } from '../../store/slices/spatialAuthoringSlice'
@@ -16,7 +16,7 @@ export function SpatialWorkspaceConnector({ onDropWorkspaceMedia, onSelectImageA
   const runtime = useCourseV10Runtime()
   const source = useEditorStore(useShallow(state => ({
     views: state.spatialViewStates, canvasMode: state.canvasMode, activation: state.courseView.activation,
-    contentEdit: state.slideContentEdit, previewBackgroundColor: state.previewBackgroundColor, courseView: state.courseView,
+    contentEdit: selectActiveSlideContentEdit(state), previewBackgroundColor: state.previewBackgroundColor, courseView: state.courseView,
   })))
   const selectedSurface = componentSurface(runtime.project, runtime.surfaceId ?? '')
   const surface = selectedSurface?.kind === 'spatial' ? selectedSurface : undefined
@@ -99,13 +99,14 @@ export function SpatialWorkspaceConnector({ onDropWorkspaceMedia, onSelectImageA
     contentEdit={source.contentEdit?.target.documentId === runtime.documentId && source.contentEdit.target.surfaceId === surface.id
       && source.contentEdit.target.activeStateId === source.courseView.activeStateId ? source.contentEdit : null}
     contentEditor={{ read: () => {
-      const draft = state().slideContentEdit
+      const draft = selectActiveSlideContentEdit(state())
       return draft?.target.documentId === runtime.documentId && draft.target.surfaceId === surface.id
         && draft.target.activeStateId === state().courseView.activeStateId ? draft : null
     },
       readProject: () => state().courseBridge.read().editingProject ?? projection,
       begin: id => state().beginSlideDataEdit(id), update: (data, composing, height, width, rangeProjection, historyGroup, layoutReady) => state().updateSlideDataDraft(data, composing, height, width, rangeProjection, historyGroup, layoutReady),
       commitInput: () => state().commitSlideContentInput(),
+      preserve: () => state().retainTextEdit(),
       setComposing: active => state().setSlideTextEditComposing(active),
       commit: () => state().commitTextEdit(), cancel: () => state().cancelTextEdit(), undo: () => { safe(state().undo()) }, redo: () => { safe(state().redo()) }, report: message => state().setError(message) }}
     onPaste={() => { safe(state().pasteNodes()) }} onSelectAll={() => state().selectAllNodes()}

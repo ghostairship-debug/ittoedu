@@ -70,6 +70,9 @@ describe('G20 default workspace entry has no embedded CLI dependency', () => {
       }
     })
     const tabs: DocumentTabsController = {
+      captureNavigationIdentity: () => '0',
+      cancelNavigation: vi.fn(),
+      showCurrentCourse: vi.fn(),
       isCourseActive: true, tabs: [], activeTab: 'course',
       createMarkdown: vi.fn(async () => {}), createText: vi.fn(async () => {}), setActiveTab: vi.fn(), focusDocument: vi.fn(async () => {}),
       openTab: vi.fn(async () => {}), closeTab: vi.fn(async () => true), removeTab: vi.fn(),
@@ -91,7 +94,7 @@ describe('G20 default workspace entry has no embedded CLI dependency', () => {
     await act(async () => { await result.current.actions.openFile({ kind: 'file', name: 'course.h5lesson', path: '/workspace/lesson/course.h5lesson' }) })
     expect(host.read().model).toMatchObject({ kind: 'course-v10', project: { title: 'registered course' } })
     expect(result.current.state.lesson).toEqual(lesson)
-    expect(tabs.setActiveTab).toHaveBeenCalledWith('course')
+    expect(tabs.showCurrentCourse).toHaveBeenCalledWith(expect.any(Function))
     const opened = host.read().documentId
     await act(async () => { await result.current.actions.newStandaloneProject() })
     expect(host.read().documentId).not.toBe(opened)

@@ -1,0 +1,80 @@
+{
+  "anchors": [
+    {
+      "coffeeUnderlay": "poc",
+      "mountId": "1792672809332-0.32755154414726073",
+      "reading": "{\"containerId\":\"47415583-2d75-4b72-9c46-dfd29b47d82a\",\"activeInstanceId\":\"b3d345ba-f2c8-4c52-add1-2aa477d6a241\",\"progress\":0.12943126074724678}",
+      "chapter": "2",
+      "events": "11",
+      "tick": "54",
+      "idle": "true"
+    },
+    {
+      "coffeeUnderlay": "poc",
+      "mountId": "1792672809332-0.32755154414726073",
+      "reading": "{\"containerId\":\"47415583-2d75-4b72-9c46-dfd29b47d82a\",\"activeInstanceId\":\"5093abd6-eba9-43cc-a54a-ad2eb13648e6\",\"progress\":0.6325923506212987}",
+      "chapter": "5",
+      "events": "13",
+      "tick": "110",
+      "idle": "true"
+    },
+    {
+      "coffeeUnderlay": "poc",
+      "mountId": "1792672809332-0.32755154414726073",
+      "reading": "{\"containerId\":\"47415583-2d75-4b72-9c46-dfd29b47d82a\",\"activeInstanceId\":\"8ad1964b-3a7a-4a92-a59c-259924f7b485\",\"progress\":0.9238714129200029}",
+      "chapter": "7",
+      "events": "15",
+      "tick": "165",
+      "idle": "true"
+    },
+    {
+      "coffeeUnderlay": "poc",
+      "mountId": "1792672809332-0.32755154414726073",
+      "reading": "{\"containerId\":\"47415583-2d75-4b72-9c46-dfd29b47d82a\",\"activeInstanceId\":\"5093abd6-eba9-43cc-a54a-ad2eb13648e6\",\"progress\":0.6325923506212987}",
+      "chapter": "5",
+      "events": "17",
+      "tick": "220",
+      "idle": "true"
+    },
+    {
+      "coffeeUnderlay": "poc",
+      "mountId": "1792672809332-0.32755154414726073",
+      "reading": "{\"containerId\":\"47415583-2d75-4b72-9c46-dfd29b47d82a\",\"activeInstanceId\":\"b3d345ba-f2c8-4c52-add1-2aa477d6a241\",\"progress\":0.12943126074724678}",
+      "chapter": "2",
+      "events": "19",
+      "tick": "275",
+      "idle": "true"
+    }
+  ],
+  "errors": [],
+  "initial": {
+    "coffeeUnderlay": "poc",
+    "mountId": "1792672809332-0.32755154414726073",
+    "reading": "{\"containerId\":\"47415583-2d75-4b72-9c46-dfd29b47d82a\",\"activeInstanceId\":\"5b629c9b-d44b-4fe6-a156-ed4d3b03880d\",\"progress\":0}",
+    "chapter": "1",
+    "events": "9",
+    "tick": "3",
+    "idle": "true"
+  },
+  "mount": "1792672809332-0.32755154414726073",
+  "fast": {
+    "coffeeUnderlay": "poc",
+    "mountId": "1792672809332-0.32755154414726073",
+    "reading": "{\"containerId\":\"47415583-2d75-4b72-9c46-dfd29b47d82a\",\"activeInstanceId\":\"8ad1964b-3a7a-4a92-a59c-259924f7b485\",\"progress\":0.9238714129200029}",
+    "chapter": "7",
+    "events": "27",
+    "tick": "376",
+    "idle": "true"
+  },
+  "reverseWheel": {
+    "coffeeUnderlay": "poc",
+    "mountId": "1792672809332-0.32755154414726073",
+    "reading": "{\"containerId\":\"47415583-2d75-4b72-9c46-dfd29b47d82a\",\"activeInstanceId\":\"5093abd6-eba9-43cc-a54a-ad2eb13648e6\",\"progress\":0.7007140668040601}",
+    "chapter": "5",
+    "events": "28",
+    "tick": "388",
+    "idle": "false"
+  },
+  "paperPaint": 0,
+  "frames": 6
+}

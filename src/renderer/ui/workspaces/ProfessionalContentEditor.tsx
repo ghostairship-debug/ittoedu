@@ -7,7 +7,7 @@ import { TextComponentEditor, FormulaComponentEditor } from '../../../components
 import { textComponentDataSchema, formulaComponentDataSchema } from '../../../components/text/data'
 import type { DocumentOperation } from '../../document/editorSession'
 import type { SharedDocumentEditorHandle } from '../../document/SharedDocumentEditor'
-import type { SlideContentEdit } from '../../store/slices/slideAuthoringSlice'
+import { rebaseSlideContentData, type SlideContentEdit } from '../../store/slices/slideAuthoringSlice'
 import { componentFrameStyle } from '../../componentPlatform/surfaces/slide'
 import { CanvasPlainTextEditor, type PlainTextSelectionIntent } from '../CanvasPlainTextEditor'
 import { authorFieldTextData } from '../../authoring/professionalContentFields'
@@ -24,6 +24,7 @@ export interface ProfessionalContentEditorProps {
   commit(): Promise<void>
   commitInput?(): Promise<void>
   cancel(): unknown
+  preserve?(): Promise<boolean>
   undo(): void | Promise<void>
   redo(): void | Promise<void>
   report(message: string): void
@@ -43,14 +44,23 @@ export function ProfessionalContentEditor(props: ProfessionalContentEditorProps)
   latest.current = props
   const identity = draft.authorSpot ? authorFieldIdentity(draft.instanceId, draft.authorSpot) : draft.instanceId
   const kind = componentDefinitionBuiltinKey(draft.target.editingProject.definitions[draft.definitionId])
-  const richField = draft.authorSpot ? authorFieldTextData(draft.authorSpot, draft.spotValue ?? draft.authorSpot.initialValue) : undefined
+  let presentedData = draft.data
+  try { presentedData = rebaseSlideContentData(draft.originalData, draft.data, props.project.instances[draft.instanceId]?.data ?? draft.data, kind) }
+  catch { /* Keep the local input visible when the same field really changed elsewhere. */ }
+  const nativeText = kind === 'guoling.text' && !draft.implementation && !draft.target.editingProject.instances[draft.instanceId]?.implementationOverride
+    && draft.authorSpot?.dataPath?.length === 1 && draft.authorSpot.dataPath[0] === 'content'
+    ? textComponentDataSchema.parse(presentedData) : undefined
+  const richField = draft.authorSpot ? authorFieldTextData(draft.authorSpot, draft.spotValue ?? draft.authorSpot.initialValue, nativeText) : undefined
   const ordinary = kind !== 'guoling.formula' || Boolean(draft.authorSpot)
+  const needsRetention = Boolean(draft.commitError || draft.recoveryBlocked || draft.resumeRequired)
+  const preserveAndExit = () => { if (latest.current.preserve) void latest.current.preserve().catch(failure => latest.current.report(failure instanceof Error ? failure.message : String(failure))) }
   const reportCommit = (afterBlur = false, blurred?: EventTarget | null) => queueMicrotask(() => {
     const current = latest.current
     if (current.draft.instanceId !== draft.instanceId || current.draft.target.documentId !== draft.target.documentId
       || current.draft.target.epoch !== draft.target.epoch || (current.draft.authorSpot ? authorFieldIdentity(current.draft.instanceId, current.draft.authorSpot) : current.draft.instanceId) !== identity
       || !root.current?.isConnected) return
     if (afterBlur) {
+      if (current.draft.commitError || current.draft.recoveryBlocked || current.draft.resumeRequired) return
       const active = root.current.ownerDocument.activeElement
       if (active && (root.current.contains(active) || active.closest('.text-edit-toolbar,.selection-quick-bar,.palette-button__panel'))) return
       if (blurred instanceof Node && !blurred.isConnected) { root.current.querySelector<HTMLElement>('.ProseMirror,input,textarea,[contenteditable="true"]')?.focus({ preventScroll: true }); return }
@@ -67,14 +77,16 @@ export function ProfessionalContentEditor(props: ProfessionalContentEditorProps)
     return () => { notify(false) }
   }, [host, identity, Boolean(richField)])
   useEffect(() => {
+    if (props.selectionIntent?.anchorPoint && props.selectionIntent.point
+      && rich.current?.selectAtClientPoints(props.selectionIntent.anchorPoint, props.selectionIntent.point)) return
     if (props.clientPoint && rich.current?.focusAtClientPoint(props.clientPoint)) return
     root.current?.querySelector<HTMLElement>('.ProseMirror,textarea,input,[contenteditable="true"]')?.focus({ preventScroll: true })
-  }, [host, identity, toolbar])
+  }, [host, identity, toolbar, props.selectionIntent])
   useLayoutEffect(() => {
     const element = root.current
     if (!props.floatingToolbar || !element || !host) { setToolbarPlace(null); return }
     const position = () => {
-      const bounds = visibleBounds(host), rect = element.getBoundingClientRect()
+      const bounds = visibleBounds(host.closest('.flow-workspace,.workspace') ?? host.parentElement ?? host), rect = element.getBoundingClientRect()
       const next = bounds.right > bounds.left && bounds.bottom > bounds.top
         ? { anchor: { left: rect.left, top: rect.top, width: rect.width, height: rect.height }, bounds } : null
       setToolbarPlace(previous => JSON.stringify(previous) === JSON.stringify(next) ? previous : next)
@@ -97,13 +109,13 @@ export function ProfessionalContentEditor(props: ProfessionalContentEditorProps)
   }
   const composition = (active: boolean) => {
     const current = latest.current.draft
-    latest.current.update(current.authorSpot ? authorFieldTextData(current.authorSpot, current.spotValue ?? current.authorSpot.initialValue) ?? current.data : current.data, active)
+    latest.current.update(current.authorSpot ? authorFieldTextData(current.authorSpot, current.spotValue ?? current.authorSpot.initialValue, nativeText) ?? current.data : current.data, active)
     if (!active && latest.current.commitInput && !current.authorSpot?.sourceRegion)
       void latest.current.commitInput().catch(failure => latest.current.report(failure instanceof Error ? failure.message : String(failure)))
   }
   const common = { revision: `${draft.target.epoch}:${identity}`, toolbarHost: toolbar,
     onUndo: props.undo, onRedo: props.redo, onDiagnostic: props.report, onCompositionChange: composition, onChange }
-  const richData = richField ?? (!draft.authorSpot && kind === 'guoling.text' ? textComponentDataSchema.parse(draft.data) : undefined)
+  const richData = richField ?? (!draft.authorSpot && kind === 'guoling.text' ? textComponentDataSchema.parse(presentedData) : undefined)
   return <>{createPortal(<div ref={root} data-component-professional-editor="" data-author-field-identity={draft.authorSpot ? identity : undefined} className="text-edit-overlay"
     style={{ ...(frame ? componentFrameStyle(frame) : draft.authorSpot ? componentFrameStyle(draft.authorSpot.localBounds) : { position: 'absolute' as const, inset: 0 }),
       zIndex: 20, pointerEvents: 'auto', background: draft.authorSpot && !richData ? 'transparent' : '#fff', overflow: 'visible',
@@ -111,20 +123,24 @@ export function ProfessionalContentEditor(props: ProfessionalContentEditorProps)
     onPointerDown={event => event.stopPropagation()} onDoubleClick={event => event.stopPropagation()}
     onKeyDown={event => {
       if (event.defaultPrevented || event.nativeEvent.isComposing || latest.current.draft.composing) return
-      if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); if (ordinary) reportCommit(); else props.cancel() }
+      if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); if (needsRetention && props.preserve) preserveAndExit(); else if (ordinary) reportCommit(); else props.cancel() }
       else if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) { event.preventDefault(); event.stopPropagation(); reportCommit() }
     }} onBlur={event => {
       if (event.relatedTarget instanceof Node && event.currentTarget.contains(event.relatedTarget)) return
       reportCommit(true, event.target)
     }}>
     {!props.floatingToolbar && (richData || !draft.authorSpot) && <div className="text-edit-toolbar" ref={setToolbar} />}
+    {needsRetention && props.preserve && <div role="status" style={{ background: '#fff', fontSize: 12, padding: '4px 6px', position: 'absolute', bottom: '100%', left: 0, whiteSpace: 'nowrap' }}>
+      此处输入尚未应用。{draft.commitError && <button type="button" onPointerDown={event => event.preventDefault()} onClick={() => reportCommit()}>重试此处</button>}
+      <button type="button" onPointerDown={event => event.preventDefault()} onClick={preserveAndExit}>保留原稿并退出</button>
+    </div>}
     {richData ? <TextComponentEditor {...common} editorRef={rich} data={richData} />
       : draft.authorSpot ? <CanvasPlainTextEditor key={identity} bounds={{ x: 0, y: 0, width: draft.authorSpot.localBounds.width, height: draft.authorSpot.localBounds.height }}
         value={draft.spotText ?? ''} multiline label="编辑此处文字" initialCaret={props.caretOffset} initialPoint={props.clientPoint}
-        presentation="inline" textStyle={draft.authorSpot.textStyle} selectionIntent={props.selectionIntent}
+        presentation="inline" textStyle={draft.authorSpot.textStyle} selectionIntent={props.selectionIntent} escapeBehavior={needsRetention && props.preserve ? 'cancel' : 'commit'}
         onDraftChange={(value, composing) => { props.updateSpot(value, composing); if (!composing && !draft.authorSpot?.sourceRegion && props.commitInput) void props.commitInput().catch(failure => props.report(String(failure))) }}
-        onCommit={value => { props.updateSpot(value, false); reportCommit() }} onCancel={() => reportCommit()} />
-        : <FormulaComponentEditor {...common} data={formulaComponentDataSchema.parse(draft.data)} />}
+        onCommit={value => { props.updateSpot(value, false); if (!needsRetention) reportCommit() }} onCancel={() => { if (needsRetention && props.preserve) preserveAndExit(); else reportCommit() }} />
+        : <FormulaComponentEditor {...common} data={formulaComponentDataSchema.parse(presentedData)} />}
   </div>, host)}
     {props.floatingToolbar && (richData || !draft.authorSpot) && <SelectionQuickBar
       anchor={toolbarPlace?.anchor ?? null} bounds={toolbarPlace?.bounds ?? null} label="文字编辑工具"

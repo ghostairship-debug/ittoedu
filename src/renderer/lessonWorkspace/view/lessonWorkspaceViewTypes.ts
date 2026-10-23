@@ -18,6 +18,7 @@ export interface LessonWorkspaceViewProps {
     creating: boolean;
     error: string | null;
     busy: boolean;
+    importingCourse: boolean;
     treeVersion: number;
     explorerOpen: boolean;
     mobilePane: "navigation" | "chat" | "workbench";
@@ -40,7 +41,8 @@ export interface LessonWorkspaceViewProps {
     openFile(entry: LessonDirectoryEntry): Promise<void>;
     newStandaloneProject(): Promise<void>;
     newCourse(): Promise<void>;
-    newCourseFromPptx(file: File): Promise<void>;
+    newCourseFromPptx(file: File): Promise<boolean>;
+    cancelNewCourseFromPptx(): void;
     setSelectedDirectory(value: string | null): void;
     setName(value: string): void;
     setCreating(value: boolean): void;

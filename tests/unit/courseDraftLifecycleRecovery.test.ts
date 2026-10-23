@@ -26,7 +26,8 @@ describe('advanced recovery candidates', () => {
     registerCourseDraftProvider(h.bridge, 'json', provider({ restore }))
     expect(restore).not.toHaveBeenCalled()
     expect(h.lifecycle.preserve(h.snapshot.documentId).map(record => record.payload)).toEqual([first.payload, second.payload])
-    expect(await h.lifecycle.prepare(h.snapshot.documentId)).toMatchObject({ ready: false })
+    expect(await h.lifecycle.prepare(h.snapshot.documentId)).toEqual({ ready: true, issues: [] })
+    expect(h.lifecycle.preserve(h.snapshot.documentId).map(record => record.payload)).toEqual([first.payload, second.payload])
   })
 
   it('preserves a rejected unique input in pending storage and reports it as retained', async () => {
@@ -41,7 +42,8 @@ describe('advanced recovery candidates', () => {
     registerCourseDraftProvider(h.bridge, 'json', provider())
     expect(h.lifecycle.restore(h.snapshot.documentId, [saved])).toMatchObject({ adopted: [saved], issues: [{ message: expect.stringContaining('尚未接续') }] })
     expect(h.lifecycle.preserve(h.snapshot.documentId)).toEqual([{ ...saved, documentId: h.snapshot.documentId, epoch: h.snapshot.epoch }])
-    expect(await h.lifecycle.prepare(h.snapshot.documentId)).toMatchObject({ ready: false })
+    expect(await h.lifecycle.prepare(h.snapshot.documentId)).toEqual({ ready: true, issues: [] })
+    expect(h.lifecycle.preserve(h.snapshot.documentId)).toEqual([{ ...saved, documentId: h.snapshot.documentId, epoch: h.snapshot.epoch }])
   })
 
   it('does not overwrite newer provider input with an older candidate at the same target', async () => {
@@ -62,9 +64,88 @@ describe('advanced recovery candidates', () => {
     expect(h.lifecycle.preserve(h.snapshot.documentId)).toHaveLength(1)
     expect(await h.lifecycle.prepare(h.snapshot.documentId)).toEqual({ ready: true, issues: [] })
   })
+
+  it('adopts an already applied recovered input without retaining it as unfinished input', async () => {
+    const h = await fixture(), saved = h.record('已经写入当前正文')
+    const restore = vi.fn(() => 'consumed' as const)
+    registerCourseDraftProvider(h.bridge, 'json', provider({ restore }))
+    expect(h.lifecycle.restore(h.snapshot.documentId, [saved])).toEqual({ restored: 1, adopted: [saved], issues: [] })
+    expect(h.lifecycle.preserve(h.snapshot.documentId)).toEqual([])
+    expect(await h.lifecycle.prepare(h.snapshot.documentId)).toEqual({ ready: true, issues: [] })
+    expect(restore).toHaveBeenCalledOnce()
+  })
+
+  it('consumes a pending applied input when its provider becomes available', async () => {
+    const h = await fixture(), saved = h.record('已应用但入口晚挂载')
+    h.lifecycle.restore(h.snapshot.documentId, [saved])
+    expect(h.lifecycle.preserve(h.snapshot.documentId)).toHaveLength(1)
+    registerCourseDraftProvider(h.bridge, 'json', provider({ restore: () => 'consumed' }))
+    expect(h.lifecycle.preserve(h.snapshot.documentId)).toEqual([])
+  })
+
+  it('adopts planner-rebased input at the same logical target without duplicating the old baseline', async () => {
+    const h = await fixture(), saved = h.record('保持原修改意图')
+    let retained: AdvancedDraftRecovery[] = []
+    registerCourseDraftProvider(h.bridge, 'json', provider({ preserve: () => retained,
+      restore(documentId, record) {
+        retained = [{ ...record, documentId, payload: { raw: '保持原修改意图', baseline: '当前颜色与字段基线' } }]
+        return 'adopted'
+      } }))
+    expect(h.lifecycle.restore(h.snapshot.documentId, [saved])).toEqual({ adopted: [saved], restored: 1, issues: [] })
+    expect(h.lifecycle.preserve(h.snapshot.documentId)).toEqual(retained)
+    expect(retained[0]!.payload).toMatchObject({ raw: '保持原修改意图', baseline: '当前颜色与字段基线' })
+  })
+
+  it('retains raw input when a provider claims adoption without preserving a corresponding target', async () => {
+    const h = await fixture(), saved = h.record('不能被空采用丢掉的原稿')
+    registerCourseDraftProvider(h.bridge, 'json', provider({ restore: () => 'adopted' }))
+    expect(h.lifecycle.restore(h.snapshot.documentId, [saved])).toMatchObject({ adopted: [saved], issues: [{ message: expect.stringContaining('尚未接续') }] })
+    expect(h.lifecycle.preserve(h.snapshot.documentId)).toEqual([{ ...saved, documentId: h.snapshot.documentId, epoch: h.snapshot.epoch }])
+  })
 })
 
 describe('course input durable adoption', () => {
+  it('does not claim preservation when a refused editor has not captured any raw input', async () => {
+    const h = await fixture(), error = vi.fn(), write = vi.fn(async () => {})
+    const inputs = createCourseInputLifecycle(h.bridge, {
+      capture: () => ({ snapshot: h.snapshot, records: { advanced: [], properties: [] }, flowDraft: null }),
+      drain: async () => { throw new Error('当前正文输入法尚未完成') },
+      restore: () => ({ advanced: [], properties: [] }), suspend() {}, resume() {}, error, status() {},
+    })
+    inputs.connect({ ...h.api, readAuthoringDrafts: async () => null, writeAuthoringDrafts: write })
+    expect(await inputs.prepare([h.snapshot.documentId], 'preserve')).toBe(false)
+    expect(error).toHaveBeenLastCalledWith('当前正文输入法尚未完成')
+    expect(write).not.toHaveBeenCalled()
+  })
+
+  it('does not use an unrelated old raw draft to excuse the current unregistered input failure', async () => {
+    const h = await fixture(), error = vi.fn(), write = vi.fn(async () => {})
+    const unrelated = { ...h.record('无关位置的旧JSON原稿'), documentId: h.snapshot.documentId, epoch: h.snapshot.epoch }
+    const inputs = createCourseInputLifecycle(h.bridge, {
+      capture: () => ({ snapshot: h.snapshot, records: { advanced: [unrelated], properties: [] }, flowDraft: null }),
+      drain: async () => { throw new Error('当前正文输入法尚未完成') },
+      restore: () => ({ advanced: [], properties: [] }), suspend() {}, resume() {}, error, status() {},
+    })
+    inputs.connect({ ...h.api, readAuthoringDrafts: async () => null, writeAuthoringDrafts: write })
+    expect(await inputs.prepare([h.snapshot.documentId], 'preserve')).toBe(false)
+    expect(error).toHaveBeenLastCalledWith('当前正文输入法尚未完成')
+    expect(write).not.toHaveBeenCalled()
+  })
+
+  it('does not sign durable Flow preservation when its raw-input adapter is missing', async () => {
+    const h = await fixture(), error = vi.fn(), write = vi.fn(async () => {})
+    const flowDraft = { surfaceId: 'flow', source: '只在正文原稿owner中的文字', composing: false, diagnostics: [] }
+    const inputs = createCourseInputLifecycle(h.bridge, {
+      capture: () => ({ snapshot: h.snapshot, records: { advanced: [], properties: [] }, flowDraft }),
+      drain: async () => {}, restore: () => ({ advanced: [], properties: [] }),
+      suspend() {}, resume() {}, error, status() {},
+    })
+    inputs.connect({ ...h.api, readAuthoringDrafts: async () => null, writeAuthoringDrafts: write })
+    expect(await inputs.prepare([h.snapshot.documentId], 'preserve')).toBe(false)
+    expect(error).toHaveBeenLastCalledWith('正文原稿恢复服务未连接，当前输入继续保留')
+    expect(write).not.toHaveBeenCalled()
+  })
+
   async function inputFixture(owner: 'previous' | 'current' = 'previous') {
     const h = await fixture(), saved = h.record('选入的高级原文'), rejected = h.record('未选入的高级原文', 'other')
     const property: PropertyDraftRecovery = { bindingKey: 'width', label: '宽度', kind: 'number', raw: '1e', composing: false }

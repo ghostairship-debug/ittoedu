@@ -352,8 +352,40 @@ export function flowTextSelectionTarget(model: DocumentModel, surfaceId: string,
     if (from < 0 || to > entry.length || from > to) throw new Error('正文范围已失效')
     return { kind: 'course-instance', surfaceId, instanceId: instance.id, stateId: stateId ?? null,
       ...(caption ? { fieldScope: 'flowLayout' as const } : {}), dataPath: courseInstanceSlotPath(caption ? instance.flowLayout : instance.data, slot), from, to }
-  }).filter(target => target.from < target.to)
+  }).filter(target => target.from < target.to || a === b && selection.anchor.offset === selection.head.offset)
   return textSelectionTarget(model, targets)
+}
+/** Resolve observed professional text fields back to the same Flow semantic slots. */
+export function flowInsertionSelection(model: DocumentModel, surfaceId: string, target: ToolTarget, stateId?: string | null): DocumentSelection {
+  if (model.kind !== 'course-v10') throw new Error('正文插入需要课件文档')
+  const project = resolveComponentPresentation(model.project, surfaceId, stateId ?? null)
+  const ranges = target.kind === 'text-selection' ? target.fragments.map(fragment => fragment.target) : [target]
+  if (!ranges.length) throw new Error('正文插入位置为空，请重新选择')
+  const point = (range: ToolTarget, edge: 'from' | 'to') => {
+    if (!isCourseInstanceRange(range) || range.authorField || range.surfaceId !== surfaceId || (range.stateId ?? null) !== (stateId ?? null))
+      throw new Error('插入位置需要同一Flow与展示状态中的正文光标或文字选区')
+    let found: import('../../shared/document/ports').DocumentPoint | undefined
+    walkDocument(projectFlowDocument(project, surfaceId).content.blocks, block => {
+      if (block.id !== range.instanceId || project.instances[block.id]?.visible === false) return
+      for (const slot of documentVisibleTextSlots(block)) {
+        const semantic: DocumentSlot = slot.key.startsWith('item:') ? { kind: 'item', itemId: slot.key.slice(5) }
+          : slot.key.startsWith('column:') ? { kind: 'header', columnId: slot.key.slice(7) }
+          : slot.key.startsWith('cell:') ? (() => { const [rowId, columnId] = JSON.parse(slot.key.slice(5)) as string[]; return { kind: 'cell' as const, rowId, columnId } })()
+          : { kind: 'field', field: slot.key as Extract<DocumentSlot, { kind: 'field' }>['field'] }
+        const instance = project.instances[block.id]
+        const caption = semantic.kind === 'field' && semantic.field === 'caption' && instance.flowLayout?.caption !== undefined
+          && componentDefinitionBuiltinKey(project.definitions[instance.definitionId]) !== 'guoling.table'
+        if ((range.fieldScope ?? 'data') !== (caption ? 'flowLayout' : 'data')) continue
+        if (!equalComponentValue(courseInstanceSlotPath(caption ? instance.flowLayout : instance.data, semantic), range.dataPath)) continue
+        const offset = range[edge]
+        if (!Number.isInteger(offset) || offset < 0 || offset > documentTextLength(slot.content)) throw new Error('正文插入光标已失效，请重新选择')
+        found = { blockId: block.id, slot: semantic, offset, affinity: 'after' }
+      }
+    })
+    if (!found) throw new Error('原正文槽位已不存在，请重新选择插入位置')
+    return found
+  }
+  return { kind: 'text', revision: String(model.project.revision), anchor: point(ranges[0], 'from'), head: point(ranges.at(-1)!, 'to') }
 }
 /** Preserve a rectangular PM cell selection as its real cell fields, never a whole-table grant. */
 export function flowCellSelectionTargets(model:DocumentModel,surfaceId:string,selection:Extract<DocumentSelection,{kind:'cells'}>,stateId?:string|null):CourseInstanceTarget[] {

@@ -1,0 +1,6407 @@
+[
+  {
+    "path": "pages",
+    "kind": "framework"
+  },
+  {
+    "path": "project.json",
+    "kind": "framework"
+  },
+  {
+    "path": "roots",
+    "kind": "framework"
+  },
+  {
+    "path": "theme.css",
+    "kind": "style"
+  },
+  {
+    "path": "references/component-api5.md",
+    "kind": "reference"
+  },
+  {
+    "path": "components/01-幻灯片容器.definition.json",
+    "kind": "data"
+  },
+  {
+    "path": "components/02-流式布局.definition.json",
+    "kind": "data"
+  },
+  {
+    "path": "components/03-编组.definition.json",
+    "kind": "data"
+  },
+  {
+    "path": "components/03-编组.view.js",
+    "kind": "source"
+  },
+  {
+    "path": "components/03-编组.dependencies/implementation.view.js",
+    "kind": "source"
+  },
+  {
+    "path": "components/04-形状.definition.json",
+    "kind": "data"
+  },
+  {
+    "path": "components/04-形状.view.js",
+    "kind": "source"
+  },
+  {
+    "path": "components/04-形状.dependencies/implementation.view.js",
+    "kind": "source"
+  },
+  {
+    "path": "components/05-文字.definition.json",
+    "kind": "data"
+  },
+  {
+    "path": "components/05-文字.view.js",
+    "kind": "source"
+  },
+  {
+    "path": "components/05-文字.dependencies/implementation.view.js",
+    "kind": "source"
+  },
+  {
+    "path": "components/06-图片.definition.json",
+    "kind": "data"
+  },
+  {
+    "path": "components/06-图片.view.js",
+    "kind": "source"
+  },
+  {
+    "path": "components/06-图片.dependencies/implementation.view.js",
+    "kind": "source"
+  },
+  {
+    "path": "components/07-Web 内容.definition.json",
+    "kind": "data"
+  },
+  {
+    "path": "components/07-Web 内容.view.js",
+    "kind": "source"
+  },
+  {
+    "path": "components/07-Web 内容.dependencies/implementation.view.js",
+    "kind": "source"
+  },
+  {
+    "path": "components/08-文档块.definition.json",
+    "kind": "data"
+  },
+  {
+    "path": "components/08-文档块.view.js",
+    "kind": "source"
+  },
+  {
+    "path": "components/08-文档块.dependencies/implementation.view.js",
+    "kind": "source"
+  },
+  {
+    "path": "components/09-HTML 程序.definition.json",
+    "kind": "data"
+  },
+  {
+    "path": "components/09-HTML 程序.view.js",
+    "kind": "source"
+  },
+  {
+    "path": "components/09-HTML 程序.dependencies/implementation.view.js",
+    "kind": "source"
+  },
+  {
+    "path": "components/10-coffee-navigation.js.definition.json",
+    "kind": "data"
+  },
+  {
+    "path": "components/10-coffee-navigation.js.source/coffee-navigation.js",
+    "kind": "source"
+  },
+  {
+    "path": "components/11-underlay-poc.js.definition.json",
+    "kind": "data"
+  },
+  {
+    "path": "components/11-underlay-poc.js.source/underlay-poc.js",
+    "kind": "source"
+  },
+  {
+    "path": "components/11-underlay-poc.js.source/background-entry.js",
+    "kind": "source"
+  },
+  {
+    "path": "components/11-underlay-poc.js.source/background-assets.css",
+    "kind": "source"
+  },
+  {
+    "path": "components/11-underlay-poc.js.source/background-runtime.js",
+    "kind": "source"
+  },
+  {
+    "path": "components/11-underlay-poc.js.source/assets/runtime/cup.webp",
+    "kind": "asset"
+  },
+  {
+    "path": "components/11-underlay-poc.js.source/assets/runtime/cherry.webp",
+    "kind": "asset"
+  },
+  {
+    "path": "components/11-underlay-poc.js.source/assets/runtime/section.webp",
+    "kind": "asset"
+  },
+  {
+    "path": "components/11-underlay-poc.js.source/assets/runtime/green.webp",
+    "kind": "asset"
+  },
+  {
+    "path": "components/11-underlay-poc.js.source/assets/runtime/gold.webp",
+    "kind": "asset"
+  },
+  {
+    "path": "components/11-underlay-poc.js.source/assets/runtime/roast.webp",
+    "kind": "asset"
+  },
+  {
+    "path": "components/11-underlay-poc.js.source/background-stages.js",
+    "kind": "source"
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行.json",
+    "kind": "structure",
+    "target": {
+      "kind": "container",
+      "container": {
+        "kind": "surface",
+        "surfaceId": "47415583-2d75-4b72-9c46-dfd29b47d82a"
+      }
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/01-编组.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "2ab80ec7-3a4a-41c4-be34-005d444e6e38"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/01-编组.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "2ab80ec7-3a4a-41c4-be34-005d444e6e38"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/01-编组.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "2ab80ec7-3a4a-41c4-be34-005d444e6e38"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/01-编组.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "2ab80ec7-3a4a-41c4-be34-005d444e6e38"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/01-编组/01-文字.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "e002d3c0-8c8d-4ad5-beb2-384d2315f5f6"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/01-编组/01-文字.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "e002d3c0-8c8d-4ad5-beb2-384d2315f5f6"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/01-编组/01-文字.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "e002d3c0-8c8d-4ad5-beb2-384d2315f5f6"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/01-编组/01-文字.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "e002d3c0-8c8d-4ad5-beb2-384d2315f5f6"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/01-编组/02-文字.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "bc07165c-0ecc-4f0a-bd68-0045e5ad5ff1"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/01-编组/02-文字.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "bc07165c-0ecc-4f0a-bd68-0045e5ad5ff1"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/01-编组/02-文字.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "bc07165c-0ecc-4f0a-bd68-0045e5ad5ff1"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/01-编组/02-文字.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "bc07165c-0ecc-4f0a-bd68-0045e5ad5ff1"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/01-编组/03-文字.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "fd9f686d-a76f-4d6c-9e18-b71ea9b29e6f"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/01-编组/03-文字.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "fd9f686d-a76f-4d6c-9e18-b71ea9b29e6f"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/01-编组/03-文字.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "fd9f686d-a76f-4d6c-9e18-b71ea9b29e6f"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/01-编组/03-文字.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "fd9f686d-a76f-4d6c-9e18-b71ea9b29e6f"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/02-编组.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "25abbae2-ce63-46cb-b01c-f5d9c21be846"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/02-编组.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "25abbae2-ce63-46cb-b01c-f5d9c21be846"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/02-编组.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "25abbae2-ce63-46cb-b01c-f5d9c21be846"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/02-编组.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "25abbae2-ce63-46cb-b01c-f5d9c21be846"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/02-编组/01-文档块.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "5b629c9b-d44b-4fe6-a156-ed4d3b03880d"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/02-编组/01-文档块.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "5b629c9b-d44b-4fe6-a156-ed4d3b03880d"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/02-编组/01-文档块.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "5b629c9b-d44b-4fe6-a156-ed4d3b03880d"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/02-编组/01-文档块.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "5b629c9b-d44b-4fe6-a156-ed4d3b03880d"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/02-编组/02-编组.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "403273c0-8b31-41ad-ae6b-0ebd75a8370a"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/02-编组/02-编组.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "403273c0-8b31-41ad-ae6b-0ebd75a8370a"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/02-编组/02-编组.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "403273c0-8b31-41ad-ae6b-0ebd75a8370a"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/02-编组/02-编组.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "403273c0-8b31-41ad-ae6b-0ebd75a8370a"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/02-编组/02-编组/01-编组.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "52b2687c-a12c-45c2-83c5-cc93016a7d7c"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/02-编组/02-编组/01-编组.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "52b2687c-a12c-45c2-83c5-cc93016a7d7c"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/02-编组/02-编组/01-编组.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "52b2687c-a12c-45c2-83c5-cc93016a7d7c"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/02-编组/02-编组/01-编组.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "52b2687c-a12c-45c2-83c5-cc93016a7d7c"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/02-编组/02-编组/01-编组/01-编组.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "9186c240-4d70-4be5-8d86-ffc149f7e595"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/02-编组/02-编组/01-编组/01-编组.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "9186c240-4d70-4be5-8d86-ffc149f7e595"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/02-编组/02-编组/01-编组/01-编组.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "9186c240-4d70-4be5-8d86-ffc149f7e595"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/02-编组/02-编组/01-编组/01-编组.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "9186c240-4d70-4be5-8d86-ffc149f7e595"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/02-编组/02-编组/01-编组/01-编组/01-文字.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "f441ee89-bc81-43bc-83ff-9c6d2a5b36e5"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/02-编组/02-编组/01-编组/01-编组/01-文字.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "f441ee89-bc81-43bc-83ff-9c6d2a5b36e5"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/02-编组/02-编组/01-编组/01-编组/01-文字.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "f441ee89-bc81-43bc-83ff-9c6d2a5b36e5"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/02-编组/02-编组/01-编组/01-编组/01-文字.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "f441ee89-bc81-43bc-83ff-9c6d2a5b36e5"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/02-编组/02-编组/01-编组/01-编组/02-文字.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "b1d19ccd-fbbd-421f-988c-e4e8686ffdd3"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/02-编组/02-编组/01-编组/01-编组/02-文字.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "b1d19ccd-fbbd-421f-988c-e4e8686ffdd3"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/02-编组/02-编组/01-编组/01-编组/02-文字.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "b1d19ccd-fbbd-421f-988c-e4e8686ffdd3"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/02-编组/02-编组/01-编组/01-编组/02-文字.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "b1d19ccd-fbbd-421f-988c-e4e8686ffdd3"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/02-编组/02-编组/01-编组/02-文字.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "249472f9-824a-4a16-86fb-ec32edb626f5"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/02-编组/02-编组/01-编组/02-文字.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "249472f9-824a-4a16-86fb-ec32edb626f5"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/02-编组/02-编组/01-编组/02-文字.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "249472f9-824a-4a16-86fb-ec32edb626f5"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/02-编组/02-编组/01-编组/02-文字.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "249472f9-824a-4a16-86fb-ec32edb626f5"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/02-编组/02-编组/01-编组/03-文字.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "dd6eb479-a0f3-4284-8f56-af846f15f328"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/02-编组/02-编组/01-编组/03-文字.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "dd6eb479-a0f3-4284-8f56-af846f15f328"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/02-编组/02-编组/01-编组/03-文字.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "dd6eb479-a0f3-4284-8f56-af846f15f328"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/02-编组/02-编组/01-编组/03-文字.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "dd6eb479-a0f3-4284-8f56-af846f15f328"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/02-编组/02-编组/01-编组/04-文字.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "30f0a785-8dcc-462b-917c-9c1728d0df61"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/02-编组/02-编组/01-编组/04-文字.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "30f0a785-8dcc-462b-917c-9c1728d0df61"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/02-编组/02-编组/01-编组/04-文字.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "30f0a785-8dcc-462b-917c-9c1728d0df61"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/02-编组/02-编组/01-编组/04-文字.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "30f0a785-8dcc-462b-917c-9c1728d0df61"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/02-编组/02-编组/02-编组.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "2ab417dd-793d-4064-aa8a-7869e663163c"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/02-编组/02-编组/02-编组.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "2ab417dd-793d-4064-aa8a-7869e663163c"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/02-编组/02-编组/02-编组.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "2ab417dd-793d-4064-aa8a-7869e663163c"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/02-编组/02-编组/02-编组.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "2ab417dd-793d-4064-aa8a-7869e663163c"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/02-编组/02-编组/02-编组/01-图片.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "0f19f30b-5bed-4933-af07-311081583f85"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/02-编组/02-编组/02-编组/01-图片.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "0f19f30b-5bed-4933-af07-311081583f85"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/02-编组/02-编组/02-编组/01-图片.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "0f19f30b-5bed-4933-af07-311081583f85"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/02-编组/02-编组/02-编组/01-图片.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "0f19f30b-5bed-4933-af07-311081583f85"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/02-编组/02-编组/02-编组/02-文字.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "6f393817-c7e6-45bc-ac44-a68bee7bfb78"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/02-编组/02-编组/02-编组/02-文字.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "6f393817-c7e6-45bc-ac44-a68bee7bfb78"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/02-编组/02-编组/02-编组/02-文字.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "6f393817-c7e6-45bc-ac44-a68bee7bfb78"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/02-编组/02-编组/02-编组/02-文字.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "6f393817-c7e6-45bc-ac44-a68bee7bfb78"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/03-编组.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "b10b8dc5-bf3f-4361-8bc3-b6d1f36d57c7"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/03-编组.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "b10b8dc5-bf3f-4361-8bc3-b6d1f36d57c7"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/03-编组.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "b10b8dc5-bf3f-4361-8bc3-b6d1f36d57c7"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/03-编组.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "b10b8dc5-bf3f-4361-8bc3-b6d1f36d57c7"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/03-编组/01-编组.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "95c68fa6-bbf2-4c82-8d0e-c6672a4893fe"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/03-编组/01-编组.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "95c68fa6-bbf2-4c82-8d0e-c6672a4893fe"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/03-编组/01-编组.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "95c68fa6-bbf2-4c82-8d0e-c6672a4893fe"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/03-编组/01-编组.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "95c68fa6-bbf2-4c82-8d0e-c6672a4893fe"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/03-编组/01-编组/01-图片.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "942e61c7-e691-4fac-b4c0-a09dd872b314"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/03-编组/01-编组/01-图片.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "942e61c7-e691-4fac-b4c0-a09dd872b314"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/03-编组/01-编组/01-图片.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "942e61c7-e691-4fac-b4c0-a09dd872b314"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/03-编组/01-编组/01-图片.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "942e61c7-e691-4fac-b4c0-a09dd872b314"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/03-编组/01-编组/02-文字.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "6e342a44-766a-460a-974e-1bb2e1594664"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/03-编组/01-编组/02-文字.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "6e342a44-766a-460a-974e-1bb2e1594664"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/03-编组/01-编组/02-文字.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "6e342a44-766a-460a-974e-1bb2e1594664"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/03-编组/01-编组/02-文字.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "6e342a44-766a-460a-974e-1bb2e1594664"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/03-编组/02-编组.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "7c9804d6-e6ec-4d79-a32a-2668861019b9"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/03-编组/02-编组.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "7c9804d6-e6ec-4d79-a32a-2668861019b9"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/03-编组/02-编组.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "7c9804d6-e6ec-4d79-a32a-2668861019b9"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/03-编组/02-编组.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "7c9804d6-e6ec-4d79-a32a-2668861019b9"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/03-编组/02-编组/01-文档块.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "4d4b2b29-0afe-4e4c-94fe-17cc6524a3c2"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/03-编组/02-编组/01-文档块.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "4d4b2b29-0afe-4e4c-94fe-17cc6524a3c2"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/03-编组/02-编组/01-文档块.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "4d4b2b29-0afe-4e4c-94fe-17cc6524a3c2"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/03-编组/02-编组/01-文档块.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "4d4b2b29-0afe-4e4c-94fe-17cc6524a3c2"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/03-编组/02-编组/02-文字.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "2760f24c-cd9d-487c-98a3-45dc86b81c2a"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/03-编组/02-编组/02-文字.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "2760f24c-cd9d-487c-98a3-45dc86b81c2a"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/03-编组/02-编组/02-文字.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "2760f24c-cd9d-487c-98a3-45dc86b81c2a"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/03-编组/02-编组/02-文字.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "2760f24c-cd9d-487c-98a3-45dc86b81c2a"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/03-编组/02-编组/03-文字.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "3b6e4624-25c3-4bfd-ac52-ae03714aa6e1"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/03-编组/02-编组/03-文字.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "3b6e4624-25c3-4bfd-ac52-ae03714aa6e1"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/03-编组/02-编组/03-文字.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "3b6e4624-25c3-4bfd-ac52-ae03714aa6e1"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/03-编组/02-编组/03-文字.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "3b6e4624-25c3-4bfd-ac52-ae03714aa6e1"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/03-编组/02-编组/04-文字.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "034b39b7-502c-4cf6-848c-8e30d9e5d226"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/03-编组/02-编组/04-文字.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "034b39b7-502c-4cf6-848c-8e30d9e5d226"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/03-编组/02-编组/04-文字.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "034b39b7-502c-4cf6-848c-8e30d9e5d226"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/03-编组/02-编组/04-文字.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "034b39b7-502c-4cf6-848c-8e30d9e5d226"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/03-编组/02-编组/05-文字.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "55526d7a-e9c1-443f-8c8f-0051914041a5"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/03-编组/02-编组/05-文字.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "55526d7a-e9c1-443f-8c8f-0051914041a5"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/03-编组/02-编组/05-文字.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "55526d7a-e9c1-443f-8c8f-0051914041a5"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/03-编组/02-编组/05-文字.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "55526d7a-e9c1-443f-8c8f-0051914041a5"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/03-编组/03-文字.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "3e9abbea-c1f4-4c39-8551-2bc0009f4f37"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/03-编组/03-文字.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "3e9abbea-c1f4-4c39-8551-2bc0009f4f37"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/03-编组/03-文字.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "3e9abbea-c1f4-4c39-8551-2bc0009f4f37"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/03-编组/03-文字.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "3e9abbea-c1f4-4c39-8551-2bc0009f4f37"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/04-编组.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "fdb81517-cd2b-404b-9dea-5f28e6cd703e"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/04-编组.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "fdb81517-cd2b-404b-9dea-5f28e6cd703e"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/04-编组.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "fdb81517-cd2b-404b-9dea-5f28e6cd703e"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/04-编组.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "fdb81517-cd2b-404b-9dea-5f28e6cd703e"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/04-编组/01-文档块.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "b3d345ba-f2c8-4c52-add1-2aa477d6a241"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/04-编组/01-文档块.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "b3d345ba-f2c8-4c52-add1-2aa477d6a241"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/04-编组/01-文档块.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "b3d345ba-f2c8-4c52-add1-2aa477d6a241"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/04-编组/01-文档块.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "b3d345ba-f2c8-4c52-add1-2aa477d6a241"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/04-编组/02-编组.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "82d0a668-856e-4a51-9963-e34b4ab94747"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/04-编组/02-编组.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "82d0a668-856e-4a51-9963-e34b4ab94747"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/04-编组/02-编组.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "82d0a668-856e-4a51-9963-e34b4ab94747"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/04-编组/02-编组.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "82d0a668-856e-4a51-9963-e34b4ab94747"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/04-编组/02-编组/01-编组.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "e48fa424-3cfd-416e-b307-b1a12409d118"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/04-编组/02-编组/01-编组.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "e48fa424-3cfd-416e-b307-b1a12409d118"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/04-编组/02-编组/01-编组.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "e48fa424-3cfd-416e-b307-b1a12409d118"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/04-编组/02-编组/01-编组.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "e48fa424-3cfd-416e-b307-b1a12409d118"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/04-编组/02-编组/01-编组/01-编组.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "3c01b400-53da-4cf1-82c8-d16441de087f"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/04-编组/02-编组/01-编组/01-编组.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "3c01b400-53da-4cf1-82c8-d16441de087f"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/04-编组/02-编组/01-编组/01-编组.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "3c01b400-53da-4cf1-82c8-d16441de087f"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/04-编组/02-编组/01-编组/01-编组.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "3c01b400-53da-4cf1-82c8-d16441de087f"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/04-编组/02-编组/01-编组/01-编组/01-文字.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "081f38b7-1435-496f-b2a5-f030e61aad0a"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/04-编组/02-编组/01-编组/01-编组/01-文字.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "081f38b7-1435-496f-b2a5-f030e61aad0a"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/04-编组/02-编组/01-编组/01-编组/01-文字.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "081f38b7-1435-496f-b2a5-f030e61aad0a"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/04-编组/02-编组/01-编组/01-编组/01-文字.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "081f38b7-1435-496f-b2a5-f030e61aad0a"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/04-编组/02-编组/01-编组/01-编组/02-文字.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "aef8e28e-00c5-46fa-a068-98a7c503934b"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/04-编组/02-编组/01-编组/01-编组/02-文字.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "aef8e28e-00c5-46fa-a068-98a7c503934b"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/04-编组/02-编组/01-编组/01-编组/02-文字.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "aef8e28e-00c5-46fa-a068-98a7c503934b"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/04-编组/02-编组/01-编组/01-编组/02-文字.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "aef8e28e-00c5-46fa-a068-98a7c503934b"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/04-编组/02-编组/01-编组/02-文字.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "051bf1c2-f241-4265-9d1e-3509a957cf97"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/04-编组/02-编组/01-编组/02-文字.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "051bf1c2-f241-4265-9d1e-3509a957cf97"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/04-编组/02-编组/01-编组/02-文字.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "051bf1c2-f241-4265-9d1e-3509a957cf97"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/04-编组/02-编组/01-编组/02-文字.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "051bf1c2-f241-4265-9d1e-3509a957cf97"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/04-编组/02-编组/01-编组/03-文字.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "1e41698d-161e-44f0-b8c1-d267faa74103"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/04-编组/02-编组/01-编组/03-文字.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "1e41698d-161e-44f0-b8c1-d267faa74103"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/04-编组/02-编组/01-编组/03-文字.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "1e41698d-161e-44f0-b8c1-d267faa74103"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/04-编组/02-编组/01-编组/03-文字.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "1e41698d-161e-44f0-b8c1-d267faa74103"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/04-编组/02-编组/02-编组.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "809c55b7-3ec7-4b1c-b681-76b5e522b3ec"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/04-编组/02-编组/02-编组.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "809c55b7-3ec7-4b1c-b681-76b5e522b3ec"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/04-编组/02-编组/02-编组.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "809c55b7-3ec7-4b1c-b681-76b5e522b3ec"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/04-编组/02-编组/02-编组.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "809c55b7-3ec7-4b1c-b681-76b5e522b3ec"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/04-编组/02-编组/02-编组/01-图片.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "901bbc93-5cf0-4214-bc91-14d6464f558e"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/04-编组/02-编组/02-编组/01-图片.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "901bbc93-5cf0-4214-bc91-14d6464f558e"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/04-编组/02-编组/02-编组/01-图片.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "901bbc93-5cf0-4214-bc91-14d6464f558e"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/04-编组/02-编组/02-编组/01-图片.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "901bbc93-5cf0-4214-bc91-14d6464f558e"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/04-编组/02-编组/02-编组/02-编组.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "11136615-11a3-46fd-9392-6cf2881fed57"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/04-编组/02-编组/02-编组/02-编组.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "11136615-11a3-46fd-9392-6cf2881fed57"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/04-编组/02-编组/02-编组/02-编组.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "11136615-11a3-46fd-9392-6cf2881fed57"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/04-编组/02-编组/02-编组/02-编组.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "11136615-11a3-46fd-9392-6cf2881fed57"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/04-编组/02-编组/02-编组/02-编组/01-文字.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "3fc04c23-1938-46a6-ad66-d09636fe947d"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/04-编组/02-编组/02-编组/02-编组/01-文字.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "3fc04c23-1938-46a6-ad66-d09636fe947d"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/04-编组/02-编组/02-编组/02-编组/01-文字.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "3fc04c23-1938-46a6-ad66-d09636fe947d"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/04-编组/02-编组/02-编组/02-编组/01-文字.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "3fc04c23-1938-46a6-ad66-d09636fe947d"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/04-编组/02-编组/02-编组/02-编组/02-文字.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "ae4e37f6-2c39-4889-9463-b0d9627e8d1d"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/04-编组/02-编组/02-编组/02-编组/02-文字.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "ae4e37f6-2c39-4889-9463-b0d9627e8d1d"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/04-编组/02-编组/02-编组/02-编组/02-文字.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "ae4e37f6-2c39-4889-9463-b0d9627e8d1d"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/04-编组/02-编组/02-编组/02-编组/02-文字.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "ae4e37f6-2c39-4889-9463-b0d9627e8d1d"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/04-编组/02-编组/03-编组.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "c501f8c3-1c73-4e26-b520-40037ce7bba1"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/04-编组/02-编组/03-编组.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "c501f8c3-1c73-4e26-b520-40037ce7bba1"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/04-编组/02-编组/03-编组.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "c501f8c3-1c73-4e26-b520-40037ce7bba1"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/04-编组/02-编组/03-编组.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "c501f8c3-1c73-4e26-b520-40037ce7bba1"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/04-编组/02-编组/03-编组/01-图片.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "369030d4-eaac-4a41-aafa-2738e24d8274"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/04-编组/02-编组/03-编组/01-图片.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "369030d4-eaac-4a41-aafa-2738e24d8274"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/04-编组/02-编组/03-编组/01-图片.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "369030d4-eaac-4a41-aafa-2738e24d8274"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/04-编组/02-编组/03-编组/01-图片.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "369030d4-eaac-4a41-aafa-2738e24d8274"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/04-编组/02-编组/03-编组/02-编组.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "785348ed-4b2a-49a2-8dc3-dbf7b7efa541"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/04-编组/02-编组/03-编组/02-编组.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "785348ed-4b2a-49a2-8dc3-dbf7b7efa541"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/04-编组/02-编组/03-编组/02-编组.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "785348ed-4b2a-49a2-8dc3-dbf7b7efa541"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/04-编组/02-编组/03-编组/02-编组.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "785348ed-4b2a-49a2-8dc3-dbf7b7efa541"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/04-编组/02-编组/03-编组/02-编组/01-文字.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "649f9a37-d9c2-4a32-9311-26993d3005ea"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/04-编组/02-编组/03-编组/02-编组/01-文字.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "649f9a37-d9c2-4a32-9311-26993d3005ea"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/04-编组/02-编组/03-编组/02-编组/01-文字.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "649f9a37-d9c2-4a32-9311-26993d3005ea"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/04-编组/02-编组/03-编组/02-编组/01-文字.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "649f9a37-d9c2-4a32-9311-26993d3005ea"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/04-编组/02-编组/03-编组/02-编组/02-文字.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "e66ab85c-55c4-4fac-94e1-3f2c9190972e"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/04-编组/02-编组/03-编组/02-编组/02-文字.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "e66ab85c-55c4-4fac-94e1-3f2c9190972e"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/04-编组/02-编组/03-编组/02-编组/02-文字.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "e66ab85c-55c4-4fac-94e1-3f2c9190972e"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/04-编组/02-编组/03-编组/02-编组/02-文字.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "e66ab85c-55c4-4fac-94e1-3f2c9190972e"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/04-编组/02-编组/04-编组.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "0d6528eb-4ab8-4676-a013-8f340d565734"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/04-编组/02-编组/04-编组.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "0d6528eb-4ab8-4676-a013-8f340d565734"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/04-编组/02-编组/04-编组.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "0d6528eb-4ab8-4676-a013-8f340d565734"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/04-编组/02-编组/04-编组.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "0d6528eb-4ab8-4676-a013-8f340d565734"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/04-编组/03-编组.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "5295ede2-98d6-4dc6-af0c-d916a27e588e"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/04-编组/03-编组.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "5295ede2-98d6-4dc6-af0c-d916a27e588e"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/04-编组/03-编组.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "5295ede2-98d6-4dc6-af0c-d916a27e588e"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/04-编组/03-编组.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "5295ede2-98d6-4dc6-af0c-d916a27e588e"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/04-编组/03-编组/01-文字.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "3da56194-fb8c-4896-a2c8-8d351bc82342"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/04-编组/03-编组/01-文字.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "3da56194-fb8c-4896-a2c8-8d351bc82342"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/04-编组/03-编组/01-文字.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "3da56194-fb8c-4896-a2c8-8d351bc82342"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/04-编组/03-编组/01-文字.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "3da56194-fb8c-4896-a2c8-8d351bc82342"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/04-编组/03-编组/02-编组.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "a07d1691-0b2c-4f88-a605-9ece068f302c"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/04-编组/03-编组/02-编组.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "a07d1691-0b2c-4f88-a605-9ece068f302c"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/04-编组/03-编组/02-编组.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "a07d1691-0b2c-4f88-a605-9ece068f302c"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/04-编组/03-编组/02-编组.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "a07d1691-0b2c-4f88-a605-9ece068f302c"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/04-编组/03-编组/02-编组/01-文字.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "4b5a2e50-5d1e-4cc7-b551-c6697702fcc6"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/04-编组/03-编组/02-编组/01-文字.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "4b5a2e50-5d1e-4cc7-b551-c6697702fcc6"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/04-编组/03-编组/02-编组/01-文字.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "4b5a2e50-5d1e-4cc7-b551-c6697702fcc6"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/04-编组/03-编组/02-编组/01-文字.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "4b5a2e50-5d1e-4cc7-b551-c6697702fcc6"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/04-编组/03-编组/02-编组/02-文字.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "62b9d55e-ec5f-4b1e-83ac-43b891857c93"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/04-编组/03-编组/02-编组/02-文字.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "62b9d55e-ec5f-4b1e-83ac-43b891857c93"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/04-编组/03-编组/02-编组/02-文字.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "62b9d55e-ec5f-4b1e-83ac-43b891857c93"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/04-编组/03-编组/02-编组/02-文字.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "62b9d55e-ec5f-4b1e-83ac-43b891857c93"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/04-编组/03-编组/02-编组/03-文字.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "385356fc-88e0-46e5-a1d1-b2280a033ab0"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/04-编组/03-编组/02-编组/03-文字.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "385356fc-88e0-46e5-a1d1-b2280a033ab0"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/04-编组/03-编组/02-编组/03-文字.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "385356fc-88e0-46e5-a1d1-b2280a033ab0"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/04-编组/03-编组/02-编组/03-文字.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "385356fc-88e0-46e5-a1d1-b2280a033ab0"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/05-编组.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "8dac3dd6-e9d4-419d-858d-c3f75fdca6c4"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/05-编组.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "8dac3dd6-e9d4-419d-858d-c3f75fdca6c4"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/05-编组.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "8dac3dd6-e9d4-419d-858d-c3f75fdca6c4"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/05-编组.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "8dac3dd6-e9d4-419d-858d-c3f75fdca6c4"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/05-编组/01-编组.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "93895d37-50ae-43f4-95c4-fc28c2db0c7f"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/05-编组/01-编组.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "93895d37-50ae-43f4-95c4-fc28c2db0c7f"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/05-编组/01-编组.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "93895d37-50ae-43f4-95c4-fc28c2db0c7f"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/05-编组/01-编组.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "93895d37-50ae-43f4-95c4-fc28c2db0c7f"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/05-编组/01-编组/01-图片.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "61773329-373c-4fd7-86bc-8cc3b6e05fdc"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/05-编组/01-编组/01-图片.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "61773329-373c-4fd7-86bc-8cc3b6e05fdc"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/05-编组/01-编组/01-图片.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "61773329-373c-4fd7-86bc-8cc3b6e05fdc"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/05-编组/01-编组/01-图片.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "61773329-373c-4fd7-86bc-8cc3b6e05fdc"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/05-编组/01-编组/02-文字.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "bd11e207-c41d-4171-83fa-ad1df41fb36f"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/05-编组/01-编组/02-文字.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "bd11e207-c41d-4171-83fa-ad1df41fb36f"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/05-编组/01-编组/02-文字.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "bd11e207-c41d-4171-83fa-ad1df41fb36f"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/05-编组/01-编组/02-文字.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "bd11e207-c41d-4171-83fa-ad1df41fb36f"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/05-编组/02-文字.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "4572d9b6-8ace-4569-a295-9e3dda094980"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/05-编组/02-文字.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "4572d9b6-8ace-4569-a295-9e3dda094980"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/05-编组/02-文字.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "4572d9b6-8ace-4569-a295-9e3dda094980"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/05-编组/02-文字.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "4572d9b6-8ace-4569-a295-9e3dda094980"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/06-编组.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "eecbdbf3-0cd5-40f3-9b9b-37d4a9a984fa"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/06-编组.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "eecbdbf3-0cd5-40f3-9b9b-37d4a9a984fa"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/06-编组.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "eecbdbf3-0cd5-40f3-9b9b-37d4a9a984fa"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/06-编组.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "eecbdbf3-0cd5-40f3-9b9b-37d4a9a984fa"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/06-编组/01-编组.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "82b886f2-806e-4b21-a2a1-63ca371f3f26"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/06-编组/01-编组.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "82b886f2-806e-4b21-a2a1-63ca371f3f26"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/06-编组/01-编组.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "82b886f2-806e-4b21-a2a1-63ca371f3f26"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/06-编组/01-编组.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "82b886f2-806e-4b21-a2a1-63ca371f3f26"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/06-编组/01-编组/01-文档块.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "a8add446-cdcf-4007-824f-f0449a24912a"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/06-编组/01-编组/01-文档块.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "a8add446-cdcf-4007-824f-f0449a24912a"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/06-编组/01-编组/01-文档块.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "a8add446-cdcf-4007-824f-f0449a24912a"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/06-编组/01-编组/01-文档块.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "a8add446-cdcf-4007-824f-f0449a24912a"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/06-编组/01-编组/02-文字.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "793910e9-658a-40f4-a5fb-ae8b3420f3e8"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/06-编组/01-编组/02-文字.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "793910e9-658a-40f4-a5fb-ae8b3420f3e8"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/06-编组/01-编组/02-文字.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "793910e9-658a-40f4-a5fb-ae8b3420f3e8"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/06-编组/01-编组/02-文字.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "793910e9-658a-40f4-a5fb-ae8b3420f3e8"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/06-编组/01-编组/03-编组.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "12f800a2-9b79-4a94-8fdc-d5f67e4ea80a"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/06-编组/01-编组/03-编组.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "12f800a2-9b79-4a94-8fdc-d5f67e4ea80a"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/06-编组/01-编组/03-编组.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "12f800a2-9b79-4a94-8fdc-d5f67e4ea80a"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/06-编组/01-编组/03-编组.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "12f800a2-9b79-4a94-8fdc-d5f67e4ea80a"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/06-编组/01-编组/03-编组/01-编组.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "58b48c1b-46fb-423f-9cd9-b5a67793284b"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/06-编组/01-编组/03-编组/01-编组.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "58b48c1b-46fb-423f-9cd9-b5a67793284b"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/06-编组/01-编组/03-编组/01-编组.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "58b48c1b-46fb-423f-9cd9-b5a67793284b"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/06-编组/01-编组/03-编组/01-编组.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "58b48c1b-46fb-423f-9cd9-b5a67793284b"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/06-编组/01-编组/03-编组/01-编组/01-编组.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "c2f8d4d0-f4c8-4ed3-9f83-3b8f9849ce5e"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/06-编组/01-编组/03-编组/01-编组/01-编组.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "c2f8d4d0-f4c8-4ed3-9f83-3b8f9849ce5e"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/06-编组/01-编组/03-编组/01-编组/01-编组.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "c2f8d4d0-f4c8-4ed3-9f83-3b8f9849ce5e"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/06-编组/01-编组/03-编组/01-编组/01-编组.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "c2f8d4d0-f4c8-4ed3-9f83-3b8f9849ce5e"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/06-编组/01-编组/03-编组/01-编组/01-编组/01-文字.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "892a3a7e-6757-4a14-bfc0-86e59447ec14"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/06-编组/01-编组/03-编组/01-编组/01-编组/01-文字.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "892a3a7e-6757-4a14-bfc0-86e59447ec14"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/06-编组/01-编组/03-编组/01-编组/01-编组/01-文字.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "892a3a7e-6757-4a14-bfc0-86e59447ec14"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/06-编组/01-编组/03-编组/01-编组/01-编组/01-文字.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "892a3a7e-6757-4a14-bfc0-86e59447ec14"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/06-编组/01-编组/03-编组/01-编组/01-编组/02-文字.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "cd3b73e0-0eee-42ba-8164-aada3329c6ab"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/06-编组/01-编组/03-编组/01-编组/01-编组/02-文字.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "cd3b73e0-0eee-42ba-8164-aada3329c6ab"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/06-编组/01-编组/03-编组/01-编组/01-编组/02-文字.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "cd3b73e0-0eee-42ba-8164-aada3329c6ab"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/06-编组/01-编组/03-编组/01-编组/01-编组/02-文字.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "cd3b73e0-0eee-42ba-8164-aada3329c6ab"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/06-编组/01-编组/03-编组/01-编组/02-文字.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "a8f474a8-d99d-4b35-a1ec-b694291fc1b1"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/06-编组/01-编组/03-编组/01-编组/02-文字.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "a8f474a8-d99d-4b35-a1ec-b694291fc1b1"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/06-编组/01-编组/03-编组/01-编组/02-文字.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "a8f474a8-d99d-4b35-a1ec-b694291fc1b1"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/06-编组/01-编组/03-编组/01-编组/02-文字.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "a8f474a8-d99d-4b35-a1ec-b694291fc1b1"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/06-编组/01-编组/03-编组/02-文字.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "582cb0f9-f146-4d65-97c4-4c52a1cd27c6"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/06-编组/01-编组/03-编组/02-文字.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "582cb0f9-f146-4d65-97c4-4c52a1cd27c6"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/06-编组/01-编组/03-编组/02-文字.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "582cb0f9-f146-4d65-97c4-4c52a1cd27c6"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/06-编组/01-编组/03-编组/02-文字.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "582cb0f9-f146-4d65-97c4-4c52a1cd27c6"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/06-编组/01-编组/04-编组.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "9fa9da51-02b1-4d46-87c2-247bb9993ff1"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/06-编组/01-编组/04-编组.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "9fa9da51-02b1-4d46-87c2-247bb9993ff1"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/06-编组/01-编组/04-编组.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "9fa9da51-02b1-4d46-87c2-247bb9993ff1"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/06-编组/01-编组/04-编组.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "9fa9da51-02b1-4d46-87c2-247bb9993ff1"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/06-编组/01-编组/04-编组/01-Web 内容.content.html",
+    "kind": "html",
+    "target": {
+      "kind": "instance",
+      "instanceId": "8bc2720a-0b46-439a-98c1-dc505b1cb456"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/06-编组/01-编组/04-编组/01-Web 内容.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "8bc2720a-0b46-439a-98c1-dc505b1cb456"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/06-编组/01-编组/04-编组/01-Web 内容.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "8bc2720a-0b46-439a-98c1-dc505b1cb456"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/06-编组/01-编组/04-编组/01-Web 内容.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "8bc2720a-0b46-439a-98c1-dc505b1cb456"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/06-编组/01-编组/04-编组/01-Web 内容.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "8bc2720a-0b46-439a-98c1-dc505b1cb456"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/06-编组/01-编组/05-编组.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "344255ec-18cf-4727-ba89-064edeaf9460"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/06-编组/01-编组/05-编组.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "344255ec-18cf-4727-ba89-064edeaf9460"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/06-编组/01-编组/05-编组.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "344255ec-18cf-4727-ba89-064edeaf9460"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/06-编组/01-编组/05-编组.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "344255ec-18cf-4727-ba89-064edeaf9460"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/06-编组/01-编组/05-编组/01-文字.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "d69c4eaa-7738-401a-94a2-092f468a214a"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/06-编组/01-编组/05-编组/01-文字.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "d69c4eaa-7738-401a-94a2-092f468a214a"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/06-编组/01-编组/05-编组/01-文字.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "d69c4eaa-7738-401a-94a2-092f468a214a"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/06-编组/01-编组/05-编组/01-文字.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "d69c4eaa-7738-401a-94a2-092f468a214a"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/06-编组/01-编组/05-编组/02-文字.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "3c84401c-931a-4a79-a6a2-55728160b07b"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/06-编组/01-编组/05-编组/02-文字.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "3c84401c-931a-4a79-a6a2-55728160b07b"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/06-编组/01-编组/05-编组/02-文字.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "3c84401c-931a-4a79-a6a2-55728160b07b"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/06-编组/01-编组/05-编组/02-文字.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "3c84401c-931a-4a79-a6a2-55728160b07b"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/07-编组.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "f255afab-5e7d-432c-bf3d-7d98560f0f83"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/07-编组.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "f255afab-5e7d-432c-bf3d-7d98560f0f83"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/07-编组.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "f255afab-5e7d-432c-bf3d-7d98560f0f83"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/07-编组.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "f255afab-5e7d-432c-bf3d-7d98560f0f83"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/07-编组/01-文档块.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "83bca290-3006-4058-af49-a97b1e1fd00d"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/07-编组/01-文档块.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "83bca290-3006-4058-af49-a97b1e1fd00d"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/07-编组/01-文档块.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "83bca290-3006-4058-af49-a97b1e1fd00d"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/07-编组/01-文档块.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "83bca290-3006-4058-af49-a97b1e1fd00d"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/07-编组/02-编组.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "494685d4-20c7-4697-90b4-d1d4f89d0fc4"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/07-编组/02-编组.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "494685d4-20c7-4697-90b4-d1d4f89d0fc4"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/07-编组/02-编组.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "494685d4-20c7-4697-90b4-d1d4f89d0fc4"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/07-编组/02-编组.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "494685d4-20c7-4697-90b4-d1d4f89d0fc4"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/07-编组/02-编组/01-编组.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "908ea557-44b1-4e4b-9c0a-824f11e046a8"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/07-编组/02-编组/01-编组.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "908ea557-44b1-4e4b-9c0a-824f11e046a8"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/07-编组/02-编组/01-编组.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "908ea557-44b1-4e4b-9c0a-824f11e046a8"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/07-编组/02-编组/01-编组.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "908ea557-44b1-4e4b-9c0a-824f11e046a8"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/07-编组/02-编组/01-编组/01-编组.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "e2ebba8e-e86b-42e8-9643-ccd3d8c07a84"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/07-编组/02-编组/01-编组/01-编组.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "e2ebba8e-e86b-42e8-9643-ccd3d8c07a84"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/07-编组/02-编组/01-编组/01-编组.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "e2ebba8e-e86b-42e8-9643-ccd3d8c07a84"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/07-编组/02-编组/01-编组/01-编组.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "e2ebba8e-e86b-42e8-9643-ccd3d8c07a84"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/07-编组/02-编组/01-编组/01-编组/01-文字.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "dbea96e8-bedc-4406-bc5e-335a1a706ac4"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/07-编组/02-编组/01-编组/01-编组/01-文字.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "dbea96e8-bedc-4406-bc5e-335a1a706ac4"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/07-编组/02-编组/01-编组/01-编组/01-文字.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "dbea96e8-bedc-4406-bc5e-335a1a706ac4"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/07-编组/02-编组/01-编组/01-编组/01-文字.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "dbea96e8-bedc-4406-bc5e-335a1a706ac4"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/07-编组/02-编组/01-编组/01-编组/02-文字.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "b60d2e6e-bd27-4efb-b087-a76e58bd9dd2"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/07-编组/02-编组/01-编组/01-编组/02-文字.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "b60d2e6e-bd27-4efb-b087-a76e58bd9dd2"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/07-编组/02-编组/01-编组/01-编组/02-文字.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "b60d2e6e-bd27-4efb-b087-a76e58bd9dd2"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/07-编组/02-编组/01-编组/01-编组/02-文字.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "b60d2e6e-bd27-4efb-b087-a76e58bd9dd2"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/07-编组/02-编组/01-编组/02-文字.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "31caf0c4-7de2-4957-a332-e624f150417b"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/07-编组/02-编组/01-编组/02-文字.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "31caf0c4-7de2-4957-a332-e624f150417b"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/07-编组/02-编组/01-编组/02-文字.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "31caf0c4-7de2-4957-a332-e624f150417b"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/07-编组/02-编组/01-编组/02-文字.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "31caf0c4-7de2-4957-a332-e624f150417b"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/07-编组/02-编组/02-编组.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "850d29cd-7947-43d6-b569-3538c29355cb"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/07-编组/02-编组/02-编组.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "850d29cd-7947-43d6-b569-3538c29355cb"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/07-编组/02-编组/02-编组.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "850d29cd-7947-43d6-b569-3538c29355cb"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/07-编组/02-编组/02-编组.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "850d29cd-7947-43d6-b569-3538c29355cb"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/07-编组/02-编组/02-编组/01-文字.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "653606d5-eff0-43bf-b069-a34c88af4698"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/07-编组/02-编组/02-编组/01-文字.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "653606d5-eff0-43bf-b069-a34c88af4698"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/07-编组/02-编组/02-编组/01-文字.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "653606d5-eff0-43bf-b069-a34c88af4698"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/07-编组/02-编组/02-编组/01-文字.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "653606d5-eff0-43bf-b069-a34c88af4698"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/07-编组/02-编组/02-编组/02-文字.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "b8e04c9f-115a-4793-bfee-a958c6f0ade4"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/07-编组/02-编组/02-编组/02-文字.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "b8e04c9f-115a-4793-bfee-a958c6f0ade4"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/07-编组/02-编组/02-编组/02-文字.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "b8e04c9f-115a-4793-bfee-a958c6f0ade4"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/07-编组/02-编组/02-编组/02-文字.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "b8e04c9f-115a-4793-bfee-a958c6f0ade4"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/07-编组/03-编组.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "abeec8ab-5b77-43b2-b53a-2254ad371dbb"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/07-编组/03-编组.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "abeec8ab-5b77-43b2-b53a-2254ad371dbb"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/07-编组/03-编组.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "abeec8ab-5b77-43b2-b53a-2254ad371dbb"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/07-编组/03-编组.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "abeec8ab-5b77-43b2-b53a-2254ad371dbb"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/07-编组/03-编组/01-编组.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "10e90bb1-a699-4cab-98e9-31c82398052f"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/07-编组/03-编组/01-编组.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "10e90bb1-a699-4cab-98e9-31c82398052f"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/07-编组/03-编组/01-编组.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "10e90bb1-a699-4cab-98e9-31c82398052f"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/07-编组/03-编组/01-编组.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "10e90bb1-a699-4cab-98e9-31c82398052f"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/07-编组/03-编组/01-编组/01-图片.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "37febd3d-c742-435e-b1e3-c81a76de76b5"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/07-编组/03-编组/01-编组/01-图片.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "37febd3d-c742-435e-b1e3-c81a76de76b5"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/07-编组/03-编组/01-编组/01-图片.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "37febd3d-c742-435e-b1e3-c81a76de76b5"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/07-编组/03-编组/01-编组/01-图片.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "37febd3d-c742-435e-b1e3-c81a76de76b5"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/07-编组/03-编组/01-编组/02-文字.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "90cde52c-9f78-4a96-9632-ee59e3a1f395"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/07-编组/03-编组/01-编组/02-文字.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "90cde52c-9f78-4a96-9632-ee59e3a1f395"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/07-编组/03-编组/01-编组/02-文字.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "90cde52c-9f78-4a96-9632-ee59e3a1f395"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/07-编组/03-编组/01-编组/02-文字.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "90cde52c-9f78-4a96-9632-ee59e3a1f395"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/07-编组/03-编组/02-编组.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "3907d72c-5a8c-483a-aeb4-d8b04b392cba"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/07-编组/03-编组/02-编组.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "3907d72c-5a8c-483a-aeb4-d8b04b392cba"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/07-编组/03-编组/02-编组.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "3907d72c-5a8c-483a-aeb4-d8b04b392cba"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/07-编组/03-编组/02-编组.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "3907d72c-5a8c-483a-aeb4-d8b04b392cba"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/07-编组/03-编组/02-编组/01-图片.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "838ff4d7-d3ba-4c33-b4e5-d368d5d480c9"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/07-编组/03-编组/02-编组/01-图片.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "838ff4d7-d3ba-4c33-b4e5-d368d5d480c9"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/07-编组/03-编组/02-编组/01-图片.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "838ff4d7-d3ba-4c33-b4e5-d368d5d480c9"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/07-编组/03-编组/02-编组/01-图片.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "838ff4d7-d3ba-4c33-b4e5-d368d5d480c9"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/07-编组/03-编组/02-编组/02-文字.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "d9b5ada8-9e16-4b8c-aa55-9b8866e42fe4"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/07-编组/03-编组/02-编组/02-文字.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "d9b5ada8-9e16-4b8c-aa55-9b8866e42fe4"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/07-编组/03-编组/02-编组/02-文字.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "d9b5ada8-9e16-4b8c-aa55-9b8866e42fe4"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/07-编组/03-编组/02-编组/02-文字.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "d9b5ada8-9e16-4b8c-aa55-9b8866e42fe4"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/07-编组/04-编组.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "c9864817-cc42-41e2-9015-67fa6991257f"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/07-编组/04-编组.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "c9864817-cc42-41e2-9015-67fa6991257f"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/07-编组/04-编组.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "c9864817-cc42-41e2-9015-67fa6991257f"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/07-编组/04-编组.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "c9864817-cc42-41e2-9015-67fa6991257f"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/07-编组/04-编组/01-文档块.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "61087d4b-a58d-4442-b15c-63762f47d11e"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/07-编组/04-编组/01-文档块.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "61087d4b-a58d-4442-b15c-63762f47d11e"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/07-编组/04-编组/01-文档块.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "61087d4b-a58d-4442-b15c-63762f47d11e"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/07-编组/04-编组/01-文档块.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "61087d4b-a58d-4442-b15c-63762f47d11e"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/07-编组/04-编组/01-文档块/01-文字.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "12a22e62-63ae-44fa-b25f-5091208b9038"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/07-编组/04-编组/01-文档块/01-文字.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "12a22e62-63ae-44fa-b25f-5091208b9038"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/07-编组/04-编组/01-文档块/01-文字.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "12a22e62-63ae-44fa-b25f-5091208b9038"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/07-编组/04-编组/01-文档块/01-文字.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "12a22e62-63ae-44fa-b25f-5091208b9038"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/07-编组/04-编组/02-文档块.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "62a33235-5c25-4ae6-8c1c-4e8c8bf89087"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/07-编组/04-编组/02-文档块.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "62a33235-5c25-4ae6-8c1c-4e8c8bf89087"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/07-编组/04-编组/02-文档块.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "62a33235-5c25-4ae6-8c1c-4e8c8bf89087"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/07-编组/04-编组/02-文档块.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "62a33235-5c25-4ae6-8c1c-4e8c8bf89087"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/07-编组/04-编组/02-文档块/01-文字.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "4ddff538-f688-4c4b-bbb8-36e61741c3c0"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/07-编组/04-编组/02-文档块/01-文字.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "4ddff538-f688-4c4b-bbb8-36e61741c3c0"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/07-编组/04-编组/02-文档块/01-文字.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "4ddff538-f688-4c4b-bbb8-36e61741c3c0"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/07-编组/04-编组/02-文档块/01-文字.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "4ddff538-f688-4c4b-bbb8-36e61741c3c0"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/07-编组/04-编组/03-文档块.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "5e8ef2fb-8c7e-40fa-bb34-6025f180f663"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/07-编组/04-编组/03-文档块.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "5e8ef2fb-8c7e-40fa-bb34-6025f180f663"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/07-编组/04-编组/03-文档块.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "5e8ef2fb-8c7e-40fa-bb34-6025f180f663"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/07-编组/04-编组/03-文档块.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "5e8ef2fb-8c7e-40fa-bb34-6025f180f663"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/07-编组/04-编组/03-文档块/01-文字.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "4f6eef14-9c62-4ba1-84eb-157b1ca0bc9f"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/07-编组/04-编组/03-文档块/01-文字.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "4f6eef14-9c62-4ba1-84eb-157b1ca0bc9f"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/07-编组/04-编组/03-文档块/01-文字.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "4f6eef14-9c62-4ba1-84eb-157b1ca0bc9f"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/07-编组/04-编组/03-文档块/01-文字.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "4f6eef14-9c62-4ba1-84eb-157b1ca0bc9f"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/07-编组/04-编组/04-文字.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "f51a1d1d-2cf4-44b0-ac05-9a9ae8ac483e"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/07-编组/04-编组/04-文字.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "f51a1d1d-2cf4-44b0-ac05-9a9ae8ac483e"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/07-编组/04-编组/04-文字.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "f51a1d1d-2cf4-44b0-ac05-9a9ae8ac483e"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/07-编组/04-编组/04-文字.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "f51a1d1d-2cf4-44b0-ac05-9a9ae8ac483e"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/07-编组/05-文字.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "f38c8a5b-bb54-4504-a46f-3a568bf8de59"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/07-编组/05-文字.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "f38c8a5b-bb54-4504-a46f-3a568bf8de59"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/07-编组/05-文字.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "f38c8a5b-bb54-4504-a46f-3a568bf8de59"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/07-编组/05-文字.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "f38c8a5b-bb54-4504-a46f-3a568bf8de59"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/08-编组.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "20b6839d-2a3a-4cfb-9bdf-0b6031d30803"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/08-编组.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "20b6839d-2a3a-4cfb-9bdf-0b6031d30803"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/08-编组.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "20b6839d-2a3a-4cfb-9bdf-0b6031d30803"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/08-编组.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "20b6839d-2a3a-4cfb-9bdf-0b6031d30803"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/08-编组/01-文档块.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "5093abd6-eba9-43cc-a54a-ad2eb13648e6"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/08-编组/01-文档块.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "5093abd6-eba9-43cc-a54a-ad2eb13648e6"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/08-编组/01-文档块.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "5093abd6-eba9-43cc-a54a-ad2eb13648e6"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/08-编组/01-文档块.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "5093abd6-eba9-43cc-a54a-ad2eb13648e6"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/08-编组/02-Web 内容.content.html",
+    "kind": "html",
+    "target": {
+      "kind": "instance",
+      "instanceId": "aee929af-3338-409a-a386-bcbef0d0e285"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/08-编组/02-Web 内容.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "aee929af-3338-409a-a386-bcbef0d0e285"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/08-编组/02-Web 内容.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "aee929af-3338-409a-a386-bcbef0d0e285"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/08-编组/02-Web 内容.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "aee929af-3338-409a-a386-bcbef0d0e285"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/08-编组/02-Web 内容.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "aee929af-3338-409a-a386-bcbef0d0e285"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/09-编组.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "5cc857be-4d91-4b0e-8203-208b8961b2a7"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/09-编组.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "5cc857be-4d91-4b0e-8203-208b8961b2a7"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/09-编组.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "5cc857be-4d91-4b0e-8203-208b8961b2a7"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/09-编组.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "5cc857be-4d91-4b0e-8203-208b8961b2a7"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/09-编组/01-编组.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "9ae7efb1-241b-4d14-986d-5159e0d76d83"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/09-编组/01-编组.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "9ae7efb1-241b-4d14-986d-5159e0d76d83"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/09-编组/01-编组.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "9ae7efb1-241b-4d14-986d-5159e0d76d83"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/09-编组/01-编组.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "9ae7efb1-241b-4d14-986d-5159e0d76d83"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/09-编组/01-编组/01-文档块.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "b1a166da-1cc4-4f39-a8ba-dc5c15bd39ba"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/09-编组/01-编组/01-文档块.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "b1a166da-1cc4-4f39-a8ba-dc5c15bd39ba"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/09-编组/01-编组/01-文档块.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "b1a166da-1cc4-4f39-a8ba-dc5c15bd39ba"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/09-编组/01-编组/01-文档块.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "b1a166da-1cc4-4f39-a8ba-dc5c15bd39ba"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/09-编组/01-编组/02-文字.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "16c380cd-e761-4119-ab1a-a2f1336ff3ce"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/09-编组/01-编组/02-文字.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "16c380cd-e761-4119-ab1a-a2f1336ff3ce"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/09-编组/01-编组/02-文字.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "16c380cd-e761-4119-ab1a-a2f1336ff3ce"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/09-编组/01-编组/02-文字.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "16c380cd-e761-4119-ab1a-a2f1336ff3ce"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/09-编组/01-编组/03-编组.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "1516d1f5-1b04-4cf7-9d48-ea8d1b499fd7"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/09-编组/01-编组/03-编组.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "1516d1f5-1b04-4cf7-9d48-ea8d1b499fd7"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/09-编组/01-编组/03-编组.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "1516d1f5-1b04-4cf7-9d48-ea8d1b499fd7"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/09-编组/01-编组/03-编组.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "1516d1f5-1b04-4cf7-9d48-ea8d1b499fd7"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/09-编组/01-编组/03-编组/01-编组.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "6ef0bebc-1806-4eea-a25f-bc5437b3f78c"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/09-编组/01-编组/03-编组/01-编组.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "6ef0bebc-1806-4eea-a25f-bc5437b3f78c"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/09-编组/01-编组/03-编组/01-编组.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "6ef0bebc-1806-4eea-a25f-bc5437b3f78c"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/09-编组/01-编组/03-编组/01-编组.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "6ef0bebc-1806-4eea-a25f-bc5437b3f78c"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/09-编组/01-编组/03-编组/01-编组/01-编组.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "f22e7e78-07c3-4757-9df2-b92b60f14e7d"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/09-编组/01-编组/03-编组/01-编组/01-编组.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "f22e7e78-07c3-4757-9df2-b92b60f14e7d"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/09-编组/01-编组/03-编组/01-编组/01-编组.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "f22e7e78-07c3-4757-9df2-b92b60f14e7d"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/09-编组/01-编组/03-编组/01-编组/01-编组.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "f22e7e78-07c3-4757-9df2-b92b60f14e7d"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/09-编组/01-编组/03-编组/01-编组/01-编组/01-文字.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "cd1c1368-b009-4a8d-83db-3c2e349535df"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/09-编组/01-编组/03-编组/01-编组/01-编组/01-文字.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "cd1c1368-b009-4a8d-83db-3c2e349535df"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/09-编组/01-编组/03-编组/01-编组/01-编组/01-文字.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "cd1c1368-b009-4a8d-83db-3c2e349535df"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/09-编组/01-编组/03-编组/01-编组/01-编组/01-文字.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "cd1c1368-b009-4a8d-83db-3c2e349535df"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/09-编组/01-编组/03-编组/01-编组/01-编组/02-文字.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "a317cd36-c035-4032-b4da-078bf12f65e2"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/09-编组/01-编组/03-编组/01-编组/01-编组/02-文字.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "a317cd36-c035-4032-b4da-078bf12f65e2"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/09-编组/01-编组/03-编组/01-编组/01-编组/02-文字.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "a317cd36-c035-4032-b4da-078bf12f65e2"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/09-编组/01-编组/03-编组/01-编组/01-编组/02-文字.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "a317cd36-c035-4032-b4da-078bf12f65e2"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/09-编组/01-编组/03-编组/01-编组/02-文字.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "89bc3d62-61a1-476b-9a21-1ddbc4701f41"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/09-编组/01-编组/03-编组/01-编组/02-文字.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "89bc3d62-61a1-476b-9a21-1ddbc4701f41"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/09-编组/01-编组/03-编组/01-编组/02-文字.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "89bc3d62-61a1-476b-9a21-1ddbc4701f41"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/09-编组/01-编组/03-编组/01-编组/02-文字.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "89bc3d62-61a1-476b-9a21-1ddbc4701f41"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/09-编组/01-编组/03-编组/02-文字.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "a5b31d67-b4ef-40d8-9867-4c014d0a9c57"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/09-编组/01-编组/03-编组/02-文字.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "a5b31d67-b4ef-40d8-9867-4c014d0a9c57"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/09-编组/01-编组/03-编组/02-文字.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "a5b31d67-b4ef-40d8-9867-4c014d0a9c57"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/09-编组/01-编组/03-编组/02-文字.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "a5b31d67-b4ef-40d8-9867-4c014d0a9c57"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/09-编组/01-编组/04-编组.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "b354a3ff-d8a9-4d78-9c1b-5b460433c191"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/09-编组/01-编组/04-编组.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "b354a3ff-d8a9-4d78-9c1b-5b460433c191"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/09-编组/01-编组/04-编组.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "b354a3ff-d8a9-4d78-9c1b-5b460433c191"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/09-编组/01-编组/04-编组.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "b354a3ff-d8a9-4d78-9c1b-5b460433c191"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/09-编组/01-编组/04-编组/01-HTML 程序.content.html",
+    "kind": "html",
+    "target": {
+      "kind": "instance",
+      "instanceId": "8f45751d-9cc3-49dd-ba88-c645759f022c"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/09-编组/01-编组/04-编组/01-HTML 程序.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "8f45751d-9cc3-49dd-ba88-c645759f022c"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/09-编组/01-编组/04-编组/01-HTML 程序.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "8f45751d-9cc3-49dd-ba88-c645759f022c"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/09-编组/01-编组/04-编组/01-HTML 程序.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "8f45751d-9cc3-49dd-ba88-c645759f022c"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/09-编组/01-编组/04-编组/01-HTML 程序.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "8f45751d-9cc3-49dd-ba88-c645759f022c"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/09-编组/01-编组/05-编组.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "048e41db-1227-436b-9ef0-e7d400a54ca8"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/09-编组/01-编组/05-编组.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "048e41db-1227-436b-9ef0-e7d400a54ca8"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/09-编组/01-编组/05-编组.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "048e41db-1227-436b-9ef0-e7d400a54ca8"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/09-编组/01-编组/05-编组.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "048e41db-1227-436b-9ef0-e7d400a54ca8"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/09-编组/01-编组/05-编组/01-文字.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "d3fc86a9-03fe-4a46-9434-de7dc1fc9be5"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/09-编组/01-编组/05-编组/01-文字.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "d3fc86a9-03fe-4a46-9434-de7dc1fc9be5"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/09-编组/01-编组/05-编组/01-文字.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "d3fc86a9-03fe-4a46-9434-de7dc1fc9be5"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/09-编组/01-编组/05-编组/01-文字.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "d3fc86a9-03fe-4a46-9434-de7dc1fc9be5"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/09-编组/01-编组/05-编组/02-编组.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "843f9f9c-7948-44bc-9f01-45dcc055c84e"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/09-编组/01-编组/05-编组/02-编组.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "843f9f9c-7948-44bc-9f01-45dcc055c84e"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/09-编组/01-编组/05-编组/02-编组.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "843f9f9c-7948-44bc-9f01-45dcc055c84e"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/09-编组/01-编组/05-编组/02-编组.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "843f9f9c-7948-44bc-9f01-45dcc055c84e"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/09-编组/01-编组/05-编组/02-编组/01-文字.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "c95651b8-7d81-4b52-9271-dcf8e3b00b0b"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/09-编组/01-编组/05-编组/02-编组/01-文字.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "c95651b8-7d81-4b52-9271-dcf8e3b00b0b"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/09-编组/01-编组/05-编组/02-编组/01-文字.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "c95651b8-7d81-4b52-9271-dcf8e3b00b0b"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/09-编组/01-编组/05-编组/02-编组/01-文字.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "c95651b8-7d81-4b52-9271-dcf8e3b00b0b"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/09-编组/01-编组/05-编组/02-编组/02-文字.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "1dfdb080-f36e-4764-a825-cd1709fce327"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/09-编组/01-编组/05-编组/02-编组/02-文字.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "1dfdb080-f36e-4764-a825-cd1709fce327"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/09-编组/01-编组/05-编组/02-编组/02-文字.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "1dfdb080-f36e-4764-a825-cd1709fce327"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/09-编组/01-编组/05-编组/02-编组/02-文字.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "1dfdb080-f36e-4764-a825-cd1709fce327"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/10-编组.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "cb9c49ee-cd80-4a5d-b8b0-3574ec9a6833"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/10-编组.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "cb9c49ee-cd80-4a5d-b8b0-3574ec9a6833"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/10-编组.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "cb9c49ee-cd80-4a5d-b8b0-3574ec9a6833"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/10-编组.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "cb9c49ee-cd80-4a5d-b8b0-3574ec9a6833"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/10-编组/01-文档块.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "8ad1964b-3a7a-4a92-a59c-259924f7b485"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/10-编组/01-文档块.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "8ad1964b-3a7a-4a92-a59c-259924f7b485"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/10-编组/01-文档块.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "8ad1964b-3a7a-4a92-a59c-259924f7b485"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/10-编组/01-文档块.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "8ad1964b-3a7a-4a92-a59c-259924f7b485"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/10-编组/02-编组.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "f43a9372-e119-4ac2-9950-5805eeb33f79"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/10-编组/02-编组.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "f43a9372-e119-4ac2-9950-5805eeb33f79"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/10-编组/02-编组.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "f43a9372-e119-4ac2-9950-5805eeb33f79"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/10-编组/02-编组.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "f43a9372-e119-4ac2-9950-5805eeb33f79"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/10-编组/02-编组/01-文字.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "a61ad2e8-169b-4fbf-9037-416aca8c19df"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/10-编组/02-编组/01-文字.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "a61ad2e8-169b-4fbf-9037-416aca8c19df"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/10-编组/02-编组/01-文字.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "a61ad2e8-169b-4fbf-9037-416aca8c19df"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/10-编组/02-编组/01-文字.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "a61ad2e8-169b-4fbf-9037-416aca8c19df"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/10-编组/02-编组/02-文字.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "b0f3766e-01e9-4a6e-93ea-297fd302ba7b"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/10-编组/02-编组/02-文字.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "b0f3766e-01e9-4a6e-93ea-297fd302ba7b"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/10-编组/02-编组/02-文字.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "b0f3766e-01e9-4a6e-93ea-297fd302ba7b"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/10-编组/02-编组/02-文字.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "b0f3766e-01e9-4a6e-93ea-297fd302ba7b"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/10-编组/03-编组.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "71465557-000c-471a-9d0e-b3a35526bc54"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/10-编组/03-编组.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "71465557-000c-471a-9d0e-b3a35526bc54"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/10-编组/03-编组.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "71465557-000c-471a-9d0e-b3a35526bc54"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/10-编组/03-编组.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "71465557-000c-471a-9d0e-b3a35526bc54"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/10-编组/03-编组/01-编组.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "2ebd3b7e-7565-4f1d-865c-bbb47d00e5da"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/10-编组/03-编组/01-编组.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "2ebd3b7e-7565-4f1d-865c-bbb47d00e5da"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/10-编组/03-编组/01-编组.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "2ebd3b7e-7565-4f1d-865c-bbb47d00e5da"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/10-编组/03-编组/01-编组.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "2ebd3b7e-7565-4f1d-865c-bbb47d00e5da"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/10-编组/03-编组/01-编组/01-文字.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "3979cd3a-0f7c-4646-817b-1910304c9774"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/10-编组/03-编组/01-编组/01-文字.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "3979cd3a-0f7c-4646-817b-1910304c9774"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/10-编组/03-编组/01-编组/01-文字.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "3979cd3a-0f7c-4646-817b-1910304c9774"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/10-编组/03-编组/01-编组/01-文字.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "3979cd3a-0f7c-4646-817b-1910304c9774"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/10-编组/03-编组/01-编组/02-文字.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "8ee9c20c-1d7f-4d17-a5de-ddabfd2ede80"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/10-编组/03-编组/01-编组/02-文字.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "8ee9c20c-1d7f-4d17-a5de-ddabfd2ede80"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/10-编组/03-编组/01-编组/02-文字.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "8ee9c20c-1d7f-4d17-a5de-ddabfd2ede80"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/10-编组/03-编组/01-编组/02-文字.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "8ee9c20c-1d7f-4d17-a5de-ddabfd2ede80"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/10-编组/03-编组/01-编组/03-文字.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "8f6ca411-39a9-44af-b91b-5479f1a29edd"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/10-编组/03-编组/01-编组/03-文字.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "8f6ca411-39a9-44af-b91b-5479f1a29edd"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/10-编组/03-编组/01-编组/03-文字.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "8f6ca411-39a9-44af-b91b-5479f1a29edd"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/10-编组/03-编组/01-编组/03-文字.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "8f6ca411-39a9-44af-b91b-5479f1a29edd"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/10-编组/03-编组/02-编组.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "55943865-733d-4f39-8b26-819039b501aa"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/10-编组/03-编组/02-编组.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "55943865-733d-4f39-8b26-819039b501aa"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/10-编组/03-编组/02-编组.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "55943865-733d-4f39-8b26-819039b501aa"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/10-编组/03-编组/02-编组.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "55943865-733d-4f39-8b26-819039b501aa"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/10-编组/03-编组/02-编组/01-图片.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "877942f1-2eed-4823-9fab-07f558f824d0"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/10-编组/03-编组/02-编组/01-图片.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "877942f1-2eed-4823-9fab-07f558f824d0"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/10-编组/03-编组/02-编组/01-图片.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "877942f1-2eed-4823-9fab-07f558f824d0"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/10-编组/03-编组/02-编组/01-图片.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "877942f1-2eed-4823-9fab-07f558f824d0"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/10-编组/03-编组/02-编组/02-文字.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "bf46e6b9-8684-47d0-b26d-5d2df78ea0a4"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/10-编组/03-编组/02-编组/02-文字.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "bf46e6b9-8684-47d0-b26d-5d2df78ea0a4"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/10-编组/03-编组/02-编组/02-文字.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "bf46e6b9-8684-47d0-b26d-5d2df78ea0a4"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/10-编组/03-编组/02-编组/02-文字.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "bf46e6b9-8684-47d0-b26d-5d2df78ea0a4"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/10-编组/04-编组.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "9bf32f9d-d4ac-40f4-94fa-293d8f591f5a"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/10-编组/04-编组.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "9bf32f9d-d4ac-40f4-94fa-293d8f591f5a"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/10-编组/04-编组.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "9bf32f9d-d4ac-40f4-94fa-293d8f591f5a"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/10-编组/04-编组.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "9bf32f9d-d4ac-40f4-94fa-293d8f591f5a"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/10-编组/04-编组/01-文字.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "f1b95f36-6da5-4ac6-b04c-ee49b833abbb"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/10-编组/04-编组/01-文字.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "f1b95f36-6da5-4ac6-b04c-ee49b833abbb"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/10-编组/04-编组/01-文字.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "f1b95f36-6da5-4ac6-b04c-ee49b833abbb"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/10-编组/04-编组/01-文字.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "f1b95f36-6da5-4ac6-b04c-ee49b833abbb"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/10-编组/04-编组/02-编组.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "1dace930-84ae-44cd-9ead-d22edf889c39"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/10-编组/04-编组/02-编组.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "1dace930-84ae-44cd-9ead-d22edf889c39"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/10-编组/04-编组/02-编组.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "1dace930-84ae-44cd-9ead-d22edf889c39"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/10-编组/04-编组/02-编组.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "1dace930-84ae-44cd-9ead-d22edf889c39"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/10-编组/04-编组/02-编组/01-编组.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "b6685775-ac67-42cb-b69b-e85934d87b76"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/10-编组/04-编组/02-编组/01-编组.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "b6685775-ac67-42cb-b69b-e85934d87b76"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/10-编组/04-编组/02-编组/01-编组.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "b6685775-ac67-42cb-b69b-e85934d87b76"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/10-编组/04-编组/02-编组/01-编组.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "b6685775-ac67-42cb-b69b-e85934d87b76"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/10-编组/04-编组/02-编组/01-编组/01-文字.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "a27dffab-a970-43c1-96c7-080a88b9d938"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/10-编组/04-编组/02-编组/01-编组/01-文字.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "a27dffab-a970-43c1-96c7-080a88b9d938"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/10-编组/04-编组/02-编组/01-编组/01-文字.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "a27dffab-a970-43c1-96c7-080a88b9d938"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/10-编组/04-编组/02-编组/01-编组/01-文字.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "a27dffab-a970-43c1-96c7-080a88b9d938"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/10-编组/04-编组/02-编组/01-编组/02-文字.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "1ec1a3ee-e400-4cc6-a67e-8ac7623b0ab8"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/10-编组/04-编组/02-编组/01-编组/02-文字.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "1ec1a3ee-e400-4cc6-a67e-8ac7623b0ab8"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/10-编组/04-编组/02-编组/01-编组/02-文字.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "1ec1a3ee-e400-4cc6-a67e-8ac7623b0ab8"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/10-编组/04-编组/02-编组/01-编组/02-文字.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "1ec1a3ee-e400-4cc6-a67e-8ac7623b0ab8"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/10-编组/04-编组/02-编组/01-编组/03-文字.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "89b5c581-dbc1-48fe-856a-b209545b99ad"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/10-编组/04-编组/02-编组/01-编组/03-文字.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "89b5c581-dbc1-48fe-856a-b209545b99ad"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/10-编组/04-编组/02-编组/01-编组/03-文字.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "89b5c581-dbc1-48fe-856a-b209545b99ad"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/10-编组/04-编组/02-编组/01-编组/03-文字.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "89b5c581-dbc1-48fe-856a-b209545b99ad"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/10-编组/04-编组/02-编组/02-编组.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "d4f05791-e374-440e-b219-59583056b40b"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/10-编组/04-编组/02-编组/02-编组.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "d4f05791-e374-440e-b219-59583056b40b"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/10-编组/04-编组/02-编组/02-编组.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "d4f05791-e374-440e-b219-59583056b40b"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/10-编组/04-编组/02-编组/02-编组.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "d4f05791-e374-440e-b219-59583056b40b"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/10-编组/04-编组/02-编组/02-编组/01-文字.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "ff2fe98f-3600-482a-8960-e0fb6c4cfe73"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/10-编组/04-编组/02-编组/02-编组/01-文字.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "ff2fe98f-3600-482a-8960-e0fb6c4cfe73"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/10-编组/04-编组/02-编组/02-编组/01-文字.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "ff2fe98f-3600-482a-8960-e0fb6c4cfe73"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/10-编组/04-编组/02-编组/02-编组/01-文字.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "ff2fe98f-3600-482a-8960-e0fb6c4cfe73"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/10-编组/04-编组/02-编组/02-编组/02-文字.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "0b0647af-1080-466b-acde-95d8f4eacdfb"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/10-编组/04-编组/02-编组/02-编组/02-文字.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "0b0647af-1080-466b-acde-95d8f4eacdfb"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/10-编组/04-编组/02-编组/02-编组/02-文字.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "0b0647af-1080-466b-acde-95d8f4eacdfb"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/10-编组/04-编组/02-编组/02-编组/02-文字.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "0b0647af-1080-466b-acde-95d8f4eacdfb"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/10-编组/04-编组/02-编组/02-编组/03-文字.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "a4d1d510-4bc8-4e82-adc3-4422d3d9a357"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/10-编组/04-编组/02-编组/02-编组/03-文字.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "a4d1d510-4bc8-4e82-adc3-4422d3d9a357"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/10-编组/04-编组/02-编组/02-编组/03-文字.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "a4d1d510-4bc8-4e82-adc3-4422d3d9a357"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/10-编组/04-编组/02-编组/02-编组/03-文字.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "a4d1d510-4bc8-4e82-adc3-4422d3d9a357"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/10-编组/04-编组/02-编组/03-编组.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "fbaabad3-bdde-49c7-abb5-2ed2427a6622"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/10-编组/04-编组/02-编组/03-编组.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "fbaabad3-bdde-49c7-abb5-2ed2427a6622"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/10-编组/04-编组/02-编组/03-编组.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "fbaabad3-bdde-49c7-abb5-2ed2427a6622"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/10-编组/04-编组/02-编组/03-编组.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "fbaabad3-bdde-49c7-abb5-2ed2427a6622"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/10-编组/04-编组/02-编组/03-编组/01-文字.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "239176eb-f2b5-40c6-98f5-b2701c010873"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/10-编组/04-编组/02-编组/03-编组/01-文字.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "239176eb-f2b5-40c6-98f5-b2701c010873"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/10-编组/04-编组/02-编组/03-编组/01-文字.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "239176eb-f2b5-40c6-98f5-b2701c010873"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/10-编组/04-编组/02-编组/03-编组/01-文字.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "239176eb-f2b5-40c6-98f5-b2701c010873"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/10-编组/04-编组/02-编组/03-编组/02-文字.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "96d509fd-9d46-4d0e-afa1-0bcfcd627aaf"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/10-编组/04-编组/02-编组/03-编组/02-文字.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "96d509fd-9d46-4d0e-afa1-0bcfcd627aaf"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/10-编组/04-编组/02-编组/03-编组/02-文字.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "96d509fd-9d46-4d0e-afa1-0bcfcd627aaf"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/10-编组/04-编组/02-编组/03-编组/02-文字.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "96d509fd-9d46-4d0e-afa1-0bcfcd627aaf"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/10-编组/04-编组/02-编组/03-编组/03-文字.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "0efb7c9e-ab52-4a3e-89ed-d134c740bd7a"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/10-编组/04-编组/02-编组/03-编组/03-文字.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "0efb7c9e-ab52-4a3e-89ed-d134c740bd7a"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/10-编组/04-编组/02-编组/03-编组/03-文字.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "0efb7c9e-ab52-4a3e-89ed-d134c740bd7a"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/10-编组/04-编组/02-编组/03-编组/03-文字.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "0efb7c9e-ab52-4a3e-89ed-d134c740bd7a"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/10-编组/05-编组.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "deafbd51-f766-4d99-94b2-4cf6889a9148"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/10-编组/05-编组.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "deafbd51-f766-4d99-94b2-4cf6889a9148"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/10-编组/05-编组.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "deafbd51-f766-4d99-94b2-4cf6889a9148"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/10-编组/05-编组.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "deafbd51-f766-4d99-94b2-4cf6889a9148"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/10-编组/05-编组/01-文字.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "84317628-5b57-405d-9a6d-ece79f35981c"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/10-编组/05-编组/01-文字.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "84317628-5b57-405d-9a6d-ece79f35981c"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/10-编组/05-编组/01-文字.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "84317628-5b57-405d-9a6d-ece79f35981c"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/10-编组/05-编组/01-文字.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "84317628-5b57-405d-9a6d-ece79f35981c"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/10-编组/05-编组/02-文字.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "90b2367b-8fdf-44d6-8cb5-9efa95e61b26"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/10-编组/05-编组/02-文字.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "90b2367b-8fdf-44d6-8cb5-9efa95e61b26"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/10-编组/05-编组/02-文字.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "90b2367b-8fdf-44d6-8cb5-9efa95e61b26"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/10-编组/05-编组/02-文字.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "90b2367b-8fdf-44d6-8cb5-9efa95e61b26"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/11-编组.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "35d827a8-bdf2-4a0c-b5e9-354de2edf2c9"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/11-编组.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "35d827a8-bdf2-4a0c-b5e9-354de2edf2c9"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/11-编组.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "35d827a8-bdf2-4a0c-b5e9-354de2edf2c9"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/11-编组.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "35d827a8-bdf2-4a0c-b5e9-354de2edf2c9"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/11-编组/01-文档块.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "8e89d941-4b5e-4aef-95ba-eac0f43af8b0"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/11-编组/01-文档块.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "8e89d941-4b5e-4aef-95ba-eac0f43af8b0"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/11-编组/01-文档块.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "8e89d941-4b5e-4aef-95ba-eac0f43af8b0"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/11-编组/01-文档块.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "8e89d941-4b5e-4aef-95ba-eac0f43af8b0"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/11-编组/01-文档块/01-编组.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "d7d0cd2f-6e73-4bb4-b203-40eab5563bb9"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/11-编组/01-文档块/01-编组.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "d7d0cd2f-6e73-4bb4-b203-40eab5563bb9"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/11-编组/01-文档块/01-编组.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "d7d0cd2f-6e73-4bb4-b203-40eab5563bb9"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/11-编组/01-文档块/01-编组.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "d7d0cd2f-6e73-4bb4-b203-40eab5563bb9"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/11-编组/01-文档块/01-编组/01-编组.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "0ac87975-ca9f-4f70-bea9-a4700892b21e"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/11-编组/01-文档块/01-编组/01-编组.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "0ac87975-ca9f-4f70-bea9-a4700892b21e"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/11-编组/01-文档块/01-编组/01-编组.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "0ac87975-ca9f-4f70-bea9-a4700892b21e"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/11-编组/01-文档块/01-编组/01-编组.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "0ac87975-ca9f-4f70-bea9-a4700892b21e"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/11-编组/01-文档块/01-编组/01-编组/01-文字.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "caa7b049-11e7-4896-b021-1bcb9833885b"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/11-编组/01-文档块/01-编组/01-编组/01-文字.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "caa7b049-11e7-4896-b021-1bcb9833885b"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/11-编组/01-文档块/01-编组/01-编组/01-文字.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "caa7b049-11e7-4896-b021-1bcb9833885b"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/11-编组/01-文档块/01-编组/01-编组/01-文字.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "caa7b049-11e7-4896-b021-1bcb9833885b"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/11-编组/01-文档块/01-编组/01-编组/02-文字.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "85a5c7da-fd02-4ab3-80be-7f942fda5db8"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/11-编组/01-文档块/01-编组/01-编组/02-文字.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "85a5c7da-fd02-4ab3-80be-7f942fda5db8"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/11-编组/01-文档块/01-编组/01-编组/02-文字.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "85a5c7da-fd02-4ab3-80be-7f942fda5db8"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/11-编组/01-文档块/01-编组/01-编组/02-文字.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "85a5c7da-fd02-4ab3-80be-7f942fda5db8"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/11-编组/01-文档块/01-编组/01-编组/03-文字.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "d15a6acd-9cf7-4013-b679-f8a9a63ad525"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/11-编组/01-文档块/01-编组/01-编组/03-文字.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "d15a6acd-9cf7-4013-b679-f8a9a63ad525"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/11-编组/01-文档块/01-编组/01-编组/03-文字.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "d15a6acd-9cf7-4013-b679-f8a9a63ad525"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/11-编组/01-文档块/01-编组/01-编组/03-文字.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "d15a6acd-9cf7-4013-b679-f8a9a63ad525"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/11-编组/01-文档块/01-编组/01-编组/04-文字.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "84ae7680-78ac-45e8-8e64-68fef78d124c"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/11-编组/01-文档块/01-编组/01-编组/04-文字.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "84ae7680-78ac-45e8-8e64-68fef78d124c"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/11-编组/01-文档块/01-编组/01-编组/04-文字.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "84ae7680-78ac-45e8-8e64-68fef78d124c"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/11-编组/01-文档块/01-编组/01-编组/04-文字.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "84ae7680-78ac-45e8-8e64-68fef78d124c"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/11-编组/01-文档块/01-编组/01-编组/05-文字.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "a4e968f3-9d87-4341-9809-365e2f9c5e07"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/11-编组/01-文档块/01-编组/01-编组/05-文字.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "a4e968f3-9d87-4341-9809-365e2f9c5e07"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/11-编组/01-文档块/01-编组/01-编组/05-文字.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "a4e968f3-9d87-4341-9809-365e2f9c5e07"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/11-编组/01-文档块/01-编组/01-编组/05-文字.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "a4e968f3-9d87-4341-9809-365e2f9c5e07"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/11-编组/01-文档块/01-编组/01-编组/06-文字.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "0613bd98-1b20-4949-859d-5a2e21443368"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/11-编组/01-文档块/01-编组/01-编组/06-文字.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "0613bd98-1b20-4949-859d-5a2e21443368"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/11-编组/01-文档块/01-编组/01-编组/06-文字.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "0613bd98-1b20-4949-859d-5a2e21443368"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/11-编组/01-文档块/01-编组/01-编组/06-文字.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "0613bd98-1b20-4949-859d-5a2e21443368"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/11-编组/01-文档块/01-编组/01-编组/07-文字.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "814e779d-f246-42e7-8506-7385011ba509"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/11-编组/01-文档块/01-编组/01-编组/07-文字.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "814e779d-f246-42e7-8506-7385011ba509"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/11-编组/01-文档块/01-编组/01-编组/07-文字.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "814e779d-f246-42e7-8506-7385011ba509"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/11-编组/01-文档块/01-编组/01-编组/07-文字.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "814e779d-f246-42e7-8506-7385011ba509"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/11-编组/01-文档块/01-编组/01-编组/08-文字.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "d96f4bdd-302f-4c21-94dd-41af8f62ad2b"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/11-编组/01-文档块/01-编组/01-编组/08-文字.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "d96f4bdd-302f-4c21-94dd-41af8f62ad2b"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/11-编组/01-文档块/01-编组/01-编组/08-文字.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "d96f4bdd-302f-4c21-94dd-41af8f62ad2b"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/11-编组/01-文档块/01-编组/01-编组/08-文字.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "d96f4bdd-302f-4c21-94dd-41af8f62ad2b"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/11-编组/01-文档块/01-编组/02-编组.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "4eefe6f8-6454-4b0f-86f5-69d92547c673"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/11-编组/01-文档块/01-编组/02-编组.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "4eefe6f8-6454-4b0f-86f5-69d92547c673"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/11-编组/01-文档块/01-编组/02-编组.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "4eefe6f8-6454-4b0f-86f5-69d92547c673"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/11-编组/01-文档块/01-编组/02-编组.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "4eefe6f8-6454-4b0f-86f5-69d92547c673"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/11-编组/01-文档块/01-编组/02-编组/01-文字.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "c5110b54-7051-439c-9a7d-df9f44fa8cb7"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/11-编组/01-文档块/01-编组/02-编组/01-文字.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "c5110b54-7051-439c-9a7d-df9f44fa8cb7"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/11-编组/01-文档块/01-编组/02-编组/01-文字.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "c5110b54-7051-439c-9a7d-df9f44fa8cb7"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/11-编组/01-文档块/01-编组/02-编组/01-文字.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "c5110b54-7051-439c-9a7d-df9f44fa8cb7"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/11-编组/01-文档块/01-编组/02-编组/02-文字.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "b587f866-9d93-4878-ac26-6425f602658b"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/11-编组/01-文档块/01-编组/02-编组/02-文字.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "b587f866-9d93-4878-ac26-6425f602658b"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/11-编组/01-文档块/01-编组/02-编组/02-文字.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "b587f866-9d93-4878-ac26-6425f602658b"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/11-编组/01-文档块/01-编组/02-编组/02-文字.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "b587f866-9d93-4878-ac26-6425f602658b"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/11-编组/01-文档块/01-编组/02-编组/03-文字.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "932edbe1-6a57-48d4-9b3c-ab3387b57840"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/11-编组/01-文档块/01-编组/02-编组/03-文字.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "932edbe1-6a57-48d4-9b3c-ab3387b57840"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/11-编组/01-文档块/01-编组/02-编组/03-文字.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "932edbe1-6a57-48d4-9b3c-ab3387b57840"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/11-编组/01-文档块/01-编组/02-编组/03-文字.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "932edbe1-6a57-48d4-9b3c-ab3387b57840"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/11-编组/01-文档块/01-编组/02-编组/04-文字.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "150a7f29-a4d9-4963-9304-8ae896dbde41"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/11-编组/01-文档块/01-编组/02-编组/04-文字.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "150a7f29-a4d9-4963-9304-8ae896dbde41"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/11-编组/01-文档块/01-编组/02-编组/04-文字.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "150a7f29-a4d9-4963-9304-8ae896dbde41"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/11-编组/01-文档块/01-编组/02-编组/04-文字.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "150a7f29-a4d9-4963-9304-8ae896dbde41"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/11-编组/01-文档块/01-编组/02-编组/05-文字.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "e0fdd875-3971-4944-abfa-f2bf2e62fb2b"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/11-编组/01-文档块/01-编组/02-编组/05-文字.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "e0fdd875-3971-4944-abfa-f2bf2e62fb2b"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/11-编组/01-文档块/01-编组/02-编组/05-文字.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "e0fdd875-3971-4944-abfa-f2bf2e62fb2b"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/11-编组/01-文档块/01-编组/02-编组/05-文字.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "e0fdd875-3971-4944-abfa-f2bf2e62fb2b"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/11-编组/01-文档块/01-编组/02-编组/06-文字.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "fb27687b-c280-448c-a44e-1cb1b0e00c85"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/11-编组/01-文档块/01-编组/02-编组/06-文字.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "fb27687b-c280-448c-a44e-1cb1b0e00c85"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/11-编组/01-文档块/01-编组/02-编组/06-文字.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "fb27687b-c280-448c-a44e-1cb1b0e00c85"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/11-编组/01-文档块/01-编组/02-编组/06-文字.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "fb27687b-c280-448c-a44e-1cb1b0e00c85"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/11-编组/01-文档块/01-编组/02-编组/07-文字.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "216d0b21-03ad-4a0d-88f6-33242c0a6fd3"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/11-编组/01-文档块/01-编组/02-编组/07-文字.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "216d0b21-03ad-4a0d-88f6-33242c0a6fd3"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/11-编组/01-文档块/01-编组/02-编组/07-文字.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "216d0b21-03ad-4a0d-88f6-33242c0a6fd3"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/11-编组/01-文档块/01-编组/02-编组/07-文字.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "216d0b21-03ad-4a0d-88f6-33242c0a6fd3"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/11-编组/01-文档块/01-编组/02-编组/08-文字.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "4f94f503-84b1-4653-9aa0-34be2bc23a01"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/11-编组/01-文档块/01-编组/02-编组/08-文字.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "4f94f503-84b1-4653-9aa0-34be2bc23a01"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/11-编组/01-文档块/01-编组/02-编组/08-文字.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "4f94f503-84b1-4653-9aa0-34be2bc23a01"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/11-编组/01-文档块/01-编组/02-编组/08-文字.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "4f94f503-84b1-4653-9aa0-34be2bc23a01"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/11-编组/01-文档块/01-编组/02-编组/09-文字.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "fff533a7-eddb-4b36-9414-03a27401dd5c"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/11-编组/01-文档块/01-编组/02-编组/09-文字.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "fff533a7-eddb-4b36-9414-03a27401dd5c"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/11-编组/01-文档块/01-编组/02-编组/09-文字.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "fff533a7-eddb-4b36-9414-03a27401dd5c"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/11-编组/01-文档块/01-编组/02-编组/09-文字.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "fff533a7-eddb-4b36-9414-03a27401dd5c"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/11-编组/02-文档块.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "1aeba383-8beb-4424-bfa0-adf107a6012c"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/11-编组/02-文档块.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "1aeba383-8beb-4424-bfa0-adf107a6012c"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/11-编组/02-文档块.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "1aeba383-8beb-4424-bfa0-adf107a6012c"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/11-编组/02-文档块.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "1aeba383-8beb-4424-bfa0-adf107a6012c"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/12-编组.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "84108b20-9749-4cf9-b51b-71e180fdbd2c"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/12-编组.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "84108b20-9749-4cf9-b51b-71e180fdbd2c"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/12-编组.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "84108b20-9749-4cf9-b51b-71e180fdbd2c"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/12-编组.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "84108b20-9749-4cf9-b51b-71e180fdbd2c"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/12-编组/01-文字.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "2e0c71a3-79f3-4824-8912-787c04e00ec7"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/12-编组/01-文字.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "2e0c71a3-79f3-4824-8912-787c04e00ec7"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/12-编组/01-文字.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "2e0c71a3-79f3-4824-8912-787c04e00ec7"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/12-编组/01-文字.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "2e0c71a3-79f3-4824-8912-787c04e00ec7"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/12-编组/02-文字.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "7090d6a8-d9af-480c-a637-d70566886c0f"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/12-编组/02-文字.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "7090d6a8-d9af-480c-a637-d70566886c0f"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/12-编组/02-文字.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "7090d6a8-d9af-480c-a637-d70566886c0f"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行/12-编组/02-文字.dependencies/implementation.view.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "7090d6a8-d9af-480c-a637-d70566886c0f"
+    }
+  },
+  {
+    "path": "global/underlay.json",
+    "kind": "structure",
+    "target": {
+      "kind": "container",
+      "container": {
+        "kind": "global",
+        "plane": "underlay"
+      }
+    }
+  },
+  {
+    "path": "global/underlay/01-underlay-poc.js.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "926a6155-1814-4a16-ba47-24c1c1f5dbc8"
+    }
+  },
+  {
+    "path": "global/underlay/01-underlay-poc.js.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "926a6155-1814-4a16-ba47-24c1c1f5dbc8"
+    }
+  },
+  {
+    "path": "global/underlay/01-underlay-poc.js.source/underlay-poc.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "926a6155-1814-4a16-ba47-24c1c1f5dbc8"
+    }
+  },
+  {
+    "path": "global/underlay/01-underlay-poc.js.source/background-entry.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "926a6155-1814-4a16-ba47-24c1c1f5dbc8"
+    }
+  },
+  {
+    "path": "global/underlay/01-underlay-poc.js.source/background-assets.css",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "926a6155-1814-4a16-ba47-24c1c1f5dbc8"
+    }
+  },
+  {
+    "path": "global/underlay/01-underlay-poc.js.source/background-runtime.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "926a6155-1814-4a16-ba47-24c1c1f5dbc8"
+    }
+  },
+  {
+    "path": "global/underlay/01-underlay-poc.js.source/assets/runtime/cup.webp",
+    "kind": "asset",
+    "target": {
+      "kind": "instance",
+      "instanceId": "926a6155-1814-4a16-ba47-24c1c1f5dbc8"
+    }
+  },
+  {
+    "path": "global/underlay/01-underlay-poc.js.source/assets/runtime/cherry.webp",
+    "kind": "asset",
+    "target": {
+      "kind": "instance",
+      "instanceId": "926a6155-1814-4a16-ba47-24c1c1f5dbc8"
+    }
+  },
+  {
+    "path": "global/underlay/01-underlay-poc.js.source/assets/runtime/section.webp",
+    "kind": "asset",
+    "target": {
+      "kind": "instance",
+      "instanceId": "926a6155-1814-4a16-ba47-24c1c1f5dbc8"
+    }
+  },
+  {
+    "path": "global/underlay/01-underlay-poc.js.source/assets/runtime/green.webp",
+    "kind": "asset",
+    "target": {
+      "kind": "instance",
+      "instanceId": "926a6155-1814-4a16-ba47-24c1c1f5dbc8"
+    }
+  },
+  {
+    "path": "global/underlay/01-underlay-poc.js.source/assets/runtime/gold.webp",
+    "kind": "asset",
+    "target": {
+      "kind": "instance",
+      "instanceId": "926a6155-1814-4a16-ba47-24c1c1f5dbc8"
+    }
+  },
+  {
+    "path": "global/underlay/01-underlay-poc.js.source/assets/runtime/roast.webp",
+    "kind": "asset",
+    "target": {
+      "kind": "instance",
+      "instanceId": "926a6155-1814-4a16-ba47-24c1c1f5dbc8"
+    }
+  },
+  {
+    "path": "global/underlay/01-underlay-poc.js.source/background-stages.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "926a6155-1814-4a16-ba47-24c1c1f5dbc8"
+    }
+  },
+  {
+    "path": "global/overlay.json",
+    "kind": "structure",
+    "target": {
+      "kind": "container",
+      "container": {
+        "kind": "global",
+        "plane": "overlay"
+      }
+    }
+  },
+  {
+    "path": "global/overlay/01-coffee-navigation.js.data.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "931b8fb6-7308-4876-8e5b-c3cfb5d95d3f"
+    }
+  },
+  {
+    "path": "global/overlay/01-coffee-navigation.js.authoring.json",
+    "kind": "data",
+    "target": {
+      "kind": "instance",
+      "instanceId": "931b8fb6-7308-4876-8e5b-c3cfb5d95d3f"
+    }
+  },
+  {
+    "path": "global/overlay/01-coffee-navigation.js.style.json",
+    "kind": "style",
+    "target": {
+      "kind": "instance",
+      "instanceId": "931b8fb6-7308-4876-8e5b-c3cfb5d95d3f"
+    }
+  },
+  {
+    "path": "global/overlay/01-coffee-navigation.js.source/coffee-navigation.js",
+    "kind": "source",
+    "target": {
+      "kind": "instance",
+      "instanceId": "931b8fb6-7308-4876-8e5b-c3cfb5d95d3f"
+    }
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行.body.html",
+    "kind": "html"
+  },
+  {
+    "path": "pages/01-一杯咖啡的远行.body.md",
+    "kind": "source"
+  },
+  {
+    "path": "assets/65220032-dfc2-43e7-8578-76a700d06a6f.html",
+    "kind": "asset"
+  },
+  {
+    "path": "assets/asset_fed66dc0-bc0e-4336-8f06-d9f7b5d07f4f.jpeg",
+    "kind": "asset"
+  },
+  {
+    "path": "assets/asset_4aa58f81-2c97-4c2c-999c-c8e25baef9a0.jpeg",
+    "kind": "asset"
+  },
+  {
+    "path": "assets/069ed72f-2aec-4981-b3a7-66d3f8ad723a.html",
+    "kind": "asset"
+  },
+  {
+    "path": "assets/46bb51d7-eb5c-470f-b42b-92e879fda0b0.html",
+    "kind": "asset"
+  },
+  {
+    "path": "assets/asset_c48a157a-d5ca-436a-88c9-b9706de5fb2b.jpeg",
+    "kind": "asset"
+  },
+  {
+    "path": "assets/a3b82afb-fef7-47a0-85e0-0b5011d34bc8.html",
+    "kind": "asset"
+  },
+  {
+    "path": "assets/4756368c-6df5-4350-a8b6-c17c74928a10.html",
+    "kind": "asset"
+  },
+  {
+    "path": "assets/asset_4211216b-bea4-460c-859d-cfc422067169.webp",
+    "kind": "asset"
+  },
+  {
+    "path": "assets/asset_4a9500bf-b479-46b5-9df7-bfefd904da6b.webp",
+    "kind": "asset"
+  },
+  {
+    "path": "assets/asset_0913eab5-4ffe-43dc-ad48-8122833f08c5.webp",
+    "kind": "asset"
+  },
+  {
+    "path": "assets/asset_0d42046e-b8dc-4f00-87bb-d3e9aa91e2f2.svgxml",
+    "kind": "asset"
+  },
+  {
+    "path": "assets/asset_67f407d1-d971-4001-b828-b34735382c11.svgxml",
+    "kind": "asset"
+  },
+  {
+    "path": "assets/asset_d5814f29-ecc8-41ee-8f9c-770baf1f3a98.svgxml",
+    "kind": "asset"
+  },
+  {
+    "path": "assets/f12a9a73-27a4-4d76-8789-7714be5fab5e.html",
+    "kind": "asset"
+  },
+  {
+    "path": "assets/01ea12f2-7b93-467c-a0fe-33a32235f58d.html",
+    "kind": "asset"
+  },
+  {
+    "path": "assets/asset_52fcb460-dd86-4110-8078-7500893c6eac.jpeg",
+    "kind": "asset"
+  },
+  {
+    "path": "assets/asset_d8b7eb5f-a3cb-44c1-8f99-a2959777f572.jpeg",
+    "kind": "asset"
+  },
+  {
+    "path": "assets/bd0df625-2ff9-4a91-a617-34677ae53802.html",
+    "kind": "asset"
+  },
+  {
+    "path": "assets/5aba9372-8837-4792-aefe-d4b7c8215d09.html",
+    "kind": "asset"
+  },
+  {
+    "path": "assets/asset_aef8148e-9dbc-400c-bd02-e09174d6180a.webp",
+    "kind": "asset"
+  },
+  {
+    "path": "assets/asset_244aaa59-d94e-47c9-975a-457ba4ede1d2.webp",
+    "kind": "asset"
+  },
+  {
+    "path": "assets/asset_68d42a95-e043-4014-a732-ecf36a000dd2.webp",
+    "kind": "asset"
+  },
+  {
+    "path": "assets/7bb8e86d-6bd4-4d8e-9037-57e7ded94505.html",
+    "kind": "asset"
+  },
+  {
+    "path": "assets/asset_01c66380-70d5-44e4-a457-dfa54f3c1d75.webp",
+    "kind": "asset"
+  },
+  {
+    "path": "assets/asset_ad7e8538-b285-46e8-94eb-7d973c242193.webp",
+    "kind": "asset"
+  },
+  {
+    "path": "assets/asset_000f16b5-abe6-4930-a59c-d1cab6cd379c.webp",
+    "kind": "asset"
+  },
+  {
+    "path": "assets/asset_e5485c73-f62a-451f-8247-1612952ce572.svgxml",
+    "kind": "asset"
+  },
+  {
+    "path": "assets/asset_cd2af012-466d-4503-9d20-4302e857bc8c.svgxml",
+    "kind": "asset"
+  },
+  {
+    "path": "assets/asset_c8b94bbb-5132-4d7d-a236-fc1b308177a1.svgxml",
+    "kind": "asset"
+  },
+  {
+    "path": "assets/119874e2-c281-4e62-98c9-8983d90d93c5.html",
+    "kind": "asset"
+  },
+  {
+    "path": "assets/asset_9c9b1c38-6470-4132-b6dd-a15148ca724b.webp",
+    "kind": "asset"
+  },
+  {
+    "path": "assets/asset_2c53b98a-ae28-4a54-aad6-00a46ec41432.webp",
+    "kind": "asset"
+  },
+  {
+    "path": "assets/asset_b8c1900b-86c6-4f71-ba50-147022581790.webp",
+    "kind": "asset"
+  },
+  {
+    "path": "assets/asset_a7d49729-c37f-4c84-8d27-1b50cae1c3cc.svgxml",
+    "kind": "asset"
+  },
+  {
+    "path": "assets/asset_ac894c14-fa7c-4642-ba27-a45f72129360.svgxml",
+    "kind": "asset"
+  },
+  {
+    "path": "assets/asset_245fcc24-8bcd-456f-9217-82a93ecd05e9.svgxml",
+    "kind": "asset"
+  },
+  {
+    "path": "assets/0c4a6969-5d21-4ab5-8713-2702b5acb1e2.html",
+    "kind": "asset"
+  },
+  {
+    "path": "assets/asset_80056b4a-1e71-4842-bc3b-bc85e303ef4a.webp",
+    "kind": "asset"
+  },
+  {
+    "path": "assets/asset_4b72129b-d94d-4acb-bbe1-895869bed1a8.webp",
+    "kind": "asset"
+  },
+  {
+    "path": "assets/asset_cb03c037-b17c-4cc8-9a96-f33faf9ebb27.webp",
+    "kind": "asset"
+  },
+  {
+    "path": "assets/asset_c3383cb0-cc65-4c4c-accc-bfe6a0bbf037.svgxml",
+    "kind": "asset"
+  },
+  {
+    "path": "assets/asset_0beab1ab-18c7-417d-8ddc-21636ca7f4fe.svgxml",
+    "kind": "asset"
+  },
+  {
+    "path": "assets/asset_cc1e93d5-385e-4833-9509-f5033895ae50.svgxml",
+    "kind": "asset"
+  },
+  {
+    "path": "assets/08f47282-0bf2-4300-a7c9-3ce209f8c328.html",
+    "kind": "asset"
+  },
+  {
+    "path": "assets/asset_9df1cfc6-452c-4e77-ad31-fa740c76cafe.webp",
+    "kind": "asset"
+  },
+  {
+    "path": "assets/asset_703c90fc-6dd3-47be-b5c5-3d0866a74ca0.webp",
+    "kind": "asset"
+  },
+  {
+    "path": "assets/asset_b7752a11-a6db-4d2f-aa84-a31d5949ed08.webp",
+    "kind": "asset"
+  },
+  {
+    "path": "assets/00004210-5daf-4d98-a7c0-05bb4bb74857.html",
+    "kind": "asset"
+  },
+  {
+    "path": "assets/asset_9f19c0de-0094-4de1-b373-2d8ab2706392.webp",
+    "kind": "asset"
+  },
+  {
+    "path": "assets/fcc65556-5059-4242-ba72-5263cfa02f58.html",
+    "kind": "asset"
+  },
+  {
+    "path": "assets/asset_74125b53-9813-4732-8188-9a5c50185a79.webp",
+    "kind": "asset"
+  },
+  {
+    "path": "assets/aa67dec8-0027-4228-90db-b6e53d383955.html",
+    "kind": "asset"
+  },
+  {
+    "path": "assets/6e60c886-9115-4457-97dd-a75afe67c06a.html",
+    "kind": "asset"
+  },
+  {
+    "path": "assets/asset_84cc5715-4dc0-4ec5-a8d7-08d40a2e9e0a.webp",
+    "kind": "asset"
+  },
+  {
+    "path": "assets/59d343d2-2032-46b7-a9d5-b741b630e186.html",
+    "kind": "asset"
+  },
+  {
+    "path": "assets/1b03ab37-75e8-4e43-93bb-a0bcd82d22c9.html",
+    "kind": "asset"
+  },
+  {
+    "path": "assets/asset_c50a2e4c-ab89-4dd1-ba62-28731691520e.webp",
+    "kind": "asset"
+  },
+  {
+    "path": "assets/asset_0dc35c7a-4aba-4c67-ab10-93480a01e592.webp",
+    "kind": "asset"
+  },
+  {
+    "path": "assets/asset_73a0ea42-845c-4742-8f98-d1ed4560870b.webp",
+    "kind": "asset"
+  },
+  {
+    "path": "assets/4c87bed8-e178-4e84-8ebe-57553cb65899.html",
+    "kind": "asset"
+  },
+  {
+    "path": "assets/2ac66324-c997-4dcb-84ab-cef8a2797e87.html",
+    "kind": "asset"
+  },
+  {
+    "path": "assets/fb164b5d-2561-484c-9dc3-c1e22ee668a4.html",
+    "kind": "asset"
+  },
+  {
+    "path": "assets/asset_a501e289-9092-418a-af5a-dcede8abfbb9.webp",
+    "kind": "asset"
+  },
+  {
+    "path": "assets/asset_03cd5f60-bfe8-42f7-934e-ab05bb4adcd0.webp",
+    "kind": "asset"
+  },
+  {
+    "path": "assets/asset_c5255c53-9c87-4ea2-a156-a978bca55286.webp",
+    "kind": "asset"
+  },
+  {
+    "path": "assets/asset_1d935419-0e11-4c72-b395-3baf649e7058.webp",
+    "kind": "asset"
+  },
+  {
+    "path": "assets/asset_9c734f29-1345-4df9-a8b3-34b9a9cf87d4.webp",
+    "kind": "asset"
+  },
+  {
+    "path": "assets/asset_342db4b2-cbda-451e-a7e9-ffc552d47b10.webp",
+    "kind": "asset"
+  }
+]

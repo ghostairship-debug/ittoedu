@@ -13,6 +13,7 @@ import { buildComponentWebPackage } from '../../src/renderer/export/componentPla
 import { courseDeliverySnapshot } from '../../src/renderer/app/courseDeliverySnapshot'
 import { useCourseDelivery, type CourseDeliveryPorts } from '../../src/renderer/app/useCourseDelivery'
 vi.mock('../../src/renderer/export/loadPlayerBundle', async () => { const { readFileSync } = await import('node:fs'); return { loadPlayerBundle: () => readFileSync('dist-player/player.iife.js', 'utf8') } })
+vi.mock('../../src/renderer/export/loadCompiledPlayerBundle', async () => { const { readFileSync } = await import('node:fs'); return { loadCompiledPlayerBundle: () => readFileSync('dist-player/compiled-player.iife.js', 'utf8') } })
 const fonts = vi.hoisted(() => ({ gate: null as Promise<void> | null }))
 vi.mock('../../src/renderer/export/bundledFontEmbedding', async original => {
   const actual = await original<typeof import('../../src/renderer/export/bundledFontEmbedding')>()

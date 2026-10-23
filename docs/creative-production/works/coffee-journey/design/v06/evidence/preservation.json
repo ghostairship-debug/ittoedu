@@ -1,0 +1,59 @@
+{
+  "baselineRevision": 179,
+  "finalRevision": 204,
+  "baselineSha256": "e3303319b283afe4284628adb07a06e00251435569cd37268ad9171426e5ab90",
+  "baselineInstances": 182,
+  "finalInstances": 183,
+  "allOriginalIdsAndDefinitionsPreserved": true,
+  "newInstanceIds": [
+    "926a6155-1814-4a16-ba47-24c1c1f5dbc8"
+  ],
+  "rootIds": [
+    "47415583-2d75-4b72-9c46-dfd29b47d82a"
+  ],
+  "global": {
+    "underlay": [
+      "926a6155-1814-4a16-ba47-24c1c1f5dbc8"
+    ],
+    "overlay": [
+      "931b8fb6-7308-4876-8e5b-c3cfb5d95d3f"
+    ]
+  },
+  "counts": {
+    "guoling.container.flow": 1,
+    "guoling.text": 93,
+    "guoling.image": 8,
+    "guoling.group": 63,
+    "guoling.web": 2,
+    "guoling.document-block": 13,
+    "guoling.html-program": 1,
+    "ea91d438-5e87-47ba-8cc1-d67466026210": 1,
+    "96347310-25a2-4382-bde7-1c46f6d5ba9f": 1
+  },
+  "u05": {
+    "scriptsIdentical": true,
+    "scriptSha256": [
+      "fb3a9c822462762c2ff42fc8639d0d42a94b2bc699f40491c0760c9acdb7d1cc",
+      "585e592df9cd7fbbc704a3e36ff57ae819be47a48b86e194198daf253ea54989"
+    ],
+    "scriptCount": 2
+  },
+  "backgroundSource": {
+    "authoredSha256": "14d4759019d97ef6e3884d2bfdf062372ebe3a7bbc01669d7c302b4a0339dfb4",
+    "embeddedFiles": [
+      {
+        "path": "components/947ccfd1-0078-4078-b903-304498284ade/underlay-poc.js",
+        "sha256": "14d4759019d97ef6e3884d2bfdf062372ebe3a7bbc01669d7c302b4a0339dfb4",
+        "bytes": 15480
+      }
+    ],
+    "exactEmbeddedSourceFound": true
+  },
+  "u06": {
+    "engineSha256": "4a12280ceef51d5cf2e623e1b19a2f8003e4c9fa0521d5e4a28a67077ece26af",
+    "coffeeEmbedsExactEngine": true,
+    "sugarEmbedsExactEngine": true,
+    "coffeeProgramSha256": "3000f8d847689fdef639b2f778797e1ee516b523cd5d24efdea7e4e12f1fc2af",
+    "sugarProgramSha256": "646221aeb2a7b87bab8b2adbedffc5ed416fcc5921e9e23ae2bcdd08c4419234"
+  }
+}

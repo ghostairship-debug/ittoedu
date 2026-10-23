@@ -442,7 +442,8 @@ function transformProgram(source: string, module: boolean, globals: string, load
       && node.object.type === 'Identifier' && ['window', 'self', 'globalThis'].includes(node.object.name) && !owner(scope, node.object.name))
       diagnostics.push({ code: 'dynamic-program', message: `同文档发布尚不能保真 ${node.object.name}.${member} 动态程序；源码已保留`,
         ...(documentGlobals ? { blocking: false as const } : {}) })
-    if (member && ['addEventListener', 'removeEventListener'].includes(member)) {
+    // Trusted builtins own native listeners through their scopes; retain native optional chains and receivers.
+    if (!trustedBuiltin && member && ['addEventListener', 'removeEventListener'].includes(member)) {
       const inner = transformExpression(node.object)
       edits.push({ start: node.start, end: node.end, value: `${globals}.__eventMethod(${inner},${JSON.stringify(member)})` })
       return

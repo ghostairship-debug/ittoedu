@@ -49,6 +49,7 @@ export interface CrossSurfaceCommandPorts {
   lifecycle: ReturnType<typeof createCourseLifecycleSlice>
   /** Existing desktop editorClipboard bridge; commands and shortcuts share native events. */
   requestClipboard?(command: 'copy' | 'cut' | 'paste', requestId?: string): Promise<void> | void
+  prepareNavigation?(documentId: string): Promise<void>
 }
 import { prepareCourseObjectPaste, selectedRoots, courseObjectDescendants as descendants, sameContainer, courseObjectRemovalEdits, courseObjectOrderEdits, courseObjectMoveEdits, type CourseObjectClipboardSource } from '../../core/course/courseObjectEdits'
 import { courseSettingsEdits } from '../../core/course/courseSemanticEdits'
@@ -96,6 +97,38 @@ export function createCrossSurfaceCommands(ports: CrossSurfaceCommandPorts) {
   }
   const flush = async () => {
     if (await content().commitTextEdit?.() === false) throw new Error('当前编辑未能应用，请完成编辑后重试')
+  }
+  // A draft ACK may arrive after another document, container or scope was chosen.
+  // Navigation consumes that input only while its original editing context is current.
+  const navigateCourseView = async (select: (documentId: string) => void | Promise<void>): Promise<boolean> => {
+    const before = kernel.readView(), beforeScope = scope(), documentId = before.activeDocumentId
+    if (!documentId) return false
+    try {
+      if (ports.prepareNavigation) await ports.prepareNavigation(documentId)
+      else await flush()
+      const view = kernel.readView()
+      if (view.activeDocumentId !== documentId || view.snapshot?.epoch !== before.snapshot?.epoch
+        || view.activation !== before.activation || view.rootInstanceId !== before.rootInstanceId
+        || view.editingContainerId !== before.editingContainerId || view.editingPlane !== before.editingPlane
+        || view.surfaceId !== before.surfaceId || view.activeStateId !== before.activeStateId || scope() !== beforeScope) return false
+      await select(documentId)
+      return true
+    } catch (error) {
+      if (kernel.readView().activeDocumentId === documentId) report(error)
+      return false
+    }
+  }
+  const changeCourseDirectory = async (operation: () => Promise<import('../store/slices/courseStructureSlice').CourseStructureResult>) => {
+    let result: import('../store/slices/courseStructureSlice').CourseStructureResult = { ok: false, reason: '当前输入尚未保全或编辑位置已切换' }
+    await navigateCourseView(async documentId => {
+      const target = kernel.captureTarget(documentId)
+      result = await operation()
+      if (result.ok && result.activatedLocationId && capturedCourseViewIsCurrent(kernel.readView(), target)) {
+        kernel.selectSurface(result.activatedLocationId, documentId)
+        ports.shell.patch({ editingScope: 'scene' })
+      }
+    })
+    return result
   }
   const run = (operation: () => Promise<void> | void) => { try { void Promise.resolve(operation()).catch(report) } catch (error) { report(error) } }
   const navigateHistory = async (direction: 'undo' | 'redo'): Promise<boolean> => {
@@ -198,12 +231,14 @@ export function createCrossSurfaceCommands(ports: CrossSurfaceCommandPorts) {
     await write(shown ?? courseGeometryEdits(target.editingProject, target.instanceIds, intent), target)
   }
   const commands = {
+    navigateCourseView,
     setCanvasMode(canvasMode: 'edit' | 'run') { run(async () => { await flush(); ports.shell.patch({ canvasMode, editingTextNodeId: null }) }) },
     setEditingScope(editingScope: 'scene' | 'global') { if(surface()?.kind==='spatial' && ports.spatial.setSpatialEditingScope) ports.spatial.setSpatialEditingScope(editingScope==='global'?'global':'world'); else ports.shell.patch({ editingScope }); kernel.selectInstances([]) },
-    activateCourseLocation(id: string) { run(async () => { await flush(); kernel.selectSurface(id); kernel.selectInstances([], id) }) },
+    activateCourseLocation(id: string) { return navigateCourseView(documentId => { kernel.selectSurface(id, documentId); kernel.selectInstances([], id, documentId) }) },
     setActiveScene(id: string) { commands.activateCourseLocation(id) },
-    async addCourseContent(...args: Parameters<typeof ports.structure.addCourseContent>) { const result = await ports.structure.addCourseContent(...args); if (result.ok && result.activatedLocationId) kernel.selectSurface(result.activatedLocationId); return result },
-    async addScene() { const result = await ports.structure.addScene(); if (result.ok && result.activatedLocationId) kernel.selectSurface(result.activatedLocationId); return result },
+    addCourseContent(...args: Parameters<typeof ports.structure.addCourseContent>) { return changeCourseDirectory(() => ports.structure.addCourseContent(...args)) },
+    addScene() { return changeCourseDirectory(() => ports.structure.addScene()) },
+    duplicateCourseLocation(surfaceId: string) { return changeCourseDirectory(() => ports.structure.duplicateCourseLocation(surfaceId)) },
     reorderCourseSurfaces(ids: string[]) { return ports.structure.reorderCourseSurfaces(ids) },
     deleteCourseSurface(...args: Parameters<typeof ports.structure.deleteCourseSurface>) { return ports.structure.deleteCourseSurface(...args) },
 

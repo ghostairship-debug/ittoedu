@@ -1,0 +1,8 @@
+'use strict';
+const fs=require('node:fs'),path=require('node:path');const base=path.resolve(__dirname,'..');
+const previous=JSON.parse(fs.readFileSync(path.join(base,'evidence/r213-final-motion-frames.json'),'utf8'));
+const heights={};for(const row of previous){const s=row.transitions.flatMap(t=>t.samples).find(x=>x.scrollTop>0&&x.reading.progress>0);heights[row.width<700?'mobile':'desktop']=s.scrollTop/s.reading.progress+(row.width<700?844:1000)}
+const file=path.join(base,'background-stages.js');let text=fs.readFileSync(file,'utf8');text=text.replace(/export const READING_HEIGHTS = [\s\S]*?;/,'export const READING_HEIGHTS = '+JSON.stringify(heights,null,2)+';');fs.writeFileSync(file,text);
+const runtime=path.join(base,'background-runtime.js');text=fs.readFileSync(runtime,'utf8').replace('READING_HEIGHTS[kind]-root.clientHeight','(READING_HEIGHTS[kind]||READING_HEIGHTS.desktop)-root.clientHeight');fs.writeFileSync(runtime,text);
+const test=path.join(__dirname,'verify-motion-frames.cjs');text=fs.readFileSync(test,'utf8');text=text.replace("if(selected)await page.screenshot({path:path.join(shots,file),animations:'allow'});","if(selected){const buffer=await page.screenshot({animations:'allow'});for(let attempt=0;attempt<3;attempt++){try{fs.writeFileSync(path.join(shots,file),buffer);break}catch(error){if(attempt===2)throw error;await new Promise(r=>setTimeout(r,150))}}}");fs.writeFileSync(test,text);
+console.log('PAPER_HEIGHTS',JSON.stringify(heights));

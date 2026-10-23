@@ -4,7 +4,7 @@ import type { DocumentSnapshot } from '../../../shared/workbench/document'
 import type { DocumentFileSession } from '../../documentFiles/documentFileSession'
 import './workspaceDocumentStatus.css'
 
-type DocumentSaveStatus = Pick<DocumentSnapshot, 'documentId' | 'epoch' | 'saving' | 'saveError' | 'recovered' | 'dirty' | 'binding'>
+type DocumentSaveStatus = Pick<DocumentSnapshot, 'documentId' | 'epoch' | 'saving' | 'saveError' | 'recovered' | 'recoveryDiagnostics' | 'dirty' | 'binding'>
 
 export function documentSaveLabel(snapshot: DocumentSaveStatus): string {
   if (snapshot.saving) return '保存中'
@@ -62,5 +62,6 @@ export function WorkspaceDocumentStatus({ api, documentId, session }: {
   return <span className="workspace-document-status" role="status" data-save-state={current.saving ? 'saving' : current.saveError ? 'failed' : current.dirty ? 'dirty' : current.binding.kind === 'file' ? 'saved' : 'untitled'}>
     {documentSaveLabel(current)}
     {current.saveError && <span className="workspace-document-status__error">{saveFailureMessage(current.saveError)}当前稿仍保留，可重试或另存。</span>}
+    {!!current.recoveryDiagnostics?.length && <details><summary>恢复历史需处理</summary>{current.recoveryDiagnostics.map((message, index) => <p key={index}>{message}</p>)}</details>}
   </span>
 }

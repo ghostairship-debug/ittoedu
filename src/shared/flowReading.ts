@@ -1,4 +1,6 @@
-import type { ComponentFlowReading } from './contracts/component-platform/teacherController'
+import type { ComponentFlowReading, ComponentFlowNavigationMotion } from './contracts/component-platform/teacherController'
+
+export interface FlowNavigationOptions { behavior?: 'instant' | 'smooth'; kind?: 'object' | 'chapter' }
 
 export interface FlowReadingTarget { id: string; element: HTMLElement | null | undefined }
 const clamp = (value: number) => Math.max(0, Math.min(1, value))
@@ -31,13 +33,21 @@ export function readFlowReading(scroll: HTMLElement, body: HTMLElement,
   return { activeInstanceId, progress: range > 0 ? clamp(scroll.scrollTop / range) : 1 }
 }
 
-/** The same scroll coordinates and authored scroll-margin apply to every carrier. */
-export function scrollFlowTarget(scroll: HTMLElement, body: HTMLElement, target: HTMLElement): boolean {
+/** Resolve against the current layout, in the scroll owner's unscaled CSS pixels. */
+function targetTop(scroll: HTMLElement, body: HTMLElement, target: HTMLElement): number | null {
   const scale = scaleOf(body)
-  if (!scale || !body.contains(target) || !scroll.isConnected) return false
+  if (!scale || !body.contains(target) || !scroll.isConnected || !body.isConnected) return null
   for (let parent = target.parentElement; parent && parent !== body; parent = parent.parentElement)
     if (parent.tagName === 'DETAILS') (parent as HTMLDetailsElement).open = true
-  scroll.scrollTop += (target.getBoundingClientRect().top - scroll.getBoundingClientRect().top) / scale - scroll.clientTop - marginOf(target)
+  const top = scroll.scrollTop + (target.getBoundingClientRect().top - scroll.getBoundingClientRect().top) / scale - scroll.clientTop - marginOf(target)
+  return scroll.scrollHeight > 0 ? Math.max(0, Math.min(Math.max(0, scroll.scrollHeight - scroll.clientHeight), top)) : Math.max(0, top)
+}
+
+/** Immediate object reveal, also used by the historical Flow carrier. */
+export function scrollFlowTarget(scroll: HTMLElement, body: HTMLElement, target: HTMLElement): boolean {
+  const top = targetTop(scroll, body, target)
+  if (top === null) return false
+  scroll.scrollTop = top
   return true
 }
 
@@ -45,11 +55,23 @@ export function scrollFlowTarget(scroll: HTMLElement, body: HTMLElement, target:
  * Real scrolling releases that target; this is view state, never author state. */
 export function createFlowReadingNavigation(
   elements: () => { scroll: HTMLElement; body: HTMLElement } | null | undefined,
-  target: (id: string) => HTMLElement | null | undefined,
+  target: (id: string, kind?: 'object' | 'chapter') => HTMLElement | null | undefined,
 ) {
   let selected: { id: string; scroll: HTMLElement; body: HTMLElement; top: number; left: number } | undefined
-  return {
+  let motion: Omit<ComponentFlowNavigationMotion, 'containerId'> | undefined, sequence = 0
+  let active: { finish(completed: boolean): void } | undefined, releaseAnchor: (() => void) | undefined
+  let retired = false, ids: readonly string[] = []
+  const listeners = new Set<() => void>()
+  const changed = () => { for (const listener of listeners) listener() }
+  const cancel = () => { releaseAnchor?.(); releaseAnchor = undefined; selected = undefined; active?.finish(false) }
+  const navigation = {
+    readMotion: () => motion ? { ...motion } : undefined,
+    subscribe(listener: () => void) { listeners.add(listener); return () => { listeners.delete(listener) } },
+    cancel,
+    dispose() { if (retired) return; cancel(); retired = true; listeners.clear() },
     readReading(ids: readonly string[]): Omit<ComponentFlowReading, 'containerId'> | null {
+      // The caller supplies the formal directory; no second reading list is stored.
+      rememberIds(ids)
       const view = elements()
       if (!view) { selected = undefined; return null }
       const reading = readFlowReading(view.scroll, view.body, ids.map(id => ({ id, element: target(id) })))
@@ -61,17 +83,133 @@ export function createFlowReadingNavigation(
       }
       return reading && selected ? { ...reading, activeInstanceId: selected.id } : reading
     },
-    goToInstance(id: string | null, signal?: AbortSignal): boolean {
-      if (signal?.aborted) return false
+    goToInstance(id: string | null, signal?: AbortSignal, options: FlowNavigationOptions = {}): boolean | Promise<boolean> {
+      if (retired || signal?.aborted) return false
       const view = elements()
       if (!view) return false
-      if (id === null) { selected = undefined; view.scroll.scrollTop = 0; view.scroll.scrollLeft = 0; return true }
-      const element = target(id)
-      if (!element || !scrollFlowTarget(view.scroll, view.body, element)) return false
-      selected = { id, ...view, top: view.scroll.scrollTop, left: view.scroll.scrollLeft }
-      return true
+      const kind = options.kind ?? 'object', element = id === null ? view.body : target(id, kind)
+      const destination = element && (id === null ? 0 : targetTop(view.scroll, view.body, element))
+      if (destination === null || destination === undefined || !element) return false
+      const fromInstanceId = navigation.readReading(ids)?.activeInstanceId ?? null
+      cancel()
+      const { scroll, body } = view, win = scroll.ownerDocument.defaultView!
+      const start = scroll.scrollTop, distance = Math.abs(destination - start)
+      const reduced = win.matchMedia?.('(prefers-reduced-motion: reduce)').matches
+      const duration = options.behavior === 'instant' || id === null && options.behavior !== 'smooth' || reduced || distance < 1
+        ? 0 : Math.min(900, 160 + 240 * Math.log1p(distance / Math.max(1, scroll.clientHeight)))
+      motion = { id: ++sequence, kind, status: 'running', fromInstanceId, targetInstanceId: id,
+        startScrollTop: start, targetScrollTop: destination, scrollTop: start, progress: 0, elapsedMs: 0, durationMs: duration }
+      let frame: number | undefined, settled = false, released = false, observer: ResizeObserver | undefined, result!: (value: boolean) => void
+      const finished = new Promise<boolean>(resolve => { result = resolve })
+      const current = motion
+      const targetPosition = () => id === null ? 0 : targetTop(scroll, body, element)
+      const layoutSignature = () => [body.offsetWidth, body.offsetHeight, scroll.scrollHeight, scroll.clientHeight, scaleOf(body)].join('/')
+      let lastLayout = layoutSignature()
+      const release = () => {
+        if (released) return
+        released = true
+        observer?.disconnect()
+        if (frame !== undefined) win.cancelAnimationFrame(frame)
+        frame = undefined
+        signal?.removeEventListener('abort', aborted)
+        for (const name of ['wheel', 'touchstart', 'pointerdown']) scroll.ownerDocument.removeEventListener(name, takeover, true)
+        scroll.ownerDocument.removeEventListener('keydown', keyboard, true)
+        scroll.removeEventListener('scroll', displaced)
+        releaseAnchor = undefined
+      }
+      const finish = (completed: boolean) => {
+        if (settled) return
+        settled = true; active = undefined
+        if (frame !== undefined) win.cancelAnimationFrame(frame)
+        frame = undefined
+        signal?.removeEventListener('abort', aborted)
+        current.status = completed ? 'completed' : 'cancelled'
+        current.scrollTop = scroll.scrollTop
+        if (completed) {
+          current.progress = 1
+          if (id !== null) selected = { id, ...view, top: scroll.scrollTop, left: scroll.scrollLeft }
+        } else release()
+        changed(); result(completed)
+      }
+      const aborted = () => finish(false)
+      const interrupt = () => {
+        release(); selected = undefined
+        if (!settled) finish(false)
+        else if (motion === current) { motion = undefined; changed() }
+      }
+      const userDisplaced = (position: number | null) => Math.abs(scroll.scrollTop - current.scrollTop) > 1
+        && position !== null && Math.abs(position - current.targetScrollTop) < 0.5 && layoutSignature() === lastLayout
+      // Wheel/touch events inside a source iframe do not bubble into this
+      // document. Its native scroll chain still changes this real scroll owner.
+      const displaced = () => { if (!released && userDisplaced(targetPosition())) interrupt() }
+      const takeover = (event: Event) => {
+        // Ignore a click on a separate HUD, but catch wheel/touch/scrollbar and
+        // scrolling keys in this Flow. The browser then keeps its native input.
+        if (event.type === 'keydown') {
+          const key = (event as KeyboardEvent).key
+          if (!['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End', ' '].includes(key)) return
+          const node = event.target as HTMLElement | null
+          if (node?.closest('input,textarea,select,[contenteditable="true"]')) return
+        }
+        if (event.target instanceof win.Node && !scroll.contains(event.target) && event.target !== scroll.ownerDocument.body) return
+        interrupt()
+      }
+      // PresenterInput decides at the end of bubbling whether a key is course
+      // navigation. Only a remaining native scroll key takes over this motion.
+      const keyboard = (event: KeyboardEvent) => win.queueMicrotask(() => {
+        if (!released && !event.defaultPrevented) takeover(event)
+      })
+      releaseAnchor = release
+      for (const name of ['wheel', 'touchstart', 'pointerdown']) scroll.ownerDocument.addEventListener(name, takeover, { capture: true, passive: true })
+      scroll.ownerDocument.addEventListener('keydown', keyboard, true)
+      scroll.addEventListener('scroll', displaced, { passive: true })
+      signal?.addEventListener('abort', aborted, { once: true })
+      active = { finish }
+      const began = win.performance.now()
+      const write = (time: number) => {
+        frame = undefined
+        if (settled) return
+        const position = targetPosition()
+        if (signal?.aborted || retired || !scroll.isConnected || position === null) { finish(false); return }
+        if (userDisplaced(position)) { interrupt(); return }
+        lastLayout = layoutSignature()
+        const elapsed = Math.min(duration, Math.max(0, time - began)), t = duration ? elapsed / duration : 1
+        const eased = 1 - Math.pow(1 - t, 3)
+        scroll.scrollTop = start + (position - start) * eased
+        current.targetScrollTop = position; current.scrollTop = scroll.scrollTop; current.elapsedMs = elapsed
+        current.progress = position === start ? t : clamp((scroll.scrollTop - start) / (position - start))
+        if (t === 1) { scroll.scrollTop = position; finish(true) }
+        else { changed(); if (!settled) frame = win.requestAnimationFrame(write) }
+      }
+      // Layout changes after arrival are corrected only while this explicit
+      // navigation still owns the anchor. User input releases it immediately.
+      const resized = () => {
+        if (released || !settled || current.status !== 'completed' || frame !== undefined) return
+        frame = win.requestAnimationFrame(() => {
+          frame = undefined
+          if (released) return
+          const position = targetPosition()
+          if (position === null || !scroll.isConnected) { release(); return }
+          const previousTop = current.scrollTop, previousTarget = current.targetScrollTop
+          if (Math.abs(position - scroll.scrollTop) >= 0.5) scroll.scrollTop = position
+          current.targetScrollTop = position; current.scrollTop = scroll.scrollTop
+          lastLayout = layoutSignature()
+          if (id !== null) selected = { id, ...view, top: scroll.scrollTop, left: scroll.scrollLeft }
+          if (current.scrollTop !== previousTop || position !== previousTarget) changed()
+        })
+      }
+      observer = win.ResizeObserver ? new win.ResizeObserver(resized) : undefined
+      observer?.observe(body); if (element !== body) observer?.observe(element)
+      changed()
+      if (settled) return false
+      if (id === null) scroll.scrollLeft = 0
+      if (duration === 0) { write(began); return true }
+      frame = win.requestAnimationFrame(write)
+      return finished
     },
   }
+  function rememberIds(next: readonly string[]) { ids = next }
+  return navigation
 }
 
 /** Observe existing geometry, coalescing notifications without creating author state. */

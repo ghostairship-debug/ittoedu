@@ -48,6 +48,7 @@ async function host(project = fixture()) {
   const first = await registry.create({ kind: 'course-v10', project, resources: { assets: {}, components: {} } }, 'u4.h5lesson')
   first.subscribe(event => listeners.forEach(listener => listener(event)))
   const api = {
+    list: async () => registry.list(),
     bootstrapCourse: async () => first.read(), read: async (id: string) => registry.get(id).read(),
     dispatch: async (operation: Parameters<DocumentHostAPI['dispatch']>[0]) => registry.get(operation.documentId).execute(operation),
     lookup: async (id: string, operationId: string) => registry.get(id).lookupOperation(operationId),
@@ -89,6 +90,68 @@ it.each([true, false])('anchors the quick bar to the clicked internal author tar
     expect(bar.placement).toBe('below'); expect(bar.top).toBeGreaterThan(anchor.top + anchor.height)
     await act(async () => { fireEvent.doubleClick(workspace, { clientX: x, clientY: y }) }); expect(open).toHaveBeenCalledTimes(1)
     expect(h.first.read().undoDepth).toBe(0); expect(h.bridge.read().project).toEqual(project)
+  } finally {
+    cleanup(); h.bridge.dispose(); if (capture) Object.defineProperty(HTMLElement.prototype, 'setPointerCapture', capture); else delete (HTMLElement.prototype as Partial<HTMLElement>).setPointerCapture
+    if (release) Object.defineProperty(HTMLElement.prototype, 'releasePointerCapture', release); else delete (HTMLElement.prototype as Partial<HTMLElement>).releasePointerCapture
+    vi.restoreAllMocks(); vi.unstubAllGlobals()
+  }
+})
+it('commits the final internal pointer sample as one undoable resize and leaves a stationary pointer unchanged', async () => {
+  const project = fixture()
+  project.instances.text.frame = { width: 900, height: 600, transform: [1, 0, 0, 1, 200, 140] }
+  const h = await host(project), kernel = createEditorStoreKernel({ bridge: h.bridge, commit() {} })
+  const frame = { width: 80, height: 40, transform: [1, 0, 0, 1, 150, 50] as [number, number, number, number, number, number] }
+  const spot: ComponentAuthorSpot = { id: 'hello', instanceId: 'text', mountGeneration: 1, authorKey: 'hello', kind: 'text', initialValue: 'Hello',
+    binding: { kind: 'dom', path: [{ tag: 'p', index: 0 }], baseline: 'Hello' }, localBounds: frame,
+    geometry: { frame, parentToInstance: [1, 0, 0, 1, 0, 0], author: {}, boxInsets: { width: 0, height: 0 } } }
+  const capture = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'setPointerCapture'), release = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'releasePointerCapture')
+  vi.stubGlobal('PointerEvent', class extends MouseEvent { pointerId: number; constructor(type: string, init: MouseEventInit & { pointerId?: number } = {}) { super(type, init); this.pointerId = init.pointerId ?? 1 } })
+  vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} })
+  const rect = { x: 20, y: 40, left: 20, top: 40, right: 1940, bottom: 1320, width: 1920, height: 1280, toJSON() {} }
+  vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) { return this.classList.contains('canvas-stage-stack') ? rect : { ...rect, width: 960, height: 640 } })
+  Object.defineProperty(HTMLElement.prototype, 'setPointerCapture', { configurable: true, value() {} })
+  Object.defineProperty(HTMLElement.prototype, 'releasePointerCapture', { configurable: true, value() {} })
+  const commit = vi.fn((edits: Parameters<SlideWorkspacePorts['commit']>[0], target: Parameters<SlideWorkspacePorts['commit']>[1], group?: string) => kernel.editCaptured(kernel.capture(edits, target), group))
+  const report = vi.fn()
+  const ports: SlideWorkspacePorts = {
+    read: () => { const v = h.bridge.read(); return { project: v.editingProject, documentId: v.activeDocumentId, surfaceId: v.surfaceId, selectedInstanceIds: v.selectedInstanceIds,
+      interactionSelection: v.interactionSelection, activation: v.activation, activeStateId: v.activeStateId, assetUrls: {}, canvasMode: 'edit', contentEdit: null, drawTool: null } },
+    authorSpots: () => [spot], selectAuthorSpot: value => h.bridge.selectAuthorSpot(h.bridge.read().activeDocumentId!, value),
+    capture: documentId => kernel.captureTarget(documentId), commit,
+    edit: (edits, group) => kernel.edit(edits, group), select: ids => kernel.selectInstances(ids), selectSurface() {},
+    setCanvasMode() {}, setDrawTool() {}, report, paste() {}, selectAll() {}, beginTextEdit: () => null, updateDataDraft() {}, commitTextEdit: async () => {}, cancelTextEdit() {},
+    undo() {}, redo() {}, onElement() {}, onTargetElement() {}, addTextNode() {}, addFormulaNode() {}, addRectangleNode() {}, addShapeNode() {}, addTableNode() {}, addChartNode() {}, addExternalComponentNode() {}, drawShapeNode() {},
+  }
+  function Harness() { useSyncExternalStore(h.bridge.subscribe.bind(h.bridge), () => h.bridge.read()); return <SlideLocationWorkspace snapshot={ports.read()} ports={ports} onAddImage={() => {}} onAddVideo={() => {}} onSelectImageAsset={async () => null}/> }
+  try {
+    h.bridge.selectAuthorSpot(h.bridge.read().activeDocumentId!, spot)
+    render(<Harness/>)
+    const workspace = screen.getByRole('main', { name: '画布' })
+    const handle = () => workspace.querySelector('[data-internal-selection] [data-handle="se"]')!
+    // The internal bottom-right corner is (430, 230), rendered at 2x with the stage origin (20, 40).
+    const x = 880, y = 500, before = h.first.read()
+    fireEvent.pointerDown(handle(), { pointerId: 11, button: 0, clientX: x, clientY: y })
+    fireEvent.pointerUp(workspace, { pointerId: 11, button: 0, clientX: x, clientY: y })
+    expect(commit).not.toHaveBeenCalled()
+    expect(h.first.read()).toMatchObject({ revision: before.revision, dirty: before.dirty, undoDepth: 0 })
+    for (const [index, sample] of [
+      { move: false, dx: 40, dy: 20, width: 100, height: 50 },
+      { move: true, dx: 80, dy: 40, width: 120, height: 60 },
+    ].entries()) {
+      act(() => h.bridge.selectAuthorSpot(h.bridge.read().activeDocumentId!, spot))
+      fireEvent.pointerDown(handle(), { pointerId: 12 + index, button: 0, clientX: x, clientY: y })
+      if (sample.move) fireEvent.pointerMove(workspace, { pointerId: 12 + index, clientX: x + 20, clientY: y + 10 })
+      expect(commit).toHaveBeenCalledTimes(index)
+      fireEvent.pointerUp(workspace, { pointerId: 12 + index, button: 0, clientX: x + sample.dx, clientY: y + sample.dy })
+      await waitFor(() => expect(h.bridge.read().project!.instances.text.authoring?.records?.hello?.overrides.geometry).toEqual({ width: sample.width, height: sample.height }))
+      expect(commit).toHaveBeenCalledTimes(index + 1)
+      expect(h.first.read().undoDepth).toBe(1)
+      expect(h.bridge.read().project!.instances.text.frame).toEqual(project.instances.text.frame)
+      await act(async () => { await kernel.navigateHistory('undo') })
+      expect(h.first.read().undoDepth).toBe(0)
+      expect(h.bridge.read().project!.instances.text).toEqual(project.instances.text)
+    }
+    expect(report).not.toHaveBeenCalled()
   } finally {
     cleanup(); h.bridge.dispose(); if (capture) Object.defineProperty(HTMLElement.prototype, 'setPointerCapture', capture); else delete (HTMLElement.prototype as Partial<HTMLElement>).setPointerCapture
     if (release) Object.defineProperty(HTMLElement.prototype, 'releasePointerCapture', release); else delete (HTMLElement.prototype as Partial<HTMLElement>).releasePointerCapture

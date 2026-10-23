@@ -1,0 +1,32 @@
+{
+  "before": {
+    "initialIdle": "true",
+    "initialRaf": 0,
+    "transitionRaf": 1,
+    "afterImageLoadRaf": 1,
+    "afterRetargetRaf": 2,
+    "finalStage": "layers",
+    "finalIdle": "true",
+    "finalRaf": 0,
+    "suspendRaf": 0,
+    "resumeIdle": "true",
+    "disposedOff": 1,
+    "disposedRaf": 0,
+    "listeners": []
+  },
+  "withImageLoadGuard": {
+    "initialIdle": "true",
+    "initialRaf": 0,
+    "transitionRaf": 1,
+    "afterImageLoadRaf": 1,
+    "afterRetargetRaf": 1,
+    "finalStage": "layers",
+    "finalIdle": "true",
+    "finalRaf": 0,
+    "suspendRaf": 0,
+    "resumeIdle": "true",
+    "disposedOff": 1,
+    "disposedRaf": 0,
+    "listeners": []
+  }
+}

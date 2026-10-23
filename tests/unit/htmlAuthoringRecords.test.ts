@@ -337,8 +337,20 @@ it('compiles one real HTML pointer stream through the iframe and parent matrices
     authoring: { authorKey: 'title-key', record: { kind: 'text', binding: { kind: 'dom', path: [{ tag: 'body', index: 1 }, { tag: 'p', index: 0, attributes: { id: 'title' } }], textIndex: 0, baseline: 'Hello' }, overrides: {} } },
     geometry: { frame: { width: 100, height: 20, transform: [1, 0, 0, 1, 10, 20] }, parentToInstance: [2, 0, 0, 2, 0, 0], author: {}, boxInsets: { width: 0, height: 0 } } }
   try {
+    // The approved view starts in normal run mode; exercise the actual mode
+    // handshake before expecting author handles, retaining the geometry proof.
+    const receive = async (data: Record<string, unknown>) => act(async () => {
+      window.dispatchEvent(new MessageEvent('message', { source: iframe.contentWindow,
+        data: { protocol: 1, leaseId: 'lease', loadId: 'load', ...data } }))
+    })
+    await receive({ event: 'ready', sectionCount: 0, sectionsAmbiguous: false })
+    const off = posted.mock.calls.map(call => call[0]).filter(value => value.type === 'html-preview.edit-mode').at(-1)!
+    await receive({ event: 'edit-mode-ready', seq: 1, requestId: off.requestId, enabled: false })
+    await act(async () => { fireEvent.click(view.getByRole('button', { name: '编辑' })) })
+    const on = posted.mock.calls.map(call => call[0]).filter(value => value.type === 'html-preview.edit-mode').at(-1)!
+    await receive({ event: 'edit-mode-ready', seq: 2, requestId: on.requestId, enabled: true })
     await act(async () => window.dispatchEvent(new MessageEvent('message', { source: iframe.contentWindow,
-      data: { event: 'targets', protocol: 1, leaseId: 'lease', loadId: 'load', seq: 1, targets: [report] } })))
+      data: { event: 'targets', protocol: 1, leaseId: 'lease', loadId: 'load', seq: 3, targets: [report] } })))
     const handle = await view.findByLabelText('移动 HTML 内部对象') as HTMLButtonElement
     handle.setPointerCapture = () => {}
     const pointer = (type: string, x: number, y: number) => {

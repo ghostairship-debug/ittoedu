@@ -153,6 +153,14 @@ function oneRequest(url: URL, address: { address: string; family: 4 | 6 }, conne
     const req = client(url, requestOptions, response => {
       activity()
       const status = response.statusCode ?? 0
+      // The public resource contract only returns successful bodies. An error
+      // status is already conclusive at the headers; its body may never end.
+      // Stop this response instead of buffering it before reporting the error.
+      if (status < 200 || status >= 400) {
+        reject(new PublicHttpError('http-error', `网页返回 HTTP ${status}`, status))
+        response.destroy()
+        return
+      }
       const location = typeof response.headers.location === 'string' ? response.headers.location : undefined
       const contentTypeHeader = String(response.headers['content-type'] ?? 'application/octet-stream')
       const contentType = contentTypeHeader.split(';', 1)[0]!.trim().toLowerCase()

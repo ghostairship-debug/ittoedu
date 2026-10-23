@@ -34,6 +34,11 @@ export class AttachmentsDesktopService {
   streamPdfPages(input: AttachmentExtractionInput, options: PdfPageSinkOptions) {
     return this.extractor.streamPdfPages(input, options)
   }
+  /** Lesson materials share the same disposable Office parser as attachments. */
+  extractOffice(input: Pick<AttachmentExtractionInput, 'bytes' | 'filename'>,
+    options: { signal?: AbortSignal; onProgress?: (page: number, total: number) => void }) {
+    return this.extractor.extract(input, options)
+  }
   private retainWindow(window: BrowserWindow): void {
     const owner = window.webContents.id
     if (this.windows.has(owner)) return

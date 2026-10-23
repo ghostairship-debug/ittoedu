@@ -21,7 +21,7 @@ it('cancels a continuous pointer gesture when focus moves before release', () =>
   expect(commit).not.toHaveBeenCalled()
 })
 
-it('retires a color draft on target change while preserving the control DOM', () => {
+it('parks the old color draft and retires its picker events while the next target gets its own control', () => {
   const commit = vi.fn()
   const before = vi.fn()
   const after = vi.fn()
@@ -33,11 +33,17 @@ it('retires a color draft on target change while preserving the control DOM', ()
   fireEvent.input(picker, { target: { value: '#123456' } })
   expect(before).toHaveBeenLastCalledWith('#123456')
   rerender(view('new', after))
-  expect(screen.getByLabelText('probe选择器')).toBe(picker)
+  const nextPicker = screen.getByLabelText('probe选择器')
+  expect(nextPicker).not.toBe(picker)
+  expect(picker).not.toBeInTheDocument()
   expect(before).toHaveBeenLastCalledWith(null)
   fireEvent.change(picker, { target: { value: '#123456' } })
   expect(commit).not.toHaveBeenCalled()
   expect(after).not.toHaveBeenCalled()
+  fireEvent.input(nextPicker, { target: { value: '#654321' } })
+  fireEvent.change(nextPicker, { target: { value: '#654321' } })
+  expect(after).toHaveBeenCalledWith('#654321')
+  expect(commit).toHaveBeenCalledExactlyOnceWith('#654321')
 })
 
 it('allows choosing the same preset again after an external Undo', () => {

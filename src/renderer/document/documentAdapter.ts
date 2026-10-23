@@ -137,8 +137,8 @@ export function editorPositionToPoint(doc: PMNode, position: number, affinity: '
 }
 
 /** Identity repair is performed only at an editor split/paste boundary, never by source parsing. */
-export function renewEditorIdentities(doc: PMNode, createId: () => string, copied = false): PMNode {
-  const seen = new Set<string>()
+export function renewEditorIdentities(doc: PMNode, createId: () => string, copied = false, existingIds: ReadonlySet<string> = new Set()): PMNode {
+  const seen = new Set(existingIds)
   const visit = (node: PMNode, inherited = new Map<string, string>()): PMNode => {
     const attrs = { ...node.attrs }
     const ids = new Map(inherited)

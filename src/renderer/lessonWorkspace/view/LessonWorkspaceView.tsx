@@ -21,6 +21,7 @@ export function LessonWorkspaceView(props: LessonWorkspaceViewProps) {
  return <WorkspaceMediaSourceProvider directory={props.state.workspace} files={props.workspaceFiles}><WorkbenchSessionPortalProvider><div className="lesson-workspace-shell" data-execution={true} data-editor-focus={editorFocus}>
    {!editorFocus && <WorkspaceChrome props={props} layout={layout} proPanel={activePanel} exitEditor={exitEditor} />}
    {props.state.error && <div role="alert" className="lesson-workspace-error">{props.state.error}</div>}
+   {props.state.importingCourse && <div role="status" className="lesson-workspace-import-status">正在导入 PPT… <button type="button" onClick={props.actions.cancelNewCourseFromPptx}>取消导入</button></div>}
    <WorkspaceGrid layout={layout} editorFocus={editorFocus} proPanel={activePanel} mobilePane={props.state.mobilePane} selectPane={props.actions.setMobilePane}
      resources={<WorkspaceResources props={props} layout={layout} editorFocus={editorFocus} proPanel={activePanel} />}
      content={<WorkspaceContentHost props={props} layout={layout} editorFocus={editorFocus} enterEditor={() => { proEditorRailController.close(); setEditorFocus(true); props.actions.setMobilePane('workbench') }} exitEditor={exitEditor} />}

@@ -25,7 +25,7 @@ export interface FlowDocumentRecoveryEntry {
 export function useFlowDocumentRecovery(options: FlowDocumentRecoveryOptions): {
   retained: readonly FlowDocumentRecoveryCandidate[]
   flush(): Promise<boolean>
-  flushAll(entries: readonly FlowDocumentRecoveryEntry[]): Promise<boolean>
+  flushAll(entries: readonly FlowDocumentRecoveryEntry[], options?: { retain?: boolean }): Promise<boolean>
   suspendForClose(epochs: readonly (string | number)[]): void
   resumeAfterCloseCancelled(epochs: readonly (string | number)[]): void
 } {
@@ -133,7 +133,7 @@ export function useFlowDocumentRecovery(options: FlowDocumentRecoveryOptions): {
     suspendForClose: useCallback(epochs => { for (const epoch of epochs) suspended.current.add(epoch) }, []),
     resumeAfterCloseCancelled: useCallback(epochs => { for (const epoch of epochs) suspended.current.delete(epoch); setResumeVersion(value => value + 1) }, []),
     flush: useCallback(async () => { await writes.current; return !failed.current }, []),
-    flushAll: useCallback(async (entries: readonly FlowDocumentRecoveryEntry[]) => {
+    flushAll: useCallback(async (entries: readonly FlowDocumentRecoveryEntry[], options?: { retain?: boolean }) => {
       const frozen = structuredClone(entries), port = latest.current.options.port
       if (!frozen.length) { await writes.current; return true }
       if (!port) { report(new Error('正文恢复服务不可用，输入仍保留')); return false }
@@ -156,7 +156,14 @@ export function useFlowDocumentRecovery(options: FlowDocumentRecoveryOptions): {
           }
           identities.set(bindingKey, recoveryIdentity)
           const currentIdentity = { ...recoveryIdentity, projectPath: target.projectPath, revision: target.revision }
-          await port.write(serializeFlowDocumentRecovery(currentIdentity, draft), currentIdentity)
+          const record = serializeFlowDocumentRecovery(currentIdentity, draft)
+          await port.write(record, currentIdentity)
+          if (options?.retain) {
+            if (!port.retain) throw new Error('正文原稿保留服务尚未连接，当前输入继续保留')
+            await port.retain(record, currentIdentity)
+            const retained = await port.read(currentIdentity)
+            if (isCurrent(recoveryIdentity)) setRetained(retained)
+          }
           if (isCurrent(recoveryIdentity)) failed.current = false
         }
       }).catch(error => { complete = false; report(error) })

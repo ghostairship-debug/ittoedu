@@ -10,12 +10,13 @@ const commands: MenuCommand[] = [
   { id: 'delete', label: '删除段落', group: '段落', run },
 ]
 
-it('shows only for the caret block and shares insertion commands with the full handle menu', () => {
+it('uses one handle for insertion and paragraph actions', () => {
   const view = render(<DocumentBlockHandle blockId={null} rect={null} commands={commands} />)
   expect(screen.queryByRole('button', { name: '段落操作' })).toBeNull()
   view.rerender(<DocumentBlockHandle blockId="p" rect={{ left: 100, top: 80, height: 25 }} commands={commands} />)
-  fireEvent.click(screen.getByRole('button', { name: '插入段落' }))
-  expect(within(screen.getByRole('menu', { name: '插入段落' })).getAllByRole('menuitem').map(item => item.getAttribute('aria-label'))).toEqual(['下方插入正文'])
+  expect(screen.queryByRole('button', { name: '插入段落' })).toBeNull()
+  fireEvent.click(screen.getByRole('button', { name: '段落操作' }))
+  expect(within(screen.getByRole('menu', { name: '段落操作' })).getAllByRole('menuitem')).toHaveLength(2)
   fireEvent.click(screen.getByRole('menuitem', { name: '下方插入正文' }))
   expect(run).toHaveBeenCalledOnce()
   fireEvent.click(screen.getByRole('button', { name: '段落操作' }))

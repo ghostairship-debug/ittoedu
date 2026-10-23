@@ -1,5 +1,5 @@
 import { strFromU8, strToU8, zipSync } from 'fflate'
-import { buildFlowDocxPartsFromPlan, wordDrawingAnchorXml, wordContentGraphicXml, type WordDrawingAnchor, type FlowDocxAsset, type FlowDocxOptions, type FlowDocxBlockReportItem } from '../../docxAssembly'
+import { buildFlowDocxPartsFromPlan, wordDrawingAnchorXml, wordContentGraphicXml, WORD_DOCUMENT_TITLE_LINE_HEIGHT_PX, type WordDrawingAnchor, type FlowDocxAsset, type FlowDocxOptions, type FlowDocxBlockReportItem } from '../../docxAssembly'
 import { resolveFlowDocxPageBox } from '../../flowPageBox'
 import type { FlowPrintNode, FlowPrintPlan } from '../../course/flowPrintPlan'
 import { textOutputAdapter } from '../../../../components/text/adapters'
@@ -16,6 +16,8 @@ import { flowCompositionPictureSlices } from '../../course/flowCompositionPictur
 import { hasUnsupportedXmlText } from '../../xmlText'
 import { documentColorChannels, parseDocumentColor } from '../../../../shared/document/color'
 import type { ComponentFrame } from '../../../../shared/contracts/component-platform/frame'
+import { componentReadingLayout, wordReadingLayout } from './layout'
+import { scaleReadingNodeText, scaleWordInheritedText } from './wordTextScale'
 
 export type { ComponentExportDocument, ComponentOutputDiagnostic, ComponentOutputAsset, ComponentStaticCapture, ComponentCaptureRequest, ComponentDocumentOutputOptions } from './reading'
 const content = (text: string) => ({ inlines: [{ type: 'text' as const, text }] })
@@ -41,6 +43,9 @@ export async function buildComponentDocx(document: ComponentExportDocument, opti
   const pageSize = options.pageSize ?? 'A4', orientation = options.orientation ?? 'portrait'
   const page = resolveFlowDocxPageBox(pageSize, orientation)
   const width = page.maxContentWidthPx
+  const layout = componentReadingLayout(projection, width)
+  const readingBlocks = new Map(projection.blocks.map(block => [block.instance.id, block]))
+  const suppressed = new Set<string>()
   let drawingId = 10000
   // A marker is software-owned and checked against authored JSON before substitution.
   let markerPrefix = '__guoling_word_output__'
@@ -73,8 +78,13 @@ export async function buildComponentDocx(document: ComponentExportDocument, opti
     if (!capture) return false
     const id = `${markerPrefix}capture${assets.size}`
     assets.set(id, capture)
+    const available = layout.widths.get(block.instance.id) ?? width
+    const pageHeight = page.maxContentHeightPx - 32
+    const startsDocument = nodes.every(node => node.type === 'document-title'
+      || node.type === 'paragraph' && node.blockId.startsWith(markerPrefix))
     const slices = block.floatingPlacement ? [{ y: 0, pixels: capture.height, width: capture.width, height: capture.height }]
-      : flowCompositionPictureSlices(capture.width, capture.height, Math.min(560, width), page.maxContentHeightPx - 32)
+      : flowCompositionPictureSlices(capture.width, capture.height, Math.min(560, available), pageHeight,
+        startsDocument ? pageHeight - WORD_DOCUMENT_TITLE_LINE_HEIGHT_PX : pageHeight)
     slices.forEach((slice, index) => nodes.push({ type: 'media', blockId: `${block.instance.id}:capture:${index}`, mediaKind: 'image', assetId: id,
       fallbackLabel: `${block.instance.id} ${index + 1}/${slices.length}`, width: slice.width, height: slice.height,
       sourceRect: { x: 0, y: slice.y / capture!.height, width: 1, height: slice.pixels / capture!.height }, ...(index ? { pageBreakBefore: true } : {}) }))
@@ -84,8 +94,11 @@ export async function buildComponentDocx(document: ComponentExportDocument, opti
   }
   for (const block of projection.blocks) {
     const id = block.instance.id
+    if (block.parentId && suppressed.has(block.parentId)) { suppressed.add(id); continue }
+    const width = layout.widths.get(id) ?? page.maxContentWidthPx
     const span = { block, start: `${markerPrefix}start${blockSpans.length}`, end: `${markerPrefix}end${blockSpans.length}` }
     blockSpans.push(span)
+    const startNode = nodes.length
     boundary(span.start)
     if (hasUnsupportedXmlText(block.instance.data)) diagnostics.push({ surfaceId: options.surfaceId, instanceId: id, code: 'word-xml-text-substitution', message: 'DOCX XML 无法表示的字符已局部替换为 U+FFFD；作者原文保留。' })
     const colors = (value: unknown): void => {
@@ -102,6 +115,7 @@ export async function buildComponentDocx(document: ComponentExportDocument, opti
     const opacity = block.outputOpacity
     const requiresVisualCapture = opacity > 0 && (shear || opacity < 1 && block.kind !== 'image' && block.kind !== 'shape')
     const visualCaptured = requiresVisualCapture && await captured(block, shear)
+    if (block.kind === 'layout' && (requiresVisualCapture || opacity === 0)) suppressed.add(id)
     if (shear && opacity > 0) diagnostics.push({ surfaceId: options.surfaceId, instanceId: id, code: 'word-affine-capture', message: visualCaptured ? 'Word 不能表达仿射倾斜；实际图面已按正式矩阵投影，专业数据保留在工程。' : 'Word 不能表达此仿射倾斜且未取得实际图面；此对象没有用近似几何冒充输出。' })
     if (requiresVisualCapture && opacity < 1) diagnostics.push({ surfaceId: options.surfaceId, instanceId: id, code: 'word-opacity-capture', message: visualCaptured
       ? 'Word 原生内容不能完整表达外框透明度；采用实际初态图面，专业数据与透明度保留在工程。'
@@ -109,6 +123,15 @@ export async function buildComponentDocx(document: ComponentExportDocument, opti
     if (opacity === 0) nodes.push({ type: 'paragraph', blockId: id, content: content('') })
     else if (requiresVisualCapture && !visualCaptured) note(block, 'capture-missing', '此对象的透明度或倾斜需要实际图面；未取得图面，专业数据保留在工程。')
     else if (!visualCaptured) switch (block.kind) {
+      case 'layout': {
+        const group = layout.groups.get(id)!
+        if (group.captureReason) {
+          suppressed.add(id)
+          diagnostics.push({ surfaceId: options.surfaceId, instanceId: id, code: 'word-layout-capture', message: `${group.captureReason} 该局部区域使用实际初态图面，其他正文和专业对象仍保持原生结构。` })
+          if (!await captured(block)) note(block, 'capture-missing', '局部布局缺少实际初态图面；原层级、几何和专业数据保留在工程。')
+        } else professionalReport.push({ blockId: id, disposition: 'preserved', detail: 'Native Word layout table retains group hierarchy, columns and editable professional children' })
+        break
+      }
       case 'document-block': {
         const data = block.data
         switch (data.type) {
@@ -200,7 +223,8 @@ export async function buildComponentDocx(document: ComponentExportDocument, opti
           catch (error) { note(block, 'asset-decode-failed', String(error), block.data.assetId); break }
           assets.set(block.data.assetId, asset)
           const frame = block.outputFrame ?? block.instance.frame
-          const local = frame ?? { width: Math.min(width, source.width), height: Math.min(width, source.width) * source.height / source.width, transform: [1, 0, 0, 1, 0, 0] as const }
+          const scale = frame && !block.floatingPlacement ? Math.min(1, width / frame.width) : 1
+          const local = frame ? { ...frame, width: frame.width * scale, height: frame.height * scale } : { width: Math.min(width, source.width), height: Math.min(width, source.width) * source.height / source.width, transform: [1, 0, 0, 1, 0, 0] as const }
           const geometry = outputImageGeometry({ ...block.data, frame: local, source })
           if (frame && block.floatingPlacement) {
             const origin = transformPoint(frame.transform, geometry.shown)
@@ -223,12 +247,14 @@ export async function buildComponentDocx(document: ComponentExportDocument, opti
     }
     const definition = document.definitions[block.instance.definitionId]!
     const implementation = block.instance.implementationOverride ?? definition.implementation
-    if (implementation.kind === 'source' && block.kind !== 'static' && opacity > 0 && !requiresVisualCapture
+    if (implementation.kind === 'source' && block.kind !== 'static' && block.kind !== 'layout' && opacity > 0 && !requiresVisualCapture
       && !(block.kind === 'document-block' && block.data.type === 'code' && block.data.language === 'mermaid')) {
       if (!await captured(block)) note(block, 'custom-visual-missing', '自定义源码的图面尚未捕获；文件保留专业数据的默认输出，无法代表定制视觉与互动。')
     }
     if (block.instance.flowLayout?.caption && opacity > 0) nodes.push({ type: 'paragraph', blockId: `${id}:caption`, content: block.instance.flowLayout.caption })
     if (block.instance.flowLayout?.wrap && block.instance.flowLayout.wrap !== 'none') note(block, 'word-text-wrap', '此对象的环绕方式尚不映射到 Word，保留专业内容与题注。')
+    const textScale = layout.scales.get(id) ?? 1
+    for (let index = startNode; index < nodes.length; index++) nodes[index] = scaleReadingNodeText(nodes[index]!, textScale)
     boundary(span.end)
   }
   const background = resolveComponentBackground(document, projection.surface)
@@ -276,6 +302,8 @@ export async function buildComponentDocx(document: ComponentExportDocument, opti
     suffix = word.slice(markerParagraph(blockSpans[blockSpans.length - 1]!.end).end)
     for (const span of blockSpans) {
       span.xml = word.slice(markerParagraph(span.start).end, markerParagraph(span.end).start)
+      if (!capturedIds.has(span.block.instance.id)) span.xml = scaleWordInheritedText(span.xml,
+        layout.scales.get(span.block.instance.id) ?? 1, strFromU8(files['word/styles.xml']!))
       const opacity = capturedIds.has(span.block.instance.id) ? span.block.outputInheritedOpacity : span.block.outputOpacity
       if (capturedIds.has(span.block.instance.id) && opacity < 1) span.xml = span.xml.replace(/<a:blip([^>]*)\/>/g, `<a:blip$1><a:alphaModFix amt="${Math.round(opacity * 100000)}"/></a:blip>`)
       if (opacity > 0 && opacity < 1 && !capturedIds.has(span.block.instance.id)) {
@@ -342,7 +370,20 @@ export async function buildComponentDocx(document: ComponentExportDocument, opti
     else prefix = prefix.replace(/<w:p>(<w:pPr>[\s\S]*?<\/w:pPr>)?/, (_, properties = '') => `<w:p>${properties}${drawing}`)
     span.xml = ''
   }
-  if (blockSpans.length) word = prefix + blockSpans.map(span => span.xml).join('') + suffix
+  if (blockSpans.length) {
+    const spans = new Map(blockSpans.map(span => [span.block.instance.id, span]))
+    const render = (id: string): string => {
+      const span = spans.get(id)
+      if (!span) return ''
+      const children = projection.blocks.filter(block => block.parentId === id && spans.has(block.instance.id))
+      const body = new Map(children.map(block => [block.instance.id, render(block.instance.id)]))
+      const group = layout.groups.get(id)
+      return span.block.kind === 'layout' && group && !suppressed.has(id)
+        ? (span.xml ?? '') + wordReadingLayout(group, body, span.block.instance, layout.scales.get(id) ?? 1)
+        : (span.xml ?? '') + [...body.values()].join('')
+    }
+    word = prefix + blockSpans.filter(span => !span.block.parentId || !readingBlocks.has(span.block.parentId)).map(span => render(span.block.instance.id)).join('') + suffix
+  }
   if (footerDrawings.length) {
     const namespaces = word.match(/<w:document([^>]*)>/)![1]
     files['word/footer1.xml'] = strToU8(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:ftr${namespaces}><w:p>${footerDrawings.join('')}</w:p></w:ftr>`)

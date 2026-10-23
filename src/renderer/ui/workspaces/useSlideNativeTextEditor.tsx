@@ -34,6 +34,7 @@ interface Ports {
   commit(): Promise<void>
   commitInput?(): Promise<void>
   cancel(): void
+  preserve?(): Promise<boolean>
   undo(): void
   redo(): void
   host(): HTMLElement | null
@@ -312,7 +313,7 @@ export function useSlideNativeTextEditor(ports: Ports, contextKey: string) {
         }
         current.update(data, composing, undefined, undefined, rangeProjection, historyGroup, layoutReady)
       }} updateSpot={(value, composing) => ports.updateSpot?.(value, composing)} commit={ports.commit} commitInput={ports.commitInput}
-      cancel={ports.cancel} undo={ports.undo} redo={ports.redo} report={ports.report} /> : null
+      cancel={ports.cancel} preserve={ports.preserve} undo={ports.undo} redo={ports.redo} report={ports.report} /> : null
   useLayoutEffect(() => {
     if (!rich) { setToolbarPlace(null); return }
     const root = editorRoot.current, host = latest.current.host()

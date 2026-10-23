@@ -17,6 +17,7 @@ import type { PropertiesItemBase, PropertiesItemView, PropertiesPatch } from './
 import { componentDefinitionPresentation } from './componentDefinitionPresentation'
 import { stepFontSize } from '../../../shared/fontSizeStep'
 import { isNativeFlowLayoutGroup } from '../../../shared/flowNativeLayout'
+import type { ContainerPropertiesPatch } from './ContainerProperties'
 
 const json = (value: unknown): JsonValue => JSON.parse(JSON.stringify(value)) as JsonValue
 
@@ -89,6 +90,7 @@ export function componentPropertiesView(instance: ComponentInstance, definition?
     visible: instance.visible !== false, locked: instance.locked === true, ownLocked: instance.locked === true,
     playbackInitialVisibility: instance.playbackInitialVisibility ?? 'inherit',
   }
+  if (instance.container) return { ...base, type: 'container', container: structuredClone(instance.container) }
   // A private implementation override does not replace the definition's professional data/editor.
   const key = presentation.builtinKey
   if (key === 'guoling.text') {
@@ -223,6 +225,22 @@ export function componentPropertiesEdits(instance: ComponentInstance, definition
     edits.push(switchShapeType({ ...instance, data: shapeDataSchema.parse(instance.data) }, content.shapeType as typeof view.shapeType))
     const { shapeType: _shapeType, ...rest } = content
     edits.push(...leafEdits(instance.id, rest))
+  } else if (view.type === 'container') {
+    const settings = content.container as ContainerPropertiesPatch | undefined
+    if (settings) {
+      const config = instance.container!
+      const next: Extract<ComponentEdit, { type: 'container.patch' }>['patch'] = {}
+      if (settings.designSize) next.designSize = { ...config.designSize ?? { width: 1280, height: 720 }, ...settings.designSize }
+      if (settings.flow && config.kind === 'flow') next.flow = {
+        ...config.flow, layout: { ...config.flow?.layout ?? { readingWidth: 860, wideContentWidth: 1100 }, ...settings.flow.layout },
+      }
+      if (settings.spatial && config.kind === 'spatial') next.spatial = {
+        ...config.spatial ?? { home: { x: 0, y: 0, zoom: 1 }, frames: [] },
+        ...settings.spatial,
+        home: { ...config.spatial?.home ?? { x: 0, y: 0, zoom: 1 }, ...settings.spatial.home },
+      }
+      if (Object.keys(next).length) edits.push({ type: 'container.patch', instanceId: instance.id, patch: next })
+    }
   } else if (view.type === 'composition') {
     if (content.layoutStyle) {
       if (!view.layoutStyle) throw new Error('此组合未使用原生自动排版。')

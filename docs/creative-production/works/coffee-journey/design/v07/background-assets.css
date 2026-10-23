@@ -1,0 +1,8 @@
+.coffee-v07-material-resources {
+ --coffee-v07-cup: url('./assets/runtime/cup.webp');
+ --coffee-v07-cherry: url('./assets/runtime/cherry.webp');
+ --coffee-v07-section: url('./assets/runtime/section.webp');
+ --coffee-v07-green: url('./assets/runtime/green.webp');
+ --coffee-v07-gold: url('./assets/runtime/gold.webp');
+ --coffee-v07-roast: url('./assets/runtime/roast.webp');
+}

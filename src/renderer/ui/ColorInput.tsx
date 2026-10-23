@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { propertyDraftSuspended, usePropertyDraftBindingKey, usePropertyDraftFlush } from './properties/PropertyControls'
+import { propertyDraftSuspended, usePropertyDraftBindingKey, usePropertyDraftFlush, type PropertyCommitFailure } from './properties/PropertyControls'
+import { isCourseComponentInputFailure, settleCourseComponentInput } from '../documents/CourseV10DocumentBridge'
 
 export interface ColorPreset {
   readonly name: string
@@ -86,9 +87,10 @@ export function ColorInput({
   const latest = useRef({ bindingKey, value: normalizedValue, onChange })
   latest.current = { bindingKey, value: normalizedValue, onChange }
   const pending = useRef<Promise<boolean> | undefined>(undefined)
+  const failure = useRef<PropertyCommitFailure | undefined>(undefined)
   const composing = useRef(false), resumeRequired = useRef(false)
   const [, setInputEpoch] = useState(0)
-  const dirty = () => resumeRequired.current || composing.current || Boolean(pending.current) || draftRef.current !== lastCommittedRef.current
+  const dirty = () => resumeRequired.current || composing.current || Boolean(pending.current) || Boolean(failure.current) || draftRef.current !== lastCommittedRef.current
 
   useLayoutEffect(() => {
     if (previousBindingRef.current === bindingKey) return
@@ -155,7 +157,7 @@ export function ColorInput({
       setPickerDraft(targetVal)
       draftRef.current = targetVal
       setDraft(targetVal)
-      commit(targetVal)
+      commit(targetVal, true)
     }
 
     el.addEventListener('input', handleNativeInput)
@@ -166,12 +168,13 @@ export function ColorInput({
     }
   }, [normalizedValue, onChange, onPreviewChange])
 
-  const commit = (candidate = draftRef.current): boolean | Promise<boolean> => {
+  const commit = (candidate = draftRef.current, explicit = false): boolean | Promise<boolean> => {
     if (propertyDraftSuspended(ownerBinding.current)) return false
     if (pending.current) return pending.current
+    if (failure.current && !explicit) return false
     if (composing.current || resumeRequired.current) return false
     if (ownerBinding.current !== latest.current.bindingKey
-      || latest.current.value !== lastCommittedRef.current && latest.current.value !== normalizeOpaqueColor(candidate)) {
+      || latest.current.value !== lastCommittedRef.current && latest.current.value !== normalizeOpaqueColor(candidate) && latest.current.value !== failure.current?.value) {
       setInputError('原颜色或编辑目标已改变；输入已保留，请按 Esc 放弃后重试。'); return false
     }
     if (isCancelledRef.current) {
@@ -188,16 +191,33 @@ export function ColorInput({
     const trimmed = normalizeOpaqueColor(candidate)
     if (trimmed) {
       setInputError('')
-      if (trimmed !== lastCommittedRef.current) {
+      if (trimmed !== lastCommittedRef.current || failure.current) {
         draftRef.current = trimmed
         setDraft(trimmed)
         setPickerDraft(trimmed)
-        const finish = () => { lastCommittedRef.current = trimmed; setInputError(''); setInputEpoch(epoch => epoch + 1); return draftRef.current === trimmed }
-        const fail = (error: unknown) => { setInputError(error instanceof Error ? error.message : String(error)); return false }
+        const finish = () => { failure.current = undefined; lastCommittedRef.current = trimmed; setInputError(''); setInputEpoch(epoch => epoch + 1); return draftRef.current === trimmed }
+        const fail = (error: unknown) => {
+          if (isCourseComponentInputFailure(error)) failure.current = { error, value: trimmed, bindingKey: ownerBinding.current, label, kind: 'text' }
+          setInputError(error instanceof Error ? error.message : String(error))
+          return isCourseComponentInputFailure(error) ? settleCourseComponentInput(error).then(outcome => outcome === 'applied' && failure.current?.error === error ? finish() : false,
+            reason => { setInputError(reason instanceof Error ? reason.message : String(reason)); return false }) : false
+        }
         try {
-          const result = commitRef.current(trimmed)
+          const previous = failure.current
+          const result = previous ? previous.error.resolveInput('retry').then(outcome => {
+            if (outcome === 'pending') { setInputError(previous.error.message); return false }
+            if (failure.current !== previous || ownerBinding.current !== latest.current.bindingKey || propertyDraftSuspended(ownerBinding.current)) return false
+            if (outcome === 'applied') {
+              failure.current = undefined; lastCommittedRef.current = previous.value
+              if (draftRef.current !== trimmed || previous.value !== trimmed) { setInputError(''); return false }
+              return true
+            }
+            if (draftRef.current !== trimmed) return false
+            failure.current = undefined
+            return Promise.resolve(commitRef.current(trimmed)).then(() => true)
+          }) : commitRef.current(trimmed)
           if (!result) return finish()
-          const ack = Promise.resolve(result).then(() => { pending.current = undefined; return finish() }, error => { pending.current = undefined; return fail(error) })
+          const ack = Promise.resolve(result).then(applied => { pending.current = undefined; return applied === false ? false : finish() }, error => { pending.current = undefined; return fail(error) })
           pending.current = ack; return ack
         } catch (error) { return fail(error) }
       } else {
@@ -212,6 +232,27 @@ export function ColorInput({
     }
   }
 
+  const cancel = () => {
+    if (pending.current) return
+    const reset = () => {
+      isCancelledRef.current = true
+      ownerBinding.current = latest.current.bindingKey; commitRef.current = latest.current.onChange; lastCommittedRef.current = latest.current.value
+      resumeRequired.current = false; composing.current = false; failure.current = undefined
+      isPreviewDirtyRef.current = false; draftRef.current = latest.current.value
+      setDraft(latest.current.value); setPickerDraft(latest.current.value); setInputError(''); onPreviewChangeRef.current?.(null)
+    }
+    const previous = failure.current
+    if (!previous) { reset(); return }
+    const raw = draftRef.current
+    const task = previous.error.resolveInput('cancel').then(outcome => {
+      if (outcome === 'pending') { setInputError(previous.error.message); return false }
+      if (failure.current !== previous || draftRef.current !== raw) return false
+      reset(); return true
+    }, error => { setInputError(error instanceof Error ? error.message : String(error)); return false })
+      .finally(() => { if (pending.current === task) pending.current = undefined })
+    pending.current = task
+  }
+
   const handlePresetClick = (presetColor: string) => {
     isCancelledRef.current = false
     isPreviewDirtyRef.current = false
@@ -222,16 +263,37 @@ export function ColorInput({
       draftRef.current = next
       setDraft(next)
       setPickerDraft(next)
-      commit(next)
+      commit(next, true)
     }
   }
 
   usePropertyDraftFlush(() => dirty() ? commit() : true, {
     hasDirty: dirty,
+    isComposing: () => composing.current,
+    inFlight: () => pending.current,
+    commitFailure: () => failure.current,
     readDraft: () => ({ bindingKey: ownerBinding.current, label, kind: 'text', raw: draftRef.current,
       baseline: lastCommittedRef.current, composing: resumeRequired.current || composing.current }),
-    restoreDraft: record => { ownerBinding.current = record.bindingKey; lastCommittedRef.current = record.baseline ?? normalizedValue
+    restoreDraft: (record, resume) => { ownerBinding.current = record.bindingKey; lastCommittedRef.current = record.baseline ?? normalizedValue
       draftRef.current = record.raw; resumeRequired.current = record.composing; setDraft(record.raw)
+      const sameSession = resume?.readDraft()?.bindingKey === bindingKey
+      const adoptFailure = () => {
+        const previous = sameSession ? resume?.commitFailure?.() : undefined
+        failure.current = previous?.bindingKey === bindingKey && previous.label === label && previous.kind === 'text' ? previous : undefined
+        if (failure.current) setInputError(failure.current.error.message)
+      }
+      adoptFailure()
+      if (sameSession && resume?.pending) {
+        const task = resume.pending.then(ready => {
+          if (pending.current !== task) return ready
+          pending.current = undefined; adoptFailure()
+          const previous = resume.readDraft()
+          if (previous?.baseline !== undefined) lastCommittedRef.current = previous.baseline
+          setInputEpoch(epoch => epoch + 1)
+          return ready && !failure.current && draftRef.current === lastCommittedRef.current
+        })
+        pending.current = task
+      }
       const normalized = normalizeOpaqueColor(record.raw); if (normalized) setPickerDraft(normalized) },
   })
 
@@ -310,19 +372,11 @@ export function ColorInput({
           onKeyDown={(event) => {
             if (event.key === 'Enter') {
               if (event.nativeEvent.isComposing || composing.current) return
-              commit()
+              commit(undefined, true)
               event.currentTarget.blur()
             }
             if (event.key === 'Escape') {
-              isCancelledRef.current = true
-              ownerBinding.current = bindingKey; commitRef.current = onChange; lastCommittedRef.current = normalizedValue
-              resumeRequired.current = false; composing.current = false
-              isPreviewDirtyRef.current = false
-              draftRef.current = normalizedValue
-              setDraft(normalizedValue)
-              setPickerDraft(normalizedValue)
-              setInputError('')
-              onPreviewChange?.(null)
+              cancel()
               event.currentTarget.blur()
             }
           }}
@@ -336,8 +390,7 @@ export function ColorInput({
         event.preventDefault()
         event.stopPropagation()
         pointerGestureRef.current = false
-        isCancelledRef.current = true
-        commit()
+        cancel()
         setExpanded(false)
       }}>
         {['红', '绿', '蓝'].map((channel, index) => <label key={channel} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -359,15 +412,14 @@ export function ColorInput({
               isPreviewDirtyRef.current = true
               onPreviewChange?.(next)
             }}
-            onPointerUp={() => { pointerGestureRef.current = false; commit() }}
-            onPointerCancel={() => { pointerGestureRef.current = false; isCancelledRef.current = true; commit() }}
+            onPointerUp={() => { pointerGestureRef.current = false; commit(undefined, true) }}
+            onPointerCancel={() => { pointerGestureRef.current = false; cancel() }}
             onLostPointerCapture={() => {
               if (!pointerGestureRef.current) return
               pointerGestureRef.current = false
-              isCancelledRef.current = true
-              commit()
+              cancel()
             }}
-            onKeyUp={event => { if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End', 'PageUp', 'PageDown'].includes(event.key)) commit() }}
+            onKeyUp={event => { if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End', 'PageUp', 'PageDown'].includes(event.key)) commit(undefined, true) }}
             onBlur={() => {
               if (pointerGestureRef.current) {
                 pointerGestureRef.current = false

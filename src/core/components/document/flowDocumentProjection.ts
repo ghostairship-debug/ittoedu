@@ -1,6 +1,7 @@
 import { componentContainers } from '../../../shared/contracts/component-platform/project'
 import { componentDataEdits } from '../../course/componentDataEdits'
-import { equalComponentValue } from '../../drivers/courseV10Operations'
+import { equalComponentValue, prepareComponentTextRelationships } from '../../drivers/courseV10Operations'
+import { professionalElementDefaultSize } from '../../course/professionalElementDefaults'
 import { allDocumentTextSlots, inlineComponentIds, documentTextRanges, projectDataTextRanges, type DocumentRangeProjection } from '../../../shared/document/textInteraction'
 import type { ComponentEdit, ComponentInstance, CourseProjectV10, JsonValue } from '../../../shared/contracts/component-platform'
 import { documentBlockChildren, documentBlockSchema, documentContentSchema, documentTextSlots, normalizeDocumentText, type DocumentBlock } from '../../../shared/document/content'
@@ -17,6 +18,7 @@ import { TABLE_DEFINITION } from '../../../components/table/adapters'
 import { createTableData, parseTableData } from '../../../components/table/data'
 import { componentDefinitionBuiltinKey,type ComponentSurface } from '../../../shared/contracts/component-platform'
 import { isNativeFlowLayoutGroup } from '../../../shared/flowNativeLayout'
+import { componentLayoutInput } from '../../../components/web/measuredFragmentBox'
 
 function flowSurface(project: CourseProjectV10, surfaceId: string): ComponentSurface {
   const surface = componentContainers(project).find(value => value.id === surfaceId)
@@ -25,10 +27,12 @@ function flowSurface(project: CourseProjectV10, surfaceId: string): ComponentSur
 }
 import { DOCUMENT_BLOCK_DEFINITION, documentBlockData } from '../../../components/document-block'
 import { flowObjectExtent } from '../geometry/flowObjectExtent'
+import { normalizeDocumentColor } from '../../../shared/document/color'
 export { flowObjectExtent }
 export { DOCUMENT_BLOCK_DEFINITION }
 const json = (value: unknown): JsonValue => JSON.parse(JSON.stringify(value)) as JsonValue
 const same = (left: unknown, right: unknown) => JSON.stringify(left) === JSON.stringify(right)
+export interface FlowProjectionDiagnostic { instanceId: string; field: string; message: string }
 export function isDocumentBlock(project: CourseProjectV10, instance: ComponentInstance): boolean {
   const key = componentDefinitionBuiltinKey(project.definitions[instance.definitionId])
   return key === 'guoling.text' || key === DOCUMENT_BLOCK_DEFINITION.id
@@ -36,39 +40,42 @@ export function isDocumentBlock(project: CourseProjectV10, instance: ComponentIn
 /** Natural reading groups expose native content, while free composition and programs stay atomic. */
 export function isFlowReadingGroup(project: CourseProjectV10, instanceId: string): boolean {
   const group = project.instances[instanceId]
-  if (!group || group.container || !isNativeFlowLayoutGroup(group, project.definitions[group.definitionId])) return false
-  let text = false
-  const children = (group.childIds ?? []).filter(id => project.definitions[project.instances[id]?.definitionId]?.role !== 'behavior')
-  if (!children.length) return true // A previously expanded empty group remains a valid insertion scope.
-  for (const id of children) {
-    const child = project.instances[id], definition = child && project.definitions[child.definitionId]
-    if (!child || child.container || child.implementationOverride || definition?.implementation.kind !== 'builtin') return false
-    const key = definition.implementation.key
-    if (key === 'guoling.group') {
-      if (!isFlowReadingGroup(project, id)) return false
-      text = true
-    } else if (key === TEXT_DEFINITION.id || key === DOCUMENT_BLOCK_DEFINITION.id) {
-      if (child.frame) return false
-      text = true
-    } else if (![IMAGE_DEFINITION.id, VIDEO_DEFINITION.id, AUDIO_DEFINITION.id, CHART_DEFINITION.id, TABLE_DEFINITION.id, FORMULA_DEFINITION.id].includes(key)) return false
-  }
-  return text
+  return Boolean(group && !group.container && isNativeFlowLayoutGroup(group, project.definitions[group.definitionId]))
 }
 /** Identity and section children come from instances; this is an editor projection, never a saved body. */
-export function projectFlowBlock(project: CourseProjectV10, instanceId: string): DocumentBlock {
+export function projectFlowBlock(project: CourseProjectV10, instanceId: string, diagnostics?: FlowProjectionDiagnostic[]): DocumentBlock {
   const instance = project.instances[instanceId]
   if (!instance) throw new Error(`正文对象已不存在：${instanceId}`)
   const implementation = project.definitions[instance.definitionId]?.implementation
+  const atomic = () => ({ id: instance.id, type: 'course-instance' as const,
+    ...(project.definitions[instance.definitionId]?.title ? { title: project.definitions[instance.definitionId].title } : {}) })
+  if (instance.container) return atomic()
   if (implementation?.kind === 'builtin' && implementation.key === 'guoling.text' && !instance.implementationOverride) {
+    if (componentLayoutInput(instance, { project, definition: project.definitions[instance.definitionId], kind: 'flow', inlineSize: 1 }).mode !== 'flow-content') return atomic()
     const text = textComponentDataSchema.parse(instance.data)
     const defaults = Object.fromEntries(Object.entries(text.appearance).filter(([key]) => ['fontFamily','fontSize','color','bold','italic','underline','strike','emphasis','highlightColor'].includes(key)))
+    let colorUnavailable = false
+    for (const field of ['color', 'highlightColor'] as const) {
+      const value = text.appearance[field]
+      if (value === null) continue
+      const normalized = normalizeDocumentColor(value)
+      if (normalized !== undefined) defaults[field] = normalized
+      else {
+        colorUnavailable = true
+        diagnostics?.push({ instanceId: instance.id, field: `appearance.${field}`,
+          message: `appearance.${field}=${JSON.stringify(value).slice(0, 160)} 无法表示为正文颜色；原对象与颜色已保留，可在对象数据中修改该字段。` })
+      }
+    }
+    // CSS appearance is owned by the actual component. A document projection
+    // cannot resolve every authored CSS color, so retain that editable instance.
+    if (colorUnavailable) return atomic()
     return { id: instance.id, type: 'paragraph', content: text.content, textAlign: text.appearance.align, textDefaults: defaults,
       ...(text.appearance.lineSpacing!==undefined ? {lineSpacing:text.appearance.lineSpacing}:{}) }
   }
   if (implementation?.kind === 'builtin' && implementation.key === DOCUMENT_BLOCK_DEFINITION.id && !instance.implementationOverride) {
     const data = instance.data as Record<string, JsonValue>
     return documentBlockSchema.parse({ ...data, id: instance.id,
-      ...(data.type === 'section' ? { blocks: (instance.childIds ?? []).map(id => projectFlowBlock(project, id)) } : {}) })
+      ...(data.type === 'section' ? { blocks: (instance.childIds ?? []).map(id => projectFlowBlock(project, id, diagnostics)) } : {}) })
   }
   if (implementation?.kind === 'builtin' && implementation.key === FORMULA_DEFINITION.id && !instance.implementationOverride) {
     const data=formulaComponentDataSchema.parse(instance.data)
@@ -91,21 +98,20 @@ export function projectFlowBlock(project: CourseProjectV10, instanceId: string):
   if (isFlowReadingGroup(project, instanceId)) {
     const title = project.definitions[instance.definitionId]?.title
     return { id: instance.id, type: 'course-instance', ...(title ? { title } : {}), blocks: (instance.childIds ?? [])
-      .filter(id => project.definitions[project.instances[id]?.definitionId]?.role !== 'behavior').map(id => projectFlowBlock(project, id)) }
+      .filter(id => project.definitions[project.instances[id]?.definitionId]?.role !== 'behavior').map(id => projectFlowBlock(project, id, diagnostics)) }
   }
   if (implementation?.kind === 'builtin' && implementation.key === CHART_DEFINITION.id && !instance.implementationOverride) {
     return { id: instance.id, type: 'chart', chart: chartDataSchema.parse(instance.data), height: instance.frame?.height ?? 400 }
   }
   // The shared editor treats an arbitrary component as one object; its actual implementation stays in R0.
-  const title = project.definitions[instance.definitionId]?.title
-  return { id: instance.id, type: 'course-instance', ...(title ? { title } : {}) }
+  return atomic()
 }
 export function flowBodyIds(project: CourseProjectV10, surfaceId: string): string[] {
   return flowSurface(project, surfaceId).childIds.filter(id => !project.instances[id].flowPlacement
     && project.definitions[project.instances[id].definitionId]?.role !== 'behavior')
 }
-export function projectFlowDocument(project: CourseProjectV10, surfaceId: string): MarkdownDocument {
-  const blocks=flowBodyIds(project,surfaceId).map(id=>projectFlowBlock(project,id)), refs=documentResourceReferences(blocks)
+export function projectFlowDocument(project: CourseProjectV10, surfaceId: string, diagnostics?: FlowProjectionDiagnostic[]): MarkdownDocument {
+  const blocks=flowBodyIds(project,surfaceId).map(id=>projectFlowBlock(project,id,diagnostics)), refs=documentResourceReferences(blocks)
   return {content:{blocks},resources:{assets:refs.assets.map(assetId=>({assetId,source:{kind:'project'}})),components:[]}}
 }
 /** Only section children belong to the PM body; children of an opaque component stay in its own stage. */
@@ -179,7 +185,7 @@ function blockInstance(project: CourseProjectV10, block: DocumentBlock): Compone
     return {...previous,id:block.id,definitionId:definitionId(builtin),data:json(data),flowLayout:{width:block.layout,...(block.wrap ? {wrap:block.wrap}:{}),...(block.caption ? {caption:block.caption}:{})}}
   }
   if(block.type==='chart')return {...previous,id:block.id,definitionId:definitionId(CHART_DEFINITION.id),data:json(chartDataSchema.parse(block.chart)),
-    frame: { ...(previous?.frame ?? { width: 640, height: block.height, transform: [1, 0, 0, 1, 0, 0] as [number, number, number, number, number, number] }), height: block.height } }
+    frame: { ...(previous?.frame ?? { ...professionalElementDefaultSize('chart'), transform: [1, 0, 0, 1, 0, 0] as [number, number, number, number, number, number] }), height: block.height } }
   if(block.type==='table') {
     const initial=key===TABLE_DEFINITION.id ? parseTableData(previous.data) as any : createTableData({rows:Math.max(1,block.rows.length),columns:block.columns.length}) as any
     const columns=block.columns.map(column=>({...initial.columns.find((value:any)=>value.id===column.id),id:column.id,width:initial.columns.find((value:any)=>value.id===column.id)?.width ?? 200,
@@ -196,7 +202,8 @@ function blockInstance(project: CourseProjectV10, block: DocumentBlock): Compone
     ...(block.type === 'section' ? { childIds: block.blocks.map(child => child.id) } : {}) }
 }
 /** Convert one edit projection into canonical instance edits while retaining unrelated floating/behavior roots. */
-export function flowDocumentEdits(project: CourseProjectV10, surfaceId: string, blocks: DocumentBlock[], readingBaseline=project, rangeProjection?: readonly DocumentRangeProjection[], changedBlockIds?: readonly string[]): ComponentEdit[] {
+export function flowDocumentEdits(project: CourseProjectV10, surfaceId: string, blocks: DocumentBlock[], readingBaseline=project, rangeProjection?: readonly DocumentRangeProjection[], changedBlockIds?: readonly string[],
+  options: { deferTextRelationshipCleanup?: boolean } = {}): ComponentEdit[] {
   // The layout editor supplies this hint only for text/mark steps. Check the
   // structural carrier identities too; source/structural edits keep reconciliation.
   if (changedBlockIds?.length) {
@@ -217,14 +224,14 @@ export function flowDocumentEdits(project: CourseProjectV10, surfaceId: string, 
       const local: ComponentEdit[] = []
       for (const id of new Set(changedBlockIds)) {
         const block = documentBlockSchema.parse(indexed.get(id)!)
-        if (block.type === 'section' || block.type === 'course-instance') return flowDocumentEdits(project, surfaceId, blocks, readingBaseline, rangeProjection)
+        if (block.type === 'section' || block.type === 'course-instance') return flowDocumentEdits(project, surfaceId, blocks, readingBaseline, rangeProjection, undefined, options)
         const instance = blockInstance(project, block)
         if (!same(project.instances[id].data, instance.data)) local.push(...componentDataEdits(project, { surfaceId, instanceId: id }, {
           kind: 'replace', data: instance.data as JsonValue,
           ...(rangeProjection?.some(field => field.blockId === id) ? { rangeProjection: projectDataTextRanges(instance.data) } : {}),
         }))
       }
-      return local
+      return prepareComponentTextRelationships(project, local, options)
     }
   }
   const parsed = documentContentSchema.parse({ blocks }).blocks
@@ -234,7 +241,10 @@ export function flowDocumentEdits(project: CourseProjectV10, surfaceId: string, 
     desired.set(block.id, blockInstance(project, block))
     if (block.type === 'course-instance' && block.blocks === undefined) retain(block.id)
     const previous = project.instances[block.id]
-    if (previous) for (const child of previous.childIds ?? []) if (project.definitions[project.instances[child]?.definitionId]?.role === 'behavior' || allDocumentTextSlots(desired.get(block.id)!.data).some(slot => inlineComponentIds(slot.content).includes(child))) retain(child)
+    if (previous) {
+      const exposed = new Set(documentBlockChildren(projectFlowBlock(project, block.id))?.map(child => child.id) ?? [])
+      for (const child of previous.childIds ?? []) if (!exposed.has(child)) retain(child)
+    }
     const children = documentBlockChildren(block)
     if (children) visit(children)
   } }
@@ -302,19 +312,6 @@ export function flowDocumentEdits(project: CourseProjectV10, surfaceId: string, 
     }
   }
   ordered(parsed, { kind: 'surface', surfaceId })
-  // A partial paste lands in its actual destination paragraph, not in its staged clone shell.
-  for (const [ownerId, instance] of desired) for (const slot of allDocumentTextSlots(instance.data)) {
-    for (const childId of inlineComponentIds(slot.content)) if (project.instances[childId]) {
-      retain(childId)
-      if (!(currentChildren.get(ownerId) ?? []).includes(childId)) { edits.push({ type: 'instance.move', instanceId: childId, container: { kind: 'instance', instanceId: ownerId }, index: currentChildren.get(ownerId)?.length ?? 0 }); place(childId, ownerId, currentChildren.get(ownerId)?.length ?? 0) }
-    }
-    for (const candidate of Object.values(project.instances)) {
-      const attachments = candidate.attachments?.map(attachment => attachment.target.kind === 'text-range' && documentTextRanges(slot.content).has(attachment.target.rangeId) ? { ...attachment, target: { ...attachment.target, instanceId: ownerId, dataPath: slot.path } } : attachment)
-      if (!attachments || same(attachments, candidate.attachments)) continue
-      retain(candidate.id); edits.push({ type: 'attachments.set', instanceId: candidate.id, attachments })
-      if (!(currentChildren.get(ownerId) ?? []).includes(candidate.id) && candidate.definitionId === 'guoling.range-popover') { edits.push({ type: 'instance.move', instanceId: candidate.id, container: { kind: 'instance', instanceId: ownerId }, index: currentChildren.get(ownerId)?.length ?? 0 }); place(candidate.id, ownerId, currentChildren.get(ownerId)?.length ?? 0) }
-    }
-  }
   for (const id of oldIds) if (!edits.some(edit => edit.type === 'instance.remove' && edit.instanceId === id) && !desired.has(id) && !retained.has(id) && ![...oldIds].some(parent => !desired.has(parent) && !retained.has(parent) && project.instances[parent]?.childIds?.includes(id))) {
     edits.push({ type: 'instance.remove', instanceId: id })
     for (const children of currentChildren.values()) { const index = children.indexOf(id); if (index >= 0) children.splice(index, 1) }
@@ -331,10 +328,10 @@ export function flowDocumentEdits(project: CourseProjectV10, surfaceId: string, 
       while (siblings[index] !== id) moveRoot(siblings[index], rootOrder.indexOf(siblings[index]))
     }
   }
-  const linked = new Set<string>()
-  for (const [ownerId, instance] of desired) for (const slot of allDocumentTextSlots(instance.data)) {
-    for (const childId of inlineComponentIds(slot.content)) linked.add(childId)
-    for (const candidate of Object.values(project.instances)) if (candidate.attachments?.some(attachment => attachment.target.kind === 'text-range' && documentTextRanges(slot.content).has(attachment.target.rangeId))) linked.add(candidate.id)
-  }
-  return edits.filter(edit => edit.type !== 'instance.remove' || !linked.has(edit.instanceId))
+  const destinations = [...desired].flatMap(([instanceId, instance]) => allDocumentTextSlots(instance.data).map(slot => ({ instanceId, dataPath: slot.path, content: slot.content })))
+  const slotMigrations = [...oldIds].flatMap(instanceId => allDocumentTextSlots(project.instances[instanceId]?.data).map(slot => ({
+    from: { instanceId, dataPath: slot.path }, to: destinations.filter(candidate => [...documentTextRanges(slot.content).keys()]
+      .some(rangeId => documentTextRanges(candidate.content).has(rangeId))).map(({ instanceId, dataPath }) => ({ instanceId, dataPath })),
+  })))
+  return prepareComponentTextRelationships(project, edits, { ...options, slotMigrations })
 }

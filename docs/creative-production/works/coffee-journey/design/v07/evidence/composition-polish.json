@@ -1,0 +1,405 @@
+{
+  "stages": [
+    {
+      "key": "cup",
+      "base": [
+        239,
+        236,
+        225
+      ],
+      "tint": [
+        221,
+        210,
+        188
+      ],
+      "x": 0.88,
+      "y": 0.86,
+      "scale": 0.86,
+      "angle": -0.045,
+      "mx": 1.025,
+      "my": 0.7,
+      "mscale": 0.43,
+      "opacity": 0.94
+    },
+    {
+      "key": "cherry",
+      "base": [
+        229,
+        235,
+        219
+      ],
+      "tint": [
+        204,
+        218,
+        186
+      ],
+      "x": 0.94,
+      "y": 0.91,
+      "scale": 0.88,
+      "angle": -0.08,
+      "mx": 1.035,
+      "my": 0.69,
+      "mscale": 0.43,
+      "opacity": 0.94
+    },
+    {
+      "key": "peel",
+      "base": [
+        237,
+        227,
+        207
+      ],
+      "tint": [
+        225,
+        204,
+        173
+      ],
+      "x": 0.565,
+      "y": 0.175,
+      "scale": 0.64,
+      "angle": 0.06,
+      "mx": 0.97,
+      "my": 0.62,
+      "mscale": 0.4,
+      "opacity": 0.92
+    },
+    {
+      "key": "green",
+      "base": [
+        230,
+        235,
+        222
+      ],
+      "tint": [
+        207,
+        220,
+        192
+      ],
+      "x": 0.45,
+      "y": 0.25,
+      "scale": 0.64,
+      "angle": -0.12,
+      "mx": 0.99,
+      "my": 0.67,
+      "mscale": 0.43,
+      "opacity": 0.94
+    },
+    {
+      "key": "roast",
+      "base": [
+        25,
+        31,
+        26
+      ],
+      "tint": [
+        69,
+        58,
+        42
+      ],
+      "x": 0.29,
+      "y": 0.86,
+      "scale": 0.68,
+      "angle": 0.07,
+      "mx": 1.035,
+      "my": 0.69,
+      "mscale": 0.44,
+      "opacity": 0.96
+    },
+    {
+      "key": "solution",
+      "base": [
+        228,
+        237,
+        229
+      ],
+      "tint": [
+        188,
+        213,
+        194
+      ],
+      "x": 0.875,
+      "y": 0.085,
+      "scale": 0.82,
+      "angle": 0,
+      "mx": 1.035,
+      "my": 0.67,
+      "mscale": 0.45,
+      "opacity": 0.94
+    },
+    {
+      "key": "return",
+      "base": [
+        239,
+        236,
+        225
+      ],
+      "tint": [
+        222,
+        209,
+        182
+      ],
+      "x": 0.96,
+      "y": 0.93,
+      "scale": 0.84,
+      "angle": 0.035,
+      "mx": 1.035,
+      "my": 0.7,
+      "mscale": 0.43,
+      "opacity": 0.94
+    }
+  ],
+  "knots": {
+    "desktop": [
+      0.015156435295405167,
+      0.1458232789785194,
+      0.34044568674906306,
+      0.4719162807887518,
+      0.6273845640461654,
+      0.7318721104008525,
+      0.9402730957126736
+    ],
+    "mobile": [
+      0.009979829540122177,
+      0.14812654400755418,
+      0.32591535914824926,
+      0.4557455489989128,
+      0.6110797476743329,
+      0.6996045319283797,
+      0.8920858738920324
+    ]
+  },
+  "sourceReceipt": [
+    {
+      "kind": "read",
+      "data": {
+        "path": "components/11-underlay-poc.js.source/underlay-poc.js",
+        "type": "source",
+        "documentId": "fafe7862-b6f4-4fff-a1d3-3963bf0dcf03",
+        "epoch": "dd9ac9b8-d81e-42af-8c69-d86b5bd9075a",
+        "revision": 211,
+        "currentRevision": 211,
+        "basis": "current",
+        "summary": "源码，988 字符",
+        "references": [
+          {
+            "path": "references/component-api5.md",
+            "type": "reference"
+          }
+        ],
+        "content": "import './background-assets.css';\nimport implementation from './background-runtime.js';\n\n// CSS url() is the host's supported binary resource closure. The probe stays inside\n// this component; it never inspects the host document or controls navigation.\nexport default {\n mount(context){\n  const doc=context.root.ownerDocument,probe=doc.createElement('i');\n  probe.className='coffee-v07-material-resources';probe.hidden=true;context.root.append(probe);\n  const style=doc.defaultView.getComputedStyle(probe),assets={};\n  for(const name of ['cup','cherry','section','green','gold','roast']){\n   const value=style.getPropertyValue('--coffee-v07-'+name).trim();\n   assets[name]=value.replace(/^url\\([\"']?/,'').replace(/[\"']?\\)$/,'');\n  }\n  probe.remove();\n  const decorate=instance=>({...instance,data:{...instance.data,assets}});\n  const mounted=implementation.mount({...context,instance:decorate(context.instance)});\n  return {...mounted,update(next){mounted.update(decorate(next))}};\n }\n};\n",
+        "complete": true,
+        "note": "共享定义的作者入口；应用后使用此定义的实例一起更新。"
+      }
+    },
+    {
+      "kind": "read",
+      "data": {
+        "path": "components/11-underlay-poc.js.source/underlay-poc.js",
+        "commit": "committed",
+        "usability": "unverified",
+        "delivery": "not_requested",
+        "diagnostics": [],
+        "insertedIds": [],
+        "receipt": {
+          "status": "applied",
+          "documentId": "fafe7862-b6f4-4fff-a1d3-3963bf0dcf03",
+          "operationId": "tool:6dc863bbcd922794404fe8794a7994a6645ef1061f3994356e8ad10316c67c39",
+          "beforeRevision": 211,
+          "revision": 212,
+          "persistence": "recoverable",
+          "appliedChanges": {
+            "affectedTargets": [],
+            "changes": []
+          }
+        },
+        "files": [
+          {
+            "path": "components/11-underlay-poc.js.definition.json",
+            "type": "data",
+            "summary": "content underlay-poc.js",
+            "note": "共享定义的名称、角色与专业数据合同；内部身份和源码文件引用由软件维护。"
+          },
+          {
+            "path": "components/11-underlay-poc.js.source/underlay-poc.js",
+            "type": "source",
+            "summary": "源码，988 字符",
+            "references": [
+              {
+                "path": "references/component-api5.md",
+                "type": "reference"
+              }
+            ],
+            "note": "共享定义的作者入口；应用后使用此定义的实例一起更新。",
+            "complete": false,
+            "revision": 212,
+            "currentRevision": 212
+          },
+          {
+            "path": "components/11-underlay-poc.js.source/background-entry.js",
+            "type": "source",
+            "summary": "源码，988 字符",
+            "references": [
+              {
+                "path": "references/component-api5.md",
+                "type": "reference"
+              }
+            ],
+            "note": "共享定义的作者入口；应用后使用此定义的实例一起更新。"
+          },
+          {
+            "path": "components/11-underlay-poc.js.source/background-assets.css",
+            "type": "source",
+            "summary": "源码，377 字符",
+            "references": [
+              {
+                "path": "references/component-api5.md",
+                "type": "reference"
+              }
+            ],
+            "note": "共享定义的作者入口；应用后使用此定义的实例一起更新。"
+          },
+          {
+            "path": "components/11-underlay-poc.js.source/background-runtime.js",
+            "type": "source",
+            "summary": "源码，20255 字符",
+            "references": [
+              {
+                "path": "references/component-api5.md",
+                "type": "reference"
+              }
+            ],
+            "note": "共享定义的作者入口；应用后使用此定义的实例一起更新。"
+          },
+          {
+            "path": "components/11-underlay-poc.js.source/assets/runtime/cup.webp",
+            "type": "asset",
+            "summary": "application/octet-stream，95718 字节",
+            "references": [
+              {
+                "path": "references/component-api5.md",
+                "type": "reference"
+              }
+            ],
+            "note": "共享定义的作者入口；应用后使用此定义的实例一起更新。"
+          },
+          {
+            "path": "components/11-underlay-poc.js.source/assets/runtime/cherry.webp",
+            "type": "asset",
+            "summary": "application/octet-stream，170712 字节",
+            "references": [
+              {
+                "path": "references/component-api5.md",
+                "type": "reference"
+              }
+            ],
+            "note": "共享定义的作者入口；应用后使用此定义的实例一起更新。"
+          },
+          {
+            "path": "components/11-underlay-poc.js.source/assets/runtime/section.webp",
+            "type": "asset",
+            "summary": "application/octet-stream，204996 字节",
+            "references": [
+              {
+                "path": "references/component-api5.md",
+                "type": "reference"
+              }
+            ],
+            "note": "共享定义的作者入口；应用后使用此定义的实例一起更新。"
+          },
+          {
+            "path": "components/11-underlay-poc.js.source/assets/runtime/green.webp",
+            "type": "asset",
+            "summary": "application/octet-stream，210668 字节",
+            "references": [
+              {
+                "path": "references/component-api5.md",
+                "type": "reference"
+              }
+            ],
+            "note": "共享定义的作者入口；应用后使用此定义的实例一起更新。"
+          },
+          {
+            "path": "components/11-underlay-poc.js.source/assets/runtime/gold.webp",
+            "type": "asset",
+            "summary": "application/octet-stream，166210 字节",
+            "references": [
+              {
+                "path": "references/component-api5.md",
+                "type": "reference"
+              }
+            ],
+            "note": "共享定义的作者入口；应用后使用此定义的实例一起更新。"
+          },
+          {
+            "path": "components/11-underlay-poc.js.source/assets/runtime/roast.webp",
+            "type": "asset",
+            "summary": "application/octet-stream，187972 字节",
+            "references": [
+              {
+                "path": "references/component-api5.md",
+                "type": "reference"
+              }
+            ],
+            "note": "共享定义的作者入口；应用后使用此定义的实例一起更新。"
+          },
+          {
+            "path": "components/11-underlay-poc.js.source/background-stages.js",
+            "type": "source",
+            "summary": "源码，3255 字符",
+            "references": [
+              {
+                "path": "references/component-api5.md",
+                "type": "reference"
+              }
+            ],
+            "note": "共享定义的作者入口；应用后使用此定义的实例一起更新。"
+          }
+        ],
+        "currentRevision": 212
+      }
+    }
+  ],
+  "nativeReceipt": {
+    "status": "applied",
+    "documentId": "fafe7862-b6f4-4fff-a1d3-3963bf0dcf03",
+    "operationId": "coffee-v07-authored-mobile-chapter-clearance-1792728890760-4",
+    "beforeRevision": 212,
+    "revision": 213,
+    "persistence": "recoverable",
+    "appliedChanges": {
+      "changes": [
+        {
+          "path": [
+            "instances",
+            "403273c0-8b31-41ad-ae6b-0ebd75a8370a",
+            "style",
+            "padding"
+          ],
+          "exists": true,
+          "value": "clamp(55px,calc(67.343px - .85714cqi),64px) 0 45px"
+        },
+        {
+          "path": [
+            "instances",
+            "20b6839d-2a3a-4cfb-9bdf-0b6031d30803",
+            "style",
+            "paddingTop"
+          ],
+          "exists": true,
+          "value": "clamp(0px,calc(49.18px - 4.918cqi),30px)"
+        }
+      ],
+      "affectedTargets": [
+        "403273c0-8b31-41ad-ae6b-0ebd75a8370a",
+        "20b6839d-2a3a-4cfb-9bdf-0b6031d30803"
+      ]
+    }
+  },
+  "reason": "U03/U04 use the real typographic gutter; U05 lower-left negative space; U06 above the intro. U01 authored mobile top padding clears its own pinned navigation, no navigation offset or host code changed.",
+  "saved": {
+    "revision": 213,
+    "path": "D:\\果铃工作台\\docs\\creative-production\\works\\coffee-journey\\design\\v07\\native\\coffee-journey-v07.glx",
+    "dirty": false
+  },
+  "errors": []
+}

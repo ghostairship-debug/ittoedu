@@ -1,0 +1,66 @@
+{
+  "kind": "U06 formally integrated reference source",
+  "date": "2026-10-22",
+  "status": "Integrated and validated in coffee r204 and sugar r34",
+  "validation": "../../VERIFICATION.md",
+  "coffeeProgramSha256": "3000f8d847689fdef639b2f778797e1ee516b523cd5d24efdea7e4e12f1fc2af",
+  "sugarProgramSha256": "646221aeb2a7b87bab8b2adbedffc5ed416fcc5921e9e23ae2bcdd08c4419234",
+  "sharedEngineSha256": "4a12280ceef51d5cf2e623e1b19a2f8003e4c9fa0521d5e4a28a67077ece26af",
+  "files": [
+    {
+      "path": "INTEGRATION.md",
+      "bytes": 3366,
+      "sha256": "ac1eb794b8365e8a7a9ed5933f019af5219d277a59de7224143dd38a89059c2c"
+    },
+    {
+      "path": "build-inline.py",
+      "bytes": 913,
+      "sha256": "88bb47165c5e7073768072d4b1784cd7566e9bbbca0f0c30440cd273a74633b8"
+    },
+    {
+      "path": "common.css",
+      "bytes": 2154,
+      "sha256": "8feac4a9bea44994eb7cc3d0b9fc5b19359b4657c7021d57b654137447c9c5ec"
+    },
+    {
+      "path": "sugar-inline.html",
+      "bytes": 35574,
+      "sha256": "646221aeb2a7b87bab8b2adbedffc5ed416fcc5921e9e23ae2bcdd08c4419234"
+    },
+    {
+      "path": "sugar/water.config.js",
+      "bytes": 1106,
+      "sha256": "e3f383ac3902dea945d62bb95843c76531076114be3bf078a2f852cdbb4991f6"
+    },
+    {
+      "path": "u06-inline.html",
+      "bytes": 36122,
+      "sha256": "3000f8d847689fdef639b2f778797e1ee516b523cd5d24efdea7e4e12f1fc2af"
+    },
+    {
+      "path": "u06.html",
+      "bytes": 4578,
+      "sha256": "204083f769f0be806bf35ccb31168c0b815e76e2521dd6539d962444f277b7fe"
+    },
+    {
+      "path": "verify.cjs",
+      "bytes": 4915,
+      "sha256": "24d78e1344d74839beddf2e36d95af401f12c6e5f5015811a779ae40b2c6c3f6"
+    },
+    {
+      "path": "water.config.js",
+      "bytes": 1654,
+      "sha256": "0d13f60e34cf1594f669cadb62f82c61d19778573410db0ba86f487ea32bb56e"
+    },
+    {
+      "path": "water.css",
+      "bytes": 10280,
+      "sha256": "5898328fabcaff1740fa14066b740236123d41f2e4de8c78dab1338f36cc669f"
+    },
+    {
+      "path": "water.js",
+      "bytes": 17556,
+      "sha256": "4a12280ceef51d5cf2e623e1b19a2f8003e4c9fa0521d5e4a28a67077ece26af"
+    }
+  ]
+}

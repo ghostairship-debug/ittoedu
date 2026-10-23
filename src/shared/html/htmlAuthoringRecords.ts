@@ -2,6 +2,7 @@ import type { ComponentAuthorRecord } from '../contracts/component-platform/runt
 import { componentAuthorRecordsSchema } from '../contracts/component-platform/schema'
 import { createDomAuthoring, domAuthoringFactorySource } from '../../components/web/authoringDom'
 import { createNestedDomAuthoring } from '../../components/web/nestedAuthoringDom'
+import { createAuthoringFrameGeometry } from '../../components/web/authoringFrame'
 import { decorateHtmlFrameAuthoring, type HtmlFrameSources } from './htmlFrameAuthoring'
 import { indexHtmlElements, scanHtmlSource, type HtmlSourceToken } from './htmlSourceScanner'
 
@@ -83,27 +84,32 @@ export function extractHtmlAuthoringRecords(source: string): HtmlAuthoringAnalys
   return { authoringRecords: analysis.authoringRecords, frameSources: analysis.frameSources, source: analysis.source }
 }
 
-export function patchHtmlAuthoringRecords(source: string, records: HtmlAuthoringRecords, options: { sources?: HtmlFrameSources } = {},
+export function patchHtmlAuthoringRecords(source: string, records: HtmlAuthoringRecords, options: { sources?: HtmlFrameSources; tokens?: () => readonly HtmlSourceToken[] } = {},
   changes?: Array<{ from: number; to: number; inserted: number }>): string {
-  const sources = { ...readHtmlFrameSources(source), ...options.sources }
+  // The caller may already have scanned this immutable source. Keep those
+  // lexical facts local to the operation, including validation of old data.
+  let scanned: readonly HtmlSourceToken[] | undefined
+  const tokens = options.tokens ?? (() => scanned ??= scanHtmlSource(source).tokens)
+  const regions = softwareRegions(source, tokens), previous = authoringData(source, regions)
+  recordsFromData(previous)
+  const sources = { ...sourcesFromData(previous), ...options.sources }
   const json = JSON.stringify({ version: 1, records: componentAuthorRecordsSchema.parse(records), ...(Object.keys(sources).length ? { sources } : {}) }).replace(/</g, '\\u003c').replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029')
-  const consumer = `(()=>{const w=window;const data=JSON.parse(document.getElementById('${HTML_AUTHORING_DATA_ID}').textContent);const bridge=w.__cwHtmlFrameAuthoring;w.__cwHtmlAuthoringConsumer?.dispose();w.__cwHtmlAuthoringRecords=data.records;bridge?.setRecords(data.records);bridge?.setSources(data.sources??{});w.__cwHtmlAuthoringConsumer=(${createNestedDomAuthoring.toString()})(document.documentElement,${domAuthoringFactorySource()},{records:()=>w.__cwHtmlAuthoringRecords,shadowRoot:host=>bridge?.shadowRoot(host),resourceReference:value=>bridge?.resourceReference(value),resolveResource:value=>bridge?.resolveResource(value),matchesResource:(value,live)=>bridge?.matchesResource(value,live)??false});})();`
+  const consumer = `(()=>{const w=window;const data=JSON.parse(document.getElementById('${HTML_AUTHORING_DATA_ID}').textContent);const bridge=w.__cwHtmlFrameAuthoring;w.__cwHtmlAuthoringConsumer?.dispose();w.__cwHtmlAuthoringRecords=data.records;bridge?.setRecords(data.records);bridge?.setSources(data.sources??{});w.__cwHtmlAuthoringConsumer=(${createNestedDomAuthoring.toString()})(document.documentElement,${domAuthoringFactorySource()},{records:()=>w.__cwHtmlAuthoringRecords,shadowRoot:host=>bridge?.shadowRoot(host),resourceReference:value=>bridge?.resourceReference(value),resolveResource:value=>bridge?.resolveResource(value),matchesResource:(value,live)=>bridge?.matchesResource(value,live)??false},(${createAuthoringFrameGeometry.toString()}));})();`
     .replace(/<\/script/gi, '<\\/script')
-  const regions = softwareRegions(source), previous = authoringData(source, regions)
-  recordsFromData(previous); sourcesFromData(previous)
   let clean = source
   for (const region of regions.sort((a, b) => b.full.start - a.full.start)) {
     clean = clean.slice(0, region.full.start) + clean.slice(region.full.end)
     changes?.push({ from: region.full.start, to: region.full.end, inserted: 0 })
   }
-  let decorated = decorateHtmlFrameAuthoring(clean, undefined, { sources }, changes)
-  const bootstrap = softwareRegions(decorated).find(region => region.id === 'cw-html-frame-bootstrap')!
+  let decorated = decorateHtmlFrameAuthoring(clean, undefined, { sources }, changes, regions.length ? undefined : tokens())
+  const decoratedTokens = scanHtmlSource(decorated).tokens
+  const bootstrap = softwareRegions(decorated, () => decoratedTokens).find(region => region.id === 'cw-html-frame-bootstrap')!
   const data = `<script id="${HTML_AUTHORING_DATA_ID}" type="application/json">${json}</script>`
+  const bodyClose = decoratedTokens.filter(token => token.kind === 'end-tag' && token.name === 'body').at(-1)
   decorated = decorated.slice(0, bootstrap.full.start) + data + decorated.slice(bootstrap.full.start)
   changes?.push({ from: bootstrap.full.start, to: bootstrap.full.start, inserted: data.length })
   const wrapper = `<script id="${HTML_AUTHORING_CONSUMER_ID}">${consumer}</script>`
-  const close = scanHtmlSource(decorated).tokens.filter(token => token.kind === 'end-tag' && token.name === 'body').at(-1)
-  const at = close?.span.start ?? decorated.length
+  const at = bodyClose ? bodyClose.span.start + (bodyClose.span.start >= bootstrap.full.start ? data.length : 0) : decorated.length
   changes?.push({ from: at, to: at, inserted: wrapper.length })
   return decorated.slice(0, at) + wrapper + decorated.slice(at)
 }

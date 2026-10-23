@@ -10,7 +10,7 @@ export interface CanvasPlainTextBounds {
   height: number
 }
 
-export interface PlainTextSelectionIntent { anchor?: number; focus?: number; point?: { x: number; y: number }; word?: boolean }
+export interface PlainTextSelectionIntent { anchor?: number; focus?: number; anchorPoint?: { x: number; y: number }; point?: { x: number; y: number }; word?: boolean }
 
 /** Browser selection in the existing plain input; this never invokes authored events. */
 function selectPlainText(element: HTMLElement, intent: PlainTextSelectionIntent, fallback: number, collapseAtPoint = false) {
@@ -21,14 +21,16 @@ function selectPlainText(element: HTMLElement, intent: PlainTextSelectionIntent,
     return [element, element.childNodes.length]
   }
   let anchor = clamp(intent.anchor ?? fallback), focus = clamp(intent.focus ?? anchor)
-  if (intent.point) {
-    const point = intent.point
+  const offsetAtPoint = (point: { x: number; y: number }) => {
     const document = doc as Document & { caretPositionFromPoint?(x: number, y: number): { offsetNode: Node; offset: number } | null; caretRangeFromPoint?(x: number, y: number): Range | null }
     const position = document.caretPositionFromPoint?.(point.x, point.y), range = position ? undefined : document.caretRangeFromPoint?.(point.x, point.y)
     const node = position?.offsetNode ?? range?.startContainer, offset = position?.offset ?? range?.startOffset
-    if (node && offset !== undefined && element.contains(node)) { const prefix = doc.createRange(); prefix.selectNodeContents(element); prefix.setEnd(node, offset); focus = prefix.toString().length }
-    if (collapseAtPoint) anchor = focus
+    if (node && offset !== undefined && element.contains(node)) { const prefix = doc.createRange(); prefix.selectNodeContents(element); prefix.setEnd(node, offset); return prefix.toString().length }
+    return undefined
   }
+  if (intent.anchorPoint) anchor = offsetAtPoint(intent.anchorPoint) ?? anchor
+  if (intent.point) focus = offsetAtPoint(intent.point) ?? focus
+  if (collapseAtPoint && !intent.anchorPoint) anchor = focus
   if (intent.word) {
     const segments = new Intl.Segmenter(undefined, { granularity: 'word' }).segment(text)
     for (const segment of segments) if (segment.isWordLike && anchor >= segment.index && anchor <= segment.index + segment.segment.length) { anchor = segment.index; focus = anchor + segment.segment.length; break }
@@ -240,7 +242,7 @@ export function CanvasPlainTextEditor({
         style={inlineStyle} onInput={change} onPointerDown={event => { handoff.current = false; event.stopPropagation() }} onDoubleClick={event => event.stopPropagation()}
         onPaste={event => { event.preventDefault(); elementInsert(event.clipboardData.getData('text/plain')); change() }}
         onCompositionStart={() => { composingRef.current = true; onDraftChange?.(readInline(), true) }}
-        onCompositionEnd={() => { composingRef.current = false; change(); const pending = pendingFinishRef.current; pendingFinishRef.current = null; if (pending !== null) { if (pending) onCancel(); else onCommit(readInline()) } }}
+        onCompositionEnd={() => { composingRef.current = false; change(); const pending = pendingFinishRef.current; pendingFinishRef.current = null; if (pending !== null && !finishedRef.current) { finishedRef.current = true; if (pending) onCancel(); else onCommit(readInline()) } }}
         onBlur={() => { if (finishedRef.current) return; if (composingRef.current) pendingFinishRef.current = false; else { finishedRef.current = true; onCommit(readInline()) } }}
         onKeyDown={event => {
           if (event.nativeEvent.isComposing || composingRef.current) return

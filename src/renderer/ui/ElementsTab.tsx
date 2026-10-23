@@ -25,11 +25,13 @@ import { createShapeNode } from '../../core/tools/nativeNodeFactories'
 import { useEditorStore, selectCourseView, selectEditingScope } from '../store/editorStore'
 import { captureCourseInsertionTarget, insertCourseElement, readCourseMediaLibrary, readCourseAudioSettings,
   mediaAuthoringError, ensureCourseTeacherController, type CourseElementKind } from '../media/commitCourseMediaAuthoring'
-import { owningContainer } from '../../shared/contracts/component-platform/project'
 import type { EditingScope } from '../store/slices/editorShellSlice'
 import { MediaTab } from './MediaTab'
 import { FlowInsertMenu } from './flow/FlowInsertMenu'
 import type { FlowDeepInsertPort } from './RightSidebar'
+import { captureFlowMenuTarget, releaseFlowMenuTarget, type CapturedFlowMenuTarget } from './flow/flowInsertCommands'
+import { courseInsertionViewPlacement } from '../media/commitCourseMediaAuthoring'
+import { BUILTIN_DISCOVERY_ENTRIES, discoveryAliases, searchDiscoveryEntries } from '../../shared/componentDiscovery'
 
 interface ElementsTabProps {
   onFlowInsert?: FlowDeepInsertPort
@@ -154,11 +156,11 @@ const ADD_CATEGORIES: Array<{ id: AddCategory; label: string }> = [
 ]
 
 const CHART_ITEMS = [
-  { type: 'bar' as const, label: '柱状图', keywords: '柱状图 柱形图 柱图 条形图 bar', Icon: BarChart3 },
-  { type: 'line' as const, label: '折线图', keywords: '折线图 线图 趋势图 line', Icon: LineChart },
-  { type: 'area' as const, label: '面积图', keywords: '面积图 区域图 area', Icon: AreaChart },
-  { type: 'pie' as const, label: '饼图', keywords: '饼图 饼状图 占比图 比例图 pie', Icon: PieChart },
-  { type: 'donut' as const, label: '环形图', keywords: '环形图 甜甜圈图 环状图 donut', Icon: Donut },
+  { type: 'bar' as const, label: '柱状图', Icon: BarChart3 },
+  { type: 'line' as const, label: '折线图', Icon: LineChart },
+  { type: 'area' as const, label: '面积图', Icon: AreaChart },
+  { type: 'pie' as const, label: '饼图', Icon: PieChart },
+  { type: 'donut' as const, label: '环形图', Icon: Donut },
 ] as const
 
 function setDragData(
@@ -201,6 +203,11 @@ export function ElementsTab({
   const [activeCategory, setActiveCategory] = useState<AddCategory>('common')
   const [searchQuery, setSearchQuery] = useState('')
   const [showChartPicker, setShowChartPicker] = useState(false)
+  const chartInsertionTarget = useRef<CapturedFlowMenuTarget | null>(null)
+  useEffect(() => () => { if (chartInsertionTarget.current) releaseFlowMenuTarget(chartInsertionTarget.current) }, [])
+  useEffect(() => {
+    if (!showChartPicker && chartInsertionTarget.current) { releaseFlowMenuTarget(chartInsertionTarget.current); chartInsertionTarget.current = null }
+  }, [showChartPicker])
 
   useEffect(() => {
     if (!showChartPicker) return
@@ -216,12 +223,11 @@ export function ElementsTab({
   const view = useEditorStore(selectCourseView)
   const addElement = (kind: CourseElementKind, options: Parameters<typeof insertCourseElement>[3] = {}) => {
     try {
-      const target = captureCourseInsertionTarget(kernel), owner = target.instanceId ? owningContainer(target.project, target.instanceId) : null
+      const target = captureCourseInsertionTarget(kernel)
       const camera = componentContainers(target.project).find(surface => surface.id === target.surfaceId)?.kind === 'spatial' && editingScope !== 'global'
         ? useEditorStore.getState().readSpatialView(target.surfaceId ?? '', target.documentId).camera : null
       void insertCourseElement(kernel, target, kind,
-        { ...(editingScope === 'global' ? { container: owner?.kind === 'global' ? owner : { kind: 'global' as const, plane: 'overlay' as const } } : {}),
-          ...(camera ? { center: { x: camera.x, y: camera.y } } : {}), ...options }).catch(error => mediaAuthoringError(kernel, error))
+        { ...courseInsertionViewPlacement(target, { scope: editingScope, plane: view.editingPlane, camera }), ...options }).catch(error => mediaAuthoringError(kernel, error))
     }
     catch (error) { mediaAuthoringError(kernel, error) }
   }
@@ -233,7 +239,16 @@ export function ElementsTab({
   const addTableNode = () => addElement('table')
   const addInputNode = () => addElement('input')
   const inputAvailable = Boolean(view.project && view.surfaceId)
-  const addChartNode = (chartType: 'bar' | 'line' | 'area' | 'pie' | 'donut') => addElement('chart', { chartType })
+  const addChartNode = (chartType: 'bar' | 'line' | 'area' | 'pie' | 'donut') => {
+    if (onFlowInsert && view.project && selectEditingScope(useEditorStore.getState()) !== 'global'
+      && componentContainers(view.project).find(surface => surface.id === view.surfaceId)?.kind === 'flow') {
+      const captured = chartInsertionTarget.current ?? undefined
+      chartInsertionTarget.current = null
+      onFlowInsert({ destination: 'document', kind: 'chart', label: '图表' }, { chartType }, captured)
+      return
+    }
+    addElement('chart', { chartType })
+  }
   const mediaAssets = useMemo(() => readCourseMediaLibrary(view).assets, [view])
   const audioSettings = useMemo(() => readCourseAudioSettings(view), [view])
   const editingScope = useEditorStore(selectEditingScope)
@@ -262,46 +277,49 @@ export function ElementsTab({
   const categories = ADD_CATEGORIES
   const normalizedQuery = searchQuery.trim().toLocaleLowerCase()
   const searching = normalizedQuery.length > 0
-  const matchesSearch = (label: string): boolean =>
-    !searching || label.toLocaleLowerCase().includes(normalizedQuery)
+  const matchesSearch = (id: string, title?: string): boolean => {
+    const fact = BUILTIN_DISCOVERY_ENTRIES.find(entry => entry.id === id)
+    return searchDiscoveryEntries([{ id, title: title ?? fact?.title ?? id,
+      aliases: fact?.aliases ?? discoveryAliases(id), description: fact?.description ?? '' }], normalizedQuery).length > 0
+  }
   const visibleShapeGroups = useMemo(() => SHAPE_GROUPS
     .map((group) => ({
       ...group,
       items: group.items.filter(({ label, type }) =>
-        matchesSearch(`${label} ${type}`),
+        matchesSearch('shape', `${label} ${type}`),
       ),
     }))
     .filter((group) => group.items.length > 0), [normalizedQuery])
   const showText = searching
-    ? matchesSearch('文本 文字')
+    ? matchesSearch('text')
     : activeCategory === 'common'
   const showFormula = searching
-    ? matchesSearch('公式 数学 formula')
+    ? matchesSearch('formula')
     : activeCategory === 'common'
   const showImage = searching
-    ? matchesSearch('图片 图像')
+    ? matchesSearch('image')
     : activeCategory === 'common'
   const showVideo = searching
-    ? matchesSearch('视频')
+    ? matchesSearch('video')
     : activeCategory === 'common'
   const showTable = searching
-    ? matchesSearch('表格 table')
+    ? matchesSearch('table')
     : activeCategory === 'common'
   const matchingCharts = useMemo(() => {
     if (!searching) return []
     return CHART_ITEMS.filter((item) =>
-      matchesSearch(`图表 chart ${item.label} ${item.keywords}`)
+      matchesSearch(`chart:${item.type}`)
     )
   }, [searching, normalizedQuery])
   const showCharts = searching
-    ? matchingCharts.length > 0 || matchesSearch('图表 chart')
+    ? matchingCharts.length > 0 || matchesSearch('chart')
     : activeCategory === 'common'
   const showAudio = searching
-    ? matchesSearch('声音 音频')
+    ? matchesSearch('audio')
     : activeCategory === 'common'
   const showController = editingScope === 'global' &&
     (searching
-      ? matchesSearch('教师控制器 导航')
+      ? matchesSearch('navigation')
       : activeCategory === 'controls')
   const showQuickAdd = showText || showFormula || showImage || showVideo || showAudio || showController || showTable || showCharts
   const showShapes = searching
@@ -310,10 +328,10 @@ export function ElementsTab({
   const shapeGroups = visibleShapeGroups
   const assetSearchMatches = searching && (
     Object.values(mediaAssets).some((asset) =>
-      matchesSearch(`${asset.filename} ${asset.mimeType} ${asset.kind}`),
+      matchesSearch(asset.kind, `${asset.filename} ${asset.mimeType}`),
     ) ||
     Object.values(audioSettings.sounds).some((sound) =>
-      matchesSearch(`${sound.name} 音频 声音`),
+      matchesSearch('audio', sound.name),
     )
   )
   const showAssets = searching ? assetSearchMatches : activeCategory === 'media'
@@ -323,13 +341,21 @@ export function ElementsTab({
 
   if (authoringSurface === 'flow' && editingScope === 'scene' && onFlowInsert) return (
     <div className="elements-scroll" data-testid="elements-tab">
-      <FlowInsertMenu onInsert={command => onFlowInsert(command)} />
-      <div className="element-grid element-grid--primary">
+      <label className="add-search"><Search size={15} aria-hidden="true"/><input type="search" value={searchQuery}
+        placeholder="搜索元素、图形或素材" aria-label="搜索元素内容" onChange={event=>setSearchQuery(event.currentTarget.value)}/></label>
+      <FlowInsertMenu onInsert={command => onFlowInsert(command)} query={searchQuery} />
+      {showCharts&&<div className="element-grid element-grid--primary">
         <button type="button" aria-label="图表"
           className={`element-card element-card--primary ${showChartPicker ? 'is-active' : ''}`}
           title="图表：点击展开选择图表类型" data-testid="add-chart"
           aria-haspopup="dialog" aria-expanded={showChartPicker}
-          onClick={() => setShowChartPicker((prev) => !prev)}>
+          onClick={() => {
+            if (!showChartPicker) {
+              try { chartInsertionTarget.current = captureFlowMenuTarget(kernel) }
+              catch (error) { mediaAuthoringError(kernel, error); return }
+            }
+            setShowChartPicker(prev => !prev)
+          }}>
           <span className="element-icon"><BarChart3 size={20} /></span>图表
         </button>
         {showChartPicker && <div className="chart-picker-popover" data-testid="chart-picker-panel"
@@ -340,7 +366,7 @@ export function ElementsTab({
               onClick={() => setShowChartPicker(false)}><X size={14} /></button>
           </div>
           <div className="chart-picker-grid">
-            {CHART_ITEMS.map(({ type, label, Icon }) => <button type="button" key={type}
+            {(searching?matchingCharts:CHART_ITEMS).map(({ type, label, Icon }) => <button type="button" key={type}
               aria-label={label} className="chart-picker-item"
               title={insertionTitle(authoringSurface, editingScope, 'chart', label, spatialInsertionScope ?? undefined)}
               data-testid={`add-chart-${type}`} data-insertion-carrier={chartInsertion.carrier}
@@ -350,7 +376,7 @@ export function ElementsTab({
             </button>)}
           </div>
         </div>}
-      </div>
+      </div>}
       {onImportAudio && onImportVideo && <details className="flow-insert-assets"><summary>已导入素材</summary>
         <MediaTab embedded onFlowInsert={onFlowInsert} onImportImage={onImportImage}
           onImportAudio={onImportAudio} onImportVideo={onImportVideo} showAdvancedAudioSettings={false} />
@@ -530,7 +556,7 @@ export function ElementsTab({
                 教师控制器
               </button>
             )}
-            {authoringSurface === 'slide' && inputAvailable && (!searchQuery || '填空题输入答案'.includes(searchQuery)) && (
+            {authoringSurface === 'slide' && inputAvailable && matchesSearch('input') && (
               <button type="button" aria-label="填空题" className="element-card element-card--primary" data-testid="add-input" onClick={addInputNode}>
                 <span className="element-icon"><Type size={20} /></span>填空题
               </button>

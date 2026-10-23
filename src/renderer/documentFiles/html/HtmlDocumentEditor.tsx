@@ -6,6 +6,8 @@ import { HtmlPreviewPane } from './HtmlPreviewPane'
 import { HtmlTextDrafts } from './htmlTextDrafts'
 import { htmlTargetNode, type HtmlEditingTarget, type HtmlSourceSelection } from './htmlEditingTarget'
 import { HtmlSourceAnalysis } from './htmlSourceAnalysis'
+import type { DocumentHostAPI } from '../../../shared/workbench/desktop'
+import { HtmlTextDraftRecovery } from './htmlTextDraftRecovery'
 
 export interface HtmlDocumentEditorProps {
   tabId: string
@@ -19,19 +21,24 @@ export interface HtmlDocumentEditorProps {
   onPendingDraftChange?(dirty: boolean): void
   documentActions?: ReactNode
   onTargetSource?(target: HtmlSourceSelection | null): void
+  documents?: DocumentHostAPI
 }
 
 export interface HtmlDocumentEditorHandle extends PlainTextDocumentEditorHandle {
   flush(): { ready: boolean; source: string; sourceChangeHints?: Array<{ from: number; to: number; inserted: number }> }
+  prepare(): Promise<{ ready: boolean; source: string; issue?: string; sourceChangeHints?: Array<{ from: number; to: number; inserted: number }> }>
 }
 
 /** HTML is still one canonical text document. The preview lease is a view of its committed source. */
-export const HtmlDocumentEditor = forwardRef<HtmlDocumentEditorHandle, HtmlDocumentEditorProps>(function HtmlDocumentEditor({ tabId, active = true, committed, source, onDraft, onUndo, onRedo, onSave, onPendingDraftChange, documentActions, onTargetSource }, ref) {
+export const HtmlDocumentEditor = forwardRef<HtmlDocumentEditorHandle, HtmlDocumentEditorProps>(function HtmlDocumentEditor({ tabId, active = true, committed, source, onDraft, onUndo, onRedo, onSave, onPendingDraftChange, documentActions, onTargetSource, documents }, ref) {
   const committedSource = committed.model.kind === 'text' ? committed.model.source : ''
+  const latestSource = useRef(source); latestSource.current = source
+  const latestCommittedSource = useRef(committedSource); latestCommittedSource.current = committedSource
   const [mode, setMode] = useState<'preview' | 'source'>('preview')
   const [lease, setLease] = useState<HtmlPreviewLease | null>(null)
   const [previewError, setPreviewError] = useState<string | null>(null)
   const [viewIssue, setViewIssue] = useState<string | null>(null)
+  const [recoveryIssue, setRecoveryIssue] = useState<string | null>(null)
   const [retry, setRetry] = useState(0)
   const sourceEditor = useRef<PlainTextDocumentEditorHandle>(null)
   const composing = useRef(false)
@@ -44,7 +51,12 @@ export const HtmlDocumentEditor = forwardRef<HtmlDocumentEditorHandle, HtmlDocum
   }
   useEffect(() => { selectTarget(null) }, [committed.documentId, committed.epoch])
   const textDrafts = useMemo(() => new HtmlTextDrafts(), [committed.documentId, committed.epoch])
+  const inputOwner = useRef({ documentId: committed.documentId, epoch: committed.epoch, drafts: textDrafts })
+  inputOwner.current = { documentId: committed.documentId, epoch: committed.epoch, drafts: textDrafts }
   const retained = useSyncExternalStore(textDrafts.subscribe, textDrafts.read)
+  const recovery = useMemo(() => new HtmlTextDraftRecovery(textDrafts, { documentId: committed.documentId, epoch: committed.epoch },
+    documents ?? window.desktopAPI?.documents, setRecoveryIssue), [textDrafts, documents])
+  useEffect(() => recovery.mount(), [recovery])
   const leaseQueue = useRef<Promise<void>>(Promise.resolve())
   const reloadPreview = useRef<(() => void) | null>(null)
   const analysis = useMemo(() => new HtmlSourceAnalysis(committedSource), [committedSource, committed.documentId, committed.epoch])
@@ -57,11 +69,33 @@ export const HtmlDocumentEditor = forwardRef<HtmlDocumentEditorHandle, HtmlDocum
     })
   }, [mode, active, committed.revision, analysis])
   useEffect(() => { if (source !== committedSource && target) selectTarget(null) }, [source, committedSource, target])
-  useEffect(() => { textDrafts.reconcile(committedSource) }, [textDrafts, committedSource, committed.revision])
+  useEffect(() => { textDrafts.reconcile(committedSource) }, [textDrafts, retained, committedSource, committed.revision])
   useEffect(() => { onPendingDraftChange?.(retained.length > 0) }, [retained.length, onPendingDraftChange])
-  useImperativeHandle(ref, () => ({ flush: () => {
+  const pendingSource = () => sourceEditor.current?.flush() ?? { ready: true, source: latestSource.current }
+  const prepare = async () => {
+    const captured = inputOwner.current
+    for (;;) {
+      if (composing.current) return { ready: false, source: latestSource.current, issue: '请先完成当前文字输入。' }
+      const current = pendingSource(), drafts = textDrafts.read(), revision = latestRevision.current
+      if (!current.ready) return current
+      const sourceChangeHints: Array<{ from: number; to: number; inserted: number }> = []
+      const prepared = await recovery.prepare(current.source, sourceChangeHints, latestCommittedSource.current)
+      const owner = inputOwner.current
+      if (owner.documentId !== captured.documentId || owner.epoch !== captured.epoch || owner.drafts !== captured.drafts)
+        return { ready: false, source: latestSource.current, issue: '编辑位置已切换，原文字稿已保留。请在对应文档继续。' }
+      if (!prepared.ready) return prepared
+      const latest = pendingSource(), nextDrafts = textDrafts.read()
+      // The recovery ACK does not freeze an editable view. Re-prepare its latest
+      // raw input rather than returning a captured source over newer typing.
+      if (current.source !== latest.source || revision !== latestRevision.current || drafts.length !== nextDrafts.length
+        || drafts.some((draft, index) => draft.id !== nextDrafts[index]?.id || draft.value !== nextDrafts[index]?.value)) continue
+      if (composing.current || !latest.ready) return { ready: false, source: latest.source, issue: '请先完成当前文字输入。' }
+      return sourceChangeHints.length ? { ...prepared, sourceChangeHints } : prepared
+    }
+  }
+  useImperativeHandle(ref, () => ({ prepare, flush: () => {
     if (composing.current) return { ready: false, source }
-    const current = sourceEditor.current?.flush() ?? { ready: true, source }
+    const current = pendingSource()
     if (!current.ready) return current
     const sourceChangeHints: Array<{ from: number; to: number; inserted: number }> = []
     const prepared = textDrafts.prepare(current.source, sourceChangeHints)
@@ -73,7 +107,7 @@ export const HtmlDocumentEditor = forwardRef<HtmlDocumentEditorHandle, HtmlDocum
       setMode('source')
       sourceEditor.current?.revealRange(range)
       return true
-    } }), [source, textDrafts, committed.revision, onTargetSource])
+    } }), [source, textDrafts, recovery, committed.revision, onTargetSource])
 
   const binding = committed.binding
   const documentId = committed.documentId
@@ -142,8 +176,9 @@ export const HtmlDocumentEditor = forwardRef<HtmlDocumentEditorHandle, HtmlDocum
     onCompositionEndCapture={() => { composing.current = false; setViewIssue(null) }}>
     {(mode === 'source' || !lease) && <div role="toolbar" aria-label="HTML 文档工具" className="html-document-editor__toolbar">{viewControls}</div>}
     {viewIssue && <p role="alert">{viewIssue}</p>}
+    {recoveryIssue && <p role="alert">{recoveryIssue}<button type="button" onClick={() => { void recovery.persist().catch(() => {}) }}>重试保全原稿</button></p>}
     {retained.length > 0 && <details open={retained.some(draft => Boolean(draft.issue))} style={{ flex: '0 0 auto', maxHeight: '35%', overflow: 'auto' }}>
-      <summary>{retained.length} 处文字草稿尚未应用{retained.some(draft => Boolean(draft.issue)) ? '；请先处理原文变化' : '；保存时一并应用'}</summary>
+      <summary>{retained.length} 处文字稿尚未应用；当前内容可继续编辑{retained.some(draft => Boolean(draft.issue)) ? '，原稿单独保留' : '，保存时可合并的输入一并应用'}</summary>
       {retained.map(draft => <label key={draft.id} style={{ display: 'block', padding: 8 }}>
         原文：{draft.original}
         <textarea aria-label={`保留的 HTML 文字草稿：${draft.original}`} value={draft.value}
@@ -157,6 +192,7 @@ export const HtmlDocumentEditor = forwardRef<HtmlDocumentEditorHandle, HtmlDocum
         target={target} onTargetChange={selectTarget}
         onUndo={onUndo} onRedo={onRedo} onSave={onSave} toolbarLeading={viewControls}
         pendingSourceDraft={source !== committedSource} onReloadRequest={() => reloadPreview.current?.()}
+        preserveTextDrafts={async () => { try { await recovery.persist(); return true } catch { return false } }}
         reloadIssue={previewError} />
         : <p role={previewError ? 'alert' : 'status'}>{previewError ?? '正在准备 HTML 预览…'}{previewError && <button type="button" onClick={() => setRetry(value => value + 1)}>重试预览</button>}</p>}
     </div>

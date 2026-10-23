@@ -10,17 +10,19 @@ import { ComponentSourcesEditor } from './ComponentSourcesEditor'
 import { useEditorStore, selectEditingScope } from '../store/editorStore'
 import type { CapturedComponentOperation, CapturedCourseTarget } from '../documents/CourseV10DocumentBridge'
 import type { CourseV10DocumentBridge } from '../documents/CourseV10DocumentBridge'
+import { isCourseComponentInputFailure, settleCourseComponentInput, type CourseComponentInputFailure } from '../documents/CourseV10DocumentBridge'
 import type { DocumentOperationResult } from '../../shared/workbench/document'
 import { resolveComponentPresentation } from '../../shared/contracts/component-platform/project'
 import { notifyCourseDrafts, registerCourseDraftProvider, type AdvancedDraftIssue, type AdvancedDraftRecovery } from '../authoring/courseDraftLifecycle'
 import { componentInteractionView, componentRuleEdits } from '../interactions/componentInteractionAuthoring'
 import { replaceCourseNetworkDeclaration, type CourseNetworkDeclaration } from '../course/courseLogicAuthoringCommands'
 import { loadBuiltinComponentSource } from '../../core/components/source/builtinSources'
+import { applyComponentOperation, equalComponentValue } from '../../core/drivers/courseV10Operations'
 
 type DeveloperSection = 'runtime' | 'object' | 'rules' | 'component'
 type JsonDraftContext = { kind: 'network' } | { kind: 'object'; instanceId: string } | { kind: 'definition'; definitionId: string }
   | { kind: 'rule'; surfaceId: string; global: boolean; ruleId: string }
-type ApplyDraft = ((raw: string) => Promise<DocumentOperationResult | void>) & { target?: CapturedCourseTarget; context?: JsonDraftContext; baseline?: string }
+type ApplyDraft = ((raw: string) => Promise<DocumentOperationResult | void>) & { target?: CapturedCourseTarget; context?: JsonDraftContext; baseline?: string; matches?(raw: string): boolean }
 const errorMessage = (error: unknown) => {
   if (error instanceof SyntaxError) return 'JSON 不完整或格式有误，请检查引号、逗号和括号；原输入已保留。'
   const issues = (error as { issues?: { path: (string | number)[]; message: string }[] })?.issues
@@ -28,7 +30,7 @@ const errorMessage = (error: unknown) => {
   return error instanceof Error ? error.message : String(error)
 }
 type CodeDraft = { key: string; value: string; binding: { apply: ApplyDraft; version: number } | null;
-  busy: boolean; composing: boolean; message: string | null; listeners: Set<() => void>; pending?: Promise<boolean>; blocked?: string; baseline?: string; resumeRequired?: boolean }
+  busy: boolean; composing: boolean; message: string | null; listeners: Set<() => void>; pending?: Promise<boolean>; blocked?: string; baseline?: string; resumeRequired?: boolean; active?: boolean; activeOwner?: { isCurrent(key: string): boolean }; failure?: CourseComponentInputFailure }
 const codeDrafts = new WeakMap<object, Map<string, CodeDraft>>()
 const codeBridges = new WeakMap<object, CourseV10DocumentBridge>()
 function publishCodeDraft(owner: object, draft: CodeDraft) {
@@ -36,12 +38,30 @@ function publishCodeDraft(owner: object, draft: CodeDraft) {
   const bridge = codeBridges.get(owner)
   if (bridge) notifyCourseDrafts(bridge)
 }
+function parkCodeDraft(owner: object, draft: CodeDraft, detached = false) {
+  draft.active = false
+  if (detached && draft.composing) { draft.resumeRequired = true; draft.composing = false }
+  if (!draft.composing) draft.activeOwner = undefined
+  publishCodeDraft(owner, draft)
+}
 function codeDraftDirty(draft: CodeDraft): boolean { return Boolean(draft.binding || draft.busy || draft.composing || draft.blocked) }
+function consumeAppliedCodeDraft(owner: object, draft: CodeDraft, previous: ApplyDraft): boolean {
+  const bridge = codeBridges.get(owner)
+  if (!bridge || !previous.target || !previous.context) return false
+  const current = bridge.captureTarget(previous.target.documentId, true), target = { ...current,
+    surfaceId: previous.target.surfaceId, activeStateId: previous.target.activeStateId,
+    editingProject: resolveComponentPresentation(current.project, previous.target.surfaceId, previous.target.activeStateId) }
+  const fresh = captureDeveloperJsonSession(bridge, target, previous.context)
+  if (!fresh.matches?.(draft.value) && !jsonEqual(draft.value, fresh.baseline ?? '')) return false
+  draft.binding = null; draft.baseline = fresh.baseline; draft.active = false; draft.failure = undefined; draft.message = '修改已应用到课件。'
+  return true
+}
 async function applyCodeDraft(owner: object, draft: CodeDraft): Promise<boolean> {
   if (draft.pending) return draft.pending
   const binding = draft.binding
   if (!binding) return !draft.composing
   if (draft.composing || draft.blocked || draft.resumeRequired) {
+    if (!draft.composing) draft.active = false
     draft.message = draft.blocked ?? (draft.resumeRequired ? '上次输入尚未结束；原输入已恢复，请继续编辑后保存。' : '输入法组合尚未结束；原输入已保留。'); publishCodeDraft(owner, draft); return false
   }
   const version = binding.version
@@ -49,15 +69,39 @@ async function applyCodeDraft(owner: object, draft: CodeDraft): Promise<boolean>
   const pending = (async () => {
     await Promise.resolve()
     try {
+      if (draft.failure) {
+        const outcome = await draft.failure.resolveInput('retry')
+        if (outcome === 'pending') { draft.active = false; draft.message = '上次应用的结果尚待确认；JSON原稿仍保留，可稍后重试。'; return false }
+        draft.failure = undefined
+        if (outcome === 'applied') {
+          if (consumeAppliedCodeDraft(owner, draft, binding.apply)) return true
+          draft.active = false; draft.blocked = '上次修改已应用，当前内容又有变化；此稿仍保留，可复制核对后放弃旧稿并继续。'
+          draft.message = draft.blocked; return false
+        }
+      }
       if (draft.baseline !== undefined && jsonEqual(draft.value, draft.baseline)) {
         draft.binding = null; draft.message = '内容未改变，无需写入历史。'; return true
       }
       const result = await binding.apply(draft.value)
-      if (draft.binding === binding && binding.version === version) draft.binding = null
+      if (draft.binding === binding && binding.version === version) { draft.binding = null; draft.active = false }
       draft.message = result?.status === 'applied' ? '修改已应用到课件，可撤回。' : result?.status === 'unchanged' || draft.value === draft.baseline
         ? '内容未改变，无需写入历史。' : '修改已应用到课件。'
       return !draft.binding
-    } catch (error) { if (draft.binding === binding) draft.message = `未应用：${errorMessage(error)}`; return false }
+    } catch (error) {
+      draft.active = false
+      if (isCourseComponentInputFailure(error)) {
+        draft.failure = error
+        try {
+          if (await settleCourseComponentInput(error) === 'applied') {
+            if (consumeAppliedCodeDraft(owner, draft, binding.apply)) return true
+            draft.message = '上次修改已确认应用；待核对的JSON输入仍保留。'
+            return false
+          }
+        } catch { /* Raw input and its exact resolver remain with this draft. */ }
+      }
+      if (draft.binding === binding) draft.message = `未应用：${errorMessage(error)}`
+      return false
+    }
     finally { draft.busy = false; draft.pending = undefined; publishCodeDraft(owner, draft) }
   })()
   draft.pending = pending; publishCodeDraft(owner, draft)
@@ -67,11 +111,16 @@ function codeLifecycle(bridge: CourseV10DocumentBridge, cache: Map<string, CodeD
   codeBridges.set(bridge, bridge)
   registerCourseDraftProvider(bridge, 'json', {
     hasDirty: documentId => [...cache.values()].some(draft => codeDraftDirty(draft) && (!documentId || draft.binding?.apply.target?.documentId === documentId)),
-    async prepare(documentId) {
+    async prepare(documentId, mode = 'apply') {
       const issues: AdvancedDraftIssue[] = []
-      for (const draft of cache.values()) if (draft.binding?.apply.target?.documentId === documentId && codeDraftDirty(draft)) {
-        const target = draft.binding.apply.target
-        if (!await applyCodeDraft(bridge, draft)) issues.push({ documentId, epoch: target.epoch, message: draft.message ?? 'JSON 草稿尚未应用。' })
+      for (const draft of cache.values()) if (draft.binding?.apply.target?.documentId === documentId && codeDraftDirty(draft) && (draft.active || draft.pending || draft.composing)) {
+        if (draft.active && draft.activeOwner && !draft.activeOwner.isCurrent(draft.key)) parkCodeDraft(bridge, draft)
+        const binding = draft.binding, target = binding.apply.target!
+        if (draft.composing) issues.push({ documentId, epoch: target.epoch, message: 'JSON输入法组合尚未结束；原输入已保留。' })
+        else if (!draft.active && !draft.pending) continue
+        else if (!await applyCodeDraft(bridge, draft)
+          && (mode === 'apply' || draft.binding !== binding || !codeDraftDirty(draft) || draft.composing || draft.pending))
+          issues.push({ documentId, epoch: target.epoch, message: draft.message ?? 'JSON草稿尚未应用。' })
       }
       return issues
     },
@@ -93,11 +142,16 @@ function codeLifecycle(bridge: CourseV10DocumentBridge, cache: Map<string, CodeD
       const key = developerJsonKey(target, saved.context)
       const existing = cache.get(key)
       if (existing?.binding || existing?.busy || existing?.composing) return
+      if (apply.matches?.(saved.raw) || jsonEqual(saved.raw, apply.baseline ?? '')) {
+        if (existing) { Object.assign(existing, { value: saved.raw, baseline: apply.baseline, binding: null, active: false,
+          blocked: undefined, resumeRequired: undefined, failure: undefined, message: null }); for (const notify of existing.listeners) notify() }
+        return 'consumed' as const
+      }
       const blocked = jsonEqual(saved.baseline, apply.baseline ?? '') ? undefined : 'JSON 基线已改变；原输入已恢复，请检查当前内容或放弃草稿后继续。'
       // Restore in place so an already-mounted textarea keeps observing the same owner.
       const draft: CodeDraft = existing ?? { key, value: '', binding: null, busy: false, composing: false, message: null, listeners: new Set() }
       Object.assign(draft, { value: saved.raw, binding: { apply, version: 1 }, busy: false, composing: false,
-        baseline: saved.baseline, blocked, resumeRequired: saved.composing,
+        baseline: saved.baseline, blocked, resumeRequired: saved.composing, active: false,
         message: blocked ?? (saved.composing ? '上次输入尚未结束；原输入已恢复，请继续编辑后保存。' : '已恢复 JSON 原输入；尚未自动应用。') })
       cache.set(key, draft)
       for (const notify of draft.listeners) notify()
@@ -112,7 +166,7 @@ function codeLifecycle(bridge: CourseV10DocumentBridge, cache: Map<string, CodeD
   })
 }
 function jsonEqual(left: string, right: string): boolean {
-  try { return JSON.stringify(JSON.parse(left)) === JSON.stringify(JSON.parse(right)) } catch { return left === right }
+  try { return equalComponentValue(JSON.parse(left), JSON.parse(right)) } catch { return left === right }
 }
 function developerJsonKey(target: CapturedCourseTarget, context: JsonDraftContext): string {
   return JSON.stringify([target.documentId, target.epoch, context, context.kind === 'object' ? target.activeStateId : null])
@@ -153,7 +207,14 @@ function captureDeveloperJsonSession(bridge: CourseV10DocumentBridge, target: Ca
       expected: [...new Map([...command.expected, ...planned.expected].map(expected => [JSON.stringify(expected.path), expected])).values()] }
     return bridge.editCaptured(next)
   }
-  return Object.assign(apply, { target, context, baseline: JSON.stringify(baseline, null, 2) })
+  return Object.assign(apply, { target, context, baseline: JSON.stringify(baseline, null, 2), matches: (raw: string) => {
+    try {
+      // The same field planner may materialize defaults absent from raw JSON.
+      // Check its current no-op semantics instead of comparing only source shape.
+      const { documentId: _documentId, epoch: _epoch, ...operation } = bridge.capture(plan(raw), target)
+      return equalComponentValue(applyComponentOperation(target.project, operation, target.resources), target.project)
+    } catch { return false }
+  } })
 }
 
 /** Frozen application callback owns its original capture through selection changes and late ACK. */
@@ -170,15 +231,25 @@ export function CodeDocumentEditor({ title, description, value, bindingKey, lang
   const fresh = (): CodeDraft => ({ key: bindingKey, value, baseline: value, binding: null, busy: false, composing: false, message: null, listeners: new Set() })
   const getDraft = () => { let draft = cache!.get(bindingKey); if (!draft) { draft = fresh(); cache!.set(bindingKey, draft) } return draft }
   const current = useRef(getDraft())
-  if (!current.current.binding && !current.current.busy && current.current.key !== bindingKey) current.current = getDraft()
+  const panel = useRef<HTMLElement>(null)
+  const currentKey = useRef(bindingKey); currentKey.current = bindingKey
+  const inputOwner = useRef({ isCurrent: (candidate: string) => currentKey.current === candidate && current.current.key === candidate && Boolean(panel.current?.isConnected)
+    && !panel.current?.closest('[hidden],[inert],details:not([open])') })
+  if (!current.current.composing && current.current.key !== bindingKey) current.current = getDraft()
   const draft = current.current, stale = !!draft.binding && draft.key !== bindingKey
   const render = () => publishCodeDraft(owner, draft)
   useEffect(() => {
     const notify = () => refresh(version => version + 1)
-    draft.listeners.add(notify); return () => { draft.listeners.delete(notify) }
+    draft.listeners.add(notify)
+    return () => {
+      draft.listeners.delete(notify)
+      if (draft.activeOwner !== inputOwner.current) return
+      parkCodeDraft(owner, draft, true)
+    }
   }, [draft])
   useEffect(() => { if (!draft.binding && !draft.busy && draft.key === bindingKey) { draft.value = value; draft.baseline = value; render() } }, [draft, bindingKey, value])
   const begin = () => {
+    draft.active = true; draft.activeOwner = inputOwner.current
     if (!draft.binding && capture) { draft.binding = { apply: capture(), version: 0 }; draft.baseline = draft.binding.apply.baseline ?? value }
     return draft.binding
   }
@@ -186,26 +257,48 @@ export function CodeDocumentEditor({ title, description, value, bindingKey, lang
     try { const binding = begin(); if (binding) binding.version++; draft.value = raw; draft.resumeRequired = false; draft.message = null; render() }
     catch (error) { draft.message = errorMessage(error); render() }
   }
-  const apply = async () => {
+  const apply = async (acceptRetained = false) => {
     if (draft.busy || draft.composing) return
+    if (acceptRetained) draft.resumeRequired = false
     let binding: NonNullable<CodeDraft['binding']>
     try { const started = begin(); if (!started) return; binding = started } catch (error) { draft.message = errorMessage(error); render(); return }
     void binding
     await applyCodeDraft(owner, draft)
   }
-  return <section className="developer-card">
+  return <section ref={panel} className="developer-card">
     <div className="developer-card__heading"><div><strong>{title}</strong><span>{description}</span></div><code>{language === 'json' ? 'JSON' : 'JS'}</code></div>
     <textarea className="developer-code-editor" aria-label={title} value={draft.value} readOnly={readOnly || draft.busy} wrap="off" spellCheck={false}
       onChange={event => change(event.target.value)} onKeyDownCapture={event => { if ((event.ctrlKey || event.metaKey) && ['z', 'y'].includes(event.key.toLowerCase())) event.stopPropagation() }}
       onBlur={event => { if (!event.currentTarget.closest('section')?.contains(event.relatedTarget as Node | null) && draft.binding) void apply() }}
       onCompositionStart={() => { try { begin(); draft.composing = true; render() } catch (error) { draft.message = errorMessage(error); render() } }}
-      onCompositionEnd={() => { setTimeout(() => { draft.composing = false; render(); void apply() }, 0) }} />
+      onCompositionEnd={() => { setTimeout(() => {
+        if (current.current !== draft || draft.activeOwner !== inputOwner.current || !draft.listeners.size) return
+        draft.composing = false; draft.resumeRequired = false
+        if (!inputOwner.current.isCurrent(draft.key)) { parkCodeDraft(owner, draft); return }
+        render(); void apply()
+      }, 0) }} />
     {!readOnly && <div className="developer-card__actions">
       {language === 'json' && <button className="secondary-button" disabled={draft.composing || draft.busy} onClick={() => {
         try { change(JSON.stringify(JSON.parse(draft.value), null, 2)) } catch (error) { draft.message = `格式化失败：${errorMessage(error)}`; render() }
       }}><WandSparkles size={13} />格式化</button>}
-      {capture && <button className="primary-button" disabled={draft.composing || draft.busy} onClick={() => void apply()}><ShieldCheck size={13} />{applyLabel}</button>}
-      <button className="secondary-button" disabled={draft.composing || draft.busy} onClick={() => { cache!.delete(draft.key); current.current = fresh(); cache!.set(bindingKey, current.current); render() }}>放弃草稿</button>
+      {capture && <button className="primary-button" disabled={draft.composing || draft.busy} onClick={() => void apply(true)}><ShieldCheck size={13} />{applyLabel}</button>}
+      <button className="secondary-button" disabled={draft.composing || draft.busy} onClick={() => { void (async () => {
+        const next = fresh(), valueAtStart = draft.value, bindingAtStart = draft.binding, version = draft.binding?.version
+        draft.busy = true; render()
+        try {
+          if (draft.failure) {
+            const outcome = await draft.failure.resolveInput('cancel')
+            if (outcome === 'pending') { draft.message = '上次应用的结果尚待确认；JSON原稿仍保留，请稍后重试。'; return }
+            draft.failure = undefined
+          }
+          if (draft.value !== valueAtStart || draft.binding !== bindingAtStart || draft.binding?.version !== version) {
+            draft.message = '处理期间又有新输入；JSON原稿仍保留。'; return
+          }
+          cache!.delete(draft.key); cache!.set(next.key, next)
+          if (current.current === draft) current.current = next
+        } catch (error) { draft.message = errorMessage(error) }
+        finally { draft.busy = false; render() }
+      })() }}>放弃草稿</button>
     </div>}
     {stale && <p role="status" data-testid="code-document-stale">草稿属于原文档与原对象；应用仍只提交捕获的目标。</p>}
     {draft.message && <p className="developer-card__message" role="status">{draft.message}</p>}

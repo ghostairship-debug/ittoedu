@@ -2,13 +2,17 @@ import type { DocumentBlock, DocumentContent, FlowTextContent } from '../../shar
 import { documentBlockChildren, documentContentSchema, plainDocumentText } from '../../shared/document/content'
 import { fromEditorDocument, renewEditorIdentities, toEditorDocument } from './documentAdapter'
 import type { MenuCommand } from '../editing/commands/CommandMenu'
+import { locateDocumentBlock as locate } from '../../shared/document/blockInsertion'
+import type { DocumentSelection } from '../../shared/document/ports'
+import { prepareProfessionalElement } from '../../core/course/professionalElementDefaults'
+import { parseTableData } from '../../components/table/data'
 
 export type DocumentBlockKind = 'paragraph' | 'heading' | 'quote' | 'list' | 'code' | 'divider' | 'table' | 'callout' | 'section'
 export type DocumentBlockAction = 'insert-above' | 'insert-below' | 'duplicate' | 'delete' | 'move-up' | 'move-down'
 export type DocumentBlockCommand = { action: DocumentBlockAction; blockId: string; kind?: DocumentBlockKind }
   | { action: 'ai'; blockId: string }
   | { action: 'convert'; blockId: string; kind: DocumentBlockKind }
-  | { action: 'move'; blockId: string; targetId: string; side: 'before' | 'after' }
+  | { action: 'move'; blockId: string; targetId: string; side: 'before' | 'after' | 'inside' }
 
 export interface DocumentBlockCommandPort {
   content: DocumentContent
@@ -20,11 +24,21 @@ export interface DocumentBlockCommandPort {
   ai?(blockId: string): void
   /** The host's existing clipboard/resource owner copies formal component instances. */
   duplicate?(blockId: string): void
+  columns?(instanceIds: readonly string[]): void
   disabledReason?: string | null
   createId?(): string
 }
 
 const empty = (): FlowTextContent => ({ inlines: [] })
+
+/** Whole selected reading blocks, in their formal order. Partial text stays intact. */
+export function documentColumnSelection(content: DocumentContent, selection: DocumentSelection | null): string[] | null {
+  if (!selection || selection.kind === 'cells') return null
+  if (selection.kind === 'object') return locate(content.blocks, selection.blockId) ? [selection.blockId] : null
+  const anchor = locate(content.blocks, selection.anchor.blockId), head = locate(content.blocks, selection.head.blockId)
+  if (!anchor || !head || anchor.blocks !== head.blocks) return null
+  return anchor.blocks.slice(Math.min(anchor.index, head.index), Math.max(anchor.index, head.index) + 1).map(block => block.id)
+}
 export const DOCUMENT_BLOCK_KINDS: readonly { kind: DocumentBlockKind; label: string }[] = [
   { kind: 'paragraph', label: '正文' }, { kind: 'heading', label: '标题' },
   { kind: 'quote', label: '引用' }, { kind: 'list', label: '列表' },
@@ -32,19 +46,6 @@ export const DOCUMENT_BLOCK_KINDS: readonly { kind: DocumentBlockKind; label: st
   { kind: 'table', label: '表格' },
   { kind: 'callout', label: '提示框' }, { kind: 'section', label: '折叠节' },
 ]
-
-function locate(blocks: DocumentBlock[], id: string): { blocks: DocumentBlock[]; index: number; block: DocumentBlock } | null {
-  for (let index = 0; index < blocks.length; index++) {
-    const block = blocks[index]!
-    if (block.id === id) return { blocks, index, block }
-    const children = documentBlockChildren(block)
-    if (children) {
-      const child = locate(children, id)
-      if (child) return child
-    }
-  }
-  return null
-}
 
 export function createDocumentBlock(kind: DocumentBlockKind, id: () => string = () => crypto.randomUUID(), initial: { text?: string; title?: string } = {}): DocumentBlock {
   const blockId = id()
@@ -59,9 +60,10 @@ export function createDocumentBlock(kind: DocumentBlockKind, id: () => string = 
     case 'callout': return { id: blockId, type: kind, tone: 'note', title: { inlines: [{ type: 'text', text: initial.title ?? '提示' }] }, body: text() }
     case 'section': return { id: blockId, type: kind, title: text(), collapsedByDefault: false, blocks: [{id:id(),type:'paragraph',content:empty()}] }
     case 'table': {
-      const columns = Array.from({ length: 2 }, () => ({ id: id(), header: empty() }))
-      const rows = Array.from({ length: 2 }, () => ({ id: id(), cells: Object.fromEntries(columns.map(column => [column.id, empty()])) }))
-      return { id: blockId, type: kind, columns, rows }
+      const data = parseTableData(prepareProfessionalElement('table').data)
+      const columns = data.columns.map(column => ({ id: id(), header: column.header ?? empty() }))
+      const rows = data.rows.map(row => ({ id: id(), cells: Object.fromEntries(columns.map((column, index) => [column.id, row.cells[index]?.content ?? { inlines: [{ type: 'text' as const, text: row.cells[index]?.text ?? '' }] }])) }))
+      return { id: blockId, type: kind, headerEnabled: data.headerEnabled, columns, rows }
     }
   }
 }
@@ -128,10 +130,13 @@ export function applyDocumentBlockCommand(content: DocumentContent, command: Exc
       const destination = locate(next.blocks, command.targetId)
       if (!destination) throw new Error(`找不到目标段落：${command.targetId}`)
       if (command.blockId === command.targetId) return content
-      if (destination.blocks !== blocks) throw new Error('暂不支持跨分节拖动段落')
+      // A reading group/section can move between columns, but never into its own tree.
+      if (documentBlockChildren(block) && locate(documentBlockChildren(block)!, command.targetId)) throw new Error('不能把段落移入自身内部')
+      const targetBlocks = command.side === 'inside' ? documentBlockChildren(destination.block) : destination.blocks
+      if (!targetBlocks) throw new Error('此对象不能容纳段落')
       blocks.splice(index, 1)
-      const target = blocks.findIndex(item => item.id === command.targetId)
-      blocks.splice(target + (command.side === 'after' ? 1 : 0), 0, block)
+      const target = command.side === 'inside' ? targetBlocks.length : targetBlocks.findIndex(item => item.id === command.targetId)
+      targetBlocks.splice(target + (command.side === 'after' ? 1 : 0), 0, block)
       break
     }
     case 'convert': blocks[index] = convert(block, command.kind, createId); break
@@ -161,6 +166,8 @@ export function documentBlockMenu(port: DocumentBlockCommandPort): MenuCommand[]
     run: () => run(command), danger: command.action === 'delete',
   })
   return [
+    ...(port.columns ? [{ id: 'columns', label: '分为两列', group: '布局', disabledReason: port.disabledReason,
+      run: () => port.columns!([port.blockId]) }] : []),
     ...DOCUMENT_BLOCK_KINDS.map(({ kind, label }) => item(`insert-${kind}`, `下方插入${label}`, '插入', { action: 'insert-below', blockId: port.blockId, kind })),
     item('insert-above', '上方插入段落', '插入', { action: 'insert-above', blockId: port.blockId }),
     ...DOCUMENT_BLOCK_KINDS.filter(({ kind }) => !['table', 'callout', 'section'].includes(kind)).map(({ kind, label }) => item(`convert-${kind}`, `转换为${label}`, '转换', { action: 'convert', blockId: port.blockId, kind }, conversionReason(location.block, kind))),

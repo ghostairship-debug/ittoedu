@@ -1,0 +1,391 @@
+{
+  "date": "2026-10-22T14:02:03.393Z",
+  "coffeeRevision": 204,
+  "sugarRevision": 34,
+  "offline": true,
+  "coffee": [
+    {
+      "width": 1440,
+      "chapters": [
+        {
+          "coffeeUnderlay": "journey-v1",
+          "mountId": "1792677734427-3ikdo",
+          "chapter": "1",
+          "stage": "cup",
+          "reading": "{\"containerId\":\"47415583-2d75-4b72-9c46-dfd29b47d82a\",\"activeInstanceId\":\"5b629c9b-d44b-4fe6-a156-ed4d3b03880d\",\"progress\":0.007807860606723874}",
+          "events": "11",
+          "tick": "2",
+          "idle": "true",
+          "reduced": "false",
+          "size": "1422x982"
+        },
+        {
+          "coffeeUnderlay": "journey-v1",
+          "mountId": "1792677734427-3ikdo",
+          "chapter": "2",
+          "stage": "fruit",
+          "reading": "{\"containerId\":\"47415583-2d75-4b72-9c46-dfd29b47d82a\",\"activeInstanceId\":\"b3d345ba-f2c8-4c52-add1-2aa477d6a241\",\"progress\":0.126533270420731}",
+          "events": "13",
+          "tick": "59",
+          "idle": "true",
+          "reduced": "false",
+          "size": "1422x982"
+        },
+        {
+          "coffeeUnderlay": "journey-v1",
+          "mountId": "1792677734427-3ikdo",
+          "chapter": "3",
+          "stage": "layers",
+          "reading": "{\"containerId\":\"47415583-2d75-4b72-9c46-dfd29b47d82a\",\"activeInstanceId\":\"a8add446-cdcf-4007-824f-f0449a24912a\",\"progress\":0.3258633588512111}",
+          "events": "15",
+          "tick": "121",
+          "idle": "true",
+          "reduced": "false",
+          "size": "1422x982"
+        },
+        {
+          "coffeeUnderlay": "journey-v1",
+          "mountId": "1792677734427-3ikdo",
+          "chapter": "4",
+          "stage": "green",
+          "reading": "{\"containerId\":\"47415583-2d75-4b72-9c46-dfd29b47d82a\",\"activeInstanceId\":\"83bca290-3006-4058-af49-a97b1e1fd00d\",\"progress\":0.4572191314113892}",
+          "events": "17",
+          "tick": "190",
+          "idle": "true",
+          "reduced": "false",
+          "size": "1422x982"
+        },
+        {
+          "coffeeUnderlay": "journey-v1",
+          "mountId": "1792677734427-3ikdo",
+          "chapter": "5",
+          "stage": "roast",
+          "reading": "{\"containerId\":\"47415583-2d75-4b72-9c46-dfd29b47d82a\",\"activeInstanceId\":\"5093abd6-eba9-43cc-a54a-ad2eb13648e6\",\"progress\":0.6145245583409732}",
+          "events": "19",
+          "tick": "257",
+          "idle": "true",
+          "reduced": "false",
+          "size": "1422x982"
+        },
+        {
+          "coffeeUnderlay": "journey-v1",
+          "mountId": "1792677734427-3ikdo",
+          "chapter": "6",
+          "stage": "solution",
+          "reading": "{\"containerId\":\"47415583-2d75-4b72-9c46-dfd29b47d82a\",\"activeInstanceId\":\"b1a166da-1cc4-4f39-a8ba-dc5c15bd39ba\",\"progress\":0.71717496102349}",
+          "events": "21",
+          "tick": "317",
+          "idle": "true",
+          "reduced": "false",
+          "size": "1422x982"
+        },
+        {
+          "coffeeUnderlay": "journey-v1",
+          "mountId": "1792677734427-3ikdo",
+          "chapter": "7",
+          "stage": "return",
+          "reading": "{\"containerId\":\"47415583-2d75-4b72-9c46-dfd29b47d82a\",\"activeInstanceId\":\"8ad1964b-3a7a-4a92-a59c-259924f7b485\",\"progress\":0.925575946335311}",
+          "events": "23",
+          "tick": "380",
+          "idle": "true",
+          "reduced": "false",
+          "size": "1422x982"
+        }
+      ],
+      "lightTransition": {
+        "coffeeUnderlay": "journey-v1",
+        "mountId": "1792677734427-3ikdo",
+        "chapter": "6",
+        "stage": "solution",
+        "reading": "{\"containerId\":\"47415583-2d75-4b72-9c46-dfd29b47d82a\",\"activeInstanceId\":\"b1a166da-1cc4-4f39-a8ba-dc5c15bd39ba\",\"progress\":0.71717496102349}",
+        "events": "29",
+        "tick": "565",
+        "idle": "false",
+        "reduced": "false",
+        "size": "1422x982",
+        "paperPixel": [
+          221,
+          233,
+          226,
+          255
+        ]
+      },
+      "fastFinal": {
+        "coffeeUnderlay": "journey-v1",
+        "mountId": "1792677734427-3ikdo",
+        "chapter": "6",
+        "stage": "solution",
+        "reading": "{\"containerId\":\"47415583-2d75-4b72-9c46-dfd29b47d82a\",\"activeInstanceId\":\"b1a166da-1cc4-4f39-a8ba-dc5c15bd39ba\",\"progress\":0.71717496102349}",
+        "events": "39",
+        "tick": "712",
+        "idle": "true",
+        "reduced": "false",
+        "size": "1422x982"
+      },
+      "idleStopped": true,
+      "reverseWheel": true,
+      "reduced": {
+        "coffeeUnderlay": "journey-v1",
+        "mountId": "1792677734427-3ikdo",
+        "chapter": "6",
+        "stage": "solution",
+        "reading": "{\"containerId\":\"47415583-2d75-4b72-9c46-dfd29b47d82a\",\"activeInstanceId\":\"b1a166da-1cc4-4f39-a8ba-dc5c15bd39ba\",\"progress\":0.71717496102349}",
+        "events": "45",
+        "tick": "724",
+        "idle": "true",
+        "reduced": "true",
+        "size": "1422x982"
+      }
+    },
+    {
+      "width": 390,
+      "chapters": [
+        {
+          "coffeeUnderlay": "journey-v1",
+          "mountId": "1792677775291-k9a01",
+          "chapter": "1",
+          "stage": "cup",
+          "reading": "{\"containerId\":\"47415583-2d75-4b72-9c46-dfd29b47d82a\",\"activeInstanceId\":\"5b629c9b-d44b-4fe6-a156-ed4d3b03880d\",\"progress\":0.004065856479309036}",
+          "events": "11",
+          "tick": "2",
+          "idle": "true",
+          "reduced": "false",
+          "size": "372x826"
+        },
+        {
+          "coffeeUnderlay": "journey-v1",
+          "mountId": "1792677775291-k9a01",
+          "chapter": "2",
+          "stage": "fruit",
+          "reading": "{\"containerId\":\"47415583-2d75-4b72-9c46-dfd29b47d82a\",\"activeInstanceId\":\"b3d345ba-f2c8-4c52-add1-2aa477d6a241\",\"progress\":0.13260236472291967}",
+          "events": "13",
+          "tick": "93",
+          "idle": "true",
+          "reduced": "false",
+          "size": "372x826"
+        },
+        {
+          "coffeeUnderlay": "journey-v1",
+          "mountId": "1792677775291-k9a01",
+          "chapter": "3",
+          "stage": "layers",
+          "reading": "{\"containerId\":\"47415583-2d75-4b72-9c46-dfd29b47d82a\",\"activeInstanceId\":\"a8add446-cdcf-4007-824f-f0449a24912a\",\"progress\":0.3141798188556982}",
+          "events": "15",
+          "tick": "186",
+          "idle": "true",
+          "reduced": "false",
+          "size": "372x826"
+        },
+        {
+          "coffeeUnderlay": "journey-v1",
+          "mountId": "1792677775291-k9a01",
+          "chapter": "4",
+          "stage": "green",
+          "reading": "{\"containerId\":\"47415583-2d75-4b72-9c46-dfd29b47d82a\",\"activeInstanceId\":\"83bca290-3006-4058-af49-a97b1e1fd00d\",\"progress\":0.4439176028772865}",
+          "events": "17",
+          "tick": "278",
+          "idle": "true",
+          "reduced": "false",
+          "size": "372x826"
+        },
+        {
+          "coffeeUnderlay": "journey-v1",
+          "mountId": "1792677775291-k9a01",
+          "chapter": "5",
+          "stage": "roast",
+          "reading": "{\"containerId\":\"47415583-2d75-4b72-9c46-dfd29b47d82a\",\"activeInstanceId\":\"5093abd6-eba9-43cc-a54a-ad2eb13648e6\",\"progress\":0.60073029481791}",
+          "events": "19",
+          "tick": "371",
+          "idle": "true",
+          "reduced": "false",
+          "size": "372x826"
+        },
+        {
+          "coffeeUnderlay": "journey-v1",
+          "mountId": "1792677775291-k9a01",
+          "chapter": "6",
+          "stage": "solution",
+          "reading": "{\"containerId\":\"47415583-2d75-4b72-9c46-dfd29b47d82a\",\"activeInstanceId\":\"b1a166da-1cc4-4f39-a8ba-dc5c15bd39ba\",\"progress\":0.6877765858067534}",
+          "events": "21",
+          "tick": "465",
+          "idle": "true",
+          "reduced": "false",
+          "size": "372x826"
+        },
+        {
+          "coffeeUnderlay": "journey-v1",
+          "mountId": "1792677775291-k9a01",
+          "chapter": "7",
+          "stage": "return",
+          "reading": "{\"containerId\":\"47415583-2d75-4b72-9c46-dfd29b47d82a\",\"activeInstanceId\":\"8ad1964b-3a7a-4a92-a59c-259924f7b485\",\"progress\":0.8802579277704061}",
+          "events": "23",
+          "tick": "561",
+          "idle": "true",
+          "reduced": "false",
+          "size": "372x826"
+        }
+      ],
+      "lightTransition": {
+        "coffeeUnderlay": "journey-v1",
+        "mountId": "1792677775291-k9a01",
+        "chapter": "6",
+        "stage": "solution",
+        "reading": "{\"containerId\":\"47415583-2d75-4b72-9c46-dfd29b47d82a\",\"activeInstanceId\":\"b1a166da-1cc4-4f39-a8ba-dc5c15bd39ba\",\"progress\":0.6877765858067534}",
+        "events": "29",
+        "tick": "800",
+        "idle": "false",
+        "reduced": "false",
+        "size": "372x826",
+        "paperPixel": [
+          221,
+          233,
+          226,
+          255
+        ]
+      },
+      "fastFinal": {
+        "coffeeUnderlay": "journey-v1",
+        "mountId": "1792677775291-k9a01",
+        "chapter": "6",
+        "stage": "solution",
+        "reading": "{\"containerId\":\"47415583-2d75-4b72-9c46-dfd29b47d82a\",\"activeInstanceId\":\"b1a166da-1cc4-4f39-a8ba-dc5c15bd39ba\",\"progress\":0.6877765858067534}",
+        "events": "39",
+        "tick": "1047",
+        "idle": "true",
+        "reduced": "false",
+        "size": "372x826"
+      },
+      "idleStopped": true,
+      "reverseWheel": true,
+      "reduced": {
+        "coffeeUnderlay": "journey-v1",
+        "mountId": "1792677775291-k9a01",
+        "chapter": "6",
+        "stage": "solution",
+        "reading": "{\"containerId\":\"47415583-2d75-4b72-9c46-dfd29b47d82a\",\"activeInstanceId\":\"b1a166da-1cc4-4f39-a8ba-dc5c15bd39ba\",\"progress\":0.6877765858067534}",
+        "events": "45",
+        "tick": "1068",
+        "idle": "true",
+        "reduced": "true",
+        "size": "372x826"
+      }
+    }
+  ],
+  "sugar": [
+    {
+      "width": 1440,
+      "chapters": [
+        {
+          "coffeeUnderlay": "journey-v1",
+          "mountId": "1792677801009-0fo44",
+          "chapter": "1",
+          "stage": "crystal",
+          "reading": "{\"containerId\":\"eec78b8e-0324-4c04-8dbf-fdd50b1de6a7\",\"activeInstanceId\":\"ca1efa48-27a3-4517-89ea-175c3d215142\",\"progress\":0.010098539656491863}",
+          "events": "8",
+          "tick": "62",
+          "idle": "true",
+          "reduced": "false",
+          "size": "1422x982"
+        },
+        {
+          "coffeeUnderlay": "journey-v1",
+          "mountId": "1792677801009-0fo44",
+          "chapter": "2",
+          "stage": "dissolved",
+          "reading": "{\"containerId\":\"eec78b8e-0324-4c04-8dbf-fdd50b1de6a7\",\"activeInstanceId\":\"923db1a3-613f-43fd-b76f-76a9278cc0f4\",\"progress\":0.41404012591616635}",
+          "events": "10",
+          "tick": "137",
+          "idle": "true",
+          "reduced": "false",
+          "size": "1422x982"
+        },
+        {
+          "coffeeUnderlay": "journey-v1",
+          "mountId": "1792677801009-0fo44",
+          "chapter": "3",
+          "stage": "distributed",
+          "reading": "{\"containerId\":\"eec78b8e-0324-4c04-8dbf-fdd50b1de6a7\",\"activeInstanceId\":\"a5030d3f-9275-4563-b495-bc94e8bf3d97\",\"progress\":0.9997554259926943}",
+          "events": "12",
+          "tick": "193",
+          "idle": "true",
+          "reduced": "false",
+          "size": "1422x982"
+        }
+      ],
+      "water": {
+        "waterLab": "",
+        "mode": "dilute",
+        "extraction": "false",
+        "playing": "false",
+        "added": "300",
+        "solute": "30",
+        "total": "600",
+        "concentration": "5.00",
+        "particles": "72",
+        "shownAdded": "300.00",
+        "visibleParticles": "72"
+      },
+      "statePreserved": true,
+      "sameMount": true
+    },
+    {
+      "width": 390,
+      "chapters": [
+        {
+          "coffeeUnderlay": "journey-v1",
+          "mountId": "1792677814693-pswd3",
+          "chapter": "1",
+          "stage": "crystal",
+          "reading": "{\"containerId\":\"eec78b8e-0324-4c04-8dbf-fdd50b1de6a7\",\"activeInstanceId\":\"ca1efa48-27a3-4517-89ea-175c3d215142\",\"progress\":0.009315933885981703}",
+          "events": "8",
+          "tick": "61",
+          "idle": "true",
+          "reduced": "false",
+          "size": "372x826"
+        },
+        {
+          "coffeeUnderlay": "journey-v1",
+          "mountId": "1792677814693-pswd3",
+          "chapter": "2",
+          "stage": "dissolved",
+          "reading": "{\"containerId\":\"eec78b8e-0324-4c04-8dbf-fdd50b1de6a7\",\"activeInstanceId\":\"923db1a3-613f-43fd-b76f-76a9278cc0f4\",\"progress\":0.3237287025378642}",
+          "events": "10",
+          "tick": "140",
+          "idle": "true",
+          "reduced": "false",
+          "size": "372x826"
+        },
+        {
+          "coffeeUnderlay": "journey-v1",
+          "mountId": "1792677814693-pswd3",
+          "chapter": "3",
+          "stage": "distributed",
+          "reading": "{\"containerId\":\"eec78b8e-0324-4c04-8dbf-fdd50b1de6a7\",\"activeInstanceId\":\"a5030d3f-9275-4563-b495-bc94e8bf3d97\",\"progress\":1}",
+          "events": "12",
+          "tick": "217",
+          "idle": "true",
+          "reduced": "false",
+          "size": "372x826"
+        }
+      ],
+      "water": {
+        "waterLab": "",
+        "mode": "dilute",
+        "extraction": "false",
+        "playing": "false",
+        "added": "300",
+        "solute": "30",
+        "total": "600",
+        "concentration": "5.00",
+        "particles": "72",
+        "shownAdded": "300.00",
+        "visibleParticles": "72"
+      },
+      "statePreserved": true,
+      "sameMount": true
+    }
+  ],
+  "errors": [],
+  "httpRequests": [],
+  "passed": true
+}

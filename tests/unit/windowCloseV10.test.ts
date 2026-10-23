@@ -50,6 +50,27 @@ async function fixture() {
 }
 
 describe('V10 mixed window close', () => {
+  it('preserves confirmed recovery through the writer barrier without discarding live sessions', async () => {
+    const f = await fixture()
+    f.ports.confirm = () => 'preserve'
+    f.ports.discard = vi.fn(f.ports.discard!)
+    f.ports.withWriteBarrier = async (ids, work) => {
+      f.order.push('barrier-enter')
+      try { return await f.host.tools.withWriteTaskBarrier(ids, work) }
+      finally { f.order.push('barrier-exit') }
+    }
+    const notes = f.host.registry.list().find(snapshot => snapshot.model.kind === 'text' && snapshot.model.source === 'changed notes.txt')!
+    expect(await prepareDocumentWindowClose(f.ports)).toBe(true)
+    expect(f.order).toEqual(['preserve', 'barrier-enter', 'stop', 'barrier-exit'])
+    expect(f.ports.discard).not.toHaveBeenCalled()
+    expect(f.ports.save).not.toHaveBeenCalled()
+    expect(f.host.registry.list()).toHaveLength(4)
+    const cold = new DocumentHostService(path.join(f.root, 'journal'))
+    expect(await cold.internalAPI.restore(notes.documentId)).toMatchObject({ dirty: true, model: { source: 'changed notes.txt' } })
+    const restoredCourse = await cold.internalAPI.restore(f.course.documentId)
+    expect(await cold.readAuthoringDrafts(restoredCourse.documentId)).toMatchObject({ advanced: [{ payload: '{' }], properties: [{ raw: '-' }] })
+    expect(await fs.readFile(path.join(f.root, 'notes.txt'), 'utf8')).toBe('original notes.txt')
+  })
   it('discards formal recovery after suspension while preserving unresolved raw input', async () => {
     const f = await fixture()
     expect(await prepareDocumentWindowClose(f.ports)).toBe(true)

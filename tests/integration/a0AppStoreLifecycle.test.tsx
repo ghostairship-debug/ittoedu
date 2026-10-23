@@ -8,7 +8,7 @@ import { DocumentHostService } from '../../src/main/workbench/DocumentHostServic
 import type { DocumentHostAPI } from '../../src/shared/workbench/desktop'
 import { createBlankCourseProjectV10 } from '../../src/core/course/createCourseProjectV10'
 import { useEditorStore, selectHasUnsavedCourseDocuments } from '../../src/renderer/store/editorStore'
-import { useCourseProjectLifecycle, type CourseProjectLifecyclePorts } from '../../src/renderer/app/useCourseProjectLifecycle'
+import { adaptCourseDocumentActivation, useCourseProjectLifecycle, type CourseProjectLifecyclePorts } from '../../src/renderer/app/useCourseProjectLifecycle'
 
 const directories: string[] = []
 afterEach(async () => {
@@ -40,9 +40,9 @@ function mountLifecycle(api: DocumentHostAPI) {
     documents: {
       ready: () => read().connectCourseDocuments(api),
       snapshot: () => read().courseView.snapshot,
-      create: (kind, canvas) => read().createCourseDocument(kind, canvas),
-      createFrom: content => read().createCourseDocumentFrom(content.project, content.resources),
-      open: filename => read().openCourseDocument(filename),
+      create: async (kind, canvas, activateIf) => adaptCourseDocumentActivation(await read().createCourseDocument(kind, canvas, activateIf), activateIf),
+      createFrom: async (content, activateIf) => adaptCourseDocumentActivation(await read().createCourseDocumentFrom(content.project, content.resources, activateIf), activateIf),
+      open: async (filename, activateIf) => adaptCourseDocumentActivation(await read().openCourseDocument(filename, activateIf), activateIf),
       save: saveAs => read().saveCourseDocument(saveAs),
       drain: () => read().drainCourseDocument(),
     },

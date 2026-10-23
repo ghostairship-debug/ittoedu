@@ -15,7 +15,7 @@ import type { ChartType } from '../../course/chartContentOperations'
 import type { FlowBlockFormatSpec } from '../../authoring/flowTextInput'
 import { flowDocumentDraftSaveBlock } from '../../authoring/flowDocumentDraft'
 import { flowDocumentEdits, projectFlowDocument, flowDocumentBlock } from '../../componentPlatform/surfaces/flow/documentProjection'
-import { applyFlowCaretStyle, drainFlowWorkspace, flushFlowWorkspace, requestFlowBlockSelection } from '../../document/flowWorkspaceRegistry'
+import { applyFlowCaretStyle, captureFlowBlockFrame, drainFlowWorkspace, flushFlowWorkspace, requestFlowBlockSelection } from '../../document/flowWorkspaceRegistry'
 import { prepareFlowDocumentResourceTransaction, releaseFlowPreparedResources } from '../../document/flowDocumentResources'
 import { applyDocumentBlockCommand } from '../../document/documentBlockCommands'
 import { documentBlockChildren, documentTextSlots } from '../../../shared/document/content'
@@ -30,15 +30,26 @@ export interface FlowV10AuthoringPorts {
   read(): FlowOwnedState
   patch(patch: Partial<FlowOwnedState>): void
   readEditingScope?(): 'scene' | 'global'
-  content?: { begin(instanceId: string, source?: 'canvas' | 'properties'): unknown; commit(): Promise<boolean | void>; cancel(): void }
+  content?: { begin(instanceId: string, source?: 'canvas' | 'properties'): unknown; commit(documentId?: string): Promise<boolean | void>; cancel(): void }
 }
 /** Formal writes and History belong to the shared V10 Session. Only local input drafts live in this slice. */
 export function createFlowAuthoringSlice(kernel: EditorStoreKernel, flow: FlowV10AuthoringPorts) {
-  const setDraft = (draft: FlowDocumentDraft | null, documentId = kernel.readView().activeDocumentId ?? '') => {
+  const setDraft = (draft: FlowDocumentDraft | null, documentId = kernel.readView().activeDocumentId ?? '', surfaceId = draft?.surfaceId ?? kernel.readView().surfaceId) => {
     if (!documentId) return
     const drafts = { ...flow.read().flowDocumentDrafts }
+    if (!draft && drafts[documentId] && drafts[documentId].surfaceId !== surfaceId) return
     if (draft) drafts[documentId] = draft; else delete drafts[documentId]
-    flow.patch({ flowDocumentDrafts: drafts, ...(documentId === kernel.readView().activeDocumentId ? { flowDocumentDraft: draft } : {}) })
+    const view = kernel.readView()
+    flow.patch({ flowDocumentDrafts: drafts, ...(documentId === view.activeDocumentId
+      ? { flowDocumentDraft: draft?.surfaceId === view.surfaceId ? draft : null } : {}) })
+  }
+  /** The recovery adapter ACKs and retains the exact raw before navigation calls this. */
+  const parkFlowDocumentDraft = (documentId: string, surfaceId = flow.read().flowDocumentDrafts?.[documentId]?.surfaceId) => {
+    const draft = flow.read().flowDocumentDrafts?.[documentId]
+    if (!draft || draft.surfaceId !== surfaceId) return
+    if (draft.composing) throw new Error('请先完成正在输入的文字')
+    if (draft.preparedResources?.length) throw new Error('这份正文还有尚未接入工程的素材，请先完成或撤销该次粘贴；原稿仍保留')
+    setDraft(null, documentId, surfaceId)
   }
   const report = (error: unknown) => kernel.setFeedback({ errorMessage: error instanceof Error ? error.message : String(error) })
   const commit = async (edits: ComponentEdit[], historyGroup?: string, target = kernel.captureTarget(), documentProjection = false): Promise<FlowAuthoringReceipt> => {
@@ -57,10 +68,16 @@ export function createFlowAuthoringSlice(kernel: EditorStoreKernel, flow: FlowV1
     const draft = flow.read().flowDocumentDrafts?.[documentId]
     return flowDocumentDraftSaveBlock(draft) ?? { ok: true as const }
   }
-  const drain = async (documentId = kernel.readView().activeDocumentId ?? '') => {
+  const drain = async (documentId = kernel.readView().activeDocumentId ?? '', mode: 'save' | 'preserve' = 'save') => {
     const result = await drainFlowWorkspace(documentId)
-    if (!result.ok) return { ok: false as const, reason: result.reason ?? '正文草稿尚未完成' }
-    return flowDocumentDraftSaveBlock(flow.read().flowDocumentDrafts?.[documentId]) ?? { ok: true as const }
+    const draft = flow.read().flowDocumentDrafts?.[documentId]
+    if (!result.ok) {
+      if (mode === 'preserve' && result.preservable && draft && draft.surfaceId === result.surfaceId && !draft.composing && !draft.preparedResources?.length)
+        return { ok: true as const }
+      return { ok: false as const, reason: result.reason ?? '正文草稿尚未完成' }
+    }
+    if (mode === 'preserve' && draft && !draft.composing && !draft.preparedResources?.length) return { ok: true as const }
+    return flowDocumentDraftSaveBlock(draft) ?? { ok: true as const }
   }
   const add = async (kind: CourseElementKind, options: CourseInsertionOptions = {}) => {
     const target = active()
@@ -147,6 +164,8 @@ export function createFlowAuthoringSlice(kernel: EditorStoreKernel, flow: FlowV1
         case 'patch-overlay-paper-space': case 'patch-overlay-body-plane': case 'convert-overlay-to-document': case 'convert-block-to-overlay': {
           if (!instance) throw new Error('请选择讲义对象')
           const placement = instance.flowPlacement ?? { space: 'paper' as const, plane: 'overlay' as const }
+          const observedFrame = intent.kind === 'convert-block-to-overlay' && !intent.frame && !instance.flowPlacement
+            ? captureFlowBlockFrame(target, instance.id) : null
           const edits = flowPlacementEdits(target.editingProject, instance.id, intent.kind === 'convert-overlay-to-document'
             ? { kind: 'document', surfaceId: target.surfaceId! }
             : { kind: 'overlay', surfaceId: target.surfaceId!, placement: {
@@ -154,7 +173,7 @@ export function createFlowAuthoringSlice(kernel: EditorStoreKernel, flow: FlowV1
                 : intent.kind === 'patch-overlay-body-plane' ? { plane: intent.bodyPlane }
                 : intent.kind === 'convert-block-to-overlay' && intent.paragraphAnchor ? { paragraphAnchor: intent.paragraphAnchor } : {}) },
               ...(intent.kind === 'convert-block-to-overlay' && intent.frame ? { frame: { width: intent.frame.width, height: intent.frame.height,
-                transform: [1,0,0,1,intent.frame.x,intent.frame.y] } } : {}) })
+                transform: [1,0,0,1,intent.frame.x,intent.frame.y] } } : observedFrame ? { frame: observedFrame } : {}) })
           return commit(edits, undefined, target)
         }
         case 'move-block': {
@@ -168,6 +187,7 @@ export function createFlowAuthoringSlice(kernel: EditorStoreKernel, flow: FlowV1
   return {
     runFlowAuthoringIntent,
     setFlowDocumentDraft: setDraft,
+    parkFlowDocumentDraft,
     setFlowContextSelection: (selection: DocumentSelection | null) => flow.patch({ flowContextSelection: selection }),
     beginTextEdit(instanceId: string, source?: 'canvas' | 'properties') {
       const target = active()
@@ -178,10 +198,10 @@ export function createFlowAuthoringSlice(kernel: EditorStoreKernel, flow: FlowV1
       requestFlowBlockSelection({documentId:target.documentId,surfaceId:target.surfaceId!,blockId:instanceId})
     },
     async commitTextEdit() {
-      const editing = flow.read().flowEditingInstance, documentId = editing?.documentId ?? kernel.readView().activeDocumentId ?? ''
+      const editing = flow.read().flowEditingInstance, documentId = kernel.readView().activeDocumentId ?? ''
       if (!(await drain(documentId)).ok) return false
-      if (await flow.content?.commit() === false) return false
-      if (flow.read().flowEditingInstance === editing) flow.patch({flowEditingInstance:null})
+      if (await flow.content?.commit(documentId) === false) return false
+      if (editing?.documentId === documentId && flow.read().flowEditingInstance === editing) flow.patch({flowEditingInstance:null})
       return true
     },
     cancelTextEdit() { flow.content?.cancel(); flow.patch({flowEditingInstance:null}) },

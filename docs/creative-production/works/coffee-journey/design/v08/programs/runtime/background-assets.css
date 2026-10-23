@@ -1,0 +1,17 @@
+.coffee-v08-material-resources {
+ --coffee-sourcecup: url('./assets/runtime/u01-cup-compact.png');
+ --coffee-sourcecherry: url('./assets/runtime/u01-cherry-compact.png');
+ --coffee-cherry: url('./assets/runtime/cherry.webp');
+ --coffee-section: url('./assets/runtime/section.webp');
+ --coffee-green: url('./assets/runtime/green.webp');
+ --coffee-gold: url('./assets/runtime/gold.webp');
+ --coffee-roast: url('./assets/runtime/roast.webp');
+ --coffee-sortingphoto: url('./assets/runtime/sorting-photo.jpeg');
+ --coffee-bagphoto: url('./assets/runtime/bag-photo.jpeg');
+ --coffee-u03natural: url('./assets/runtime/u03natural.webp');
+ --coffee-u03washed: url('./assets/runtime/u03washed.webp');
+ --coffee-u03honey: url('./assets/runtime/u03honey.webp');
+ --coffee-u05green: url('./assets/runtime/u05green.webp');
+ --coffee-u05gold: url('./assets/runtime/u05gold.webp');
+ --coffee-u05roast: url('./assets/runtime/u05roast.webp');
+}

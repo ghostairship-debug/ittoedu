@@ -166,7 +166,7 @@ it('leaves focus on a newly chosen view control when its editing overlay unmount
   expect(nextView).toHaveFocus()
 })
 
-it('allows saving after the stated copy, reselect, apply and discard-old-draft conflict recovery', () => {
+it('does not make the old retained input a conflict after that exact input has already been applied', () => {
   const drafts = new HtmlTextDrafts()
   drafts.change(target, source, '我的修改')
   const changed = '<p>新原文</p>'
@@ -179,7 +179,8 @@ it('allows saving after the stated copy, reselect, apply and discard-old-draft c
   const applied = '<p>我的修改</p>'
   drafts.reconcile(applied)
   drafts.applied(replacement, changed, conflict.value)
-  expect(drafts.prepare(applied).ready).toBe(false)
+  expect(drafts.prepare(applied)).toEqual({ ready: true, source: applied })
+  expect(drafts.read()).toEqual([])
   drafts.discard(conflict.id)
   expect(drafts.prepare(applied)).toEqual({ ready: true, source: applied })
   expect(drafts.read()).toEqual([])

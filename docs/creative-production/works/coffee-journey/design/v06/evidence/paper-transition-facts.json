@@ -1,0 +1,85 @@
+{
+  "sourceSha256": "14d4759019d97ef6e3884d2bfdf062372ebe3a7bbc01669d7c302b4a0339dfb4",
+  "at90": {
+    "base": [
+      124,
+      133,
+      127.5
+    ],
+    "tint": [
+      121,
+      131.5,
+      113.5
+    ],
+    "objectSize": 162.35674074074075,
+    "raf": 1
+  },
+  "at180": {
+    "base": [
+      225,
+      237,
+      230
+    ],
+    "objectSize": 163.36059259259258,
+    "raf": 1
+  },
+  "at350": {
+    "base": [
+      225,
+      237,
+      230
+    ],
+    "objectSize": 166.67022303510643,
+    "raf": 1
+  },
+  "interruptContinuous": true,
+  "reverseContinuous": true,
+  "darkAt675": {
+    "base": [
+      124.5,
+      132,
+      125
+    ],
+    "raf": 1
+  },
+  "finalIdle": "true",
+  "suspendRaf": 0,
+  "cleanup": {
+    "raf": 0,
+    "off": 1,
+    "listeners": []
+  },
+  "longConfig": {
+    "base": [
+      225,
+      237,
+      230
+    ],
+    "idle": "true",
+    "raf": 0
+  },
+  "zeroUsesDefault180": {
+    "base": [
+      225,
+      237,
+      230
+    ],
+    "raf": 1
+  },
+  "negativeClampedTo1": {
+    "base": [
+      225,
+      237,
+      230
+    ],
+    "raf": 1
+  },
+  "reduced": {
+    "base": [
+      225,
+      237,
+      230
+    ],
+    "raf": 0
+  }
+}

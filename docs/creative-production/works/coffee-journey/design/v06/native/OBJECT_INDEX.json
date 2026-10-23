@@ -1,0 +1,2635 @@
+{
+  "projectId": "9e8fc453-78b9-4c0d-94f4-79e0ed782dda",
+  "schemaVersion": 11,
+  "revision": 204,
+  "title": "一杯咖啡的远行 · 全篇",
+  "rootIds": [
+    "47415583-2d75-4b72-9c46-dfd29b47d82a"
+  ],
+  "global": {
+    "underlay": [
+      "926a6155-1814-4a16-ba47-24c1c1f5dbc8"
+    ],
+    "overlay": [
+      "931b8fb6-7308-4876-8e5b-c3cfb5d95d3f"
+    ]
+  },
+  "counts": {
+    "guoling.container.flow": 1,
+    "guoling.text": 93,
+    "guoling.image": 8,
+    "guoling.group": 63,
+    "guoling.web": 2,
+    "guoling.document-block": 13,
+    "guoling.html-program": 1,
+    "ea91d438-5e87-47ba-8cc1-d67466026210": 1,
+    "96347310-25a2-4382-bde7-1c46f6d5ba9f": 1
+  },
+  "chapterAnchors": [
+    {
+      "targetId": "5b629c9b-d44b-4fe6-a156-ed4d3b03880d",
+      "number": "01",
+      "label": "杯中"
+    },
+    {
+      "targetId": "b3d345ba-f2c8-4c52-add1-2aa477d6a241",
+      "number": "02",
+      "label": "生长"
+    },
+    {
+      "targetId": "a8add446-cdcf-4007-824f-f0449a24912a",
+      "number": "03",
+      "label": "处理"
+    },
+    {
+      "targetId": "83bca290-3006-4058-af49-a97b1e1fd00d",
+      "number": "04",
+      "label": "交接"
+    },
+    {
+      "targetId": "5093abd6-eba9-43cc-a54a-ad2eb13648e6",
+      "number": "05",
+      "label": "烘焙"
+    },
+    {
+      "targetId": "b1a166da-1cc4-4f39-a8ba-dc5c15bd39ba",
+      "number": "06",
+      "label": "水"
+    },
+    {
+      "targetId": "8ad1964b-3a7a-4a92-a59c-259924f7b485",
+      "number": "07",
+      "label": "回味"
+    }
+  ],
+  "programs": {
+    "u03": "8bc2720a-0b46-439a-98c1-dc505b1cb456",
+    "u05": "aee929af-3338-409a-a386-bcbef0d0e285",
+    "u06": "8f45751d-9cc3-49dd-ba88-c645759f022c"
+  },
+  "sourceDefinitions": [
+    {
+      "instanceId": "926a6155-1814-4a16-ba47-24c1c1f5dbc8",
+      "definitionId": "96347310-25a2-4382-bde7-1c46f6d5ba9f",
+      "workspace": {
+        "ownerId": "947ccfd1-0078-4078-b903-304498284ade",
+        "entry": "underlay-poc.js"
+      }
+    },
+    {
+      "instanceId": "931b8fb6-7308-4876-8e5b-c3cfb5d95d3f",
+      "definitionId": "ea91d438-5e87-47ba-8cc1-d67466026210",
+      "workspace": {
+        "ownerId": "19613394-8662-4a60-92a4-bebf15a5d146",
+        "entry": "coffee-navigation.js"
+      }
+    }
+  ],
+  "instances": [
+    {
+      "id": "47415583-2d75-4b72-9c46-dfd29b47d82a",
+      "definitionId": "guoling.container.flow",
+      "name": "一杯咖啡的远行",
+      "parentId": null,
+      "childIds": [
+        "2ab80ec7-3a4a-41c4-be34-005d444e6e38",
+        "25abbae2-ce63-46cb-b01c-f5d9c21be846",
+        "b10b8dc5-bf3f-4361-8bc3-b6d1f36d57c7",
+        "fdb81517-cd2b-404b-9dea-5f28e6cd703e",
+        "8dac3dd6-e9d4-419d-858d-c3f75fdca6c4",
+        "eecbdbf3-0cd5-40f3-9b9b-37d4a9a984fa",
+        "f255afab-5e7d-432c-bf3d-7d98560f0f83",
+        "20b6839d-2a3a-4cfb-9bdf-0b6031d30803",
+        "5cc857be-4d91-4b0e-8203-208b8961b2a7",
+        "cb9c49ee-cd80-4a5d-b8b0-3574ec9a6833",
+        "35d827a8-bdf2-4a0c-b5e9-354de2edf2c9",
+        "84108b20-9749-4cf9-b51b-71e180fdbd2c"
+      ],
+      "virtualPaths": []
+    },
+    {
+      "id": "051bf1c2-f241-4265-9d1e-3509a957cf97",
+      "definitionId": "guoling.text",
+      "parentId": "e48fa424-3cfd-416e-b307-b1a12409d118",
+      "childIds": [],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/04-编组/02-编组/01-编组/02-文字.data.json",
+        "pages/01-一杯咖啡的远行/04-编组/02-编组/01-编组/02-文字.style.json",
+        "pages/01-一杯咖啡的远行/04-编组/02-编组/01-编组/02-文字.view.js",
+        "pages/01-一杯咖啡的远行/04-编组/02-编组/01-编组/02-文字.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "1e41698d-161e-44f0-b8c1-d267faa74103",
+      "definitionId": "guoling.text",
+      "parentId": "e48fa424-3cfd-416e-b307-b1a12409d118",
+      "childIds": [],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/04-编组/02-编组/01-编组/03-文字.data.json",
+        "pages/01-一杯咖啡的远行/04-编组/02-编组/01-编组/03-文字.style.json",
+        "pages/01-一杯咖啡的远行/04-编组/02-编组/01-编组/03-文字.view.js",
+        "pages/01-一杯咖啡的远行/04-编组/02-编组/01-编组/03-文字.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "901bbc93-5cf0-4214-bc91-14d6464f558e",
+      "definitionId": "guoling.image",
+      "parentId": "809c55b7-3ec7-4b1c-b681-76b5e522b3ec",
+      "childIds": [],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/04-编组/02-编组/02-编组/01-图片.data.json",
+        "pages/01-一杯咖啡的远行/04-编组/02-编组/02-编组/01-图片.style.json",
+        "pages/01-一杯咖啡的远行/04-编组/02-编组/02-编组/01-图片.view.js",
+        "pages/01-一杯咖啡的远行/04-编组/02-编组/02-编组/01-图片.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "3fc04c23-1938-46a6-ad66-d09636fe947d",
+      "definitionId": "guoling.text",
+      "parentId": "11136615-11a3-46fd-9392-6cf2881fed57",
+      "childIds": [],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/04-编组/02-编组/02-编组/02-编组/01-文字.data.json",
+        "pages/01-一杯咖啡的远行/04-编组/02-编组/02-编组/02-编组/01-文字.style.json",
+        "pages/01-一杯咖啡的远行/04-编组/02-编组/02-编组/02-编组/01-文字.view.js",
+        "pages/01-一杯咖啡的远行/04-编组/02-编组/02-编组/02-编组/01-文字.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "369030d4-eaac-4a41-aafa-2738e24d8274",
+      "definitionId": "guoling.image",
+      "parentId": "c501f8c3-1c73-4e26-b520-40037ce7bba1",
+      "childIds": [],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/04-编组/02-编组/03-编组/01-图片.data.json",
+        "pages/01-一杯咖啡的远行/04-编组/02-编组/03-编组/01-图片.style.json",
+        "pages/01-一杯咖啡的远行/04-编组/02-编组/03-编组/01-图片.view.js",
+        "pages/01-一杯咖啡的远行/04-编组/02-编组/03-编组/01-图片.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "649f9a37-d9c2-4a32-9311-26993d3005ea",
+      "definitionId": "guoling.text",
+      "parentId": "785348ed-4b2a-49a2-8dc3-dbf7b7efa541",
+      "childIds": [],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/04-编组/02-编组/03-编组/02-编组/01-文字.data.json",
+        "pages/01-一杯咖啡的远行/04-编组/02-编组/03-编组/02-编组/01-文字.style.json",
+        "pages/01-一杯咖啡的远行/04-编组/02-编组/03-编组/02-编组/01-文字.view.js",
+        "pages/01-一杯咖啡的远行/04-编组/02-编组/03-编组/02-编组/01-文字.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "e66ab85c-55c4-4fac-94e1-3f2c9190972e",
+      "definitionId": "guoling.text",
+      "parentId": "785348ed-4b2a-49a2-8dc3-dbf7b7efa541",
+      "childIds": [],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/04-编组/02-编组/03-编组/02-编组/02-文字.data.json",
+        "pages/01-一杯咖啡的远行/04-编组/02-编组/03-编组/02-编组/02-文字.style.json",
+        "pages/01-一杯咖啡的远行/04-编组/02-编组/03-编组/02-编组/02-文字.view.js",
+        "pages/01-一杯咖啡的远行/04-编组/02-编组/03-编组/02-编组/02-文字.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "fdb81517-cd2b-404b-9dea-5f28e6cd703e",
+      "definitionId": "guoling.group",
+      "name": "U02 · 土地与人的手",
+      "parentId": "47415583-2d75-4b72-9c46-dfd29b47d82a",
+      "childIds": [
+        "b3d345ba-f2c8-4c52-add1-2aa477d6a241",
+        "82d0a668-856e-4a51-9963-e34b4ab94747",
+        "5295ede2-98d6-4dc6-af0c-d916a27e588e"
+      ],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/04-编组.data.json",
+        "pages/01-一杯咖啡的远行/04-编组.style.json",
+        "pages/01-一杯咖啡的远行/04-编组.view.js",
+        "pages/01-一杯咖啡的远行/04-编组.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "61773329-373c-4fd7-86bc-8cc3b6e05fdc",
+      "definitionId": "guoling.image",
+      "parentId": "93895d37-50ae-43f4-95c4-fc28c2db0c7f",
+      "childIds": [],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/05-编组/01-编组/01-图片.data.json",
+        "pages/01-一杯咖啡的远行/05-编组/01-编组/01-图片.style.json",
+        "pages/01-一杯咖啡的远行/05-编组/01-编组/01-图片.view.js",
+        "pages/01-一杯咖啡的远行/05-编组/01-编组/01-图片.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "bd11e207-c41d-4171-83fa-ad1df41fb36f",
+      "definitionId": "guoling.text",
+      "parentId": "93895d37-50ae-43f4-95c4-fc28c2db0c7f",
+      "childIds": [],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/05-编组/01-编组/02-文字.data.json",
+        "pages/01-一杯咖啡的远行/05-编组/01-编组/02-文字.style.json",
+        "pages/01-一杯咖啡的远行/05-编组/01-编组/02-文字.view.js",
+        "pages/01-一杯咖啡的远行/05-编组/01-编组/02-文字.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "4572d9b6-8ace-4569-a295-9e3dda094980",
+      "definitionId": "guoling.text",
+      "parentId": "8dac3dd6-e9d4-419d-858d-c3f75fdca6c4",
+      "childIds": [],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/05-编组/02-文字.data.json",
+        "pages/01-一杯咖啡的远行/05-编组/02-文字.style.json",
+        "pages/01-一杯咖啡的远行/05-编组/02-文字.view.js",
+        "pages/01-一杯咖啡的远行/05-编组/02-文字.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "8dac3dd6-e9d4-419d-858d-c3f75fdca6c4",
+      "definitionId": "guoling.group",
+      "name": "从果实到处理",
+      "parentId": "47415583-2d75-4b72-9c46-dfd29b47d82a",
+      "childIds": [
+        "93895d37-50ae-43f4-95c4-fc28c2db0c7f",
+        "4572d9b6-8ace-4569-a295-9e3dda094980"
+      ],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/05-编组.data.json",
+        "pages/01-一杯咖啡的远行/05-编组.style.json",
+        "pages/01-一杯咖啡的远行/05-编组.view.js",
+        "pages/01-一杯咖啡的远行/05-编组.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "8bc2720a-0b46-439a-98c1-dc505b1cb456",
+      "definitionId": "guoling.web",
+      "name": "U03 · 三种处理路线",
+      "parentId": "9fa9da51-02b1-4d46-87c2-247bb9993ff1",
+      "childIds": [],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/06-编组/01-编组/04-编组/01-Web 内容.content.html",
+        "pages/01-一杯咖啡的远行/06-编组/01-编组/04-编组/01-Web 内容.data.json",
+        "pages/01-一杯咖啡的远行/06-编组/01-编组/04-编组/01-Web 内容.style.json",
+        "pages/01-一杯咖啡的远行/06-编组/01-编组/04-编组/01-Web 内容.view.js",
+        "pages/01-一杯咖啡的远行/06-编组/01-编组/04-编组/01-Web 内容.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "31caf0c4-7de2-4957-a332-e624f150417b",
+      "definitionId": "guoling.text",
+      "parentId": "908ea557-44b1-4e4b-9c0a-824f11e046a8",
+      "childIds": [],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/07-编组/02-编组/01-编组/02-文字.data.json",
+        "pages/01-一杯咖啡的远行/07-编组/02-编组/01-编组/02-文字.style.json",
+        "pages/01-一杯咖啡的远行/07-编组/02-编组/01-编组/02-文字.view.js",
+        "pages/01-一杯咖啡的远行/07-编组/02-编组/01-编组/02-文字.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "653606d5-eff0-43bf-b069-a34c88af4698",
+      "definitionId": "guoling.text",
+      "parentId": "850d29cd-7947-43d6-b569-3538c29355cb",
+      "childIds": [],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/07-编组/02-编组/02-编组/01-文字.data.json",
+        "pages/01-一杯咖啡的远行/07-编组/02-编组/02-编组/01-文字.style.json",
+        "pages/01-一杯咖啡的远行/07-编组/02-编组/02-编组/01-文字.view.js",
+        "pages/01-一杯咖啡的远行/07-编组/02-编组/02-编组/01-文字.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "37febd3d-c742-435e-b1e3-c81a76de76b5",
+      "definitionId": "guoling.image",
+      "parentId": "10e90bb1-a699-4cab-98e9-31c82398052f",
+      "childIds": [],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/07-编组/03-编组/01-编组/01-图片.data.json",
+        "pages/01-一杯咖啡的远行/07-编组/03-编组/01-编组/01-图片.style.json",
+        "pages/01-一杯咖啡的远行/07-编组/03-编组/01-编组/01-图片.view.js",
+        "pages/01-一杯咖啡的远行/07-编组/03-编组/01-编组/01-图片.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "90cde52c-9f78-4a96-9632-ee59e3a1f395",
+      "definitionId": "guoling.text",
+      "parentId": "10e90bb1-a699-4cab-98e9-31c82398052f",
+      "childIds": [],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/07-编组/03-编组/01-编组/02-文字.data.json",
+        "pages/01-一杯咖啡的远行/07-编组/03-编组/01-编组/02-文字.style.json",
+        "pages/01-一杯咖啡的远行/07-编组/03-编组/01-编组/02-文字.view.js",
+        "pages/01-一杯咖啡的远行/07-编组/03-编组/01-编组/02-文字.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "838ff4d7-d3ba-4c33-b4e5-d368d5d480c9",
+      "definitionId": "guoling.image",
+      "parentId": "3907d72c-5a8c-483a-aeb4-d8b04b392cba",
+      "childIds": [],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/07-编组/03-编组/02-编组/01-图片.data.json",
+        "pages/01-一杯咖啡的远行/07-编组/03-编组/02-编组/01-图片.style.json",
+        "pages/01-一杯咖啡的远行/07-编组/03-编组/02-编组/01-图片.view.js",
+        "pages/01-一杯咖啡的远行/07-编组/03-编组/02-编组/01-图片.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "d9b5ada8-9e16-4b8c-aa55-9b8866e42fe4",
+      "definitionId": "guoling.text",
+      "parentId": "3907d72c-5a8c-483a-aeb4-d8b04b392cba",
+      "childIds": [],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/07-编组/03-编组/02-编组/02-文字.data.json",
+        "pages/01-一杯咖啡的远行/07-编组/03-编组/02-编组/02-文字.style.json",
+        "pages/01-一杯咖啡的远行/07-编组/03-编组/02-编组/02-文字.view.js",
+        "pages/01-一杯咖啡的远行/07-编组/03-编组/02-编组/02-文字.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "f51a1d1d-2cf4-44b0-ac05-9a9ae8ac483e",
+      "definitionId": "guoling.text",
+      "parentId": "c9864817-cc42-41e2-9015-67fa6991257f",
+      "childIds": [],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/07-编组/04-编组/04-文字.data.json",
+        "pages/01-一杯咖啡的远行/07-编组/04-编组/04-文字.style.json",
+        "pages/01-一杯咖啡的远行/07-编组/04-编组/04-文字.view.js",
+        "pages/01-一杯咖啡的远行/07-编组/04-编组/04-文字.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "f255afab-5e7d-432c-bf3d-7d98560f0f83",
+      "definitionId": "guoling.group",
+      "name": "U04 · 安静的交接",
+      "parentId": "47415583-2d75-4b72-9c46-dfd29b47d82a",
+      "childIds": [
+        "83bca290-3006-4058-af49-a97b1e1fd00d",
+        "494685d4-20c7-4697-90b4-d1d4f89d0fc4",
+        "abeec8ab-5b77-43b2-b53a-2254ad371dbb",
+        "c9864817-cc42-41e2-9015-67fa6991257f",
+        "f38c8a5b-bb54-4504-a46f-3a568bf8de59"
+      ],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/07-编组.data.json",
+        "pages/01-一杯咖啡的远行/07-编组.style.json",
+        "pages/01-一杯咖啡的远行/07-编组.view.js",
+        "pages/01-一杯咖啡的远行/07-编组.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "aee929af-3338-409a-a386-bcbef0d0e285",
+      "definitionId": "guoling.web",
+      "name": "U05 · 烘焙的连续观察",
+      "parentId": "20b6839d-2a3a-4cfb-9bdf-0b6031d30803",
+      "childIds": [],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/08-编组/02-Web 内容.content.html",
+        "pages/01-一杯咖啡的远行/08-编组/02-Web 内容.data.json",
+        "pages/01-一杯咖啡的远行/08-编组/02-Web 内容.style.json",
+        "pages/01-一杯咖啡的远行/08-编组/02-Web 内容.view.js",
+        "pages/01-一杯咖啡的远行/08-编组/02-Web 内容.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "4b5a2e50-5d1e-4cc7-b551-c6697702fcc6",
+      "definitionId": "guoling.text",
+      "parentId": "a07d1691-0b2c-4f88-a605-9ece068f302c",
+      "childIds": [],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/04-编组/03-编组/02-编组/01-文字.data.json",
+        "pages/01-一杯咖啡的远行/04-编组/03-编组/02-编组/01-文字.style.json",
+        "pages/01-一杯咖啡的远行/04-编组/03-编组/02-编组/01-文字.view.js",
+        "pages/01-一杯咖啡的远行/04-编组/03-编组/02-编组/01-文字.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "62b9d55e-ec5f-4b1e-83ac-43b891857c93",
+      "definitionId": "guoling.text",
+      "parentId": "a07d1691-0b2c-4f88-a605-9ece068f302c",
+      "childIds": [],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/04-编组/03-编组/02-编组/02-文字.data.json",
+        "pages/01-一杯咖啡的远行/04-编组/03-编组/02-编组/02-文字.style.json",
+        "pages/01-一杯咖啡的远行/04-编组/03-编组/02-编组/02-文字.view.js",
+        "pages/01-一杯咖啡的远行/04-编组/03-编组/02-编组/02-文字.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "385356fc-88e0-46e5-a1d1-b2280a033ab0",
+      "definitionId": "guoling.text",
+      "parentId": "a07d1691-0b2c-4f88-a605-9ece068f302c",
+      "childIds": [],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/04-编组/03-编组/02-编组/03-文字.data.json",
+        "pages/01-一杯咖啡的远行/04-编组/03-编组/02-编组/03-文字.style.json",
+        "pages/01-一杯咖啡的远行/04-编组/03-编组/02-编组/03-文字.view.js",
+        "pages/01-一杯咖啡的远行/04-编组/03-编组/02-编组/03-文字.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "793910e9-658a-40f4-a5fb-ae8b3420f3e8",
+      "definitionId": "guoling.text",
+      "parentId": "82b886f2-806e-4b21-a2a1-63ca371f3f26",
+      "childIds": [],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/06-编组/01-编组/02-文字.data.json",
+        "pages/01-一杯咖啡的远行/06-编组/01-编组/02-文字.style.json",
+        "pages/01-一杯咖啡的远行/06-编组/01-编组/02-文字.view.js",
+        "pages/01-一杯咖啡的远行/06-编组/01-编组/02-文字.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "a8add446-cdcf-4007-824f-f0449a24912a",
+      "definitionId": "guoling.document-block",
+      "parentId": "82b886f2-806e-4b21-a2a1-63ca371f3f26",
+      "childIds": [],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/06-编组/01-编组/01-文档块.data.json",
+        "pages/01-一杯咖啡的远行/06-编组/01-编组/01-文档块.style.json",
+        "pages/01-一杯咖啡的远行/06-编组/01-编组/01-文档块.view.js",
+        "pages/01-一杯咖啡的远行/06-编组/01-编组/01-文档块.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "582cb0f9-f146-4d65-97c4-4c52a1cd27c6",
+      "definitionId": "guoling.text",
+      "parentId": "12f800a2-9b79-4a94-8fdc-d5f67e4ea80a",
+      "childIds": [],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/06-编组/01-编组/03-编组/02-文字.data.json",
+        "pages/01-一杯咖啡的远行/06-编组/01-编组/03-编组/02-文字.style.json",
+        "pages/01-一杯咖啡的远行/06-编组/01-编组/03-编组/02-文字.view.js",
+        "pages/01-一杯咖啡的远行/06-编组/01-编组/03-编组/02-文字.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "3c84401c-931a-4a79-a6a2-55728160b07b",
+      "definitionId": "guoling.text",
+      "parentId": "344255ec-18cf-4727-ba89-064edeaf9460",
+      "childIds": [],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/06-编组/01-编组/05-编组/02-文字.data.json",
+        "pages/01-一杯咖啡的远行/06-编组/01-编组/05-编组/02-文字.style.json",
+        "pages/01-一杯咖啡的远行/06-编组/01-编组/05-编组/02-文字.view.js",
+        "pages/01-一杯咖啡的远行/06-编组/01-编组/05-编组/02-文字.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "f38c8a5b-bb54-4504-a46f-3a568bf8de59",
+      "definitionId": "guoling.text",
+      "parentId": "f255afab-5e7d-432c-bf3d-7d98560f0f83",
+      "childIds": [],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/07-编组/05-文字.data.json",
+        "pages/01-一杯咖啡的远行/07-编组/05-文字.style.json",
+        "pages/01-一杯咖啡的远行/07-编组/05-文字.view.js",
+        "pages/01-一杯咖啡的远行/07-编组/05-文字.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "249472f9-824a-4a16-86fb-ec32edb626f5",
+      "definitionId": "guoling.text",
+      "parentId": "52b2687c-a12c-45c2-83c5-cc93016a7d7c",
+      "childIds": [],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/02-编组/02-编组/01-编组/02-文字.data.json",
+        "pages/01-一杯咖啡的远行/02-编组/02-编组/01-编组/02-文字.style.json",
+        "pages/01-一杯咖啡的远行/02-编组/02-编组/01-编组/02-文字.view.js",
+        "pages/01-一杯咖啡的远行/02-编组/02-编组/01-编组/02-文字.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "dd6eb479-a0f3-4284-8f56-af846f15f328",
+      "definitionId": "guoling.text",
+      "parentId": "52b2687c-a12c-45c2-83c5-cc93016a7d7c",
+      "childIds": [],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/02-编组/02-编组/01-编组/03-文字.data.json",
+        "pages/01-一杯咖啡的远行/02-编组/02-编组/01-编组/03-文字.style.json",
+        "pages/01-一杯咖啡的远行/02-编组/02-编组/01-编组/03-文字.view.js",
+        "pages/01-一杯咖啡的远行/02-编组/02-编组/01-编组/03-文字.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "30f0a785-8dcc-462b-917c-9c1728d0df61",
+      "definitionId": "guoling.text",
+      "parentId": "52b2687c-a12c-45c2-83c5-cc93016a7d7c",
+      "childIds": [],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/02-编组/02-编组/01-编组/04-文字.data.json",
+        "pages/01-一杯咖啡的远行/02-编组/02-编组/01-编组/04-文字.style.json",
+        "pages/01-一杯咖啡的远行/02-编组/02-编组/01-编组/04-文字.view.js",
+        "pages/01-一杯咖啡的远行/02-编组/02-编组/01-编组/04-文字.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "0f19f30b-5bed-4933-af07-311081583f85",
+      "definitionId": "guoling.image",
+      "parentId": "2ab417dd-793d-4064-aa8a-7869e663163c",
+      "childIds": [],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/02-编组/02-编组/02-编组/01-图片.data.json",
+        "pages/01-一杯咖啡的远行/02-编组/02-编组/02-编组/01-图片.style.json",
+        "pages/01-一杯咖啡的远行/02-编组/02-编组/02-编组/01-图片.view.js",
+        "pages/01-一杯咖啡的远行/02-编组/02-编组/02-编组/01-图片.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "6f393817-c7e6-45bc-ac44-a68bee7bfb78",
+      "definitionId": "guoling.text",
+      "parentId": "2ab417dd-793d-4064-aa8a-7869e663163c",
+      "childIds": [],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/02-编组/02-编组/02-编组/02-文字.data.json",
+        "pages/01-一杯咖啡的远行/02-编组/02-编组/02-编组/02-文字.style.json",
+        "pages/01-一杯咖啡的远行/02-编组/02-编组/02-编组/02-文字.view.js",
+        "pages/01-一杯咖啡的远行/02-编组/02-编组/02-编组/02-文字.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "25abbae2-ce63-46cb-b01c-f5d9c21be846",
+      "definitionId": "guoling.group",
+      "name": "U01 · 一杯咖啡的远行",
+      "parentId": "47415583-2d75-4b72-9c46-dfd29b47d82a",
+      "childIds": [
+        "5b629c9b-d44b-4fe6-a156-ed4d3b03880d",
+        "403273c0-8b31-41ad-ae6b-0ebd75a8370a"
+      ],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/02-编组.data.json",
+        "pages/01-一杯咖啡的远行/02-编组.style.json",
+        "pages/01-一杯咖啡的远行/02-编组.view.js",
+        "pages/01-一杯咖啡的远行/02-编组.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "942e61c7-e691-4fac-b4c0-a09dd872b314",
+      "definitionId": "guoling.image",
+      "parentId": "95c68fa6-bbf2-4c82-8d0e-c6672a4893fe",
+      "childIds": [],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/03-编组/01-编组/01-图片.data.json",
+        "pages/01-一杯咖啡的远行/03-编组/01-编组/01-图片.style.json",
+        "pages/01-一杯咖啡的远行/03-编组/01-编组/01-图片.view.js",
+        "pages/01-一杯咖啡的远行/03-编组/01-编组/01-图片.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "6e342a44-766a-460a-974e-1bb2e1594664",
+      "definitionId": "guoling.text",
+      "parentId": "95c68fa6-bbf2-4c82-8d0e-c6672a4893fe",
+      "childIds": [],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/03-编组/01-编组/02-文字.data.json",
+        "pages/01-一杯咖啡的远行/03-编组/01-编组/02-文字.style.json",
+        "pages/01-一杯咖啡的远行/03-编组/01-编组/02-文字.view.js",
+        "pages/01-一杯咖啡的远行/03-编组/01-编组/02-文字.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "2760f24c-cd9d-487c-98a3-45dc86b81c2a",
+      "definitionId": "guoling.text",
+      "parentId": "7c9804d6-e6ec-4d79-a32a-2668861019b9",
+      "childIds": [],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/03-编组/02-编组/02-文字.data.json",
+        "pages/01-一杯咖啡的远行/03-编组/02-编组/02-文字.style.json",
+        "pages/01-一杯咖啡的远行/03-编组/02-编组/02-文字.view.js",
+        "pages/01-一杯咖啡的远行/03-编组/02-编组/02-文字.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "3b6e4624-25c3-4bfd-ac52-ae03714aa6e1",
+      "definitionId": "guoling.text",
+      "parentId": "7c9804d6-e6ec-4d79-a32a-2668861019b9",
+      "childIds": [],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/03-编组/02-编组/03-文字.data.json",
+        "pages/01-一杯咖啡的远行/03-编组/02-编组/03-文字.style.json",
+        "pages/01-一杯咖啡的远行/03-编组/02-编组/03-文字.view.js",
+        "pages/01-一杯咖啡的远行/03-编组/02-编组/03-文字.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "034b39b7-502c-4cf6-848c-8e30d9e5d226",
+      "definitionId": "guoling.text",
+      "parentId": "7c9804d6-e6ec-4d79-a32a-2668861019b9",
+      "childIds": [],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/03-编组/02-编组/04-文字.data.json",
+        "pages/01-一杯咖啡的远行/03-编组/02-编组/04-文字.style.json",
+        "pages/01-一杯咖啡的远行/03-编组/02-编组/04-文字.view.js",
+        "pages/01-一杯咖啡的远行/03-编组/02-编组/04-文字.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "3e9abbea-c1f4-4c39-8551-2bc0009f4f37",
+      "definitionId": "guoling.text",
+      "parentId": "b10b8dc5-bf3f-4361-8bc3-b6d1f36d57c7",
+      "childIds": [],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/03-编组/03-文字.data.json",
+        "pages/01-一杯咖啡的远行/03-编组/03-文字.style.json",
+        "pages/01-一杯咖啡的远行/03-编组/03-文字.view.js",
+        "pages/01-一杯咖啡的远行/03-编组/03-文字.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "b10b8dc5-bf3f-4361-8bc3-b6d1f36d57c7",
+      "definitionId": "guoling.group",
+      "name": "把时间往前推一点",
+      "parentId": "47415583-2d75-4b72-9c46-dfd29b47d82a",
+      "childIds": [
+        "95c68fa6-bbf2-4c82-8d0e-c6672a4893fe",
+        "7c9804d6-e6ec-4d79-a32a-2668861019b9",
+        "3e9abbea-c1f4-4c39-8551-2bc0009f4f37"
+      ],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/03-编组.data.json",
+        "pages/01-一杯咖啡的远行/03-编组.style.json",
+        "pages/01-一杯咖啡的远行/03-编组.view.js",
+        "pages/01-一杯咖啡的远行/03-编组.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "8f45751d-9cc3-49dd-ba88-c645759f022c",
+      "definitionId": "guoling.html-program",
+      "name": "U06 · 水与稀释实验",
+      "parentId": "b354a3ff-d8a9-4d78-9c1b-5b460433c191",
+      "childIds": [],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/09-编组/01-编组/04-编组/01-HTML 程序.content.html",
+        "pages/01-一杯咖啡的远行/09-编组/01-编组/04-编组/01-HTML 程序.data.json",
+        "pages/01-一杯咖啡的远行/09-编组/01-编组/04-编组/01-HTML 程序.style.json",
+        "pages/01-一杯咖啡的远行/09-编组/01-编组/04-编组/01-HTML 程序.view.js",
+        "pages/01-一杯咖啡的远行/09-编组/01-编组/04-编组/01-HTML 程序.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "3979cd3a-0f7c-4646-817b-1910304c9774",
+      "definitionId": "guoling.text",
+      "parentId": "2ebd3b7e-7565-4f1d-865c-bbb47d00e5da",
+      "childIds": [],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/10-编组/03-编组/01-编组/01-文字.data.json",
+        "pages/01-一杯咖啡的远行/10-编组/03-编组/01-编组/01-文字.style.json",
+        "pages/01-一杯咖啡的远行/10-编组/03-编组/01-编组/01-文字.view.js",
+        "pages/01-一杯咖啡的远行/10-编组/03-编组/01-编组/01-文字.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "8ee9c20c-1d7f-4d17-a5de-ddabfd2ede80",
+      "definitionId": "guoling.text",
+      "parentId": "2ebd3b7e-7565-4f1d-865c-bbb47d00e5da",
+      "childIds": [],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/10-编组/03-编组/01-编组/02-文字.data.json",
+        "pages/01-一杯咖啡的远行/10-编组/03-编组/01-编组/02-文字.style.json",
+        "pages/01-一杯咖啡的远行/10-编组/03-编组/01-编组/02-文字.view.js",
+        "pages/01-一杯咖啡的远行/10-编组/03-编组/01-编组/02-文字.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "8f6ca411-39a9-44af-b91b-5479f1a29edd",
+      "definitionId": "guoling.text",
+      "parentId": "2ebd3b7e-7565-4f1d-865c-bbb47d00e5da",
+      "childIds": [],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/10-编组/03-编组/01-编组/03-文字.data.json",
+        "pages/01-一杯咖啡的远行/10-编组/03-编组/01-编组/03-文字.style.json",
+        "pages/01-一杯咖啡的远行/10-编组/03-编组/01-编组/03-文字.view.js",
+        "pages/01-一杯咖啡的远行/10-编组/03-编组/01-编组/03-文字.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "877942f1-2eed-4823-9fab-07f558f824d0",
+      "definitionId": "guoling.image",
+      "parentId": "55943865-733d-4f39-8b26-819039b501aa",
+      "childIds": [],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/10-编组/03-编组/02-编组/01-图片.data.json",
+        "pages/01-一杯咖啡的远行/10-编组/03-编组/02-编组/01-图片.style.json",
+        "pages/01-一杯咖啡的远行/10-编组/03-编组/02-编组/01-图片.view.js",
+        "pages/01-一杯咖啡的远行/10-编组/03-编组/02-编组/01-图片.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "bf46e6b9-8684-47d0-b26d-5d2df78ea0a4",
+      "definitionId": "guoling.text",
+      "parentId": "55943865-733d-4f39-8b26-819039b501aa",
+      "childIds": [],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/10-编组/03-编组/02-编组/02-文字.data.json",
+        "pages/01-一杯咖啡的远行/10-编组/03-编组/02-编组/02-文字.style.json",
+        "pages/01-一杯咖啡的远行/10-编组/03-编组/02-编组/02-文字.view.js",
+        "pages/01-一杯咖啡的远行/10-编组/03-编组/02-编组/02-文字.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "cb9c49ee-cd80-4a5d-b8b0-3574ec9a6833",
+      "definitionId": "guoling.group",
+      "name": "U07 · 回到杯中",
+      "parentId": "47415583-2d75-4b72-9c46-dfd29b47d82a",
+      "childIds": [
+        "8ad1964b-3a7a-4a92-a59c-259924f7b485",
+        "f43a9372-e119-4ac2-9950-5805eeb33f79",
+        "71465557-000c-471a-9d0e-b3a35526bc54",
+        "9bf32f9d-d4ac-40f4-94fa-293d8f591f5a",
+        "deafbd51-f766-4d99-94b2-4cf6889a9148"
+      ],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/10-编组.data.json",
+        "pages/01-一杯咖啡的远行/10-编组.style.json",
+        "pages/01-一杯咖啡的远行/10-编组.view.js",
+        "pages/01-一杯咖啡的远行/10-编组.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "f1b95f36-6da5-4ac6-b04c-ee49b833abbb",
+      "definitionId": "guoling.text",
+      "parentId": "9bf32f9d-d4ac-40f4-94fa-293d8f591f5a",
+      "childIds": [],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/10-编组/04-编组/01-文字.data.json",
+        "pages/01-一杯咖啡的远行/10-编组/04-编组/01-文字.style.json",
+        "pages/01-一杯咖啡的远行/10-编组/04-编组/01-文字.view.js",
+        "pages/01-一杯咖啡的远行/10-编组/04-编组/01-文字.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "a27dffab-a970-43c1-96c7-080a88b9d938",
+      "definitionId": "guoling.text",
+      "parentId": "b6685775-ac67-42cb-b69b-e85934d87b76",
+      "childIds": [],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/10-编组/04-编组/02-编组/01-编组/01-文字.data.json",
+        "pages/01-一杯咖啡的远行/10-编组/04-编组/02-编组/01-编组/01-文字.style.json",
+        "pages/01-一杯咖啡的远行/10-编组/04-编组/02-编组/01-编组/01-文字.view.js",
+        "pages/01-一杯咖啡的远行/10-编组/04-编组/02-编组/01-编组/01-文字.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "1ec1a3ee-e400-4cc6-a67e-8ac7623b0ab8",
+      "definitionId": "guoling.text",
+      "parentId": "b6685775-ac67-42cb-b69b-e85934d87b76",
+      "childIds": [],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/10-编组/04-编组/02-编组/01-编组/02-文字.data.json",
+        "pages/01-一杯咖啡的远行/10-编组/04-编组/02-编组/01-编组/02-文字.style.json",
+        "pages/01-一杯咖啡的远行/10-编组/04-编组/02-编组/01-编组/02-文字.view.js",
+        "pages/01-一杯咖啡的远行/10-编组/04-编组/02-编组/01-编组/02-文字.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "89b5c581-dbc1-48fe-856a-b209545b99ad",
+      "definitionId": "guoling.text",
+      "parentId": "b6685775-ac67-42cb-b69b-e85934d87b76",
+      "childIds": [],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/10-编组/04-编组/02-编组/01-编组/03-文字.data.json",
+        "pages/01-一杯咖啡的远行/10-编组/04-编组/02-编组/01-编组/03-文字.style.json",
+        "pages/01-一杯咖啡的远行/10-编组/04-编组/02-编组/01-编组/03-文字.view.js",
+        "pages/01-一杯咖啡的远行/10-编组/04-编组/02-编组/01-编组/03-文字.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "ff2fe98f-3600-482a-8960-e0fb6c4cfe73",
+      "definitionId": "guoling.text",
+      "parentId": "d4f05791-e374-440e-b219-59583056b40b",
+      "childIds": [],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/10-编组/04-编组/02-编组/02-编组/01-文字.data.json",
+        "pages/01-一杯咖啡的远行/10-编组/04-编组/02-编组/02-编组/01-文字.style.json",
+        "pages/01-一杯咖啡的远行/10-编组/04-编组/02-编组/02-编组/01-文字.view.js",
+        "pages/01-一杯咖啡的远行/10-编组/04-编组/02-编组/02-编组/01-文字.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "0b0647af-1080-466b-acde-95d8f4eacdfb",
+      "definitionId": "guoling.text",
+      "parentId": "d4f05791-e374-440e-b219-59583056b40b",
+      "childIds": [],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/10-编组/04-编组/02-编组/02-编组/02-文字.data.json",
+        "pages/01-一杯咖啡的远行/10-编组/04-编组/02-编组/02-编组/02-文字.style.json",
+        "pages/01-一杯咖啡的远行/10-编组/04-编组/02-编组/02-编组/02-文字.view.js",
+        "pages/01-一杯咖啡的远行/10-编组/04-编组/02-编组/02-编组/02-文字.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "a4d1d510-4bc8-4e82-adc3-4422d3d9a357",
+      "definitionId": "guoling.text",
+      "parentId": "d4f05791-e374-440e-b219-59583056b40b",
+      "childIds": [],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/10-编组/04-编组/02-编组/02-编组/03-文字.data.json",
+        "pages/01-一杯咖啡的远行/10-编组/04-编组/02-编组/02-编组/03-文字.style.json",
+        "pages/01-一杯咖啡的远行/10-编组/04-编组/02-编组/02-编组/03-文字.view.js",
+        "pages/01-一杯咖啡的远行/10-编组/04-编组/02-编组/02-编组/03-文字.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "239176eb-f2b5-40c6-98f5-b2701c010873",
+      "definitionId": "guoling.text",
+      "parentId": "fbaabad3-bdde-49c7-abb5-2ed2427a6622",
+      "childIds": [],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/10-编组/04-编组/02-编组/03-编组/01-文字.data.json",
+        "pages/01-一杯咖啡的远行/10-编组/04-编组/02-编组/03-编组/01-文字.style.json",
+        "pages/01-一杯咖啡的远行/10-编组/04-编组/02-编组/03-编组/01-文字.view.js",
+        "pages/01-一杯咖啡的远行/10-编组/04-编组/02-编组/03-编组/01-文字.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "96d509fd-9d46-4d0e-afa1-0bcfcd627aaf",
+      "definitionId": "guoling.text",
+      "parentId": "fbaabad3-bdde-49c7-abb5-2ed2427a6622",
+      "childIds": [],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/10-编组/04-编组/02-编组/03-编组/02-文字.data.json",
+        "pages/01-一杯咖啡的远行/10-编组/04-编组/02-编组/03-编组/02-文字.style.json",
+        "pages/01-一杯咖啡的远行/10-编组/04-编组/02-编组/03-编组/02-文字.view.js",
+        "pages/01-一杯咖啡的远行/10-编组/04-编组/02-编组/03-编组/02-文字.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "0efb7c9e-ab52-4a3e-89ed-d134c740bd7a",
+      "definitionId": "guoling.text",
+      "parentId": "fbaabad3-bdde-49c7-abb5-2ed2427a6622",
+      "childIds": [],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/10-编组/04-编组/02-编组/03-编组/03-文字.data.json",
+        "pages/01-一杯咖啡的远行/10-编组/04-编组/02-编组/03-编组/03-文字.style.json",
+        "pages/01-一杯咖啡的远行/10-编组/04-编组/02-编组/03-编组/03-文字.view.js",
+        "pages/01-一杯咖啡的远行/10-编组/04-编组/02-编组/03-编组/03-文字.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "9bf32f9d-d4ac-40f4-94fa-293d8f591f5a",
+      "definitionId": "guoling.group",
+      "name": "先说感受，再说偏好",
+      "parentId": "cb9c49ee-cd80-4a5d-b8b0-3574ec9a6833",
+      "childIds": [
+        "f1b95f36-6da5-4ac6-b04c-ee49b833abbb",
+        "1dace930-84ae-44cd-9ead-d22edf889c39"
+      ],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/10-编组/04-编组.data.json",
+        "pages/01-一杯咖啡的远行/10-编组/04-编组.style.json",
+        "pages/01-一杯咖啡的远行/10-编组/04-编组.view.js",
+        "pages/01-一杯咖啡的远行/10-编组/04-编组.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "5093abd6-eba9-43cc-a54a-ad2eb13648e6",
+      "definitionId": "guoling.document-block",
+      "parentId": "20b6839d-2a3a-4cfb-9bdf-0b6031d30803",
+      "childIds": [],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/08-编组/01-文档块.data.json",
+        "pages/01-一杯咖啡的远行/08-编组/01-文档块.style.json",
+        "pages/01-一杯咖啡的远行/08-编组/01-文档块.view.js",
+        "pages/01-一杯咖啡的远行/08-编组/01-文档块.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "16c380cd-e761-4119-ab1a-a2f1336ff3ce",
+      "definitionId": "guoling.text",
+      "parentId": "9ae7efb1-241b-4d14-986d-5159e0d76d83",
+      "childIds": [],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/09-编组/01-编组/02-文字.data.json",
+        "pages/01-一杯咖啡的远行/09-编组/01-编组/02-文字.style.json",
+        "pages/01-一杯咖啡的远行/09-编组/01-编组/02-文字.view.js",
+        "pages/01-一杯咖啡的远行/09-编组/01-编组/02-文字.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "b1a166da-1cc4-4f39-a8ba-dc5c15bd39ba",
+      "definitionId": "guoling.document-block",
+      "parentId": "9ae7efb1-241b-4d14-986d-5159e0d76d83",
+      "childIds": [],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/09-编组/01-编组/01-文档块.data.json",
+        "pages/01-一杯咖啡的远行/09-编组/01-编组/01-文档块.style.json",
+        "pages/01-一杯咖啡的远行/09-编组/01-编组/01-文档块.view.js",
+        "pages/01-一杯咖啡的远行/09-编组/01-编组/01-文档块.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "a5b31d67-b4ef-40d8-9867-4c014d0a9c57",
+      "definitionId": "guoling.text",
+      "parentId": "1516d1f5-1b04-4cf7-9d48-ea8d1b499fd7",
+      "childIds": [],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/09-编组/01-编组/03-编组/02-文字.data.json",
+        "pages/01-一杯咖啡的远行/09-编组/01-编组/03-编组/02-文字.style.json",
+        "pages/01-一杯咖啡的远行/09-编组/01-编组/03-编组/02-文字.view.js",
+        "pages/01-一杯咖啡的远行/09-编组/01-编组/03-编组/02-文字.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "c95651b8-7d81-4b52-9271-dcf8e3b00b0b",
+      "definitionId": "guoling.text",
+      "parentId": "843f9f9c-7948-44bc-9f01-45dcc055c84e",
+      "childIds": [],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/09-编组/01-编组/05-编组/02-编组/01-文字.data.json",
+        "pages/01-一杯咖啡的远行/09-编组/01-编组/05-编组/02-编组/01-文字.style.json",
+        "pages/01-一杯咖啡的远行/09-编组/01-编组/05-编组/02-编组/01-文字.view.js",
+        "pages/01-一杯咖啡的远行/09-编组/01-编组/05-编组/02-编组/01-文字.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "1dfdb080-f36e-4764-a825-cd1709fce327",
+      "definitionId": "guoling.text",
+      "parentId": "843f9f9c-7948-44bc-9f01-45dcc055c84e",
+      "childIds": [],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/09-编组/01-编组/05-编组/02-编组/02-文字.data.json",
+        "pages/01-一杯咖啡的远行/09-编组/01-编组/05-编组/02-编组/02-文字.style.json",
+        "pages/01-一杯咖啡的远行/09-编组/01-编组/05-编组/02-编组/02-文字.view.js",
+        "pages/01-一杯咖啡的远行/09-编组/01-编组/05-编组/02-编组/02-文字.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "84317628-5b57-405d-9a6d-ece79f35981c",
+      "definitionId": "guoling.text",
+      "parentId": "deafbd51-f766-4d99-94b2-4cf6889a9148",
+      "childIds": [],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/10-编组/05-编组/01-文字.data.json",
+        "pages/01-一杯咖啡的远行/10-编组/05-编组/01-文字.style.json",
+        "pages/01-一杯咖啡的远行/10-编组/05-编组/01-文字.view.js",
+        "pages/01-一杯咖啡的远行/10-编组/05-编组/01-文字.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "1aeba383-8beb-4424-bfa0-adf107a6012c",
+      "definitionId": "guoling.document-block",
+      "parentId": "35d827a8-bdf2-4a0c-b5e9-354de2edf2c9",
+      "childIds": [],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/11-编组/02-文档块.data.json",
+        "pages/01-一杯咖啡的远行/11-编组/02-文档块.style.json",
+        "pages/01-一杯咖啡的远行/11-编组/02-文档块.view.js",
+        "pages/01-一杯咖啡的远行/11-编组/02-文档块.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "85a5c7da-fd02-4ab3-80be-7f942fda5db8",
+      "definitionId": "guoling.text",
+      "parentId": "0ac87975-ca9f-4f70-bea9-a4700892b21e",
+      "childIds": [],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/11-编组/01-文档块/01-编组/01-编组/02-文字.data.json",
+        "pages/01-一杯咖啡的远行/11-编组/01-文档块/01-编组/01-编组/02-文字.style.json",
+        "pages/01-一杯咖啡的远行/11-编组/01-文档块/01-编组/01-编组/02-文字.view.js",
+        "pages/01-一杯咖啡的远行/11-编组/01-文档块/01-编组/01-编组/02-文字.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "d15a6acd-9cf7-4013-b679-f8a9a63ad525",
+      "definitionId": "guoling.text",
+      "parentId": "0ac87975-ca9f-4f70-bea9-a4700892b21e",
+      "childIds": [],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/11-编组/01-文档块/01-编组/01-编组/03-文字.data.json",
+        "pages/01-一杯咖啡的远行/11-编组/01-文档块/01-编组/01-编组/03-文字.style.json",
+        "pages/01-一杯咖啡的远行/11-编组/01-文档块/01-编组/01-编组/03-文字.view.js",
+        "pages/01-一杯咖啡的远行/11-编组/01-文档块/01-编组/01-编组/03-文字.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "84ae7680-78ac-45e8-8e64-68fef78d124c",
+      "definitionId": "guoling.text",
+      "parentId": "0ac87975-ca9f-4f70-bea9-a4700892b21e",
+      "childIds": [],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/11-编组/01-文档块/01-编组/01-编组/04-文字.data.json",
+        "pages/01-一杯咖啡的远行/11-编组/01-文档块/01-编组/01-编组/04-文字.style.json",
+        "pages/01-一杯咖啡的远行/11-编组/01-文档块/01-编组/01-编组/04-文字.view.js",
+        "pages/01-一杯咖啡的远行/11-编组/01-文档块/01-编组/01-编组/04-文字.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "a4e968f3-9d87-4341-9809-365e2f9c5e07",
+      "definitionId": "guoling.text",
+      "parentId": "0ac87975-ca9f-4f70-bea9-a4700892b21e",
+      "childIds": [],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/11-编组/01-文档块/01-编组/01-编组/05-文字.data.json",
+        "pages/01-一杯咖啡的远行/11-编组/01-文档块/01-编组/01-编组/05-文字.style.json",
+        "pages/01-一杯咖啡的远行/11-编组/01-文档块/01-编组/01-编组/05-文字.view.js",
+        "pages/01-一杯咖啡的远行/11-编组/01-文档块/01-编组/01-编组/05-文字.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "0613bd98-1b20-4949-859d-5a2e21443368",
+      "definitionId": "guoling.text",
+      "parentId": "0ac87975-ca9f-4f70-bea9-a4700892b21e",
+      "childIds": [],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/11-编组/01-文档块/01-编组/01-编组/06-文字.data.json",
+        "pages/01-一杯咖啡的远行/11-编组/01-文档块/01-编组/01-编组/06-文字.style.json",
+        "pages/01-一杯咖啡的远行/11-编组/01-文档块/01-编组/01-编组/06-文字.view.js",
+        "pages/01-一杯咖啡的远行/11-编组/01-文档块/01-编组/01-编组/06-文字.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "814e779d-f246-42e7-8506-7385011ba509",
+      "definitionId": "guoling.text",
+      "parentId": "0ac87975-ca9f-4f70-bea9-a4700892b21e",
+      "childIds": [],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/11-编组/01-文档块/01-编组/01-编组/07-文字.data.json",
+        "pages/01-一杯咖啡的远行/11-编组/01-文档块/01-编组/01-编组/07-文字.style.json",
+        "pages/01-一杯咖啡的远行/11-编组/01-文档块/01-编组/01-编组/07-文字.view.js",
+        "pages/01-一杯咖啡的远行/11-编组/01-文档块/01-编组/01-编组/07-文字.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "932edbe1-6a57-48d4-9b3c-ab3387b57840",
+      "definitionId": "guoling.text",
+      "parentId": "4eefe6f8-6454-4b0f-86f5-69d92547c673",
+      "childIds": [],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/11-编组/01-文档块/01-编组/02-编组/03-文字.data.json",
+        "pages/01-一杯咖啡的远行/11-编组/01-文档块/01-编组/02-编组/03-文字.style.json",
+        "pages/01-一杯咖啡的远行/11-编组/01-文档块/01-编组/02-编组/03-文字.view.js",
+        "pages/01-一杯咖啡的远行/11-编组/01-文档块/01-编组/02-编组/03-文字.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "150a7f29-a4d9-4963-9304-8ae896dbde41",
+      "definitionId": "guoling.text",
+      "parentId": "4eefe6f8-6454-4b0f-86f5-69d92547c673",
+      "childIds": [],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/11-编组/01-文档块/01-编组/02-编组/04-文字.data.json",
+        "pages/01-一杯咖啡的远行/11-编组/01-文档块/01-编组/02-编组/04-文字.style.json",
+        "pages/01-一杯咖啡的远行/11-编组/01-文档块/01-编组/02-编组/04-文字.view.js",
+        "pages/01-一杯咖啡的远行/11-编组/01-文档块/01-编组/02-编组/04-文字.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "e0fdd875-3971-4944-abfa-f2bf2e62fb2b",
+      "definitionId": "guoling.text",
+      "parentId": "4eefe6f8-6454-4b0f-86f5-69d92547c673",
+      "childIds": [],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/11-编组/01-文档块/01-编组/02-编组/05-文字.data.json",
+        "pages/01-一杯咖啡的远行/11-编组/01-文档块/01-编组/02-编组/05-文字.style.json",
+        "pages/01-一杯咖啡的远行/11-编组/01-文档块/01-编组/02-编组/05-文字.view.js",
+        "pages/01-一杯咖啡的远行/11-编组/01-文档块/01-编组/02-编组/05-文字.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "fb27687b-c280-448c-a44e-1cb1b0e00c85",
+      "definitionId": "guoling.text",
+      "parentId": "4eefe6f8-6454-4b0f-86f5-69d92547c673",
+      "childIds": [],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/11-编组/01-文档块/01-编组/02-编组/06-文字.data.json",
+        "pages/01-一杯咖啡的远行/11-编组/01-文档块/01-编组/02-编组/06-文字.style.json",
+        "pages/01-一杯咖啡的远行/11-编组/01-文档块/01-编组/02-编组/06-文字.view.js",
+        "pages/01-一杯咖啡的远行/11-编组/01-文档块/01-编组/02-编组/06-文字.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "216d0b21-03ad-4a0d-88f6-33242c0a6fd3",
+      "definitionId": "guoling.text",
+      "parentId": "4eefe6f8-6454-4b0f-86f5-69d92547c673",
+      "childIds": [],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/11-编组/01-文档块/01-编组/02-编组/07-文字.data.json",
+        "pages/01-一杯咖啡的远行/11-编组/01-文档块/01-编组/02-编组/07-文字.style.json",
+        "pages/01-一杯咖啡的远行/11-编组/01-文档块/01-编组/02-编组/07-文字.view.js",
+        "pages/01-一杯咖啡的远行/11-编组/01-文档块/01-编组/02-编组/07-文字.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "4f94f503-84b1-4653-9aa0-34be2bc23a01",
+      "definitionId": "guoling.text",
+      "parentId": "4eefe6f8-6454-4b0f-86f5-69d92547c673",
+      "childIds": [],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/11-编组/01-文档块/01-编组/02-编组/08-文字.data.json",
+        "pages/01-一杯咖啡的远行/11-编组/01-文档块/01-编组/02-编组/08-文字.style.json",
+        "pages/01-一杯咖啡的远行/11-编组/01-文档块/01-编组/02-编组/08-文字.view.js",
+        "pages/01-一杯咖啡的远行/11-编组/01-文档块/01-编组/02-编组/08-文字.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "d96f4bdd-302f-4c21-94dd-41af8f62ad2b",
+      "definitionId": "guoling.text",
+      "parentId": "0ac87975-ca9f-4f70-bea9-a4700892b21e",
+      "childIds": [],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/11-编组/01-文档块/01-编组/01-编组/08-文字.data.json",
+        "pages/01-一杯咖啡的远行/11-编组/01-文档块/01-编组/01-编组/08-文字.style.json",
+        "pages/01-一杯咖啡的远行/11-编组/01-文档块/01-编组/01-编组/08-文字.view.js",
+        "pages/01-一杯咖啡的远行/11-编组/01-文档块/01-编组/01-编组/08-文字.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "b587f866-9d93-4878-ac26-6425f602658b",
+      "definitionId": "guoling.text",
+      "parentId": "4eefe6f8-6454-4b0f-86f5-69d92547c673",
+      "childIds": [],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/11-编组/01-文档块/01-编组/02-编组/02-文字.data.json",
+        "pages/01-一杯咖啡的远行/11-编组/01-文档块/01-编组/02-编组/02-文字.style.json",
+        "pages/01-一杯咖啡的远行/11-编组/01-文档块/01-编组/02-编组/02-文字.view.js",
+        "pages/01-一杯咖啡的远行/11-编组/01-文档块/01-编组/02-编组/02-文字.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "fff533a7-eddb-4b36-9414-03a27401dd5c",
+      "definitionId": "guoling.text",
+      "parentId": "4eefe6f8-6454-4b0f-86f5-69d92547c673",
+      "childIds": [],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/11-编组/01-文档块/01-编组/02-编组/09-文字.data.json",
+        "pages/01-一杯咖啡的远行/11-编组/01-文档块/01-编组/02-编组/09-文字.style.json",
+        "pages/01-一杯咖啡的远行/11-编组/01-文档块/01-编组/02-编组/09-文字.view.js",
+        "pages/01-一杯咖啡的远行/11-编组/01-文档块/01-编组/02-编组/09-文字.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "8ad1964b-3a7a-4a92-a59c-259924f7b485",
+      "definitionId": "guoling.document-block",
+      "parentId": "cb9c49ee-cd80-4a5d-b8b0-3574ec9a6833",
+      "childIds": [],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/10-编组/01-文档块.data.json",
+        "pages/01-一杯咖啡的远行/10-编组/01-文档块.style.json",
+        "pages/01-一杯咖啡的远行/10-编组/01-文档块.view.js",
+        "pages/01-一杯咖啡的远行/10-编组/01-文档块.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "83bca290-3006-4058-af49-a97b1e1fd00d",
+      "definitionId": "guoling.document-block",
+      "parentId": "f255afab-5e7d-432c-bf3d-7d98560f0f83",
+      "childIds": [],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/07-编组/01-文档块.data.json",
+        "pages/01-一杯咖啡的远行/07-编组/01-文档块.style.json",
+        "pages/01-一杯咖啡的远行/07-编组/01-文档块.view.js",
+        "pages/01-一杯咖啡的远行/07-编组/01-文档块.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "b3d345ba-f2c8-4c52-add1-2aa477d6a241",
+      "definitionId": "guoling.document-block",
+      "parentId": "fdb81517-cd2b-404b-9dea-5f28e6cd703e",
+      "childIds": [],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/04-编组/01-文档块.data.json",
+        "pages/01-一杯咖啡的远行/04-编组/01-文档块.style.json",
+        "pages/01-一杯咖啡的远行/04-编组/01-文档块.view.js",
+        "pages/01-一杯咖啡的远行/04-编组/01-文档块.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "5b629c9b-d44b-4fe6-a156-ed4d3b03880d",
+      "definitionId": "guoling.document-block",
+      "parentId": "25abbae2-ce63-46cb-b01c-f5d9c21be846",
+      "childIds": [],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/02-编组/01-文档块.data.json",
+        "pages/01-一杯咖啡的远行/02-编组/01-文档块.style.json",
+        "pages/01-一杯咖啡的远行/02-编组/01-文档块.view.js",
+        "pages/01-一杯咖啡的远行/02-编组/01-文档块.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "e48fa424-3cfd-416e-b307-b1a12409d118",
+      "definitionId": "guoling.group",
+      "name": "U02·标题与引言",
+      "parentId": "82d0a668-856e-4a51-9963-e34b4ab94747",
+      "childIds": [
+        "3c01b400-53da-4cf1-82c8-d16441de087f",
+        "051bf1c2-f241-4265-9d1e-3509a957cf97",
+        "1e41698d-161e-44f0-b8c1-d267faa74103"
+      ],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/04-编组/02-编组/01-编组.data.json",
+        "pages/01-一杯咖啡的远行/04-编组/02-编组/01-编组.style.json",
+        "pages/01-一杯咖啡的远行/04-编组/02-编组/01-编组.view.js",
+        "pages/01-一杯咖啡的远行/04-编组/02-编组/01-编组.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "785348ed-4b2a-49a2-8dc3-dbf7b7efa541",
+      "definitionId": "guoling.group",
+      "name": "U02·林间说明",
+      "parentId": "c501f8c3-1c73-4e26-b520-40037ce7bba1",
+      "childIds": [
+        "649f9a37-d9c2-4a32-9311-26993d3005ea",
+        "e66ab85c-55c4-4fac-94e1-3f2c9190972e"
+      ],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/04-编组/02-编组/03-编组/02-编组.data.json",
+        "pages/01-一杯咖啡的远行/04-编组/02-编组/03-编组/02-编组.style.json",
+        "pages/01-一杯咖啡的远行/04-编组/02-编组/03-编组/02-编组.view.js",
+        "pages/01-一杯咖啡的远行/04-编组/02-编组/03-编组/02-编组.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "c501f8c3-1c73-4e26-b520-40037ce7bba1",
+      "definitionId": "guoling.group",
+      "name": "U02·林间图注",
+      "parentId": "82d0a668-856e-4a51-9963-e34b4ab94747",
+      "childIds": [
+        "369030d4-eaac-4a41-aafa-2738e24d8274",
+        "785348ed-4b2a-49a2-8dc3-dbf7b7efa541"
+      ],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/04-编组/02-编组/03-编组.data.json",
+        "pages/01-一杯咖啡的远行/04-编组/02-编组/03-编组.style.json",
+        "pages/01-一杯咖啡的远行/04-编组/02-编组/03-编组.view.js",
+        "pages/01-一杯咖啡的远行/04-编组/02-编组/03-编组.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "0d6528eb-4ab8-4676-a013-8f340d565734",
+      "definitionId": "guoling.group",
+      "name": "U02·左侧编辑栏",
+      "parentId": "82d0a668-856e-4a51-9963-e34b4ab94747",
+      "childIds": [],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/04-编组/02-编组/04-编组.data.json",
+        "pages/01-一杯咖啡的远行/04-编组/02-编组/04-编组.style.json",
+        "pages/01-一杯咖啡的远行/04-编组/02-编组/04-编组.view.js",
+        "pages/01-一杯咖啡的远行/04-编组/02-编组/04-编组.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "ae4e37f6-2c39-4889-9463-b0d9627e8d1d",
+      "definitionId": "guoling.text",
+      "name": "U02·分选署名",
+      "parentId": "11136615-11a3-46fd-9392-6cf2881fed57",
+      "childIds": [],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/04-编组/02-编组/02-编组/02-编组/02-文字.data.json",
+        "pages/01-一杯咖啡的远行/04-编组/02-编组/02-编组/02-编组/02-文字.style.json",
+        "pages/01-一杯咖啡的远行/04-编组/02-编组/02-编组/02-编组/02-文字.view.js",
+        "pages/01-一杯咖啡的远行/04-编组/02-编组/02-编组/02-编组/02-文字.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "11136615-11a3-46fd-9392-6cf2881fed57",
+      "definitionId": "guoling.group",
+      "name": "U02·照片署名",
+      "parentId": "809c55b7-3ec7-4b1c-b681-76b5e522b3ec",
+      "childIds": [
+        "3fc04c23-1938-46a6-ad66-d09636fe947d",
+        "ae4e37f6-2c39-4889-9463-b0d9627e8d1d"
+      ],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/04-编组/02-编组/02-编组/02-编组.data.json",
+        "pages/01-一杯咖啡的远行/04-编组/02-编组/02-编组/02-编组.style.json",
+        "pages/01-一杯咖啡的远行/04-编组/02-编组/02-编组/02-编组.view.js",
+        "pages/01-一杯咖啡的远行/04-编组/02-编组/02-编组/02-编组.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "809c55b7-3ec7-4b1c-b681-76b5e522b3ec",
+      "definitionId": "guoling.group",
+      "name": "U02·分选照片",
+      "parentId": "82d0a668-856e-4a51-9963-e34b4ab94747",
+      "childIds": [
+        "901bbc93-5cf0-4214-bc91-14d6464f558e",
+        "11136615-11a3-46fd-9392-6cf2881fed57"
+      ],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/04-编组/02-编组/02-编组.data.json",
+        "pages/01-一杯咖啡的远行/04-编组/02-编组/02-编组.style.json",
+        "pages/01-一杯咖啡的远行/04-编组/02-编组/02-编组.view.js",
+        "pages/01-一杯咖啡的远行/04-编组/02-编组/02-编组.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "82d0a668-856e-4a51-9963-e34b4ab94747",
+      "definitionId": "guoling.group",
+      "name": "U02·开篇双栏",
+      "parentId": "fdb81517-cd2b-404b-9dea-5f28e6cd703e",
+      "childIds": [
+        "e48fa424-3cfd-416e-b307-b1a12409d118",
+        "809c55b7-3ec7-4b1c-b681-76b5e522b3ec",
+        "c501f8c3-1c73-4e26-b520-40037ce7bba1",
+        "0d6528eb-4ab8-4676-a013-8f340d565734"
+      ],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/04-编组/02-编组.data.json",
+        "pages/01-一杯咖啡的远行/04-编组/02-编组.style.json",
+        "pages/01-一杯咖啡的远行/04-编组/02-编组.view.js",
+        "pages/01-一杯咖啡的远行/04-编组/02-编组.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "3da56194-fb8c-4896-a2c8-8d351bc82342",
+      "definitionId": "guoling.text",
+      "name": "U02·阅读侧注",
+      "parentId": "5295ede2-98d6-4dc6-af0c-d916a27e588e",
+      "childIds": [],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/04-编组/03-编组/01-文字.data.json",
+        "pages/01-一杯咖啡的远行/04-编组/03-编组/01-文字.style.json",
+        "pages/01-一杯咖啡的远行/04-编组/03-编组/01-文字.view.js",
+        "pages/01-一杯咖啡的远行/04-编组/03-编组/01-文字.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "a07d1691-0b2c-4f88-a605-9ece068f302c",
+      "definitionId": "guoling.group",
+      "name": "U02·阅读正文",
+      "parentId": "5295ede2-98d6-4dc6-af0c-d916a27e588e",
+      "childIds": [
+        "4b5a2e50-5d1e-4cc7-b551-c6697702fcc6",
+        "62b9d55e-ec5f-4b1e-83ac-43b891857c93",
+        "385356fc-88e0-46e5-a1d1-b2280a033ab0"
+      ],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/04-编组/03-编组/02-编组.data.json",
+        "pages/01-一杯咖啡的远行/04-编组/03-编组/02-编组.style.json",
+        "pages/01-一杯咖啡的远行/04-编组/03-编组/02-编组.view.js",
+        "pages/01-一杯咖啡的远行/04-编组/03-编组/02-编组.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "5295ede2-98d6-4dc6-af0c-d916a27e588e",
+      "definitionId": "guoling.group",
+      "name": "U02·阅读",
+      "parentId": "fdb81517-cd2b-404b-9dea-5f28e6cd703e",
+      "childIds": [
+        "3da56194-fb8c-4896-a2c8-8d351bc82342",
+        "a07d1691-0b2c-4f88-a605-9ece068f302c"
+      ],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/04-编组/03-编组.data.json",
+        "pages/01-一杯咖啡的远行/04-编组/03-编组.style.json",
+        "pages/01-一杯咖啡的远行/04-编组/03-编组.view.js",
+        "pages/01-一杯咖啡的远行/04-编组/03-编组.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "20b6839d-2a3a-4cfb-9bdf-0b6031d30803",
+      "definitionId": "guoling.group",
+      "name": "U05·全宽暗场",
+      "parentId": "47415583-2d75-4b72-9c46-dfd29b47d82a",
+      "childIds": [
+        "5093abd6-eba9-43cc-a54a-ad2eb13648e6",
+        "aee929af-3338-409a-a386-bcbef0d0e285"
+      ],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/08-编组.data.json",
+        "pages/01-一杯咖啡的远行/08-编组.style.json",
+        "pages/01-一杯咖啡的远行/08-编组.view.js",
+        "pages/01-一杯咖啡的远行/08-编组.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "931b8fb6-7308-4876-8e5b-c3cfb5d95d3f",
+      "definitionId": "ea91d438-5e87-47ba-8cc1-d67466026210",
+      "name": "咖啡·统一导航",
+      "parentId": null,
+      "childIds": [],
+      "virtualPaths": [
+        "global/overlay/01-coffee-navigation.js.data.json",
+        "global/overlay/01-coffee-navigation.js.authoring.json",
+        "global/overlay/01-coffee-navigation.js.style.json",
+        "global/overlay/01-coffee-navigation.js.source/coffee-navigation.js"
+      ]
+    },
+    {
+      "id": "081f38b7-1435-496f-b2a5-f030e61aad0a",
+      "definitionId": "guoling.text",
+      "name": "U02·章节序号",
+      "parentId": "3c01b400-53da-4cf1-82c8-d16441de087f",
+      "childIds": [],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/04-编组/02-编组/01-编组/01-编组/01-文字.data.json",
+        "pages/01-一杯咖啡的远行/04-编组/02-编组/01-编组/01-编组/01-文字.style.json",
+        "pages/01-一杯咖啡的远行/04-编组/02-编组/01-编组/01-编组/01-文字.view.js",
+        "pages/01-一杯咖啡的远行/04-编组/02-编组/01-编组/01-编组/01-文字.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "aef8e28e-00c5-46fa-a068-98a7c503934b",
+      "definitionId": "guoling.text",
+      "name": "U02·章节名",
+      "parentId": "3c01b400-53da-4cf1-82c8-d16441de087f",
+      "childIds": [],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/04-编组/02-编组/01-编组/01-编组/02-文字.data.json",
+        "pages/01-一杯咖啡的远行/04-编组/02-编组/01-编组/01-编组/02-文字.style.json",
+        "pages/01-一杯咖啡的远行/04-编组/02-编组/01-编组/01-编组/02-文字.view.js",
+        "pages/01-一杯咖啡的远行/04-编组/02-编组/01-编组/01-编组/02-文字.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "3c01b400-53da-4cf1-82c8-d16441de087f",
+      "definitionId": "guoling.group",
+      "name": "U02·原生章节标识",
+      "parentId": "e48fa424-3cfd-416e-b307-b1a12409d118",
+      "childIds": [
+        "081f38b7-1435-496f-b2a5-f030e61aad0a",
+        "aef8e28e-00c5-46fa-a068-98a7c503934b"
+      ],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/04-编组/02-编组/01-编组/01-编组.data.json",
+        "pages/01-一杯咖啡的远行/04-编组/02-编组/01-编组/01-编组.style.json",
+        "pages/01-一杯咖啡的远行/04-编组/02-编组/01-编组/01-编组.view.js",
+        "pages/01-一杯咖啡的远行/04-编组/02-编组/01-编组/01-编组.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "e002d3c0-8c8d-4ad5-beb2-384d2315f5f6",
+      "definitionId": "guoling.text",
+      "name": "刊头·作品名",
+      "parentId": "2ab80ec7-3a4a-41c4-be34-005d444e6e38",
+      "childIds": [],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/01-编组/01-文字.data.json",
+        "pages/01-一杯咖啡的远行/01-编组/01-文字.style.json",
+        "pages/01-一杯咖啡的远行/01-编组/01-文字.view.js",
+        "pages/01-一杯咖啡的远行/01-编组/01-文字.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "fd9f686d-a76f-4d6c-9e18-b71ea9b29e6f",
+      "definitionId": "guoling.text",
+      "name": "刊头·卷号",
+      "parentId": "2ab80ec7-3a4a-41c4-be34-005d444e6e38",
+      "childIds": [],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/01-编组/03-文字.data.json",
+        "pages/01-一杯咖啡的远行/01-编组/03-文字.style.json",
+        "pages/01-一杯咖啡的远行/01-编组/03-文字.view.js",
+        "pages/01-一杯咖啡的远行/01-编组/03-文字.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "2ab80ec7-3a4a-41c4-be34-005d444e6e38",
+      "definitionId": "guoling.group",
+      "name": "全篇·刊头",
+      "parentId": "47415583-2d75-4b72-9c46-dfd29b47d82a",
+      "childIds": [
+        "e002d3c0-8c8d-4ad5-beb2-384d2315f5f6",
+        "bc07165c-0ecc-4f0a-bd68-0045e5ad5ff1",
+        "fd9f686d-a76f-4d6c-9e18-b71ea9b29e6f"
+      ],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/01-编组.data.json",
+        "pages/01-一杯咖啡的远行/01-编组.style.json",
+        "pages/01-一杯咖啡的远行/01-编组.view.js",
+        "pages/01-一杯咖啡的远行/01-编组.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "f441ee89-bc81-43bc-83ff-9c6d2a5b36e5",
+      "definitionId": "guoling.text",
+      "name": "U01·章节序号",
+      "parentId": "9186c240-4d70-4be5-8d86-ffc149f7e595",
+      "childIds": [],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/02-编组/02-编组/01-编组/01-编组/01-文字.data.json",
+        "pages/01-一杯咖啡的远行/02-编组/02-编组/01-编组/01-编组/01-文字.style.json",
+        "pages/01-一杯咖啡的远行/02-编组/02-编组/01-编组/01-编组/01-文字.view.js",
+        "pages/01-一杯咖啡的远行/02-编组/02-编组/01-编组/01-编组/01-文字.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "b1d19ccd-fbbd-421f-988c-e4e8686ffdd3",
+      "definitionId": "guoling.text",
+      "name": "U01·章节说明",
+      "parentId": "9186c240-4d70-4be5-8d86-ffc149f7e595",
+      "childIds": [],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/02-编组/02-编组/01-编组/01-编组/02-文字.data.json",
+        "pages/01-一杯咖啡的远行/02-编组/02-编组/01-编组/01-编组/02-文字.style.json",
+        "pages/01-一杯咖啡的远行/02-编组/02-编组/01-编组/01-编组/02-文字.view.js",
+        "pages/01-一杯咖啡的远行/02-编组/02-编组/01-编组/01-编组/02-文字.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "9186c240-4d70-4be5-8d86-ffc149f7e595",
+      "definitionId": "guoling.group",
+      "name": "U01·章节标识",
+      "parentId": "52b2687c-a12c-45c2-83c5-cc93016a7d7c",
+      "childIds": [
+        "f441ee89-bc81-43bc-83ff-9c6d2a5b36e5",
+        "b1d19ccd-fbbd-421f-988c-e4e8686ffdd3"
+      ],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/02-编组/02-编组/01-编组/01-编组.data.json",
+        "pages/01-一杯咖啡的远行/02-编组/02-编组/01-编组/01-编组.style.json",
+        "pages/01-一杯咖啡的远行/02-编组/02-编组/01-编组/01-编组.view.js",
+        "pages/01-一杯咖啡的远行/02-编组/02-编组/01-编组/01-编组.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "52b2687c-a12c-45c2-83c5-cc93016a7d7c",
+      "definitionId": "guoling.group",
+      "name": "U01·开篇文案",
+      "parentId": "403273c0-8b31-41ad-ae6b-0ebd75a8370a",
+      "childIds": [
+        "9186c240-4d70-4be5-8d86-ffc149f7e595",
+        "249472f9-824a-4a16-86fb-ec32edb626f5",
+        "dd6eb479-a0f3-4284-8f56-af846f15f328",
+        "30f0a785-8dcc-462b-917c-9c1728d0df61"
+      ],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/02-编组/02-编组/01-编组.data.json",
+        "pages/01-一杯咖啡的远行/02-编组/02-编组/01-编组.style.json",
+        "pages/01-一杯咖啡的远行/02-编组/02-编组/01-编组.view.js",
+        "pages/01-一杯咖啡的远行/02-编组/02-编组/01-编组.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "2ab417dd-793d-4064-aa8a-7869e663163c",
+      "definitionId": "guoling.group",
+      "name": "U01·杯子照片",
+      "parentId": "403273c0-8b31-41ad-ae6b-0ebd75a8370a",
+      "childIds": [
+        "0f19f30b-5bed-4933-af07-311081583f85",
+        "6f393817-c7e6-45bc-ac44-a68bee7bfb78"
+      ],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/02-编组/02-编组/02-编组.data.json",
+        "pages/01-一杯咖啡的远行/02-编组/02-编组/02-编组.style.json",
+        "pages/01-一杯咖啡的远行/02-编组/02-编组/02-编组.view.js",
+        "pages/01-一杯咖啡的远行/02-编组/02-编组/02-编组.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "403273c0-8b31-41ad-ae6b-0ebd75a8370a",
+      "definitionId": "guoling.group",
+      "name": "U01·开篇跨页",
+      "parentId": "25abbae2-ce63-46cb-b01c-f5d9c21be846",
+      "childIds": [
+        "52b2687c-a12c-45c2-83c5-cc93016a7d7c",
+        "2ab417dd-793d-4064-aa8a-7869e663163c"
+      ],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/02-编组/02-编组.data.json",
+        "pages/01-一杯咖啡的远行/02-编组/02-编组.style.json",
+        "pages/01-一杯咖啡的远行/02-编组/02-编组.view.js",
+        "pages/01-一杯咖啡的远行/02-编组/02-编组.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "95c68fa6-bbf2-4c82-8d0e-c6672a4893fe",
+      "definitionId": "guoling.group",
+      "name": "U01·果实照片",
+      "parentId": "b10b8dc5-bf3f-4361-8bc3-b6d1f36d57c7",
+      "childIds": [
+        "942e61c7-e691-4fac-b4c0-a09dd872b314",
+        "6e342a44-766a-460a-974e-1bb2e1594664"
+      ],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/03-编组/01-编组.data.json",
+        "pages/01-一杯咖啡的远行/03-编组/01-编组.style.json",
+        "pages/01-一杯咖啡的远行/03-编组/01-编组.view.js",
+        "pages/01-一杯咖啡的远行/03-编组/01-编组.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "55526d7a-e9c1-443f-8c8f-0051914041a5",
+      "definitionId": "guoling.text",
+      "name": "U01·起源第二段",
+      "parentId": "7c9804d6-e6ec-4d79-a32a-2668861019b9",
+      "childIds": [],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/03-编组/02-编组/05-文字.data.json",
+        "pages/01-一杯咖啡的远行/03-编组/02-编组/05-文字.style.json",
+        "pages/01-一杯咖啡的远行/03-编组/02-编组/05-文字.view.js",
+        "pages/01-一杯咖啡的远行/03-编组/02-编组/05-文字.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "7c9804d6-e6ec-4d79-a32a-2668861019b9",
+      "definitionId": "guoling.group",
+      "name": "U01·起源文案",
+      "parentId": "b10b8dc5-bf3f-4361-8bc3-b6d1f36d57c7",
+      "childIds": [
+        "4d4b2b29-0afe-4e4c-94fe-17cc6524a3c2",
+        "2760f24c-cd9d-487c-98a3-45dc86b81c2a",
+        "3b6e4624-25c3-4bfd-ac52-ae03714aa6e1",
+        "034b39b7-502c-4cf6-848c-8e30d9e5d226",
+        "55526d7a-e9c1-443f-8c8f-0051914041a5"
+      ],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/03-编组/02-编组.data.json",
+        "pages/01-一杯咖啡的远行/03-编组/02-编组.style.json",
+        "pages/01-一杯咖啡的远行/03-编组/02-编组.view.js",
+        "pages/01-一杯咖啡的远行/03-编组/02-编组.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "93895d37-50ae-43f4-95c4-fc28c2db0c7f",
+      "definitionId": "guoling.group",
+      "name": "U02·果实照片",
+      "parentId": "8dac3dd6-e9d4-419d-858d-c3f75fdca6c4",
+      "childIds": [
+        "61773329-373c-4fd7-86bc-8cc3b6e05fdc",
+        "bd11e207-c41d-4171-83fa-ad1df41fb36f"
+      ],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/05-编组/01-编组.data.json",
+        "pages/01-一杯咖啡的远行/05-编组/01-编组.style.json",
+        "pages/01-一杯咖啡的远行/05-编组/01-编组.view.js",
+        "pages/01-一杯咖啡的远行/05-编组/01-编组.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "892a3a7e-6757-4a14-bfc0-86e59447ec14",
+      "definitionId": "guoling.text",
+      "name": "U03·章节序号",
+      "parentId": "c2f8d4d0-f4c8-4ed3-9f83-3b8f9849ce5e",
+      "childIds": [],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/06-编组/01-编组/03-编组/01-编组/01-编组/01-文字.data.json",
+        "pages/01-一杯咖啡的远行/06-编组/01-编组/03-编组/01-编组/01-编组/01-文字.style.json",
+        "pages/01-一杯咖啡的远行/06-编组/01-编组/03-编组/01-编组/01-编组/01-文字.view.js",
+        "pages/01-一杯咖啡的远行/06-编组/01-编组/03-编组/01-编组/01-编组/01-文字.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "cd3b73e0-0eee-42ba-8164-aada3329c6ab",
+      "definitionId": "guoling.text",
+      "name": "U03·章节说明",
+      "parentId": "c2f8d4d0-f4c8-4ed3-9f83-3b8f9849ce5e",
+      "childIds": [],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/06-编组/01-编组/03-编组/01-编组/01-编组/02-文字.data.json",
+        "pages/01-一杯咖啡的远行/06-编组/01-编组/03-编组/01-编组/01-编组/02-文字.style.json",
+        "pages/01-一杯咖啡的远行/06-编组/01-编组/03-编组/01-编组/01-编组/02-文字.view.js",
+        "pages/01-一杯咖啡的远行/06-编组/01-编组/03-编组/01-编组/01-编组/02-文字.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "c2f8d4d0-f4c8-4ed3-9f83-3b8f9849ce5e",
+      "definitionId": "guoling.group",
+      "name": "U03·章节标识",
+      "parentId": "58b48c1b-46fb-423f-9cd9-b5a67793284b",
+      "childIds": [
+        "892a3a7e-6757-4a14-bfc0-86e59447ec14",
+        "cd3b73e0-0eee-42ba-8164-aada3329c6ab"
+      ],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/06-编组/01-编组/03-编组/01-编组/01-编组.data.json",
+        "pages/01-一杯咖啡的远行/06-编组/01-编组/03-编组/01-编组/01-编组.style.json",
+        "pages/01-一杯咖啡的远行/06-编组/01-编组/03-编组/01-编组/01-编组.view.js",
+        "pages/01-一杯咖啡的远行/06-编组/01-编组/03-编组/01-编组/01-编组.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "a8f474a8-d99d-4b35-a1ec-b694291fc1b1",
+      "definitionId": "guoling.text",
+      "name": "U03·正式标题",
+      "parentId": "58b48c1b-46fb-423f-9cd9-b5a67793284b",
+      "childIds": [],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/06-编组/01-编组/03-编组/01-编组/02-文字.data.json",
+        "pages/01-一杯咖啡的远行/06-编组/01-编组/03-编组/01-编组/02-文字.style.json",
+        "pages/01-一杯咖啡的远行/06-编组/01-编组/03-编组/01-编组/02-文字.view.js",
+        "pages/01-一杯咖啡的远行/06-编组/01-编组/03-编组/01-编组/02-文字.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "58b48c1b-46fb-423f-9cd9-b5a67793284b",
+      "definitionId": "guoling.group",
+      "name": "U03·章节标题",
+      "parentId": "12f800a2-9b79-4a94-8fdc-d5f67e4ea80a",
+      "childIds": [
+        "c2f8d4d0-f4c8-4ed3-9f83-3b8f9849ce5e",
+        "a8f474a8-d99d-4b35-a1ec-b694291fc1b1"
+      ],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/06-编组/01-编组/03-编组/01-编组.data.json",
+        "pages/01-一杯咖啡的远行/06-编组/01-编组/03-编组/01-编组.style.json",
+        "pages/01-一杯咖啡的远行/06-编组/01-编组/03-编组/01-编组.view.js",
+        "pages/01-一杯咖啡的远行/06-编组/01-编组/03-编组/01-编组.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "12f800a2-9b79-4a94-8fdc-d5f67e4ea80a",
+      "definitionId": "guoling.group",
+      "name": "U03·章节开篇",
+      "parentId": "82b886f2-806e-4b21-a2a1-63ca371f3f26",
+      "childIds": [
+        "58b48c1b-46fb-423f-9cd9-b5a67793284b",
+        "582cb0f9-f146-4d65-97c4-4c52a1cd27c6"
+      ],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/06-编组/01-编组/03-编组.data.json",
+        "pages/01-一杯咖啡的远行/06-编组/01-编组/03-编组.style.json",
+        "pages/01-一杯咖啡的远行/06-编组/01-编组/03-编组.view.js",
+        "pages/01-一杯咖啡的远行/06-编组/01-编组/03-编组.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "d69c4eaa-7738-401a-94a2-092f468a214a",
+      "definitionId": "guoling.text",
+      "name": "U03·后记标题",
+      "parentId": "344255ec-18cf-4727-ba89-064edeaf9460",
+      "childIds": [],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/06-编组/01-编组/05-编组/01-文字.data.json",
+        "pages/01-一杯咖啡的远行/06-编组/01-编组/05-编组/01-文字.style.json",
+        "pages/01-一杯咖啡的远行/06-编组/01-编组/05-编组/01-文字.view.js",
+        "pages/01-一杯咖啡的远行/06-编组/01-编组/05-编组/01-文字.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "344255ec-18cf-4727-ba89-064edeaf9460",
+      "definitionId": "guoling.group",
+      "name": "U03·实验后记",
+      "parentId": "82b886f2-806e-4b21-a2a1-63ca371f3f26",
+      "childIds": [
+        "d69c4eaa-7738-401a-94a2-092f468a214a",
+        "3c84401c-931a-4a79-a6a2-55728160b07b"
+      ],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/06-编组/01-编组/05-编组.data.json",
+        "pages/01-一杯咖啡的远行/06-编组/01-编组/05-编组.style.json",
+        "pages/01-一杯咖啡的远行/06-编组/01-编组/05-编组.view.js",
+        "pages/01-一杯咖啡的远行/06-编组/01-编组/05-编组.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "82b886f2-806e-4b21-a2a1-63ca371f3f26",
+      "definitionId": "guoling.group",
+      "name": "U03·章节内容",
+      "parentId": "eecbdbf3-0cd5-40f3-9b9b-37d4a9a984fa",
+      "childIds": [
+        "a8add446-cdcf-4007-824f-f0449a24912a",
+        "793910e9-658a-40f4-a5fb-ae8b3420f3e8",
+        "12f800a2-9b79-4a94-8fdc-d5f67e4ea80a",
+        "9fa9da51-02b1-4d46-87c2-247bb9993ff1",
+        "344255ec-18cf-4727-ba89-064edeaf9460"
+      ],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/06-编组/01-编组.data.json",
+        "pages/01-一杯咖啡的远行/06-编组/01-编组.style.json",
+        "pages/01-一杯咖啡的远行/06-编组/01-编组.view.js",
+        "pages/01-一杯咖啡的远行/06-编组/01-编组.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "eecbdbf3-0cd5-40f3-9b9b-37d4a9a984fa",
+      "definitionId": "guoling.group",
+      "name": "U03·处理章节",
+      "parentId": "47415583-2d75-4b72-9c46-dfd29b47d82a",
+      "childIds": [
+        "82b886f2-806e-4b21-a2a1-63ca371f3f26"
+      ],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/06-编组.data.json",
+        "pages/01-一杯咖啡的远行/06-编组.style.json",
+        "pages/01-一杯咖啡的远行/06-编组.view.js",
+        "pages/01-一杯咖啡的远行/06-编组.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "dbea96e8-bedc-4406-bc5e-335a1a706ac4",
+      "definitionId": "guoling.text",
+      "name": "U04·章节序号",
+      "parentId": "e2ebba8e-e86b-42e8-9643-ccd3d8c07a84",
+      "childIds": [],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/07-编组/02-编组/01-编组/01-编组/01-文字.data.json",
+        "pages/01-一杯咖啡的远行/07-编组/02-编组/01-编组/01-编组/01-文字.style.json",
+        "pages/01-一杯咖啡的远行/07-编组/02-编组/01-编组/01-编组/01-文字.view.js",
+        "pages/01-一杯咖啡的远行/07-编组/02-编组/01-编组/01-编组/01-文字.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "b60d2e6e-bd27-4efb-b087-a76e58bd9dd2",
+      "definitionId": "guoling.text",
+      "name": "U04·章节说明",
+      "parentId": "e2ebba8e-e86b-42e8-9643-ccd3d8c07a84",
+      "childIds": [],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/07-编组/02-编组/01-编组/01-编组/02-文字.data.json",
+        "pages/01-一杯咖啡的远行/07-编组/02-编组/01-编组/01-编组/02-文字.style.json",
+        "pages/01-一杯咖啡的远行/07-编组/02-编组/01-编组/01-编组/02-文字.view.js",
+        "pages/01-一杯咖啡的远行/07-编组/02-编组/01-编组/01-编组/02-文字.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "e2ebba8e-e86b-42e8-9643-ccd3d8c07a84",
+      "definitionId": "guoling.group",
+      "name": "U04·章节标识",
+      "parentId": "908ea557-44b1-4e4b-9c0a-824f11e046a8",
+      "childIds": [
+        "dbea96e8-bedc-4406-bc5e-335a1a706ac4",
+        "b60d2e6e-bd27-4efb-b087-a76e58bd9dd2"
+      ],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/07-编组/02-编组/01-编组/01-编组.data.json",
+        "pages/01-一杯咖啡的远行/07-编组/02-编组/01-编组/01-编组.style.json",
+        "pages/01-一杯咖啡的远行/07-编组/02-编组/01-编组/01-编组.view.js",
+        "pages/01-一杯咖啡的远行/07-编组/02-编组/01-编组/01-编组.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "908ea557-44b1-4e4b-9c0a-824f11e046a8",
+      "definitionId": "guoling.group",
+      "name": "U04·章节标题",
+      "parentId": "494685d4-20c7-4697-90b4-d1d4f89d0fc4",
+      "childIds": [
+        "e2ebba8e-e86b-42e8-9643-ccd3d8c07a84",
+        "31caf0c4-7de2-4957-a332-e624f150417b"
+      ],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/07-编组/02-编组/01-编组.data.json",
+        "pages/01-一杯咖啡的远行/07-编组/02-编组/01-编组.style.json",
+        "pages/01-一杯咖啡的远行/07-编组/02-编组/01-编组.view.js",
+        "pages/01-一杯咖啡的远行/07-编组/02-编组/01-编组.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "b8e04c9f-115a-4793-bfee-a958c6f0ade4",
+      "definitionId": "guoling.text",
+      "name": "U04·交接第二段",
+      "parentId": "850d29cd-7947-43d6-b569-3538c29355cb",
+      "childIds": [],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/07-编组/02-编组/02-编组/02-文字.data.json",
+        "pages/01-一杯咖啡的远行/07-编组/02-编组/02-编组/02-文字.style.json",
+        "pages/01-一杯咖啡的远行/07-编组/02-编组/02-编组/02-文字.view.js",
+        "pages/01-一杯咖啡的远行/07-编组/02-编组/02-编组/02-文字.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "850d29cd-7947-43d6-b569-3538c29355cb",
+      "definitionId": "guoling.group",
+      "name": "U04·交接正文",
+      "parentId": "494685d4-20c7-4697-90b4-d1d4f89d0fc4",
+      "childIds": [
+        "653606d5-eff0-43bf-b069-a34c88af4698",
+        "b8e04c9f-115a-4793-bfee-a958c6f0ade4"
+      ],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/07-编组/02-编组/02-编组.data.json",
+        "pages/01-一杯咖啡的远行/07-编组/02-编组/02-编组.style.json",
+        "pages/01-一杯咖啡的远行/07-编组/02-编组/02-编组.view.js",
+        "pages/01-一杯咖啡的远行/07-编组/02-编组/02-编组.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "494685d4-20c7-4697-90b4-d1d4f89d0fc4",
+      "definitionId": "guoling.group",
+      "name": "U04·交接开篇",
+      "parentId": "f255afab-5e7d-432c-bf3d-7d98560f0f83",
+      "childIds": [
+        "908ea557-44b1-4e4b-9c0a-824f11e046a8",
+        "850d29cd-7947-43d6-b569-3538c29355cb"
+      ],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/07-编组/02-编组.data.json",
+        "pages/01-一杯咖啡的远行/07-编组/02-编组.style.json",
+        "pages/01-一杯咖啡的远行/07-编组/02-编组.view.js",
+        "pages/01-一杯咖啡的远行/07-编组/02-编组.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "10e90bb1-a699-4cab-98e9-31c82398052f",
+      "definitionId": "guoling.group",
+      "name": "U04·生豆图注",
+      "parentId": "abeec8ab-5b77-43b2-b53a-2254ad371dbb",
+      "childIds": [
+        "37febd3d-c742-435e-b1e3-c81a76de76b5",
+        "90cde52c-9f78-4a96-9632-ee59e3a1f395"
+      ],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/07-编组/03-编组/01-编组.data.json",
+        "pages/01-一杯咖啡的远行/07-编组/03-编组/01-编组.style.json",
+        "pages/01-一杯咖啡的远行/07-编组/03-编组/01-编组.view.js",
+        "pages/01-一杯咖啡的远行/07-编组/03-编组/01-编组.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "3907d72c-5a8c-483a-aeb4-d8b04b392cba",
+      "definitionId": "guoling.group",
+      "name": "U04·劳动图注",
+      "parentId": "abeec8ab-5b77-43b2-b53a-2254ad371dbb",
+      "childIds": [
+        "838ff4d7-d3ba-4c33-b4e5-d368d5d480c9",
+        "d9b5ada8-9e16-4b8c-aa55-9b8866e42fe4"
+      ],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/07-编组/03-编组/02-编组.data.json",
+        "pages/01-一杯咖啡的远行/07-编组/03-编组/02-编组.style.json",
+        "pages/01-一杯咖啡的远行/07-编组/03-编组/02-编组.view.js",
+        "pages/01-一杯咖啡的远行/07-编组/03-编组/02-编组.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "abeec8ab-5b77-43b2-b53a-2254ad371dbb",
+      "definitionId": "guoling.group",
+      "name": "U04·照片跨页",
+      "parentId": "f255afab-5e7d-432c-bf3d-7d98560f0f83",
+      "childIds": [
+        "10e90bb1-a699-4cab-98e9-31c82398052f",
+        "3907d72c-5a8c-483a-aeb4-d8b04b392cba"
+      ],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/07-编组/03-编组.data.json",
+        "pages/01-一杯咖啡的远行/07-编组/03-编组.style.json",
+        "pages/01-一杯咖啡的远行/07-编组/03-编组.view.js",
+        "pages/01-一杯咖啡的远行/07-编组/03-编组.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "c9864817-cc42-41e2-9015-67fa6991257f",
+      "definitionId": "guoling.group",
+      "name": "U04·三个交接观察点",
+      "parentId": "f255afab-5e7d-432c-bf3d-7d98560f0f83",
+      "childIds": [
+        "61087d4b-a58d-4442-b15c-63762f47d11e",
+        "62a33235-5c25-4ae6-8c1c-4e8c8bf89087",
+        "5e8ef2fb-8c7e-40fa-bb34-6025f180f663",
+        "f51a1d1d-2cf4-44b0-ac05-9a9ae8ac483e"
+      ],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/07-编组/04-编组.data.json",
+        "pages/01-一杯咖啡的远行/07-编组/04-编组.style.json",
+        "pages/01-一杯咖啡的远行/07-编组/04-编组.view.js",
+        "pages/01-一杯咖啡的远行/07-编组/04-编组.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "cd1c1368-b009-4a8d-83db-3c2e349535df",
+      "definitionId": "guoling.text",
+      "name": "U06·章节序号",
+      "parentId": "f22e7e78-07c3-4757-9df2-b92b60f14e7d",
+      "childIds": [],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/09-编组/01-编组/03-编组/01-编组/01-编组/01-文字.data.json",
+        "pages/01-一杯咖啡的远行/09-编组/01-编组/03-编组/01-编组/01-编组/01-文字.style.json",
+        "pages/01-一杯咖啡的远行/09-编组/01-编组/03-编组/01-编组/01-编组/01-文字.view.js",
+        "pages/01-一杯咖啡的远行/09-编组/01-编组/03-编组/01-编组/01-编组/01-文字.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "a317cd36-c035-4032-b4da-078bf12f65e2",
+      "definitionId": "guoling.text",
+      "name": "U06·章节说明",
+      "parentId": "f22e7e78-07c3-4757-9df2-b92b60f14e7d",
+      "childIds": [],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/09-编组/01-编组/03-编组/01-编组/01-编组/02-文字.data.json",
+        "pages/01-一杯咖啡的远行/09-编组/01-编组/03-编组/01-编组/01-编组/02-文字.style.json",
+        "pages/01-一杯咖啡的远行/09-编组/01-编组/03-编组/01-编组/01-编组/02-文字.view.js",
+        "pages/01-一杯咖啡的远行/09-编组/01-编组/03-编组/01-编组/01-编组/02-文字.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "f22e7e78-07c3-4757-9df2-b92b60f14e7d",
+      "definitionId": "guoling.group",
+      "name": "U06·章节标识",
+      "parentId": "6ef0bebc-1806-4eea-a25f-bc5437b3f78c",
+      "childIds": [
+        "cd1c1368-b009-4a8d-83db-3c2e349535df",
+        "a317cd36-c035-4032-b4da-078bf12f65e2"
+      ],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/09-编组/01-编组/03-编组/01-编组/01-编组.data.json",
+        "pages/01-一杯咖啡的远行/09-编组/01-编组/03-编组/01-编组/01-编组.style.json",
+        "pages/01-一杯咖啡的远行/09-编组/01-编组/03-编组/01-编组/01-编组.view.js",
+        "pages/01-一杯咖啡的远行/09-编组/01-编组/03-编组/01-编组/01-编组.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "89bc3d62-61a1-476b-9a21-1ddbc4701f41",
+      "definitionId": "guoling.text",
+      "name": "U06·正式标题",
+      "parentId": "6ef0bebc-1806-4eea-a25f-bc5437b3f78c",
+      "childIds": [],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/09-编组/01-编组/03-编组/01-编组/02-文字.data.json",
+        "pages/01-一杯咖啡的远行/09-编组/01-编组/03-编组/01-编组/02-文字.style.json",
+        "pages/01-一杯咖啡的远行/09-编组/01-编组/03-编组/01-编组/02-文字.view.js",
+        "pages/01-一杯咖啡的远行/09-编组/01-编组/03-编组/01-编组/02-文字.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "6ef0bebc-1806-4eea-a25f-bc5437b3f78c",
+      "definitionId": "guoling.group",
+      "name": "U06·章节标题",
+      "parentId": "1516d1f5-1b04-4cf7-9d48-ea8d1b499fd7",
+      "childIds": [
+        "f22e7e78-07c3-4757-9df2-b92b60f14e7d",
+        "89bc3d62-61a1-476b-9a21-1ddbc4701f41"
+      ],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/09-编组/01-编组/03-编组/01-编组.data.json",
+        "pages/01-一杯咖啡的远行/09-编组/01-编组/03-编组/01-编组.style.json",
+        "pages/01-一杯咖啡的远行/09-编组/01-编组/03-编组/01-编组.view.js",
+        "pages/01-一杯咖啡的远行/09-编组/01-编组/03-编组/01-编组.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "1516d1f5-1b04-4cf7-9d48-ea8d1b499fd7",
+      "definitionId": "guoling.group",
+      "name": "U06·章节开篇",
+      "parentId": "9ae7efb1-241b-4d14-986d-5159e0d76d83",
+      "childIds": [
+        "6ef0bebc-1806-4eea-a25f-bc5437b3f78c",
+        "a5b31d67-b4ef-40d8-9867-4c014d0a9c57"
+      ],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/09-编组/01-编组/03-编组.data.json",
+        "pages/01-一杯咖啡的远行/09-编组/01-编组/03-编组.style.json",
+        "pages/01-一杯咖啡的远行/09-编组/01-编组/03-编组.view.js",
+        "pages/01-一杯咖啡的远行/09-编组/01-编组/03-编组.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "d3fc86a9-03fe-4a46-9434-de7dc1fc9be5",
+      "definitionId": "guoling.text",
+      "name": "U06·后记标题",
+      "parentId": "048e41db-1227-436b-9ef0-e7d400a54ca8",
+      "childIds": [],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/09-编组/01-编组/05-编组/01-文字.data.json",
+        "pages/01-一杯咖啡的远行/09-编组/01-编组/05-编组/01-文字.style.json",
+        "pages/01-一杯咖啡的远行/09-编组/01-编组/05-编组/01-文字.view.js",
+        "pages/01-一杯咖啡的远行/09-编组/01-编组/05-编组/01-文字.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "843f9f9c-7948-44bc-9f01-45dcc055c84e",
+      "definitionId": "guoling.group",
+      "name": "U06·后记正文",
+      "parentId": "048e41db-1227-436b-9ef0-e7d400a54ca8",
+      "childIds": [
+        "c95651b8-7d81-4b52-9271-dcf8e3b00b0b",
+        "1dfdb080-f36e-4764-a825-cd1709fce327"
+      ],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/09-编组/01-编组/05-编组/02-编组.data.json",
+        "pages/01-一杯咖啡的远行/09-编组/01-编组/05-编组/02-编组.style.json",
+        "pages/01-一杯咖啡的远行/09-编组/01-编组/05-编组/02-编组.view.js",
+        "pages/01-一杯咖啡的远行/09-编组/01-编组/05-编组/02-编组.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "048e41db-1227-436b-9ef0-e7d400a54ca8",
+      "definitionId": "guoling.group",
+      "name": "U06·实验后记",
+      "parentId": "9ae7efb1-241b-4d14-986d-5159e0d76d83",
+      "childIds": [
+        "d3fc86a9-03fe-4a46-9434-de7dc1fc9be5",
+        "843f9f9c-7948-44bc-9f01-45dcc055c84e"
+      ],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/09-编组/01-编组/05-编组.data.json",
+        "pages/01-一杯咖啡的远行/09-编组/01-编组/05-编组.style.json",
+        "pages/01-一杯咖啡的远行/09-编组/01-编组/05-编组.view.js",
+        "pages/01-一杯咖啡的远行/09-编组/01-编组/05-编组.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "9ae7efb1-241b-4d14-986d-5159e0d76d83",
+      "definitionId": "guoling.group",
+      "name": "U06·章节内容",
+      "parentId": "5cc857be-4d91-4b0e-8203-208b8961b2a7",
+      "childIds": [
+        "b1a166da-1cc4-4f39-a8ba-dc5c15bd39ba",
+        "16c380cd-e761-4119-ab1a-a2f1336ff3ce",
+        "1516d1f5-1b04-4cf7-9d48-ea8d1b499fd7",
+        "b354a3ff-d8a9-4d78-9c1b-5b460433c191",
+        "048e41db-1227-436b-9ef0-e7d400a54ca8"
+      ],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/09-编组/01-编组.data.json",
+        "pages/01-一杯咖啡的远行/09-编组/01-编组.style.json",
+        "pages/01-一杯咖啡的远行/09-编组/01-编组.view.js",
+        "pages/01-一杯咖啡的远行/09-编组/01-编组.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "5cc857be-4d91-4b0e-8203-208b8961b2a7",
+      "definitionId": "guoling.group",
+      "name": "U06·水的章节",
+      "parentId": "47415583-2d75-4b72-9c46-dfd29b47d82a",
+      "childIds": [
+        "9ae7efb1-241b-4d14-986d-5159e0d76d83"
+      ],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/09-编组.data.json",
+        "pages/01-一杯咖啡的远行/09-编组.style.json",
+        "pages/01-一杯咖啡的远行/09-编组.view.js",
+        "pages/01-一杯咖啡的远行/09-编组.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "2ebd3b7e-7565-4f1d-865c-bbb47d00e5da",
+      "definitionId": "guoling.group",
+      "name": "U07·回味文案",
+      "parentId": "71465557-000c-471a-9d0e-b3a35526bc54",
+      "childIds": [
+        "3979cd3a-0f7c-4646-817b-1910304c9774",
+        "8ee9c20c-1d7f-4d17-a5de-ddabfd2ede80",
+        "8f6ca411-39a9-44af-b91b-5479f1a29edd"
+      ],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/10-编组/03-编组/01-编组.data.json",
+        "pages/01-一杯咖啡的远行/10-编组/03-编组/01-编组.style.json",
+        "pages/01-一杯咖啡的远行/10-编组/03-编组/01-编组.view.js",
+        "pages/01-一杯咖啡的远行/10-编组/03-编组/01-编组.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "55943865-733d-4f39-8b26-819039b501aa",
+      "definitionId": "guoling.group",
+      "name": "U07·回味照片",
+      "parentId": "71465557-000c-471a-9d0e-b3a35526bc54",
+      "childIds": [
+        "877942f1-2eed-4823-9fab-07f558f824d0",
+        "bf46e6b9-8684-47d0-b26d-5d2df78ea0a4"
+      ],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/10-编组/03-编组/02-编组.data.json",
+        "pages/01-一杯咖啡的远行/10-编组/03-编组/02-编组.style.json",
+        "pages/01-一杯咖啡的远行/10-编组/03-编组/02-编组.view.js",
+        "pages/01-一杯咖啡的远行/10-编组/03-编组/02-编组.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "71465557-000c-471a-9d0e-b3a35526bc54",
+      "definitionId": "guoling.group",
+      "name": "U07·回味开篇",
+      "parentId": "cb9c49ee-cd80-4a5d-b8b0-3574ec9a6833",
+      "childIds": [
+        "2ebd3b7e-7565-4f1d-865c-bbb47d00e5da",
+        "55943865-733d-4f39-8b26-819039b501aa"
+      ],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/10-编组/03-编组.data.json",
+        "pages/01-一杯咖啡的远行/10-编组/03-编组.style.json",
+        "pages/01-一杯咖啡的远行/10-编组/03-编组.view.js",
+        "pages/01-一杯咖啡的远行/10-编组/03-编组.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "a61ad2e8-169b-4fbf-9037-416aca8c19df",
+      "definitionId": "guoling.text",
+      "name": "U07·章节序号",
+      "parentId": "f43a9372-e119-4ac2-9950-5805eeb33f79",
+      "childIds": [],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/10-编组/02-编组/01-文字.data.json",
+        "pages/01-一杯咖啡的远行/10-编组/02-编组/01-文字.style.json",
+        "pages/01-一杯咖啡的远行/10-编组/02-编组/01-文字.view.js",
+        "pages/01-一杯咖啡的远行/10-编组/02-编组/01-文字.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "b0f3766e-01e9-4a6e-93ea-297fd302ba7b",
+      "definitionId": "guoling.text",
+      "name": "U07·章节说明",
+      "parentId": "f43a9372-e119-4ac2-9950-5805eeb33f79",
+      "childIds": [],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/10-编组/02-编组/02-文字.data.json",
+        "pages/01-一杯咖啡的远行/10-编组/02-编组/02-文字.style.json",
+        "pages/01-一杯咖啡的远行/10-编组/02-编组/02-文字.view.js",
+        "pages/01-一杯咖啡的远行/10-编组/02-编组/02-文字.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "f43a9372-e119-4ac2-9950-5805eeb33f79",
+      "definitionId": "guoling.group",
+      "name": "U07·章节标识",
+      "parentId": "cb9c49ee-cd80-4a5d-b8b0-3574ec9a6833",
+      "childIds": [
+        "a61ad2e8-169b-4fbf-9037-416aca8c19df",
+        "b0f3766e-01e9-4a6e-93ea-297fd302ba7b"
+      ],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/10-编组/02-编组.data.json",
+        "pages/01-一杯咖啡的远行/10-编组/02-编组.style.json",
+        "pages/01-一杯咖啡的远行/10-编组/02-编组.view.js",
+        "pages/01-一杯咖啡的远行/10-编组/02-编组.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "b6685775-ac67-42cb-b69b-e85934d87b76",
+      "definitionId": "guoling.group",
+      "name": "U07·第一问",
+      "parentId": "1dace930-84ae-44cd-9ead-d22edf889c39",
+      "childIds": [
+        "a27dffab-a970-43c1-96c7-080a88b9d938",
+        "1ec1a3ee-e400-4cc6-a67e-8ac7623b0ab8",
+        "89b5c581-dbc1-48fe-856a-b209545b99ad"
+      ],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/10-编组/04-编组/02-编组/01-编组.data.json",
+        "pages/01-一杯咖啡的远行/10-编组/04-编组/02-编组/01-编组.style.json",
+        "pages/01-一杯咖啡的远行/10-编组/04-编组/02-编组/01-编组.view.js",
+        "pages/01-一杯咖啡的远行/10-编组/04-编组/02-编组/01-编组.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "d4f05791-e374-440e-b219-59583056b40b",
+      "definitionId": "guoling.group",
+      "name": "U07·第二问",
+      "parentId": "1dace930-84ae-44cd-9ead-d22edf889c39",
+      "childIds": [
+        "ff2fe98f-3600-482a-8960-e0fb6c4cfe73",
+        "0b0647af-1080-466b-acde-95d8f4eacdfb",
+        "a4d1d510-4bc8-4e82-adc3-4422d3d9a357"
+      ],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/10-编组/04-编组/02-编组/02-编组.data.json",
+        "pages/01-一杯咖啡的远行/10-编组/04-编组/02-编组/02-编组.style.json",
+        "pages/01-一杯咖啡的远行/10-编组/04-编组/02-编组/02-编组.view.js",
+        "pages/01-一杯咖啡的远行/10-编组/04-编组/02-编组/02-编组.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "fbaabad3-bdde-49c7-abb5-2ed2427a6622",
+      "definitionId": "guoling.group",
+      "name": "U07·第三问",
+      "parentId": "1dace930-84ae-44cd-9ead-d22edf889c39",
+      "childIds": [
+        "239176eb-f2b5-40c6-98f5-b2701c010873",
+        "96d509fd-9d46-4d0e-afa1-0bcfcd627aaf",
+        "0efb7c9e-ab52-4a3e-89ed-d134c740bd7a"
+      ],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/10-编组/04-编组/02-编组/03-编组.data.json",
+        "pages/01-一杯咖啡的远行/10-编组/04-编组/02-编组/03-编组.style.json",
+        "pages/01-一杯咖啡的远行/10-编组/04-编组/02-编组/03-编组.view.js",
+        "pages/01-一杯咖啡的远行/10-编组/04-编组/02-编组/03-编组.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "1dace930-84ae-44cd-9ead-d22edf889c39",
+      "definitionId": "guoling.group",
+      "name": "U07·品尝三问",
+      "parentId": "9bf32f9d-d4ac-40f4-94fa-293d8f591f5a",
+      "childIds": [
+        "b6685775-ac67-42cb-b69b-e85934d87b76",
+        "d4f05791-e374-440e-b219-59583056b40b",
+        "fbaabad3-bdde-49c7-abb5-2ed2427a6622"
+      ],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/10-编组/04-编组/02-编组.data.json",
+        "pages/01-一杯咖啡的远行/10-编组/04-编组/02-编组.style.json",
+        "pages/01-一杯咖啡的远行/10-编组/04-编组/02-编组.view.js",
+        "pages/01-一杯咖啡的远行/10-编组/04-编组/02-编组.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "90b2367b-8fdf-44d6-8cb5-9efa95e61b26",
+      "definitionId": "guoling.text",
+      "name": "U07·重读",
+      "parentId": "deafbd51-f766-4d99-94b2-4cf6889a9148",
+      "childIds": [],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/10-编组/05-编组/02-文字.data.json",
+        "pages/01-一杯咖啡的远行/10-编组/05-编组/02-文字.style.json",
+        "pages/01-一杯咖啡的远行/10-编组/05-编组/02-文字.view.js",
+        "pages/01-一杯咖啡的远行/10-编组/05-编组/02-文字.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "deafbd51-f766-4d99-94b2-4cf6889a9148",
+      "definitionId": "guoling.group",
+      "name": "U07·结尾",
+      "parentId": "cb9c49ee-cd80-4a5d-b8b0-3574ec9a6833",
+      "childIds": [
+        "84317628-5b57-405d-9a6d-ece79f35981c",
+        "90b2367b-8fdf-44d6-8cb5-9efa95e61b26"
+      ],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/10-编组/05-编组.data.json",
+        "pages/01-一杯咖啡的远行/10-编组/05-编组.style.json",
+        "pages/01-一杯咖啡的远行/10-编组/05-编组.view.js",
+        "pages/01-一杯咖啡的远行/10-编组/05-编组.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "35d827a8-bdf2-4a0c-b5e9-354de2edf2c9",
+      "definitionId": "guoling.group",
+      "name": "全篇·来源与说明",
+      "parentId": "47415583-2d75-4b72-9c46-dfd29b47d82a",
+      "childIds": [
+        "8e89d941-4b5e-4aef-95ba-eac0f43af8b0",
+        "1aeba383-8beb-4424-bfa0-adf107a6012c"
+      ],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/11-编组.data.json",
+        "pages/01-一杯咖啡的远行/11-编组.style.json",
+        "pages/01-一杯咖啡的远行/11-编组.view.js",
+        "pages/01-一杯咖啡的远行/11-编组.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "2e0c71a3-79f3-4824-8912-787c04e00ec7",
+      "definitionId": "guoling.text",
+      "name": "页脚·作品",
+      "parentId": "84108b20-9749-4cf9-b51b-71e180fdbd2c",
+      "childIds": [],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/12-编组/01-文字.data.json",
+        "pages/01-一杯咖啡的远行/12-编组/01-文字.style.json",
+        "pages/01-一杯咖啡的远行/12-编组/01-文字.view.js",
+        "pages/01-一杯咖啡的远行/12-编组/01-文字.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "7090d6a8-d9af-480c-a637-d70566886c0f",
+      "definitionId": "guoling.text",
+      "name": "页脚·版次",
+      "parentId": "84108b20-9749-4cf9-b51b-71e180fdbd2c",
+      "childIds": [],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/12-编组/02-文字.data.json",
+        "pages/01-一杯咖啡的远行/12-编组/02-文字.style.json",
+        "pages/01-一杯咖啡的远行/12-编组/02-文字.view.js",
+        "pages/01-一杯咖啡的远行/12-编组/02-文字.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "84108b20-9749-4cf9-b51b-71e180fdbd2c",
+      "definitionId": "guoling.group",
+      "name": "全篇·页脚",
+      "parentId": "47415583-2d75-4b72-9c46-dfd29b47d82a",
+      "childIds": [
+        "2e0c71a3-79f3-4824-8912-787c04e00ec7",
+        "7090d6a8-d9af-480c-a637-d70566886c0f"
+      ],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/12-编组.data.json",
+        "pages/01-一杯咖啡的远行/12-编组.style.json",
+        "pages/01-一杯咖啡的远行/12-编组.view.js",
+        "pages/01-一杯咖啡的远行/12-编组.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "61087d4b-a58d-4442-b15c-63762f47d11e",
+      "definitionId": "guoling.document-block",
+      "name": "U04·包装与原料",
+      "parentId": "c9864817-cc42-41e2-9015-67fa6991257f",
+      "childIds": [
+        "12a22e62-63ae-44fa-b25f-5091208b9038"
+      ],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/07-编组/04-编组/01-文档块.data.json",
+        "pages/01-一杯咖啡的远行/07-编组/04-编组/01-文档块.style.json",
+        "pages/01-一杯咖啡的远行/07-编组/04-编组/01-文档块.view.js",
+        "pages/01-一杯咖啡的远行/07-编组/04-编组/01-文档块.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "12a22e62-63ae-44fa-b25f-5091208b9038",
+      "definitionId": "guoling.text",
+      "name": "U04·包装与原料说明",
+      "parentId": "61087d4b-a58d-4442-b15c-63762f47d11e",
+      "childIds": [],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/07-编组/04-编组/01-文档块/01-文字.data.json",
+        "pages/01-一杯咖啡的远行/07-编组/04-编组/01-文档块/01-文字.style.json",
+        "pages/01-一杯咖啡的远行/07-编组/04-编组/01-文档块/01-文字.view.js",
+        "pages/01-一杯咖啡的远行/07-编组/04-编组/01-文档块/01-文字.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "62a33235-5c25-4ae6-8c1c-4e8c8bf89087",
+      "definitionId": "guoling.document-block",
+      "name": "U04·运输与存放",
+      "parentId": "c9864817-cc42-41e2-9015-67fa6991257f",
+      "childIds": [
+        "4ddff538-f688-4c4b-bbb8-36e61741c3c0"
+      ],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/07-编组/04-编组/02-文档块.data.json",
+        "pages/01-一杯咖啡的远行/07-编组/04-编组/02-文档块.style.json",
+        "pages/01-一杯咖啡的远行/07-编组/04-编组/02-文档块.view.js",
+        "pages/01-一杯咖啡的远行/07-编组/04-编组/02-文档块.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "4ddff538-f688-4c4b-bbb8-36e61741c3c0",
+      "definitionId": "guoling.text",
+      "name": "U04·运输与存放说明",
+      "parentId": "62a33235-5c25-4ae6-8c1c-4e8c8bf89087",
+      "childIds": [],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/07-编组/04-编组/02-文档块/01-文字.data.json",
+        "pages/01-一杯咖啡的远行/07-编组/04-编组/02-文档块/01-文字.style.json",
+        "pages/01-一杯咖啡的远行/07-编组/04-编组/02-文档块/01-文字.view.js",
+        "pages/01-一杯咖啡的远行/07-编组/04-编组/02-文档块/01-文字.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "5e8ef2fb-8c7e-40fa-bb34-6025f180f663",
+      "definitionId": "guoling.document-block",
+      "name": "U04·到达与接收",
+      "parentId": "c9864817-cc42-41e2-9015-67fa6991257f",
+      "childIds": [
+        "4f6eef14-9c62-4ba1-84eb-157b1ca0bc9f"
+      ],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/07-编组/04-编组/03-文档块.data.json",
+        "pages/01-一杯咖啡的远行/07-编组/04-编组/03-文档块.style.json",
+        "pages/01-一杯咖啡的远行/07-编组/04-编组/03-文档块.view.js",
+        "pages/01-一杯咖啡的远行/07-编组/04-编组/03-文档块.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "4f6eef14-9c62-4ba1-84eb-157b1ca0bc9f",
+      "definitionId": "guoling.text",
+      "name": "U04·到达与接收说明",
+      "parentId": "5e8ef2fb-8c7e-40fa-bb34-6025f180f663",
+      "childIds": [],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/07-编组/04-编组/03-文档块/01-文字.data.json",
+        "pages/01-一杯咖啡的远行/07-编组/04-编组/03-文档块/01-文字.style.json",
+        "pages/01-一杯咖啡的远行/07-编组/04-编组/03-文档块/01-文字.view.js",
+        "pages/01-一杯咖啡的远行/07-编组/04-编组/03-文档块/01-文字.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "8e89d941-4b5e-4aef-95ba-eac0f43af8b0",
+      "definitionId": "guoling.document-block",
+      "name": "全篇·来源折叠",
+      "parentId": "35d827a8-bdf2-4a0c-b5e9-354de2edf2c9",
+      "childIds": [
+        "d7d0cd2f-6e73-4bb4-b203-40eab5563bb9"
+      ],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/11-编组/01-文档块.data.json",
+        "pages/01-一杯咖啡的远行/11-编组/01-文档块.style.json",
+        "pages/01-一杯咖啡的远行/11-编组/01-文档块.view.js",
+        "pages/01-一杯咖啡的远行/11-编组/01-文档块.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "4d4b2b29-0afe-4e4c-94fe-17cc6524a3c2",
+      "definitionId": "guoling.document-block",
+      "name": "U01·果实起源锚点",
+      "parentId": "7c9804d6-e6ec-4d79-a32a-2668861019b9",
+      "childIds": [],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/03-编组/02-编组/01-文档块.data.json",
+        "pages/01-一杯咖啡的远行/03-编组/02-编组/01-文档块.style.json",
+        "pages/01-一杯咖啡的远行/03-编组/02-编组/01-文档块.view.js",
+        "pages/01-一杯咖啡的远行/03-编组/02-编组/01-文档块.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "bc07165c-0ecc-4f0a-bd68-0045e5ad5ff1",
+      "definitionId": "guoling.text",
+      "name": "刊头·英文副题",
+      "parentId": "2ab80ec7-3a4a-41c4-be34-005d444e6e38",
+      "childIds": [],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/01-编组/02-文字.data.json",
+        "pages/01-一杯咖啡的远行/01-编组/02-文字.style.json",
+        "pages/01-一杯咖啡的远行/01-编组/02-文字.view.js",
+        "pages/01-一杯咖啡的远行/01-编组/02-文字.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "9fa9da51-02b1-4d46-87c2-247bb9993ff1",
+      "definitionId": "guoling.group",
+      "name": "U03·程序全宽容器",
+      "parentId": "82b886f2-806e-4b21-a2a1-63ca371f3f26",
+      "childIds": [
+        "8bc2720a-0b46-439a-98c1-dc505b1cb456"
+      ],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/06-编组/01-编组/04-编组.data.json",
+        "pages/01-一杯咖啡的远行/06-编组/01-编组/04-编组.style.json",
+        "pages/01-一杯咖啡的远行/06-编组/01-编组/04-编组.view.js",
+        "pages/01-一杯咖啡的远行/06-编组/01-编组/04-编组.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "b354a3ff-d8a9-4d78-9c1b-5b460433c191",
+      "definitionId": "guoling.group",
+      "name": "U06·程序全宽容器",
+      "parentId": "9ae7efb1-241b-4d14-986d-5159e0d76d83",
+      "childIds": [
+        "8f45751d-9cc3-49dd-ba88-c645759f022c"
+      ],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/09-编组/01-编组/04-编组.data.json",
+        "pages/01-一杯咖啡的远行/09-编组/01-编组/04-编组.style.json",
+        "pages/01-一杯咖啡的远行/09-编组/01-编组/04-编组.view.js",
+        "pages/01-一杯咖啡的远行/09-编组/01-编组/04-编组.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "d7d0cd2f-6e73-4bb4-b203-40eab5563bb9",
+      "definitionId": "guoling.group",
+      "name": "来源·自适应双栏",
+      "parentId": "8e89d941-4b5e-4aef-95ba-eac0f43af8b0",
+      "childIds": [
+        "0ac87975-ca9f-4f70-bea9-a4700892b21e",
+        "4eefe6f8-6454-4b0f-86f5-69d92547c673"
+      ],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/11-编组/01-文档块/01-编组.data.json",
+        "pages/01-一杯咖啡的远行/11-编组/01-文档块/01-编组.style.json",
+        "pages/01-一杯咖啡的远行/11-编组/01-文档块/01-编组.view.js",
+        "pages/01-一杯咖啡的远行/11-编组/01-文档块/01-编组.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "0ac87975-ca9f-4f70-bea9-a4700892b21e",
+      "definitionId": "guoling.group",
+      "name": "来源·图像栏目",
+      "parentId": "d7d0cd2f-6e73-4bb4-b203-40eab5563bb9",
+      "childIds": [
+        "caa7b049-11e7-4896-b021-1bcb9833885b",
+        "85a5c7da-fd02-4ab3-80be-7f942fda5db8",
+        "d15a6acd-9cf7-4013-b679-f8a9a63ad525",
+        "84ae7680-78ac-45e8-8e64-68fef78d124c",
+        "a4e968f3-9d87-4341-9809-365e2f9c5e07",
+        "0613bd98-1b20-4949-859d-5a2e21443368",
+        "814e779d-f246-42e7-8506-7385011ba509",
+        "d96f4bdd-302f-4c21-94dd-41af8f62ad2b"
+      ],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/11-编组/01-文档块/01-编组/01-编组.data.json",
+        "pages/01-一杯咖啡的远行/11-编组/01-文档块/01-编组/01-编组.style.json",
+        "pages/01-一杯咖啡的远行/11-编组/01-文档块/01-编组/01-编组.view.js",
+        "pages/01-一杯咖啡的远行/11-编组/01-文档块/01-编组/01-编组.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "4eefe6f8-6454-4b0f-86f5-69d92547c673",
+      "definitionId": "guoling.group",
+      "name": "来源·内容栏目",
+      "parentId": "d7d0cd2f-6e73-4bb4-b203-40eab5563bb9",
+      "childIds": [
+        "c5110b54-7051-439c-9a7d-df9f44fa8cb7",
+        "b587f866-9d93-4878-ac26-6425f602658b",
+        "932edbe1-6a57-48d4-9b3c-ab3387b57840",
+        "150a7f29-a4d9-4963-9304-8ae896dbde41",
+        "e0fdd875-3971-4944-abfa-f2bf2e62fb2b",
+        "fb27687b-c280-448c-a44e-1cb1b0e00c85",
+        "216d0b21-03ad-4a0d-88f6-33242c0a6fd3",
+        "4f94f503-84b1-4653-9aa0-34be2bc23a01",
+        "fff533a7-eddb-4b36-9414-03a27401dd5c"
+      ],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/11-编组/01-文档块/01-编组/02-编组.data.json",
+        "pages/01-一杯咖啡的远行/11-编组/01-文档块/01-编组/02-编组.style.json",
+        "pages/01-一杯咖啡的远行/11-编组/01-文档块/01-编组/02-编组.view.js",
+        "pages/01-一杯咖啡的远行/11-编组/01-文档块/01-编组/02-编组.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "caa7b049-11e7-4896-b021-1bcb9833885b",
+      "definitionId": "guoling.text",
+      "name": "来源·关于图像",
+      "parentId": "0ac87975-ca9f-4f70-bea9-a4700892b21e",
+      "childIds": [],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/11-编组/01-文档块/01-编组/01-编组/01-文字.data.json",
+        "pages/01-一杯咖啡的远行/11-编组/01-文档块/01-编组/01-编组/01-文字.style.json",
+        "pages/01-一杯咖啡的远行/11-编组/01-文档块/01-编组/01-编组/01-文字.view.js",
+        "pages/01-一杯咖啡的远行/11-编组/01-文档块/01-编组/01-编组/01-文字.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "c5110b54-7051-439c-9a7d-df9f44fa8cb7",
+      "definitionId": "guoling.text",
+      "name": "来源·关于内容",
+      "parentId": "4eefe6f8-6454-4b0f-86f5-69d92547c673",
+      "childIds": [],
+      "virtualPaths": [
+        "pages/01-一杯咖啡的远行/11-编组/01-文档块/01-编组/02-编组/01-文字.data.json",
+        "pages/01-一杯咖啡的远行/11-编组/01-文档块/01-编组/02-编组/01-文字.style.json",
+        "pages/01-一杯咖啡的远行/11-编组/01-文档块/01-编组/02-编组/01-文字.view.js",
+        "pages/01-一杯咖啡的远行/11-编组/01-文档块/01-编组/02-编组/01-文字.dependencies/implementation.view.js"
+      ]
+    },
+    {
+      "id": "926a6155-1814-4a16-ba47-24c1c1f5dbc8",
+      "definitionId": "96347310-25a2-4382-bde7-1c46f6d5ba9f",
+      "name": "咖啡·全局物件叙事",
+      "parentId": null,
+      "childIds": [],
+      "virtualPaths": [
+        "global/underlay/01-underlay-poc.js.data.json",
+        "global/underlay/01-underlay-poc.js.style.json",
+        "global/underlay/01-underlay-poc.js.source/underlay-poc.js"
+      ]
+    }
+  ]
+}

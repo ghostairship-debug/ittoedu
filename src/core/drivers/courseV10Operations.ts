@@ -1,4 +1,4 @@
-import { componentTextRelationshipCleanupEdits } from '../course/componentTextRelationshipEdits'
+import { componentTextRelationshipEdits, type TextRelationshipPlanOptions } from '../course/componentTextRelationshipEdits'
 import { canonicalNavigationGuard, removeNavigationGuardSurfaces } from '../../shared/courseNavigationGuards'
 import { allDocumentTextSlots, documentComponentDataVersions, inlineComponentIds } from '../../shared/document/textInteraction'
 import { createComponentReferenceCapture } from '../components/library/references'
@@ -11,6 +11,7 @@ import { componentInteractionDataSchema } from '../../shared/componentInteractio
 import type { ComponentFrame } from '../../shared/contracts/component-platform/frame'
 import { DEFAULT_SLIDE_CANVAS, sharedSlideFrameMapping } from '../../shared/slideCanvas'
 import { IDENTITY_MATRIX, multiplyMatrices, type AffineMatrix } from '../components/geometry'
+import { isNativeFlowLayoutGroup } from '../../shared/flowNativeLayout'
 
 /** The formal parent chain defines coordinates for every authoring entry. */
 export function componentParentMatrix(project: CourseProjectV10, id: string): AffineMatrix {
@@ -430,8 +431,98 @@ function dependencyPaths(project: CourseProjectV10, edits: ComponentEdit[]): str
   return [...new Map(paths.map(path => [JSON.stringify(path), path])).values()]
 }
 
-export function captureComponentOperation(project: CourseProjectV10, edits: ComponentEdit[], readPaths: readonly string[][] = []): ComponentOperationBatch {
-  return { type: 'component-platform.apply', edits: structuredClone(edits), expected: [...new Map([...dependencyPaths(project, edits), ...readPaths].map(path => [JSON.stringify(path), path])).values()]
+export function prepareComponentTextRelationships(project: CourseProjectV10, edits: ComponentEdit[], options: TextRelationshipPlanOptions = {}): ComponentEdit[] {
+  if (!edits.some(edit => edit.type === 'data.set' || edit.type === 'instance.insert' || edit.type === 'instance.remove'
+    || edit.type === 'instance.move' || edit.type === 'surface.remove' || edit.type === 'surface.presentation.set'
+    || edit.type === 'container.patch' && Object.hasOwn(edit.patch, 'presentation') || edit.type === 'attachments.set')) return edits
+  const inline = (data: unknown) => allDocumentTextSlots(data).some(slot => inlineComponentIds(slot.content).length)
+  if (!Object.values(project.instances).some(instance => instance.attachments?.some(attachment => attachment.target.kind === 'text-range')
+    || instance.childIds?.length && documentComponentDataVersions(project, instance.id).some(inline)) && !edits.some(edit => edit.type === 'attachments.set' && edit.attachments.some(attachment => attachment.target.kind === 'text-range')
+      || edit.type === 'data.set' && inline(edit.value) || edit.type === 'instance.insert' && edit.instances.some(instance => inline(instance.data)
+        || instance.attachments?.some(attachment => attachment.target.kind === 'text-range'))
+      || edit.type === 'surface.presentation.set' && edit.presentation?.states.some(state => Object.values(state.overrides).some(override => inline(override.data))))) return edits
+  const final = applyComponentOperationCandidate(project, { type: 'component-platform.apply', edits,
+    expected: dependencyPaths(project, edits).map(path => ({ path, ...structuredClone(componentValueAt(project, path)) })) }, undefined, localComponentEdits(edits))
+  const attachmentSources = new Map(Object.values(project.instances).flatMap(instance => instance.attachments ? [[instance.id, instance.attachments] as const] : []))
+  const affectedInstanceIds = new Set<string>()
+  const insertedInstances = new Map<string, { instance: CourseProjectV10['instances'][string]; owner?: ComponentContainer }>()
+  for (const edit of edits) {
+    if ('instanceId' in edit) {
+      affectedInstanceIds.add(edit.instanceId)
+      if ((edit.type === 'instance.remove' || edit.type === 'instance.move') && project.instances[edit.instanceId]) descendantIds(project, edit.instanceId).forEach(id => affectedInstanceIds.add(id))
+    }
+    if (edit.type === 'surface.remove' && project.instances[edit.surfaceId]) descendantIds(project, edit.surfaceId).forEach(id => affectedInstanceIds.add(id))
+    if (edit.type === 'surface.presentation.set' || edit.type === 'container.patch' && Object.hasOwn(edit.patch, 'presentation')) {
+      const surfaceId = edit.type === 'surface.presentation.set' ? edit.surfaceId : edit.instanceId
+      for (const version of [project.instances[surfaceId]?.container?.presentation, final.instances[surfaceId]?.container?.presentation])
+        for (const state of version?.states ?? []) for (const id of Object.keys(state.overrides)) affectedInstanceIds.add(id)
+    }
+    if (edit.type === 'attachments.set') attachmentSources.set(edit.instanceId, edit.attachments)
+    if (edit.type === 'instance.insert') for (const instance of edit.instances) {
+      affectedInstanceIds.add(instance.id)
+      insertedInstances.set(instance.id, { instance, ...(edit.rootIds.includes(instance.id) ? { owner: edit.container } : {}) })
+      if (instance.attachments) attachmentSources.set(instance.id, instance.attachments)
+    }
+  }
+  for (const { instance } of insertedInstances.values()) for (const child of instance.childIds ?? []) {
+    const source = insertedInstances.get(child)
+    if (source) source.owner = { kind: 'instance', instanceId: instance.id }
+  }
+  const relationships = componentTextRelationshipEdits(project, final, { ...options, attachmentSources, affectedInstanceIds, insertedInstances,
+    explicitlyRemoved: new Set(edits.flatMap(edit => edit.type === 'instance.remove' ? [edit.instanceId] : [])) })
+  if (!relationships.length) return edits
+  const moves = relationships.filter((edit): edit is Extract<ComponentEdit, { type: 'instance.move' }> => edit.type === 'instance.move')
+  const result: ComponentEdit[] = []
+  const pending = new Set(moves)
+  // A relationship can enter a soon-to-be-removed group earlier in this batch.
+  // Track ownership and current frames here; authored data remains the final planner's input.
+  const structure: CourseProjectV10 = { ...project, rootIds: [...project.rootIds], definitions: { ...project.definitions },
+    global: { underlay: [...project.global.underlay], overlay: [...project.global.overlay] },
+    instances: Object.fromEntries(Object.entries(project.instances).map(([id, instance]) => [id,
+      { ...instance, ...(instance.childIds ? { childIds: [...instance.childIds] } : {}) }])) }
+  const children = (container: ComponentContainer) => {
+    if (container.kind === 'instance') structure.instances[container.instanceId].childIds ??= []
+    return containerChildIds(structure, container)
+  }
+  const moveOwnership = (edit: Extract<ComponentEdit, { type: 'instance.move' }>) => {
+    const owner = owningContainer(structure, edit.instanceId)
+    if (owner) { const ids = children(owner); ids.splice(ids.indexOf(edit.instanceId), 1) }
+    children(edit.container).splice(edit.index, 0, edit.instanceId)
+    if (edit.frame) structure.instances[edit.instanceId].frame = edit.frame
+  }
+  for (const edit of edits) {
+    if (edit.type === 'instance.remove' || edit.type === 'surface.remove') {
+      const root = edit.type === 'instance.remove' ? edit.instanceId : edit.surfaceId
+      const removed = structure.instances[root] ? descendantIds(structure, root) : []
+      for (const move of pending) if (removed.includes(move.instanceId)) {
+        const { frame: _previousFrame, ...placement } = move
+        const frame = structure.instances[move.instanceId]?.frame
+        const rescue = { ...placement, index: 0, ...(frame ? { frame } : {}) }
+        result.push(rescue); moveOwnership(rescue); pending.delete(move)
+      }
+      const owner = owningContainer(structure, root)
+      if (owner) { const ids = children(owner); ids.splice(ids.indexOf(root), 1) }
+      for (const id of structure.instances[root] ? descendantIds(structure, root) : []) delete structure.instances[id]
+    } else if (edit.type === 'surface.insert') insertSurface(structure, edit.surface, edit.index)
+    else if (edit.type === 'instance.insert') {
+      for (const instance of edit.instances) structure.instances[instance.id] = { ...instance,
+        ...(instance.childIds ? { childIds: [...instance.childIds] } : {}) }
+      children(edit.container).splice(edit.index, 0, ...edit.rootIds)
+    }
+    else if (edit.type === 'instance.move') moveOwnership(edit)
+    else if (edit.type === 'frame.set') {
+      if (edit.frame) structure.instances[edit.instanceId].frame = edit.frame
+      else delete structure.instances[edit.instanceId].frame
+    }
+    result.push(edit)
+  }
+  return [...result, ...[...pending].map(move => ({ ...move, index: 0 })), ...relationships.filter(edit => edit.type !== 'instance.move')]
+}
+
+export function captureComponentOperation(project: CourseProjectV10, edits: ComponentEdit[], readPaths: readonly string[][] = [],
+  options: { deferTextRelationships?: boolean } = {}): ComponentOperationBatch {
+  const prepared = options.deferTextRelationships ? edits : prepareComponentTextRelationships(project, edits)
+  return { type: 'component-platform.apply', edits: structuredClone(prepared), expected: [...new Map([...dependencyPaths(project, prepared), ...readPaths].map(path => [JSON.stringify(path), path])).values()]
     .map(path => ({ path, ...structuredClone(componentValueAt(project, path)) })) }
 }
 
@@ -523,7 +614,8 @@ export function resizeComponentSurfacesEdits(project: CourseProjectV10, input: {
 }
 
 /** Convert only explicitly overridable properties at the captured editing state. */
-export function presentationComponentEdits(project: CourseProjectV10, surfaceId: string | null, stateId: string | null, edits: ComponentEdit[]): ComponentEdit[] {
+export function presentationComponentEdits(project: CourseProjectV10, surfaceId: string | null, stateId: string | null, edits: ComponentEdit[],
+  options: { deferTextRelationships?: boolean } = {}): ComponentEdit[] {
   if (!surfaceId || !stateId) return edits
   const surface = componentContainers(project).find(value => value.id === surfaceId)
   const original = surface?.presentation
@@ -589,18 +681,7 @@ export function presentationComponentEdits(project: CourseProjectV10, surfaceId:
     changed = true
   }
   if (changed) result.push({ type: 'surface.presentation.set', surfaceId, presentation })
-  // Reconcile the same body relations against the final author versions. Domain
-  // planners can run on a disposable effective projection before state retargeting.
-  const bodies = new Set(edits.filter((edit): edit is Extract<ComponentEdit, { type: 'data.set' }> => edit.type === 'data.set').map(edit => edit.instanceId))
-  const finalProject = { ...project, instances: { ...project.instances,
-    [surfaceId]: { ...project.instances[surfaceId], container: { ...project.instances[surfaceId].container!, presentation } } } }
-  const finalEffective = resolveComponentPresentation(finalProject, surfaceId, stateId)
-  const related = new Set<string>()
-  for (const id of bodies) for (const slot of allDocumentTextSlots(effective.instances[id]?.data)) for (const child of inlineComponentIds(slot.content)) related.add(child)
-  for (const instance of Object.values(project.instances)) if (instance.attachments?.some(attachment => attachment.target.kind === 'text-range' && bodies.has(attachment.target.instanceId))) related.add(instance.id)
-  const reconciled = [...bodies].flatMap(id => effective.instances[id] && finalEffective.instances[id]
-    ? componentTextRelationshipCleanupEdits(effective, id, finalEffective.instances[id].data, documentComponentDataVersions(finalProject, id)) : [])
-  return [...result.filter(edit => !((edit.type === 'instance.remove' || edit.type === 'attachments.set') && related.has(edit.instanceId))), ...reconciled]
+  return options.deferTextRelationships ? result : prepareComponentTextRelationships(project, result)
 }
 
 function isFlowBody(project: CourseProjectV10, id: string): boolean {
@@ -610,8 +691,9 @@ function isFlowBody(project: CourseProjectV10, id: string): boolean {
   while (owner?.kind === 'instance') {
     instance = project.instances[owner.instanceId]
     if (instance.container) return instance.container.kind === 'flow'
-    if (instance.flowPlacement || componentDefinitionBuiltinKey(project.definitions[instance.definitionId]) !== 'guoling.document-block'
-      || !instance.data || typeof instance.data !== 'object' || Array.isArray(instance.data) || instance.data.type !== 'section') return false
+    const section = componentDefinitionBuiltinKey(project.definitions[instance.definitionId]) === 'guoling.document-block'
+      && instance.data && typeof instance.data === 'object' && !Array.isArray(instance.data) && instance.data.type === 'section'
+    if (instance.flowPlacement || !section && !isNativeFlowLayoutGroup(instance, project.definitions[instance.definitionId])) return false
     owner = owningContainer(project, instance.id)
   }
   return owner?.kind === 'surface' && componentContainers(project).some(surface => surface.id === owner.surfaceId && surface.kind === 'flow')
@@ -656,6 +738,39 @@ function flowBodyContentEdit(project: CourseProjectV10, edit: ComponentEdit): bo
   if (edit.path.length || !before || typeof before !== 'object' || Array.isArray(before) || !after || typeof after !== 'object' || Array.isArray(after)) return false
   const { content: _oldContent, ...oldFields } = before, { content: _newContent, ...newFields } = after
   return equalComponentValue(oldFields, newFields)
+}
+
+/** Body locks protect layout; their own text edits may maintain that text's actual relations. */
+function flowTextRelationEdit(project: CourseProjectV10, current: CourseProjectV10, edit: ComponentEdit, textBodies: ReadonlySet<string>): boolean {
+  if (!('instanceId' in edit) || !['attachments.set', 'instance.move', 'instance.remove'].includes(edit.type)) return false
+  const instance = project.instances[edit.instanceId]
+  if (!instance || !textBodies.size) return false
+  const rangeBodies = instance.attachments?.flatMap(attachment => attachment.target.kind === 'text-range' && textBodies.has(attachment.target.instanceId)
+    ? [attachment.target.instanceId] : []) ?? []
+  const inlineBodies = [...textBodies].filter(id => documentComponentDataVersions(project, id)
+    .some(data => allDocumentTextSlots(data).some(slot => inlineComponentIds(slot.content).includes(instance.id))))
+  if (!rangeBodies.length && !inlineBodies.length) return false
+  if (edit.type !== 'instance.move') return true
+  if (edit.container.kind !== 'instance') return false
+  const destinationId = edit.container.instanceId
+  return inlineBodies.length > 0 && isFlowBody(current, destinationId)
+    && documentComponentDataVersions(current, destinationId).some(data => allDocumentTextSlots(data)
+      .some(slot => inlineComponentIds(slot.content).includes(instance.id)))
+    || rangeBodies.some(id => containingSurfaceId(project, id) === destinationId
+      && project.instances[destinationId]?.container?.kind === 'flow')
+}
+
+function hasOnlyBodyInheritedLocks(project: CourseProjectV10, id: string, bodyOwner = false): boolean {
+  if (project.instances[id]?.locked && !(bodyOwner && isFlowBody(project, id)
+    && componentDefinitionBuiltinKey(project.definitions[project.instances[id].definitionId]) === 'guoling.text')) return false
+  let owner = owningContainer(project, id)
+  while (owner?.kind === 'instance') {
+    const parent = project.instances[owner.instanceId]
+    if (parent.locked && !(isFlowBody(project, parent.id)
+      && componentDefinitionBuiltinKey(project.definitions[parent.definitionId]) === 'guoling.text')) return false
+    owner = owningContainer(project, parent.id)
+  }
+  return true
 }
 
 export function applyComponentOperation(project: CourseProjectV10, raw: ComponentOperationBatch, resources?:DocumentResources): CourseProjectV10 {
@@ -724,6 +839,8 @@ function applyComponentOperationCandidate(project: CourseProjectV10, raw: Compon
   const passive = command.edits.some(edit => edit.type === 'instance.move' && componentIsLocked(project, edit.instanceId))
     ? passiveFlowMoves(project, command.edits) : new Set<ComponentEdit>()
   const removedInBatch = new Set<string>()
+  const textBodies = new Set(command.edits.filter(edit => flowBodyContentEdit(project, edit))
+    .flatMap(edit => 'instanceId' in edit ? [edit.instanceId] : []))
   for (const edit of command.edits) {
     if (local && 'instanceId' in edit) {
       const path = ['instances', edit.instanceId]
@@ -734,19 +851,20 @@ function applyComponentOperationCandidate(project: CourseProjectV10, raw: Compon
     // Earlier edits can change definitions, bindings or asset scope on `next`.
     const references = createComponentReferenceCapture(next, resources)
     // Every author entry reaches this application boundary. Runtime state/animation never does.
-    const requireUnlocked = (id: string) => {
-      if (project.instances[id] && componentIsLocked(next, id)) throw new Error('对象已锁定，请先解锁')
+    const relationEdit = flowTextRelationEdit(project, next, edit, textBodies)
+    const requireUnlocked = (id: string, allowBodyLock = false, bodyOwner = false) => {
+      if (project.instances[id] && componentIsLocked(next, id) && !(allowBodyLock && hasOnlyBodyInheritedLocks(next, id, bodyOwner))) throw new Error('对象已锁定，请先解锁')
     }
     if ('instanceId' in edit && !(edit.type === 'instance.patch' && Object.keys(edit.patch).every(key => key === 'locked'))
       && !(edit.type === 'instance.move' && passive.has(edit)) && !flowBodyContentEdit(next, edit))
-      requireUnlocked(edit.instanceId)
+      requireUnlocked(edit.instanceId, relationEdit)
     if (edit.type === 'instance.insert' && edit.container.kind === 'instance') requireUnlocked(edit.container.instanceId)
     if (edit.type === 'instance.insert' && edit.container.kind === 'surface') requireUnlocked(edit.container.surfaceId)
-    if (edit.type === 'instance.move' && edit.container.kind === 'instance') requireUnlocked(edit.container.instanceId)
+    if (edit.type === 'instance.move' && edit.container.kind === 'instance') requireUnlocked(edit.container.instanceId, relationEdit, true)
     if (edit.type === 'instance.move' && edit.container.kind === 'surface') requireUnlocked(edit.container.surfaceId)
     if ('surfaceId' in edit && next.instances[edit.surfaceId]) requireUnlocked(edit.surfaceId)
-    if (edit.type === 'instance.remove') descendantIds(next, edit.instanceId).forEach(requireUnlocked)
-    if (edit.type === 'surface.remove' && next.instances[edit.surfaceId]) descendantIds(next, edit.surfaceId).forEach(requireUnlocked)
+    if (edit.type === 'instance.remove') descendantIds(next, edit.instanceId).forEach(id => requireUnlocked(id, relationEdit))
+    if (edit.type === 'surface.remove' && next.instances[edit.surfaceId]) descendantIds(next, edit.surfaceId).forEach(id => requireUnlocked(id))
     if (edit.type === 'definition.set' || edit.type === 'definition.remove') {
       const id = edit.type === 'definition.set' ? edit.definition.id : edit.definitionId
       const before=next.definitions[id]

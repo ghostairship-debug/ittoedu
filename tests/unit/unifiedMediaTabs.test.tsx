@@ -98,7 +98,7 @@ describe('media file tabs use their actual file editor', () => {
     let workspace!: ReturnType<typeof useLessonWorkspaceController>
     const openTab = vi.fn(async (_tab: Parameters<DocumentTabsController['openTab']>[0]) => {})
     const operation = vi.fn(async () => ({ recent: [] }))
-    const tabs = { openTab, drainAll: async () => true, setActiveTab: () => {} } as unknown as DocumentTabsController
+    const tabs = { openTab, drainAll: async () => true, setActiveTab: () => {}, cancelNavigation: () => {}, showCurrentCourse: () => {} } as unknown as DocumentTabsController
     function Harness() {
       workspace = useLessonWorkspaceController({ lessonOperation: operation, projectPath: null, tabs, onOpenProject: async () => true, onNewProject: async () => true })
       return null

@@ -89,6 +89,9 @@ export async function scanComponentCatalogSources(appRoot: string, userData: str
   for (const source of byPath.values()) {
     try {
       const scanned = await scanCatalogSource(source.path, source.trust, managed)
+      const sourceKind = canonicalCatalogPath(source.path) === canonicalCatalogPath(path.resolve(appRoot, BUILT_IN_COMPONENT_CATALOG_DIRECTORY))
+        ? 'built-in' as const : canonicalCatalogPath(source.path) === canonicalCatalogPath(managed) ? 'personal' as const : 'external' as const
+      scanned.packages = scanned.packages.map(entry => ({ ...entry, sourceKind }))
       sources.set(scanned.source.sourceId, scanned)
     } catch (error) {
       issues.push({

@@ -15,16 +15,45 @@ import type { ImageTransformOperation } from '../../shared/imageTransformContrac
 import { readImageDimensions } from '../project/assetManager'
 import { AUDIO_DEFINITION, VIDEO_DEFINITION, createAudioData, createVideoData,
   audioDataSchema, videoDataSchema, replaceAudioSource, replaceVideoSource } from '../../components/media'
+import type { DocumentSelection } from '../../shared/document/ports'
+import { prepareFlowBodyInsertion } from '../../core/course/courseFlowInsertion'
 
 export type { ProjectAudioSettingsPatch } from '../../core/course/courseMediaEdits'
 import { courseAudioSettings, courseAudioSettingsEdits, courseSoundEdits, courseSoundImportEdits, type ProjectAudioSettingsPatch } from '../../core/course/courseMediaEdits'
 
 export interface ImportedAssetBatchItem { meta: AssetMeta & { source?: AssetSource }; bytes: Uint8Array }
 export { insertionContainer, insertionIndex, definitionInsertionEdits, courseAuthorData, resolveCourseInsertionPlacement } from '../../core/course/courseElementInsertion'
-export type { CourseInsertionOptions, CourseElementKind } from '../../core/course/courseElementInsertion'
+export type { CourseElementKind } from '../../core/course/courseElementInsertion'
 import { definitionInsertionEdits, courseAuthorData, insertionContainer, resolveCourseInsertionPlacement, courseInsertionFrame as frame,
-  prepareCourseElementEdits, prepareCourseTeacherControllerEdits, type CourseInsertionOptions, type CourseElementKind } from '../../core/course/courseElementInsertion'
+  prepareCourseElementEdits, prepareCourseTeacherControllerEdits, type CourseInsertionOptions as ElementInsertionOptions, type CourseElementKind } from '../../core/course/courseElementInsertion'
+export interface CourseInsertionOptions extends ElementInsertionOptions {
+  /** Captured and mapped by the input owner; undefined retains explicit block-boundary placement. */
+  flowSelection?: DocumentSelection | null
+}
 export interface CourseInsertionResult { instanceIds: string[]; documentId: string; surfaceId: string | null }
+
+/** All manual insertion entries translate the same current view scope into a formal owner. */
+export function courseInsertionViewPlacement(target: CapturedCourseTarget, context: {
+  scope: 'scene' | 'global'; plane?: 'underlay' | 'overlay'; camera?: { x: number; y: number } | null
+}): CourseInsertionOptions {
+  if (context.scope === 'global') {
+    const selected = target.instanceIds[0]
+    const owns = (roots: readonly string[]): boolean => roots.some(id => id === selected || owns(target.project.instances[id]?.childIds ?? []))
+    const plane = selected && owns(target.project.global.underlay) ? 'underlay'
+      : selected && owns(target.project.global.overlay) ? 'overlay' : context.plane ?? 'overlay'
+    return { container: { kind: 'global', plane } }
+  }
+  return context.camera && componentContainers(target.project).find(surface => surface.id === target.surfaceId)?.kind === 'spatial'
+    ? { center: { x: context.camera.x, y: context.camera.y } } : {}
+}
+
+export function prepareCourseInsertion(target: CapturedCourseTarget, options: CourseInsertionOptions) {
+  if (options.destination === 'paper' || options.flowSelection === undefined) return { target, options, edits: [] as ComponentEdit[] }
+  if (!target.surfaceId) throw new Error('正文插入目标没有页面')
+  const plan = prepareFlowBodyInsertion(target.project, target.surfaceId, options.flowSelection)
+  return { target: { ...target, project: plan.project, editingProject: plan.project },
+    options: { ...options, flowSelection: undefined, container: plan.container, index: plan.index }, edits: plan.edits }
+}
 
 export function captureCourseInsertionTarget(kernel: EditorStoreKernel): CapturedCourseTarget {
   const target = kernel.captureTarget()
@@ -33,10 +62,12 @@ export function captureCourseInsertionTarget(kernel: EditorStoreKernel): Capture
 export async function commitCourseInsertion(kernel: EditorStoreKernel, target: CapturedCourseTarget, definition: ComponentDefinition,
   instances: ComponentInstance[], options: CourseInsertionOptions = {}, additional: ComponentEdit[] = [],
   rootIds: string[] = instances.map(instance => instance.id)): Promise<CourseInsertionResult> {
-  const surface = componentContainers(target.project).find(value => value.id === target.surfaceId)
+  const prepared = prepareCourseInsertion(target, options), working = prepared.target
+  options = prepared.options
+  const surface = componentContainers(working.project).find(value => value.id === target.surfaceId)
   if (target.surfaceId && !surface) throw new Error('插入的原页面已不存在')
-  const ids = rootIds, placement = resolveCourseInsertionPlacement(target, options, ids)
-  const edits: ComponentEdit[] = [...definitionInsertionEdits(target, definition), ...additional,
+  const ids = rootIds, placement = resolveCourseInsertionPlacement(working, options, ids)
+  const edits: ComponentEdit[] = [...prepared.edits, ...definitionInsertionEdits(working, definition), ...additional,
     { type: 'instance.insert', container: placement.container, index: placement.index, instances, rootIds: ids }, ...placement.edits]
   await kernel.editCaptured(kernel.capture(edits, target))
   if (capturedCourseViewIsCurrent(kernel.readView(), target)) kernel.selectInstances(ids, target.surfaceId, target.documentId)
@@ -44,9 +75,10 @@ export async function commitCourseInsertion(kernel: EditorStoreKernel, target: C
 }
 export async function insertCourseElement(kernel: EditorStoreKernel, target: CapturedCourseTarget,
   kind: CourseElementKind, options: CourseInsertionOptions = {}): Promise<CourseInsertionResult> {
-  const { edits, instanceIds } = prepareCourseElementEdits(target.project, target.surfaceId, target.instanceId, kind,
-    { ...options, container: options.container ?? insertionContainer(target, options) })
-  await kernel.editCaptured(kernel.capture(edits, target))
+  const prepared = prepareCourseInsertion(target, options), working = prepared.target
+  const { edits, instanceIds } = prepareCourseElementEdits(working.project, working.surfaceId, working.instanceId, kind,
+    { ...prepared.options, container: prepared.options.container ?? insertionContainer(working, prepared.options) })
+  await kernel.editCaptured(kernel.capture([...prepared.edits, ...edits], target))
   if (capturedCourseViewIsCurrent(kernel.readView(), target)) kernel.selectInstances(instanceIds, target.surfaceId, target.documentId)
   return { instanceIds, documentId: target.documentId, surfaceId: target.surfaceId }
 }
@@ -170,12 +202,15 @@ export function readCourseMediaLibrary(view: CourseV10ViewState): { assets: Reco
 }
 export async function insertCourseLibraryAsset(kernel: EditorStoreKernel, assetId: string, options: CourseInsertionOptions = {},
   captured = captureCourseInsertionTarget(kernel)): Promise<CourseInsertionResult> {
-  const target = captured, view = kernel.readView(), original = view.views.find(item => item.documentId === target.documentId)
+  return insertCourseMedia(kernel, captured, [await prepareCourseLibraryAsset(kernel, captured, assetId)], options)
+}
+export async function prepareCourseLibraryAsset(kernel: EditorStoreKernel, target: CapturedCourseTarget, assetId: string): Promise<ImportedAssetBatchItem> {
+  const view = kernel.readView(), original = view.views.find(item => item.documentId === target.documentId)
   if (!original) throw new Error('原媒体文档已关闭')
   const library = readCourseMediaLibrary({ ...view, activeDocumentId: target.documentId, project: target.project }), meta = library.assets[assetId], bytes = library.files[assetId]
   if (!meta || !bytes) throw new Error('原素材字节不存在，无法插入')
   if (meta.kind === 'image') Object.assign(meta, await readImageDimensions(bytes, meta.mimeType))
-  return insertCourseMedia(kernel, target, [{ meta, bytes }], options)
+  return { meta, bytes }
 }
 export function mediaAuthoringError(kernel: EditorStoreKernel, error: unknown): void {
   kernel.setFeedback({ errorMessage: error instanceof Error ? error.message : String(error) })

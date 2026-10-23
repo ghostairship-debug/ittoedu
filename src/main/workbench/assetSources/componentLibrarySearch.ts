@@ -4,6 +4,7 @@ import type { ComponentCatalogManager } from '../../componentCatalogManager'
 import { exportComponentLibraryArchive, importComponentLibraryArchive } from '../../../core/components/library/archive'
 import type { ComponentLibraryArchiveMetadata } from '../../../core/components/library/archive'
 import { compareVersions } from '../../htmlComponentLibrary'
+import { createCatalogDiscoveryEntry, createHtmlDiscoveryEntry, searchDiscoveryEntries, type ComponentDiscoveryEntry } from '../../../shared/componentDiscovery'
 
 export type ComponentLibrarySnapshot = ComponentCatalogSnapshot
 export type AssetLibraryCatalog = Pick<ComponentCatalogManager, 'load' | 'readPackage' | 'install'> & Partial<Pick<ComponentCatalogManager, 'deletePackage'>>
@@ -30,6 +31,7 @@ export interface AssetSearchResult {
   status: 'results'
   query: string
   candidates: readonly AssetCandidateView[]
+  entries: readonly ComponentDiscoveryEntry[]
   libraryEntries: number
   unreadable?: number
   note?: string
@@ -46,22 +48,16 @@ export function searchComponentLibrary(snapshot: ComponentLibrarySnapshot, query
     const existing = current.get(entry.packageId)
     if (!existing || newer(entry, existing) > 0) current.set(entry.packageId, entry)
   }
-  const terms = [...new Set(query.toLowerCase().split(/[\s,，、;；/]+/).filter(Boolean))]
-  const scored = [...current.values()].flatMap(entry => {
-    const fields: [readonly string[], number][] = [[[entry.name], 6], [entry.tags, 3], [[entry.category ?? '', ...entry.subject, ...entry.schoolStage], 2], [[entry.description], 2], [[entry.packageId], 1]]
-    let matched = 0, score = 0
-    for (const term of terms) {
-      const weight = Math.max(0, ...fields.map(([values, value]) => values.some(text => text.toLowerCase().includes(term)) ? value : 0))
-      if (weight) { matched++; score += weight }
-    }
-    return matched || !terms.length ? [{ entry, matched, score }] : []
-  }).sort((left, right) => right.matched - left.matched || right.score - left.score || left.entry.name.localeCompare(right.entry.name, 'zh-CN'))
-  const candidates = scored.slice(0, limit).map(({ entry }): AssetCandidateView => ({ kind: 'component-package', packageId: entry.packageId, version: entry.version,
+  const matches = searchDiscoveryEntries([...current.values()].sort((left, right) => left.name.localeCompare(right.name, 'zh-CN'))
+    .map(entry => ({ ...createCatalogDiscoveryEntry(entry), entry })), query, limit)
+  const candidates = matches.map(({ entry }): AssetCandidateView => ({ kind: 'component-package', packageId: entry.packageId, version: entry.version,
     name: entry.name, description: entry.description, ...(entry.category ? { category: entry.category } : {}),
     ...(entry.subject.length ? { subject: entry.subject } : {}), ...(entry.schoolStage.length ? { schoolStage: entry.schoolStage } : {}),
     ...(entry.tags.length ? { tags: entry.tags } : {}), ...(entry.source?.kind === 'local' ? { sourceCourse: entry.source.reference } : {}), quality: entry.quality,
     source: entry.sourceLabel, sourceId: entry.sourceId, removable: entry.removable === true, trust: entry.sourceTrust }))
-  return { status: 'results', query, candidates, libraryEntries: current.size,
+  const entries = searchDiscoveryEntries([...current.values()].map(createCatalogDiscoveryEntry)
+    .concat((snapshot.htmlComponents ?? []).map(createHtmlDiscoveryEntry)), query, limit)
+  return { status: 'results', query, candidates, entries, libraryEntries: current.size,
     ...(snapshot.issues.length ? { unreadable: snapshot.issues.length } : {}),
     ...(snapshot.htmlComponents?.length ? { note: '目录内的旧 HTML 条目未列为 Component API 5 可插入条目；原文件保留。' } : {}),
     ...(candidates.length ? {} : { hint: '资产库中没有匹配的条目；可换用更通用的词，或按需新建组件' }) }

@@ -25,20 +25,23 @@ import { collectComponentProjectHealth } from '../core/components/componentProje
 import { summarizeCourseProjectHealth } from '../shared/componentProjectHealth'
 import { createSlideLightEditingPort } from './composition/selection/slideLightEditingPort'
 import { useComponentLibrary } from './app/useComponentLibrary'
-import { insertComponentDefinitionAtTarget, insertComponentPackagesAtTarget } from './components/insertComponentPackages'
-import { selectCurrentCatalogPackages } from './components/componentLibraryModel'
+import { prepareComponentDefinitionEntryAtTarget, insertComponentPackagesAtTarget } from './components/insertComponentPackages'
+import { selectCurrentCatalogPackages, selectProjectLibraryDefinitions } from './components/componentLibraryModel'
 import { useCourseDelivery } from './app/useCourseDelivery'
 import { courseDeliverySnapshot } from './app/courseDeliverySnapshot'
 import { resolveCourseProjectDeliveryFindingRoute, selectCourseProjectDiagnosticRoute } from './diagnostics/projectHealthNavigation'
 import { CoursePreviewNotices } from './app/CoursePreviewNotices'
-import { useCourseProjectLifecycle } from './app/useCourseProjectLifecycle'
+import { adaptCourseDocumentActivation, useCourseProjectLifecycle } from './app/useCourseProjectLifecycle'
 import { useFlowDocumentRecovery } from './app/useFlowDocumentRecovery'
 import { createFlowDocumentRecoveryPort } from './authoring/flowDocumentDraft'
-import { captureFlowMenuTarget, resolveFlowMenuInsertionOptions, insertFlowMenu as commitFlowMenu, type CapturedFlowMenuTarget, type FlowInsertCommand } from './ui/flow/flowInsertCommands'
-import { insertCourseMedia, insertCoursePreparedMedia, transformCourseImageAtTarget, type CourseInsertionOptions } from './media/commitCourseMediaAuthoring'
+import { captureFlowMenuTarget, refreshFlowMenuTarget, releaseFlowMenuTarget, flowInsertionBoundaryBlockId, resolveFlowMenuInsertionOptions, insertFlowMenu as commitFlowMenu, type CapturedFlowMenuTarget, type FlowInsertCommand } from './ui/flow/flowInsertCommands'
+import { insertCourseMedia, insertCoursePreparedMedia, prepareCourseLibraryAsset, transformCourseImageAtTarget, type CourseInsertionOptions, type ImportedAssetBatchItem } from './media/commitCourseMediaAuthoring'
+import { DocumentInsertionTargetError } from '../shared/document/blockInsertion'
 import { readComponentInteractionSounds, setComponentClickInteraction } from './interactions/componentInteractionAuthoring'
 import { flowBodyIds } from './componentPlatform/surfaces/flow/documentProjection'
-import type { CapturedCourseTarget } from './documents/CourseV10DocumentBridge'
+import { capturedCourseViewIsCurrent, isCourseComponentInputFailure, settleCourseComponentInput, type CapturedCourseTarget, type CourseUnconfirmedInputIdentity } from './documents/CourseV10DocumentBridge'
+import { exportPdfWithSignal } from './export/pdfExportClient'
+import { courseInsertionViewPlacement } from './media/commitCourseMediaAuthoring'
 import type { ComponentLibraryEntry } from '../shared/contracts/component-platform/library'
 import { createComponentElementCardNavigation } from './workbench/elementCards/ElementCardIndicator'
 import type { FlowDeepInsertPayload } from './ui/RightSidebar'
@@ -86,6 +89,7 @@ import type { DocumentSnapshot } from '../shared/workbench/document'
 import type { CourseProjectV10 } from '../shared/contracts/component-platform'
 import { projectWithBackgroundPreview } from './authoring/backgroundPreview'
 import { projectWithSlideContentDraft } from './store/slices/slideAuthoringSlice'
+import { selectActiveSlideContentEdit } from './store/editorStore'
 
 function desktopApi() {
   if (!window.desktopAPI) {
@@ -108,6 +112,23 @@ function readableError(error: unknown, fallback: string): string {
     return error.message
   }
   return toUserMessage(error, fallback)
+}
+
+function recoveryInputText(payload: unknown): string {
+  if (typeof payload === 'string') return payload
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return JSON.stringify(payload, null, 2) ?? ''
+  const input = payload as Record<string, unknown>
+  for (const key of ['raw', 'spotText', 'source']) if (typeof input[key] === 'string') return input[key] as string
+  const value = input.value
+  if (value && typeof value === 'object' && !Array.isArray(value)) {
+    const files = (value as Record<string, unknown>).files
+    if (files && typeof files === 'object' && !Array.isArray(files)) {
+      const text = Object.entries(files).flatMap(([name, file]) => file && typeof file === 'object' && typeof (file as { text?: unknown }).text === 'string'
+        ? [`${name}\n${(file as { text: string }).text}`] : []).join('\n\n')
+      if (text) return text
+    }
+  }
+  return JSON.stringify(value ?? payload, null, 2)
 }
 
 async function drainCourseDocument(documentId = useEditorStore.getState().courseView.activeDocumentId): Promise<DocumentSnapshot> {
@@ -169,6 +190,14 @@ export default function App() {
     return () => { stopRequests(); stopCancellation?.(); for (const build of builds.values()) build.controller.abort() }
   }, [])
   const lessonShell = useRef<LessonWorkspaceShellHandle>(null)
+  const captureWorkspaceNavigation = () => {
+    const owner = lessonShell.current, token = owner?.captureNavigationIdentity()
+    return () => Boolean(owner && owner === lessonShell.current && owner.captureNavigationIdentity() === token)
+  }
+  const beginWorkspaceNavigation = () => {
+    lessonShell.current?.cancelNavigation()
+    return captureWorkspaceNavigation()
+  }
   const openingLaunchFiles = useRef(false)
   useEffect(() => {
     const api = window.desktopAPI
@@ -234,6 +263,9 @@ export default function App() {
       .catch(error => useEditorStore.getState().setError(error instanceof Error ? error.message : '输入恢复暂未完成，原稿保留在本机'))
   }, [courseConnection.documents, rawDocuments])
   const courseKernel = useEditorStore(state => state.courseKernel)
+  const unconfirmedInput = courseKernel.bridge.captureUnconfirmedInput()
+  const [checkingInput, setCheckingInput] = useState<string | null>(null)
+  const [knownUnappliedInput, setKnownUnappliedInput] = useState<CourseUnconfirmedInputIdentity | null>(null)
   const allCourseDirty = useEditorStore(selectHasUnsavedCourseDocuments)
   const projectPath = useEditorStore((state) => state.projectPath)
   const activeCourseDocument = useEditorStore(selectActiveCourseProjectDocument)
@@ -242,6 +274,8 @@ export default function App() {
   const courseResources = useEditorStore(selectActiveCourseResources)
   const flowDocumentDraft = useEditorStore(state => state.flowDocumentDraft)
   const localDraftVersion = useEditorStore(state => state.localDraftVersion)
+  const preservedInputDrafts = useMemo(() => courseInputs.readDrafts(), [courseInputs, localDraftVersion, courseConnection.documents])
+  const preservedInputCount = preservedInputDrafts.reduce((count, input) => count + input.advanced.length + input.properties.length, 0)
   const [retainedFlowOpen, setRetainedFlowOpen] = useState(false)
   const selectedItemName = useEditorStore(state => {
     const project = state.courseView.project
@@ -345,7 +379,7 @@ export default function App() {
     if (!rawDocuments) return
     void courseInputs.persist()
   }, [localDraftVersion, courseConnection.documents, rawDocuments])
-  const preserveFlowInputs = async (documentIds?: readonly string[]): Promise<boolean> => {
+  const preserveFlowInputs = async (documentIds?: readonly string[], retain = false): Promise<boolean> => {
     const state = useEditorStore.getState()
     const entries = Object.entries(state.flowDocumentDrafts ?? {}).flatMap(([documentId, draft]) => {
       if (!draft || documentIds && !documentIds.includes(documentId)) return []
@@ -354,9 +388,62 @@ export default function App() {
       return [{ target: { documentId, projectId: snapshot.model.project.id, projectPath: snapshot.binding.kind === 'file' ? snapshot.binding.path : null,
         surfaceId: draft.surfaceId, revision: draft.revision, epoch: snapshot.epoch }, draft }]
     })
-    return flowRecovery.flushAll(entries)
+    return flowRecovery.flushAll(entries, { retain })
+  }
+  const inspectUnconfirmedInput = async (finish = false) => {
+    const foregroundIsCurrent = captureWorkspaceNavigation()
+    const target = courseKernel.bridge.captureUnconfirmedInput()
+    if (!target) return
+    const originalMessage = useEditorStore.getState().errorMessage
+    const currentScope = () => {
+      const view = courseKernel.readView()
+      return foregroundIsCurrent() && view.activeDocumentId === target.documentId && view.snapshot?.epoch === target.epoch
+    }
+    setCheckingInput(target.operationId)
+    try {
+      if (finish) {
+        // These are existing raw-input owners. End never clears their records,
+        // another operation, or a live composition.
+        await courseInputs.persist([target.documentId])
+        if (!await preserveFlowInputs([target.documentId], true)) throw new Error('当前正文原稿尚未保全，请稍后再结束这次操作。')
+        const outcome = await courseKernel.bridge.endUnconfirmedInput(target)
+        if (!currentScope()) return
+        if (outcome === 'pending') { setStatus('这次修改仍未确认，现有内容和输入继续保留。'); return }
+        setKnownUnappliedInput(null)
+        setStatus(outcome === 'applied' ? '已核实，这次修改已经应用。' : '这次未应用操作已结束，现有内容和其他输入保留。')
+      } else {
+        const outcome = await courseKernel.bridge.queryUnconfirmedInput(target)
+        if (!currentScope()) return
+        if (outcome.status === 'unsubmitted' || outcome.status === 'settled' && !('revision' in outcome.result)) {
+          setKnownUnappliedInput(target)
+          setStatus('已核实，这次修改没有应用；可以结束此操作，现有内容和原稿保留。')
+          return
+        }
+        if (outcome.status !== 'settled') { setStatus('这次修改暂未确认，现有内容和输入继续保留。'); return }
+        setKnownUnappliedInput(null)
+        setStatus('已核实，这次修改已经应用。')
+      }
+      const state = useEditorStore.getState()
+      if (!courseKernel.readView().error && state.errorMessage === originalMessage) state.setError(null)
+    } catch (error) {
+      const remaining = courseKernel.bridge.captureUnconfirmedInput(target.documentId)
+      if (currentScope() && remaining?.epoch === target.epoch && remaining.operationId === target.operationId)
+        setStatus(error instanceof Error ? `${error.message}；原输入仍保留。` : '暂未核实，原输入仍保留。')
+    } finally { setCheckingInput(current => current === target.operationId ? null : current) }
   }
 
+  const unconfirmedInputActions = unconfirmedInput && activeWorkspaceKind.current === 'course' && <span style={{ display: 'inline-flex', gap: 6, flexShrink: 0 }}>
+    <button type="button" style={{ minHeight: 22, height: 22, padding: '1px 6px', fontSize: 11 }} title="只查询原操作，不重复写入"
+      disabled={checkingInput === unconfirmedInput.operationId} onClick={() => { void inspectUnconfirmedInput() }}>
+      {checkingInput === unconfirmedInput.operationId ? '正在核实…' : '核实上次修改'}</button>
+    {knownUnappliedInput?.documentId === unconfirmedInput.documentId && knownUnappliedInput.epoch === unconfirmedInput.epoch
+      && knownUnappliedInput.operationId === unconfirmedInput.operationId && <button type="button" style={{ minHeight: 22, height: 22, padding: '1px 6px', fontSize: 11 }}
+        disabled={checkingInput === unconfirmedInput.operationId} title="保留已登记原稿，只结束已核实未写入的这一次操作"
+        onClick={() => { void inspectUnconfirmedInput(true) }}>结束未应用操作</button>}
+  </span>
+  const completeCourseActivation = (result: void | boolean | { documentId: string; activated: boolean }, activateIf?: () => boolean): void | boolean => {
+    return adaptCourseDocumentActivation(result, activateIf, () => lessonShell.current?.cancelNavigation())
+  }
   const courseProjectLifecycle = useCourseProjectLifecycle({
     captureIdentity() {
       const view = useEditorStore.getState().courseView
@@ -375,9 +462,9 @@ export default function App() {
         const view = useEditorStore.getState().courseView
         return documentId ? view.documents.find(snapshot => snapshot.documentId === documentId) ?? null : view.snapshot
       },
-      create: (surface, canvas) => useEditorStore.getState().createCourseDocument(surface, canvas),
-      createFrom: content => useEditorStore.getState().createCourseDocumentFrom(content.project, content.resources),
-      open: path => useEditorStore.getState().openCourseDocument(path),
+      create: async (surface, canvas, activateIf) => completeCourseActivation(await useEditorStore.getState().createCourseDocument(surface, canvas, activateIf), activateIf),
+      createFrom: async (content, activateIf) => completeCourseActivation(await useEditorStore.getState().createCourseDocumentFrom(content.project, content.resources, activateIf), activateIf),
+      open: async (path, activateIf) => completeCourseActivation(await useEditorStore.getState().openCourseDocument(path, activateIf), activateIf),
       save: (saveAs, documentId) => useEditorStore.getState().saveCourseDocument(saveAs, saveDirectory.current ?? undefined, documentId),
       drain: () => drainCourseDocument(),
       settle: async () => {
@@ -403,7 +490,8 @@ export default function App() {
     openRecentProjectFile: (path) => desktopApi().openRecentProject({ path }),
     confirmProjectOpen: (confirmationId) => desktopApi().confirmProjectOpen({ confirmationId }),
     beforeReplace: async () => await prepareCourseClose(),
-    onProjectReplaced: () => lessonShell.current?.detachLesson(),
+    beginForeground: beginWorkspaceNavigation,
+    onProjectReplaced: foreground => lessonShell.current?.detachLesson(foreground),
     preserveBeforeClose: async (mode, ids) => {
       if (!ids) {
         await elementCards.flushDrafts()
@@ -446,59 +534,71 @@ export default function App() {
     textEditTrigger: undefined,
   })
   // The work area's "从 PPT 新建 果铃工程": a new untitled H5 presentation holding the PPT's pages (M21).
-  const newProjectFromPptx = async ({ name, bytes }: { name: string; bytes: Uint8Array }) => {
+  const newProjectFromPptx = async ({ name, bytes }: { name: string; bytes: Uint8Array }, signal?: AbortSignal, foreground?: () => boolean) => {
+    const foregroundIsCurrent = foreground ?? beginWorkspaceNavigation()
     const title = pptxCourseStem(name)
-    const course = await preparePptxCourseOffThread(bytes, name)
+    const course = await preparePptxCourseOffThread(bytes, name, signal)
+    if (signal?.aborted || !foregroundIsCurrent()) return false
     if (!await confirmPptxLosses(name, course.issues)) return false
+    if (signal?.aborted || !foregroundIsCurrent()) return false
     const issues = course.issues.length
-    const created = await courseProjectLifecycle.newProjectFrom(async () => ({ project: course.model.project, resources: course.model.resources }), { origin: 'lesson' })
-    if (created) setStatus(issues ? `已从 PPT 新建 果铃工程「${title}」；${issues} 项内容未保留或已简化` : `已从 PPT 新建 果铃工程「${title}」`)
+    const created = await courseProjectLifecycle.newProjectFrom(async () => ({ project: course.model.project, resources: course.model.resources }), { origin: 'lesson', foreground: foregroundIsCurrent })
+    if (created && foregroundIsCurrent()) setStatus(issues ? `已从 PPT 新建 果铃工程「${title}」；${issues} 项内容未保留或已简化` : `已从 PPT 新建 果铃工程「${title}」`)
     return created
   }
 
   const htmlImportInFlight = useRef(false)
   const [flowImportIssues, setFlowImportIssues] = useState<{ name: string; issues: string[] } | null>(null)
   const openFlowImport = async (directory?: SaveDirectoryContext, sourceEntryId?: string) => {
+    const foregroundIsCurrent = beginWorkspaceNavigation()
     try {
       const service = desktopApi().flowImport
       if (!service) throw new Error('文档导入服务不可用，请重新打开应用')
       const bridge = useEditorStore.getState().courseBridge
       const target = activeWorkspaceDocument?.kind === 'course' ? bridge.captureTarget() : null
       const originalDocument = bridge.read().activeDocumentId
+      let activateImportedProject = false
       const imported = await service.read({ directory, sourceEntryId })
       if (!imported) return
-      if (bridge.read().activeDocumentId !== originalDocument || target && bridge.read().snapshot?.epoch !== target.epoch) throw new Error('导入期间工程已切换；原文件仍保留，请在目标工程重新导入。')
       if (target) {
         const current = bridge.captureTarget(target.documentId)
+        if (current.epoch !== target.epoch) throw new Error('原导入工程已关闭，原文件仍保留。')
         const planned = planFlowImport(current.project, imported)
         await bridge.editCaptured(bridge.capture(planned.edits, { ...current, surfaceId: null, activeStateId: null }), 'flow-import')
-        bridge.selectSurface(target.documentId, planned.surfaceId)
+        if (foregroundIsCurrent() && capturedCourseViewIsCurrent(bridge.read(), target)) {
+          bridge.selectSurface(target.documentId, planned.surfaceId)
+          activateImportedProject = true
+        }
       } else {
+        if (!foregroundIsCurrent() || bridge.read().activeDocumentId !== originalDocument) return
         const project = createBlankCourseProjectV10(imported.name.replace(/\.[^.]+$/, ''))
         const planned = planFlowImport(project, imported)
         planned.edits.push({ type: 'surface.remove', surfaceId: componentSurfaces(project)[0].id })
         const next = applyComponentOperation(project, captureComponentOperation(project, planned.edits))
         const created = await courseProjectLifecycle.newProjectFrom(async () => ({ project: next,
-          resources: { assets: Object.fromEntries(imported.assets.map(entry => [entry.asset.id, entry.bytes])), components: {} } }), { origin: 'lesson' })
+          resources: { assets: Object.fromEntries(imported.assets.map(entry => [entry.asset.id, entry.bytes])), components: {} } }), { origin: 'lesson', foreground: foregroundIsCurrent })
         if (!created) return
+        activateImportedProject = foregroundIsCurrent()
       }
-      lessonShell.current?.showProject()
+      if (activateImportedProject) lessonShell.current?.showProject(foregroundIsCurrent)
       setStatus(`已将 ${imported.name} 导入为可编辑 Flow；原文件保留。`)
-      if (imported.issues.length) setFlowImportIssues({ name: imported.name, issues: imported.issues })
+      if (imported.issues.length && activateImportedProject && foregroundIsCurrent()) setFlowImportIssues({ name: imported.name, issues: imported.issues })
     } catch (failure) { setError(readableError(failure, '文档导入未完成；原文件仍保留')) }
   }
   const openHtmlImport = async (directory?: SaveDirectoryContext, sourceEntryId?: string) => {
+    const foregroundIsCurrent = beginWorkspaceNavigation()
     try {
       if (!desktopApi().htmlImport) throw new Error('HTML 导入服务不可用')
       // An empty/plain-document work area must not import into an unrelated background course.
       // The existing lifecycle preserves every prior document and creates the canonical target.
       if (activeWorkspaceKind.current !== 'course' || !useEditorStore.getState().courseView.activeDocumentId) {
-        if (!await courseProjectLifecycle.newProject({ origin: 'lesson' })) return
-        lessonShell.current?.showProject()
+        if (!await courseProjectLifecycle.newProject({ origin: 'lesson', foreground: foregroundIsCurrent }) || !foregroundIsCurrent()) return
+        lessonShell.current?.showProject(foregroundIsCurrent)
       }
       const documentId = useEditorStore.getState().courseView.activeDocumentId
       if (!documentId) throw new Error('请先打开一份 果铃工程')
       const snapshot = await useEditorStore.getState().drainCourseDocument()
+      if (!foregroundIsCurrent()) return
       if (snapshot.documentId !== documentId || snapshot.model.kind !== 'course-v10') {
         throw new Error('当前 果铃工程已切换，请重新发起导入')
       }
@@ -528,6 +628,7 @@ export default function App() {
         ? (await desktopApi().workspaceFiles!({ type: 'resolve', workspaceId: directory!.workspaceId, entryId: sourceEntryId })).resolvedPath
         : null
       const current = useEditorStore.getState().courseView
+      if (!foregroundIsCurrent()) return
       if (current.activeDocumentId !== snapshot.documentId || current.snapshot?.epoch !== snapshot.epoch || current.snapshot.revision !== snapshot.revision) {
         throw new Error('当前 果铃工程已变化，请重新发起导入')
       }
@@ -541,8 +642,11 @@ export default function App() {
   const confirmHtmlImport = async (target: { locationId: string; anchorBlockId?: string }) => {
     const dialog = htmlImportDialog
     if (!dialog || dialog.busy || htmlImportInFlight.current) return
+    const foregroundIsCurrent = captureWorkspaceNavigation()
+    const originalViewport = (document.querySelector<HTMLElement>('.flow-workspace__scroll') ?? document.querySelector<HTMLElement>('.editor-center'))?.getBoundingClientRect()
     htmlImportInFlight.current = true
-    setHtmlImportDialog({ ...dialog, busy: true, error: null })
+    const pendingDialog = { ...dialog, busy: true, error: null }
+    setHtmlImportDialog(pendingDialog)
     try {
       const snapshot = await drainCourseDocument(dialog.documentId)
       if (snapshot.documentId !== dialog.documentId || snapshot.epoch !== dialog.epoch
@@ -552,7 +656,7 @@ export default function App() {
       const api = desktopApi().htmlImport
       if (!api) throw new Error('HTML 导入服务不可用')
       const surface = componentContainers(snapshot.model.project).find(surface => surface.id === target.locationId)
-      const workspace = (document.querySelector<HTMLElement>('.flow-workspace__scroll') ?? document.querySelector<HTMLElement>('.editor-center'))?.getBoundingClientRect()
+      const workspace = originalViewport
       const viewport = surface?.kind === 'flow' && workspace && workspace.height > 0
         ? { width: Math.ceil(surface.flow?.layout.readingWidth ?? workspace.width), height: Math.ceil(workspace.height) } : undefined
       const result = await api.import({
@@ -562,7 +666,7 @@ export default function App() {
         source: dialog.sourcePath ? { kind: 'file', path: dialog.sourcePath } : { kind: 'choose' },
       })
       if (!result) {
-        setHtmlImportDialog(null)
+        setHtmlImportDialog(current => current === pendingDialog ? null : current)
         setStatus('已取消 HTML 导入')
         return
       }
@@ -574,10 +678,10 @@ export default function App() {
         || confirmed.revision < result.receipt.revision) {
         throw new Error('导入已提交，但当前文档尚未同步；请重新打开页面核对')
       }
-      setHtmlImportDialog(null)
-      setStatus(result.notices.length ? `HTML 页面已导入；${result.notices.join('；')}` : 'HTML 页面已导入到所选位置')
+      setHtmlImportDialog(current => current === pendingDialog ? null : current)
+      if (foregroundIsCurrent()) setStatus(result.notices.length ? `HTML 页面已导入；${result.notices.join('；')}` : 'HTML 页面已导入到所选位置')
     } catch (error) {
-      setHtmlImportDialog(current => current?.documentId === dialog.documentId && current.epoch === dialog.epoch
+      setHtmlImportDialog(current => current === pendingDialog
         ? { ...current, busy: false, error: readableError(error, 'HTML 导入失败') } : current)
     } finally {
       htmlImportInFlight.current = false
@@ -610,15 +714,17 @@ export default function App() {
       if (!project) return
       const route = resolveCourseProjectDeliveryFindingRoute(project, item)
       if (!route.available) { state.setStatus(route.reason); return }
-      selectCourseProjectDiagnosticRoute(state.courseKernel, route, state.setEditingScope)
-      state.setActiveTab(route.tab)
+      void state.navigateCourseView(() => {
+        selectCourseProjectDiagnosticRoute(state.courseKernel, route, state.setEditingScope)
+        state.setActiveTab(route.tab)
+      })
     },
     compileComponent: input => desktopApi().compileComponent(input),
     buildOutput: buildFrozenDelivery,
     captureAuthoringObservation: rect => desktopApi().captureAuthoringObservation!(rect),
     exportHtml: (input) => desktopApi().exportHtml(input),
     exportWebPackage: (input) => desktopApi().exportWebPackage(input),
-    exportPdf: (input) => desktopApi().exportPdf(input),
+    exportPdf: (input, options) => exportPdfWithSignal(desktopApi(), input, options),
     exportBinary: (input) => desktopApi().exportBinary(input),
   }, {
     documentTrigger: activeCourseDocument,
@@ -629,14 +735,10 @@ export default function App() {
 
   const captureInsertionPlacement = (target: CapturedCourseTarget): CourseInsertionOptions => {
     const current = useEditorStore.getState()
-    if (selectEditingScope(current) !== 'global') {
-      if (componentContainers(target.project).find(surface => surface.id === target.surfaceId)?.kind !== 'spatial') return {}
-      const camera = current.readSpatialView(target.surfaceId ?? '', target.documentId).camera
-      return { center: { x: camera.x, y: camera.y } }
-    }
-    const selected = target.instanceIds[0]
-    const owns = (roots: readonly string[]): boolean => roots.some(id => id === selected || owns(target.project.instances[id]?.childIds ?? []))
-    return { container: { kind: 'global', plane: selected && owns(target.project.global.underlay) ? 'underlay' : 'overlay' } }
+    const scope = selectEditingScope(current)
+    const camera = scope !== 'global' && componentContainers(target.project).find(surface => surface.id === target.surfaceId)?.kind === 'spatial'
+      ? current.readSpatialView(target.surfaceId ?? '', target.documentId).camera : null
+    return courseInsertionViewPlacement(target, { scope, plane: current.courseView.editingPlane, camera })
   }
   useCourseCanvasPaste({
     kernel: courseKernel,
@@ -692,30 +794,54 @@ export default function App() {
     runBusy: run, commitStatus: setStatus, reportError: setError,
   })
 
-  const [pendingFlowComponent, setPendingFlowComponent] = useState<{ command: FlowInsertCommand; capture: CapturedFlowMenuTarget } | null>(null)
-  const insertFlowMenu = (command: FlowInsertCommand, payload?: FlowDeepInsertPayload, captured?: CapturedFlowMenuTarget, entry?: ComponentLibraryEntry) => {
+  const [pendingFlowComponent, setPendingFlowComponent] = useState<{ command: FlowInsertCommand; capture: CapturedFlowMenuTarget;
+    payload?: FlowDeepInsertPayload; entry?: ComponentLibraryEntry; media?: ImportedAssetBatchItem; reason?: string; afterBlockId?: string | null; inputFailure?: unknown } | null>(null)
+  const pendingFlowComponentRef = useRef(pendingFlowComponent); pendingFlowComponentRef.current = pendingFlowComponent
+  useEffect(() => () => { const pending = pendingFlowComponentRef.current; if (pending) releaseFlowMenuTarget(pending.capture) }, [])
+  const closeFlowComponentChoice = async () => {
+    const pending = pendingFlowComponent
+    if (!pending) return
+    try {
+      if (pending.inputFailure && await settleCourseComponentInput(pending.inputFailure) === 'pending') {
+        setError('这次插入结果仍在核实，已准备内容保留，请稍后重试。'); return
+      }
+    } catch (error) { setError(readableError(error, '暂未核实这次插入，已准备内容仍保留。')); return }
+    releaseFlowMenuTarget(pending.capture)
+    setPendingFlowComponent(current => current === pending ? null : current)
+  }
+  const insertFlowMenu = (command: FlowInsertCommand, payload?: FlowDeepInsertPayload, captured?: CapturedFlowMenuTarget,
+    entry?: ComponentLibraryEntry, preparedMedia?: ImportedAssetBatchItem, afterBlockId?: string) => {
     let target: CapturedFlowMenuTarget
-    try { target = captured ?? captureFlowMenuTarget(courseKernel) }
+    try { target = captured ?? captureFlowMenuTarget(courseKernel, command.destination === 'document') }
     catch (error) { setError(readableError(error, `${command.label}插入失败。`)); return }
     void run(async () => {
-      const options = resolveFlowMenuInsertionOptions(target, command)
+      let kept = false, media = preparedMedia
+      try {
       if (command.kind === 'component') {
-        if (!entry && !payload?.packageId) { setPendingFlowComponent({ command, capture: target }); return }
-        const inserted = entry
-          ? await insertComponentPackagesAtTarget(courseKernel, target, [entry], options)
-          : await insertComponentDefinitionAtTarget(courseKernel, target, payload!.packageId!, payload?.presetId, options)
-        if (!inserted.ok) throw new Error(inserted.reason ?? '组件插入未提交')
+        if (!entry && !payload?.packageId) { kept = true; setPendingFlowComponent({ command, capture: target }); return }
+        if (payload?.presetId) throw new Error('此定义没有该预设，请选择组件库的完整条目。')
+        entry ??= await prepareComponentDefinitionEntryAtTarget(courseKernel, target, payload!.packageId!, { sourceInstanceId: payload?.sourceInstanceId, catalogEntry: payload?.catalogEntry })
+      }
+      if (['image', 'video', 'audio'].includes(command.kind) && !media) {
+        media = payload?.assetId ? await prepareCourseLibraryAsset(courseKernel, target, payload.assetId)
+          : await (command.kind === 'image' ? mediaImport.selectImageAsset() : command.kind === 'video' ? mediaImport.selectVideoAsset() : mediaImport.selectAudioAsset()) ?? undefined
+        if (!media) return
+      }
+      target = await refreshFlowMenuTarget(courseKernel, target)
+      const options = resolveFlowMenuInsertionOptions(target, command, {
+        ...(payload?.chartType ? { chartType: payload.chartType } : {}),
+        ...(afterBlockId ? { flowSelection: { revision: String(target.project.revision), kind: 'object', blockId: afterBlockId } as const } : {}),
+      })
+      if (command.kind === 'component') {
+        const inserted = await insertComponentPackagesAtTarget(courseKernel, target, [entry!], options)
+        if (!inserted.ok) throw inserted.targetInvalid ? new DocumentInsertionTargetError(inserted.reason ?? '组件插入位置已失效') : inserted.inputFailure ?? new Error(inserted.reason ?? '组件插入未提交')
         await drainCourseDocument(target.documentId)
         setStatus(`已插入${command.label}`)
         return
       }
       let result
-      if ((command.kind === 'image' || command.kind === 'video' || command.kind === 'audio') && !payload?.assetId) {
-        const selected = await (command.kind === 'image' ? mediaImport.selectImageAsset()
-          : command.kind === 'video' ? mediaImport.selectVideoAsset() : mediaImport.selectAudioAsset())
-        if (!selected) return
-        result = await insertCourseMedia(courseKernel, target, [selected], options)
-      } else result = await commitFlowMenu(courseKernel, target, command, { assetId: payload?.assetId })
+      if (media) result = await insertCourseMedia(courseKernel, target, [media], options)
+      else result = await commitFlowMenu(courseKernel, target, command, options)
       const confirmed = await drainCourseDocument(target.documentId)
       const current = courseKernel.readView()
       if (current.activeDocumentId === target.documentId && current.surfaceId === target.surfaceId && result.surfaceId && result.instanceIds[0]) {
@@ -724,7 +850,39 @@ export default function App() {
           surfaceId: result.surfaceId, blockId: result.instanceIds[0], revision: confirmed.revision })
       }
       setStatus(`已插入${command.label}`)
+      } catch (error) {
+        if (!(error instanceof DocumentInsertionTargetError) && !isCourseComponentInputFailure(error)) throw error
+        // The prepared entry/media is retained below before ending only this failed proposal.
+        let boundary: string | null = null
+        try { boundary = flowInsertionBoundaryBlockId(target) } catch { /* A deleted bookmark has no valid block-boundary fallback. */ }
+        const pending = { command, capture: target, payload, entry, media, reason: error.message, afterBlockId: boundary,
+          ...(isCourseComponentInputFailure(error) ? { inputFailure: error } : {}) }
+        setPendingFlowComponent(pending)
+        if (isCourseComponentInputFailure(error) && await settleCourseComponentInput(error) === 'applied') {
+          setPendingFlowComponent(current => current === pending ? null : current)
+          setStatus(`已插入${command.label}`)
+        } else setError(error.message)
+      } finally { if (!kept) releaseFlowMenuTarget(target) }
     }, `${command.label}插入失败。`)
+  }
+  const resumeFlowInsertion = async (afterBlock = false) => {
+    const pending = pendingFlowComponent
+    if (!pending) return
+    try { if (pending.inputFailure) {
+      const outcome = await settleCourseComponentInput(pending.inputFailure)
+      if (outcome === 'pending') { setError('这次插入结果仍在核实，已准备内容保留，请稍后重试。'); return }
+      if (outcome === 'applied') { setPendingFlowComponent(current => current === pending ? null : current); setStatus('插入已经完成'); return }
+    } } catch (error) { setError(readableError(error, '暂未核实这次插入，已准备内容仍保留。')); return }
+    let target: CapturedFlowMenuTarget
+    try {
+      target = captureFlowMenuTarget(courseKernel, pending.command.destination === 'document')
+      if (target.documentId !== pending.capture.documentId || target.surfaceId !== pending.capture.surfaceId) {
+        releaseFlowMenuTarget(target)
+        throw new Error('请回到原讲义页面选择插入位置，已准备内容仍保留。')
+      }
+    } catch (error) { setError(readableError(error, '请在原讲义重新选择插入位置')); return }
+    setPendingFlowComponent(null)
+    insertFlowMenu(pending.command, pending.payload, target, pending.entry, pending.media, afterBlock ? pending.afterBlockId ?? undefined : undefined)
   }
 
   useEditorKeyboardRouter({
@@ -733,7 +891,7 @@ export default function App() {
       const state = useEditorStore.getState(), view = state.courseView
       const kind = (view.project == null ? undefined : componentContainers(view.project).find(surface => surface.id === view.surfaceId)?.kind)
       const contentEditable = target instanceof HTMLElement && target.isContentEditable
-      const draft = state.slideContentEdit
+      const draft = selectActiveSlideContentEdit(state)
       const draftImplementation = draft && view.project?.definitions[draft.definitionId]?.implementation
       return {
         hasCourseProject: Boolean(view.project),
@@ -868,7 +1026,14 @@ export default function App() {
     <LessonWorkspaceHost ref={lessonShell} projectPath={projectPath} documents={documentsWithSaveDirectory ?? undefined} onSaveDirectoryChange={setSaveDirectory}
       courseDocuments={{ documents: courseConnection.documents, activation: courseConnection.activation,
         activeDocumentId: courseConnection.activeDocumentId,
-        activate: id => useEditorStore.getState().activateCourseDocument(id),
+        captureScope: () => {
+          if (activeWorkspaceKind.current !== 'course') return () => true
+          const original = useEditorStore.getState(), scope = selectEditingScope(original), mode = original.canvasMode
+          const ownsView = original.courseBridge.captureViewScope()
+          return () => activeWorkspaceKind.current === 'course' && selectEditingScope(useEditorStore.getState()) === scope
+            && useEditorStore.getState().canvasMode === mode && ownsView()
+        },
+        activate: (id, activateIf) => useEditorStore.getState().activateCourseDocument(id, activateIf),
         close: async id => {
           return useEditorStore.getState().closeCourseDocument(id)
         } }}
@@ -879,9 +1044,11 @@ export default function App() {
         return [await captureCourseDocumentReference({ documentId: activeDocumentId, surfaceId }, writable,
           id => prepare ? state.drainCourseDocument(id) : rawDocuments!.read(id))]
       }}
-      onOpenProject={path => courseProjectLifecycle.openRecentProject(path, { origin: 'lesson' })} onNewProject={() => courseProjectLifecycle.newProject({ origin: 'lesson' })} onNewProjectFromPptx={newProjectFromPptx} onDirtyChange={setLessonDirty} onActiveDocumentChange={setActiveWorkspaceDocument}
+      onOpenProject={(path, foreground) => courseProjectLifecycle.openRecentProject(path, { origin: 'lesson', foreground })} onNewProject={foreground => courseProjectLifecycle.newProject({ origin: 'lesson', foreground })} onNewProjectFromPptx={newProjectFromPptx} onDirtyChange={setLessonDirty} onActiveDocumentChange={setActiveWorkspaceDocument}
       onImportHtml={(directory, sourceEntryId) => { void openHtmlImport(directory, sourceEntryId) }} onImportFlow={(directory, sourceEntryId) => { void openFlowImport(directory, sourceEntryId) }}
-      toolbarExtras={flowRecovery.retained.length > 0 && <button type="button" title="查看保留的正文原稿" onClick={() => setRetainedFlowOpen(true)}><FileClock size={14} />保留原稿 ({flowRecovery.retained.length})</button>}
+      toolbarExtras={<>
+        {flowRecovery.retained.length + preservedInputCount > 0 && <button type="button" title="查看保留的输入原稿" onClick={() => setRetainedFlowOpen(true)}><FileClock size={14} />输入原稿 ({flowRecovery.retained.length + preservedInputCount})</button>}
+      </>}
 >
     <BundledFontBoundary><CourseEditorFrame lightTools={courseCommonTools('light')}>
       <CourseAdvancedChrome><TopToolbar
@@ -949,32 +1116,57 @@ export default function App() {
           onDeleteCatalogComponent={componentLibrary.deleteCatalogPackage}
         />
       </EditorPanelLayout>
-      {pendingFlowComponent && <div className="modal-backdrop" role="presentation" onMouseDown={() => setPendingFlowComponent(null)}>
+      {pendingFlowComponent?.reason && <section role="region" aria-label="待插入内容" className="modal" style={{ position: 'fixed', right: 24, bottom: 60, zIndex: 1000, maxWidth: 420 }}>
+        <h2>请重新选择插入位置</h2><p>{pendingFlowComponent.reason}</p>
+        <p>已准备的{pendingFlowComponent.command.label}保留在此处。请回到原讲义选择位置后继续。</p>
+        <div className="modal__actions">
+          <button type="button" onClick={() => resumeFlowInsertion()}>插入到原讲义当前位置</button>
+          {pendingFlowComponent.afterBlockId && <button type="button" onClick={() => resumeFlowInsertion(true)}>在原所在块下方插入</button>}
+          <button type="button" className="secondary-button" onClick={closeFlowComponentChoice}>取消</button>
+        </div>
+      </section>}
+      {pendingFlowComponent && !pendingFlowComponent.reason && <div className="modal-backdrop" role="presentation" onMouseDown={closeFlowComponentChoice}>
         <section className="modal" role="dialog" aria-modal="true" aria-labelledby="flow-component-choice-title" onMouseDown={event => event.stopPropagation()}>
           <h2 id="flow-component-choice-title">选择要插入的组件</h2>
           <p>将组件插入{pendingFlowComponent.command.destination === 'document' ? '正文' : '纸面'}。选择已有组件或内置组件。</p>
           <div style={{ maxHeight: 320, overflowY: 'auto' }}>
-            {componentLibrary.installedEntries.map(entry =>
-              <button key={entry.id} type="button" className="secondary-button" onClick={() => {
-                const pending = pendingFlowComponent
-                setPendingFlowComponent(null)
-                insertFlowMenu(pending.command, { packageId: entry.definitionId }, pending.capture)
-              }}>{entry.title}</button>)}
-            {selectCurrentCatalogPackages(componentLibrary.componentCatalog.packages.filter(entry => entry.sourceTrust === 'built-in' && !componentLibrary.installedEntries.some(installed => installed.id === entry.packageId)))
+            {selectProjectLibraryDefinitions(pendingFlowComponent.capture.project.definitions).map(definition => {
+              const sources = Object.values(pendingFlowComponent.capture.project.instances).filter(instance => instance.definitionId === definition.id)
+              const catalog = selectCurrentCatalogPackages(componentLibrary.componentCatalog.packages.filter(entry => entry.packageId === definition.library?.packageId && entry.sourceTrust !== 'prompt' && entry.quality !== 'deprecated'))[0]
+              return <div key={definition.id}>
+                <p>{definition.title ?? definition.id} · 复制现有实例</p>
+                {catalog && <button type="button" className="secondary-button" onClick={() => {
+                  const pending = pendingFlowComponent
+                  setPendingFlowComponent(null)
+                  void componentLibrary.prepareCatalogPackage(catalog).then(data => {
+                    if (data) insertFlowMenu(pending.command, { packageId: data.id }, pending.capture, data)
+                    else releaseFlowMenuTarget(pending.capture)
+                  }).catch(error => { releaseFlowMenuTarget(pending.capture); setError(error instanceof Error ? error.message : '组件包准备失败') })
+                }}>从组件库新建</button>}
+                {sources.length ? sources.map(source => <button key={source.id} type="button" className="secondary-button" onClick={() => {
+                  const pending = pendingFlowComponent
+                  setPendingFlowComponent(null)
+                  insertFlowMenu(pending.command, { packageId: definition.id, sourceInstanceId: source.id }, pending.capture)
+                }}>复制 {source.name ?? source.id}</button>) : <p>此定义没有可复制的实例，请选择组件库条目。</p>}
+              </div>
+            })}
+            {selectCurrentCatalogPackages(componentLibrary.componentCatalog.packages.filter(entry => entry.sourceTrust === 'built-in' && !Object.values(pendingFlowComponent.capture.project.definitions).some(definition => definition.library?.packageId === entry.packageId)))
               .map(entry => <button key={entry.packageId} type="button" className="secondary-button" onClick={() => {
                 const pending = pendingFlowComponent
                 setPendingFlowComponent(null)
                 void componentLibrary.prepareCatalogPackage(entry).then(data => {
                   if (data) insertFlowMenu(pending.command, { packageId: data.id }, pending.capture, data)
-                }).catch(error => setError(error instanceof Error ? error.message : '组件包准备失败'))
+                  else releaseFlowMenuTarget(pending.capture)
+                }).catch(error => { releaseFlowMenuTarget(pending.capture); setError(error instanceof Error ? error.message : '组件包准备失败') })
               }}>{entry.name}</button>)}
           </div>
           <div className="modal__actions">
-            <button type="button" className="secondary-button" onClick={() => setPendingFlowComponent(null)}>取消</button>
+            <button type="button" className="secondary-button" onClick={closeFlowComponentChoice}>取消</button>
           </div>
         </section>
       </div>}
       <footer className="status-bar" aria-live="polite">
+        {unconfirmedInputActions}
         <span className="status-dot" />
         <span>{courseDelivery.exportProgress === 'cancelling' ? '正在清理已取消的导出…' : busy ? '正在处理…' : (statusMessage ?? '就绪')}</span>
         {courseDelivery.exportProgress === 'generating' && <button type="button" onClick={courseDelivery.cancelExport}>取消导出</button>}
@@ -998,15 +1190,25 @@ export default function App() {
         <span>{projectPath ? '工程已命名' : '尚未保存'}</span>
       </footer>
 
-      {retainedFlowOpen && flowRecovery.retained.length > 0 && <div className="modal-backdrop" role="presentation">
+      {retainedFlowOpen && flowRecovery.retained.length + preservedInputCount > 0 && <div className="modal-backdrop" role="presentation">
         <section className="modal copyable-summary-dialog" role="dialog" aria-modal="true" aria-labelledby="retained-flow-title">
-          <header className="copyable-summary-dialog__header"><h2 id="retained-flow-title">保留的正文原稿</h2>
+          <header className="copyable-summary-dialog__header"><h2 id="retained-flow-title">保留的输入原稿</h2>
             <button type="button" className="icon-button" title="关闭原稿" aria-label="关闭原稿" onClick={() => setRetainedFlowOpen(false)}><X size={17} /></button>
           </header>
           {flowRecovery.retained.map((record, index) => <details key={record.recovery.id} open={index === 0}>
             <summary>版本 {record.revision} · {record.surfaceId}</summary>
             <textarea className="copyable-summary-dialog__content" aria-label={`版本 ${record.revision} 的正文原稿`} value={record.source} readOnly />
           </details>)}
+          {preservedInputDrafts.map(input => <div key={input.documentId}>
+            {input.advanced.map((record, index) => <details key={`${record.kind}:${record.key}:${index}`}>
+              <summary>{input.projectTitle ?? '工程'} · {record.kind === 'source' ? '源码' : record.kind === 'json' ? 'JSON' : '文字'}原稿 {index + 1}</summary>
+              <textarea className="copyable-summary-dialog__content" aria-label={`保留的${record.kind}原稿 ${index + 1}`} value={recoveryInputText(record.payload)} readOnly />
+            </details>)}
+            {input.properties.map((record, index) => <details key={`${record.bindingKey}:${index}`}>
+              <summary>{input.projectTitle ?? '工程'} · {record.label || '属性'}原稿</summary>
+              <textarea className="copyable-summary-dialog__content" aria-label={`保留的属性原稿 ${index + 1}`} value={record.raw} readOnly />
+            </details>)}
+          </div>)}
           <div className="modal__actions"><button type="button" className="primary-button" onClick={() => setRetainedFlowOpen(false)}>完成</button></div>
         </section>
       </div>}
@@ -1014,7 +1216,7 @@ export default function App() {
       {errorMessage && (
         <div className="toast" role="alert">
           <AlertCircle size={19} />
-          <div className="toast__content">{errorMessage}</div>
+          <div className="toast__content">{errorMessage}{unconfirmedInputActions && <div>{unconfirmedInputActions}</div>}</div>
           <button
             type="button"
             className="icon-button"

@@ -3,7 +3,8 @@ import { domAuthoringFactorySource, createDomAuthoring } from '../../src/compone
 import { decorateHtmlFrameAuthoring, installHtmlFrameAuthoring, neededHtmlFrameSources, type HtmlFrameAuthoringBridge } from '../../src/shared/html/htmlFrameAuthoring'
 import { extractHtmlAuthoringRecords, patchHtmlAuthoringRecords, readHtmlAuthoringRecords, readHtmlFrameSources } from '../../src/shared/html/htmlAuthoringRecords'
 import type { ComponentAuthorRecord } from '../../src/shared/contracts/component-platform/runtime'
-import { installAuthoringInputArbitration } from '../../src/components/web/ownedDocumentAuthoring'
+import { installAuthoringInputArbitration, authoringCaretOffset } from '../../src/components/web/ownedDocumentAuthoring'
+import { createAuthoringFrameGeometry } from '../../src/components/web/authoringFrame'
 import { installHtmlBlobCapture } from '../../src/components/web/htmlBlobCapture'
 
 const bridges: HtmlFrameAuthoringBridge[] = []
@@ -70,7 +71,9 @@ it('serializes a page-privilege bootstrap and captures closed roots without open
   const factory = new Function(`return ${domAuthoringFactorySource()}`)() as typeof createDomAuthoring
   const input = new Function(`return (${installAuthoringInputArbitration.toString()})`)() as typeof installAuthoringInputArbitration
   const capture = new Function(`return (${installHtmlBlobCapture.toString()})`)() as typeof installHtmlBlobCapture
-  const bridge = serialized(factory, document, input, false, capture); bridges.push(bridge)
+  const frames = new Function(`return (${createAuthoringFrameGeometry.toString()})`)() as typeof createAuthoringFrameGeometry
+  const caret = new Function(`return (${authoringCaretOffset.toString()})`)() as typeof authoringCaretOffset
+  const bridge = serialized(factory, document, input, false, capture, frames, caret); bridges.push(bridge)
   const host = document.createElement('article'); document.body.append(host)
   const shadow = host.attachShadow({ mode: 'closed' }); shadow.innerHTML = '<p>Closed text</p>'
   expect(host.shadowRoot).toBeNull()

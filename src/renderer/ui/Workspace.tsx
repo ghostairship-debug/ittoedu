@@ -6,7 +6,7 @@ import { SlideWorkspaceConnector } from './workspaces/SlideWorkspaceConnector'
 import { SpatialWorkspaceConnector } from './workspaces/SpatialWorkspaceConnector'
 import { useWorkspaceRoute } from './workspaces/WorkspaceRouteContext'
 import { useEffect, useRef, type ReactNode } from 'react'
-import { useEditorStore } from '../store/editorStore'
+import { selectActiveSlideContentEdit, useEditorStore } from '../store/editorStore'
 import { containerEditingPath, globalContainerEditingLocation } from '../documents/containerEditingContext'
 import { isComponentVisibleAtSurface } from '../../shared/contracts/component-platform/project'
 import { useCourseV10Runtime } from '../components/CourseV10RuntimeView'
@@ -30,6 +30,8 @@ export function Workspace({
 }: WorkspaceProps) {
   const route = useWorkspaceRoute()
   const view = useEditorStore(state => state.courseView)
+  const retainedInputs = useEditorStore(state => state.retainedSlideContentEdits)
+  const retained = (retainedInputs ?? []).filter(record => record.documentId === view.activeDocumentId)
   const selected = view.project?.instances[view.selectedInstanceId ?? '']
   const bridge = useEditorStore(state => state.courseBridge)
   const sharedLocation = view.project && selected?.container ? globalContainerEditingLocation(view.project, selected.id) : null
@@ -38,25 +40,37 @@ export function Workspace({
     style={{ display: 'flex', gap: 8, alignItems: 'center', padding: '6px 10px', flex: '0 0 auto' }}>
     {view.editingContainerId && <button type="button" data-testid="container-edit-return" onClick={() => {
       const documentId = view.activeDocumentId!
-      void useEditorStore.getState().commitTextEdit().then(() => {
-        if (bridge.read().activeDocumentId === documentId) {
-          bridge.leaveContainer(documentId)
-          if (view.editingPlane && (view.editingPath?.length ?? 0) <= 1) {
-            useEditorStore.getState().setEditingScope('global')
-            bridge.selectInstances(documentId, [view.editingContainerId!])
-          }
+      void useEditorStore.getState().navigateCourseView(() => {
+        bridge.leaveContainer(documentId)
+        if (view.editingPlane && (view.editingPath?.length ?? 0) <= 1) {
+          useEditorStore.getState().setEditingScope('global')
+          bridge.selectInstances(documentId, [view.editingContainerId!])
         }
-      }).catch(error => useEditorStore.getState().setError(String(error)))
+      })
     }}>返回上层</button>}
     <span>{view.editingPlane ? view.editingPlane === 'underlay' ? '共享底层 / ' : '共享浮层 / ' : ''}{view.editingPath?.map(id => view.project?.instances[id]?.name ?? view.project?.title ?? id).join(' / ')}</span>
     {canEnterSelected && selected && selected.id !== view.surfaceId && <button type="button" data-testid="container-edit-enter" onClick={() => {
       const documentId = view.activeDocumentId!, containerId = selected.id
-      void useEditorStore.getState().commitTextEdit().then(() => {
-        if (bridge.read().activeDocumentId === documentId) { bridge.enterContainer(documentId, containerId); useEditorStore.getState().setEditingScope('scene') }
-      }).catch(error => useEditorStore.getState().setError(String(error)))
+      void useEditorStore.getState().navigateCourseView(() => {
+        bridge.enterContainer(documentId, containerId); useEditorStore.getState().setEditingScope('scene')
+      })
     }}>进入容器编辑</button>}
   </nav> : null
-  const frame = (content: ReactNode) => <div data-container-editor-frame="" style={{ display: 'grid', gridTemplateRows: scopeControls ? 'auto minmax(0, 1fr)' : 'minmax(0, 1fr)', minWidth: 0, minHeight: 0 }}>{scopeControls}{content}</div>
+  const retainedView = retained.length ? <details style={{ padding: '4px 10px', fontSize: 12 }}>
+    <summary>保留的文字原稿（{retained.length}）</summary>
+    <p>这些输入尚未应用，当前内容可以继续编辑。可复制原文后在对应位置接续。</p>
+    {retained.map((record, index) => {
+      const payload = record.payload && typeof record.payload === 'object' && !Array.isArray(record.payload) ? record.payload : {}
+      const raw = typeof payload.spotText === 'string' ? payload.spotText : JSON.stringify(payload.spotValue ?? payload.data ?? record.payload, null, 2)
+      return <label key={`${record.key}:${index}`} style={{ display: 'block' }}>原稿 {index + 1}
+        <textarea readOnly aria-label={`保留的文字原稿 ${index + 1}`} value={raw} rows={4} style={{ width: '100%' }} />
+      </label>
+    })}
+  </details> : null
+  const hasHeader = Boolean(scopeControls || retainedView)
+  const frame = (content: ReactNode) => <div data-container-editor-frame="" style={{ display: 'grid', gridTemplateRows: hasHeader ? 'auto minmax(0, 1fr)' : 'minmax(0, 1fr)', minWidth: 0, minHeight: 0 }}>
+    {hasHeader && <div>{scopeControls}{retainedView}</div>}{content}
+  </div>
   if (route.kind === 'conflict') {
     return (
       <main className="workspace" data-testid="workspace-route-conflict" role="alert">
@@ -82,7 +96,7 @@ function ProgramWorkspace({ rootInstanceId, onSelectImageAsset }: { rootInstance
   const runtime = useCourseV10Runtime()
   const canvasMode = useEditorStore(state => state.canvasMode)
   const root = useRef<HTMLElement>(null)
-  const contentDraft = useEditorStore(state => state.slideContentEdit)
+  const contentDraft = useEditorStore(selectActiveSlideContentEdit)
   const authorInteraction = useComponentAuthorInteraction({ root, documentId: runtime.documentId, surfaceId: runtime.surfaceId ?? null,
     enabled: canvasMode === 'edit', selectImage: onSelectImageAsset, report: message => useEditorStore.getState().setError(message) })
   useEffect(() => { runtime.setPlaying(canvasMode === 'run') }, [runtime.setPlaying, canvasMode])

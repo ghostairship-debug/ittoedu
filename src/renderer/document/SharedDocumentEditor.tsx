@@ -9,7 +9,7 @@ import { projectDocumentRanges } from '../../shared/document/textInteraction'
 import { pinnedSelectionKey, pinnedSelectionPlugin, sourcePinnedSelectionEffect, sourcePinnedSelectionField } from './selectionDecorations'
 import { FONT_FAMILY_OPTIONS } from '../../shared/fonts/fontFamilyCatalog'
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState, useMemo, type ReactNode } from 'react'
-import { AArrowDown, AArrowUp, Baseline, Bold, Highlighter, Italic, Link2, MoreHorizontal, Sigma, SlidersHorizontal, Table2, Underline, Strikethrough, Superscript, Subscript, Code, Eraser, Dot } from 'lucide-react'
+import { Baseline, Bold, Highlighter, Italic, Link2, MoreHorizontal, Sigma, SlidersHorizontal, Table2, Underline, Superscript, Subscript, Code, Eraser } from 'lucide-react'
 import { stepFontSize } from '../../shared/fontSizeStep'
 import { LatexFormulaAuthoringEditor } from '../ui/LatexFormulaAuthoringEditor'
 import { PaletteButton } from '../editing/color/PaletteButton'
@@ -29,9 +29,11 @@ import type { TextRunStyle } from '../../shared/contracts/native-v1/types'
 import { buildFlowTextStyleCss } from '../../shared/flowRichText'
 import { Plugin, PluginKey } from 'prosemirror-state'
 import { Decoration, DecorationSet } from 'prosemirror-view'
-import { createLayoutEditor, createDocumentDraftSession, DOCUMENT_OBJECT_CONTEXT_MENU_EVENT, type DocumentObjectContextMenuDetail, type DocumentOperation, type DocumentContentScope, type DocumentCommitResult } from './editorSession'
-import { documentBlockMenu, applyDocumentBlockCommand, createDocumentBlock, type DocumentBlockCommand } from './documentBlockCommands'
+import { createLayoutEditor, createDocumentDraftSession, DOCUMENT_OBJECT_CONTEXT_MENU_EVENT, type DocumentObjectContextMenuDetail, type DocumentOperation, type DocumentContentScope, type DocumentCommitResult, type DocumentInsertionSelection } from './editorSession'
+import { documentBlockMenu, applyDocumentBlockCommand, createDocumentBlock, documentColumnSelection, DOCUMENT_BLOCK_KINDS, type DocumentBlockKind, type DocumentBlockCommand } from './documentBlockCommands'
 import { DocumentBlockHandle, documentBlockDragId, DOCUMENT_BLOCK_DRAG_MIME } from './DocumentBlockHandle'
+import { documentBlockDropTarget, type DocumentBlockDropTarget } from './documentBlockDrop'
+import { documentFlowEditingPlugin } from './documentFlowEditing'
 import { documentTableCommandLabels, type DocumentTableCommand } from './documentTableCommands'
 import { changeDocumentTableFromEditorState, resolveDocumentTableEditorTarget } from './documentTableEditorPort'
 import { restoreDocumentTableSelection, type PreviousDocumentTableSelection } from './documentTableSelectionRestore'
@@ -42,6 +44,9 @@ import { CellSelection } from 'prosemirror-tables'
 import { toggleMark } from 'prosemirror-commands'
 import { describeDocumentMath, parseDocumentMath } from '../../shared/document/math'
 import { documentBlockChildren, type DocumentBlock } from '../../shared/document/content'
+import { insertDocumentBlocks, documentInsertionBlockId, DocumentInsertionTargetError } from '../../shared/document/blockInsertion'
+import { prepareProfessionalElement } from '../../core/course/professionalElementDefaults'
+import { chartDataSchema } from '../../components/chart'
 import type { DocumentClipboardResourcePort } from './documentClipboard'
 import './sharedDocumentEditor.css'
 import 'katex/dist/katex.min.css'
@@ -178,6 +183,10 @@ export interface SharedDocumentEditorProps {
   renderObject?(block: DocumentBlock, container: HTMLElement): (() => void) | void
   /** The callback may style the outer/children holders, never mount or replace their children. */
   renderGroup?(instanceId: string, wrapper: HTMLElement, contentDOM: HTMLElement): void
+  /** The course owner creates ordinary columns in one canonical transaction. */
+  onColumns?(instanceIds: readonly string[]): void | Promise<void>
+  /** Current rendered grid/row layout, used only for collapsed boundary keys. */
+  isMultiColumnLayout?(instanceId: string): boolean
   runtimeSpacers?: readonly { readonly blockId: string; readonly height: number }[]
   objectRevision?: unknown
   objectRevisionFor?(block:DocumentBlock):unknown
@@ -193,8 +202,10 @@ export interface SharedDocumentEditorProps {
   onChange(document: MarkdownDocument, operation: DocumentOperation): DocumentCommitResult
   /** Local editable content, before the caller's formal commit ACK. */
   onDocumentDraft?(document: MarkdownDocument, operation: DocumentOperation): void
-  /** Explicit discard only; releases caller-owned draft handles restored outside this view. */
-  onDiscardDraft?(): void
+  /** The input owner resolves any formal proposal before releasing its local raw input. */
+  onDiscardDraft?(): boolean | void | Promise<boolean | void>
+  /** Durably retain unapplied raw source, then return to the current formal document. */
+  onPreserveDraft?(): Promise<boolean>
   onDraft(source: string, diagnostics: DocumentDiagnostic[]): void
   onCompositionChange?(composing: boolean, source: string): void
   onSelection?(selection: DocumentSelection | null): void
@@ -227,8 +238,10 @@ function editorMarkdownOptions(owner: Pick<SharedDocumentEditorProps, 'target' |
   return { createId: () => crypto.randomUUID(), target: owner.target, resolveImage: owner.resolveImage, recoverUnsupportedBlocks: owner.target === 'file' }
 }
 export interface SharedDocumentEditorHandle {
+  captureInsertionSelection(): DocumentInsertionSelection
   clearSelection(targets?: readonly ExecutionSelectionTarget[]): void
   focusAtClientPoint(point: { x: number; y: number }): boolean
+  selectAtClientPoints(anchor: { x: number; y: number }, head: { x: number; y: number }): boolean
   /** Apply synchronous layout projection without treating its wrapper styles as author input. */
   paintProjection(paint: () => void): void
   /** Applies a future typing style at the actual PM caret; it creates no document transaction. */
@@ -236,6 +249,8 @@ export interface SharedDocumentEditorHandle {
   flush(): { ready: boolean; source: string; diagnostics: DocumentDiagnostic[] }
   /** Flush local input and wait for its actual commit ACK before save/history/navigation. */
   drain(): Promise<{ ready: boolean; source: string; diagnostics: DocumentDiagnostic[] }>
+  /** After drain, the owner may retain this exact local draft and resume formal content. */
+  canPreserveDraft(): boolean
   /** Prepare raw file source for its owner's formal ACK; layout diagnostics do not reject source repair. */
   drainSource(): Promise<{ ready: boolean; source: string; diagnostics: DocumentDiagnostic[] }>
   /** Uses the same explicit discard as the draft UI, including the caller's cleanup. */
@@ -266,6 +281,14 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
   const linkTarget=useRef<ReturnType<ReturnType<typeof createLayoutEditor>['trackSelection']>|null>(null)
   const [semanticSelection, setSemanticSelection] = useState<DocumentSelection | null>(null)
   const [activeBlock, setActiveBlock] = useState<{ id: string; rect: { left: number; top: number; height: number } } | null>(null)
+  const interactionFocused = useRef(false), draggingBlock = useRef(false)
+  const focusGeneration = useRef(0)
+  const outsidePointerFrame = useRef<number | null>(null)
+  const draggedBlockId = useRef<string | null>(null)
+  const draggedBlockContent = useRef<ReturnType<typeof fromEditorDocument> | null>(null)
+  const blockDragHandlers = useRef<{ over(event: DragEvent): void; drop(event: DragEvent): void } | null>(null)
+  const [blockDrop, setBlockDrop] = useState<DocumentBlockDropTarget | null>(null)
+  const formattingMenu = useContextMenu()
   const [linkDraft, setLinkDraft] = useState<string | null>(null)
   const [contextualTarget, setContextualTarget] = useState<DocumentContextSelection | null>(null)
   /** Each newly published target; the quick bar closes its popovers when it changes. */
@@ -277,6 +300,7 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
   const manualTarget = useRef<DocumentContextSelection | null>(null)
   const [localPin, setLocalPin] = useState<{mode: 'layout' | 'source'; from: number; to: number; revision: string} | null>(null)
   const [commandError, setCommandError] = useState('')
+  const [insertionFallback, setInsertionFallback] = useState<{ blockId: string; kind: DocumentBlockKind | 'chart'; message: string } | null>(null)
   const editorRoot = useRef<HTMLDivElement | null>(null)
   const [rootElement, setRootElement] = useState<HTMLDivElement | null>(null)
   const attachRoot = useCallback((element: HTMLDivElement | null) => { editorRoot.current = element; setRootElement(element) }, [])
@@ -404,6 +428,7 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
   const fail = (message: string) => reportDiagnostics([{ message, offset: 0, endOffset: 0, line: 1, column: 1 }])
   const previewBlocked = () => setCommandError('正在生成的范围暂时只读。请先停止生成，再编辑这一处。')
   const pinPlugin = useMemo(() => pinnedSelectionPlugin(), [])
+  const flowEditingPlugin = useMemo(() => documentFlowEditingPlugin({ isMultiColumnLayout: id => latest.current.isMultiColumnLayout?.(id) ?? false }), [])
   const previewPlugin = useMemo(() => layoutPreviewPlugin(previewBlocked), [])
   const inlineDefaultsPlugin = useMemo(() => documentInlineDefaultsPlugin(() => latest.current.inlineStyleDefaults), [])
   function publishContextualTarget(target: DocumentContextSelection | null) {
@@ -477,7 +502,7 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
     return result.status === 'valid'
   }
   function updateActiveBlock(state: EditorState) {
-    if (latest.current.active === false || !documentScope || mode !== 'layout' || !state.selection.empty || !(state.selection instanceof TextSelection)) { setActiveBlock(null); return }
+    if (latest.current.active === false || !interactionFocused.current || !documentScope || mode !== 'layout' || !state.selection.empty || !(state.selection instanceof TextSelection)) { setActiveBlock(null); return }
     const point = editorPositionToPoint(state.doc, state.selection.head)
     const id = point?.blockId
     let blockPosition: number | null = null
@@ -488,15 +513,36 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
     const element = node instanceof HTMLElement ? node : null
     if (!id || !element) { setActiveBlock(null); return }
     const rect = element.getBoundingClientRect()
-    if (rect.width <= 0 || rect.height <= 0) { setActiveBlock(null); return }
+    const bounds = visibleEditorBounds(element)
+    if (rect.width <= 0 || rect.height <= 0 || rect.top < bounds.top || rect.top >= bounds.bottom) { setActiveBlock(null); return }
     const next = { id, rect: { left: rect.left, top: rect.top, height: rect.height } }
     setActiveBlock(previous => previous && previous.id === next.id && previous.rect.left === next.rect.left && previous.rect.top === next.rect.top && previous.rect.height === next.rect.height ? previous : next)
   }
   useEffect(() => {
     const reposition = () => { const state = layout.current?.view.state; if (state) updateActiveBlock(state) }
+    const blur = () => { interactionFocused.current = false; setActiveBlock(null); setBlockDrop(null) }
+    const focus = () => { interactionFocused.current = Boolean(layout.current?.view.hasFocus()); reposition() }
     window.addEventListener('scroll', reposition, true); window.addEventListener('resize', reposition)
-    return () => { window.removeEventListener('scroll', reposition, true); window.removeEventListener('resize', reposition) }
+    window.addEventListener('blur', blur); window.addEventListener('focus', focus)
+    return () => { window.removeEventListener('scroll', reposition, true); window.removeEventListener('resize', reposition); window.removeEventListener('blur', blur); window.removeEventListener('focus', focus) }
   }, [mode])
+  useEffect(() => {
+    const outsidePointer = () => {
+      if (outsidePointerFrame.current !== null) cancelAnimationFrame(outsidePointerFrame.current)
+      if (!interactionFocused.current) return
+      outsidePointerFrame.current = requestAnimationFrame(() => {
+        outsidePointerFrame.current = null
+        if (!draggingBlock.current) { interactionFocused.current = false; setActiveBlock(null) }
+      })
+    }
+    // A focused menu can be removed by an outside press without firing blur.
+    // The React capture handler below cancels this for the editor and all its portals.
+    window.document.addEventListener('pointerdown', outsidePointer, true)
+    return () => {
+      window.document.removeEventListener('pointerdown', outsidePointer, true)
+      if (outsidePointerFrame.current !== null) cancelAnimationFrame(outsidePointerFrame.current)
+    }
+  }, [])
   useEffect(() => {
     if (props.active === false) { setActiveBlock(null); objectMenu.close(); return }
     if (layout.current) updateActiveBlock(layout.current.view.state)
@@ -529,6 +575,7 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
     return documentBlockMenu({ content: fromEditorDocument(editor.view.state.doc),
       readContent: () => fromEditorDocument(editor.view.state.doc), blockId, apply: applyDocumentContent, onError: fail,
       duplicate: latest.current.clipboardResourcePort ? id => { void editor.duplicateBlock(id) } : undefined,
+      columns: latest.current.onColumns ? createColumns : undefined,
       ai: latest.current.onContextualCommand ? id => {
         let at = -1
         editor.view.state.doc.descendants((node, position) => { if (at < 0 && node.attrs.id === id) at = position; return at < 0 })
@@ -537,6 +584,10 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
         editor.view.focus()
       } : undefined,
       disabledReason: previewSelection() ? '正在生成的范围暂时只读' : null })
+  }
+  function createColumns(instanceIds: readonly string[]) {
+    try { void Promise.resolve(latest.current.onColumns?.(instanceIds)).catch(fail) }
+    catch (error) { fail(error instanceof Error ? error.message : String(error)) }
   }
   function clipboardMenu(): MenuCommand[] {
     const editor = layout.current
@@ -610,7 +661,7 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
       disabledReason: previewSelection() ? '正在生成的范围暂时只读' : null, run: () => run('delete-table') }]
   }
   const options = () => ({ draftSession, contentScope: latest.current.contentScope,hiddenBlockIds:latest.current.hiddenBlockIds, presentation: latest.current.target === 'flow' ? 'flow' as const : undefined, stateChanged: (state: EditorState) => { const next = readDocumentFormatting(state, latest.current.inlineStyleDefaults); setFormat(previous => JSON.stringify(previous) === JSON.stringify(next) ? previous : next); updateActiveBlock(state) }, requestMathDraft: (request: { from: number; to: number; display: true; latex: ''; formulaId: string }) => {const editor=layout.current;if(editor){mathTarget.current?.release();mathTarget.current=editor.trackSelection(TextSelection.create(editor.view.state.doc,request.from,request.to))}setMathDraft({ ...request, accessibleText: '' })}, document: projection.current.document, sourceMap: mapRef.current, revision: latest.current.revision,
-    projectionPlugins: [previewPlugin, pinPlugin, inlineDefaultsPlugin], projectionClipboard: (view: Parameters<typeof layoutPreviewClipboard>[0], event: ClipboardEvent, cut: boolean) => {
+    projectionPlugins: [...(latest.current.target === 'flow' ? [flowEditingPlugin] : []), previewPlugin, pinPlugin, inlineDefaultsPlugin], projectionClipboard: (view: Parameters<typeof layoutPreviewClipboard>[0], event: ClipboardEvent, cut: boolean) => {
       const handled = layoutPreviewClipboard(view, event, cut)
       if (handled && cut) previewBlocked()
       return handled
@@ -837,6 +888,11 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
     if (source.current) source.current.dispatch({ effects: sourcePinnedSelectionEffect.of([...pins.flatMap(pin => sourcePreviewRanges(pin, mapRef.current, draft.current, toEditorDocument(projection.current.document.content))), ...(localPin?.mode === 'source' && localPin.revision === props.revision ? [localPin] : [])]) })
   }, [mode, props.pinnedTargets, props.revision, fallbackMap, localPin])
   useImperativeHandle(ref, () => ({
+    captureInsertionSelection: () => {
+      const editor = layout.current
+      if (!editor || mode !== 'layout' || latest.current.readOnly || sourceComposing.current || editor.view.composing) throw new Error('请在正文中选择插入位置并完成当前输入')
+      return editor.captureInsertionSelection()
+    },
     clearSelection: clearDocumentSelection,
     focusAtClientPoint: point => {
       const editor = layout.current
@@ -847,6 +903,17 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
         editor.view.dispatch(editor.view.state.tr.setSelection(TextSelection.near(editor.view.state.doc.resolve(hit.pos))))
         editor.view.focus()
         return true
+      } catch { return false }
+    },
+    selectAtClientPoints: (anchor, head) => {
+      const editor = layout.current
+      if (!editor || mode !== 'layout' || latest.current.active === false || latest.current.readOnly || editor.view.composing) return false
+      const view = editor.view
+      try {
+        const from = view.posAtCoords({ left: anchor.x, top: anchor.y }), to = view.posAtCoords({ left: head.x, top: head.y })
+        if (!from || !to) return false
+        view.dispatch(view.state.tr.setSelection(TextSelection.between(view.state.doc.resolve(from.pos), view.state.doc.resolve(to.pos))))
+        view.focus(); return true
       } catch { return false }
     },
     paintProjection: paint => { layout.current?.paintProjection(paint) },
@@ -860,7 +927,8 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
       const ready = !sourceComposing.current && !sourceInvalid.current && !restoredDiagnostics.current && (layout.current?.flush() ?? !draftSession.rejected)
       return { ready, source: deferredLayoutSource && mode === 'layout' && !sourceComposing.current && !layout.current?.view.composing ? materializeSource() : draft.current, diagnostics: diagnosticsRef.current }
     },
-    drain, drainSource, discardDraft: discardLocalDraft,
+    drain, drainSource, canPreserveDraft: () => !sourceComposing.current && !source.current?.composing && !layout.current?.view.composing
+      && (sourceInvalid.current || restoredDiagnostics.current || draftSession.rejected), discardDraft: discardLocalDraft,
     getContextualEditTarget: () => contextualTargetRef.current,
     focusEndParagraph: () => {
       const editor = layout.current
@@ -926,9 +994,10 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
     },
   }), [diagnostics, mode])
   async function drain() {
-    if (sourceComposing.current || source.current?.composing || sourceInvalid.current || restoredDiagnostics.current) return { ready: false, source: draft.current, diagnostics: diagnosticsRef.current }
+    if (sourceComposing.current || source.current?.composing) return { ready: false, source: draft.current, diagnostics: diagnosticsRef.current }
     const ready = layout.current ? await layout.current.drain() : await draftSession.drain()
-    return { ready, source: deferredLayoutSource && mode === 'layout' ? materializeSource() : draft.current, diagnostics: diagnosticsRef.current }
+    return { ready: ready && !sourceInvalid.current && !restoredDiagnostics.current,
+      source: deferredLayoutSource && mode === 'layout' ? materializeSource() : draft.current, diagnostics: diagnosticsRef.current }
   }
   function isFileSource() { return latest.current.target === 'file' && mode === 'source' }
   async function drainSource() {
@@ -945,10 +1014,26 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
   }
   async function discardLocalDraft() {
     if (sourceComposing.current || source.current?.composing || layout.current?.view.composing) return
-    const owner = draftOwner.current ?? latest.current
+    const owner = draftOwner.current ?? latest.current, raw = draft.current, formal = latest.current.document
     await draftSession.drain()
+    if (await owner.onDiscardDraft?.() === false) return
+    if (draft.current !== raw || latest.current.document !== formal) return
     if (!await draftSession.discard(latest.current.document)) return
-    owner.onDiscardDraft?.()
+    resetLocalDraft()
+  }
+  async function preserveLocalDraft() {
+    if (sourceComposing.current || source.current?.composing || layout.current?.view.composing) return
+    const owner = draftOwner.current ?? latest.current, raw = draft.current, formal = latest.current.document
+    await draftSession.drain()
+    // The owner also owns prepared resources: it must decline this exit while
+    // their raw bytes have not been durably preserved. Never discard a batch to
+    // make an unrelated editor appear ready.
+    if (!await owner.onPreserveDraft?.()) return
+    if (draft.current !== raw || latest.current.document !== formal) return
+    if (!await draftSession.discard(latest.current.document)) return
+    resetLocalDraft()
+  }
+  function resetLocalDraft() {
     draftOwner.current = null; restoredDiagnostics.current = false; latestOperation.current = null
     const current = latest.current, text = current.target === 'file' && current.sourceDraft !== undefined ? current.sourceDraft : serializeDocumentMarkdown(current.document, current.target)
     const parsed = documentScope ? parseDocumentMarkdown(text, editorMarkdownOptions(current)) : null
@@ -1127,14 +1212,31 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
     } catch (error) { fail(error instanceof Error ? error.message : String(error)) }
   }
   const discardButton = diagnostics.length > 0 && (props.target !== 'file' || draftSession.rejected || restoredDiagnostics.current) && <button type="button" onClick={() => { void discardLocalDraft().catch(error => fail(error instanceof Error ? error.message : String(error))) }}>丢弃待修草稿</button>
-  function insertTable() {
+  const preserveButton = diagnostics.length > 0 && props.onPreserveDraft && <button type="button" onClick={() => { void preserveLocalDraft().catch(error => fail(error instanceof Error ? error.message : String(error))) }}>保留原稿并继续编辑</button>
+  function insertAtSelection(kind: DocumentBlockKind | 'chart', afterBlockId?: string) {
     const editor = layout.current
     if (!editor || latest.current.readOnly) return
     editor.syncDomTextSelection()
     const content = fromEditorDocument(editor.view.state.doc)
-    const point = editorPositionToPoint(editor.view.state.doc, editor.view.state.selection.head)
-    const blockId = point?.blockId ?? content.blocks.at(-1)?.id
-    applyDocumentContent(blockId ? applyDocumentBlockCommand(content, { action: 'insert-below', blockId, kind: 'table' }) : { blocks: [createDocumentBlock('table')] })
+    const selection = afterBlockId ? { revision: latest.current.revision, kind: 'object' as const, blockId: afterBlockId } : editor.readSelection()
+    try {
+      const professional = kind === 'chart' ? prepareProfessionalElement('chart') : null
+      const block: DocumentBlock = professional ? { id: crypto.randomUUID(), type: 'chart', chart: chartDataSchema.parse(professional.data), height: professional.height } : createDocumentBlock(kind as DocumentBlockKind)
+      applyDocumentContent(insertDocumentBlocks(content, selection, [block]))
+      setInsertionFallback(null)
+    } catch (error) {
+      if (error instanceof DocumentInsertionTargetError && selection) {
+        try { setInsertionFallback({ blockId: documentInsertionBlockId(content, selection), kind, message: error.message }); return } catch { /* The original block may have disappeared. */ }
+      }
+      fail(error instanceof Error ? error.message : String(error))
+    }
+  }
+  function insertTable() { insertAtSelection('table') }
+  function selectionInsertionMenu(): MenuCommand[] {
+    return [...DOCUMENT_BLOCK_KINDS, { kind: 'chart' as const, label: '图表' }].map(({ kind, label }) => ({
+      id: `insert-at-${kind}`, label: `插入${label}`, group: '插入', run: () => insertAtSelection(kind),
+      disabledReason: previewSelection() ? '正在生成的范围暂时只读' : undefined,
+    }))
   }
   function patchBlockProperties(blockId: string, patch: Record<string, unknown>) {
     const editor = layout.current
@@ -1159,22 +1261,32 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
       {documentScope && modeControls}
       {mode === 'layout' && props.contentScope === 'formula' && <button type="button" onMouseDown={event => event.preventDefault()} onClick={openMath}>编辑公式</button>}
       {mode === 'layout' && props.contentScope !== 'formula' && <>
-        {([['bold', '粗体'], ['italic', '斜体'], ['underline', '下划线'], ['strike', '删除线'], ['emphasis', '着重号']] as const).map(([key, label]) => <button key={key} type="button" onMouseDown={event => event.preventDefault()} aria-label={label} title={label} aria-pressed={format.flags[key]} onClick={() => toggleStyle(key)}>{key === 'bold' ? <Bold size={16} /> : key === 'italic' ? <Italic size={16} /> : key === 'underline' ? <Underline size={16} /> : key === 'strike' ? <Strikethrough size={16} /> : <Dot size={16} />}</button>)}
-        <button type="button" aria-label="减小字号" title="按原字号减小" onMouseDown={event => event.preventDefault()} onClick={() => style(effective => ({ fontSize: stepFontSize(effective.fontSize ?? 16, -1) }))}><AArrowDown size={16} /></button>        <label><input aria-label="字号" type="number" min="8" max="400" value={format.fontSize === 'mixed' ? '' : format.fontSize ?? ''} placeholder={format.fontSize === 'mixed' ? '混合' : '默认'} onChange={event => { const value = Number(event.target.value); if (value >= 8 && value <= 400) style({ fontSize: value }) }} /></label>
-        <button type="button" aria-label="增大字号" title="按原字号增大" onMouseDown={event => event.preventDefault()} onClick={() => style(effective => ({ fontSize: stepFontSize(effective.fontSize ?? 16, 1) }))}><AArrowUp size={16} /></button>        <label><select aria-label="字体" value={format.fontFamily === 'mixed' ? '__mixed' : format.fontFamily ?? ''} onChange={event => { if (event.target.value && event.target.value !== '__mixed') style({ fontFamily: event.target.value }) }}><option value="">默认字体</option>{format.fontFamily === 'mixed' && <option value="__mixed">混合字体</option>}{format.fontFamily && format.fontFamily !== 'mixed' && !FONT_FAMILY_OPTIONS.some(option => option.family === format.fontFamily) && <option value={format.fontFamily}>{format.fontFamily}</option>}{FONT_FAMILY_OPTIONS.map(option => <option key={option.family} value={option.family}>{option.label}</option>)}</select></label>
+        {([['bold', '粗体'], ['italic', '斜体'], ['underline', '下划线']] as const).map(([key, label]) => <button key={key} type="button" onMouseDown={event => event.preventDefault()} aria-label={label} title={label} aria-pressed={format.flags[key]} onClick={() => toggleStyle(key)}>{key === 'bold' ? <Bold size={16} /> : key === 'italic' ? <Italic size={16} /> : <Underline size={16} />}</button>)}
+        <label><input aria-label="字号" type="number" min="8" max="400" value={format.fontSize === 'mixed' ? '' : format.fontSize ?? ''} placeholder={format.fontSize === 'mixed' ? '混合' : '默认'} onChange={event => { const value = Number(event.target.value); if (value >= 8 && value <= 400) style({ fontSize: value }) }} /></label>
+        <label><select aria-label="字体" value={format.fontFamily === 'mixed' ? '__mixed' : format.fontFamily ?? ''} onChange={event => { if (event.target.value && event.target.value !== '__mixed') style({ fontFamily: event.target.value }) }}><option value="">默认字体</option>{format.fontFamily === 'mixed' && <option value="__mixed">混合字体</option>}{format.fontFamily && format.fontFamily !== 'mixed' && !FONT_FAMILY_OPTIONS.some(option => option.family === format.fontFamily) && <option value={format.fontFamily}>{format.fontFamily}</option>}{FONT_FAMILY_OPTIONS.map(option => <option key={option.family} value={option.family}>{option.label}</option>)}</select></label>
         <PaletteButton label="文字颜色" text="颜色" onPick={color => { if (color) style({ color }) }} />
         <PaletteButton label="高亮颜色" text="高亮" variant="highlight" onPick={highlightColor => style({ highlightColor })} />
-        <button type="button" aria-label="上标" title="上标" onMouseDown={event => event.preventDefault()} onClick={() => style({ baseline: 0.35 })}><Superscript size={16} /></button>
-        <button type="button" aria-label="下标" title="下标" onMouseDown={event => event.preventDefault()} onClick={() => style({ baseline: -0.25 })}><Subscript size={16} /></button>
-        <button type="button" aria-label="行内代码" title="行内代码" onMouseDown={event => event.preventDefault()} onClick={() => { const editor = layout.current; if (editor) toggleMark(documentEditorSchema.marks.code)(editor.view.state, editor.view.dispatch) }}><Code size={16} /></button>
         <button type="button" aria-label="链接" title="链接" onMouseDown={event => event.preventDefault()} onClick={() => { const editor=layout.current;if(!editor)return;const state=editor.view.state;let selected=state.selection;const mark=state.selection.$from.marks().find(mark=>mark.type===documentEditorSchema.marks.link);if(mark && selected.empty){const parent=selected.$from.parent,base=selected.$from.start();let from=selected.from,to=selected.to;parent.forEach((node,pos)=>{if(node.marks.some(value=>value.eq(mark))){if(base+pos<=selected.from && base+pos+node.nodeSize>=selected.from){from=base+pos;to=base+pos+node.nodeSize}}});while(from>base && state.doc.resolve(from).nodeBefore?.marks.some(value=>value.eq(mark)))from-=state.doc.resolve(from).nodeBefore!.nodeSize;while(to<selected.$from.end() && state.doc.resolve(to).nodeAfter?.marks.some(value=>value.eq(mark)))to+=state.doc.resolve(to).nodeAfter!.nodeSize;selected=TextSelection.create(state.doc,from,to)}linkTarget.current?.release();linkTarget.current=editor.trackSelection(selected);setLinkDraft(mark?.attrs.href ?? '') }}><Link2 size={16} /></button>
         <button type="button" aria-label="公式" title="公式" onMouseDown={event => event.preventDefault()} onClick={openMath}><Sigma size={16} /></button>
         {documentScope && <button type="button" aria-label="插入表格" title="插入表格" onMouseDown={event => event.preventDefault()} onClick={insertTable}><Table2 size={16} aria-hidden="true" /></button>}
         {!documentScope && <button type="button" aria-label="清除文字格式" title="清除文字格式" onMouseDown={event => event.preventDefault()} onClick={clearFormatting}><Eraser size={16} /></button>}
         {documentScope && <select aria-label="段落类型" value={format.paragraphType} onChange={event => applyParagraphType(event.target.value)}><option value="" disabled>段落类型</option><option value="paragraph">正文</option>{[1,2,3,4,5,6].map(level => <option key={level} value={level}>标题 {level}</option>)}</select>}
+        <button type="button" aria-label="更多文字格式" title="更多文字格式" aria-haspopup="menu" aria-expanded={formattingMenu.isOpen} onMouseDown={event => event.preventDefault()} onClick={event => {
+          if (formattingMenu.isOpen) { formattingMenu.close(); return }
+          const rect = event.currentTarget.getBoundingClientRect()
+          formattingMenu.open({ x: rect.left, y: rect.bottom }, '更多文字格式', [
+            { id: 'strike', label: '删除线', run: () => toggleStyle('strike') },
+            { id: 'emphasis', label: '着重号', run: () => toggleStyle('emphasis') },
+            { id: 'superscript', label: '上标', run: () => style({ baseline: 0.35 }) },
+            { id: 'subscript', label: '下标', run: () => style({ baseline: -0.25 }) },
+            { id: 'smaller', label: '减小字号', run: () => style(effective => ({ fontSize: stepFontSize(effective.fontSize ?? 16, -1) })) },
+            { id: 'larger', label: '增大字号', run: () => style(effective => ({ fontSize: stepFontSize(effective.fontSize ?? 16, 1) })) },
+            { id: 'clear', label: '清除文字格式', run: clearFormatting },
+          ])
+        }}><MoreHorizontal size={16} /></button>
       </>}
       {mode === 'layout' && !props.readOnly && props.renderTextActions?.(semanticSelection)}
-      {discardButton}
+      {preserveButton}{discardButton}
     </div>
   const editorForms = <>
     {linkDraft !== null && <form className="shared-document-form" aria-label="链接编辑" onSubmit={event => {
@@ -1266,6 +1378,13 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
         </div>}
       </QuickBarPopoverButton>}
       {props.renderQuickBarActions?.(contextualTarget)}
+      {props.onColumns && mode === 'layout' && !props.readOnly && <QuickBarButton label="所选段落分为两列" text="分栏"
+        disabled={Boolean(previewSelection()) || !documentColumnSelection(props.document.content, contextualTarget.selection)}
+        onClick={() => {
+          const content = layout.current && fromEditorDocument(layout.current.view.state.doc)
+          const ids = content && documentColumnSelection(content, contextualTarget.selection)
+          if (ids) createColumns(ids)
+        }} />}
       {props.target === 'file' && propertyBlock && ['paragraph', 'heading', 'quote', 'table', 'formula', 'media'].includes(propertyBlock.type) && <QuickBarPopoverButton label="属性" icon={<SlidersHorizontal size={16} />} popoverLabel="当前文档块属性">
         {() => <div className="shared-document-block-properties" data-document-block-id={propertyBlock.id}>
           {(propertyBlock.type === 'paragraph' || propertyBlock.type === 'heading' || propertyBlock.type === 'quote') && <>
@@ -1286,21 +1405,66 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
       {props.renderQuickBarMenu?.(contextualTarget)}
       {commandError && <span role="alert" className="selection-quick-bar__notice" title={commandError}>{commandError}</span>}
     </SelectionQuickBar>
-  return <div ref={attachRoot} inert={props.active === false} onDragOverCapture={event => { if (props.active !== false && documentScope && event.dataTransfer.types.includes(DOCUMENT_BLOCK_DRAG_MIME)) { event.preventDefault(); event.stopPropagation() } }}
-    onDropCapture={event => {
-      if (props.active === false || !documentScope || !event.dataTransfer.types.includes(DOCUMENT_BLOCK_DRAG_MIME)) return
-      event.preventDefault(); event.stopPropagation()
-      if (props.readOnly || mode !== 'layout') return
-      const sourceId = documentBlockDragId(event.dataTransfer)
-      const target = (event.target as HTMLElement).closest<HTMLElement>('[data-flow-block-id]')
-      const targetId = target?.dataset.flowBlockId
-      if (!sourceId || !targetId || sourceId === targetId || !layout.current) return
-      const side = event.clientY < target!.getBoundingClientRect().top + target!.getBoundingClientRect().height / 2 ? 'before' : 'after'
-      try {
-        const content = fromEditorDocument(layout.current.view.state.doc)
-        applyDocumentContent(applyDocumentBlockCommand(content, { action: 'move', blockId: sourceId, targetId, side }))
-      } catch (error) { fail(error instanceof Error ? error.message : String(error)) }
+  function resolveBlockDrop(sourceId: string, point: { x: number; y: number }) {
+    const view = layout.current?.view
+    if (!view || props.readOnly || mode !== 'layout') return null
+    const paper = view.dom.closest('.flow-paper') ?? view.dom
+    if (point.y < paper.getBoundingClientRect().top) return null
+    return documentBlockDropTarget(draggedBlockContent.current ?? fromEditorDocument(view.state.doc), view.dom, sourceId, point)
+  }
+  type BlockDragEvent = Pick<DragEvent, 'dataTransfer' | 'clientX' | 'clientY' | 'preventDefault' | 'stopPropagation'>
+  function overBlock(event: BlockDragEvent) {
+    if (props.active === false || !documentScope || !event.dataTransfer?.types.includes(DOCUMENT_BLOCK_DRAG_MIME)) return
+    event.preventDefault(); event.stopPropagation()
+    if (props.readOnly || mode !== 'layout') return
+    event.dataTransfer.dropEffect = 'move'
+    // Chromium protects transfer data until drop; retain the source at dragstart.
+    const sourceId = draggedBlockId.current
+    const next = sourceId ? resolveBlockDrop(sourceId, { x: event.clientX, y: event.clientY }) : null
+    setBlockDrop(previous => previous && next && previous.targetId === next.targetId && previous.side === next.side
+      && previous.left === next.left && previous.top === next.top && previous.width === next.width ? previous : next)
+  }
+  function dropBlock(event: BlockDragEvent) {
+    if (props.active === false || !documentScope || !event.dataTransfer?.types.includes(DOCUMENT_BLOCK_DRAG_MIME)) return
+    event.preventDefault(); event.stopPropagation()
+    setBlockDrop(null); draggingBlock.current = false; draggedBlockId.current = null; draggedBlockContent.current = null
+    if (props.readOnly || mode !== 'layout') return
+    const sourceId = documentBlockDragId(event.dataTransfer)
+    const target = sourceId ? resolveBlockDrop(sourceId, { x: event.clientX, y: event.clientY }) : null
+    if (!sourceId || !target || !layout.current) return
+    try {
+      const content = fromEditorDocument(layout.current.view.state.doc)
+      applyDocumentContent(applyDocumentBlockCommand(content, { action: 'move', blockId: sourceId, targetId: target.targetId, side: target.side }))
+    } catch (error) { fail(error instanceof Error ? error.message : String(error)) }
+  }
+  blockDragHandlers.current = { over: overBlock, drop: dropBlock }
+  useEffect(() => {
+    // Flow's blank paper extends beyond the PM root. Route it to the same paragraph owner.
+    const paper = editorRoot.current?.closest('.flow-paper')
+    if (!paper) return
+    const over = (event: Event) => blockDragHandlers.current?.over(event as DragEvent)
+    const drop = (event: Event) => blockDragHandlers.current?.drop(event as DragEvent)
+    paper.addEventListener('dragover', over, true); paper.addEventListener('drop', drop, true)
+    return () => { paper.removeEventListener('dragover', over, true); paper.removeEventListener('drop', drop, true) }
+  }, [mode])
+  return <div ref={attachRoot} inert={props.active === false}
+    onPointerDownCapture={() => {
+      if (outsidePointerFrame.current !== null) { cancelAnimationFrame(outsidePointerFrame.current); outsidePointerFrame.current = null }
     }}
+    onFocusCapture={() => { ++focusGeneration.current; interactionFocused.current = true; if (layout.current) updateActiveBlock(layout.current.view.state) }}
+    onBlurCapture={() => {
+      const generation = ++focusGeneration.current
+      // Keep the handle mounted while the browser transfers focus to it or an owned portal.
+      // Flow publishes its selection synchronously on blur, before the next focus event.
+      requestAnimationFrame(() => {
+        if (generation !== focusGeneration.current || draggingBlock.current) return
+        interactionFocused.current = false; setActiveBlock(null)
+      })
+    }}
+    onDragOverCapture={overBlock}
+    onDragLeave={event => { if (!(event.relatedTarget instanceof Node) || !event.currentTarget.contains(event.relatedTarget)) setBlockDrop(null) }}
+    onDragEndCapture={() => { draggingBlock.current = false; draggedBlockId.current = null; draggedBlockContent.current = null; setBlockDrop(null); if (layout.current) updateActiveBlock(layout.current.view.state) }}
+    onDropCapture={dropBlock}
     onContextMenu={event => {
       if (props.active === false || props.readOnly || mode !== 'layout') return
       const target = (event.target as HTMLElement).closest<HTMLElement>('[data-flow-block-id]')
@@ -1323,16 +1487,16 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
       event.preventDefault()
       openObjectMenu({ x: event.clientX, y: event.clientY }, documentScope ? '段落操作' : '文字操作', [...(documentScope ? activeBlockMenu(id) : []), ...clipboardMenu()])
     }}
-    className={`shared-document-editor${props.target === 'flow' ? ' shared-document-editor--flow' : ''}`} onKeyDown={event => {
+    className={`shared-document-editor${props.target === 'flow' ? ' shared-document-editor--flow' : props.target === 'file' && documentScope ? ' shared-document-editor--file' : ''}`} onKeyDown={event => {
     if (props.active === false) return
     if (documentScope && event.key === 'Escape' && contextualTarget) { event.preventDefault(); setDismissedGeneration(targetGeneration) }
     if (documentScope && event.key === '/' && mode === 'layout' && !event.nativeEvent.isComposing && !props.readOnly && activeBlock && layout.current) {
       const selection = layout.current.view.state.selection
-      if (selection.empty && selection.$from.depth === 1 && selection.$from.parent.type === documentEditorSchema.nodes.paragraph && selection.$from.parent.content.size === 0) {
+      if (selection.empty && selection.$from.parent.type === documentEditorSchema.nodes.paragraph && selection.$from.parent.content.size === 0) {
         event.preventDefault()
         slashReturn.current?.release();slashReturn.current=layout.current.trackSelection()
         openObjectMenu({ x: activeBlock.rect.left, y: activeBlock.rect.top + activeBlock.rect.height }, '插入段落',
-          activeBlockMenu(activeBlock.id).filter(command => command.group === '插入'))
+          selectionInsertionMenu())
       }
     }
   }} onCompositionStartCapture={() => props.onCompositionChange?.(true, deferredLayoutSource && mode === 'layout' ? materializeSource() : draft.current)} onCompositionEndCapture={() => {
@@ -1342,7 +1506,13 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
      {props.active !== false && !props.readOnly && (props.toolbarHost ? createPortal(<>{toolbar}{editorForms}</>, props.toolbarHost) : <>{toolbar}{editorForms}</>)}
      {quickBar}
      {props.active !== false && objectMenu.element}
-      {props.active !== false && documentScope && mode === 'layout' && !props.readOnly && activeBlock && <DocumentBlockHandle blockId={activeBlock.id} rect={activeBlock.rect} commands={activeBlockMenu(activeBlock.id)} disabledReason={previewSelection() ? '正在生成的范围暂时只读' : null} />}
+     {props.active !== false && formattingMenu.element}
+     {props.active !== false && insertionFallback && <div role="alert" className="shared-document-more__mode-notice">{insertionFallback.message}
+       <button type="button" onMouseDown={event => event.preventDefault()} onClick={() => insertAtSelection(insertionFallback.kind, insertionFallback.blockId)}>在所在块下方插入</button>
+       <button type="button" onClick={() => setInsertionFallback(null)}>取消</button>
+     </div>}
+     {props.active !== false && blockDrop && createPortal(<div className="document-block-drop-indicator" style={{ left: blockDrop.left, top: blockDrop.top, width: blockDrop.width }} />, window.document.body)}
+      {props.active !== false && documentScope && mode === 'layout' && !props.readOnly && activeBlock && <DocumentBlockHandle blockId={activeBlock.id} rect={activeBlock.rect} commands={activeBlockMenu(activeBlock.id)} disabledReason={previewSelection() ? '正在生成的范围暂时只读' : null} onDragStart={id => { draggingBlock.current = true; draggedBlockId.current = id; if (layout.current) draggedBlockContent.current = fromEditorDocument(layout.current.view.state.doc) }} />}
      {props.active !== false && allPreviews.length > 0 && <div className="document-generation-status" role="status">{allPreviews.length} 处正文正在生成，生成部分尚未保存。{allPreviews.map((preview, index) => <button key={preview.editId} type="button" aria-label={`停止生成第 ${index + 1} 处`} onClick={preview.cancel}>停止生成 {index + 1}</button>)}{commandError && <span role="alert">{commandError}</span>}</div>}
     {diagnostics.length > 0 && <ul role="alert" aria-label="源文问题">{diagnostics.map((diagnostic, index) => <li key={index}><button type="button" onMouseDown={event => event.preventDefault()} onClick={() => locateDiagnostic(diagnostic)}>第 {diagnostic.line} 行，第 {diagnostic.column} 列：{diagnostic.message}</button></li>)}</ul>}
      {mode === 'layout' ? <div ref={layoutHost} /> : <div ref={sourceHost} />}

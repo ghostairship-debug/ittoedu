@@ -1,12 +1,13 @@
 import { createRoot } from 'react-dom/client'
 import { flushSync } from 'react-dom'
+import { StrictMode } from 'react'
 import { useEditorStore } from '../../src/renderer/store/editorStore'
 import { CourseV10RuntimeView, type CourseV10RuntimePorts } from '../../src/renderer/components/CourseV10RuntimeView'
 import { FlowWorkspaceConnector } from '../../src/renderer/ui/workspaces/FlowWorkspaceConnector'
 import type { DocumentHostAPI } from '../../src/shared/workbench/desktop'
 
 /** Actual Main/Store/Bridge, FlowWorkspace and SharedDocumentEditor; no layout imitation. */
-export async function mountCurrentCourseBrowserHarness(host: HTMLElement, api: DocumentHostAPI) {
+export async function mountCurrentCourseBrowserHarness(host: HTMLElement, api: DocumentHostAPI, strictMode = false) {
   await useEditorStore.getState().connectCourseDocuments(api)
   const root = createRoot(host), errors: string[] = []
   let runtime: CourseV10RuntimePorts | undefined
@@ -22,8 +23,8 @@ export async function mountCurrentCourseBrowserHarness(host: HTMLElement, api: D
       onSurfaceSelect={id => bridge.selectSurface(document.documentId, id)}
       renderWorkspace={ports => { runtime = ports; return <FlowWorkspaceConnector onSelectImageAsset={async () => null} /> }} />
   }
-  flushSync(() => root.render(<View />))
-  return { errors, async dispose() {
+  flushSync(() => root.render(strictMode ? <StrictMode><View /></StrictMode> : <View />))
+  return { get runtime() { if (!runtime) throw new Error('Current Flow runtime missing'); return runtime }, errors, async dispose() {
     flushSync(() => root.unmount()); if (runtime) await runtime.world.dispose(); useEditorStore.getState().courseBridge.dispose()
   } }
 }

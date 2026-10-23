@@ -1,5 +1,6 @@
 import type { createDomAuthoring, DomAuthorObservation } from './authoringDom'
 import type { ComponentAuthorGeometryObservation } from '../../shared/contracts/component-platform/runtime'
+import { createAuthoringFrameGeometry } from './authoringFrame'
 
 type Authoring = ReturnType<typeof createDomAuthoring>
 type Options = Parameters<typeof createDomAuthoring>[1] & { onDocumentsChanged?(): void }
@@ -12,10 +13,12 @@ export interface NestedDomAuthoring extends Authoring {
 
 /** Compose the existing DOM adapter across accessible local document carriers.
  * Keep runtime dependencies inside: saved ordinary HTML embeds this function. */
-export function createNestedDomAuthoring(root: HTMLElement, factory: typeof createDomAuthoring, options: Options): NestedDomAuthoring {
+export function createNestedDomAuthoring(root: HTMLElement, factory: typeof createDomAuthoring, options: Options,
+  frameFactory: typeof createAuthoringFrameGeometry = createAuthoringFrameGeometry): NestedDomAuthoring {
   type Matrix = ComponentAuthorGeometryObservation['parentToInstance']
   type Entry = { document: Document; root: HTMLElement; frame?: HTMLIFrameElement; scope: string; adapter: Authoring }
   const entryDocument = root.ownerDocument
+  const frameFacts = frameFactory()
   const entries = new Map<Document, Entry>()
   const frames = new Set<HTMLIFrameElement>()
   let disposed = false, syncing = false, queued = false, observationActive = true, dirty = false
@@ -111,33 +114,8 @@ export function createNestedDomAuthoring(root: HTMLElement, factory: typeof crea
     if (changedDocuments) options.onDocumentsChanged?.()
   }
   const measureFrameMatrix = (frame: HTMLIFrameElement): Matrix | undefined => {
-    const view = frame.ownerDocument.defaultView, rect = frame.getBoundingClientRect()
-    if (!view || !rect.width || !rect.height) return undefined
-    const width = frame.offsetWidth || frame.clientWidth || rect.width, height = frame.offsetHeight || frame.clientHeight || rect.height
-    let linear = identity()
-    const MatrixClass = (view as Window & { DOMMatrix?: typeof DOMMatrix }).DOMMatrix
-    if (MatrixClass) {
-      for (let element: HTMLElement | null = frame; element; element = element.parentElement) {
-        const style = view.getComputedStyle(element), transform = new MatrixClass(style.transform === 'none' || !style.transform ? undefined : style.transform)
-        if (!transform.is2D) return undefined
-        let angle = 0
-        if (style.rotate && style.rotate !== 'none') {
-          const match = /^(?:z\s+)?(-?[\d.]+)(deg|rad|turn)$/.exec(style.rotate)
-          if (!match) return undefined
-          angle = Number(match[1]) * (match[2] === 'deg' ? Math.PI / 180 : match[2] === 'turn' ? Math.PI * 2 : 1)
-        }
-        const scale = style.scale && style.scale !== 'none' ? style.scale.split(/\s+/).map(Number) : [1, 1]
-        if (scale.length > 2 || scale.some(value => !Number.isFinite(value))) return undefined
-        const zoom = parseFloat(style.zoom) || 1, x = scale[0]! * zoom, y = (scale[1] ?? scale[0])! * zoom
-        const cosine = Math.cos(angle), sine = Math.sin(angle)
-        linear = multiply(multiply([cosine * x, sine * x, -sine * y, cosine * y, 0, 0],
-          [transform.a, transform.b, transform.c, transform.d, 0, 0]), linear)
-      }
-    } else linear = [rect.width / width, 0, 0, rect.height / height, 0, 0]
-    const xs = [0, linear[0] * width, linear[2] * height, linear[0] * width + linear[2] * height]
-    const ys = [0, linear[1] * width, linear[3] * height, linear[1] * width + linear[3] * height]
-    const border: Matrix = [linear[0], linear[1], linear[2], linear[3], rect.x - Math.min(...xs), rect.y - Math.min(...ys)]
-    return multiply(border, [1, 0, 0, 1, frame.clientLeft, frame.clientTop])
+    if (!entries.get(frame.ownerDocument)?.adapter.visible(frame)) return undefined
+    return frameFacts.frameMatrix(frame)
   }
   const frameMatrix = (frame: HTMLIFrameElement): Matrix | undefined => {
     if (readScope?.frames.has(frame)) return readScope.frames.get(frame)
@@ -174,8 +152,12 @@ export function createNestedDomAuthoring(root: HTMLElement, factory: typeof crea
     const local = entries.get(node.ownerDocument!)?.adapter.geometry(node), matrix = toEntry(node.ownerDocument!)
     return local && matrix ? { ...local, parentToInstance: multiply(matrix, local.parentToInstance) } : undefined
   }
-  const observation = (value: DomAuthorObservation | null | undefined): DomAuthorObservation | null => value
-    ? { ...value, ...(value.geometry ? { geometry: geometry(value.node) } : {}) } : null
+  const observation = (value: DomAuthorObservation | null | undefined): DomAuthorObservation | null => {
+    if (!value) return null
+    const matrix = toEntry(value.node.ownerDocument!)
+    return { ...value, ...(value.geometry ? { geometry: geometry(value.node) } : {}),
+      ...(value.textStyle && matrix ? { textStyle: frameFacts.transformTextStyle(value.textStyle, matrix) } : {}) }
+  }
   const rect = (node: Node) => {
     const document = node.ownerDocument!, matrix = toEntry(document)
     const local = node.nodeType === 1 ? (node as Element).getBoundingClientRect() : (() => {
@@ -221,13 +203,17 @@ export function createNestedDomAuthoring(root: HTMLElement, factory: typeof crea
     },
     documents() { sync(); return [...entries.keys()] },
     roots() { sync(); return [...entries.values()].flatMap(entry => entry.adapter.roots()) },
+    visible(node) { return withReadScope(() => Boolean(node.ownerDocument && toEntry(node.ownerDocument) && entries.get(node.ownerDocument)?.adapter.visible(node))) },
     refresh() { sync(); for (const entry of entries.values()) entry.adapter.refresh() },
-    describe(node) { sync(); return observation(entries.get(node.ownerDocument!)?.adapter.describe(node)) },
-    geometry(node) { sync(); return geometry(node) },
-    textStyle(node) { sync(); return entries.get(node.ownerDocument!)?.adapter.textStyle(node) },
+    describe(node) { return withReadScope(() => observation(entries.get(node.ownerDocument!)?.adapter.describe(node))) },
+    geometry(node) { return withReadScope(() => geometry(node)) },
+    textStyle(node) { return withReadScope(() => {
+      const style = entries.get(node.ownerDocument!)?.adapter.textStyle(node), matrix = toEntry(node.ownerDocument!)
+      return style && matrix ? frameFacts.transformTextStyle(style, matrix) : style
+    }) },
     suppressText(target?: string | Node) { sync(); for (const entry of entries.values()) entry.adapter.suppressText(typeof target === 'string' || target?.ownerDocument === entry.document ? target : undefined) },
     rect,
-    scan() { sync(); return [...entries.values()].flatMap(entry => entry.adapter.scan().map(value => observation(value)!)) },
+    scan() { sync(); return withReadScope(() => [...entries.values()].flatMap(entry => toEntry(entry.document) ? entry.adapter.scan().map(value => observation(value)!) : [])) },
     previewGeometry(authorKey, value) { sync(); for (const entry of entries.values()) entry.adapter.previewGeometry(authorKey, value) },
     paintedElementAt(x, y) { sync(); return entries.get(entryDocument)?.adapter.paintedElementAt(x, y) },
     hit(x, y) {

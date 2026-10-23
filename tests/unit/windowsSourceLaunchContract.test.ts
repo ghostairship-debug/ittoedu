@@ -23,14 +23,25 @@ describe('legacy PPT conversion failure isolation', () => {
   it('rejects renamed ZIP files before launching PowerPoint', () => {
     expect(() => assertLegacyPpt(new Uint8Array([0x50, 0x4b]))).toThrow('不是旧版二进制 PPT')
   })
-  it('cancels only the conversion worker on explicit abort and cleans its copied input', async () => {
+  it('waits for cooperative conversion cleanup on explicit abort and cleans only its copied input', async () => {
     const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'ppt-resave-test-'))
     const source = path.join(directory, 'original.ppt'), temporary = path.join(directory, 'temporary')
     const bytes = Buffer.alloc(512); Buffer.from([0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1]).copy(bytes)
     await fs.writeFile(source, bytes)
+    const cleanup = path.join(directory, 'worker-cleaned')
     const runner = (_script: string, input: string) => {
       expect(input).not.toBe(source)
-      return spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] })
+      // The replacement runner follows the production cancellation marker,
+      // including finishing its cleanup before resaveLegacyPpt may return.
+      return spawn(process.execPath, ['-e', `
+        const fs = require('node:fs'), path = require('node:path');
+        const timer = setInterval(() => {
+          if (fs.existsSync(path.join(path.dirname(process.argv[1]), 'cancel'))) {
+            clearInterval(timer);
+            setTimeout(() => { fs.writeFileSync(process.argv[2], 'cleaned'); process.exit(0) }, 30);
+          }
+        }, 10);
+      `, input, cleanup], { windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] })
     }
     try {
       const controller = new AbortController()
@@ -38,6 +49,7 @@ describe('legacy PPT conversion failure isolation', () => {
         const child = runner(args[0], args[1]); setTimeout(() => controller.abort(), 30); return child
       } })
       await expect(pending).rejects.toThrow('取消')
+      expect(await fs.readFile(cleanup, 'utf8')).toBe('cleaned')
       expect(await fs.readFile(source)).toEqual(bytes)
       expect(await fs.readdir(temporary)).toEqual([])
     } finally { await fs.rm(directory, { recursive: true, force: true }) }

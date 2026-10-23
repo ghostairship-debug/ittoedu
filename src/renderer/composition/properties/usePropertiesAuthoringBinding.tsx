@@ -6,6 +6,7 @@ import type { ComponentInstance, JsonValue } from '../../../shared/contracts/com
 import { resolveComponentPresentation } from '../../../shared/contracts/component-platform'
 import { mergeComponentBackground } from '../../../shared/componentBackgroundPaint'
 import type { CapturedCourseTarget } from '../../documents/CourseV10DocumentBridge'
+import { isCourseComponentInputFailure, settleCourseComponentInput } from '../../documents/CourseV10DocumentBridge'
 import type { TextRunEdit } from '../../../shared/textRuns'
 import { formatTextComponentRange, replaceTextComponentRange, textComponentDataSchema, type TextComponentData } from '../../../components/text/data'
 import { parseTableData, tableCellContent } from '../../../components/table/data'
@@ -72,7 +73,26 @@ export function usePropertiesAuthoringBinding({ onReplaceImage }: { readonly onR
     interactionSelectionIdentity(read.selectedField)])
   const feedback = (value: { kind: 'error' | 'status'; message: string }) => kernel.setFeedback(value.kind === 'error'
     ? { errorMessage: value.message, statusMessage: null } : { errorMessage: null, statusMessage: value.message })
-  const report = (error: unknown) => feedback({ kind: 'error', message: error instanceof Error ? error.message : String(error) })
+  const report = async (error: unknown) => {
+    const message = error instanceof Error ? error.message : String(error)
+    if (typeof window !== 'undefined') void window.desktopAPI?.reportDiagnostic?.({ source: 'renderer', message,
+      ...(error instanceof Error && error.stack ? { stack: error.stack } : {}) }).catch(() => {})
+    if (isCourseComponentInputFailure(error)) {
+      try {
+        const outcome = await settleCourseComponentInput(error)
+        if (outcome === 'applied') return
+        try { requireLiveSelection() } catch { return }
+        feedback(outcome === 'pending' ? { kind: 'error', message: '这次属性修改的回执尚未确认，输入已保留；请稍后重试查证。' }
+          : { kind: 'status', message: '本次属性修改未应用，可在对应位置重新操作。' })
+      } catch (failure) {
+        try { requireLiveSelection() } catch { return }
+        feedback({ kind: 'error', message: failure instanceof Error ? failure.message : String(failure) })
+      }
+      return
+    }
+    try { requireLiveSelection() } catch { return }
+    feedback({ kind: 'error', message })
+  }
   const requireLiveSelection = (): void => {
     const current = selectPropertiesAuthoringReadModel(useEditorStore.getState())
     if (JSON.stringify([current.documentId, current.epoch, current.rootInstanceId, current.surface?.id, current.activeStateId, current.selectedInstanceIds, current.editingGlobal,
@@ -348,9 +368,9 @@ export function usePropertiesAuthoringBinding({ onReplaceImage }: { readonly onR
         }
         edits.push({ type: 'data.set', instanceId: node.id, path: ['style'], value: json(style) })
       }
-      return submit(edits, target).then(() => null, error => error instanceof Error ? error.message : String(error))
+      return submit(edits, target).then(() => null)
     }
-    catch (error) { return error instanceof Error ? error.message : String(error) }
+    catch (error) { if (isCourseComponentInputFailure(error)) throw error; return error instanceof Error ? error.message : String(error) }
   }, report) : null
   const selectedContext: SlideNativePropertiesContext | null = node && selected ? {
     kind: 'slide-native', draftBindingKey: key, view: node, target: { layerItemId: selected.id },

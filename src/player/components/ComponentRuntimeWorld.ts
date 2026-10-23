@@ -707,8 +707,8 @@ export class ComponentRuntimeWorld {
     if (!project?.instances[id]) return false
     const implementation = project.instances[id].implementationOverride ?? project.definitions[project.instances[id].definitionId]?.implementation
     if (implementation?.kind === 'builtin' && implementation.key === 'guoling.popover') {
-      const reference = project.instances[id].attachments?.find(attachment => attachment.instanceId === id && attachment.target.kind === 'text-range')?.target
-      if (reference) return Boolean(this.target(reference)?.element?.isConnected)
+      const references = project.instances[id].attachments?.filter(attachment => attachment.instanceId === id && attachment.target.kind === 'text-range').map(attachment => attachment.target)
+      if (references?.length) return references.some(reference => this.target(reference)?.element?.isConnected)
     }
     // Only these professional behaviors reconnect a visual presentation lease.
     // Event/state behaviors keep their document-wide subscriptions, including

@@ -1,38 +1,34 @@
-# 《一杯咖啡的远行》｜当前作品入口
+# 《一杯咖啡的远行》｜当前正式作品入口
 
-**当前有效工程：v0.5，Project 11，revision 179（2026-10-22 核验）。** U01—U07 已形成同一 Flow 下的完整作品：7 个有界原生 group、62 个原生文字对象、8 个文档标题、8 张原生图片、3 段局部程序。代表性的编辑／撤销／保存／冷开及 1440／390px 单 HTML 断网播放已通过。**尚未完成最后一轮创作收口，也未发行或获得 Owner 最终接受。**
+**最新已保存工作候选：v08，Project 11／revision 247（2026-10-23）。** [当前作品与证据入口](design/v08/README.md)包含[正式GLX](design/v08/native/coffee-journey-v08.glx)、[离线HTML](design/v08/native/coffee-journey-v08-offline.html)及原独立冷开／导出、身份保留收据。验收交接与Owner艺术判断按实际证据接续，不因本次卫生整理签收。
 
-## 唯一当前入口
+上一代完整交付基线为v07/r215：完成摄影级材料背景、六段连续转场、U03结构材料精修并接入正式Flow导航运动；原生图文、三个局部互动程序与唯一Global Underlay保留。以下说明和证据仍对应v07，不能替代v08的新增验证。
+
+## v07既有交付基线
 
 | 用途 | 文件 |
 | --- | --- |
-| **果铃继续创作** | [当前 GLX](design/v05/native/coffee-journey-v05.glx)，r179；修改前复制新命名副本 |
-| **已核验的正式离线交付** | [单文件 HTML](design/v05/native/coffee-journey-v05-offline.html) |
-| 独立响应式设计源 | [七章网页](design/v05/index.html)，不是 GLX 的第二个正式作者稿 |
-| 修改方法及源码、图片 | [v05 设计与源文件](design/v05/README.md) |
-| 继续任务与验收边界 | [NEXT_PASS](handoff/NEXT_PASS.md) |
-| 供 AI 选择的案例 | [REFERENCE_CASES](design/v05/REFERENCE_CASES.md) |
-| 素材来源、许可及生成说明 | [ASSETS](design/v05/ASSETS.md) |
+| 果铃继续编辑 | [v07 正式 GLX](design/v07/native/coffee-journey-v07.glx)，r215 |
+| 离线阅读 | [v07 单文件 HTML](design/v07/native/coffee-journey-v07-offline.html)，r215 |
+| 六段连续材质演示 | [独立离线审片](design/v07/art-studies-offline.html) |
+| 正文真实滚动过渡逐帧审片 | [导航运动审片](design/v07/previews/MOTION_REVIEW.html) |
+| 交付总说明 | [v07 README](design/v07/README.md)、[CLOSEOUT](design/v07/CLOSEOUT.md) |
+| 可复用创作机制 | [v07 参考案例](design/v07/REFERENCE_CASES.md)、[背景机制](design/v07/BACKGROUND_RUNTIME.md)、[U03 集成](design/v07/programs/u03/INTEGRATION.md) |
+| 素材与许可 | [v07 素材台账](design/v07/ASSETS.md)、[继承摄影授权台账](assets/photography/LICENSES_AND_SELECTION.md) |
+| 真实验收、截图与版本校验 | [VERIFICATION](design/v07/VERIFICATION.md)、[截图](design/v07/previews/README.md)、[Manifest](design/v07/DELIVERY_MANIFEST.json) |
+| 续作提示及边界 | [NEXT_PASS](handoff/NEXT_PASS.md) |
 
-版本和 SHA-256 由 [交付 Manifest](design/v05/DELIVERY_MANIFEST.json) 记录。上述正式工程和离线文件已从 2026-10-22 经验证的 r179 冻结原件逐字节复制到本目录，原始 output 文件保留用于核对。勿使用带审查标记的 r183/r188 副本继续创作。
+## 已成立的参考价值
 
-## 可以借鉴和复用什么
+- **高质量图像结合持续 Runtime**：六张一致光照的摄影感主体，按统一注册坐标使用分层贴图、移动遮罩、材质序列与源纹理碎裂，实现杯／果／种子／豆／粉末溶质／杯的视觉连续性。
+- **Flow 的内容与运动是唯一事实**：背景消费宿主 `flowMotion` 和阅读进度同步变化；深浅章节同屏使用内容坐标纸色区段，桌面负空间与手机边缘遮罩保护原生正文。
+- **U03 科学编辑表现**：同尺度材质剖面、SVG 描线、独立图例与三路线矩阵。选择、详情、比较和返回保持。
+- **U05/U06 成熟局部程序保留**：U05 三关键帧进度机制；U06 固定溶质计算/状态/交互/声音。它们依旧是独立局部程序，未因背景重制合并成大 Web。
+- **正式编辑交付**：共 183 个实例，所有原有实例与定义身份保持；r215 已验证保存、新进程冷开和离线导出。完整交付证据见 [v07 验收](design/v07/VERIFICATION.md)。
 
-- **图文设计**：U01/U07 首尾呼应；U02 人物主图＋环境副图；U04 安静章节节奏。
-- **可改写交互**：U03 同时点多状态比较，U05 三关键帧连续演变；不把它们当作任意主题的一键通用组件。
-- **有条件的配置复用**：U06 固定溶质稀释机制在独立 HTML 中已迁移至糖水主题；正式 GLX 跨题材迁移尚未验证。
-- **工程组合**：Flow 原生段落／图片包围三个局部 HTML 程序，正文、图注保留独立编辑身份。
+## 历史和权利边界
 
-详见 [场景模式](design/v05/SCENE_PATTERNS.md)、[AI 创作指南](design/v05/AI_CREATIVE_GUIDE.md)、[复用契约](design/v05/REUSE_GUIDE.md)。
-
-## 收口尚需什么
-
-1. U06 动态图解层次、信息重点与手机画布标注可读性；
-2. U03 SVG 组织区分及三路线并排比较的视觉信息；
-3. U05 只做最后代表性验收，不重做成熟关键帧；
-4. U06 迁移到另一主题的**正式 GLX**并验证编辑、保存、冷开及离线交付；
-5. 跨章节背景 Runtime 的连续物件动画是新提议，**尚未开发或验证**；初步判断与最小验证范围见 [背景 Runtime 方案](handoff/BACKGROUND_RUNTIME_CONCEPT.md)。
-
-曾经的“Flow 已挂载程序热编辑 append 失败”“手机整篇同比缩小”“内置源码分发导致新建／导出失败”已由软件批次处理。当前仍可能存在有界构图内部按作者画幅缩放、大 HTML 保存等待等受限场景，不能把旧诊断继续当成当前阻断。
-
-**历史隔离**：v03、v04、next-round、旧交接及 r73 阶段交付，已移出默认作品树，备份与清单见 `output/coffee-document-cleanup-20261022/`。它们不参与默认创作检索，不应覆盖本页和 NEXT_PASS 的现行判断。
+- [v06/r204](design/v06/README.md) 保留为上一代 Canvas/SVG 背景与原始参考样本；[v05/r179](design/v05/README.md) 为更早基线。**两个版本的 GLX 均未覆盖**。
+- 已成立的独立糖水复用示例仍为 [v06/r34 糖水 GLX](design/v06/reuse/solute-study/solute-study.glx) 及其 [离线 HTML](design/v06/reuse/solute-study/solute-study-offline.html)。v07 没有另造一个糖水副本。
+- AI 生成材料图属于概念解释；真实纪实照片分别沿用原作者与相应 CC 授权。手机验收为 390px Chromium 页面而非实体手机认证，音频触发验证不等同听感认证。
+- v07资料整理时未修改软件源码、正式GLX、HTML或图片，也未提交Git；本次另获卫生整理后本地提交授权，推送、发行和部署仍暂停。所有作品修改继续沿现有正式作者事务和保存链，避免覆盖参考基线。

@@ -1,6 +1,6 @@
 import type { WorkspaceFilesAPI } from '../../shared/workbench/workspaceFiles'
 import type { MediaFileDraftInput } from '../../shared/workbench/mediaFiles'
-import { forwardRef, useEffect, useImperativeHandle, useLayoutEffect, useRef } from 'react'
+import { forwardRef, useEffect, useId, useImperativeHandle, useLayoutEffect, useRef } from 'react'
 import type { ReactNode } from 'react'
 import type { LessonDesktopRequest, LessonDesktopResult } from '../../shared/lessonDesktopContract'
 import type { LessonWorkspace } from '../../shared/lessonWorkspace'
@@ -18,10 +18,10 @@ export interface LessonWorkspaceShellProps {
   documentPort: RecoverableDocumentFilePort
   projectPath: string | null
   onBeforeWorkspaceChange?(): Promise<void>
-  onOpenProject(path: string): Promise<boolean>
-  onNewProject(): Promise<boolean>
+  onOpenProject(path: string, foreground?: () => boolean): Promise<boolean>
+  onNewProject(foreground?: () => boolean): Promise<boolean>
   /** Content import creates an untitled course when no course is open. */
-  onNewProjectFromPptx?(file: { name: string; bytes: Uint8Array }): Promise<boolean>
+  onNewProjectFromPptx?(file: { name: string; bytes: Uint8Array }, signal?: AbortSignal, foreground?: () => boolean): Promise<boolean>
   renderAssistant?(root: string | null, documentTarget: ActiveDocumentTarget | undefined, isCourse: boolean, drainDocuments: (documentIds?: readonly string[]) => Promise<boolean>, lesson: LessonWorkspace | null): ReactNode
   renderMaterial?(path: string, lesson: LessonWorkspace | null): ReactNode
   renderMaterials?(lesson: LessonWorkspace): ReactNode
@@ -36,6 +36,9 @@ export interface LessonWorkspaceShellProps {
 }
 
 export interface LessonWorkspaceShellHandle {
+  /** Stable getter identity belongs to this mounted shell; its value reads existing navigation owners. */
+  captureNavigationIdentity(): string
+  cancelNavigation(): void
   captureMediaDrafts(source: string, kind: 'file' | 'directory'): MediaFileDraftInput[]
   flushAll(): Promise<boolean>
   saveActiveDocument(): Promise<'course' | 'document' | 'none'>
@@ -45,15 +48,17 @@ export interface LessonWorkspaceShellHandle {
   suspendForClose(documentIds?: readonly string[]): void
   resumeAfterCloseCancelled(documentIds?: readonly string[]): void
   openFile(path: string): Promise<void>
-  focusDocument(documentId: string): Promise<void>
-  detachLesson(): void
-  showProject(): void
+  focusDocument(documentId: string): Promise<void | boolean>
+  detachLesson(foreground?: () => boolean): void
+  showProject(foreground?: () => boolean): void
 }
 
 /** Composition and lifecycle bridge for the lesson workspace. Rendering and local writers live in dedicated modules. */
 export const LessonWorkspaceShell = forwardRef<LessonWorkspaceShellHandle, LessonWorkspaceShellProps>(function LessonWorkspaceShell(props, ref) {
   const tabs = useDocumentTabsController({ documentPort: props.documentPort, courseDocuments: props.courseDocuments })
   const workspace = useLessonWorkspaceController({ lessonOperation: props.lessonOperation, projectPath: props.projectPath, onOpenProject: props.onOpenProject, onNewProject: props.onNewProject, onNewProjectFromPptx: props.onNewProjectFromPptx, onBeforeWorkspaceChange: props.onBeforeWorkspaceChange, tabs })
+  const mountIdentity = useId()
+  const captureNavigationIdentity = useRef(() => JSON.stringify([mountIdentity, workspace.actions.captureNavigationIdentity(), tabs.captureNavigationIdentity()]))
   const shownWorkspace = useRef(workspace.state.workspace)
   useLayoutEffect(() => {
     if (shownWorkspace.current === workspace.state.workspace) return
@@ -66,6 +71,8 @@ export const LessonWorkspaceShell = forwardRef<LessonWorkspaceShellHandle, Lesso
   const activeKind = activeTab?.kind, activeName = activeTab?.name
   useEffect(() => { props.onActiveDocumentChange?.(activeKind && activeName ? { kind: activeKind, name: activeName } : null) }, [activeKind, activeName, props.onActiveDocumentChange])
   useImperativeHandle(ref, () => ({
+    captureNavigationIdentity: captureNavigationIdentity.current,
+    cancelNavigation: tabs.cancelNavigation,
     captureMediaDrafts: tabs.captureMediaDrafts,
     flushAll: tabs.flushAll,
     saveActiveDocument: tabs.saveActiveDocument,

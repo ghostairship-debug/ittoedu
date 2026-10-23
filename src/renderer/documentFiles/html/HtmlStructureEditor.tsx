@@ -14,6 +14,7 @@ export interface HtmlStructureEditorProps {
   analysis: HtmlSourceAnalysis
   lease: HtmlPreviewLease
   pendingDraft?: boolean
+  beforeSourceEdit?(): Promise<boolean>
   loading?: boolean
   active?: boolean
   target?: HtmlEditingTarget | null
@@ -26,7 +27,7 @@ function nodeLabel(node: HtmlSourceNode): string {
 }
 
 /** Controls are projections of the committed source. Every application returns to its existing Main transaction. */
-export function HtmlStructureEditor({ committed, lease, analysis, pendingDraft = false, loading = false, active = true, target, onTargetChange }: HtmlStructureEditorProps) {
+export function HtmlStructureEditor({ committed, lease, analysis, pendingDraft = false, beforeSourceEdit, loading = false, active = true, target, onTargetChange }: HtmlStructureEditorProps) {
   const displayedAnalysis = useRef(analysis)
   if (active) displayedAnalysis.current = analysis
   const source = displayedAnalysis.current.source
@@ -99,6 +100,10 @@ export function HtmlStructureEditor({ committed, lease, analysis, pendingDraft =
     if (!editable) return
     setBusy(true); setIssue(null)
     try {
+      if (beforeSourceEdit && !await beforeSourceEdit()) {
+        setIssue('这次结构修改尚未应用：文字原稿暂未保全，可重试保全后继续。')
+        return
+      }
       const checked = htmlSourceEditCommandSchema.parse(command)
       const result = await window.desktopAPI.workspaceFiles!({ type: 'html-preview.edit-source',
         operationId: crypto.randomUUID(), documentId: committed.documentId, epoch: committed.epoch,

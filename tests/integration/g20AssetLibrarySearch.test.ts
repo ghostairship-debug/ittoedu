@@ -50,7 +50,10 @@ it('searches current archives across actual catalog directories, ranks the newes
     expect(found).toMatchObject({ unreadable: expect.any(Number), note: expect.stringContaining('旧 HTML') })
     expect((await service.search({ query: '四季', limit: 1 })).candidates).toHaveLength(1)
     expect(await service.search({ query: '无匹配的月相' })).toMatchObject({ candidates: [], hint: expect.stringContaining('没有匹配') })
-    expect((await service.search({ query: '旧公转HTML' })).candidates).toEqual([])
+    const oldHtml = await service.search({ query: '旧公转HTML' })
+    expect(oldHtml.candidates).toEqual([])
+    expect(oldHtml.entries).toMatchObject([{ source: { kind: 'html' }, action: { kind: 'unavailable' }, availability: { available: false, reason: expect.stringContaining('尚无对应插入入口') } }])
+    expect(found.entries[0].action).toMatchObject({ tool: 'asset.use', input: { packageId: current.id, sourceId: found.candidates[0].sourceId, version: '1.10.0' } })
 
     const externalEntry = snapshot.packages.find(value => value.packageId === current.id && value.sourceTrust === 'prompt')!
     expect(await service.read({ packageId: current.id, version: '1.10.0', sourceId: externalEntry.sourceId }))

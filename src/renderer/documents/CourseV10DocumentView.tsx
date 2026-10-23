@@ -18,7 +18,7 @@ export interface CourseV10DocumentViewProps {
   onSelect(instanceId: string | null): void
   onElement?(instanceId: string, element: HTMLElement | null, expectedDefault?: HTMLElement): void
   onTargetElement?(instanceId: string, element: HTMLElement | null, expectedDefault?: HTMLElement): void
-  renderContainer?(instanceId: string, project: CourseProjectV10): ReactNode
+  renderContainer?(instanceId: string, project: CourseProjectV10, placement?: 'free' | 'flow'): ReactNode
 }
 
 /** Author geometry and ownership projection only; professional DOM belongs to component runtime. */
@@ -69,7 +69,7 @@ export function InstanceView({ instance, project, authorProject = project, surfa
     ...(placement === 'program' ? { position: 'absolute', inset: 0, width: '100%', height: '100%', transform: 'none' } as CSSProperties : {}),
     outline: !player && (selectedInstanceIds?.includes(instance.id) ?? selectedInstanceId === instance.id) ? '2px solid #2563eb' : undefined }}
     data-component-instance={instance.id} data-component-placement={placement} onPointerDown={event => { if (!player && !isPlaying?.() && !instance.locked) { event.stopPropagation(); onSelect(instance.id) } }}>
-    {instance.container && renderContainer ? renderContainer(instance.id, project) : presentation.section
+    {instance.container && renderContainer ? renderContainer(instance.id, project, placement === 'flow' ? 'flow' : 'free') : presentation.section
       ? <details open={presentation.section.open} style={presentation.stageStyle as CSSProperties}>{content}{childContent}</details>
       : <div style={presentation.stageStyle as CSSProperties}>{content}{childContent}{!player && <ImageSafeAreaGuides instance={instance} project={project} />}</div>}
   </div>

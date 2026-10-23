@@ -23,7 +23,7 @@ import { saveDocumentWithDialog } from './workbench/documentSaveDialog'
 import { requestRendererBeforeClose } from './workbench/documentCloseDialog'
 import { executionDesktopService } from './workbench/execution/ExecutionDesktopService'
 import { externalMcpService } from './workbench/external/externalDesktopService'
-import { prepareDocumentWindowClose, type DocumentCloseChoice } from './workbench/documentCloseCoordinator'
+import { prepareDocumentWindowClose, preserveDocumentWindowRecovery, type DocumentCloseChoice } from './workbench/documentCloseCoordinator'
 import { mainPreviewNetworkPolicy } from './previewNetworkPolicy'
 import {
   BACKGROUND_E2E_WINDOW_ORIGIN,
@@ -33,6 +33,12 @@ import {
 export interface MainWindowResult {
   window: BrowserWindow
   rendererEntryUrl: string
+}
+
+interface CloseAttempt {
+  controller: AbortController
+  recoveryChoice?: 'cancel' | 'preserve'
+  recoveryPrompt?: Promise<void>
 }
 
 function getPreloadPath(): string {
@@ -122,25 +128,30 @@ export async function createMainWindow(
   })
   const windowWebContentsId = window.webContents.id
   let closeApproved = false
-  let closeCheckInFlight = false
-  let closeController: AbortController | undefined
-  let closeRecoveryPrompt = false
-  const offerCloseRecovery = async (reason?: string) => {
-    const attempt = closeController
-    if (closeRecoveryPrompt || closeApproved || !attempt || attempt.signal.aborted || window.isDestroyed()) return
-    closeRecoveryPrompt = true
-    try {
-      const { response } = await dialog.showMessageBox(window, {
-        type: 'warning', title: '关闭前保全尚未完成',
-        message: '可以返回处理当前输入，继续等待，或只保留已确认的恢复稿后关闭。',
-        detail: (reason ? `未完成原因：${reason}\n\n` : '') + '“只保留已确认的恢复稿”不会删除课件、聊天或 Main 已持久化的修改；但仍在输入框、尚未提交成功的文字、图片和其他视图草稿可能丢失。正常退出请先返回检查。',
-        buttons: ['返回继续编辑', '继续等待', '只保留已确认恢复稿并关闭'], defaultId: 0, cancelId: 0, noLink: true,
-      })
-      if (response === 1 || closeController !== attempt || attempt.signal.aborted || closeApproved || window.isDestroyed()) return
-      attempt.abort()
-      if (response === 2 && !window.isDestroyed()) { closeApproved = true; window.close() }
-    } catch (error) { console.error('关闭选项未能显示，窗口与恢复稿保持原状', error) }
-    finally { closeRecoveryPrompt = false }
+  let closeAttempt: CloseAttempt | undefined
+  const offerCloseRecovery = (reason?: string): Promise<void> => {
+    const attempt = closeAttempt
+    if (attempt?.recoveryPrompt) return attempt.recoveryPrompt
+    if (closeApproved || !attempt || attempt.controller.signal.aborted || window.isDestroyed()) return Promise.resolve()
+    const prompt = (async () => {
+      try {
+        const { response } = await dialog.showMessageBox(window, {
+          type: 'warning', title: '关闭前保全尚未完成',
+          message: '可以返回处理当前输入，继续等待，或只保留已确认的恢复稿后关闭。',
+          detail: (reason ? `未完成原因：${reason}\n\n` : '') + '“只保留已确认的恢复稿”不会删除课件、聊天或 Main 已持久化的修改；但仍在输入框、尚未提交成功的文字、图片和其他视图草稿可能丢失。正常退出请先返回检查。',
+          buttons: ['返回继续编辑', '继续等待', '只保留已确认恢复稿并关闭'], defaultId: 0, cancelId: 0, noLink: true,
+        })
+        if (response === 1 || closeAttempt !== attempt || attempt.controller.signal.aborted || closeApproved || window.isDestroyed()) return
+        attempt.recoveryChoice = response === 2 ? 'preserve' : 'cancel'
+        attempt.controller.abort()
+      } catch (error) {
+        console.error('关闭选项未能显示，窗口与恢复稿保持原状', error)
+        attempt.recoveryChoice = 'cancel'
+        attempt.controller.abort()
+      }
+    })().finally(() => { if (attempt.recoveryPrompt === prompt) attempt.recoveryPrompt = undefined })
+    attempt.recoveryPrompt = prompt
+    return prompt
   }
   let previewNetworkDocumentToken: string | null = null
 
@@ -210,74 +221,93 @@ export async function createMainWindow(
   window.on('close', (event) => {
     if (closeApproved) return
     event.preventDefault()
-    if (closeCheckInFlight) { void offerCloseRecovery(); return }
-    closeCheckInFlight = true
-    const closing = new AbortController(); closeController = closing
+    if (closeAttempt) { void offerCloseRecovery(); return }
+    const closing: CloseAttempt = { controller: new AbortController() }
+    closeAttempt = closing
     window.setProgressBar(2, { mode: 'indeterminate' })
     let closeSaveDirectory: SaveDirectoryContext | undefined
-    void prepareDocumentWindowClose({
+    const recoveryPorts = {
       list: () => documentHost().registry.list(),
       drain: async () => { await Promise.all(documentHost().registry.list().map(snapshot => documentHost().registry.get(snapshot.documentId).drain())) },
-      rendererDirty: () => window.webContents.isCrashed() ? Promise.resolve(true) : Promise.race([
-        window.webContents.executeJavaScript(
-          'Boolean(window.__COURSEWARE_EDITOR_DIRTY__)',
-          true,
-        ).then(Boolean),
-        new Promise<boolean>((resolve) => setTimeout(() => resolve(true), 1_500)),
-      ]).then(rendererDirty => rendererDirty || appState.isDirty()),
-      confirm: () => confirmClose(window),
-      cancelled: () => closing.signal.aborted,
-      prepareRenderer: async (mode, ids) => {
-        if (window.webContents.isCrashed()) {
-          await offerCloseRecovery('界面进程已退出，无法完成关闭前输入保全。')
-          return false
-        }
-        const prepared = await requestRendererBeforeClose(window, mode, closing.signal, () => {
-          if (closeController === closing && !closing.signal.aborted) void offerCloseRecovery()
-        }, ids)
-        if (prepared.suggestedDirectory) closeSaveDirectory = prepared.suggestedDirectory
-        if (!prepared.ready && !closing.signal.aborted) await offerCloseRecovery()
-        return prepared.ready && !closing.signal.aborted
-      },
-      save: documentId => saveDocumentWithDialog(window, documentHost(), documentId, false, closeSaveDirectory),
-      withWriteBarrier: (ids, work) => documentHost().tools.withWriteTaskBarrier(ids, work),
-      stopWriters: async ids => {
+      withWriteBarrier: <T>(ids: readonly string[], work: () => Promise<T>) => documentHost().tools.withWriteTaskBarrier(ids, work),
+      stopWriters: async (ids: readonly string[]) => {
         const execution = await executionDesktopService(), external = await externalMcpService()
         for (const id of ids) { await execution.stopTasksForDocument(id); await external.stopForDocument(id) }
       },
-      discard: async snapshots => {
-        for (const expected of snapshots) {
-          if (closing.signal.aborted) return false
-          const current = await documentHost().registry.get(expected.documentId).drain()
-          if (current.epoch !== expected.epoch) throw new Error('关闭期间文档已重新打开，未放弃新的文档')
-          await documentHost().operate({ type: 'close', documentId: current.documentId, discardDirty: true,
-            expected: { epoch: current.epoch, revision: current.revision } })
-        }
-        return !closing.signal.aborted
-      },
-      onBlocked: documentId => {
-        if (!window.isDestroyed()) { window.webContents.send(IPC_CHANNELS.requestFocusDocument, documentId); window.focus() }
-      },
-    }).then(approved => {
-      if (!approved || closing.signal.aborted) return
-      appState.setDirty(false)
+    }
+    void (async () => {
+      let approved = false
+      try {
+        approved = await prepareDocumentWindowClose({
+          ...recoveryPorts,
+          rendererDirty: () => window.webContents.isCrashed() ? Promise.resolve(true) : Promise.race([
+            window.webContents.executeJavaScript(
+              'Boolean(window.__COURSEWARE_EDITOR_DIRTY__)',
+              true,
+            ).then(Boolean),
+            new Promise<boolean>((resolve) => setTimeout(() => resolve(true), 1_500)),
+          ]).then(rendererDirty => rendererDirty || appState.isDirty()),
+          confirm: () => confirmClose(window),
+          cancelled: () => closing.controller.signal.aborted,
+          prepareRenderer: async (mode, ids) => {
+            if (window.webContents.isCrashed()) {
+              await offerCloseRecovery('界面进程已退出，无法完成关闭前输入保全。')
+              return false
+            }
+            const prepared = await requestRendererBeforeClose(window, mode, closing.controller.signal, () => {
+              if (closeAttempt === closing && !closing.controller.signal.aborted) void offerCloseRecovery()
+            }, ids)
+            await closing.recoveryPrompt
+            if (prepared.suggestedDirectory) closeSaveDirectory = prepared.suggestedDirectory
+            if (!prepared.ready && !closing.controller.signal.aborted) await offerCloseRecovery()
+            return prepared.ready && !closing.controller.signal.aborted
+          },
+          save: documentId => saveDocumentWithDialog(window, documentHost(), documentId, false, closeSaveDirectory),
+          discard: async snapshots => {
+            for (const expected of snapshots) {
+              if (closing.controller.signal.aborted) return false
+              const current = await documentHost().registry.get(expected.documentId).drain()
+              await closing.recoveryPrompt
+              if (closing.controller.signal.aborted) return false
+              if (current.epoch !== expected.epoch) throw new Error('关闭期间文档已重新打开，未放弃新的文档')
+              await documentHost().operate({ type: 'close', documentId: current.documentId, discardDirty: true,
+                expected: { epoch: current.epoch, revision: current.revision } })
+            }
+            return !closing.controller.signal.aborted
+          },
+          onBlocked: documentId => {
+            if (!window.isDestroyed()) { window.webContents.send(IPC_CHANNELS.requestFocusDocument, documentId); window.focus() }
+          },
+        })
+      } catch (error) {
+        console.error('关闭前保存或保全失败', error)
+        if (!window.isDestroyed() && !closing.controller.signal.aborted) await offerCloseRecovery(error instanceof Error ? error.message : '无法保存全部文档')
+      }
+      await closing.recoveryPrompt
+      if (closing.recoveryChoice === 'preserve') {
+        // Finish the original preparation first so a forced preserve never nests its write barrier.
+        approved = await preserveDocumentWindowRecovery({ ...recoveryPorts,
+          cancelled: () => closeAttempt !== closing || window.isDestroyed(),
+        })
+      } else if (closing.controller.signal.aborted) return
+      if (!approved || closeAttempt !== closing || window.isDestroyed()) return
+      if (closing.recoveryChoice !== 'preserve') appState.setDirty(false)
       closeApproved = true
-      if (!window.isDestroyed()) window.close()
-    }).catch((error) => {
-      console.error('关闭前保存或保全失败', error)
-      if (!window.isDestroyed() && !closing.signal.aborted) return offerCloseRecovery(error instanceof Error ? error.message : '无法保存全部文档')
+      window.close()
+    })().catch((error) => {
+      console.error('关闭前停止写入或保全恢复稿失败，窗口保持打开', error)
     }).finally(() => {
-      if (closeController === closing) {
+      if (closeAttempt === closing) {
         if (!closeApproved && !window.isDestroyed()) window.webContents.send(IPC_CHANNELS.requestResumeClose)
-        closeCheckInFlight = false; closeController = undefined
+        closeAttempt = undefined
         if (!window.isDestroyed()) window.setProgressBar(-1)
       }
     })
   })
 
-  window.on('unresponsive', () => { if (closeCheckInFlight) void offerCloseRecovery() })
+  window.on('unresponsive', () => { if (closeAttempt) void offerCloseRecovery() })
   window.on('closed', () => {
-    closeController?.abort()
+    closeAttempt?.controller.abort()
     try { clearHtmlPreviewFrameEntries(windowWebContentsId) }
     catch (error) { console.error('关闭窗口时释放 HTML 预览帧失败', error) }
     try { beginPreviewNetworkDocumentNavigation() }

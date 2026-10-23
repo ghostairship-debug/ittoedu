@@ -82,12 +82,19 @@ export class DocumentSession {
   private recovered = false
   private closed = false
   private readonly operationReceipts: Map<string, DurableDocumentState['operations'][number]>
+  /** The accepted command chain may cross its own no-op input receipts, but
+   * never History navigation or a different input owner. */
+  private historyGroupHead?: string
 
   private constructor(
     private state: DurableDocumentState,
     private readonly driver: DocumentDriver,
     private readonly persistence: DocumentPersistence,
-  ) { this.operationReceipts = new Map(state.operations.map(receipt => [receipt.operationId, receipt])) }
+  ) {
+    this.operationReceipts = new Map(state.operations.map(receipt => [receipt.operationId, receipt]))
+    const head = state.past.at(-1)?.operationId
+    if (head && state.operations.at(-1)?.operationId === head) this.historyGroupHead = head
+  }
 
   private accept(next: DurableDocumentState): void {
     for (let index = this.state.operations.length; index < next.operations.length; index++) {
@@ -120,9 +127,14 @@ export class DocumentSession {
     if (!epoch || ![1, 2, 3].includes(input.schemaVersion) || input.model.kind !== driver.kind
       || input.schemaVersion === 1 && input.disposition !== undefined
       || input.schemaVersion >= 2 && input.disposition !== 'active') throw new Error('无法恢复文档版本、终态或 Driver')
-    const normalized = normalizeCourseDocumentRecovery(input)
+    const normalized = normalizeCourseDocumentRecovery(input, model => driver.validate(model))
     for (const model of documentRecoveryModels(normalized)) driver.validate(model)
     const state = structuredClone(compactDocumentRecovery(normalized, driver))
+    if ((normalized.recoveryDiagnostics?.length ?? 0) > (input.recoveryDiagnostics?.length ?? 0)) {
+      if (!persistence.preserveRecovery) throw new Error('历史需要隔离，但持久化服务不能保全原恢复记录；原输入未改动')
+      const retained = await persistence.preserveRecovery(input)
+      state.recoveryDiagnostics = [...normalized.recoveryDiagnostics!, `原恢复记录已保留：${retained}`]
+    }
     state.schemaVersion = 3
     state.disposition = 'active'
     state.epoch = epoch
@@ -184,6 +196,7 @@ export class DocumentSession {
       binding: this.state.binding, model: this.state.model,
       dirty: this.state.savedRevision !== this.state.revision, saving: this.saving,
       saveError: this.saveError, recovered: this.recovered,
+      ...(this.state.recoveryDiagnostics ? { recoveryDiagnostics: this.state.recoveryDiagnostics } : {}),
       recoverable: true, undoDepth: this.state.past.length, redoDepth: this.state.future.length,
       ...(this.state.past.at(-1) ? { undoHead: { operationId: this.state.past.at(-1)!.operationId, actor: this.state.past.at(-1)!.actor } } : {}),
     })
@@ -212,6 +225,7 @@ export class DocumentSession {
       binding: structuredClone(this.state.binding), kind: this.state.model.kind,
       ...(this.state.model.kind === 'course-v10' || this.state.model.kind === 'course-v9' ? { projectId: this.state.model.project.id } : {}),
       dirty: this.state.savedRevision !== this.state.revision, saving: this.saving, saveError: this.saveError, recovered: this.recovered,
+      ...(this.state.recoveryDiagnostics ? { recoveryDiagnostics: [...this.state.recoveryDiagnostics] } : {}),
       recoverable: true, undoDepth: this.state.past.length, redoDepth: this.state.future.length,
       ...(this.state.past.at(-1) ? { undoHead: { operationId: this.state.past.at(-1)!.operationId, actor: this.state.past.at(-1)!.actor } } : {}) }
   }
@@ -392,7 +406,7 @@ export class DocumentSession {
           const previous = next.past.at(-1)
           if (amendment || (operation.historyGroup && previous?.historyGroup === operation.historyGroup
             && previous.actor === operation.actor && previous.runId === operation.runId
-            && previous.operationId === next.operations.at(-1)?.operationId)) {
+            && previous.operationId === this.historyGroupHead)) {
             // A strict amendment was checked in this serial turn; retain its original before/group.
             // Replace the entry too: a failed append must leave the acknowledged head intact.
             next.past[next.past.length - 1] = { ...previous!, effects: [...previous!.effects!, effect!],
@@ -428,6 +442,13 @@ export class DocumentSession {
       catch (error) { return this.reject(id, 'failed', 'recovery-write-failed', error instanceof Error ? error.message : '恢复稿写入失败，修改未提交') }
       const before = this.state.model
       this.accept(next)
+      if (operation.mutation.type !== 'command') this.historyGroupHead = undefined
+      else if (changed) this.historyGroupHead = id
+      else {
+        const head = next.past.at(-1)
+        if (!operation.historyGroup || head?.historyGroup !== operation.historyGroup
+          || head.actor !== operation.actor || head.runId !== operation.runId) this.historyGroupHead = undefined
+      }
       if (changed) this.notifyCommit({ operation, result, before, after: next.model })
       if (changed) this.notify(id, result.appliedChanges, effect, result.beforeRevision)
       else this.notifyState(id)
@@ -449,6 +470,7 @@ export class DocumentSession {
     const changes = this.state.operations.slice(from).flatMap(receipt => {
       const result = receipt.result
       if (result.status !== 'applied' || result.revision <= revision) return []
+      if (receipt.historyUnavailable) throw new Error('原修改经过已隔离的历史，无法接续；原恢复记录与操作回执仍保留')
       if (result.beforeRevision !== next) throw new Error('原修改到当前版本之间存在无法定位的历史，请重新选择')
       next = result.revision
       const pair = pairs.get(receipt.operationId)
@@ -471,6 +493,7 @@ export class DocumentSession {
     let current = this.state.model
     for (let index = this.state.operations.length - 1; index >= 0; index--) {
       const receipt = this.state.operations[index]!
+      if (receipt.historyUnavailable) break
       if (receipt.result.status !== 'applied') continue
       if (receipt.result.revision <= sinceRevision) break
       let pair: { before: DocumentModel; after: DocumentModel } | undefined

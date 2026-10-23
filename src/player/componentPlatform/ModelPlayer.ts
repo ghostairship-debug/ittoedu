@@ -3,7 +3,8 @@ import type { DocumentModel } from '../../shared/workbench/document'
 import { createComponentModelProjection } from './modelProjection'
 import type { ComponentSpatialCameraPort } from '../surfaces/spatial/componentSpatialAdapter'
 import type { TeacherControllerDisplayPort } from '../../shared/teacherControllerViewportGeometry'
-import { componentContainers, resolveComponentPresentation, type CourseProjectV10, type TeacherControllerPort, type ComponentFlowReading } from '../../shared/contracts/component-platform'
+import { componentContainers, resolveComponentPresentation, type CourseProjectV10, type TeacherControllerPort, type ComponentFlowReading, type ComponentFlowNavigationMotion } from '../../shared/contracts/component-platform'
+import type { FlowNavigationOptions } from '../../shared/flowReading'
 
 export type ComponentPlayerModel = Extract<DocumentModel, { kind: 'course-v10' }>
 export type ComponentPlayerRuntimeOptions = NonNullable<ConstructorParameters<typeof ComponentPlatformRuntime>[1]>
@@ -12,8 +13,10 @@ export interface ComponentPlayerObservation {
   readZoom(): number
   setZoom(zoom: number): void
   reset(): void
-  goToInstance?(instanceId: string | null, signal?: AbortSignal): boolean | Promise<boolean>
+  goToInstance?(instanceId: string | null, signal?: AbortSignal, options?: FlowNavigationOptions): boolean | Promise<boolean>
   readReading?(targetIds: readonly string[]): Omit<ComponentFlowReading, 'containerId'> | null
+  readMotion?(): Omit<ComponentFlowNavigationMotion, 'containerId'> | undefined
+  cancel?(): void
   subscribe?(listener: () => void): () => void
 }
 

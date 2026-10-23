@@ -11,11 +11,21 @@ export function isNativeFlowLayoutGroup(instance: Pick<ComponentInstance, 'frame
 
 const containerProperties = /^(?:display|gap|rowGap|columnGap|gridTemplate(?:Columns|Rows|Areas)?|gridAuto(?:Columns|Rows|Flow)|flexDirection|flexWrap|flexFlow|alignItems|alignContent|justifyItems|justifyContent|placeItems|placeContent)$/
 const itemProperties = /^(?:(?:min|max)?(?:Width|Height)|width|height|inlineSize|blockSize|minInlineSize|maxInlineSize|minBlockSize|maxBlockSize|margin(?:Top|Right|Bottom|Left|Inline|Block|InlineStart|InlineEnd|BlockStart|BlockEnd)?|grid(?:Area|Row|Column|RowStart|RowEnd|ColumnStart|ColumnEnd)|order|flex|flexBasis|flexGrow|flexShrink|alignSelf|justifySelf|placeSelf|zIndex|aspectRatio)$/
+const stickyProperties = /^(?:inset(?:(?:Block|Inline)(?:Start|End)?)?|top|right|bottom|left|zIndex)$/
 const unitless = /^(?:order|zIndex|flex|flexGrow|flexShrink|grid(?:Row|Column)(?:Start|End)?|aspectRatio)$/
 function camel(key: string): string { return key.replace(/-([a-z])/g, (_match, letter: string) => letter.toUpperCase()) }
 
 export function isNativeFlowContainerStyle(key: string): boolean { return containerProperties.test(camel(key)) }
 export function isNativeFlowItemStyle(key: string): boolean { return itemProperties.test(camel(key)) }
+
+/** Sticky stays in the existing reading order; the browser uses its actual Flow scroll owner. */
+export function isFlowStickyStyle(instance: Pick<ComponentInstance, 'style'>, key: string): boolean {
+  return instance.style?.position === 'sticky' && (key === 'position' || stickyProperties.test(camel(key)))
+}
+
+export function flowStickyStyle(instance: Pick<ComponentInstance, 'style'>): Record<string, string> {
+  return instance.style?.position === 'sticky' ? { position: 'sticky', ...projectStyle(instance, stickyProperties) } : {}
+}
 
 /** Only the existing Flow owner (or explicit viewport stretch) grants CSS placement. */
 export function componentFlowStylePolicy(project: CourseProjectV10, instance: ComponentInstance, patch: JsonObject = {}): (key: string) => boolean {
@@ -31,8 +41,14 @@ export function componentFlowStylePolicy(project: CourseProjectV10, instance: Co
   const group = inFlow && (isNativeFlowLayoutGroup(instance, definition)
     || isNativeFlowLayoutGroup({ ...instance, style: { ...instance.style, ...patch } }, definition))
   const item = group || inFlow && Boolean(parent && isNativeFlowLayoutGroup(parent, project.definitions[parent.definitionId]))
+  const nextStyle = Object.fromEntries([...Object.entries(instance.style ?? {}), ...Object.entries(patch)].map(([key, value]) => [camel(key), value]))
+  const wasSticky = instance.style?.position === 'sticky'
+  const retiresSticky = wasSticky && (nextStyle.position === null || nextStyle.position === 'relative' || nextStyle.position === 'static')
   return key => group && isNativeFlowContainerStyle(key) || item && isNativeFlowItemStyle(key)
-    || Boolean(instance.viewportPinned && camel(key) === 'width' && (patch[key] === '100%' || instance.style?.width === '100%'))
+    || inFlow && (isFlowStickyStyle({ style: nextStyle }, key)
+      || camel(key) === 'position' && retiresSticky
+      || wasSticky && stickyProperties.test(camel(key)) && patch[key] === null)
+    || Boolean(instance.viewportPinned && ['width', 'height'].includes(camel(key)) && (patch[key] === '100%' || instance.style?.[camel(key)] === '100%'))
 }
 
 function projectStyle(instance: Pick<ComponentInstance, 'style'>, accept: RegExp): Record<string, string> {

@@ -29,6 +29,8 @@ export interface ComponentImageApplicationInput {
   source?: AssetSource
   container?: ComponentContainer
   index?: number
+  /** The composing Gateway settles text attachments on its final batch. */
+  deferTextRelationships?: boolean
 }
 export interface ComponentImageApplicationPorts {
   prepareImage: PrepareImageResourcePort
@@ -124,10 +126,11 @@ export async function prepareComponentMediaApplication(input: ComponentMediaAppl
     edits.push({ type: 'instance.insert', container, index, rootIds: [instanceId], instances: [{ id: instanceId,
       definitionId: definition.id, name: admitted.meta.filename, data: JSON.parse(JSON.stringify(data)) as JsonValue, frame }] })
   }
-  const mapped = presentationComponentEdits(project, surfaceId, stateId, edits)
-  const command = captureComponentOperation(project, mapped)
+  const options = { deferTextRelationships: captured.deferTextRelationships }
+  const mapped = presentationComponentEdits(project, surfaceId, stateId, edits, options)
+  const command = captureComponentOperation(project, mapped, [], options)
   if (mapped !== edits) {
-    const original = captureComponentOperation(project, edits)
+    const original = captureComponentOperation(project, edits, [], options)
     command.expected = [...new Map([...command.expected, ...original.expected].map(value => [JSON.stringify(value.path), value])).values()]
   }
   return { documentId: snapshot.documentId, epoch: snapshot.epoch, baseRevision: snapshot.revision, command,

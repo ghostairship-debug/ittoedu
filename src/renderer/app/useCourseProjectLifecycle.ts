@@ -9,6 +9,13 @@ import type {
   RecentProjectEntry,
   RecoveryProjectResult,
 } from '../../shared/ipcTypes'
+
+/** Renderer-only adapter: preserve completed writes while expiring only their old foreground intent. */
+export function adaptCourseDocumentActivation(result: void | boolean | { documentId: string; activated: boolean },
+  activateIf?: () => boolean, cancelNavigation?: () => void): void | boolean {
+  if (result && typeof result === 'object' && !result.activated && activateIf?.()) cancelNavigation?.()
+  return typeof result === 'boolean' ? result : undefined
+}
 export interface CanonicalCourseProjectSnapshot {
   readonly project: CourseProjectV10
   readonly resources: DocumentResources
@@ -64,10 +71,10 @@ export interface CourseProjectLifecyclePorts<TDraftToken = unknown> {
   documents?: {
     ready(): Promise<void>
     snapshot(documentId?: string): DocumentSnapshot | null
-    create(surface: 'slide' | 'flow' | 'spatial', canvas?: SlideCanvasSize): Promise<void>
+    create(surface: 'slide' | 'flow' | 'spatial', canvas?: SlideCanvasSize, activateIf?: () => boolean): Promise<void | boolean>
     /** A new untitled course with given content, e.g. made from a PPT (M21). */
-    createFrom?(content: CourseProjectContent): Promise<void>
-    open(path: string): Promise<void>
+    createFrom?(content: CourseProjectContent, activateIf?: () => boolean): Promise<void | boolean>
+    open(path: string, activateIf?: () => boolean): Promise<void | boolean>
     save(saveAs?: boolean, documentId?: string): Promise<DocumentSnapshot | null>
     drain(): Promise<DocumentSnapshot>
     /** Settles already admitted operations while raw recovery input stays local. */
@@ -98,7 +105,9 @@ export interface CourseProjectLifecyclePorts<TDraftToken = unknown> {
   }): Promise<{ path: string } | null>
   beforeSave?(): Promise<boolean>
   beforeReplace?(): Promise<boolean>
-  onProjectReplaced?(): void
+  /** Claims this explicit UI request through the existing navigation owner. */
+  beginForeground?(): () => boolean
+  onProjectReplaced?(foreground?: () => boolean): void
   /** A local authoring owner may retain input that has not entered DocumentSession. */
   prepareBeforeClose?(mode?: 'save' | 'preserve', documentIds?: readonly string[]): boolean | Promise<boolean>
   preserveBeforeClose?(mode?: 'save' | 'preserve', documentIds?: readonly string[]): Promise<boolean>
@@ -131,7 +140,12 @@ export interface CourseProjectLifecycleWatch {
 }
 
 export interface CourseProjectOperationOptions { readonly isCurrent?: () => boolean }
-export interface CourseProjectReplacementOptions extends CourseProjectOperationOptions { readonly origin?: 'lesson' | 'standalone'; readonly canvas?: SlideCanvasSize }
+export interface CourseProjectReplacementOptions extends CourseProjectOperationOptions {
+  readonly origin?: 'lesson' | 'standalone'
+  readonly canvas?: SlideCanvasSize
+  /** A caller that already claimed navigation supplies the same live predicate. */
+  readonly foreground?: () => boolean
+}
 
 export interface CourseProjectLifecycleApi {
   readonly recentProjects: RecentProjectEntry[]
@@ -156,10 +170,12 @@ export function useCourseProjectLifecycle<TDraftToken>(ports: CourseProjectLifec
     const now = ref.current.captureIdentity()
     return before.projectId === now.projectId && before.revision === now.revision && before.documentId === now.documentId && before.epoch === now.epoch
   }
-  const replace = useCallback(async (work: () => Promise<void>, options?: CourseProjectReplacementOptions): Promise<boolean> => {
+  const replace = useCallback(async (work: (isCurrent: () => boolean) => Promise<void | boolean>, options?: CourseProjectReplacementOptions): Promise<boolean> => {
+    const foreground = options?.foreground ?? ref.current.beginForeground?.()
+    const isCurrent = () => options?.isCurrent?.() !== false && foreground?.() !== false
     const result = await ref.current.runBusy(async () => {
       await service().ready()
-      if (options?.isCurrent?.() === false) return false
+      if (!isCurrent()) return false
       const identity = service().snapshot()
       const sameDocument = () => {
         const now = service().snapshot()
@@ -168,39 +184,40 @@ export function useCourseProjectLifecycle<TDraftToken>(ports: CourseProjectLifec
       if (ref.current.beforeReplace && !(await ref.current.beforeReplace())) return false
       // Switching views retains the previous main-owned document and its History.
       // Only unfinished renderer input needs admission; nothing is discarded here.
-      if (!sameDocument() || options?.isCurrent?.() === false) return false
+      if (!sameDocument() || !isCurrent()) return false
       if (identity) await (service().settle?.() ?? service().drain())
-      if (!sameDocument() || options?.isCurrent?.() === false) return false
+      if (!sameDocument() || !isCurrent()) return false
       const epoch = ++replacement.current
-      await work()
-      if (epoch !== replacement.current || options?.isCurrent?.() === false) return false
-      if (options?.origin !== 'lesson') ref.current.onProjectReplaced?.()
+      if (await work(isCurrent) === false) return false
+      // A completed writer remains completed. Only its foreground effect expires.
+      if (epoch === replacement.current && isCurrent() && options?.origin !== 'lesson') ref.current.onProjectReplaced?.(isCurrent)
       await refresh()
       return true
     }, '切换失败，当前修改仍保留。')
     return result === true
   }, [refresh])
-  const newProject = useCallback((options?: CourseProjectReplacementOptions) => replace(() => service().create('slide', options?.canvas), options), [replace])
-  const newProjectFrom = useCallback((make: () => Promise<CourseProjectContent>, options?: CourseProjectReplacementOptions) => replace(async () => {
+  const newProject = useCallback((options?: CourseProjectReplacementOptions) => replace(isCurrent => service().create('slide', options?.canvas, isCurrent), options), [replace])
+  const newProjectFrom = useCallback((make: () => Promise<CourseProjectContent>, options?: CourseProjectReplacementOptions) => replace(async isCurrent => {
     const content = await make()
+    if (!isCurrent()) return false
     const create = service().createFrom
     if (!create) throw new Error('当前界面不能从已有内容新建 果铃工程')
-    await create(content)
+    return create(content, isCurrent)
   }, options), [replace])
-  const newFlowProject = useCallback((options?: CourseProjectReplacementOptions) => replace(() => service().create('flow'), options), [replace])
-  const newSpatialProject = useCallback((options?: CourseProjectReplacementOptions) => replace(() => service().create('spatial'), options), [replace])
-  const openProject = useCallback(() => { void replace(async () => {
+  const newFlowProject = useCallback((options?: CourseProjectReplacementOptions) => replace(isCurrent => service().create('flow', undefined, isCurrent), options), [replace])
+  const newSpatialProject = useCallback((options?: CourseProjectReplacementOptions) => replace(isCurrent => service().create('spatial', undefined, isCurrent), options), [replace])
+  const openProject = useCallback(() => { void replace(async isCurrent => {
     const identity = ref.current.captureIdentity()
     const file = await ref.current.openProjectFile()
-    if (!file) return
+    if (!file || !isCurrent()) return false
     if (!same(identity)) throw new Error('选择文件期间文档已改变，已取消打开')
-    await service().open(file.path)
+    if (await service().open(file.path, isCurrent) === false) return false
     try { await ref.current.confirmProjectOpen(file.confirmationId) }
     catch (error) {
-      ref.current.commitStatus(`工程已打开，可继续编辑；最近工程记录确认失败，请稍后重新打开：${error instanceof Error ? error.message : String(error)}`)
+      if (isCurrent()) ref.current.commitStatus(`工程已打开，可继续编辑；最近工程记录确认失败，请稍后重新打开：${error instanceof Error ? error.message : String(error)}`)
     }
   }) }, [replace])
-  const openRecentProject = useCallback((path: string, options?: CourseProjectReplacementOptions) => replace(() => service().open(path), options), [replace])
+  const openRecentProject = useCallback((path: string, options?: CourseProjectReplacementOptions) => replace(isCurrent => service().open(path, isCurrent), options), [replace])
   const saveProject = useCallback(async (saveAs = false, options?: CourseProjectOperationOptions): Promise<boolean> => {
     if (saving.current || options?.isCurrent?.() === false) return false
     // The action queue may wait while the user selects another course. Retain

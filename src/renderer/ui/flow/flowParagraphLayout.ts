@@ -1,31 +1,22 @@
 import type { FlowParagraphBlockRect } from '../../../shared/flowParagraphAnchors'
 import type { ComponentContainer, ComponentEdit, ComponentFrame, CourseProjectV10 } from '../../../shared/contracts/component-platform'
-import { containerChildIds, owningContainer } from '../../../shared/contracts/component-platform/project'
-import { flowDocumentBlock } from '../../componentPlatform/surfaces/flow/documentProjection'
+import { containerChildIds } from '../../../shared/contracts/component-platform/project'
+import { projectFlowDocument } from '../../componentPlatform/surfaces/flow/documentProjection'
 import { flowParagraphAnchorAt } from '../../../shared/flowParagraphAnchors'
 import { flowReadingMembers } from '../../../core/course/courseFlowEdits'
+import { documentBlockContainerAt } from '../../document/documentBlockDrop'
 
 export { componentClientMatrix as flowContentClientMatrix } from '../../../player/components/runtime/componentClientMatrix'
 
 /** Capture the real reading container beneath the pointer, including nested sections. */
 export function flowDocumentInsertionAt(paper: HTMLElement, project: CourseProjectV10, surfaceId: string, point: { x: number; y: number }) {
-  const observed = [...paper.querySelectorAll<HTMLElement>('[data-flow-block-id]')]
-    .filter(element => flowDocumentBlock(project, surfaceId, element.dataset.flowBlockId!))
-  const hit = observed.filter(element => {
-    const rect = element.getBoundingClientRect()
-    return point.x >= rect.left && point.x <= rect.right && point.y >= rect.top && point.y <= rect.bottom
-  }).sort((a, b) => depthWithin(b, paper) - depthWithin(a, paper))[0]
-  const id = hit?.dataset.flowBlockId
-  const block = id && flowDocumentBlock(project, surfaceId, id)
-  const container: ComponentContainer = block && block.type === 'section'
-    ? { kind: 'instance', instanceId: block.id }
-    : id ? owningContainer(project, id) ?? { kind: 'surface', surfaceId } : { kind: 'surface', surfaceId }
+  const destination = documentBlockContainerAt(projectFlowDocument(project, surfaceId).content, paper, point)
+  const container: ComponentContainer = destination.parent ? { kind: 'instance', instanceId: destination.parent.id } : { kind: 'surface', surfaceId }
   const members = flowReadingMembers(project, container)
   let afterBlockId: string | null = null
   for (const member of members) {
-    const element = observed.find(element => element.dataset.flowBlockId === member)
-    if (!element) continue
-    const rect = element.getBoundingClientRect()
+    const block = destination.blocks.find(block => block.id === member), rect = block && destination.rect(block)
+    if (!rect) continue
     if (point.y < rect.top + rect.height / 2) break
     afterBlockId = member
   }

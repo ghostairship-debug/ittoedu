@@ -21,6 +21,20 @@ export interface DocumentClosePorts {
 let beforeWindowClose: (() => Promise<'continue' | 'handled'>) | undefined
 export function setBeforeWindowClose(hook?: () => Promise<'continue' | 'handled'>): void { beforeWindowClose = hook }
 
+/** Keep confirmed recovery records while stopping writes; never discard or close their sessions. */
+export async function preserveDocumentWindowRecovery(
+  ports: Pick<DocumentClosePorts, 'list' | 'drain' | 'cancelled' | 'withWriteBarrier' | 'stopWriters'>,
+): Promise<boolean> {
+  const ids = ports.list().map(snapshot => snapshot.documentId)
+  const work = async () => {
+    await ports.stopWriters?.(ids)
+    if (ports.cancelled?.()) return false
+    await ports.drain()
+    return !ports.cancelled?.()
+  }
+  return ports.withWriteBarrier ? ports.withWriteBarrier(ids, work) : work()
+}
+
 /** Decides close permission across every live document, independent of the foreground view. */
 export async function prepareDocumentWindowClose(ports: DocumentClosePorts): Promise<boolean> {
   if (beforeWindowClose && await beforeWindowClose() === 'handled') return false
@@ -34,8 +48,7 @@ export async function prepareDocumentWindowClose(ports: DocumentClosePorts): Pro
   if (decision === 'cancel' || ports.cancelled?.()) return false
   if (decision === 'preserve') {
     if (!(await ports.prepareRenderer('preserve'))) return false
-    await ports.drain()
-    return !ports.cancelled?.()
+    return preserveDocumentWindowRecovery(ports)
   }
   const work = async () => {
     if (decision === 'discard') {

@@ -26,6 +26,9 @@ import type { HtmlActionToolName } from './HtmlActionTools'
 import { viewActionToolSchemas, type ViewActionToolName } from './ViewActionTools'
 import { projectModelJobSnapshot, serviceToolOutcome } from './modelToolResult'
 import { taskTargetDeclaration } from '../../shared/workbench/taskTargetContext'
+import { BUILTIN_DISCOVERY_ENTRIES, createRecipeDiscoveryEntries, createWorkAssetDiscoveryEntry, searchDiscoveryEntries, type ComponentDiscoveryEntry } from '../../shared/componentDiscovery'
+import { RECIPE_CATALOG } from '../course/courseRecipeEdits'
+import { builtInWorkAssetMetadata, loadBuiltInWorkAsset } from '../components/library/workAssets'
 
 /** Main supplies real services. Neither their implementations nor credentials enter core. */
 export interface HostToolServices {
@@ -132,7 +135,7 @@ export interface HostToolServices {
     import(input: { runId: string; file: string }): Promise<unknown>
     delete(input: { runId: string; packageId: string; version?: string; sourceId?: string }): Promise<unknown>
     search(input: { runId: string; query: string; limit?: number }): Promise<unknown>
-    read(input: { runId: string; packageId: string; version?: string }): Promise<
+    read(input: { runId: string; packageId: string; version?: string; sourceId?: string }): Promise<
       | { status: 'ready'; packageId: string; version: string; name: string; entry: ComponentLibraryEntry }
       | { status: 'rejected' | 'failed'; reason: string }>
     save(input: { runId: string; entry: ComponentLibraryEntry; description?: string; subject?: readonly string[]; schoolStage?: readonly string[];
@@ -197,6 +200,8 @@ export const hostToolCatalog = (Object.keys(schema) as HostToolName[]).map(name 
 export function hostToolRegistration(name: string) { return hostToolCatalog.find(tool => tool.name === name) }
 export const isHostToolName = (name: string): name is HostToolName => Object.hasOwn(schema, name)
 interface HostAuthority {
+  /** Only the Gateway may project current project facts through this run's actual readable scope. */
+  projectDiscovery?(runId: string): Promise<readonly ComponentDiscoveryEntry[]>
   /** Current file/selection projection, resolved by the existing Gateway owner. */
   taskTargetContext?(runId: string, target?: DelegationTarget, resumeContext?: unknown): Promise<unknown | null>
   resolveImage(runId: string, target: string): Promise<{ snapshot: DocumentSnapshot; target: ToolTarget }>
@@ -956,25 +961,45 @@ export class HostToolCoordinator {
     this.builtInRun(runId)
     return resource
   }
-  async assetSearch(runId: string, input: { query: string; limit?: number } | { packageId: string; version?: string }): Promise<ToolResult> {
-    this.builtInRun(runId)
-    if (!this.services.assetLibrary) return this.serviceUnavailable('资产库检索服务尚未配置')
-    if ('query' in input) return { kind: 'read', data: await this.services.assetLibrary.search({ runId, ...input }) }
-    const result = await this.services.assetLibrary.read({ runId, ...input })
+  async assetSearch(runId: string, input: { query: string; limit?: number } | { packageId: string; version?: string; sourceId?: string }): Promise<ToolResult> {
+    const run = this.serviceRun(runId)
+    if ('query' in input) {
+      const directory = this.services.assetLibrary && run.grant.fileAccess
+        ? await this.services.assetLibrary.search({ runId, ...input }) : undefined
+      const result = directory && typeof directory === 'object' && !Array.isArray(directory) ? directory as Record<string, unknown> : {}
+      const catalog = Array.isArray(result.entries) ? result.entries as ComponentDiscoveryEntry[] : []
+      const entries = searchDiscoveryEntries([...BUILTIN_DISCOVERY_ENTRIES, ...createRecipeDiscoveryEntries(RECIPE_CATALOG),
+        ...builtInWorkAssetMetadata().map(createWorkAssetDiscoveryEntry), ...(await this.authority.projectDiscovery?.(runId) ?? []), ...catalog], input.query, input.limit ?? 8)
+      return { kind: 'read', data: { status: 'results', query: input.query, candidates: [], libraryEntries: 0, ...result, entries,
+        ...(entries.length ? { hint: undefined } : {}),
+        ...(!this.services.assetLibrary ? { directory: { available: false, reason: '资产目录服务尚未配置；内置能力仍可查询。' } }
+          : !run.grant.fileAccess ? { directory: { available: false, reason: '当前任务未授权读取资产目录；内置与已授权工程能力仍可查询。' } } : {}) } }
+    }
+    let result: Awaited<ReturnType<NonNullable<HostToolServices['assetLibrary']>['read']>>
+    const builtin = !input.sourceId && (!input.version || input.version === '1.0.0') ? await loadBuiltInWorkAsset(input.packageId) : undefined
+    if (builtin) result = { status: 'ready', packageId: builtin.id, version: '1.0.0', name: builtin.title, entry: builtin }
+    else {
+      this.builtInRun(runId)
+      if (!this.services.assetLibrary) return this.serviceUnavailable('资产库检索服务尚未配置')
+      result = await this.services.assetLibrary.read({ runId, ...input })
+    }
     if (result.status !== 'ready') return { kind: 'read', data: result }
     const { entry } = result
     return { kind: 'read', data: { status: 'entry', packageId: result.packageId, version: result.version, title: entry.title,
-      kind: entry.kind ?? 'objects', rootIds: entry.example.rootIds, objects: Object.values(entry.example.instances).map(instance => ({
+      kind: entry.kind ?? 'objects', ...(entry.usage ? { usage: entry.usage } : {}), rootIds: entry.example.rootIds, objects: Object.values(entry.example.instances).map(instance => ({
         id: instance.id, title: instance.name ?? entry.definitions[instance.definitionId]?.title, definitionId: instance.definitionId,
         childIds: instance.childIds ?? [], ...(instance.container ? { container: instance.container } : {}), data: instance.data })),
       pages: entry.example.rootIds.flatMap(id => { const instance = entry.example.instances[id]; return instance?.container ? [{ id, kind: instance.container.kind,
         title: instance.name ?? entry.definitions[instance.definitionId]?.title, childIds: instance.childIds ?? [] }] : [] }), inputs: entry.inputs ?? [] } }
   }
   /** One complete API 5 example for the canonical project writer. */
-  libraryComponent(runId: string, packageId: string, version?: string) {
+  async libraryComponent(runId: string, packageId: string, version?: string, sourceId?: string) {
+    this.serviceRun(runId)
+    const builtin = !sourceId && (!version || version === '1.0.0') ? await loadBuiltInWorkAsset(packageId) : undefined
+    if (builtin) return { status: 'ready' as const, packageId, version: '1.0.0', name: builtin.title, entry: builtin }
     this.writableRun(runId)
     if (!this.services.assetLibrary) throw new Error('资产库服务尚未配置')
-    return this.services.assetLibrary.read({ runId, packageId, ...(version ? { version } : {}) })
+    return this.services.assetLibrary.read({ runId, packageId, ...(version ? { version } : {}), ...(sourceId ? { sourceId } : {}) })
   }
   async saveLibraryComponent(runId: string, operationId: string, input: Omit<Parameters<NonNullable<HostToolServices['assetLibrary']>['save']>[0], 'runId'>): Promise<ToolResult> {
     this.writableRun(runId)

@@ -4,12 +4,13 @@ import {
   Settings2, Sparkles, Workflow, X,
 } from 'lucide-react'
 import { ElementsTab } from './ElementsTab'
-import type { FlowInsertCommand } from './flow/flowInsertCommands'
+import type { CapturedFlowMenuTarget, FlowInsertCommand } from './flow/flowInsertCommands'
 import { NodesTab } from './NodesTab'
 import { PropertiesTab } from './PropertiesTab'
 import { AutomationTab } from './AutomationTab'
 import { DeveloperTab } from './DeveloperTab'
 import { ComponentsTab } from './ComponentsTab'
+import type { ComponentLibraryAddOptions } from '../components/insertComponentPackages'
 import { useEditorStore } from '../store/editorStore'
 import type { SidebarTab } from '../store/slices/editorShellSlice'
 import {
@@ -22,8 +23,12 @@ import type {
 } from '../../shared/componentCatalog'
 import './proEditorRail.css'
 
-export interface FlowDeepInsertPayload { readonly assetId?: string; readonly packageId?: string; readonly presetId?: string }
-export type FlowDeepInsertPort = (command: FlowInsertCommand, payload?: FlowDeepInsertPayload) => void
+export interface FlowDeepInsertPayload {
+  readonly assetId?: string; readonly packageId?: string; readonly presetId?: string; readonly sourceInstanceId?: string
+  readonly chartType?: 'bar' | 'line' | 'area' | 'pie' | 'donut'
+  readonly catalogEntry?: import('../../shared/componentCatalog').AvailableComponentCatalogPackage
+}
+export type FlowDeepInsertPort = (command: FlowInsertCommand, payload?: FlowDeepInsertPayload, captured?: CapturedFlowMenuTarget) => void
 
 interface RightSidebarProps {
   onFlowInsert?: FlowDeepInsertPort
@@ -39,6 +44,7 @@ interface RightSidebarProps {
   onRefreshComponentCatalog?(): void
   onAddCatalogComponents?(
     entries: AvailableComponentCatalogPackage[],
+    options?: ComponentLibraryAddOptions,
   ): boolean | Promise<boolean>
   onUpdateCatalogComponent?(entry: AvailableComponentCatalogPackage): void
   onExtractSelection?(title: string, kind?: 'objects' | 'page' | 'structure', surfaceIds?: readonly string[]): Promise<void>

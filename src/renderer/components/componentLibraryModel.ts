@@ -1,21 +1,79 @@
 import type { AvailableComponentCatalogPackage, AvailableHtmlComponent } from '../../shared/componentCatalog'
-import { componentDefinitionBuiltinKey, type ComponentDefinition } from '../../shared/contracts/component-platform/project'
+import { componentContainerBuiltinKey, componentDefinitionBuiltinKey, type ComponentDefinition, type CourseProjectV10 } from '../../shared/contracts/component-platform/project'
 import { BUILTIN_SOURCE_ENTRIES } from '../../components/builtin-source/entries'
 import type { ComponentLibraryEntry } from '../../shared/contracts/component-platform/library'
+import { BUILTIN_DISCOVERY_ENTRIES, createCatalogDiscoveryEntry, createHtmlDiscoveryEntry, createWorkAssetDiscoveryEntry, searchDiscoveryEntries, type ComponentDiscoveryEntry } from '../../shared/componentDiscovery'
+import { builtInWorkAssetMetadata, type BuiltInWorkAssetMetadata } from '../../core/components/library/workAssets'
+import { planComponentLibraryUsage } from '../../core/components/library/usage'
 import {
   compareSemanticVersions,
 } from './componentCatalogStatus'
 
 export const GENERAL_COMPONENT_SUBJECT = '通用组件'
 
-/** Built-in work assets use the same insertion service and appear in the existing library. */
-export function filterBuiltInWorkAssets<T extends Pick<ComponentLibraryEntry, 'id' | 'title' | 'usage'>>(entries: readonly T[], query: string): T[] {
-  const term = query.trim().toLocaleLowerCase()
-  return entries.filter(entry => !term || [entry.id, entry.title, entry.usage?.kind, entry.usage?.description]
-    .filter(Boolean).join(' ').toLocaleLowerCase().includes(term))
+export interface ComponentLibraryCardEntry extends ComponentDiscoveryEntry {
+  selectionId: string
+  sourceId: string
+  sourceLabel: string
+  catalogEntry?: AvailableComponentCatalogPackage
+  workAsset?: BuiltInWorkAssetMetadata
+  teacherController?: boolean
 }
 
-const internalImplementationKeys = new Set(Object.keys(BUILTIN_SOURCE_ENTRIES))
+/** One read projection of the existing owners; resources remain lazy until adding. */
+export function createComponentLibraryCards(packages: readonly AvailableComponentCatalogPackage[]): ComponentLibraryCardEntry[] {
+  const cards = new Map<string, ComponentLibraryCardEntry>()
+  for (const asset of builtInWorkAssetMetadata()) cards.set(asset.id, { ...createWorkAssetDiscoveryEntry(asset),
+    selectionId: `builtin:${asset.id}`, sourceId: 'built-in', sourceLabel: '内置', workAsset: asset })
+  const teacher = BUILTIN_DISCOVERY_ENTRIES.find(entry => entry.id === 'navigation')!
+  cards.set(teacher.id, { ...teacher, selectionId: 'builtin:navigation', sourceId: 'built-in', sourceLabel: '内置', teacherController: true })
+  for (const entry of selectCurrentCatalogPackages(packages)) cards.set(entry.packageId, { ...createCatalogDiscoveryEntry(entry),
+    // Explicit human selection is the existing manual import path. AI trust facts remain unchanged.
+    availability: { available: entry.quality !== 'deprecated', ...(entry.quality === 'deprecated' ? { reason: '此版本已弃用。' } : {}) },
+    selectionId: entry.packageId, sourceId: entry.sourceKind === 'built-in' || entry.sourceTrust === 'built-in' ? 'built-in' : entry.sourceId,
+    sourceLabel: entry.sourceKind === 'built-in' || entry.sourceTrust === 'built-in' ? '内置' : entry.sourceKind === 'personal' ? '我的资产库' : entry.sourceLabel, catalogEntry: entry })
+  return [...cards.values()]
+}
+
+export interface ComponentLibraryBrowseFilters { query: string; category: string; source: string; subject: string; schoolStage: string }
+export function filterComponentLibraryCards(cards: readonly ComponentLibraryCardEntry[], filters: ComponentLibraryBrowseFilters) {
+  const filtered = cards.filter(entry => {
+    if (filters.category && entry.library?.category !== filters.category) return false
+    if (filters.source && entry.sourceId !== filters.source) return false
+    const subjects = entry.library?.subjects ?? []
+    const stages = entry.library?.schoolStages ?? []
+    if (filters.subject && subjects.length && !subjects.some(value => normalizeSubject(value) === GENERAL_COMPONENT_SUBJECT || value === filters.subject)) return false
+    if (filters.schoolStage && stages.length && !stages.some(value => ['通用', '不限', '不限学段'].includes(value) || value === filters.schoolStage)) return false
+    return true
+  })
+  return searchDiscoveryEntries(filtered, filters.query)
+}
+
+export function componentLibraryCardAvailability(entry: ComponentLibraryCardEntry, project?: CourseProjectV10 | null, navigationTargetId?: string | null) {
+  if (!entry.availability.available || entry.usage?.kind !== 'transition') return entry.availability
+  if (!project || !navigationTargetId) return { available: false, reason: '请先返回编辑器，选中含导航动作的控件或规则。' }
+  try {
+    planComponentLibraryUsage(project, entry, { container: { kind: 'instance', instanceId: navigationTargetId }, index: 0,
+      targetBindings: { navigation: navigationTargetId } })
+    return { available: true }
+  } catch (error) { return { available: false, reason: error instanceof Error ? error.message : String(error) } }
+}
+
+export function componentLibraryPlacementLabel(entry: ComponentLibraryCardEntry, local = false) {
+  if (entry.teacherController) return '整课全局层 · 已有时复用'
+  if (entry.usage?.kind === 'transition') return '应用到所选导航动作 · 每次选一种'
+  if (entry.usage?.kind === 'background') return '当前作用范围的背景层'
+  if (entry.workAsset?.kind === 'page' || entry.workAsset?.kind === 'structure') return local ? '嵌入当前容器' : '新增页面 · 保留内部结构'
+  return '当前编辑容器'
+}
+
+/** Built-in work assets use the same insertion service and appear in the existing library. */
+export function filterBuiltInWorkAssets<T extends Pick<ComponentLibraryEntry, 'id' | 'title' | 'usage'>>(entries: readonly T[], query: string): T[] {
+  return searchDiscoveryEntries(entries.map(entry => ({ ...createWorkAssetDiscoveryEntry(entry), entry })), query).map(value => value.entry)
+}
+
+const internalImplementationKeys = new Set([...Object.keys(BUILTIN_SOURCE_ENTRIES),
+  ...(['slide', 'flow', 'spatial'] as const).map(componentContainerBuiltinKey)])
 /** Engine definitions keep their editing actions; authored packages and custom definitions belong in this panel. */
 export function selectProjectLibraryDefinitions(definitions: Readonly<Record<string, ComponentDefinition>>): ComponentDefinition[] {
   return Object.values(definitions).filter(definition => {
@@ -148,8 +206,7 @@ export function filterComponentLibraryPackages(
   entries: ReadonlyArray<AvailableComponentCatalogPackage>,
   filters: ComponentLibraryFilters,
 ): AvailableComponentCatalogPackage[] {
-  const query = filters.query.trim().toLocaleLowerCase()
-  return entries.filter((entry) => {
+  const filtered = entries.filter((entry) => {
     if (
       filters.subject &&
       !componentLibrarySubjects(entry).includes(filters.subject)
@@ -159,17 +216,9 @@ export function filterComponentLibraryPackages(
       !entry.schoolStage.includes(filters.schoolStage)
     ) return false
     if (filters.category && entry.category !== filters.category) return false
-    if (!query) return true
-    return [
-      entry.name,
-      entry.packageId,
-      entry.description,
-      entry.category ?? '',
-      ...entry.subject,
-      ...entry.schoolStage,
-      ...entry.tags,
-    ].join(' ').toLocaleLowerCase().includes(query)
+    return true
   })
+  return searchDiscoveryEntries(filtered.map(entry => ({ ...createCatalogDiscoveryEntry(entry), entry })), filters.query).map(value => value.entry)
 }
 
 /** One card per HTML component entry (packageId within its directory), the newest saved version. */
@@ -189,10 +238,7 @@ export function filterHtmlComponents(
   entries: ReadonlyArray<AvailableHtmlComponent>,
   query: string,
 ): AvailableHtmlComponent[] {
-  const normalized = query.trim().toLocaleLowerCase()
-  if (!normalized) return [...entries]
-  return entries.filter((entry) => [entry.name, entry.description, entry.sourceCourse ?? '', ...entry.subject, ...entry.schoolStage, ...entry.tags]
-    .join(' ').toLocaleLowerCase().includes(normalized))
+  return searchDiscoveryEntries(entries.map(entry => ({ ...createHtmlDiscoveryEntry(entry), entry })), query).map(value => value.entry)
 }
 
 /** Catalog byte identity is metadata; author availability follows the formal definition version. */

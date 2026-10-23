@@ -1,6 +1,7 @@
 import { afterEach, expect, it, vi } from 'vitest'
 import { domAuthoringFactorySource, createDomAuthoring } from '../../src/components/web/authoringDom'
 import { createNestedDomAuthoring, type NestedDomAuthoring } from '../../src/components/web/nestedAuthoringDom'
+import { createAuthoringFrameGeometry } from '../../src/components/web/authoringFrame'
 import type { ComponentAuthorRecord } from '../../src/shared/contracts/component-platform/runtime'
 
 const adapters: NestedDomAuthoring[] = []
@@ -72,7 +73,8 @@ it('runs the serialized helper and original adapter without module dependencies'
   const serialized = new Function(`return (${createNestedDomAuthoring.toString()})`)() as typeof createNestedDomAuthoring
   const factory = new Function(`return ${domAuthoringFactorySource()}`)() as typeof createDomAuthoring
   let records: Record<string, ComponentAuthorRecord> = {}
-  const adapter = serialized(document.documentElement, factory, { records: () => records }); adapters.push(adapter)
+  const frames = new Function(`return (${createAuthoringFrameGeometry.toString()})`)() as typeof createAuthoringFrameGeometry
+  const adapter = serialized(document.documentElement, factory, { records: () => records }, frames); adapters.push(adapter)
   const target = adapter.describe(child.querySelector('#title')!.firstChild!)!
   records = { [target.authorKey]: { ...target.record, overrides: { text: 'From saved source' } } }
   adapter.refresh()

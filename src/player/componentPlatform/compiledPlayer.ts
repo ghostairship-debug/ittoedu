@@ -11,7 +11,7 @@ import {ComponentRuntimeWorld} from '../components/ComponentRuntimeWorld'
 import {ComponentNavigationOwner} from '../../renderer/components/ComponentNavigationOwner'
 import {createCompiledContentEnvironment} from './compiledContentEnvironment'
 import {PlaybackViewSession,createPlaybackContent} from '../playbackViewSession'
-import { resolveComponentOuterPresentation, applyComponentPresentationStyle } from '../../shared/componentPresentation'
+import { resolveComponentOuterPresentation, resolveComponentContainerSizing, applyComponentPresentationStyle } from '../../shared/componentPresentation'
 import {applyComponentBackgroundPaint} from '../../shared/componentBackgroundPaint'
 import {applyComponentPaintStyle} from '../components/componentPlacementStyle'
 import {createComponentSpatialCameraPort,componentSpatialCameraMatrix,type ComponentSpatialCameraPort} from '../surfaces/spatial/componentSpatialAdapter'
@@ -20,6 +20,7 @@ import {paintComponentSpatialGraph} from './paintSpatialGraph'
 import {createTeacherControllerHudGeometry,projectTeacherControllerInstances,teacherControllerReferenceSize,isViewportComponent} from '../../shared/teacherControllerViewportGeometry'
 import {flowParagraphAnchoredFrame,type FlowParagraphBlockRect} from '../../shared/flowParagraphAnchors'
 import {createFlowReadingNavigation,observeFlowReading} from '../../shared/flowReading'
+import {resolveFlowChapterEntry} from '../../shared/flowChapterEntry'
 import {flowPaperMaxWidth,flowPaperPadding,flowScrollPadding} from '../../shared/flowBodyPresentation'
 import {mountComponentFlowToc} from './flowToc'
 import {attachComponentPlatformNavigationKeys} from '../behaviors/navigation/shortcuts'
@@ -34,7 +35,7 @@ import {createPlaybackNavigationContent,mountPlaybackNavigationChrome} from './p
 import {createWebResourceUrlLease,webRuntimeResourceAddress} from '../../components/web/resourceUrlLease'
 import {componentFragmentStateKey,createComponentFragmentProjection} from './fragments'
 
-interface SurfaceView {root:HTMLElement;host:HTMLElement;content:HTMLElement;view:PlaybackViewSession;camera?:ComponentSpatialCameraPort;off:()=>void;toc?:ReturnType<typeof mountComponentFlowToc>}
+interface SurfaceView {root:HTMLElement;host:HTMLElement;content:HTMLElement;view:PlaybackViewSession;camera?:ComponentSpatialCameraPort;off:()=>void;cancelReading?:()=>void;toc?:ReturnType<typeof mountComponentFlowToc>}
 type Factory=(globals:Record<string,unknown>)=>Record<string,any>|Promise<Record<string,any>>
 type WebFactory=(globals:Record<string,unknown>)=>unknown
 function waitForSourceValue<T>(pending:PromiseLike<T>,signal:AbortSignal,retire?:(value:T)=>void|Promise<void>):Promise<T|undefined>{
@@ -192,13 +193,12 @@ export async function mountCompiledCourse(artifact:CompiledCoursePlayback,root:H
   // authored width of a fixed local composition and cannot size its own fit.
   const presentation=resolveComponentOuterPresentation(project,instance,{placement:flow?'flow':'free',purpose:'playback',inlineSize:node.clientWidth||instance.frame?.width||surface?.flow?.layout.readingWidth||860,flowLayout:surface?.flow?.layout})
   applyComponentPaintStyle(node,instance,project.definitions[instance.definitionId]);applyComponentPresentationStyle(node,presentation.outerStyle);applyComponentPresentationStyle(stage,presentation.stageStyle);applyComponentPresentationStyle(content,presentation.contentStyle);applyComponentPresentationStyle(children,presentation.childrenStyle)
-  if(instance.container){Object.assign(stage.style,{position:'relative',width:'100%',height:'100%'});Object.assign(content.style,{position:'absolute',inset:'0',width:'100%',height:'100%'});Object.assign(children.style,{position:'absolute',inset:'0',width:'100%',height:'100%'});if(flow)node.style.height=`${instance.frame?.height??instance.container.designSize?.height??320}px`}
   if(original.rootIds.includes(id)&&!instance.container){Object.assign(node.style,{position:'absolute',inset:'0',width:'100%',height:'100%',transform:'none'});Object.assign(stage.style,{position:'absolute',inset:'0',height:'100%'});Object.assign(content.style,{position:'absolute',inset:'0',height:'100%'})}
   return presentation
  }
  function paintGlobals(){
   const view=views.get(surfaceId??'');if(!view)return
-  const geometry=createTeacherControllerHudGeometry({referenceSize:teacherControllerReferenceSize(project),viewportRect:{x:0,y:0,width:root.clientWidth,height:root.clientHeight},controllerInsets:view.view.chrome?.controllerInsets})
+  const geometry=createTeacherControllerHudGeometry({referenceSize:teacherControllerReferenceSize(project),viewportRect:{x:0,y:0,width:root.clientWidth,height:root.clientHeight}})
   const display=projectTeacherControllerInstances(project,geometry,teacher)
   for(const id of [...project.global.underlay,...project.global.overlay]){const node=targets.get(id),instance=project.instances[id];if(!node||!instance?.frame)continue;if(isViewportComponent(project,id)){const frame=display.instances[id]?.frame;if(frame)Object.assign(node.style,{position:'absolute',left:'0',top:'0',width:`${frame.width}px`,height:`${frame.height}px`,transformOrigin:'0 0',transform:`matrix(${frame.transform.join(',')})`})}else{const stage=view.host,scale=view.view.fitScale(surfaceId!);const origin=`translate(${parseFloat(stage.style.left)||0}px,${parseFloat(stage.style.top)||0}px) scale(${scale})`;node.style.transform=`${origin} ${view.content.style.transform} matrix(${instance.frame.transform.join(',')})`}}
  }
@@ -211,14 +211,21 @@ export async function mountCompiledCourse(artifact:CompiledCoursePlayback,root:H
   const relayout=()=>{if(stopped)return
    for(const [id,view]of views)if(rootOwner(id)===activeRootId)view.view.resize()
    for(const [id,node]of targets)if(node.dataset.compiledPlacement==='flow'&&node.style.display!=='none'&&rootOwner(id)===activeRootId&&project.instances[id])placeNode(id,node,project.instances[id])
-   for(const [id,view]of views){if(rootOwner(id)!==activeRootId)continue;view.view.resize();if(view.camera){const size=viewport(id);const worldNode=view.content.querySelector<HTMLElement>('[data-component-spatial-world]');if(worldNode)worldNode.style.transform=`matrix(${componentSpatialCameraMatrix(view.camera.read(),{x:0,y:0,...size}).join(',')})`;const graph=view.content.querySelector<SVGSVGElement>('[data-compiled-spatial-graph]');if(graph)paintComponentSpatialGraph(dom,project,id,graph,view.camera.read(),size)}paintFlowAnchors(view,id)}paintGlobals()}
+   for(const [id,view]of views){if(rootOwner(id)!==activeRootId)continue;
+    const instance=project.instances[id],flow=targets.get(id)?.dataset.compiledPlacement==='flow',natural=instance&&resolveComponentContainerSizing(instance,flow?'flow':'free')?.naturalHeight
+    Object.assign(view.root.style,{position:natural?'relative':'absolute',inset:natural?'auto':'0px'})
+    const paper=view.content.querySelector<HTMLElement>('[data-compiled-flow-paper]'),scroll=paper?.parentElement
+    if(paper&&scroll){Object.assign(scroll.style,{position:natural?'relative':'absolute',inset:natural?'auto':'0px',overflow:natural?'visible':'auto'});paper.style.minHeight=natural?'0px':'100%';if(natural){const css=browser.getComputedStyle(scroll),height=Math.ceil(paper.scrollHeight+(parseFloat(css.paddingTop)||0)+(parseFloat(css.paddingBottom)||0));view.root.style.height=`${height}px`}else view.root.style.height='100%'}
+    view.view.resize();if(view.camera){const size=viewport(id);const worldNode=view.content.querySelector<HTMLElement>('[data-component-spatial-world]');if(worldNode)worldNode.style.transform=`matrix(${componentSpatialCameraMatrix(view.camera.read(),{x:0,y:0,...size}).join(',')})`;const graph=view.content.querySelector<SVGSVGElement>('[data-compiled-spatial-graph]');if(graph)paintComponentSpatialGraph(dom,project,id,graph,view.camera.read(),size)}paintFlowAnchors(view,id)}paintGlobals()}
   for(const surface of componentContainers(original)){const section=shell.querySelector<HTMLElement>(`[data-compiled-surface="${CSS.escape(surface.id)}"]`);if(!section)continue;const content=section.querySelector<HTMLElement>(':scope > [data-compiled-surface-content]')!,view=new PlaybackViewSession(),viewportElement=(section.dataset.pageBackdrop='transparent',view.mount(section)),host=dom.createElement('div');viewportElement.append(host);host.append(content);section.dataset.pageBackdrop='transparent';if(surface.designSize){host.dataset.canvasWidth=String(surface.designSize.width);host.dataset.canvasHeight=String(surface.designSize.height)}view.register({id:surface.id,kind:surface.kind,root:host,content,onObservationChange:paintGlobals});view.activate(surface.id)
   const releases:Array<()=>void>=[],entry:SurfaceView={root:section,host,content,view,off:()=>releases.forEach(off=>off())};views.set(surface.id,entry)
   const flowScroll=content.querySelector<HTMLElement>('[data-flow-paper-scroll]'),flowBody=content.querySelector<HTMLElement>('[data-compiled-flow-body]')
-  const reading=createFlowReadingNavigation(()=>flowScroll&&flowBody?{scroll:flowScroll,body:flowBody}:null,id=>targets.get(id))
+  const reading=createFlowReadingNavigation(()=>flowScroll&&flowBody?{scroll:flowScroll,body:flowBody}:null,(id,kind)=>targets.get(kind==='chapter'?resolveFlowChapterEntry(project,surface.id,id):id))
+  entry.cancelReading=reading.cancel
   const observation={readZoom:()=>view.state.zoom,setZoom:(zoom:number)=>view.zoomTo(zoom),reset:()=>{view.reset();reading.goToInstance(null)}}
   const flowObservation=flowScroll&&flowBody?{...observation,...reading}:observation
   releases.push(navigation.registerObservation(surface.id,flowObservation),view.subscribe(navigation.changed))
+  releases.push(reading.dispose)
   if(flowScroll&&flowBody)releases.push(observeFlowReading(flowScroll,flowBody,navigation.changed))
   if(surface.kind==='spatial'){const camera=createComponentSpatialCameraPort(surface.spatial?.home??{x:0,y:0,zoom:1}),session={frameId:null as string|null,stepIndex:null as number|null};entry.camera=camera;releases.push(camera.subscribe(relayout),bindSpatialInput(content,camera),navigation.registerCamera(surface.id,camera,{frameId:()=>session.frameId,selectFrame:value=>{session.frameId=value},stepIndex:()=>session.stepIndex,selectStep:index=>{session.stepIndex=index},viewport:()=>viewport(surface.id)}))}
    if(surface.kind==='flow'&&surface.flow?.layout.toc!=='hidden')entry.toc=mountComponentFlowToc(section,surface.id,teacher.forContainer?.(surface.id)??teacher)
@@ -232,7 +239,7 @@ export async function mountCompiledCourse(artifact:CompiledCoursePlayback,root:H
   if(stopped)return
   const changedTextRanges:string[]=[]
    project=resolveModelPlayerPresentation(original,navigation)
-   for(const [id,view]of views){const visible=rootOwner(id)===activeRootId;view.root.hidden=!visible;view.root.style.display=visible?'':'none'}
+   for(const [id,view]of views){const visible=rootOwner(id)===activeRootId;if(!visible&&!view.root.hidden)view.cancelReading?.();view.root.hidden=!visible;view.root.style.display=visible?'':'none'}
    for(const [id,element]of programRoots)element.hidden=id!==activeRootId
    const surface=componentSurface(project,surfaceId??'')
   applyComponentBackgroundPaint(shell,resolveComponentBackground(project),id=>assetUrls[id])
@@ -256,7 +263,7 @@ export async function mountCompiledCourse(artifact:CompiledCoursePlayback,root:H
  await navigation.initializeSpatialPlayback(controller.signal)
   pointerChrome=hasPresentation?mountPlaybackNavigationChrome(hostRoot,navigation,{content:root,playback:artifact.course.playback,report}):undefined
   navigationTasks=navigation.createKeyTasks();keys=!hasPresentation||options.keyboardNavigation===false?undefined:attachComponentPlatformNavigationKeys({root,navigation:navigationTasks,keyboardNavigation:artifact.course.playback?.keyboardNavigation??true,presenter:artifact.course.playback?.presenter??{enabled:true,strategy:'scene-navigation',additionalBindings:[]},onAuthoredCommand:command=>world.dispatchPresenterCommand(command),onError:error=>report(String(error))})
-  observer=typeof browser.ResizeObserver==='function'?new browser.ResizeObserver(relayout):undefined;observer?.observe(root);for(const view of views.values())observer?.observe(view.root);root.addEventListener('load',relayout,true);root.addEventListener('toggle',relayout,true);removeLayoutListeners=()=>{root.removeEventListener('load',relayout,true);root.removeEventListener('toggle',relayout,true)};void dom.fonts?.ready.then(relayout)
+  observer=typeof browser.ResizeObserver==='function'?new browser.ResizeObserver(relayout):undefined;observer?.observe(root);for(const view of views.values()){observer?.observe(view.root);const body=view.content.querySelector('[data-compiled-flow-body]');if(body)observer?.observe(body)}root.addEventListener('load',relayout,true);root.addEventListener('toggle',relayout,true);removeLayoutListeners=()=>{root.removeEventListener('load',relayout,true);root.removeEventListener('toggle',relayout,true)};void dom.fonts?.ready.then(relayout)
  offPlacement=teacher.subscribePlacement?.(paintGlobals);offNavigation=teacher.subscribe(paintGlobals)
  for(const diagnostic of artifact.diagnostics)report(`${diagnostic.instanceId??''} ${diagnostic.message}`,{severity:diagnostic.blocking===false?'warning':'error',code:diagnostic.code,instanceId:diagnostic.instanceId})
  return {runtime:world,navigation,ready,next:()=>navigation.execute({type:'step.next'}),previous:()=>navigation.execute({type:'step.previous'}),go:(id:string,targetStateId?:string)=>navigation.execute({type:'scene.go',sceneId:id,targetStateId}),camera:(id:string)=>views.get(id)?.camera,observation:(id:string)=>views.get(id)?.view,update,

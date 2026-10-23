@@ -356,8 +356,18 @@ export class ViewObservationDesktopService implements PublishedActionPreviewPort
         }, '观察宿主准备或截图无响应'),
         select: (locationId, stateId) => withFaultWait(() => contents.executeJavaScript(`window.__COURSEWARE_OBSERVATION_SELECT__(${JSON.stringify(locationId)},${JSON.stringify(stateId)})`) as Promise<ObservationWorkerResult>, '观察宿主切换无响应'),
         capture: () => withFaultWait(async () => {
-          await waitForCaptureFramePaint(contents.mainFrame, randomUUID())
           const current = target.interactive ? await read() : initial, rect = current.rect
+          if (rect && !target.interactive) {
+            // capturePage clips to the hidden window's viewport. A local Flow
+            // picture can be taller than its author viewport: expand only this
+            // owned window, leaving the renderer's explicitly sized root and
+            // the captured instance's local viewport unchanged.
+            const [width, height] = worker.getContentSize()
+            const captureWidth = Math.max(width, Math.ceil(rect.x + rect.width))
+            const captureHeight = Math.max(height, Math.ceil(rect.y + rect.height))
+            if (captureWidth !== width || captureHeight !== height) worker.setContentSize(captureWidth, captureHeight)
+          }
+          await waitForCaptureFramePaint(contents.mainFrame, randomUUID())
           const bitmap = await contents.capturePage(rect ? { x: Math.floor(rect.x), y: Math.floor(rect.y), width: Math.ceil(rect.width), height: Math.ceil(rect.height) } : undefined)
           const size = bitmap.getSize()
           if (size.width < 1 || size.height < 1 || bitmap.isEmpty()) throw new Error('观察宿主未生成真实画面')

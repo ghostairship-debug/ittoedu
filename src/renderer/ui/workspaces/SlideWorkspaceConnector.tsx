@@ -3,7 +3,7 @@ import { useShallow } from 'zustand/react/shallow'
 import { useAssetObjectUrls } from '../useAssetObjectUrls'
 import type { ImportedImageAsset } from '../../project/assetManager'
 import type { WorkspaceMediaDropHandler } from '../../lessonWorkspace/workspaceMediaDrop'
-import { useEditorStore } from '../../store/editorStore'
+import { selectActiveSlideContentEdit, useEditorStore } from '../../store/editorStore'
 import { useCourseV10Runtime } from '../../components/CourseV10RuntimeView'
 import { SlideLocationWorkspace, type SlideWorkspaceSnapshot, type SlideWorkspacePorts } from './SlideLocationWorkspace'
 
@@ -22,7 +22,7 @@ export function SlideWorkspaceConnector(props: SlideWorkspaceConnectorProps) {
   const assetUrlsRef = useRef(assetUrls); assetUrlsRef.current = assetUrls
   const source = useEditorStore(useShallow(state => ({
     courseView: state.courseView, canvasMode: state.canvasMode,
-    contentEdit: state.slideContentEdit, drawTool: state.slideDrawTool, editingScope: state.editingScope, backgroundPreview: state.previewBackgroundColor,
+    contentEdit: selectActiveSlideContentEdit(state), drawTool: state.slideDrawTool, editingScope: state.editingScope, backgroundPreview: state.previewBackgroundColor,
   })))
   const read = (): SlideWorkspaceSnapshot => {
     const state = useEditorStore.getState(), view = state.courseBridge.read()
@@ -32,7 +32,7 @@ export function SlideWorkspaceConnector(props: SlideWorkspaceConnectorProps) {
       interactionSelection: view.interactionSelection,
       rootInstanceId: view.rootInstanceId, editingContainerId: view.editingContainerId,
       activation: view.activation, activeStateId: view.activeStateId,
-      canvasMode: state.canvasMode, contentEdit: state.slideContentEdit, drawTool: state.slideDrawTool, assetUrls: assetUrlsRef.current, editingScope: state.editingScope,
+      canvasMode: state.canvasMode, contentEdit: selectActiveSlideContentEdit(state), drawTool: state.slideDrawTool, assetUrls: assetUrlsRef.current, editingScope: state.editingScope,
     }
   }
   const snapshot: SlideWorkspaceSnapshot = {
@@ -89,6 +89,7 @@ export function SlideWorkspaceConnector(props: SlideWorkspaceConnectorProps) {
       setTextComposing: active => state().setSlideTextEditComposing(active),
       commitTextEdit: () => state().commitSlideContentEdit(), cancelTextEdit: () => state().cancelTextEdit(),
       commitTextInput: () => state().commitSlideContentInput(),
+      preserveTextEdit: () => state().retainTextEdit(),
       undo: () => { safe(state().undo()) }, redo: () => { safe(state().redo()) },
       onElement: runtime.onElement, onTargetElement: runtime.onTargetElement,
       addTextNode: (x, y) => safe(state().addTextNode(x, y)),
@@ -97,7 +98,7 @@ export function SlideWorkspaceConnector(props: SlideWorkspaceConnectorProps) {
       addShapeNode: (type, x, y) => safe(state().addShapeNode(type, x, y)),
       addTableNode: (x, y) => safe(state().addTableNode(x, y)),
       addChartNode: (type, x, y) => safe(state().addChartNode(type, x, y)),
-      addExternalComponentNode: (id, x, y, preset) => safe(state().addExternalComponentNode(id, x, y, preset)),
+      addExternalComponentNode: (id, x, y, preset, sourceInstanceId) => safe(state().addExternalComponentNode(id, x, y, preset, sourceInstanceId)),
       drawShapeNode: (input, target) => safe(state().drawSlideShapeNode(input, target)),
     }
   }, [runtime.documentId, runtime.world, runtime.navigation, runtime.onElement, runtime.onTargetElement, runtime.selectInstances, runtime.edit, runtime.resetPlayback, runtime.registerObservation, runtime.containerViewState, runtime.surfaceId])
