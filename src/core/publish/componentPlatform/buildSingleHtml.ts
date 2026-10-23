@@ -1,7 +1,9 @@
 import type { PublishedCourseV4 } from '../../../shared/contracts/component-platform/published'
+import { restoreSerializedResourcePool, serializeResourcePool } from '../../../shared/serializedResourcePool'
 
 const escapeAttribute = (value: string) => value.replace(/[&<>"']/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[character]!)
 const scriptLiteral = (value: string) => JSON.stringify(value).replace(/</g, '\\u003c')
+interface HtmlResourceOptions { preparedAssetScriptUrl?: string; preparedFontScriptUrl?: string; fontFaceCssElementId?: string }
 
 /** Parseable independently of the player, so bundle/JSON/entry failures stay visible. */
 function earlyPlaybackScript(): string {
@@ -9,22 +11,31 @@ function earlyPlaybackScript(): string {
 }
 
 function singleHtml(payload: { title: string }, playerBundle: string, entry: string,
-  options: { preparedAssetScriptUrl?: string; fontFaceCssElementId?: string }): string {
-  const encoded = JSON.stringify(payload).replace(/</g, '\\u003c')
+  options: HtmlResourceOptions): string {
+  const serialized = serializeResourcePool(payload)
+  const encoded = JSON.stringify(serialized.data).replace(/</g, '\\u003c')
+  const pool = serialized.pool ? `<script id="course-resource-pool" type="application/json">${JSON.stringify(serialized.pool).replace(/</g, '\\u003c')}</script>` : ''
   const bundle = playerBundle.replace(/<\/script/gi, '<\\/script')
-  const assetScript = options.preparedAssetScriptUrl ? `<script src="${escapeAttribute(options.preparedAssetScriptUrl)}"></script>` : ''
-  const assetOption = options.preparedAssetScriptUrl ? 'preparedAssetBytes:window.CoursewarePreparedAssetBytes,' : ''
-  const fontOption = options.fontFaceCssElementId ? `fontFaceCss:(document.getElementById(${scriptLiteral(options.fontFaceCssElementId)})||{}).textContent||"",` : ''
-  const mount = `(function(){try{if(window.__coursePlaybackFailed)throw window.__coursePlaybackError;var course=JSON.parse(document.getElementById('course-data').textContent);window.coursePlayerReady=Promise.resolve(${entry}(course,document.getElementById('course-root'),{${assetOption}${fontOption}report:function(message,issue){window.__coursePlaybackDiagnostic(message,issue);}})).then(function(player){window.coursePlayer=player;var diagnostic=document.getElementById('course-diagnostic');if(!window.__coursePlaybackFailed&&!diagnostic.getAttribute('data-has-diagnostic'))diagnostic.hidden=true;return player;},function(error){window.__coursePlaybackFailure(error);throw error;});}catch(error){window.__coursePlaybackFailure(error);window.coursePlayerReady=Promise.reject(error);window.coursePlayerReady.catch(function(){});}})();`
-  return `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escapeAttribute(payload.title)}</title><style>html,body{margin:0;width:100%;height:100%;background:#eef2f7}#course-root{width:100%;height:100%;overflow:hidden}#course-diagnostic{position:fixed;bottom:0;left:0;max-width:100%;box-sizing:border-box;padding:8px 12px;background:#fff;color:#475569;z-index:10000}</style></head><body><main id="course-root"></main><div id="course-diagnostic" role="status" aria-live="polite">正在加载课件…</div><script>${earlyPlaybackScript().replace(/<\/script/gi, '<\\/script')}</script><script id="course-data" type="application/json">${encoded}</script><script>${bundle}</script>${assetScript}<script>${mount}</script></body></html>`
+  const fontScript = options.preparedFontScriptUrl ? `<script src="${escapeAttribute(options.preparedFontScriptUrl)}"></script>` : ''
+  const preparesNativeAssets = entry === 'CoursewareCompiledPlayer.mountCompiledCourse'
+  const assetOption = options.preparedAssetScriptUrl ? `preparedAssetBytes:window.CoursewarePreparedAssetBytes,${preparesNativeAssets ? 'prepareAssetBytes:prepareAssetBytes,' : ''}` : ''
+  // HTTP uses cacheable package files. Only file:// needs the classic-script
+  // byte carrier, because fetch cannot read beside an extracted local document.
+  const assetLoader = options.preparedAssetScriptUrl ? `var assetPreparation;function prepareAssetBytes(){if(window.CoursewarePreparedAssetBytes)return Promise.resolve(window.CoursewarePreparedAssetBytes);return assetPreparation||(assetPreparation=new Promise(function(resolve,reject){var script=document.createElement('script');script.src=${scriptLiteral(options.preparedAssetScriptUrl)};script.onload=function(){if(!window.CoursewarePreparedAssetBytes){reject(new Error('资源脚本没有提供素材字节'));return;}resolve(window.CoursewarePreparedAssetBytes);};script.onerror=function(){reject(new Error('离线资源脚本加载失败'));};document.head.appendChild(script);}));}` : ''
+  // The Published entry consumes bytes directly; retain that existing contract.
+  // Compiled playback can prepare its native-directory bytes at first use.
+  const prepared = options.preparedAssetScriptUrl ? preparesNativeAssets ? `location.protocol==='file:'?prepareAssetBytes():Promise.resolve()` : 'prepareAssetBytes()' : 'Promise.resolve()'
+  const fontOption = options.fontFaceCssElementId ? `fontFaceCss:window.CoursewarePreparedFontFaceCss||((document.getElementById(${scriptLiteral(options.fontFaceCssElementId)})||{}).textContent||"").replace(/url\\((['"]?)([^'")]+)\\1\\)/g,function(all,quote,url){return /^(?:data:|blob:|https?:|file:)/i.test(url)?all:'url('+JSON.stringify(new URL(url,document.baseURI).href)+')';}),` : ''
+  const mount = `(function(){${assetLoader}window.coursePlayerReady=(${prepared}).then(function(){if(window.__coursePlaybackFailed)throw window.__coursePlaybackError;var element=document.getElementById('course-data'),pool=document.getElementById('course-resource-pool');var course=(${restoreSerializedResourcePool.toString()})(JSON.parse(element.textContent),pool?JSON.parse(pool.textContent):undefined);element.__courseDecodedPayload=course;return ${entry}(course,document.getElementById('course-root'),{${assetOption}${fontOption}report:function(message,issue){window.__coursePlaybackDiagnostic(message,issue);}});}).then(function(player){window.coursePlayer=player;var diagnostic=document.getElementById('course-diagnostic');if(!window.__coursePlaybackFailed&&!diagnostic.getAttribute('data-has-diagnostic'))diagnostic.hidden=true;return player;},function(error){window.__coursePlaybackFailure(error);throw error;});window.coursePlayerReady.catch(function(){});})();`
+  return `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escapeAttribute(payload.title)}</title><style>html,body{margin:0;width:100%;height:100%;background:#eef2f7}#course-root{width:100%;height:100%;overflow:hidden}#course-diagnostic{position:fixed;bottom:0;left:0;max-width:100%;box-sizing:border-box;padding:8px 12px;background:#fff;color:#475569;z-index:10000}</style></head><body><main id="course-root"></main><div id="course-diagnostic" role="status" aria-live="polite">正在加载课件…</div><script>${earlyPlaybackScript().replace(/<\/script/gi, '<\\/script')}</script><script id="course-data" type="application/json">${encoded}</script>${pool}<script>${bundle}</script>${fontScript}<script>${mount.replace(/<\/script/gi, '<\\/script')}</script></body></html>`
 }
 
 /** Fixed host template; source remains JSON data until the isolated runtime loads compiled ESM. */
-export function buildComponentSingleHtml(payload: PublishedCourseV4, playerBundle: string, options: { preparedAssetScriptUrl?: string; fontFaceCssElementId?: string } = {}): string {
+export function buildComponentSingleHtml(payload: PublishedCourseV4, playerBundle: string, options: HtmlResourceOptions = {}): string {
   return singleHtml(payload, playerBundle, 'CoursewarePlayer.mountPublishedCourseV4', options)
 }
 
 /** Final delivery template consumes materialized compiled content and the shared runtime only. */
-export function buildCompiledSingleHtml(artifact: import('./compiledContract').CompiledCoursePlayback, runtimeBundle: string, options: { fontFaceCssElementId?: string; preparedAssetScriptUrl?: string } = {}): string {
+export function buildCompiledSingleHtml(artifact: import('./compiledContract').CompiledCoursePlayback, runtimeBundle: string, options: HtmlResourceOptions = {}): string {
   return singleHtml(artifact, runtimeBundle, 'CoursewareCompiledPlayer.mountCompiledCourse', options)
 }

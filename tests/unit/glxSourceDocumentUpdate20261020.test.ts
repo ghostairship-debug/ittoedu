@@ -30,7 +30,8 @@ it('updates a no-frame HTML Source program through World/Host/Sandbox with a new
   const published = await stage('publish Source document', buildPublishedCourseV4({ project, assetBytes: {} },
     { compilation: new InMemoryComponentCompilation(createEsbuildComponentCompiler()) }))
   const bundle = await stage('bundle Source update player', build({ stdin: {
-    contents: `export {mountPublishedCourseV4,publishedComponentModel} from './src/player/componentPlatform/publishedPlayer';`,
+    contents: `export {mountPublishedCourseV4} from './src/player/componentPlatform/publishedPlayer';
+      export {publishedComponentModel} from './src/player/componentPlatform/publishedProjection';`,
     resolveDir: process.cwd(), loader: 'ts' }, platform: 'browser', target: 'es2022', bundle: true, write: false, format: 'iife', globalName: 'SourceDocumentUpdate' }))
   const browser = await stage('launch Source update browser', chromium.launch({ headless: true }))
   try {

@@ -194,6 +194,7 @@ export function installOwnedDocumentAuthoring(token: string, documentPath: strin
   runtimeResources?(resources: Record<string, string>): Record<string, string>
   resolveResource?(reference: string, bindings: Readonly<Record<string, string>>): string | undefined
   matchesResource?(reference: string, liveUrl: string, bindings: Readonly<Record<string, string>>): boolean
+  resourceReference?(liveUrl: string, bindings: Readonly<Record<string, string>>): string | undefined
   bindings?(): Readonly<Record<string, string>>
   activity?(): { active: boolean; visible: boolean; playing: boolean } | undefined
   refreshResources?(root: Document, resources: Record<string, string>, bindings: Readonly<Record<string, string>>): void
@@ -417,8 +418,9 @@ export function installOwnedDocumentAuthoring(token: string, documentPath: strin
       originalText: node => pageText()?.originalText(node), claimText: (node, text) => pageText()?.setLocalText(node, text),
       resolveResource: reference => options.resolveResource?.(reference, state.bindings) ?? resourceUrls()[state.bindings[reference] ?? reference] ?? reference,
       matchesResource: (reference, liveUrl) => options.matchesResource?.(reference, liveUrl, state.bindings) ?? false,
-      resourceReference: url => Object.entries(state.bindings).find(([, id]) => resourceUrls()[id] === url)?.[0]
-        ?? Object.entries(resourceUrls()).find(([, value]) => value === url)?.[0],
+      resourceReference: url => options.resourceReference ? options.resourceReference(url, state.bindings)
+        : Object.entries(state.bindings).find(([, id]) => resourceUrls()[id] === url)?.[0]
+          ?? Object.entries(resourceUrls()).find(([, value]) => value === url)?.[0],
       onChange: enqueue, report: (authorKey, status) => parentMessage({ type: 'guoling.authoring.status', authorKey, status }) })
     releaseCarriers = options.blobCarriers?.()?.subscribe(frame => {
       children.delete(frame)

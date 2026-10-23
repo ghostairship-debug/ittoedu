@@ -1,5 +1,6 @@
 import type { PublishedCourseV4 } from '../../shared/contracts/component-platform/published'
-import { mountPublishedCourseV4, publishedComponentModel } from './publishedPlayer'
+import { mountPublishedCourseV4 } from './publishedPlayer'
+import { publishedComponentModel } from './publishedProjection'
 import { componentSurfaceGeometryTargets } from './spatialTargets'
 import { spatialFramePose } from '../surfaces/spatial/componentPlatform/graph'
 import { componentDefinitionBuiltinKey, componentSurface } from '../../shared/contracts/component-platform/project'

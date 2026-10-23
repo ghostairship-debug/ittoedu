@@ -1,27 +1,45 @@
 /** Software-only projection address. Canonical source keeps cw-resource references. */
 export const webRuntimeResourceAddress = (id: string): string => `guoling-resource:${encodeURIComponent(id).replace(/[!'()*]/g, character => `%${character.charCodeAt(0).toString(16)}`)}`
 
-/** One resource version is materialized once in the realm which actually consumes it.
+/** Each source is decoded once in the realm which actually consumes it.
  * Opaque sandbox documents cannot use their parent's Blob storage key. */
 export function createWebResourceUrlLease(realm: Pick<typeof globalThis, 'URL' | 'Blob' | 'atob'> = globalThis) {
-  const sources: Record<string, string> = {}, urls: Record<string, string> = {}, owned: string[] = []
+  const sources: Record<string, string> = {}, urls: Record<string, string> = {}
+  const materialized = new Map<string, { blob: Blob; urls: Map<string, string> }>()
   let ended = false
+  const materialize = (id: string, source: string): string => {
+    if (!source.startsWith('data:')) return source
+    let cached = materialized.get(source)
+    if (!cached) {
+      const comma = source.indexOf(','), metadata = source.slice(5, comma), body = source.slice(comma + 1)
+      if (comma < 0) return source
+      const base64 = /;base64(?:;|$)/i.test(metadata)
+      const bytes = base64 ? Uint8Array.from(realm.atob(body), character => character.charCodeAt(0))
+        : new TextEncoder().encode(decodeURIComponent(body))
+      cached = { blob: new realm.Blob([bytes], { type: metadata.split(';')[0] || 'text/plain' }), urls: new Map() }
+      materialized.set(source, cached)
+    }
+    // Authoring reverses a live address back to its logical resource ID.
+    // Share the decoded bytes, but keep a distinct address for each ID.
+    const url = cached.urls.get(id) ?? realm.URL.createObjectURL(cached.blob)
+    cached.urls.set(id, url)
+    return url
+  }
+  const currentUrl = (id: string): string | undefined => {
+    const source = sources[id]
+    return source?.startsWith('data:') ? materialized.get(source)?.urls.get(id) : source
+  }
   const update = (resources: Readonly<Record<string, string>>): Record<string, string> => {
     if (ended) return urls
     for (const id of Object.keys(urls)) if (!(id in resources)) { delete urls[id]; delete sources[id] }
     for (const [id, source] of Object.entries(resources)) {
       if (sources[id] === source) continue
-      let url = source
-      if (source.startsWith('data:')) {
-        const comma = source.indexOf(','), metadata = source.slice(5, comma), body = source.slice(comma + 1)
-        if (comma < 0) continue
-        const base64 = /;base64(?:;|$)/i.test(metadata)
-        const bytes = base64 ? Uint8Array.from(realm.atob(body), character => character.charCodeAt(0))
-          : new TextEncoder().encode(decodeURIComponent(body))
-        url = realm.URL.createObjectURL(new realm.Blob([bytes], { type: metadata.split(';')[0] || 'text/plain' }))
-        owned.push(url)
-      }
-      sources[id] = source; urls[id] = url
+      sources[id] = source
+      let url: string | undefined
+      // A resource table is also passed to realms which use only a small part
+      // of it. Register the identity now; decode only on actual address access.
+      Object.defineProperty(urls, id, { enumerable: true, configurable: true,
+        get: () => url ??= ended ? source : materialize(id, source) })
     }
     return urls
   }
@@ -42,11 +60,15 @@ export function createWebResourceUrlLease(realm: Pick<typeof globalThis, 'URL' |
     return bound ? bound === liveUrl : reference === liveUrl
       || Object.keys(sources).some(id => sources[id] === reference && urls[id] === liveUrl)
   }
-  return { sources, urls, update, project, resolve, matches, release() {
+  // Reverse authoring lookups must not materialize all other table entries.
+  const reverse = (liveUrl: string, bindings: Readonly<Record<string, string>> = {}): string | undefined =>
+    Object.entries(bindings).find(([, id]) => currentUrl(id) === liveUrl)?.[0]
+      ?? Object.keys(sources).find(id => currentUrl(id) === liveUrl)
+  return { sources, urls, update, project, resolve, matches, reverse, release() {
     if (ended) return
     ended = true
     // Prior versions remain alive while authored programs can still hold them.
-    for (const url of owned) realm.URL.revokeObjectURL(url)
-    owned.length = 0
+    for (const resource of materialized.values()) for (const url of resource.urls.values()) realm.URL.revokeObjectURL(url)
+    materialized.clear()
   } }
 }

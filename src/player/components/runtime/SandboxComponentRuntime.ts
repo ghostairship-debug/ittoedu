@@ -3,7 +3,7 @@ import { hasWebContentData } from '../../../components/web/sourcePreparation'
 import { nanoid } from 'nanoid'
 import { splitInstalledBundledFontFaceCss } from '../../../shared/fonts/installedBundledFontFaceCss'
 import type { CompiledComponentModule } from '../../../core/components/compilation/types'
-import type { ComponentInstance, ComponentRuntimeScope, ComponentTarget, JsonValue, ComponentRuntimeContext, ComponentAuthorSpotInput, ComponentAuthorPreviewCallbacks, ComponentAuthorGeometry, ComponentMediaCommand, ComponentMediaRegistration, ComponentMediaPort, ComponentInteractionPort, ComponentPresentationPort, ComponentMediaState, ComponentMediaRegistrationOptions, ComponentLayoutInput, ComponentLayoutPort } from '../../../shared/contracts/component-platform'
+import type { ComponentInstance, ComponentRuntimeScope, ComponentTarget, JsonValue, ComponentRuntimeContext, ComponentAuthorSpotInput, ComponentAuthorPreviewCallbacks, ComponentAuthorGeometry, ComponentMediaCommand, ComponentMediaRegistration, ComponentMediaPort, ComponentInteractionPort, ComponentPresentationPort, ComponentMediaState, ComponentMediaRegistrationOptions, ComponentLayoutInput, ComponentLayoutPort, ComponentGeometrySnapshot } from '../../../shared/contracts/component-platform'
 import type { PreparedComponentRuntime } from './ComponentRuntimeHost'
 import { componentTargetSchema, jsonValueSchema, componentFrameSchema } from '../../../shared/contracts/component-platform'
 import { teacherControllerActionSchema, type TeacherControllerAction, type TeacherControllerPort, type TeacherControllerSnapshot } from '../../../shared/contracts/component-platform/teacherController'
@@ -28,6 +28,7 @@ import { domTextOverrideRealmSource, type DomTextOverrideController } from '../.
 import type { LightEditTextOverride } from '../../../shared/contracts/runtime/lightEdit'
 import { invertMatrix, multiplyMatrices, transformPoint, type AffineMatrix } from '../../../core/components/geometry'
 import { componentClientMatrix } from './componentClientMatrix'
+import { projectComponentGeometry } from './componentGeometry'
 
 export interface RuntimeTargetSnapshot { reference: ComponentTarget; instanceId: string; value?: JsonValue }
 export interface ComponentBootstrapTransport {
@@ -206,6 +207,8 @@ function contentRealmBridge(nonce: string, fragmentBox: { resourceFactory: typeo
   let motionSequence = 0, motionRequestSequence = 0
   const motionTasks = new Map<number, { start(reducedMotion: boolean): void; settle(outcome: ComponentMotionOutcome): void }>()
   const motionRequests = new Map<number, { taskId: number; method: string; resolve(value: unknown): void }>()
+  let geometrySequence = 0
+  const geometryRequests = new Map<number, (value: ComponentGeometrySnapshot | null) => void>()
   let serviceSequence = 0
   const serviceRequests = new Map<number, (value: boolean) => void>()
   const mediaCommands = new Map<number, (command: ComponentMediaCommand) => boolean | Promise<boolean>>()
@@ -290,6 +293,8 @@ function contentRealmBridge(nonce: string, fragmentBox: { resourceFactory: typeo
     motionTasks.clear()
     for (const pending of motionRequests.values()) pending.resolve(pending.method === 'nextFrame' ? null : false)
     motionRequests.clear()
+    for (const resolve of geometryRequests.values()) resolve(null)
+    geometryRequests.clear()
     for (const resolve of serviceRequests.values()) resolve(false)
     serviceRequests.clear(); mediaCommands.clear(); interactionListeners.clear()
     authorPreviewCallbacks.clear()
@@ -427,6 +432,14 @@ function contentRealmBridge(nonce: string, fragmentBox: { resourceFactory: typeo
           runScopeId: message.runScopeId, instanceId: instance.id, generation, signal: controller.signal,
           isActive: () => active,
           cleanup: (cleanup: () => void) => { if (active) cleanups.add(cleanup); else cleanup() },
+          ...(message.measure ? { measure: (references: readonly ComponentTarget[]): Promise<ComponentGeometrySnapshot | null> => {
+            if (!active) return Promise.resolve(null)
+            const requestId = ++geometrySequence
+            return new Promise(resolve => {
+              geometryRequests.set(requestId, resolve)
+              send({ type: 'geometry.measure', requestId, references })
+            })
+          } } : {}),
           // These are explicitly the latest observed snapshots, never synchronous RPC.
           target: (reference: ComponentTarget) => {
             if (!active) return null
@@ -726,6 +739,7 @@ function contentRealmBridge(nonce: string, fragmentBox: { resourceFactory: typeo
             runtimeResources: () => resourceUrls,
             resolveResource: (reference, bindings) => resourceLease.resolve(reference, bindings),
             matchesResource: (reference, liveUrl, bindings) => resourceLease.matches(reference, liveUrl, bindings),
+            resourceReference: (url, bindings) => resourceLease.reverse(url, bindings),
             activity: () => authoredDocument ? undefined : activitySnapshot(),
             blobCarriers: () => authoredDocument?.blobCarriers,
             observe: observeHtml, onChange: () => collectHtml(),
@@ -747,9 +761,7 @@ function contentRealmBridge(nonce: string, fragmentBox: { resourceFactory: typeo
             claimText: (node, text) => (sourcePageText ?? (window as Window & { __cwPageTextOverrides?: DomTextOverrideController }).__cwPageTextOverrides)?.setLocalText(node, text),
             resolveResource: reference => resourceLease.resolve(reference, currentBindings()) ?? reference,
             matchesResource: (reference, liveUrl) => resourceLease.matches(reference, liveUrl, currentBindings()),
-            resourceReference: url => Object.entries(currentBindings())
-              .find(([, id]) => resourceUrls[id] === url)?.[0]
-              ?? Object.entries(resourceUrls).find(([, value]) => value === url)?.[0],
+            resourceReference: url => resourceLease.reverse(url, currentBindings()),
             report: (authorKey, status) => {
               if (status === 'unresolved') scope.events.emit('component.diagnostic', { instanceId: instance.id, authorKey,
                 message: '内部作者对象当前无法唯一重绑定；原内容与作者修改已保留，尚未应用' })
@@ -1013,6 +1025,11 @@ function contentRealmBridge(nonce: string, fragmentBox: { resourceFactory: typeo
         teacherPending.delete(message.requestId as number)
         if (message.error) pending.reject(new Error(String(message.error)))
         else pending.resolve(message.result === true)
+        return
+      } else if (message.type === 'geometry.measured') {
+        if (!active || message.generation !== generation) return
+        const resolve = geometryRequests.get(message.requestId as number)
+        if (resolve) { geometryRequests.delete(message.requestId as number); resolve(message.snapshot as ComponentGeometrySnapshot | null) }
         return
       } else if (message.type === 'motion.started') {
         if (active && message.generation === generation) motionTasks.get(message.taskId as number)?.start(message.reducedMotion === true)
@@ -1298,6 +1315,25 @@ export async function preparePublishedNativeComponent(artifact: CompiledComponen
       return
     }
     if (!scope?.isActive() || message?.generation !== scope.generation) return
+    if (message.type === 'geometry.measure' && Number.isInteger(message.requestId)) {
+      const references: ReturnType<typeof componentTargetSchema.safeParse>[] | null = Array.isArray(message.references)
+        ? message.references.map((value: unknown) => componentTargetSchema.safeParse(value)) : null
+      const currentScope = scope
+      // Capture the requesting realm transform alongside the host's synchronous
+      // layout batch, before any promise turn can move the iframe.
+      const matrix = authorRoot ? clientMatrix(iframe) : [1, 0, 0, 1, 0, 0] as AffineMatrix
+      const hostToViewport = matrix ? invertMatrix(matrix) : null
+      const measured = currentScope.measure && references?.every(value => value.success) && hostToViewport
+        ? currentScope.measure(references.map(value => value.data!)) : Promise.resolve(null)
+      void measured.then(snapshot => {
+        if (!disposed && currentScope.isActive()) port.postMessage({ type: 'geometry.measured', requestId: message.requestId,
+          generation: currentScope.generation, snapshot: snapshot && hostToViewport ? projectComponentGeometry(snapshot, hostToViewport) : null })
+      }).catch(() => {
+        if (!disposed && currentScope.isActive()) port.postMessage({ type: 'geometry.measured', requestId: message.requestId,
+          generation: currentScope.generation, snapshot: null })
+      })
+      return
+    }
     if (message.type === 'inline.release' && Number.isInteger(message.slotId)) { releaseInlineSlot(message.slotId); return }
     if ((message.type === 'inline.mount' || message.type === 'inline.layout') && Number.isInteger(message.slotId)) {
       const placement = inlinePlacement(message.placement)
@@ -1776,6 +1812,7 @@ export async function preparePublishedNativeComponent(artifact: CompiledComponen
           visual: Boolean(context.root), state: snapshots.state(), targets: targetsFor(projected), teacher: teacherSnapshot(), htmlAuthoring: snapshots.htmlAuthoring,
           media: Boolean(mediaPort), interaction: interactionSnapshot(),
           inline: Boolean(inlinePort && context.root),
+          measure: Boolean(scope.measure),
           layout: layoutPort?.read(),
           sourceViewport,
           fragmentStateKey: componentFragmentStateKey(context.instance.id), themeCss: snapshots.themeCss?.(), resources: snapshots.resources?.(), resourceBindings: snapshots.resourceBindings,

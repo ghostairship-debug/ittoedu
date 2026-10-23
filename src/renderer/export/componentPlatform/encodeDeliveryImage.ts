@@ -1,9 +1,10 @@
 import type { ComponentAsset } from '../../../shared/contracts/component-platform'
 import type { DocumentSnapshot } from '../../../shared/workbench/document'
 import { assetBytesSha256 } from '../../project/assetManager'
+import { imageDerivativePlan, imageDerivativeTraits, type ImageDerivativeDemand } from '../../../shared/imageDerivative'
+export type { ImageDerivativeDemand } from '../../../shared/imageDerivative'
 
-type DeliveryImage = { bytes: Uint8Array; mimeType: string }
-const deliveryEncoding = { mimeType: 'image/webp', quality: 0.9 } as const
+type DeliveryImage = { bytes: Uint8Array; mimeType: string; width: number; height: number }
 interface Derivative {
   key: string
   promise: Promise<DeliveryImage | undefined>
@@ -64,11 +65,11 @@ export function beginDeliveryImageEncoding(dom: Document, identity?: Pick<Docume
   const pinned = new Set<Derivative>(), used = new Map<string, Derivative>()
   let finished = false
   return {
-    encode: (asset: Readonly<ComponentAsset>, bytes: Uint8Array, signal?: AbortSignal) => encodeForBuild(asset, bytes, dom, cache, entry => {
+    encode: (asset: Readonly<ComponentAsset>, bytes: Uint8Array, signal?: AbortSignal, demand?: ImageDerivativeDemand) => encodeForBuild(asset, bytes, dom, cache, entry => {
       if (finished) return
       used.set(asset.id, entry)
       if (!pinned.has(entry)) { pinned.add(entry); entry.refs++ }
-    }, signal),
+    }, signal, demand),
     finish(success = false) {
       if (finished) return
       finished = true
@@ -84,60 +85,37 @@ export function beginDeliveryImageEncoding(dom: Document, identity?: Pick<Docume
   }
 }
 
-function isAnimatedPng(bytes: Uint8Array): boolean {
-  for (let offset = 8; offset + 12 <= bytes.length;) {
-    const size = new DataView(bytes.buffer, bytes.byteOffset + offset, 4).getUint32(0)
-    if (String.fromCharCode(...bytes.subarray(offset + 4, offset + 8)) === 'acTL') return true
-    offset += size + 12
-  }
-  return false
-}
-
-function isStaticLosslessWebp(bytes: Uint8Array): boolean {
-  const chunk = (offset: number) => String.fromCharCode(...bytes.subarray(offset, offset + 4))
-  if (bytes.length < 20 || chunk(0) !== 'RIFF' || chunk(8) !== 'WEBP') return false
-  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
-  let lossless = false
-  for (let offset = 12; offset + 8 <= bytes.length;) {
-    const type = chunk(offset), size = view.getUint32(offset + 4, true), end = offset + 8 + size
-    if (end > bytes.length) return false
-    if (type === 'ANIM' || type === 'ANMF' || type === 'VP8X' && size > 0 && (bytes[offset + 8]! & 2) !== 0) return false
-    if (type === 'VP8 ') return false // Already lossy: preserve its existing delivery encoding.
-    if (type === 'VP8L') lossless = true
-    offset = end + (size & 1)
-  }
-  return lossless
-}
-
-async function encode(bytes: Uint8Array, mimeType: string, dom: Document): Promise<DeliveryImage | undefined> {
+async function encode(bytes: Uint8Array, mimeType: string, dom: Document, demand?: ImageDerivativeDemand): Promise<DeliveryImage | undefined> {
   const url = URL.createObjectURL(new Blob([Uint8Array.from(bytes)], { type: mimeType }))
   const image = new dom.defaultView!.Image()
   try {
     image.src = url
     await image.decode()
+    const plan = imageDerivativePlan({ width: image.naturalWidth, height: image.naturalHeight }, mimeType, imageDerivativeTraits(bytes, mimeType), demand)
+    if (!plan.encode) return
     const canvas = dom.createElement('canvas')
-    canvas.width = image.naturalWidth
-    canvas.height = image.naturalHeight
+    canvas.width = plan.width
+    canvas.height = plan.height
     const context = canvas.getContext('2d')
     if (!context) return
-    context.drawImage(image, 0, 0)
-    const blob = await new Promise<Blob | null>(resolve => canvas.toBlob(resolve, deliveryEncoding.mimeType, deliveryEncoding.quality))
-    if (!blob || blob.type !== deliveryEncoding.mimeType || blob.size >= bytes.length) return
-    return { bytes: new Uint8Array(await blob.arrayBuffer()), mimeType: blob.type }
+    context.imageSmoothingQuality = 'high'
+    context.drawImage(image, 0, 0, plan.width, plan.height)
+    const blob = await new Promise<Blob | null>(resolve => canvas.toBlob(resolve, plan.outputMimeType, plan.quality))
+    if (!blob || blob.type !== plan.outputMimeType || blob.size >= bytes.length) return
+    return { bytes: new Uint8Array(await blob.arrayBuffer()), mimeType: blob.type, width: plan.width, height: plan.height }
   } finally {
     URL.revokeObjectURL(url)
   }
 }
 
-/** Encode a delivery derivative at its real intrinsic resolution; author bytes remain untouched. */
-async function encodeForBuild(asset: Readonly<ComponentAsset>, bytes: Uint8Array, dom: Document, cache: ImageCache, use: (entry: Derivative) => void, signal?: AbortSignal): Promise<(DeliveryImage & { filename?: string }) | undefined> {
+/** Keep editor originals; only runtime display demand may reduce their resolution. */
+async function encodeForBuild(asset: Readonly<ComponentAsset>, bytes: Uint8Array, dom: Document, cache: ImageCache, use: (entry: Derivative) => void, signal?: AbortSignal, demand?: ImageDerivativeDemand): Promise<(DeliveryImage & { filename?: string }) | undefined> {
   signal?.throwIfAborted()
-  // Lossless WebP needs the same delivery candidate as PNG. Keep already lossy
-  // WebP and every animated carrier, including APNG, in its original encoding.
-  if (!['image/png', 'image/jpeg', 'image/webp'].includes(asset.mimeType ?? '')
-    || asset.mimeType === 'image/png' && isAnimatedPng(bytes)
-    || asset.mimeType === 'image/webp' && !isStaticLosslessWebp(bytes)) return
-  const key = `${asset.mimeType}:${deliveryEncoding.mimeType}:${deliveryEncoding.quality}:${await assetBytesSha256(bytes)}`
+  if (!['image/png', 'image/jpeg', 'image/webp'].includes(asset.mimeType ?? '') || demand?.quality === 'original') return
+  const traits = imageDerivativeTraits(bytes, asset.mimeType!)
+  if (traits.animated || asset.mimeType === 'image/webp' && traits.lossy && !demand) return
+  const key = JSON.stringify([asset.mimeType, demand?.width, demand?.height, demand?.dpr ?? 2, demand?.fit ?? 'contain',
+    demand?.crop?.width ?? 1, demand?.crop?.height ?? 1, demand?.quality, await assetBytesSha256(bytes)])
   signal?.throwIfAborted()
   let entry = cache.entries.get(key)
   if (!entry) {
@@ -145,7 +123,7 @@ async function encodeForBuild(asset: Readonly<ComponentAsset>, bytes: Uint8Array
     // same encoding. Failed decodes can be retried after their cause is fixed.
     entry = { key, pending: true, refs: 0, promise: Promise.resolve(undefined) }
     const created = entry
-    created.promise = encode(bytes, asset.mimeType!, dom).then(result => {
+    created.promise = encode(bytes, asset.mimeType!, dom, demand).then(result => {
       created.pending = false
       if (!created.refs && cache.entries.get(key) === created) cache.entries.delete(key)
       return result
@@ -160,12 +138,13 @@ async function encodeForBuild(asset: Readonly<ComponentAsset>, bytes: Uint8Array
   const result = await entry.promise
   signal?.throwIfAborted()
   if (!result) return
-  return { ...result, ...(asset.filename ? { filename: `${asset.filename.replace(/\.[^.]+$/, '')}.webp` } : {}) }
+  const extension = result.mimeType === 'image/png' ? 'png' : 'webp'
+  return { ...result, ...(asset.filename ? { filename: `${asset.filename.replace(/\.[^.]+$/, '')}.${extension}` } : {}) }
 }
 
 /** Standalone calls have no document owner and release their work when settled. */
-export async function encodeDeliveryImage(asset: Readonly<ComponentAsset>, bytes: Uint8Array, dom: Document, signal?: AbortSignal) {
+export async function encodeDeliveryImage(asset: Readonly<ComponentAsset>, bytes: Uint8Array, dom: Document, signal?: AbortSignal, demand?: ImageDerivativeDemand) {
   const job = beginDeliveryImageEncoding(dom)
-  try { return await job.encode(asset, bytes, signal) }
+  try { return await job.encode(asset, bytes, signal, demand) }
   finally { job.finish() }
 }

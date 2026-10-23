@@ -15,6 +15,9 @@ import type { WebData } from '../../../components/web/data'
 import { collectWebNetworkResourceFacts } from '../../../components/web/resources'
 import type { ComponentCompilationDiagnostic, ComponentCompilationInput, ComponentCompilationResult } from '../../components/compilation/types'
 import { prepareBrowserScripts } from './prepareBrowserScripts'
+import { publishedImageDemands, runtimeImageAssetIds } from './imageDemand'
+import type { ImageDerivativeDemand } from '../../../shared/imageDerivative'
+import { resourceContentSha256Async } from '../../../shared/resourceContent'
 
 export interface ComponentPublishDiagnostic {
   code: 'asset-bytes-missing' | 'asset-url-unusable' | 'source-not-compiled' | 'source-compile-failed' | 'source-compile-warning' | 'online-remote-asset' | 'network-dependency' | 'asset-encoding-warning'
@@ -30,7 +33,9 @@ export interface ComponentPublishOptions {
   signal?: AbortSignal
   onProgress?: () => void
   /** A web package writer can save these bytes and return a relative URL. Default: embedded bytes. */
-  deliveryAsset?(asset:Readonly<ComponentAsset>,bytes:Uint8Array):Promise<{bytes:Uint8Array;mimeType:string;filename?:string}|undefined>
+  deliveryAsset?(asset:Readonly<ComponentAsset>,bytes:Uint8Array,demand?:ImageDerivativeDemand):Promise<{bytes:Uint8Array;mimeType:string;filename?:string;width?:number;height?:number}|undefined>
+  /** Optional measured requirements/quality exceptions override the canonical native display estimate. */
+  imageDemands?: Readonly<Record<string, ImageDerivativeDemand>>
   assetUrl?: (asset: Readonly<ComponentAsset>, bytes: Uint8Array) => string | undefined | Promise<string | undefined>
 }
 
@@ -220,8 +225,16 @@ export async function buildPublishedCourseV4(
   const resources={assets:{...sources.assetBytes},components:sources.componentFiles??{}}
   const references=createComponentReferenceCapture(project,resources)
   const versions=[project,...Object.values(project.instances).flatMap(instance=>(instance.container?.presentation?.states??[]).map(state=>resolveComponentPresentation(project,instance.id,state.id)))]
+  const runtimeAssets = (instance: typeof project.instances[string], version: CourseProjectV10) => {
+    // Every effective state is visited below. Do not also collect its raw editor
+    // override as a container dependency (including restore-original image refs).
+    const current = instance.container?.presentation ? { ...instance, container: { ...instance.container, presentation: undefined } } : instance
+    return runtimeImageAssetIds(current, version.definitions[current.definitionId], references.componentAssetIds(current,version.definitions[current.definitionId],version))
+  }
+  const demands = publishedImageDemands(versions, runtimeAssets)
+  const embeddedUrls = new Map<string, string>()
   for(const version of versions)for(const instance of Object.values(version.instances)){
-    for(const id of references.componentAssetIds(instance,version.definitions[instance.definitionId],version))assetIds.add(id)
+    for(const id of runtimeAssets(instance,version))assetIds.add(id)
     if(instance.container)for(const id of componentBackgroundAssetIds(resolveComponentBackground(version,instance.container)))assetIds.add(id)
   }
   for(const id of componentBackgroundAssetIds(project.background))assetIds.add(id)
@@ -249,9 +262,15 @@ export async function buildPublishedCourseV4(
     }
     try {
       let deliveryBytes:Uint8Array=Uint8Array.from(bytes),deliveryAsset=asset
-      if(options.deliveryAsset)try{const encoded=await options.deliveryAsset(asset,deliveryBytes);check();if(encoded){deliveryBytes=encoded.bytes;deliveryAsset={...asset,mimeType:encoded.mimeType,byteLength:encoded.bytes.length,...(encoded.filename?{filename:encoded.filename}:{}),remote:undefined};const{path:_path,...metadata}=deliveryAsset;assets[id]=metadata}}
+      if(options.deliveryAsset)try{const encoded=await options.deliveryAsset(asset,deliveryBytes,options.imageDemands?.[id] ?? demands.get(id));check();if(encoded){deliveryBytes=encoded.bytes;deliveryAsset={...asset,mimeType:encoded.mimeType,byteLength:encoded.bytes.length,...(encoded.filename?{filename:encoded.filename}:{}),...(encoded.width ? {width:encoded.width} : {}),...(encoded.height ? {height:encoded.height} : {}),remote:undefined};const{path:_path,...metadata}=deliveryAsset;assets[id]=metadata}}
       catch(error){options.signal?.throwIfAborted();diagnostics.push({code:'asset-encoding-warning',severity:'warning',message:`资源 ${id} 的交付编码未完成，保留可用原始字节：${String(error)}`,path:['assets',id]})}
-      const url = options.assetUrl ? await options.assetUrl(deliveryAsset,deliveryBytes) : componentAssetDataUrl(deliveryBytes,deliveryAsset.mimeType)
+      let url: string | undefined
+      if (options.assetUrl) url = await options.assetUrl(deliveryAsset,deliveryBytes)
+      else {
+        const key = `${deliveryAsset.mimeType ?? 'application/octet-stream'}:${await resourceContentSha256Async(deliveryBytes)}`
+        url = embeddedUrls.get(key)
+        if (!url) { url = componentAssetDataUrl(deliveryBytes,deliveryAsset.mimeType); embeddedUrls.set(key,url) }
+      }
       check()
       if (portableUrl(url)) assets[id]!.url = url
       else diagnostics.push({ code: 'asset-url-unusable', message: `资源 ${id} 未获得可交付 URL；素材引用已保留`, path: ['assets', id, 'url'] })

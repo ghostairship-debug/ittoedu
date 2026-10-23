@@ -3,8 +3,9 @@ import type { DocumentModel } from '../../shared/workbench/document'
 import { createComponentModelProjection } from './modelProjection'
 import type { ComponentSpatialCameraPort } from '../surfaces/spatial/componentSpatialAdapter'
 import type { TeacherControllerDisplayPort } from '../../shared/teacherControllerViewportGeometry'
-import { componentContainers, resolveComponentPresentation, type CourseProjectV10, type TeacherControllerPort, type ComponentFlowReading, type ComponentFlowNavigationMotion } from '../../shared/contracts/component-platform'
+import { componentContainers, type ComponentFlowReading, type ComponentFlowNavigationMotion } from '../../shared/contracts/component-platform'
 import type { FlowNavigationOptions } from '../../shared/flowReading'
+import { resolveModelPlayerPresentation } from './publishedProjection'
 
 export type ComponentPlayerModel = Extract<DocumentModel, { kind: 'course-v10' }>
 export type ComponentPlayerRuntimeOptions = NonNullable<ConstructorParameters<typeof ComponentPlatformRuntime>[1]>
@@ -102,26 +103,6 @@ function mutatedProjectionInstances(before: string, after: string): ReadonlySet<
   const roots = [...dirty]
   for (const nodes of [oldNodes, nextNodes]) { const visited = new Set<string>(); for (const id of roots) visit(id, nodes, visited) }
   return dirty
-}
-
-/** One disposable parent-before-child projection for native and compiled players. */
-export function resolveModelPlayerPresentation(source: CourseProjectV10, navigation?: TeacherControllerPort): CourseProjectV10 {
-  let project = source
-  const visited = new Set<string>()
-  const present = (id: string) => {
-    if (visited.has(id)) return
-    visited.add(id)
-    const instance = source.instances[id]
-    if (instance?.container) {
-      const port = navigation?.forContainer?.(id) ?? (navigation?.readLocation() === id ? navigation : undefined)
-      const stateId = port?.currentStateId?.()
-      if (stateId !== undefined) project = resolveComponentPresentation(project, id, stateId)
-    }
-    instance?.childIds?.forEach(present)
-  }
-  for (const id of [...source.rootIds, ...source.global.underlay, ...source.global.overlay]) present(id)
-  componentContainers(source).forEach(container => present(container.id))
-  return project
 }
 
 /** The one runtime lifetime/commit owner; React and DOM only supply their actual projection commit. */

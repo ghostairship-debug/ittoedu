@@ -1,4 +1,5 @@
 import { scanHtmlSource } from '../../../shared/html/htmlSourceScanner'
+import { restoreSerializedResourcePool, type SerializedResourcePool } from '../../../shared/serializedResourcePool'
 
 export interface CompiledHtmlPreviewAsset {
   readonly contentType: string
@@ -16,7 +17,7 @@ export interface CompiledHtmlPreviewProjection {
 export function projectCompiledHtmlPreviewAssets(source: string,
   assetUrl: (canonicalAssetId: string) => string): CompiledHtmlPreviewProjection {
   const unchanged = (): CompiledHtmlPreviewProjection => ({ source, assets: new Map() })
-  if (!source.includes('compiled-course-v1') || !source.includes('course-data')) return unchanged()
+  if (!/compiled-course-v[12]/.test(source) || !source.includes('course-data')) return unchanged()
   const tokens = scanHtmlSource(source).tokens
   const entries = tokens.flatMap((token, index) => token.kind === 'start-tag' && token.name === 'script'
     && token.attributes?.some(attribute => attribute.name === 'id' && attribute.decodedValue === 'course-data') ? [index] : [])
@@ -25,9 +26,22 @@ export function projectCompiledHtmlPreviewAssets(source: string,
   if (!start.attributes?.some(attribute => attribute.name === 'type' && attribute.decodedValue?.trim().toLowerCase() === 'application/json')
     || body?.kind !== 'raw-text' || body.rawKind !== 'script') return unchanged()
   let data: { format?: unknown; course?: { assets?: unknown } }
-  try { data = JSON.parse(source.slice(body.span.start, body.span.end)) }
+  const poolEntries = tokens.flatMap((token, index) => token.kind === 'start-tag' && token.name === 'script'
+    && token.attributes?.some(attribute => attribute.name === 'id' && attribute.decodedValue === 'course-resource-pool') ? [index] : [])
+  if (poolEntries.length > 1) return unchanged()
+  let poolSpan: { start: number; end: number } | undefined
+  try {
+    let pool: SerializedResourcePool | undefined
+    if (poolEntries.length) {
+      const poolStart = tokens[poolEntries[0]!]!, poolBody = tokens[poolEntries[0]! + 1], poolEnd = tokens[poolEntries[0]! + 2]
+      if (poolBody?.kind !== 'raw-text' || poolBody.rawKind !== 'script' || poolEnd?.kind !== 'end-tag' || poolEnd.name !== 'script') return unchanged()
+      pool = JSON.parse(source.slice(poolBody.span.start, poolBody.span.end))
+      poolSpan = { start: poolStart.span.start, end: poolEnd.span.end }
+    }
+    data = restoreSerializedResourcePool(JSON.parse(source.slice(body.span.start, body.span.end)), pool) as typeof data
+  }
   catch { return unchanged() }
-  if (!data || data.format !== 'compiled-course-v1' || !data.course || !data.course.assets
+  if (!data || !['compiled-course-v1', 'compiled-course-v2'].includes(String(data.format)) || !data.course || !data.course.assets
     || typeof data.course.assets !== 'object' || Array.isArray(data.course.assets)) return unchanged()
   const recordEntries = tokens.flatMap((token, index) => token.kind === 'start-tag' && token.name === 'script'
     && token.attributes?.some(attribute => attribute.name === 'id' && attribute.decodedValue === 'cw-html-authoring-records') ? [index] : [])
@@ -73,5 +87,10 @@ export function projectCompiledHtmlPreviewAssets(source: string,
   }
   if (!assets.size) return unchanged()
   const json = JSON.stringify(data).replace(/</g, '\\u003c')
-  return { source: source.slice(0, body.span.start) + json + source.slice(body.span.end), assets }
+  // This projection now contains ordinary decoded course JSON. Remove the
+  // transport pool so bootstrap cannot replay its original string offsets.
+  const edits = [{ start: body.span.start, end: body.span.end, text: json }, ...(poolSpan ? [{ ...poolSpan, text: '' }] : [])]
+  let projected = source
+  for (const edit of edits.sort((a, b) => b.start - a.start)) projected = projected.slice(0, edit.start) + edit.text + projected.slice(edit.end)
+  return { source: projected, assets }
 }

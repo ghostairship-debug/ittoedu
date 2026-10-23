@@ -39,6 +39,27 @@ export interface ComponentPresentationPort {
   visibility(visible?: boolean): { setVisible(visible: boolean): Promise<boolean>; dispose(): void }
 }
 
+/** One synchronous host observation. Frames map target border-box CSS pixels into the caller's viewport. */
+export interface ComponentGeometrySnapshot {
+  /** Host performance.timeOrigin + performance.now(), in milliseconds; all entries share this sample. */
+  sampleTime: number
+  targets: {
+    reference: ComponentTarget
+    /** Null means no connected, measurable visual projection. Offscreen alone does not make it null. */
+    viewportFrame: ComponentFrame | null
+    flow?: {
+      containerId: string
+      /** Frame in the real Flow scroll owner's unscaled content CSS pixels. */
+      contentFrame: ComponentFrame
+      /** Maps those content pixels into the same caller viewport as viewportFrame. */
+      contentToViewport: AffineTransform
+      /** Visible scroll window in content pixels, including the current scrollLeft/scrollTop. */
+      viewport: { x: number; y: number; width: number; height: number }
+      scrollSize: { width: number; height: number }
+    }
+  }[]
+}
+
 /** Every mounted implementation receives a fresh scope; state never writes author data. */
 export interface ComponentRuntimeScope {
   readonly runScopeId: string
@@ -49,6 +70,8 @@ export interface ComponentRuntimeScope {
   isActive(): boolean
   cleanup(dispose: () => void): void
   target(reference: ComponentTarget): ComponentRuntimeTarget | null
+  /** Batch fresh layout facts; no author transaction, retained layout cache, or independent animation clock. */
+  measure?(references: readonly ComponentTarget[]): Promise<ComponentGeometrySnapshot | null>
   events: {
     emit(name: string, value: JsonValue): void
     /** __runtime.activity replays the current {active, visible, playing} for this instance. */

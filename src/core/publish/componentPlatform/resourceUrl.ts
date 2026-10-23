@@ -2,6 +2,11 @@ const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789
 
 /** Works in browser and headless producers without Node or renderer imports. */
 export function componentAssetDataUrl(bytes: Uint8Array, mimeType = 'application/octet-stream'): string {
+  if (typeof globalThis.btoa === 'function') {
+    const chunks: string[] = []
+    for (let offset = 0; offset < bytes.length; offset += 0x8000) chunks.push(String.fromCharCode(...bytes.subarray(offset, offset + 0x8000)))
+    return `data:${mimeType};base64,${globalThis.btoa(chunks.join(''))}`
+  }
   let encoded = ''
   for (let index = 0; index < bytes.length; index += 3) {
     const value = (bytes[index]! << 16) | ((bytes[index + 1] ?? 0) << 8) | (bytes[index + 2] ?? 0)

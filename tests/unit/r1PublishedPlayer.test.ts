@@ -1,6 +1,7 @@
 import { testContainerInstance, createTestPublishedFromLegacy } from '../helpers/glxWorkFixture'
 import { afterEach, expect, it, vi } from 'vitest'
-import { mountPublishedCourseV3, publishedComponentModel } from '../../src/player/componentPlatform/publishedPlayer'
+import { mountPublishedCourseV3 } from '../../src/player/componentPlatform/publishedPlayer'
+import { publishedComponentModel } from '../../src/player/componentPlatform/publishedProjection'
 import { prepareComponentOutputRegion } from '../../src/player/componentPlatform/outputCapture'
 import type { PublishedCourseV3 } from '../../src/shared/contracts/component-platform/published'
 import * as sandbox from '../../src/renderer/components/SandboxComponentImplementation'

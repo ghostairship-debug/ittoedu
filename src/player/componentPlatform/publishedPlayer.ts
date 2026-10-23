@@ -1,10 +1,10 @@
-import { publishedCourseV3Schema, type PublishedCourseV3, type PublishedImplementation } from '../../shared/contracts/component-platform/published'
+import { publishedCourseV3Schema, type PublishedImplementation } from '../../shared/contracts/component-platform/published'
 import { nanoid } from 'nanoid'
 import { spatialPlaybackPathId } from '../surfaces/spatial/componentPlatform/graph'
 import { componentDefinitionBuiltinKey, componentSurface } from '../../shared/contracts/component-platform'
 import { instanceWorkRootId } from '../components/runtime/containerScopes'
-import type { DocumentResources } from '../../shared/workbench/document'
 import { mountV10Model } from './ModelPlayer'
+import { publishedComponentModel } from './publishedProjection'
 import { prepareSandboxComponent, type ComponentBootstrapTransport } from '../../renderer/components/SandboxComponentImplementation'
 import { ComponentNavigationOwner } from '../../renderer/components/ComponentNavigationOwner'
 import { webContentRealmSource } from '../../components/web/contentRealmImplementation'
@@ -16,15 +16,6 @@ import { attachComponentPlatformNavigationKeys } from '../behaviors/navigation/s
 import type { PresenterInputFeedback } from '../PlayerPresenterInput'
 import { waitForPublishedObservationReady } from '../surfaces/publishedCapture'
 import { createPlaybackNavigationContent, mountPlaybackNavigationChrome } from './playbackNavigationChrome'
-
-/** One read-only P0 projection into R0; never saved as an author document. */
-export function publishedComponentModel(payload: PublishedCourseV3) {
-  return { kind: 'course-v10' as const, project: { schemaVersion: 11 as const, revision: 0, id: payload.id, title: payload.title,
-    definitions: payload.definitions, instances: payload.instances, rootIds: payload.rootIds, entry: payload.entry, global: payload.global,
-    background: payload.background, theme: payload.theme, designTokens: payload.designTokens, playback: payload.playback, media: payload.media, logic: payload.logic,
-    assets: Object.fromEntries(Object.entries(payload.assets).map(([id, asset]) => { const { url: _url, ...metadata } = asset; return [id, { ...metadata, path: `assets/${encodeURIComponent(id)}` }] })) },
-    resources: { assets: {}, components: {} } as DocumentResources }
-}
 
 export interface PublishedComponentPlayerOptions {
   report?(message: string): void

@@ -1,0 +1,11 @@
+{
+  "measuredAt": "2026-10-23T17:16:03.877Z",
+  "pid": 35120,
+  "target": "D:\\果铃工作台\\output\\resource-runtime-repair-20261024\\resource\\coffee-journey-v08-cas-copy.glx",
+  "archiveBytes": 8434293,
+  "readAndOpenCodecMs": 233.5453,
+  "assets": 80,
+  "componentOwners": 12,
+  "allLogicalContentEqual": true,
+  "scope": "Fresh Node process filesystem+codec cold open; not filesystem cache-cold or actual GUI first frame."
+}

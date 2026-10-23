@@ -80,6 +80,8 @@ Flow 正文使用其 `.body.html` 或 `.body.md`，保留源文中软件生成�
 
 `scope.state/events.subscribe` 与 `teacherController.subscribe` 已自动随挂载清理，无需重复登记 `scope.cleanup`；原始 state/tc 订阅不回放首值，首次显示另读 `get/read`，或对状态使用增强的 `observe`。`listen` 管理局部 DOM 监听，自行建立的其他监听、定时器或 Observer 等资源按需交给 `scope.cleanup`。普通暂停、跨页保留挂载，销毁、取消或重置时清理。完整 `.view.*` 仍是 API5 实现入口；独立替换完整 `mount` 需返回含 `update/dispose` 的有效实例。普通正文、样式和页内脚本继续修改 `.content.html`，由成熟 Web 实现负责更新与清理。
 
+跨对象、跨 iframe 的位置用 `await context.scope.measure?.([{kind:'instance',instanceId:实际目标ID}, ...])` 一次批量读取；`sampleTime` 是宿主 `performance.timeOrigin + performance.now()` 毫秒，同批条目来自同一次同步布局观测。每项 `viewportFrame` 将目标边框内像素映射到调用者视口，未挂载或不可测为 `null`，已挂载离屏目标仍可测。Flow 的 `contentFrame` 位于实际滚动 owner 的未缩放内容坐标，`contentToViewport` 把该内容坐标映射到同一调用者视口；`flow.viewport` 是内容空间内的可见滚动窗口，其 `x/y` 为同批 `scrollLeft/scrollTop`。矩阵 `[a,b,c,d,e,f]` 作用于点是 `{x:a*x+c*y+e,y:b*x+d*y+f}`。一次动画计算只用同一批样本，不能混用历史视口坐标与后来读取的阅读进度；布局变化后重测，挂载退出后不再采用旧样本。高频视觉更新复用 `scope.target(...).motion.replace` 的 `write/nextFrame/animate` 或程序自己的 Canvas 绘制；这是暂态呈现，不把每帧几何写入工程或全局 `scope.state` 广播。
+
 成熟 Web 实现导出 `document:'web'`，短入口用 `...implementation` 继承该声明后可继续使用完整/嵌套 HTML、模块和资源。宿主实际载入一次 Source，再按声明准备浏览器文档，真实 `DOMContentLoaded` 后调用原 `mount`；DOM 和监听在 `mount` 中建立。准备采用浏览器 `document.open` 语义，其 `readyState` 与首次导航可能不同。完整替换为没有此声明的实现时，宿主不会因为保留了 `data.html` 就执行它。普通 HTML `<script>` 仍没有 API5 的全局上下文。
 
 正式导航、快捷键和可选教师控制台复用同一运行状态。AI 新作不自动插入可见完整教师台。独立对象点击跳页可用 `interaction.update {target:"已观察的独立对象句柄",change:{kind:"click",action:"location-go",value:"已观察的目的页面句柄"}}`，无需为此读取完整实现或改为 Source；一个 HTML 实例内部多个按钮的不同动作及程序共享状态，可按实际源码入口添加局部增强并使用宿主端口。按需读取创作方法的导航与控制参考。旧工程已有界面按用户要求保留或修改。程序自己处理的按键应阻止重复处理；未处理的翻页键交给宿主。

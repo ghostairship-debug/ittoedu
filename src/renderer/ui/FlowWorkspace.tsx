@@ -196,6 +196,9 @@ export function FlowWorkspace({ documentId, project, surfaceId, toolbarContainer
         ? {width:shell.clientWidth,height:shell.clientHeight}:session.state.viewport
     }});session.activate(surfaceId)
     root.style.setProperty('--flow-observation-transform',content.style.transform)
+    // The formal Flow target owns the same live content/scroll projection used
+    // by reading and runtime geometry. Child registrations alone omit this basis.
+    runtime.onTargetElement(surfaceId, content)
     const view = runtime.containerViewState?.(surfaceId), element = scroll.current
     if (view) {
       if (view.zoom !== undefined) session.zoomTo(view.zoom)
@@ -228,8 +231,9 @@ export function FlowWorkspace({ documentId, project, surfaceId, toolbarContainer
         if (element) { view.scrollTop = element.scrollTop; view.scrollLeft = element.scrollLeft }
       }
       unsubscribe();release();reading.dispose()
+      runtime.onTargetElement(surfaceId, null, content)
     }
-  },[observationHost,surfaceId,runtime.registerObservation,runtime.navigation,runtime.containerViewState])
+  },[observationHost,surfaceId,runtime.registerObservation,runtime.navigation,runtime.containerViewState,runtime.onTargetElement])
   useEffect(() => {
     const host = scroll.current
     if (host && layoutBody) return observeFlowReading(host, layoutBody, runtime.navigation.changed)

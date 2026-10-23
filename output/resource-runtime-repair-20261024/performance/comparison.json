@@ -1,0 +1,145 @@
+{
+  "scope": "Same-script, same Chromium 149.0.7827.55, DPR1 and viewport, original final HTML versus final software formal buildHtml candidate. Cold browser/context; OS file cache not purged. Single samples, not statistical or universal speed claims.",
+  "results": {
+    "baseline-desktop": {
+      "bytes": 29529332,
+      "dcl": 5545,
+      "ready": 12171,
+      "lcp": 5440,
+      "loadLongTaskCount": 15,
+      "loadLongTaskTotalMs": 6382,
+      "loadLongTaskMaxMs": 5024,
+      "scroll": {
+        "total": 9029,
+        "final": 9029,
+        "duration": 7095.700000000001,
+        "frames": 56,
+        "mean": 126.78035714285716,
+        "p95": 166.60000000000218,
+        "max": 166.70000000000073,
+        "over33": 50,
+        "over50": 50
+      },
+      "scrollMetrics": {
+        "TaskDuration": 7.282697,
+        "ScriptDuration": 6.669544,
+        "LayoutDuration": 0.003799,
+        "RecalcStyleDuration": 0.035251,
+        "JSHeapUsedSize": 58015432,
+        "Nodes": 40,
+        "Documents": 8
+      },
+      "errors": []
+    },
+    "baseline-mobile": {
+      "bytes": 29529332,
+      "dcl": 6112,
+      "ready": 19855,
+      "lcp": 5996,
+      "loadLongTaskCount": 25,
+      "loadLongTaskTotalMs": 8638,
+      "loadLongTaskMaxMs": 5585,
+      "scroll": {
+        "total": 10990,
+        "final": 10990,
+        "duration": 7157.400000002981,
+        "frames": 35,
+        "mean": 204.75045714285713,
+        "p95": 366.6999999999971,
+        "max": 450,
+        "over33": 33,
+        "over50": 32
+      },
+      "scrollMetrics": {
+        "TaskDuration": 7.44131,
+        "ScriptDuration": 6.790281,
+        "LayoutDuration": 0.005209,
+        "RecalcStyleDuration": 0.082048,
+        "JSHeapUsedSize": -148487084,
+        "Nodes": 40,
+        "Documents": 8
+      },
+      "errors": []
+    },
+    "baseline-desktop-cache": {
+      "bytes": 29529332,
+      "dcl": 5869,
+      "ready": 13683,
+      "lcp": 5420,
+      "loadLongTaskCount": 14,
+      "loadLongTaskTotalMs": 6537,
+      "loadLongTaskMaxMs": 5019,
+      "errors": []
+    },
+    "after-desktop": {
+      "bytes": 21253952,
+      "dcl": 5586,
+      "ready": 8823,
+      "lcp": 5448,
+      "loadLongTaskCount": 14,
+      "loadLongTaskTotalMs": 3613,
+      "loadLongTaskMaxMs": 1887,
+      "scroll": {
+        "total": 9029,
+        "final": 9029,
+        "duration": 7004.399999994039,
+        "frames": 348,
+        "mean": 20.161965517241377,
+        "p95": 49.899999999999636,
+        "max": 116.59999999999854,
+        "over33": 18,
+        "over50": 15
+      },
+      "scrollMetrics": {
+        "TaskDuration": 5.701824,
+        "ScriptDuration": 3.929399,
+        "LayoutDuration": 0.006847,
+        "RecalcStyleDuration": 0.063451,
+        "JSHeapUsedSize": -471866392,
+        "Nodes": -990,
+        "Documents": -4
+      },
+      "errors": []
+    },
+    "after-mobile": {
+      "bytes": 21253952,
+      "dcl": 2680,
+      "ready": 5616,
+      "lcp": 2556,
+      "loadLongTaskCount": 14,
+      "loadLongTaskTotalMs": 3708,
+      "loadLongTaskMaxMs": 2181,
+      "scroll": {
+        "total": 10990,
+        "final": 10990,
+        "duration": 7015.599999997019,
+        "frames": 339,
+        "mean": 20.69719764011799,
+        "p95": 50.100000000000364,
+        "max": 116.80000000000018,
+        "over33": 17,
+        "over50": 17
+      },
+      "scrollMetrics": {
+        "TaskDuration": 6.060586,
+        "ScriptDuration": 4.330835,
+        "LayoutDuration": 0.006882,
+        "RecalcStyleDuration": 0.076144,
+        "JSHeapUsedSize": -8386236,
+        "Nodes": -113,
+        "Documents": -1
+      },
+      "errors": []
+    },
+    "after-desktop-cache": {
+      "bytes": 21253952,
+      "dcl": 2705,
+      "ready": 5714,
+      "lcp": 2348,
+      "loadLongTaskCount": 14,
+      "loadLongTaskTotalMs": 3631,
+      "loadLongTaskMaxMs": 1958,
+      "errors": []
+    }
+  }
+}

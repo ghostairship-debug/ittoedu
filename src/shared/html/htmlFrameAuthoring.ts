@@ -86,9 +86,13 @@ export function installHtmlFrameAuthoring(factory: typeof createDomAuthoring, ta
     if (!element) { if (doc.readyState !== 'loading') aliasesRead = true; return }
     if (element.localName !== 'script' || element.getAttribute('type')?.trim().toLowerCase() !== 'application/json') { aliasesRead = true; return }
     try {
-      const value = JSON.parse(element.textContent ?? '')
+      // Export bootstrap retains the decoded payload on its existing data
+      // element; avoid serializing a second full copy merely for author aliases.
+      const decoded = (element as HTMLElement & { __courseDecodedPayload?: any }).__courseDecodedPayload
+      if (!decoded && doc.getElementById('course-resource-pool')) return // file:// byte preparation may still be pending.
+      const value = decoded ?? JSON.parse(element.textContent ?? '')
       aliasesRead = true
-      if (value?.format !== 'compiled-course-v1' || !value.course?.assets || typeof value.course.assets !== 'object' || Array.isArray(value.course.assets)) return
+      if (!['compiled-course-v1', 'compiled-course-v2'].includes(value?.format) || !value.course?.assets || typeof value.course.assets !== 'object' || Array.isArray(value.course.assets)) return
       for (const id of Object.keys(value.course.assets).sort()) {
         const url = value.course.assets[id]?.url
         if (typeof url !== 'string') continue

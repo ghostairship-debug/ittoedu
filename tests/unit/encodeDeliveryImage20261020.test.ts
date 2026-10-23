@@ -12,7 +12,7 @@ vi.mock('../../src/renderer/export/loadCompiledPlayerBundle', () => ({ loadCompi
 
 afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks() })
 
-const asset: ComponentAsset = { id: 'source', path: 'assets/source.png', mimeType: 'image/png', filename: 'source.png' }
+const asset: ComponentAsset = { id: 'source', path: 'assets/source.jpeg', mimeType: 'image/jpeg', filename: 'source.jpeg' }
 const source = () => Uint8Array.from({ length: 100 }, (_, i) => i)
 function openDocument(documentId = 'course', epoch = 'epoch', ids = ['source', 'duplicate']): DocumentSnapshot {
   const project = createBlankCourseProjectV10('image cache')
@@ -86,7 +86,7 @@ it('retains smaller sources and unsupported Canvas output without recompressing 
 it('preserves animation in APNG and other formats without decoding a single frame', async () => {
   const h = canvasDocument(), apng = new Uint8Array(24)
   apng.set([97, 99, 84, 76], 12)
-  expect(await h.job.encode(asset, apng)).toBeUndefined()
+  expect(await h.job.encode({ ...asset, mimeType: 'image/png' }, apng)).toBeUndefined()
   for (const mimeType of ['image/gif', 'image/webp', 'image/avif', 'image/svg+xml']) {
     expect(await h.job.encode({ ...asset, mimeType }, source())).toBeUndefined()
   }
@@ -190,6 +190,44 @@ it('does not let an older or failed build replace a newer successful retention s
   const current = beginDeliveryImageEncoding(h.dom, { ...h.snapshot, revision: 1 })
   await current.encode(asset, changed); current.finish(true)
   expect(h.decode).toHaveBeenCalledTimes(3)
+})
+
+it('uses display/crop/DPR demand in the same content cache and keeps differing requests separate', async () => {
+  const h = canvasDocument(), demand = { width: 100, height: 50, dpr: 2, fit: 'cover' as const }
+  const first = await h.job.encode(asset, source(), undefined, demand)
+  expect(first).toMatchObject({ width: 218, height: 100 })
+  expect(h.canvas).toMatchObject({ width: 218, height: 100 })
+  await h.job.encode({ ...asset, id: 'duplicate' }, source().slice(), undefined, { ...demand })
+  expect(h.decode).toHaveBeenCalledTimes(1)
+  await h.job.encode(asset, source(), undefined, { ...demand, crop: { x: 0.5, y: 0, width: 0.5, height: 1 } })
+  expect(h.decode).toHaveBeenCalledTimes(2)
+  expect(h.canvas).toMatchObject({ width: 400, height: 184 })
+  await h.job.encode(asset, source(), undefined, { ...demand, dpr: 1 })
+  expect(h.decode).toHaveBeenCalledTimes(3)
+  h.job.finish()
+})
+
+it('only decodes and reduces a lossy WebP when its actual runtime pixels can decrease', async () => {
+  const h = canvasDocument(), bytes = webp([['VP8 ', source()]]), image = { ...asset, mimeType: 'image/webp' }
+  expect(await h.job.encode(image, bytes)).toBeUndefined()
+  expect(h.decode).not.toHaveBeenCalled()
+  expect(await h.job.encode(image, bytes, undefined, { width: 2000, height: 2000 })).toBeUndefined()
+  expect(h.canvas.toBlob).not.toHaveBeenCalled()
+  expect(await h.job.encode(image, bytes, undefined, { width: 200, height: 100 })).toMatchObject({ width: 400, height: 184 })
+  expect(h.canvas.toBlob).toHaveBeenCalledTimes(1)
+  h.job.finish()
+})
+
+it('preserves an unclassified PNG losslessly and only permits its WebP conversion for explicit photography', async () => {
+  const h = canvasDocument(), png = { ...asset, mimeType: 'image/png', filename: 'diagram.png' }
+  expect(await h.job.encode(png, source())).toBeUndefined()
+  expect(h.canvas.toBlob).not.toHaveBeenCalled()
+  h.options.type = 'image/png'
+  expect(await h.job.encode(png, source(), undefined, { width: 100, height: 50 })).toMatchObject({ mimeType: 'image/png', width: 200, height: 92 })
+  expect(h.canvas.toBlob).toHaveBeenLastCalledWith(expect.any(Function), 'image/png', 0.9)
+  h.options.type = 'image/webp'
+  expect(await h.job.encode(png, source(), undefined, { width: 100, height: 50, quality: 'photo' })).toMatchObject({ mimeType: 'image/webp' })
+  h.job.finish()
 })
 
 it('the actual published builder retains only live-owner work and releases ownerless build work', async () => {

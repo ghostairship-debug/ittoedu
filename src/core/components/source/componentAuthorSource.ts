@@ -20,6 +20,8 @@ export const componentAuthorSourceRuntimeNote = [
   '增强模块导出 default 函数或 enhance(context)。context 提供原 API5 端口及 listen(type,selector,handler) 的根节点委托监听、observe(key,paint) 的首次读取和订阅；重绘后继续使用这些受管监听/显示，更新时先清理增强再执行原 update 并重新接入。可返回清理函数或含 dispose() 的对象，异步 dispose 会等待。scope.cleanup 用于计时器、Observer 和外部资源。',
   '显式连接由 object.update.properties.stateBindings 提供 alias→已声明的 courseState.key；增强用 bindings.get/set/observe(alias)，observe 同时首显与订阅。软件维护这些声明引用的改名与复制映射，不改写业务 JS 字符串。scope.state 的普通 JSON 业务仍可直接使用。',
   'scope.state/events.subscribe 和 tc.subscribe 已自动随挂载清理，无需重复登记；state.subscribe 不回放当前值，直接使用时首显另读 get。scope.signal 随该次挂载结束而取消，scope.isActive() 表示挂载仍存活；普通暂停、离屏和跨页保留沿原生命周期。',
+  '跨对象位置用 await context.scope.measure?.([{kind:"instance",instanceId:实际目标ID}, ...]) 批量取同一时刻的几何；返回 {sampleTime,targets}，sampleTime 是宿主 performance.timeOrigin+performance.now() 毫秒。每项 viewportFrame={width,height,transform} 将目标局部边框像素映射到调用者视口；不可测/未挂载时为 null，已挂载离屏目标仍可测。Flow 项另有 flow.containerId/contentFrame/contentToViewport/viewport/scrollSize；contentFrame 位于实际滚动 owner 未缩放内容坐标，viewport 的 x/y 是同批 scrollLeft/scrollTop，contentToViewport 映射该内容坐标到调用者视口。仿射矩阵 [a,b,c,d,e,f] 作用于点为 {x:a*x+c*y+e,y:b*x+d*y+f}。一次动画计算只用同一批返回值，不混用历史视口 rect 和异步导航快照；布局变化后重测，挂载取消后返回 null，不写作者工程或 scope.state。',
+  '瞬态动效复用 scope.target({kind:"instance",instanceId}).motion?.replace(channel, async ctx=>{...})；await ctx.write({transform,opacity})、await ctx.nextFrame()、ctx.animate(keyframes,timing) 只更新当前呈现，不能每帧用 object.update/project.apply 写持久 frame。channel 替换、task.cancel()、scope 退出会释放 effect；ctx.signal/nextFrame null/write false 表示停止。局部 Canvas 与具体路线仍由作品自己的单一渲染循环管理。',
   `局部增强示例：
 export default ({root, scope, listen, observe}) => {
   observe('value', value => {

@@ -9,6 +9,7 @@ import type { LibraryDiagnostic } from './types'
 import { ownRecordSchema } from '../../../shared/ownRecordSchema'
 import { componentNavigationTransitionSchema } from '../../../shared/contracts/component-platform/navigationMotion'
 import { normalizeComponentLibraryEntry } from './entryProject'
+import { createResourceContentIndex } from '../../../shared/resourceContent'
 
 export const COMPONENT_LIBRARY_ARCHIVE_FORMAT = 'guoling-component-library'
 const entryFields = {
@@ -42,17 +43,19 @@ export interface ComponentLibraryArchive { entry: ComponentLibraryEntry; version
 export function exportComponentLibraryArchive(input: ComponentLibraryInput, version = Object.values(input.definitions)[0]?.version ?? '1.0.0', metadata?: ComponentLibraryArchiveMetadata): Uint8Array {
   const entry = normalizeComponentLibraryEntry(input)
   const files: Record<string, Uint8Array> = {}
+  const contents = createResourceContentIndex()
+  const add = (bytes: Uint8Array) => `resources/sha256/${contents.add(bytes).sha256}`
   const paths = { assets: Object.create(null) as Record<string, string>, components: Object.create(null) as Record<string, Record<string, string>> }
   for (const [id, bytes] of Object.entries(entry.resources.assets)) {
-    const name = `assets/${encodeURIComponent(id)}`; files[name] = bytes; paths.assets[id] = name
+    paths.assets[id] = add(bytes)
   }
   for (const [id, resources] of Object.entries(entry.resources.components)) {
     paths.components[id] = Object.create(null)
     for (const [file, bytes] of Object.entries(resources)) {
-      const name = `components/${encodeURIComponent(id)}/${encodeURIComponent(file)}`
-      files[name] = bytes; paths.components[id][file] = name
+      paths.components[id][file] = add(bytes)
     }
   }
+  for (const content of contents.values()) files[`resources/sha256/${content.sha256}`] = content.bytes
   const { resources: _resources, ...author } = entry
   files['manifest.json'] = strToU8(JSON.stringify({ format: COMPONENT_LIBRARY_ARCHIVE_FORMAT, version, entry: author, resources: paths, ...(metadata ? { metadata } : {}) }))
   return zipSync(files)

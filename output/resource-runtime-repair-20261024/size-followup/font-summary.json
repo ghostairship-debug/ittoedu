@@ -1,0 +1,135 @@
+{
+  "measuredAt": "2026-10-23T18:24:14.064Z",
+  "scope": "Existing artifact font accounting and current software selector on reconstructed pre-selection Published data; no browser/performance runs. Existing artifact remains the before export.",
+  "carriers": {
+    "GLX": {
+      "fontAssets": 0,
+      "applicationFontBytesCarried": 0,
+      "note": "The GLX references the installed application font family; the runtime delivery embeds the portable font dependency."
+    },
+    "singleHtml": {
+      "file": "D:\\果铃工作台\\output\\resource-runtime-repair-20261024\\delivery\\export-candidate.generated\\coffee-v08-candidate-offline.html",
+      "bytes": 21253952,
+      "fontCssBytes": 6121992,
+      "fontFaceCount": 101,
+      "fontBinaryBytes": 4516508,
+      "fontBase64Characters": 6022144,
+      "allFacesMatchInstalled": true,
+      "fontCssPercentOfHtml": 28.80401724818048
+    },
+    "web": {
+      "fontBinaryBytes": 4516508,
+      "fontScriptBytes": 6123041,
+      "note": "Main document uses relative font files; opaque realms use one portable font script to avoid CORS. These are two actual transport consumers."
+    }
+  },
+  "installed": {
+    "family": "Noto Sans SC",
+    "faceCount": 101,
+    "bytes": 4516508,
+    "maximumNumericFile": 119
+  },
+  "observedHttp": {
+    "faceCount": 9,
+    "bytes": 493328,
+    "scope": "Previous first-screen + one water experiment transport functional acceptance; not a whole-work glyph upper bound."
+  },
+  "publishedSelector": {
+    "before": {
+      "dynamic": true,
+      "faceCount": 101,
+      "bytes": 4516508,
+      "base64Characters": 6022144
+    },
+    "after": {
+      "dynamic": false,
+      "faceCount": 24,
+      "bytes": 1265520,
+      "base64Characters": 1687396
+    },
+    "uniqueCodePoints": 744,
+    "cjkCodePoints": 623,
+    "nativeCompiledExactCount": 11,
+    "compiledDynamicTriggers": 0,
+    "authorDynamicTriggers": 0,
+    "originalFalsePositiveTriggers": [
+      {
+        "path": "payload[\"instances\"][\"aee929af-3338-409a-a386-bcbef0d0e285\"][\"data\"][\"html\"]",
+        "kind": "input",
+        "line": 202,
+        "match": "<input class=\"roast-range\" id=\"roast-range\" type=\"range\" min=\"0\" max=\"100\" value=\"0\" step=\"1\" aria-valuetext=\"0%，生豆\">",
+        "context": "<label for=\"roast-range\" class=\"sr-only\">拖动观察从生豆到熟豆的变化</label><div class=\"range-row\"><span>生豆</span><input class=\"roast-range\" id=\"roast-range\" type=\"range\" min=\"0\" max=\"100\" value=\"0\" step=\"1\" aria-valuetext=\"0%，生豆\"><span>熟豆</span></div><p class=\"range-caption\">慢慢拖动，或选择一处停留。画面为艺"
+      },
+      {
+        "path": "payload[\"instances\"][\"8f45751d-9cc3-49dd-ba88-c645759f022c\"][\"data\"][\"html\"]",
+        "kind": "input",
+        "line": 94,
+        "match": "<input id=\"water-range\" type=\"range\" min=\"0\" max=\"100\" value=\"0\" step=\"1\" aria-label=\"添加的清水克数\">",
+        "context": ">＋50 克</button><button type=\"button\" data-add=\"100\" aria-pressed=\"false\">＋100 克</button></div></div><input id=\"water-range\" type=\"range\" min=\"0\" max=\"100\" value=\"0\" step=\"1\" aria-label=\"添加的清水克数\"><div class=\"water-control-foot\"><span>拖动比较不同加水量；向回拖动表示重设情形。</span><button type=\"butto"
+      }
+    ]
+  },
+  "knownBounds": {
+    "staticCompiledMarkup": {
+      "faceCount": 20,
+      "bytes": 1112048,
+      "scope": "All static compiled markup, including every chapter present in artifact.html; excludes runtime program-created text."
+    },
+    "broadKnownContent": {
+      "faceCount": 54,
+      "bytes": 2351164,
+      "scope": "All formal project string values + Babel-parsed author JS string/template literal parts + known UTF-8 text/SVG/HTML assets, with basic controls. This is a finite known-content bound, not proof that arbitrary program/input output is finite."
+    }
+  },
+  "actualProbe": [
+    {
+      "text": "<input type=range>",
+      "dynamic": false
+    },
+    {
+      "text": "<input type=number>",
+      "dynamic": false
+    },
+    {
+      "text": "<input type=button>",
+      "dynamic": false
+    },
+    {
+      "text": "<input type=hidden>",
+      "dynamic": false
+    },
+    {
+      "text": "<input type=text>",
+      "dynamic": true
+    },
+    {
+      "text": "<input>",
+      "dynamic": true
+    },
+    {
+      "text": "<textarea></textarea>",
+      "dynamic": true
+    },
+    {
+      "text": "<p contenteditable=true>说明</p>",
+      "dynamic": true
+    }
+  ],
+  "finalExport": {
+    "primary": "formal Main HTML",
+    "file": "D:\\果铃工作台\\output\\resource-runtime-repair-20261024\\size-followup\\formal-editor-workspace\\coffee-v08-final-optimized.html",
+    "bytes": 16389609,
+    "gzipBytes": 10604673,
+    "fonts": {
+      "faceCount": 24,
+      "cssBytes": 1719037,
+      "cssBlockBytes": 1719070,
+      "binaryBytes": 1265520,
+      "base64Characters": 1687396
+    },
+    "duplicateStoredDecodedBytes": 0,
+    "webZipBytes": 20856940,
+    "webFontBinaryBytes": 1265520,
+    "webFontScriptBytes": 1719316
+  }
+}

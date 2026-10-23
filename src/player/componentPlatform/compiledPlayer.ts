@@ -5,8 +5,7 @@ import type {CompiledCoursePlayback} from '../../core/publish/componentPlatform/
 import {compiledViewSignature,compiledProgramSignature} from '../../core/publish/componentPlatform/compiledContract'
 import type {CourseProjectV11,ComponentRuntimeImplementation,ComponentInstance,MountedComponent} from '../../shared/contracts/component-platform'
 import {resolveComponentBackground, resolveComponentSurfaceBackground,owningContainer,componentDefinitionBuiltinKey,componentSurface,componentContainers} from '../../shared/contracts/component-platform'
-import {publishedComponentModel} from './publishedPlayer'
-import {resolveModelPlayerPresentation} from './ModelPlayer'
+import {publishedComponentModel,resolveModelPlayerPresentation} from './publishedProjection'
 import {ComponentRuntimeWorld} from '../components/ComponentRuntimeWorld'
 import {ComponentNavigationOwner} from '../../renderer/components/ComponentNavigationOwner'
 import {createCompiledContentEnvironment} from './compiledContentEnvironment'
@@ -48,7 +47,7 @@ function waitForSourceValue<T>(pending:PromiseLike<T>,signal:AbortSignal,retire?
  })
 }
 /** Materialized DOM plus the same navigation/action/media/state owners used by the editor. */
-export async function mountCompiledCourse(artifact:CompiledCoursePlayback,root:HTMLElement,options:{report?:(message:string,diagnostic?:{severity:'warning'|'error';code?:string;instanceId?:string})=>void;fontFaceCss?:string;keyboardNavigation?:boolean;preparedAssetBytes?:Readonly<Record<string,Uint8Array>>}={}){
+export async function mountCompiledCourse(artifact:CompiledCoursePlayback,root:HTMLElement,options:{report?:(message:string,diagnostic?:{severity:'warning'|'error';code?:string;instanceId?:string})=>void;fontFaceCss?:string;keyboardNavigation?:boolean;preparedAssetBytes?:Readonly<Record<string,Uint8Array>>;prepareAssetBytes?:()=>Promise<Readonly<Record<string,Uint8Array>>>}={}){
  if(artifact.format!=='compiled-course-v2')throw new Error('未知编译播放制品')
  const hasPresentation=Boolean(artifact.course.instances[artifact.course.entry?.rootInstanceId??'']?.container)
  const hostRoot=root;if(hasPresentation)root=createPlaybackNavigationContent(hostRoot)
@@ -58,6 +57,7 @@ export async function mountCompiledCourse(artifact:CompiledCoursePlayback,root:H
   observer:ResizeObserver|undefined,pointerChrome:ReturnType<typeof mountPlaybackNavigationChrome>|undefined,
   navigationTasks:ReturnType<ComponentNavigationOwner['createKeyTasks']>|undefined,keys:ReturnType<typeof attachComponentPlatformNavigationKeys>|undefined,
   offPlacement:(()=>void)|undefined,offNavigation:(()=>void)|undefined,removeLayoutListeners:(()=>void)|undefined,disposal:Promise<void>|undefined
+ let preparedAssets=options.preparedAssetBytes??{},nativeAssetPreparation:Promise<void>|undefined
  const dispose=():Promise<void>=>{
   if(disposal)return disposal
   stopped=true
@@ -78,6 +78,20 @@ export async function mountCompiledCourse(artifact:CompiledCoursePlayback,root:H
  const assetSources=Object.fromEntries(Object.entries(artifact.course.assets).flatMap(([id,asset])=>asset.url?[[id,new URL(asset.url,dom.baseURI).href]]:[]))
  const assetUrls=assetLease.update(assetSources)
  const nativeResourceUrls=()=>Object.fromEntries(Object.entries({...assetSources,...world.resourceUrls()}).map(([id,url])=>[id,url.startsWith('blob:')&&assetSources[id]?assetSources[id]:url]))
+ const prepareNativeResources=async(signal:AbortSignal)=>{
+  if(options.prepareAssetBytes&&!options.preparedAssetBytes){
+   nativeAssetPreparation??=options.prepareAssetBytes().then(bytes=>{
+    if(stopped||controller.signal.aborted)return
+    preparedAssets=bytes
+    // The original synchronous resources.url capability exposes a complete
+    // directory in opaque realms. Prepare its captured bytes only when such a
+    // consumer actually mounts; world.sync here would await its own resolver.
+    world.prepareResources(project,{assets:preparedAssets,components:{}})
+   })
+   await waitForSourceValue(nativeAssetPreparation,signal)
+  }
+  controller.signal.throwIfAborted();signal.throwIfAborted()
+ }
  const replaceDeliveryAssets=(source:string)=>source.replace(/cw-delivery:([a-zA-Z0-9_.%~-]+)/g,(all,id)=>assetUrls[decodeURIComponent(id)]??all)
  const nativeDeliveryAssets=(source:string)=>source.replace(/cw-delivery:([a-zA-Z0-9_.%~-]+)/g,(all,id)=>assetSources[decodeURIComponent(id)]?webRuntimeResourceAddress(decodeURIComponent(id)):all)
  const webBindings=(instance:ComponentInstance)=>({...((instance.data as unknown as WebRuntimeData).resourceBindings??{}),...instance.authoring?.resourceBindings})
@@ -114,12 +128,13 @@ export async function mountCompiledCourse(artifact:CompiledCoursePlayback,root:H
  const authorContent=(root:HTMLElement,read:()=>ComponentInstance,web=false,resourceRoot:HTMLElement=root)=>{
   const pageText=web?new DomTextOverrides([root],(read().data as unknown as WebRuntimeData).textOverrides??[]):undefined
   const bindings=()=>web?webBindings(read()):read().authoring?.resourceBindings??{}
-  const urls=()=>({...assetUrls,...world.resourceUrls()})
+  // Copy addresses without invoking the lease's per-resource lazy getters.
+  const urls=()=>Object.defineProperties({}, {...Object.getOwnPropertyDescriptors(assetUrls),...Object.getOwnPropertyDescriptors(world.resourceUrls())}) as Record<string,string>
   const author=createDomAuthoring(root,{records:()=>read().authoring?.records??{},
    ...(pageText?{originalText:(node:Text)=>pageText.originalText(node),claimText:(node:Text,text:string|null)=>pageText.setLocalText(node,text)}:{}),
    resolveResource:reference=>urls()[bindings()[reference]??reference]??assetLease.resolve(reference,bindings())??reference,
    matchesResource:(reference,liveUrl)=>assetLease.matches(reference,liveUrl,bindings()),
-   resourceReference:url=>Object.entries(bindings()).find(([,id])=>urls()[id]===url)?.[0]??Object.entries(urls()).find(([,value])=>value===url)?.[0],
+   resourceReference:url=>assetLease.reverse(url,bindings())??Object.entries(bindings()).find(([,id])=>world.resourceUrls()[id]===url)?.[0]??Object.entries(world.resourceUrls()).find(([,value])=>value===url)?.[0],
    report:(authorKey,status)=>{if(status==='unresolved')report(`${read().id} 内部作者对象 ${authorKey} 当前无法唯一重绑定；原内容与作者修改已保留，尚未应用`)}})
   const refresh=()=>{
    pageText?.setRules((read().data as unknown as WebRuntimeData).textOverrides??[])
@@ -169,10 +184,11 @@ export async function mountCompiledCourse(artifact:CompiledCoursePlayback,root:H
    }}}}
    const source=artifact.nativeSources?.[implementation.source??'']
    if(!source)throw new Error('此局部程序尚未成功编译；原源码保留在作者工程，详见交付诊断')
+   await prepareNativeResources(signal)
    return preparePublishedNativeComponent({format:'esm',code:source.code,css:nativeDeliveryAssets(source.css),diagnostics:[]},signal,{...nativeSnapshots(),resourceBindings:implementation.resourceBindings,webInstance:value=>hasWebContentData(value.data)?resolveWebResourceBindings(value,id=>(assetSources[id]??world.contentAssetUrl(id))?webRuntimeResourceAddress(id):undefined,report,implementation.resourceBindings):value})
   },
   resolveBuiltin:async(_key,signal,instance)=>{
-   if(webEntry(instance)?.program.nativeData)return preparePublishedNativeComponent({format:'esm',code:webContentRealmSource(),css:'',diagnostics:[]},signal,{...nativeSnapshots(),builtinKey:_key,instance:nativeInstance,nativeDocument:true})
+   if(webEntry(instance)?.program.nativeData){await prepareNativeResources(signal);return preparePublishedNativeComponent({format:'esm',code:webContentRealmSource(),css:'',diagnostics:[]},signal,{...nativeSnapshots(),builtinKey:_key,instance:nativeInstance,nativeDocument:true})}
    return{isWebDocument:()=>true,implementation:{mount:async context=>{
    const entry=webFactories.get(instance.id)?.find(value=>value.signature===compiledProgramSignature(context.instance))
    if(!entry)throw new Error('该状态的 Web 程序未编译；原件保留在作者工程')
@@ -257,7 +273,7 @@ export async function mountCompiledCourse(artifact:CompiledCoursePlayback,root:H
   const changedLayers=[...orderedLayers].filter(([parent,list])=>{const members=new Set(list),current=[...parent.children].filter(node=>members.has(node as HTMLElement));return current.some((node,index)=>node!==list[index])})
   if(changedLayers.length){world.beforeProjectionMutation();try{for(const [parent,list]of changedLayers)for(const node of list)parent.append(node)}finally{world.afterProjectionMutation()}}
   previousInline=currentInline
-  relayout();await world.sync(project,{assets:{...options.preparedAssetBytes},components:{}});for(const id of changedTextRanges)world.notifyTextRanges(id);relayout();navigation.changed()
+  relayout();await world.sync(project,{assets:preparedAssets,components:{}});for(const id of changedTextRanges)world.notifyTextRanges(id);relayout();navigation.changed()
  }
  ready=update();await ready
  await navigation.initializeSpatialPlayback(controller.signal)

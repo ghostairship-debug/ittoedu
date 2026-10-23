@@ -1,0 +1,81 @@
+[
+  {
+    "name": "v08-photo",
+    "source": {
+      "width": 1371,
+      "height": 2048,
+      "mimeType": "image/jpeg",
+      "bytes": 662516,
+      "alpha": false
+    },
+    "derivative": {
+      "width": 720,
+      "height": 1076,
+      "mimeType": "image/webp",
+      "bytes": 195768,
+      "alpha": false
+    },
+    "demand": {
+      "width": 360,
+      "height": 240,
+      "fit": "cover",
+      "quality": "photo"
+    },
+    "savedPercent": 70.45082684795537,
+    "meanAbsoluteDisplayError": 5.038236882716049,
+    "millisecondsFirstEncoding": 132.20000000298023,
+    "originalUnchanged": true
+  },
+  {
+    "name": "v08-alpha",
+    "source": {
+      "width": 1254,
+      "height": 1254,
+      "mimeType": "image/webp",
+      "bytes": 487458,
+      "alpha": true
+    },
+    "derivative": {
+      "width": 640,
+      "height": 640,
+      "mimeType": "image/webp",
+      "bytes": 137468,
+      "alpha": true
+    },
+    "demand": {
+      "width": 320,
+      "height": 320,
+      "fit": "contain"
+    },
+    "savedPercent": 71.79900627336099,
+    "meanAbsoluteDisplayError": 0.956875,
+    "millisecondsFirstEncoding": 145.70000000298023,
+    "originalUnchanged": true
+  },
+  {
+    "name": "detail-chart",
+    "source": {
+      "width": 2400,
+      "height": 1600,
+      "mimeType": "image/png",
+      "bytes": 89368,
+      "alpha": true
+    },
+    "derivative": {
+      "width": 1200,
+      "height": 800,
+      "mimeType": "image/png",
+      "bytes": 61081,
+      "alpha": true
+    },
+    "demand": {
+      "width": 600,
+      "height": 400,
+      "quality": "detail"
+    },
+    "savedPercent": 31.65226926864202,
+    "meanAbsoluteDisplayError": 0.015915277777777778,
+    "millisecondsFirstEncoding": 33.5,
+    "originalUnchanged": true
+  }
+]

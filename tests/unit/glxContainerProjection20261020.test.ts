@@ -1,6 +1,7 @@
 import { afterEach, expect, it, vi } from 'vitest'
 import { createComponentModelProjection } from '../../src/player/componentPlatform/modelProjection'
-import { createV10ModelPlayer, mountV10Model, resolveModelPlayerPresentation } from '../../src/player/componentPlatform/ModelPlayer'
+import { createV10ModelPlayer, mountV10Model } from '../../src/player/componentPlatform/ModelPlayer'
+import { resolveModelPlayerPresentation } from '../../src/player/componentPlatform/publishedProjection'
 import type { ComponentPlayerModel } from '../../src/player/componentPlatform/ModelPlayer'
 import type { ComponentPlatformRuntime } from '../../src/player/components/ComponentPlatformRuntime'
 import type { ComponentInstance, ComponentRuntimeContext, CourseProjectV10 } from '../../src/shared/contracts/component-platform'

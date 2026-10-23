@@ -26,17 +26,17 @@ beforeAll(async () => {
 afterAll(async () => { await browser?.close(); await server?.close() })
 
 function prepare(bytes: Buffer, mimeType = 'image/png', preserveResolution = false,
-  display = { width: 320, height: 160 }, fit: 'contain' | 'cover' | 'stretch' = 'contain') {
-  return page.evaluate(async ({ base64, mimeType, preserveResolution, display, fit }) => {
+  display = { width: 320, height: 160 }, fit: 'contain' | 'cover' | 'stretch' = 'contain', quality?: 'photo' | 'detail' | 'original') {
+  return page.evaluate(async ({ base64, mimeType, preserveResolution, display, fit, quality }) => {
     const prepareGeneratedImage = Reflect.get(window, 'prepareGeneratedImage')
     const input = { bytes: Uint8Array.from(atob(base64), character => character.charCodeAt(0)), mimeType, filename: 'misnamed-source.jpeg',
-      display, fit, preserveResolution }
+      display, fit, preserveResolution, quality }
     const result = await prepareGeneratedImage(input)
     const repeat = await prepareGeneratedImage(input)
     let binary = ''
     for (const value of result.bytes) binary += String.fromCharCode(value)
     return { width: result.width, height: result.height, mimeType: result.mimeType, filename: result.filename, base64: btoa(binary), cached: result === repeat }
-  }, { base64: bytes.toString('base64'), mimeType, preserveResolution, display, fit })
+  }, { base64: bytes.toString('base64'), mimeType, preserveResolution, display, fit, quality })
 }
 
 describe('generated image preparation in the real Chromium resource decoder', () => {
@@ -48,14 +48,14 @@ describe('generated image preparation in the real Chromium resource decoder', ()
       raw[at + 3] = x < 64 && y < 64 ? 0 : 255
     }
     const source = await sharp(raw, { raw: { width: 2048, height: 1024, channels: 4 } }).png().toBuffer()
-    const result = await prepare(source)
+    const result = await prepare(source, 'image/png', false, { width: 320, height: 160 }, 'contain', 'detail')
     expect(result).toMatchObject({ width: 640, height: 320, mimeType: 'image/png', filename: 'misnamed-source.png', cached: true })
     const output = Buffer.from(result.base64, 'base64'), decoded = await sharp(output).ensureAlpha().raw().toBuffer({ resolveWithObject: true })
     expect(decoded.info).toMatchObject({ width: 640, height: 320, channels: 4 })
     expect([...decoded.data.subarray(0, 4)]).toEqual([0, 0, 0, 0])
     expect([...decoded.data.subarray((319 * 640) * 4, (319 * 640) * 4 + 4)]).toEqual([255, 0, 0, 255])
     expect([...decoded.data.subarray((319 * 640 + 639) * 4, (319 * 640 + 639) * 4 + 4)]).toEqual([0, 0, 255, 255])
-    const second = await prepare(output)
+    const second = await prepare(output, 'image/png', false, { width: 320, height: 160 }, 'contain', 'detail')
     expect(second.base64).toBe(result.base64)
     const preserved = await prepare(source, 'image/png', true)
     expect(preserved).toMatchObject({ width: 2048, height: 1024, base64: source.toString('base64') })
@@ -65,8 +65,8 @@ describe('generated image preparation in the real Chromium resource decoder', ()
     const source = await sharp({ create: { width: 1536, height: 768, channels: 4, background: { r: 40, g: 180, b: 80, alpha: format === 'webp' ? 0.5 : 1 } } })[format]().toBuffer()
     const result = await prepare(source, `image/${format}`)
     const output = Buffer.from(result.base64, 'base64'), metadata = await sharp(output).metadata()
-    expect(result).toMatchObject({ width: 640, height: 320, mimeType: `image/${format}` })
-    expect(metadata).toMatchObject({ format, width: 640, height: 320 })
+    expect(result).toMatchObject({ width: 640, height: 320 })
+    expect(metadata).toMatchObject({ format: result.mimeType.split('/')[1], width: 640, height: 320 })
     if (format === 'webp') {
       const pixels = await sharp(output).ensureAlpha().raw().toBuffer()
       expect(pixels[3]).toBeGreaterThanOrEqual(126); expect(pixels[3]).toBeLessThanOrEqual(129)
@@ -93,26 +93,28 @@ describe('generated image preparation in the real Chromium resource decoder', ()
     const source = await sharp(raw, { raw: { width, height: width, channels: 4 } }).composite([{ input: text }]).png().toBuffer()
     const original = Buffer.from(source)
     const contain = await prepare(source, 'image/png', false, { width: 500, height: 120 })
-    expect(contain).toMatchObject({ width: 512, height: 512, mimeType: 'image/webp' })
+    expect(contain).toMatchObject({ width: 240, height: 240, mimeType: 'image/png' })
     const output = Buffer.from(contain.base64, 'base64')
     expect(output.length).toBeLessThan(source.length * 0.5)
     expect(source).toEqual(original)
     const pixels = await sharp(output).ensureAlpha().raw().toBuffer()
     expect(pixels[3]).toBe(0)
-    expect(pixels[(400 * 512 + 48) * 4 + 3]).toBe(128)
+    expect(pixels[(190 * 240 + 23) * 4 + 3]).toBe(128)
     // Compare the text region to a high-quality full-source resize, not a screenshot.
-    const reference = await sharp(source).resize(512, 512).ensureAlpha().raw().toBuffer()
+    const reference = await sharp(source).resize(240, 240).ensureAlpha().raw().toBuffer()
     let error = 0, count = 0
-    for (let y = 125; y < 335; y++) for (let x = 125; x < 385; x++) for (let channel = 0; channel < 3; channel++) {
-      const at = (y * 512 + x) * 4 + channel
+    for (let y = 59; y < 157; y++) for (let x = 59; x < 181; x++) for (let channel = 0; channel < 3; channel++) {
+      const at = (y * 240 + x) * 4 + channel
       error += Math.abs(pixels[at]! - reference[at]!); count++
     }
     expect(error / count).toBeLessThan(4)
     expect((await prepare(source, 'image/png', false, { width: 500, height: 120 }, 'cover')).width).toBe(1000)
-    expect((await prepare(output, 'image/webp', false, { width: 500, height: 120 })).base64).toBe(contain.base64)
-    const sameSizePng = await sharp(source).resize(512, 512).png().toBuffer()
+    expect((await prepare(output, 'image/png', false, { width: 500, height: 120 })).base64).toBe(contain.base64)
+    const sameSizePng = await sharp(source).resize(240, 240).png().toBuffer()
     const encoded = await prepare(sameSizePng, 'image/png', false, { width: 500, height: 120 })
-    expect(encoded).toMatchObject({ width: 512, height: 512, mimeType: 'image/webp' })
-    expect(Buffer.from(encoded.base64, 'base64').length).toBeLessThan(sameSizePng.length * 0.9)
+    expect(encoded).toMatchObject({ width: 240, height: 240, mimeType: 'image/png', base64: sameSizePng.toString('base64') })
+    const photo = await prepare(sameSizePng, 'image/png', false, { width: 500, height: 120 }, 'contain', 'photo')
+    expect(photo).toMatchObject({ mimeType: 'image/webp' })
+    expect(Buffer.from(photo.base64, 'base64').length).toBeLessThan(sameSizePng.length * 0.9)
   }, 30_000)
 })

@@ -21,7 +21,8 @@ import type { ComponentLayoutInput, ComponentLayoutPort, ComponentInstance, Comp
 import type { RuntimeTargetProfile } from '../../components/web/moduleGraph'
 import { allDocumentTextSlots,inlineComponentIds,documentTextAt,documentTextRanges,documentRangeElements,documentRangeAt } from '../../shared/document/textInteraction'
 import { isGlobalTeacherController } from '../../shared/teacherControllerViewportGeometry'
-import { instanceContainerId, instanceWorkRootId, isWithinContainer } from './runtime/containerScopes'
+import { instanceContainerId, instanceWorkRootId, isWithinContainer, runtimeInstanceOwner } from './runtime/containerScopes'
+import { measureComponentGeometry } from './runtime/componentGeometry'
 
 type Listener = (value: JsonValue | undefined) => void
 const snapshotValue = <Value extends JsonValue | undefined>(value: Value): Value => value !== null && typeof value === 'object' ? structuredClone(value) : value
@@ -275,6 +276,24 @@ export class ComponentRuntimeWorld {
       },
       ports: (_scope, instanceId) => ({
         target: reference => this.target(reference),
+        measure: async references => measureComponentGeometry(references, {
+          target: reference => this.target(reference),
+          flows: reference => {
+            const project = this.project
+            if (!project) return []
+            let id = reference.kind === 'instance' || reference.kind === 'text-range' ? reference.instanceId
+              : reference.kind === 'surface' ? reference.surfaceId : undefined
+            const result: { containerId: string; root: HTMLElement }[] = [], visited = new Set<string>()
+            while (id && !visited.has(id)) {
+              visited.add(id)
+              const root = this.targetElement(id)
+              if (project.instances[id]?.container?.kind === 'flow' && root) result.push({ containerId: id, root })
+              const owner = runtimeInstanceOwner(project, id)
+              id = owner?.kind === 'instance' ? owner.instanceId : undefined
+            }
+            return result
+          },
+        }),
         events: { emit: (name, value) => {
           if (name === 'component.diagnostic' && value && typeof value === 'object' && !Array.isArray(value) && typeof value.message === 'string') this.report(`${instanceId}：${value.message}`)
           if (name === '__runtime.text-ranges' && value && typeof value === 'object' && !Array.isArray(value) && typeof value.instanceId === 'string') this.notifyTextRanges(value.instanceId)
@@ -972,7 +991,12 @@ export class ComponentRuntimeWorld {
     this.state.set(name, stored)
     for (const listener of this.stateListeners.get(name) ?? []) listener(snapshotValue(stored))
     this.emit('__runtime.state', { name, value: stored })
-    this.notifyNavigationCapabilities?.()
+    // Runtime state is delivered to its exact subscribers and interaction rules
+    // above. Only navigation guards consume it in the navigation owner. Sending
+    // every animation/measurement write through changed() re-enters every Flow
+    // reading subscriber, which can itself publish another measured state.
+    if (this.project?.logic?.navigationGuards.some(guard => guard.conditions.some(condition => condition.key === name)))
+      this.notifyNavigationCapabilities?.()
   }
   /** Explicit editor reset retires this scene's programs; ordinary navigation keeps them alive. */
   resetSurfacePrograms = (surfaceId: string): Promise<void> => {

@@ -1,0 +1,209 @@
+{
+  "measuredAt": "2026-10-23T17:14:36.391Z",
+  "originalPath": "D:\\果铃工作台\\docs\\creative-production\\works\\coffee-journey\\design\\v08\\native\\coffee-journey-v08.glx",
+  "savedPath": "D:\\果铃工作台\\output\\resource-runtime-repair-20261024\\resource\\coffee-journey-v08-cas-copy.glx",
+  "originalSha256": "989c8d2e65fb4370ae463f9f5a4ae299f743bb8c0aa71341ccc58b29a1db8e98",
+  "original": {
+    "byteLength": 17502438,
+    "openCodecMs": 301.46720000000005,
+    "resources": {
+      "entries": 114,
+      "totalResourceBytes": 17589682,
+      "uniqueResources": 64,
+      "uniqueResourceBytes": 8473630,
+      "duplicates": [
+        {
+          "byteLength": 662516,
+          "paths": [
+            "assets/asset_fed66dc0-bc0e-4336-8f06-d9f7b5d07f4f.jpeg",
+            "components/947ccfd1-0078-4078-b903-304498284ade/assets/runtime/sorting-photo.jpeg"
+          ]
+        },
+        {
+          "byteLength": 207752,
+          "paths": [
+            "assets/asset_4211216b-bea4-460c-859d-cfc422067169.webp",
+            "assets/asset_01c66380-70d5-44e4-a457-dfa54f3c1d75.webp",
+            "assets/asset_9c9b1c38-6470-4132-b6dd-a15148ca724b.webp",
+            "assets/asset_80056b4a-1e71-4842-bc3b-bc85e303ef4a.webp",
+            "assets/asset_74125b53-9813-4732-8188-9a5c50185a79.webp",
+            "assets/asset_c50a2e4c-ab89-4dd1-ba62-28731691520e.webp",
+            "assets/asset_1d935419-0e11-4c72-b395-3baf649e7058.webp"
+          ]
+        },
+        {
+          "byteLength": 275184,
+          "paths": [
+            "assets/asset_4a9500bf-b479-46b5-9df7-bfefd904da6b.webp",
+            "assets/asset_ad7e8538-b285-46e8-94eb-7d973c242193.webp",
+            "assets/asset_2c53b98a-ae28-4a54-aad6-00a46ec41432.webp",
+            "assets/asset_4b72129b-d94d-4acb-bbe1-895869bed1a8.webp",
+            "assets/asset_0dc35c7a-4aba-4c67-ab10-93480a01e592.webp",
+            "assets/asset_9c734f29-1345-4df9-a8b3-34b9a9cf87d4.webp"
+          ]
+        },
+        {
+          "byteLength": 255870,
+          "paths": [
+            "assets/asset_0913eab5-4ffe-43dc-ad48-8122833f08c5.webp",
+            "assets/asset_000f16b5-abe6-4930-a59c-d1cab6cd379c.webp",
+            "assets/asset_b8c1900b-86c6-4f71-ba50-147022581790.webp",
+            "assets/asset_cb03c037-b17c-4cc8-9a96-f33faf9ebb27.webp",
+            "assets/asset_73a0ea42-845c-4742-8f98-d1ed4560870b.webp",
+            "assets/asset_342db4b2-cbda-451e-a7e9-ffc552d47b10.webp"
+          ]
+        },
+        {
+          "byteLength": 2739,
+          "paths": [
+            "assets/asset_0d42046e-b8dc-4f00-87bb-d3e9aa91e2f2.svgxml",
+            "assets/asset_e5485c73-f62a-451f-8247-1612952ce572.svgxml",
+            "assets/asset_a7d49729-c37f-4c84-8d27-1b50cae1c3cc.svgxml",
+            "assets/asset_c3383cb0-cc65-4c4c-accc-bfe6a0bbf037.svgxml"
+          ]
+        },
+        {
+          "byteLength": 2889,
+          "paths": [
+            "assets/asset_67f407d1-d971-4001-b828-b34735382c11.svgxml",
+            "assets/asset_cd2af012-466d-4503-9d20-4302e857bc8c.svgxml",
+            "assets/asset_ac894c14-fa7c-4642-ba27-a45f72129360.svgxml",
+            "assets/asset_0beab1ab-18c7-417d-8ddc-21636ca7f4fe.svgxml"
+          ]
+        },
+        {
+          "byteLength": 2760,
+          "paths": [
+            "assets/asset_d5814f29-ecc8-41ee-8f9c-770baf1f3a98.svgxml",
+            "assets/asset_c8b94bbb-5132-4d7d-a236-fc1b308177a1.svgxml",
+            "assets/asset_245fcc24-8bcd-456f-9217-82a93ecd05e9.svgxml",
+            "assets/asset_cc1e93d5-385e-4833-9509-f5033895ae50.svgxml"
+          ]
+        },
+        {
+          "byteLength": 172636,
+          "paths": [
+            "assets/asset_52fcb460-dd86-4110-8078-7500893c6eac.jpeg",
+            "components/947ccfd1-0078-4078-b903-304498284ade/assets/runtime/bag-photo.jpeg"
+          ]
+        },
+        {
+          "byteLength": 224896,
+          "paths": [
+            "assets/asset_aef8148e-9dbc-400c-bd02-e09174d6180a.webp",
+            "assets/asset_9df1cfc6-452c-4e77-ad31-fa740c76cafe.webp",
+            "components/947ccfd1-0078-4078-b903-304498284ade/assets/runtime/u05green.webp"
+          ]
+        },
+        {
+          "byteLength": 261754,
+          "paths": [
+            "assets/asset_244aaa59-d94e-47c9-975a-457ba4ede1d2.webp",
+            "assets/asset_703c90fc-6dd3-47be-b5c5-3d0866a74ca0.webp",
+            "components/947ccfd1-0078-4078-b903-304498284ade/assets/runtime/u05gold.webp"
+          ]
+        },
+        {
+          "byteLength": 306710,
+          "paths": [
+            "assets/asset_68d42a95-e043-4014-a732-ecf36a000dd2.webp",
+            "assets/asset_b7752a11-a6db-4d2f-aa84-a31d5949ed08.webp",
+            "components/947ccfd1-0078-4078-b903-304498284ade/assets/runtime/u05roast.webp"
+          ]
+        },
+        {
+          "byteLength": 5062,
+          "paths": [
+            "assets/7bb8e86d-6bd4-4d8e-9037-57e7ded94505.html",
+            "assets/119874e2-c281-4e62-98c9-8983d90d93c5.html",
+            "assets/0c4a6969-5d21-4ab5-8713-2702b5acb1e2.html"
+          ]
+        },
+        {
+          "byteLength": 206718,
+          "paths": [
+            "assets/asset_9f19c0de-0094-4de1-b373-2d8ab2706392.webp",
+            "assets/asset_84cc5715-4dc0-4ec5-a8d7-08d40a2e9e0a.webp"
+          ]
+        },
+        {
+          "byteLength": 380476,
+          "paths": [
+            "assets/asset_d5d75523-9802-425d-a905-03231c4e2e25.webp",
+            "assets/asset_5e7a6751-2e1e-4cc1-9a80-3c5dde4b1495.webp",
+            "components/947ccfd1-0078-4078-b903-304498284ade/assets/runtime/u03natural.webp"
+          ]
+        },
+        {
+          "byteLength": 387000,
+          "paths": [
+            "assets/asset_0d95975c-987f-40b1-a41f-1016f070cf0f.webp",
+            "assets/asset_555d8305-581c-42fb-a7fd-4e88fc1d84a6.webp",
+            "components/947ccfd1-0078-4078-b903-304498284ade/assets/runtime/u03honey.webp"
+          ]
+        },
+        {
+          "byteLength": 487458,
+          "paths": [
+            "assets/asset_d9ecde61-485f-440c-95ee-80cc98cfcf84.webp",
+            "assets/asset_157e6afa-929d-457b-8e79-beabac823cb0.webp",
+            "components/947ccfd1-0078-4078-b903-304498284ade/assets/runtime/u03washed.webp"
+          ]
+        },
+        {
+          "byteLength": 24514,
+          "paths": [
+            "components/947ccfd1-0078-4078-b903-304498284ade/background-runtime.js",
+            "components/947ccfd1-0078-4078-b903-304498284ade/v08-background-runtime.js"
+          ]
+        },
+        {
+          "byteLength": 1778,
+          "paths": [
+            "components/1bb8db30-25e4-47b9-81ff-c9fb3fc9c461/programs/runtime/visual-slot.js",
+            "components/5e289f16-2581-4d6f-897c-f6eddd809e86/programs/runtime/visual-slot.js",
+            "components/518106ef-1e88-49f3-a48c-b692a87f06e6/programs/runtime/visual-slot.js",
+            "components/168f50e7-03d0-4fa1-88e6-ee0c3062964e/programs/runtime/visual-slot.js",
+            "components/1f5d07bf-85d6-4d65-96a2-55d04cae9751/programs/runtime/visual-slot.js",
+            "components/afdae87a-e54d-4dbb-b401-a5153e25b7db/programs/runtime/visual-slot.js"
+          ]
+        },
+        {
+          "byteLength": 3560,
+          "paths": [
+            "components/4f1dd104-817a-46f1-97c0-6f46dfd5fd15/programs/runtime/local-program-bridge.js",
+            "components/2334a4b6-61f8-4979-97fb-1529b361dc22/programs/runtime/local-program-bridge.js",
+            "components/c46f1519-d4e4-418f-987f-ebe8ecd74756/programs/runtime/local-program-bridge.js"
+          ]
+        }
+      ],
+      "duplicateBytes": 9116052
+    }
+  },
+  "saved": {
+    "byteLength": 8434293,
+    "saveCodecMs": 349.38509999999997,
+    "reopenCodecMs": 198.06140000000005,
+    "resources": {
+      "entries": 64,
+      "totalResourceBytes": 8473630,
+      "uniqueResources": 64,
+      "uniqueResourceBytes": 8473630,
+      "duplicates": [],
+      "duplicateBytes": 0
+    }
+  },
+  "reductionBytes": 9068145,
+  "reductionPercent": 51.81075345046216,
+  "logicalResources": {
+    "assets": 80,
+    "componentOwners": 12,
+    "componentFiles": 34
+  },
+  "verified": {
+    "originalUnchanged": true,
+    "projectDeepEqual": true,
+    "allResourceBytesDeepEqual": true
+  },
+  "timingScope": "Single codec observation in one Node process, warmed dependencies; not GUI/first-render performance."
+}

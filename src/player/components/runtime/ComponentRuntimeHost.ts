@@ -7,7 +7,7 @@ import type {
 } from '../../../shared/contracts/component-platform'
 import type { WebModuleGraph } from '../../../components/web/moduleGraph'
 
-export type ComponentRuntimePorts = Pick<ComponentRuntimeScope, 'target' | 'events' | 'state'>
+export type ComponentRuntimePorts = Pick<ComponentRuntimeScope, 'target' | 'events' | 'state' | 'measure'>
 
 /** An observation of the existing runtime slot, never author metadata. */
 export interface ComponentRuntimeCapabilities {
@@ -541,6 +541,11 @@ export class ComponentRuntimeHost {
       signal: controller.signal,
       isActive: alive,
       cleanup,
+      ...(ports.measure ? { measure: async (references: Parameters<NonNullable<ComponentRuntimeScope['measure']>>[0]) => {
+        if (!alive()) return null
+        const sample = await ports.measure!(references)
+        return alive() ? sample : null
+      } } : {}),
       target: reference => {
         if (!alive()) return null
         const target = ports.target(reference)
