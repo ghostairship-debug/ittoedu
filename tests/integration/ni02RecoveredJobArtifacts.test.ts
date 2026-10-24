@@ -124,7 +124,8 @@ it('reads original ready computation through verified continuation, then saves w
   expect(receipt).toMatchObject({ status: 'written', sourceKind: 'compute', path: path.join(f.root, 'report.csv') })
   expect(await f.deliveries.lookup('continued:report.csv', 'continued')).toEqual(receipt)
   expect(await fs.readFile(receipt.path, 'utf8')).toBe('label,value\n正确,42\n')
-  await expect(f.call('continued', 'job.cancel', { job: created.job })).rejects.toThrow('接续任务可读取原任务成果，但不能取消原任务的作业')
+  await expect(f.call('continued', 'job.cancel', { job: created.job })).rejects.toMatchObject({ code: 'job-not-authorized',
+    message: '接续任务可读取原任务成果，但不能取消原任务的作业' })
   await f.begin('unrelated')
   await expect(f.call('unrelated', 'job.cancel', { job: created.job })).rejects.toMatchObject({ code: 'job-not-authorized' })
   await expect(f.save('unrelated', status.snapshot.artifacts[0].source, 'foreign.csv')).rejects.toMatchObject({ code: 'job-not-authorized' })
@@ -132,7 +133,8 @@ it('reads original ready computation through verified continuation, then saves w
   await expect(f.call('reader', 'job.cancel', { job: created.job })).rejects.toMatchObject({ code: 'job-not-authorized' })
   f.coordinator.authorizeContinuationReads('reader', ['original'])
   expect(await f.call('reader', 'job.status', { job: created.job })).toMatchObject({ status: 'ready' })
-  await expect(f.call('reader', 'job.cancel', { job: created.job })).rejects.toThrow('接续任务可读取原任务成果，但不能取消原任务的作业')
+  await expect(f.call('reader', 'job.cancel', { job: created.job })).rejects.toMatchObject({ code: 'job-not-authorized',
+    message: '接续任务可读取原任务成果，但不能取消原任务的作业' })
   expect(cancelled).not.toHaveBeenCalled()
   await expect(f.save('reader', status.snapshot.artifacts[0].source, 'denied.csv')).rejects.toThrow('只读')
   await f.coordinator.stop('continued')

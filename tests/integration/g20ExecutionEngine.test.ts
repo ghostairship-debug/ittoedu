@@ -213,6 +213,7 @@ describe('G20 canonical model execution loop', () => {
     const h = await fixture(provider, true)
     h.input.documents = []; h.input.workspaceRoot = h.workspaceRoot
     const initial = await h.engine.start(h.input); originalRun = initial.runId; await h.engine.wait(initial.runId)
+    const cancel = vi.spyOn(h.compute!, 'cancel')
     mode = 'read'
     const continued = await h.engine.start({ ...h.input, taskId: 'continued' }, { runId: initial.runId, facts: '', sameTask: true })
     const final = await h.engine.wait(continued.runId)
@@ -225,7 +226,9 @@ describe('G20 canonical model execution loop', () => {
     expect(await h.artifacts!.lookup(operationId, continued.runId)).toEqual(delivery.kind === 'read' ? delivery.data : undefined)
     await expect(h.artifacts!.lookup(operationId, originalRun)).rejects.toThrow('不属于当前运行')
     expect(await fs.readFile(path.join(h.workspaceRoot, 'exports/continued.txt'), 'utf8')).toBe('owner verified result\n')
-    expect(final.tools.find(tool => tool.call.name === 'job.cancel')?.result).toMatchObject({ kind: 'error', code: 'job-not-authorized' })
+    expect(final.tools.find(tool => tool.call.name === 'job.cancel')?.result).toMatchObject({ kind: 'error', code: 'job-not-authorized',
+      message: '接续任务可读取原任务成果，但不能取消原任务的作业' })
+    expect(cancel).not.toHaveBeenCalled()
     await expect(h.engine.start({ ...h.input, taskId: 'foreign', workspaceRoot: path.join(h.workspaceRoot, 'foreign') },
       { runId: initial.runId, facts: '', sameTask: true })).rejects.toThrow('工作空间')
     mode = 'new-task'
@@ -1258,6 +1261,7 @@ describe('collaboration safe-boundary scheduling', () => {
       expect(notices(request)).toHaveLength(action === 'message' ? 1 : 0)
       expect(request.messages.some(message => message.role === 'tool' && String(message.tool_call_id).includes(':ptc:'))).toBe(false)
       expect(h.session.read().revision).toBe(action === 'message' ? 1 : 0)
+      if (action === 'steer') expect(request.messages.some(message => message.role === 'user' && String(message.content).includes('只报告，不改原文'))).toBe(true)
       yield complete(request)
     }, { programmatic: new ProgrammaticToolRunner({ execute: async input => {
       scripts++
@@ -1275,14 +1279,18 @@ describe('collaboration safe-boundary scheduling', () => {
     expect((await h.engine.read(started.runId))?.steering?.at(-1)?.messageIndex).toBeUndefined()
     release.resolve()
     const final = await h.engine.wait(started.runId)
-    expect(final.status).toBe(action === 'steer' ? 'partial' : 'completed'); expect(final.failure).toBeUndefined()
+    expect(final.status).toBe('completed'); expect(final.failure).toBeUndefined()
     expect(final.requests).toHaveLength(2); expect(turns).toBe(2); expect(scripts).toBe(1)
     expect(final.tools.map(tool => tool.call.name)).toEqual(['programmatic.execute', 'read', 'text.replace'])
     expect(final.tools.at(-1)).toMatchObject({ origin: 'host', state: 'returned',
       ...(action === 'steer' ? { notInvokedReason: 'steering', result: { kind: 'read', data: { status: 'not-started' } } }
         : { result: { kind: 'document-operation', result: { status: 'applied' } } }) })
+    expect(final.tools[0].result).toMatchObject(action === 'steer'
+      ? { kind: 'error', code: 'programmatic-cancelled', data: { status: 'cancelled' } }
+      : { kind: 'read', data: { status: 'completed' } })
+    expect(final.steering?.at(-1)?.messageIndex).toBeTypeOf('number')
     expect(execute.mock.calls.map(call => call[2].name)).toEqual(action === 'message' ? ['read', 'text.replace'] : ['read'])
-    expect(h.session.read()).toMatchObject({ revision: action === 'message' ? 1 : 0,
+    expect(h.session.read()).toMatchObject({ revision: action === 'message' ? 1 : 0, undoDepth: action === 'message' ? 1 : 0,
       model: { source: action === 'message' ? '前文 NEW 后文' : '前文 OLD 后文' } })
   })
 

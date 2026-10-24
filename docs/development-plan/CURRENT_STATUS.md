@@ -2,14 +2,14 @@
 
 更新：2026-10-24。本文是当前开发入口；具体检查、失败及条件以链接中的原始结果为准。整理前的逐轮时间线已完整保留在[历史快照](../archive/20261022-开发状态快照.md)，不再作为并行启动清单。
 
-Owner最新授权：本轮审查后续维护与原有全部未提交成果一并commit并push；不删除原成果。各旧结果的未提交描述保留历史时点，发行、Portable与部署继续暂停。
+Owner最新授权：按既定四项顺序完成 Engine／互动遗留项收口、必要独审及结果记录后 commit 并 push，不追加其他工作包、不发布。前轮与原有成果已随 `699fc9e9` 及其前序提交推送；各旧结果的未提交描述保留历史时点，发行、Portable与部署继续暂停。
 
 ## 当前有效结果
 
 | 范围 | 已成立的结果与证据边界 |
 |---|---|
 | 架构优化批次（10月24日，已收口） | [原方案§15](../../output/architecture-audit-20261024/IMPLEMENTATION_PLAN.md#architecture-batch-closeout)为原批次逐包状态与重启条件；选中实施、试验和维护已收口，其他广义方向条件性暂缓。架构批次已提交推送为 `7952cc24`；历史红例的新结论见下一行，不回写原统计。 |
-| 架构审查后续维护（10月24日） | [结果与合同未决](20261024-architecture-review-followup/RESULT.md)：回执夹具、Engine四条维护、互动规则共用规划及Flow切分清理归一完成；Engine另两条合同断言保留。Owner已授权本轮与原有统一选中、作品等全部未提交成果一并commit并push，发行／Portable／部署继续暂停。 |
+| 架构审查后续维护（10月24日，遗留项已收口） | [最新四项结果](20261024-engine-interaction-closeout/RESULT.md)：暂停复位进入规则修复、教师按钮夹具维护、取消归属错误码补齐与 steer 终态预期维护完成；Engine 57／57、互动 7／7、直接取消消费者及三段类型检查通过。[前轮结果](20261024-architecture-review-followup/RESULT.md)保留回执、规则规划与 Flow 清理及原失败统计。 |
 | 资源、运行性能与动画基础（10月24日） | 已在软件层统一归档内容实体、发布衍生图片/内嵌池、lazy资源解码、正式树查询与导航状态依赖；增补同批Flow/iframe几何，修复字体输入误判及compiled无用依赖。真实v08 GLX 17.50→8.43MB，正式单HTML 29.53→16.39MB；实际Electron编辑/UndoRedo/保存新profile冷开及离线七章/三实验通过。总GLX冷启动未证实提速、滚动百毫秒长帧与作品路线问题保留。见[本轮报告](../../output/resource-runtime-repair-20261024/REPORT.md)、[同条件数据](../../output/resource-runtime-repair-20261024/PERFORMANCE.md)及[创作交接](../../output/resource-runtime-repair-20261024/CREATIVE_HANDOFF.md)。正式作品未改，前一轮交互dirty隔离保留；本轮按Owner明确要求本地commit，不push/发行。 |
 | 统一选中、整体拖动与双击编辑（10月24日） | 按Owner确定方案完成U01–U19及相关同类迁移：单击选择、主体移动／正文读序、双击编辑、单一条／能力框、字段与组层级同目标。聚焦检查、三套类型、player／renderer构建及独立源码评审通过；5个真实Chromium用例、代表GLX保存新进程冷开与离线互动通过，实际发现的Flow双击与Slide叠框已修并复验。见[唯一结果](20261024-unified-selection-editing/RESULT.md)。证据不替代完整Electron壳层／全部旧作品／物理IME或Owner接受；无关旧夹具红例保留。实施时未commit，本次纳入整体提交。 |
 | 编辑阻断与体验回退修复（10月23日收口） | P1–P9软件修复及独立复核完成；按现有owner收口输入／原稿／连接与失败出口、HTML作者事实、Flow范围与关系、输出布局、异步归属、取消和保存查证。指定旧GLX与大小HTML副本实际编辑／保存／新进程冷开及GLX Undo／Redo通过；最后移动图标改为工具栏固定入口，实际画面与相关类型／构建通过。完整A01–A20／B01–B21裁定、证据、原失败与条件边界见[唯一结果](20261023-editing-regressions/RESULT.md)。不签普遍提速、物理IME／Word GUI或Owner整体接受；该实施批次未提交，后续本地提交沿本页最新授权。 |

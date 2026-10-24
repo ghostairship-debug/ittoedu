@@ -3,6 +3,7 @@ import { testContainerInstance } from '../helpers/glxWorkFixture'
 // @vitest-environment jsdom
 import { afterEach, expect, it, vi } from 'vitest'
 import { createBlankCourseProjectV10 } from '../../src/core/course/createCourseProjectV10'
+import { prepareCourseTeacherControllerEdits } from '../../src/core/course/courseElementInsertion'
 import { CourseV10Driver } from '../../src/core/drivers/CourseV10Driver'
 import { captureComponentOperation } from '../../src/core/drivers/courseV10Operations'
 import { ComponentPlatformRuntime } from '../../src/player/components/ComponentPlatformRuntime'
@@ -72,11 +73,40 @@ it('initializes each enter subscription once on resume, while paused mounts and 
     h.setPlaying(false); h.navigate('other'); h.setPlaying(true)
     expect(enter).toHaveBeenCalledTimes(2); expect(later).toHaveBeenCalledTimes(2)
     h.navigate(h.surfaceId)
+    h.setPlaying(false); h.context.scope.events.emit('__runtime.scene.replay', 'other')
+    h.setPlaying(true); expect(enter).toHaveBeenCalledTimes(3)
     h.setPlaying(false); h.context.scope.events.emit('__runtime.scene.replay', h.surfaceId)
-    expect(enter).toHaveBeenCalledTimes(4)
+    expect(enter).toHaveBeenCalledTimes(3)
     h.setPlaying(true); expect(enter).toHaveBeenCalledTimes(4)
     stopLater()
+    h.context.scope.events.emit('__runtime.scene.replay', h.surfaceId)
+    expect(enter).toHaveBeenCalledTimes(5); expect(later).toHaveBeenCalledTimes(4)
   } finally { off(); h.dispose() }
+})
+
+it('reinitializes retained scene rules after the actual paused editor replay, without replaying on ordinary resume', async () => {
+  const base = fixture(), project = apply(base.project, componentRuleEdits(base.project, base.target, [rule('entered', { type: 'scene.enter' })]))
+  const navigation = new ComponentNavigationOwner({ project: () => project, surfaceId: () => base.surface.id, select() {} })
+  const world = new ComponentPlatformRuntime('paused-editor-replay', { mode: 'edit', teacherController: navigation })
+  const writes = vi.spyOn(world, 'setState'), root = document.createElement('div'); document.body.append(root)
+  const entries = () => writes.mock.calls.filter(([key]) => key === 'entered').length
+  world.bind('item', root)
+  try {
+    await world.sync(project, { assets: {}, components: {} })
+    expect(entries()).toBe(0)
+    world.setPlaying(true); await vi.waitFor(() => expect(entries()).toBe(1))
+    world.setPlaying(false); world.setPlaying(true); expect(entries()).toBe(1)
+    world.setPlaying(false)
+    // These are the Navigation/World operations used by CourseV10RuntimeView.resetPlayback.
+    expect(await navigation.replayCurrentSurface()).toBe(true)
+    await world.resetSurfacePrograms(base.surface.id)
+    expect(entries()).toBe(1)
+    world.setPlaying(true); await vi.waitFor(() => expect(entries()).toBe(2))
+    world.setPlaying(false); world.setPlaying(true); expect(entries()).toBe(2)
+    expect(await navigation.replayCurrentSurface()).toBe(true)
+    expect(entries()).toBe(3)
+  } finally { await world.dispose(); navigation.dispose() }
+  world.setPlaying(true); expect(entries()).toBe(3)
 })
 
 it('returns actual presenter rule outcomes for conditions, rejected navigation, successful terminal actions, cancellation and scope cleanup', async () => {
@@ -175,7 +205,8 @@ it('keeps click action types and order, respects ancestor locks, and assembles r
 })
 
 it('renders the configured teacher buttons without restoring deleted step controls', async () => {
-  const { project } = fixture(), id = project.global.overlay[0], data = project.instances[id].data as Record<string, unknown>
+  const base = fixture(), prepared = prepareCourseTeacherControllerEdits(base.project, base.surface.id)
+  const project = apply(base.project, prepared.edits), id = prepared.instanceIds[0], data = project.instances[id].data as Record<string, unknown>
   data.defaultCollapsed = false; data.buttons = []
   const root = document.createElement('div'); document.body.append(root)
   const navigation = new ComponentNavigationOwner({ project: () => project, surfaceId: () => componentSurfaces(project)[0].id, select() {} })
@@ -183,8 +214,9 @@ it('renders the configured teacher buttons without restoring deleted step contro
   world.bind(id, root)
   try {
     await world.sync(project, { assets: {}, components: {} })
-    expect(root.querySelector('[data-control="上一步"]')).toBeNull()
-    expect(root.querySelector('[data-control="下一步"]')).toBeNull()
+    expect(root.querySelectorAll('[data-controller-button-id]')).toHaveLength(0)
+    expect(root.querySelector('[aria-label="上一步"]')).toBeNull()
+    expect(root.querySelector('[aria-label="下一步"]')).toBeNull()
     expect(root.querySelector('[data-control="collapse"]')).not.toBeNull()
   } finally { await world.dispose(); navigation.dispose() }
 })

@@ -344,10 +344,10 @@ export class ComponentWorldInteractions {
           if (value === true) initialize()
         })
         const replay = trigger.type === 'scene.enter' ? scope.events.subscribe('__runtime.scene.replay', surfaceId => {
-          if (stopped || !active() || typeof surfaceId !== 'string') return
+          if (stopped || typeof surfaceId !== 'string') return
           const project = world.project()
           if (!project) return
-          if (isWithinContainer(project, scope.instanceId, surfaceId)) { initialized = true; void listener() }
+          if (isWithinContainer(project, scope.instanceId, surfaceId)) { initialized = false; initialize() }
         }) : () => {}
         return () => { stopped = true; off(); run(); replay() }
       }

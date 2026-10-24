@@ -2,7 +2,7 @@
 
 主执行者先读[当前状态](CURRENT_STATUS.md)和用户指定范围；已注入的 AGENTS 无需重读。合同、历史和证据按相关动作取用，不顺序通读全部资料。
 
-Owner最新授权：本轮审查后续维护与原有全部未提交成果一并commit并push；不删除原成果。各旧结果的未提交描述保留历史时点，发行、Portable与部署继续暂停。
+Owner最新授权：按既定四项顺序完成 Engine／互动遗留项收口、必要独审及结果记录后 commit 并 push，不追加其他工作包、不发布。前轮与原有成果已随 `699fc9e9` 及其前序提交推送；各旧结果的未提交描述保留历史时点，发行、Portable与部署继续暂停。
 
 | 用途 | 唯一入口或直接依据 |
 |---|---|
@@ -11,7 +11,7 @@ Owner最新授权：本轮审查后续维护与原有全部未提交成果一并
 | 唯一开发结果与证据 | [软件与创作修复结果](SOFTWARE_AUTHORING_RESULT.md)；最新关闭、Markdown、HTML／GLX 编辑和统一编辑复核结果在前，早期阶段按原日期读取 |
 | 实际接续任务 | [TASK_BOARD](TASK_BOARD.md)及对应卡；queued 不自动启动，未实施候选不计完成 |
 | 架构优化批次（10月24日，已收口） | [原方案§15](../../output/architecture-audit-20261024/IMPLEMENTATION_PLAN.md#architecture-batch-closeout)为原批次逐包状态与重启条件；选中实施、试验和维护已收口，其他广义方向条件性暂缓。架构批次已提交推送为 `7952cc24`；历史红例的新结论见下一行，不回写原统计。 |
-| 架构审查后续维护（10月24日） | [结果与合同未决](20261024-architecture-review-followup/RESULT.md)：回执夹具、Engine四条维护、互动规则共用规划及Flow切分清理归一完成；Engine另两条合同断言保留。Owner已授权本轮与原有统一选中、作品等全部未提交成果一并commit并push，发行／Portable／部署继续暂停。 |
+| 架构审查后续维护（10月24日，遗留项已收口） | [最新四项结果](20261024-engine-interaction-closeout/RESULT.md)：暂停复位进入规则修复、教师按钮夹具维护、取消归属错误码补齐与 steer 终态预期维护完成；Engine 57／57、互动 7／7、直接取消消费者及三段类型检查通过。[前轮结果](20261024-architecture-review-followup/RESULT.md)保留回执、规则规划与 Flow 清理及原失败统计。 |
 | 资源、运行性能与动画基础（2026-10-24） | [修复报告](../../output/resource-runtime-repair-20261024/REPORT.md)、[性能对照](../../output/resource-runtime-repair-20261024/PERFORMANCE.md)、[接口变化](../../output/resource-runtime-repair-20261024/SOFTWARE_CHANGES.md)、[创作交接](../../output/resource-runtime-repair-20261024/CREATIVE_HANDOFF.md)；GLX 17.50→8.43MB、正式HTML 29.53→16.39MB。原件只读，本轮独立本地提交，前一轮dirty保留，不push/发布 |
 | 统一选中、整体拖动与双击编辑（2026-10-24，已实施） | [唯一结果](20261024-unified-selection-editing/RESULT.md)及[原方案／同类探索](20261024-unified-selection-editing/PLAN.md)；软件迁移、聚焦验证、类型／构建及独审完成；5项真实浏览器、代表保存冷开与离线运行通过，完整Electron／Owner接受边界保留；实施时未commit，本次纳入整体提交 |
 | 编辑阻断与体验回退修复（2026-10-23，收口） | [唯一结果及A01–A20／B01–B21覆盖](20261023-editing-regressions/RESULT.md)；P1–P9软件修复与独审完成，指定GLX、大小HTML副本实际编辑／保存／新进程冷开、最终工具栏视觉及相关类型／构建通过。性能与外部条件边界保留；实施时未提交，本地提交沿下文最新授权 |

@@ -531,7 +531,7 @@ export class HostToolCoordinator {
   async jobCancel(runId: string, input: Omit<HostJobRef, 'runId'>): Promise<ToolResult> {
     this.builtInRun(runId) // Cancellation controls this run's own job; it is not a document write grant.
     const owner = await this.readableJobRef(runId, input)
-    if (owner.runId !== runId) throw new Error('接续任务可读取原任务成果，但不能取消原任务的作业')
+    if (owner.runId !== runId) throw Object.assign(new Error('接续任务可读取原任务成果，但不能取消原任务的作业'), { code: 'job-not-authorized' })
     return this.services.jobs ? { kind: 'read', data: this.jobResult(await this.services.jobs.cancel({ runId, ...input })) }
       : this.serviceUnavailable('通用作业服务尚未配置')
   }
