@@ -13,6 +13,7 @@ import { loadBuiltinComponentSource } from '../../components/source/builtinSourc
 import { compilePublishedScriptModule, compilePublishedWebProgram, stylesRequireNativeDocument, type CompiledScriptDiagnostic } from './compiledScript'
 import type { WebRuntimeData } from '../../../components/web/moduleGraph'
 import {webProgramRequiresNativeDocument} from './nativeProgram'
+import {isContentProgramImplementation} from '../../../shared/contentProgramImplementation'
 
 import {compiledViewSignature,compiledProgramSignature,type CompiledCoursePlayback} from './compiledContract'
 export type {CompiledCoursePlayback} from './compiledContract'
@@ -39,7 +40,7 @@ export async function compileCoursePlayback(payload:PublishedCourseV3,options:{d
  const effectiveDefinitions=new Set(versions.flatMap(version=>Object.values(version.instances).filter(instance=>!instance.implementationOverride).map(instance=>instance.definitionId)))
  for(const [id,definition]of Object.entries(artifact.course.definitions))if(effectiveDefinitions.has(id)&&definition.implementation.kind==='source')definition.implementation=source(payload.definitions[id].implementation,`definition:${id}`)!
  const staticInstance=(instance:PublishedInstance,key:string)=>staticKeys.has(key)&&!allDocumentTextSlots(instance.data).some(slot=>inlineComponentIds(slot.content).length)
- const hasContainerProgram=(instance:PublishedInstance,model:CourseProjectV10)=>{const implementation=instance.implementationOverride??model.definitions[instance.definitionId]?.implementation;return implementation?.kind==='source'||implementation?.kind==='builtin'&&['guoling.web','guoling.html-program'].includes(implementation.key)}
+ const hasContainerProgram=(instance:PublishedInstance,model:CourseProjectV10)=>isContentProgramImplementation(instance.implementationOverride??model.definitions[instance.definitionId]?.implementation)
  // A program may place its existing native children through inline.mount. Their
  // professional runtime must move with the shared World, rather than leaving
  // materialized pixels behind in the default projection.

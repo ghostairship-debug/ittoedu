@@ -16,7 +16,7 @@ import { analyzeHtmlAuthoringRecords, patchHtmlAuthoringRecords, readHtmlAuthori
 import { neededHtmlFrameSources } from '../../../shared/html/htmlFrameAuthoring'
 import { prepareHtmlFramePassiveResources } from './htmlFramePassiveResources'
 import type { ComponentAuthorGeometry } from '../../../shared/contracts/component-platform/runtime'
-import { equalComponentValue } from '../../../core/drivers/courseV10Operations'
+import { equalComponentValue } from '../../../shared/componentValue'
 
 type ResolveRequest = Extract<HtmlPreviewRequest, { type: 'html-preview.resolve-target' }>
 type EditRequest = Extract<HtmlPreviewRequest, { type: 'html-preview.edit' }>

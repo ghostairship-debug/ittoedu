@@ -11,6 +11,7 @@ import { componentPublishDependencies, type ComponentPublishDependencies } from 
 import { componentAssetDataUrl } from './resourceUrl'
 import { projectPublishedWebInitialization, projectPublishedWebRuntimeModules, projectWebModuleGraph, publishedWebModuleCompilationInput, publishedWebModuleDocumentPaths, webModuleGraphForDocument, webModuleCompilationInput, type WebRuntimeData } from '../../../components/web/moduleGraph'
 import { hasWebContentData } from '../../../components/web/sourcePreparation'
+import { isContentProgramImplementation } from '../../../shared/contentProgramImplementation'
 import type { WebData } from '../../../components/web/data'
 import { collectWebNetworkResourceFacts } from '../../../components/web/resources'
 import type { ComponentCompilationDiagnostic, ComponentCompilationInput, ComponentCompilationResult } from '../../components/compilation/types'
@@ -107,7 +108,7 @@ export async function buildPublishedCourseV4(
   async function prepareWebInstance(instance: CourseProjectV10['instances'][string], dataPath: Array<string | number>) {
     const effective = instance.implementationOverride ?? project.definitions[instance.definitionId]?.implementation
     let runtimeInstance = instance
-    if (effective && hasWebContentData(instance.data) && (effective.kind === 'source' || ['guoling.web', 'guoling.html-program'].includes(effective.key))) {
+    if (isContentProgramImplementation(effective) && hasWebContentData(instance.data)) {
       try {
         if (options.compilation) {
           const compilation = options.compilation

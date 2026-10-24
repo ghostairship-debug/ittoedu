@@ -1,5 +1,5 @@
 import type { ContentApplyResult } from '../../contentApply/planning/types'
-import { equalComponentValue } from '../../drivers/courseV10Operations'
+import { equalComponentValue } from '../../../shared/componentValue'
 import type { ComponentProjectSnapshot } from './coordinator'
 import { componentProjectFiles, componentProjectScopeFiles, type ComponentProjectFile, type ComponentProjectFileScope } from './projection'
 import { hasBuiltinComponentSource } from '../../components/source/builtinSources'

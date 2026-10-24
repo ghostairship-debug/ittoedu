@@ -2,7 +2,7 @@
 import { setRootContainers } from '../helpers/glxWorkFixture'
 import { afterEach, expect, it } from 'vitest'
 import { createServer, type Server } from 'node:http'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { DocumentHostService } from '../../src/main/workbench/DocumentHostService'
@@ -101,6 +101,84 @@ function currentProject() {
   setRootContainers(project, [{ id: 'flow', kind: 'flow', title: '讲义', childIds: ['box'] }])
   return project
 }
+
+it('defers only library maintenance definitions and loads them through the real Engine without granting new authority', async () => {
+  const { directory, host } = await workspace(), calls: string[] = []
+  const maintenance = ['asset.save', 'asset.import', 'asset.delete']
+  const initial = await host.internalAPI.create({ kind: 'course-v10', project: currentProject(), resources: { assets: {}, components: {} } }, 'library.h5lesson')
+  const incoming = path.join(directory, 'incoming.h5component')
+  await writeFile(incoming, 'isolated service fixture; real archive roundtrip is covered by librarySelectionJoin')
+  host.tools.configureHostServices({ assetLibrary: {
+    search: async () => ({ candidates: [] }), read: async () => ({ status: 'rejected', reason: 'unused in this route fixture' }),
+    save: async ({ entry }) => { calls.push('asset.save'); expect(entry.example.rootIds).not.toHaveLength(0)
+      return { status: 'saved', packageId: 'selected', version: '1.0.0', name: entry.title } },
+    import: async ({ file }) => { calls.push('asset.import'); expect(file).toBe(incoming)
+      return { status: 'imported', packageId: 'selected', version: '1.0.0' } },
+    delete: async ({ packageId }) => { calls.push('asset.delete'); expect(packageId).toBe('selected')
+      return { status: 'deleted', packageId, version: '1.0.0' } },
+  } })
+  const observed: { names: string[]; definitionBytes: number }[] = []
+  const provider: ModelProvider = { async *stream(request) {
+    const index = observed.length, tools = request.tools ?? []
+    observed.push({ names: tools.map(tool => tool.name), definitionBytes: Buffer.byteLength(JSON.stringify(JSON.parse(serializeModelRequest(request)).tools)) })
+    if (index === 0) {
+      const loader = tools.find(tool => tool.name === 'tools.load')!
+      for (const name of maintenance) expect(loader.description).toContain(name)
+    }
+    const call = index === 0 || index === 4 ? { name: 'tools.load', input: { names: [...maintenance, 'not.a.tool'] } }
+      : index === 1 ? { name: 'asset.save', input: { title: '存入测试库' } }
+      : index === 2 ? { name: 'asset.import', input: { file: incoming } }
+      : index === 3 ? { name: 'asset.delete', input: { packageId: 'selected', version: '1.0.0' } } : undefined
+    const toolCalls = call ? [{ id: `library-${index}`, name: call.name, argumentsText: JSON.stringify(call.input) }] : []
+    yield { type: 'response.completed', requestId: request.requestId, sequence: 1, actualModel: 'fixture', responseId: `library-${index}`,
+      nativeResponse: {}, finishReason: call ? 'tool_calls' : 'stop', toolCalls,
+      assistant: { role: 'assistant', content: call ? '' : '资产库维护完成', ...(call ? { tool_calls: toolCalls.map(value => ({
+        id: value.id, type: 'function' as const, function: { name: value.name, arguments: value.argumentsText } })) } : {}) } }
+  } }
+  const engine = new ExecutionEngine({ registry: host.registry, gateway: host.tools, provider,
+    runs: new ExecutionRunStore(path.join(directory, 'library-runs')), events: new ExecutionEventStore({ directory: path.join(directory, 'library-events') }) })
+  const selection: ModelSelection = { model: 'fixture', connection: { id: 'fixture', revision: 1, provider: 'fixture', protocol: 'openai-chat',
+    baseURL: 'http://127.0.0.1:1/v1', accountId: 'fixture', auth: { kind: 'api-key', credentialRef: 'fixture' },
+    billing: { kind: 'unknown' }, capabilities: { tools: 'supported', stream: 'supported', vision: 'unsupported', reasoning: 'unknown' } } }
+  const documents = [{ documentId: initial.documentId, writable: [{ kind: 'document' as const }],
+    selection: [{ kind: 'course-instance' as const, surfaceId: 'flow', instanceId: 'a' }] }]
+  const started = await engine.start({ conversationId: 'library', taskId: 'library', instruction: '将所选组件存入库，导入给定归档，再删除库条目',
+    selection, documents, workspaceRoot: directory, permission: 'workspace' })
+  const result = await engine.wait(started.runId)
+  expect(result.status, JSON.stringify(result.failure)).toBe('completed')
+  expect(result.input.documents).toEqual(documents)
+  expect(result.input.permission).toBe('workspace')
+  expect(observed).toHaveLength(6)
+  expect(observed[0].names).toEqual(expect.arrayContaining(['asset.search', 'asset.use', 'asset.update']))
+  for (const name of maintenance) expect(observed[0].names).not.toContain(name)
+  expect(observed[1].names.filter(name => !observed[0].names.includes(name)).sort()).toEqual([...maintenance].sort())
+  expect(observed.slice(1).map(value => value.names)).toEqual(Array(5).fill(observed[1].names))
+  expect(new Set(observed[1].names).size).toBe(observed[1].names.length)
+  expect(observed[1].definitionBytes).toBeGreaterThan(observed[0].definitionBytes)
+  expect(calls).toEqual(maintenance)
+  const after = await host.internalAPI.read(initial.documentId)
+  expect(after).toMatchObject({ documentId: initial.documentId, epoch: initial.epoch, revision: initial.revision,
+    undoDepth: initial.undoDepth, redoDepth: initial.redoDepth, dirty: initial.dirty })
+  expect(after.model).toEqual(initial.model)
+  expect(after.binding).toEqual(initial.binding)
+  for (const tool of result.tools.filter(tool => tool.call.name === 'tools.load')) expect(tool.result).toMatchObject({ kind: 'read', data: {
+    unavailable: [{ name: 'not.a.tool', code: 'unknown-tool' }], tools: expect.arrayContaining(maintenance.map(name => expect.objectContaining({ name }))),
+  } })
+  await host.tools.beginRun({ runId: 'library-readonly', actor: 'agent', documents: [{ documentId: initial.documentId, writable: [] }],
+    fileAccess: { workspaceRoot: directory, permission: 'read-only' } })
+  await host.tools.loadToolFamilies('library-readonly', [], maintenance)
+  for (const [name, input] of [['asset.save', { title: 'forbidden' }], ['asset.import', { file: incoming }], ['asset.delete', { packageId: 'selected' }]] as const)
+    expect(await host.tools.execute('library-readonly', name, { name, input })).toMatchObject({ kind: 'error' })
+  expect(calls).toEqual(maintenance)
+  expect(host.tools.runFileAccess('library-readonly')?.permission).toBe('read-only')
+  const missing = new DocumentHostService(path.join(directory, 'missing-documents'))
+  await missing.tools.beginRun({ runId: 'library-unavailable', actor: 'agent', documents: [], fileAccess: { workspaceRoot: directory, permission: 'workspace' } })
+  await missing.tools.loadToolFamilies('library-unavailable', [], maintenance)
+  const unavailable = await missing.tools.describeRun('library-unavailable')
+  for (const name of maintenance) expect(unavailable.map(tool => tool.name)).not.toContain(name)
+  console.info('ASSET_MAINTENANCE_DEFINITIONS', JSON.stringify({ initialBytes: observed[0].definitionBytes,
+    loadedBytes: observed[1].definitionBytes, deferred: maintenance }))
+})
 
 it('projects current V10 grants without widening a frozen range or a deleted container, and rejects an unauthorized batch before any write', async () => {
   const { host } = await workspace()

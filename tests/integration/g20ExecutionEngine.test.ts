@@ -439,7 +439,7 @@ describe('G20 canonical model execution loop', () => {
       if (requests.length === 1) {
         const references = JSON.parse(data.messages[1].content.split('：')[1])
         const target = references[0].writable[0].target
-        const name = data.tools.find((tool: any) => tool.function.parameters.properties.content)?.function.name
+        const name = data.tools.find((tool: any) => tool.function.name === modelToolWireName('text.replace'))?.function.name
         const args = JSON.stringify({ target, content: '新的😀内容\n第二行\\引用"' })
         response.write(wireChunk({ role: 'assistant', reasoning_content: '检查目标', signature: 'native-signature' }))
         response.write(wireChunk({ content: '准备修改' }))
@@ -454,6 +454,7 @@ describe('G20 canonical model execution loop', () => {
     h.edits.subscribe(event => { if (event.type === 'edit.changed' && event.snapshot.value) previewReady.resolve() })
     const execute = h.gateway.execute.bind(h.gateway)
     const executeSpy = vi.spyOn(h.gateway, 'execute').mockImplementation(async (...args) => { await execute(...args); throw new Error('lost ACK') })
+    const lookupSpy = vi.spyOn(h.gateway, 'lookup')
     const started = await h.engine.start(h.input)
     await previewReady.promise
     expect(h.edits.list(h.session.documentId)[0].value).toContain('新的😀内容')
@@ -462,6 +463,8 @@ describe('G20 canonical model execution loop', () => {
     continueStream.resolve()
     const final = await h.engine.wait(started.runId)
     expect(final.status).toBe('completed'); expect(requests).toHaveLength(2); expect(executeSpy).toHaveBeenCalledTimes(1)
+    expect(lookupSpy).toHaveBeenLastCalledWith(started.runId, final.tools[0]!.callId, final.tools[0]!.call)
+    await expect(lookupSpy.mock.results.at(-1)!.value).resolves.toMatchObject({ kind: 'document-operation', result: { status: 'applied' } })
     expect(h.session.read().model).toMatchObject({ source: '前文 新的😀内容\n第二行\\引用" 后文' })
     expect(h.other.read().model).toMatchObject({ source: '另一份文档' })
     expect(h.session.read().undoDepth).toBe(1); expect(h.edits.list(h.session.documentId)).toEqual([])
@@ -1031,19 +1034,23 @@ it('stops both short and long same-task cooldowns without sending a replacement 
     yield { requestId: request.requestId, sequence: 1, type: 'response.failed', failure: { outcome: 'rejected', kind: 'rate-limit', code: 'http-429', httpStatus: 429, retryAfterMs, message: '速率限制' } }
   } }
   const h = await fixture(provider), started = await h.engine.start(h.input)
-  await vi.waitFor(async () => expect((await h.events.readPage({ conversationId: h.input.conversationId, limit: 1000 })).events.some(event => event.data.status === 'retrying')).toBe(true))
+  await vi.waitFor(async () => expect((await h.events.readPage({ conversationId: h.input.conversationId, limit: 1000 })).events.some(event => event.runId === started.runId && event.data.status === 'retrying' && event.data.phase === 'retry')).toBe(true))
   await h.engine.stop(started.runId)
   expect((await h.engine.wait(started.runId)).status).toBe('stopped')
   expect(requests).toBe(1)
   retryAfterMs = 60_000
   const next = await h.engine.start({ ...h.input, taskId: 'long-wait' })
-  await vi.waitFor(async () => expect((await h.events.readPage({ conversationId: h.input.conversationId, limit: 1000 })).events.some(event => event.runId === next.runId && event.data.label === '等待服务冷却')).toBe(true))
+  await vi.waitFor(async () => expect((await h.events.readPage({ conversationId: h.input.conversationId, limit: 1000 })).events.some(event => event.runId === next.runId && event.data.status === 'retrying' && event.data.phase === 'retry')).toBe(true))
   expect((await h.engine.read(next.runId))?.status).toBe('running')
   await h.engine.stop(next.runId)
   const waiting = await h.engine.wait(next.runId)
   expect(waiting.status).toBe('stopped')
   expect(waiting.requests).toHaveLength(1)
+  expect(waiting.requests[0]!.failure).toMatchObject({ kind: 'rate-limit', retryAfterMs: 60_000 })
   expect(requests).toBe(2)
+  expect(h.session.read()).toMatchObject({ revision: 0, undoDepth: 0, model: { source: '前文 OLD 后文' } })
+  expect(h.edits.list(h.session.documentId)).toEqual([])
+  expect((await h.events.snapshot(h.input.conversationId)).items.filter(item => item.type === 'document.commit')).toEqual([])
 })
 
 it('M26 ordinary transport retry waits on the real bounded schedule and records every unknown outcome', async () => {

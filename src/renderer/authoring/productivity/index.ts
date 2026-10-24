@@ -1,5 +1,6 @@
 import type { ComponentEdit } from '../../../shared/contracts/component-platform/operations'
-import { captureComponentOperation, equalComponentValue, presentationComponentEdits } from '../../../core/drivers/courseV10Operations'
+import { captureComponentOperation, presentationComponentEdits } from '../../../core/drivers/courseV10Operations'
+import { equalComponentValue } from '../../../shared/componentValue'
 import { createCourseProductivityPreview, planCourseProductivityEdits } from '../../../core/course/courseProductivityEdits'
 import type { CourseProjectV10 } from '../../../shared/contracts/component-platform/project'
 import type { CapturedComponentOperation, CapturedCourseTarget } from '../../documents/CourseV10DocumentBridge'

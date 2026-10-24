@@ -1,7 +1,7 @@
 import type { ComponentLibraryEntry } from '../../../shared/contracts/component-platform/library'
 import type { ComponentDefinition, ComponentImplementation, CourseProjectV10 } from '../../../shared/contracts/component-platform/project'
 import type { DocumentResources } from '../../../shared/workbench/document'
-import { equalComponentValue } from '../../drivers/courseV10Operations'
+import { equalComponentValue } from '../../../shared/componentValue'
 
 export interface ComponentLibrarySourceDifference {
   path: string

@@ -5,7 +5,8 @@ import type { ComponentEdit } from '../../shared/contracts/component-platform/op
 import { CourseV10Driver } from '../../core/drivers/CourseV10Driver'
 import { createBlankCourseProjectV10 } from '../../core/course/createCourseProjectV10'
 import { DocumentAckUnknownError, DocumentBlockedInputError, DocumentProjection, type DocumentInputOperationResolution } from './DocumentProjection'
-import { captureComponentOperation, presentationComponentEdits, equalComponentValue, componentValueAt } from '../../core/drivers/courseV10Operations'
+import { captureComponentOperation, presentationComponentEdits, componentValueAt } from '../../core/drivers/courseV10Operations'
+import { equalComponentValue } from '../../shared/componentValue'
 import type { ComponentOperationBatch } from '../../shared/contracts/component-platform/operations'
 import { containerEditingPath, normalizeEditingContext } from './containerEditingContext'
 import { authorFieldFromSpot, interactionInstanceIds, interactionSelectionIdentity, type CourseInteractionSelection } from './interactionSelection'
@@ -161,6 +162,11 @@ export class CourseV10DocumentBridge {
 
   read = (): CourseV10ViewState => this.state
   subscribe = (listener: () => void): (() => void) => { this.listeners.add(listener); return () => { this.listeners.delete(listener) } }
+  private editingProjection(project: CourseProjectV10 | null, states: Readonly<Record<string, string | null>>): CourseProjectV10 | null {
+    if (!project) return null
+    return this.state.project === project && equalComponentValue(this.state.presentationStates, states)
+      ? this.state.editingProject : projectContainerPresentationStates(project, states)
+  }
   /** Selection does not change document content, resource identity or another tab's projection. */
   private publishSelection(documentId: string): void {
     const selected = this.selections.get(documentId)
@@ -171,38 +177,49 @@ export class CourseV10DocumentBridge {
       presentationStates: selected.presentationStates, activeStateId: selected.presentationStates[selected.surfaceId ?? ''] ?? null }
     this.state = { ...this.state, views: this.state.views.map(view => view.documentId === documentId ? { ...view, ...update } : view),
       ...(this.state.activeDocumentId === documentId ? { ...update, interactionSelection: selected.target, editingPath: selected.path,
-        editingProject: this.state.project ? projectContainerPresentationStates(this.state.project, selected.presentationStates) : null } : {}) }
+        editingProject: this.editingProjection(this.state.project, selected.presentationStates) } : {}) }
     for (const listener of this.listeners) listener()
   }
-  private publish(patch: Partial<CourseV10ViewState> = {}): void {
+  private publish(patch: Partial<CourseV10ViewState> = {}, changedDocumentId?: string): void {
     for (const [documentId, projection] of this.projections) {
+      if (changedDocumentId && documentId !== changedDocumentId) continue
       const view = projection.read(), model = view.draft ?? view.committed?.model
       if (model?.kind !== 'course-v10') continue
       const old = this.selections.get(documentId)
       const context = normalizeEditingContext(model.project, old?.rootInstanceId, old?.editingContainerId, old?.path)
-      if (old) for (const [id, stateId] of Object.entries(old.presentationStates)) {
-        if (stateId && !componentSurface(model.project, id)?.presentation?.states.some(state => state.id === stateId)) old.presentationStates[id] = null
+      let presentationStates = old?.presentationStates ?? {}
+      for (const [id, stateId] of Object.entries(presentationStates)) {
+        if (stateId && !componentSurface(model.project, id)?.presentation?.states.some(state => state.id === stateId))
+          presentationStates = { ...presentationStates, [id]: null }
       }
       const previousIds = interactionInstanceIds(old?.target)
       const instanceIds = previousIds.filter(id => Boolean(model.project.instances[id]))
       if (!old || old.surfaceId !== context.surfaceId || old.rootInstanceId !== context.rootInstanceId
         || old.editingContainerId !== context.editingContainerId || old.editingPlane !== context.editingPlane || instanceIds.length !== previousIds.length
-        || old.path.length !== context.path.length || old.path.some((id, index) => id !== context.path[index])) {
+        || old.path.length !== context.path.length || old.path.some((id, index) => id !== context.path[index]) || presentationStates !== old.presentationStates) {
         this.selections.set(documentId, { ...context, target: instanceIds.length === previousIds.length ? old?.target ?? null
           : old?.target?.kind === 'objects' && instanceIds.length ? { kind: 'objects', instanceIds } : null,
-          presentationStates: old?.presentationStates ?? {} })
+          presentationStates })
       }
     }
     const active = this.projections.get(patch.activeDocumentId ?? this.state.activeDocumentId ?? '')?.read()
     const model = active?.draft ?? active?.committed?.model
     const runtimeModel = active?.retainedDraftOnly ? active.committed?.model : model
     const selection = this.selections.get(patch.activeDocumentId ?? this.state.activeDocumentId ?? '')
+    // The lists remain global facts; unchanged documents retain their prepared
+    // entries. Ordinary Projection notifications still carry pending/error/input.
+    const documents = new Map(this.state.documents.map(view => [view.documentId, view]))
+    const views = new Map(this.state.views.map(view => [view.documentId, view]))
     this.state = { ...this.state, ...patch,
       documents: [...this.projections.values()].flatMap(projection => {
+        const previous = documents.get(projection.documentId)
+        if (changedDocumentId && projection.documentId !== changedDocumentId && previous) return [previous]
         const view = projection.read()
         return view.committed ? [{ ...view.committed, dirty: view.committed.dirty || !projection.canRelease() }] : []
       }), snapshot: active?.committed ?? null,
       views: [...this.projections.values()].flatMap(projection => {
+        const previous = views.get(projection.documentId)
+        if (changedDocumentId && projection.documentId !== changedDocumentId && previous) return [previous]
         const view = projection.read()
         const model = view.retainedDraftOnly ? view.committed?.model : view.draft ?? view.committed?.model
         const selection = this.selections.get(projection.documentId)
@@ -214,7 +231,7 @@ export class CourseV10DocumentBridge {
       }),
       project: model?.kind === 'course-v10' ? model.project : null,
       activeStateId: selection?.presentationStates[selection.surfaceId ?? ''] ?? null,
-      editingProject: model?.kind === 'course-v10' ? projectContainerPresentationStates(model.project, selection?.presentationStates ?? {}) : null,
+      editingProject: this.editingProjection(model?.kind === 'course-v10' ? model.project : null, selection?.presentationStates ?? {}),
       runtimeProject: runtimeModel?.kind === 'course-v10' ? runtimeModel.project : null,
       selectedInstanceIds: interactionInstanceIds(selection?.target), selectedInstanceId: interactionInstanceIds(selection?.target)[0] ?? null,
       interactionSelection: selection?.target ?? null,
@@ -309,7 +326,7 @@ export class CourseV10DocumentBridge {
           if (api !== this.api) { value.dispose(); throw new Error('文档视图已关闭') }
           if (value.read().committed?.model.kind !== 'course-v10') { value.dispose(); throw new Error('此视图只支持 Project V10') }
           this.projections.set(documentId, value)
-          this.projectionStops.set(documentId, value.subscribe(() => this.publish()))
+          this.projectionStops.set(documentId, value.subscribe(() => this.publish({}, documentId)))
           return value
         }).finally(() => { if (this.attaching.get(documentId) === pending) this.attaching.delete(documentId) })
         this.attaching.set(documentId, pending)
@@ -319,9 +336,9 @@ export class CourseV10DocumentBridge {
     // Creation/opening owns its Main result, but the user still owns foreground
     // navigation while it and this attachment are in flight.
     if (navigation !== this.navigation || activateIf?.() === false) {
-      this.publish(); return false
+      this.publish({}, documentId); return false
     }
-    this.publish({ activeDocumentId: projection.documentId, activation: this.state.activation + 1 })
+    this.publish({ activeDocumentId: projection.documentId, activation: this.state.activation + 1 }, documentId)
     return true
   }
   async create(model: Extract<DocumentModel, { kind: 'course-v10' }> = {
@@ -483,7 +500,7 @@ export class CourseV10DocumentBridge {
     const saved = await this.host().saveWithDialog(projection.documentId, saveAs, directory)
     if (!saved) return false
     await projection.reattach()
-    this.publish()
+    this.publish({}, projection.documentId)
     return true
   }
   async close(documentId: string): Promise<boolean> {
@@ -497,14 +514,14 @@ export class CourseV10DocumentBridge {
     if (!projection) return true
     // Projection deliberately retains input after an unexpected formal close.
     // Keep that recovery view and its original epoch instead of losing it here.
-    if (!projection.canRelease()) { this.publish(); return false }
+    if (!projection.canRelease()) { this.publish({}, documentId); return false }
     this.projectionStops.get(documentId)?.(); this.projectionStops.delete(documentId)
     projection.dispose(); this.projections.delete(documentId); this.selections.delete(documentId)
     if (this.state.activeDocumentId === documentId) {
       const next = [...this.projections.keys()].at(-1)
-      if (next) this.publish({ activeDocumentId: next, activation: this.state.activation + 1 })
-      else { this.state = { ...this.state, activeDocumentId: null }; this.publish() }
-    } else this.publish()
+      if (next) this.publish({ activeDocumentId: next, activation: this.state.activation + 1 }, documentId)
+      else { this.state = { ...this.state, activeDocumentId: null }; this.publish({}, documentId) }
+    } else this.publish({}, documentId)
     return true
   }
   select(instanceId: string | null, surfaceId = this.state.surfaceId): void {
@@ -563,7 +580,7 @@ export class CourseV10DocumentBridge {
     if (!context.rootInstanceId || !containerEditingPath(model.project, context.rootInstanceId, surface.id)) throw new Error('展示状态不属于当前作品范围')
     this.selections.set(documentId, { ...context, target: old?.target ?? null,
       presentationStates: { ...old?.presentationStates, [surface.id]: stateId } })
-    this.publish()
+    this.publish({}, documentId)
   }
   /** Author inspection changes the editing scope, never the work's navigation root. */
   enterContainer(documentId: string, containerId: string): void {
@@ -573,7 +590,7 @@ export class CourseV10DocumentBridge {
     const context = normalizeEditingContext(model.project, old?.rootInstanceId, containerId, old?.path)
     if (context.surfaceId !== containerId) throw new Error('容器不属于当前作品范围')
     this.selections.set(documentId, { ...context, target: null, presentationStates: old?.presentationStates ?? {} })
-    this.publish({ activation: this.state.activation + 1 })
+    this.publish({ activation: this.state.activation + 1 }, documentId)
   }
   leaveContainer(documentId = this.state.activeDocumentId ?? ''): void {
     const old = this.selections.get(documentId)
@@ -583,7 +600,7 @@ export class CourseV10DocumentBridge {
     const parent = old.path.at(-2)
     const context = normalizeEditingContext(model.project, old.rootInstanceId, parent ?? null)
     this.selections.set(documentId, { ...context, target: { kind: 'objects', instanceIds: [old.editingContainerId] }, presentationStates: old.presentationStates })
-    this.publish({ activation: this.state.activation + 1 })
+    this.publish({ activation: this.state.activation + 1 }, documentId)
   }
   captureLatestAgentUndoTarget(): CourseAgentUndoTarget | null {
     const documentId = this.state.activeDocumentId

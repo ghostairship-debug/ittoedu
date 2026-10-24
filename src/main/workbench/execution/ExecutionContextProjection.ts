@@ -2,11 +2,26 @@ import type { ModelChatMessage, ModelNativeToolCall } from '../../../shared/work
 import type { ExecutionRunRecord } from '../../../shared/workbench/execution'
 import { createHash } from 'node:crypto'
 import type { ToolResult } from '../../../shared/workbench/tools'
+import type { ProgrammaticJournalEntry } from '../../../shared/workbench/programmatic'
 import { contentApplyFact, exportFact, modelToolResult, operationFact, saveFact } from '../../../core/tools/modelToolResult'
 import { htmlActionToolCatalog, isHtmlActionTool } from '../../../core/tools/HtmlActionTools'
 import { modelToolWireName } from '../providers/OpenAIChatProvider'
 import { retireSupersededObservationMessages } from './observationModelInput'
 import { boundedModelValue, MODEL_DELIVERY_BYTES, modelJsonBytes, modelJsonFits } from '../../../core/tools/modelDeliveryBudget'
+import { isViewObservationTool } from '../../../shared/workbench/viewObservation'
+import { projectProgrammaticModelResult } from './ProgrammaticToolRunner'
+
+/** Project a completed tool's working value; execution and original receipts stay with their owners. */
+export function projectCurrentToolResult(tool: ProgrammaticJournalEntry, records: readonly ProgrammaticJournalEntry[], sourceId: string): ToolResult | undefined {
+  if (!tool.result) return tool.result
+  let projected = modelToolResult(tool.call.name, tool.call.name === 'programmatic.execute'
+    ? projectProgrammaticModelResult(tool, records)! : tool.result, { sourceId })
+  if (projected.kind === 'read' && projected.data && typeof projected.data === 'object'
+    && (isViewObservationTool(tool.call.name) || isHtmlActionTool(tool.call.name)))
+    projected = { ...projected, data: { ...projected.data, fullObservationSource: { sourceId,
+      notice: '按来源用 context.read 回读同次完整观察；imageIndexes 显式取回同次原图。历史图和句柄不代表当前活动页。' } } }
+  return projected
+}
 
 /** A source-backed working value. The caller supplies a trusted original source. */
 export function projectModelDeliveryValue(value: unknown, sourceId: string, maxBytes = MODEL_DELIVERY_BYTES, maxTextChars?: number): unknown {

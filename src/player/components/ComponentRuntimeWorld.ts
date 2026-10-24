@@ -23,11 +23,20 @@ import { allDocumentTextSlots,inlineComponentIds,documentTextAt,documentTextRang
 import { isGlobalTeacherController } from '../../shared/teacherControllerViewportGeometry'
 import { instanceContainerId, instanceWorkRootId, isWithinContainer, runtimeInstanceOwner } from './runtime/containerScopes'
 import { measureComponentGeometry } from './runtime/componentGeometry'
+import { isContentProgramImplementation } from '../../shared/contentProgramImplementation'
 
 type Listener = (value: JsonValue | undefined) => void
 const snapshotValue = <Value extends JsonValue | undefined>(value: Value): Value => value !== null && typeof value === 'object' ? structuredClone(value) : value
-const usesContentRealm = (implementation: ComponentImplementation): boolean => implementation.kind === 'source'
-  || implementation.kind === 'builtin' && ['guoling.web', 'guoling.html-program'].includes(implementation.key)
+
+export interface ComponentProjectionAttachment {
+  content?: HTMLElement
+  target?: HTMLElement
+  subtree?: HTMLElement
+  /** The surface supplies its current input/view scope, not runtime ownership. */
+  isCurrent?(): boolean
+  prepare?(): void
+  defer?: boolean
+}
 /** A run owns transient state and leases. It never writes author data or History. */
 export class ComponentRuntimeWorld {
   readonly host: ComponentRuntimeHost
@@ -41,6 +50,7 @@ export class ComponentRuntimeWorld {
   private projectionRoots = new Map<string, HTMLElement>()
   private readonly defaultProjectionRoots = new Map<string, HTMLElement>()
   private readonly defaultTargetElements = new Map<string, HTMLElement>()
+  private readonly projectionAttachments = new Map<string, ComponentProjectionAttachment>()
   private readonly inlineBindings = new Map<string, { root: HTMLElement; ownerId: string }>()
   private parking?: HTMLElement
   private targetElements = new Map<string, HTMLElement>()
@@ -624,6 +634,40 @@ export class ComponentRuntimeWorld {
     }
     this.refreshActivity(id)
   }
+  /** Own one projection attachment, including its delayed commit and release.
+   * Detach parks a running root; formal deletion/reset/World disposal retires it.
+   * The caller continues to own and restore its PM/React view subtree. */
+  attachProjection(instanceId: string, options: ComponentProjectionAttachment): () => void {
+    if (this.retired) return () => {}
+    const attachment = { ...options }
+    let released = false
+    this.projectionAttachments.set(instanceId, attachment)
+    const current = () => !released && !this.retired && this.projectionAttachments.get(instanceId) === attachment
+      && (attachment.isCurrent?.() ?? true)
+    if (current() && attachment.target) this.bindTarget(instanceId, attachment.target)
+    const commit = () => {
+      if (!current() || !(attachment.content ?? attachment.subtree ?? attachment.target)?.isConnected) return
+      attachment.prepare?.()
+      if (!current()) return
+      if (attachment.content) this.bind(instanceId, attachment.content)
+      this.afterProjectionMutation()
+    }
+    if (attachment.defer) queueMicrotask(commit)
+    else commit()
+    return () => {
+      if (released) return
+      released = true
+      if (this.projectionAttachments.get(instanceId) === attachment) {
+        this.projectionAttachments.delete(instanceId)
+        if (attachment.content) this.bind(instanceId, null, attachment.content)
+        if (attachment.target) this.bindTarget(instanceId, null, attachment.target)
+      }
+      // A reusable host can already belong to a later attachment of this instance.
+      const replacement = this.projectionAttachments.get(instanceId)
+      if (attachment.subtree) this.beforeProjectionRemoval(attachment.subtree,
+        replacement?.content === attachment.content && replacement ? instanceId : undefined)
+    }
+  }
   bind = (instanceId: string, element: HTMLElement | null, expectedDefault?: HTMLElement): void => {
     if (this.retired || element === null && expectedDefault && this.defaultProjectionRoots.get(instanceId) !== expectedDefault) return
     if (element) this.defaultProjectionRoots.set(instanceId, element)
@@ -698,8 +742,9 @@ export class ComponentRuntimeWorld {
   /** A deferred React unmount reports refs after its disposable wrapper can be
    * removed. Park this retiring subtree's current roots first, including empty
    * roots whose pending Source mount may create its iframe on the next turn. */
-  beforeProjectionRemoval(retiring: HTMLElement): void {
+  beforeProjectionRemoval(retiring: HTMLElement, retainedByNewAttachment?: string): void {
     for (const [id, root] of this.roots) {
+      if (id === retainedByNewAttachment) continue
       const projection = this.projectionRoots.get(id)
       if (!projection || !retiring.contains(projection) || !retiring.contains(root)) continue
       if (!this.parking) { this.parking = root.ownerDocument.createElement('div'); this.parking.hidden = true; root.ownerDocument.body.append(this.parking) }
@@ -775,7 +820,7 @@ export class ComponentRuntimeWorld {
     const root = this.roots.get(id)
     if (!root && definition.role !== 'behavior') return
     const effective = instance.implementationOverride ?? definition.implementation
-    const sourceRealm = usesContentRealm(effective)
+    const sourceRealm = isContentProgramImplementation(effective)
     this.refreshActivity(id)
     // Temporary absence preserves the existing generation; first use is lazy.
     // Retirement still belongs to deletion, changed implementation, reset or close.
@@ -908,6 +953,7 @@ export class ComponentRuntimeWorld {
       this.synced.delete(id); this.pendingSync.delete(id); await this.host.dispose(this.runScopeId, id)
       if (this.retired) return
       this.roots.get(id)?.remove(); this.roots.delete(id); this.projectionRoots.delete(id); this.targetElements.delete(id)
+      this.projectionAttachments.delete(id)
       const observed = this.observed.get(id); if (observed) this.visibilityObserver?.unobserve(observed)
       this.observed.delete(id); this.intersections.delete(id); this.activities.delete(id)
       this.interactions.retire(id)
@@ -1005,7 +1051,7 @@ export class ComponentRuntimeWorld {
     const ids = Object.values(this.project?.instances ?? {}).filter(instance => {
       const definition = this.project?.definitions[instance.definitionId]
       return definition && this.project && isWithinContainer(this.project, instance.id, surfaceId)
-        && usesContentRealm(instance.implementationOverride ?? definition.implementation)
+        && isContentProgramImplementation(instance.implementationOverride ?? definition.implementation)
     }).map(instance => instance.id)
     this.reset = (async () => {
       for (const id of ids) { this.synced.delete(id); this.pendingSync.delete(id) }
@@ -1099,7 +1145,7 @@ export class ComponentRuntimeWorld {
     this.visibilityObserver?.disconnect(); this.visibilityObserver = undefined
     this.observed.clear(); this.intersections.clear(); this.activities.clear()
     for (const root of this.roots.values()) root.remove()
-    this.roots.clear(); this.projectionRoots.clear(); this.targetElements.clear(); this.defaultProjectionRoots.clear(); this.defaultTargetElements.clear(); this.inlineBindings.clear(); this.synced.clear(); this.pendingSync.clear(); this.eventListeners.clear(); this.stateListeners.clear(); this.state.clear()
+    this.roots.clear(); this.projectionRoots.clear(); this.targetElements.clear(); this.defaultProjectionRoots.clear(); this.defaultTargetElements.clear(); this.projectionAttachments.clear(); this.inlineBindings.clear(); this.synced.clear(); this.pendingSync.clear(); this.eventListeners.clear(); this.stateListeners.clear(); this.state.clear()
     for (const url of this.assetUrls.values()) URL.revokeObjectURL(url)
     this.assetUrls.clear(); this.contentAssetUrls.clear(); this.referencedAssetUrls.clear(); this.assetContents.clear(); this.themeStyle?.remove(); this.themeStyle = undefined
     this.parking?.remove(); this.parking = undefined

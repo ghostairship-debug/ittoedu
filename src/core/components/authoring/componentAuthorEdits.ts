@@ -4,7 +4,7 @@ import { decodeHtmlEntities, indexHtmlElements, scanHtmlSource } from '../../../
 import { componentSourceOwnerIsShared } from '../source/sourceAuthoringEdits'
 import { assertAuthorRecordBinding, prepareWebAuthoringRecordEdits } from '../../../components/web/authoringRecords'
 import { encodeAuthorSourceText, readAuthorSourceText } from './sourceAuthorText'
-import { equalComponentValue } from '../../drivers/courseV10Operations'
+import { equalComponentValue } from '../../../shared/componentValue'
 import { locateHtmlAuthorRecordSource } from '../../../shared/html/htmlSourceLocator'
 import { imageDataSchema, replaceImageSource } from '../../../components/image/data'
 

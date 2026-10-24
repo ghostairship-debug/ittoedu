@@ -5,7 +5,7 @@ import type { TextRunStyle } from '../../../shared/contracts/native-v1/types'
 import type { TableData } from '../../../components/table/data'
 import type { DocumentBlock } from '../../../shared/document/content'
 import { documentBlockChildren } from '../../../shared/document/content'
-import { equalComponentValue } from '../../../core/drivers/courseV10Operations'
+import { equalComponentValue } from '../../../shared/componentValue'
 
 interface TableDefaults {
   revision: number

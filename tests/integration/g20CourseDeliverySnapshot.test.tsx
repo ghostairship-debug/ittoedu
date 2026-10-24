@@ -1,3 +1,4 @@
+// @requires-player-bundle
 import { testContainerInstance } from '../helpers/glxWorkFixture'
 import { act, cleanup, renderHook, waitFor } from '@testing-library/react'
 import { afterEach, expect, it, vi } from 'vitest'

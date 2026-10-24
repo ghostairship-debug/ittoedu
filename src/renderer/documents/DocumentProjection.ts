@@ -4,7 +4,8 @@ import { applyDocumentModelUpdate } from '../../core/documents/documentStateEffe
 import { MarkdownDriver } from '../../core/drivers/MarkdownDriver'
 import { TextDriver } from '../../core/drivers/TextDriver'
 import { retainDocumentResourceBytes } from '../../core/drivers/resources'
-import { captureComponentOperation, componentValueAt, ComponentOperationConflict, equalComponentValue } from '../../core/drivers/courseV10Operations'
+import { captureComponentOperation, componentValueAt, ComponentOperationConflict } from '../../core/drivers/courseV10Operations'
+import { equalComponentValue } from '../../shared/componentValue'
 import type { ComponentAppliedChanges, ComponentEdit, ComponentOperationBatch } from '../../shared/contracts/component-platform/operations'
 import type { JsonValue } from '../../shared/contracts/component-platform/project'
 

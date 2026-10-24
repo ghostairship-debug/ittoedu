@@ -11,8 +11,10 @@ import type { ExecutionPermissionMode } from '../../src/shared/workbench/executi
 import { canonicalToolRegistration, describeTools } from '../../src/core/tools/ToolCatalog'
 import { objectUpdateInputSchema } from '../../src/core/tools/toolSchemas'
 
-const jobs = ['job.status', 'job.wait', 'job.logs', 'job.cancel', 'compute.run', 'delegate.start', 'local.run', 'delegate.readonly', 'delegate.read']
-const baseline = ['media.discover']
+const jobs = ['job.status', 'job.wait', 'job.logs', 'job.cancel', 'compute.run', 'delegate.start', 'local.run', 'delegate.readonly',
+  'delegate.agent', 'delegate.models', 'delegate.resume', 'delegate.message', 'delegate.read']
+const media = ['media.start', 'media.apply', 'media.insert', 'course.media']
+const baseline = ['media.discover', 'asset.search']
 const serviceNames = new Set<string>(workbenchServiceToolCatalog.map(tool => tool.name))
 
 it('projects observed appearance copying with distinct read-source fields and no invented HTML range formatting', () => {
@@ -36,9 +38,20 @@ function fixture(external = false) {
     persistence: { append: async () => {}, save: async () => { throw new Error('Discovery must not save files') } } })
   const gateway = new DocumentToolGateway(registry, [driver], randomUUID)
   const calls: string[] = []
+  const ownedJobs = new Map<string, { runId: string; kind: HostJobRef['kind']; status: string; stopped: boolean }>()
+  const owned = (ref: HostJobRef) => {
+    const job = ownedJobs.get(ref.jobId)
+    if (!job) throw Object.assign(new Error('作业不存在'), { code: 'unknown-job' })
+    if (job.runId !== ref.runId || job.kind !== ref.kind)
+      throw Object.assign(new Error('作业不属于当前运行'), { code: 'job-not-authorized' })
+    return job
+  }
   const jobView = (name: string, ref: HostJobRef) => {
+    const job = owned(ref)
     calls.push(name)
-    return { kind: ref.kind, jobId: ref.jobId, status: 'running', terminal: false, snapshot: { runId: ref.runId, jobId: ref.jobId, status: 'running', artifacts: [] } }
+    if (name === 'job.cancel') { job.status = 'cancelled'; job.stopped = true }
+    return { kind: job.kind, jobId: ref.jobId, status: job.status, terminal: job.status !== 'running',
+      snapshot: { runId: job.runId, jobId: ref.jobId, status: job.status, stopped: job.stopped, artifacts: [] } }
   }
   const compute = (input: ComputeJobInput): ComputeJobSnapshot => ({ runId: input.runId, jobId: input.jobId,
     requestDigest: 'fixture', status: 'running', createdAt: '2026-10-01T00:00:00Z', updatedAt: '2026-10-01T00:00:00Z',
@@ -46,13 +59,18 @@ function fixture(external = false) {
   const unused = async (): Promise<never> => { throw new Error('Unexpected service operation') }
   const services: HostToolServices = {
     jobs: { status: async ref => jobView('job.status', ref), wait: async ref => jobView('job.wait', ref),
-      logs: async () => { calls.push('job.logs'); return { entries: [] } }, cancel: async ref => jobView('job.cancel', ref) },
-    compute: { start: async input => { calls.push('compute.run'); return compute(input) },
+      logs: async ref => { owned(ref); calls.push('job.logs'); return { entries: [] } }, cancel: async ref => jobView('job.cancel', ref) },
+    compute: { start: async input => {
+      calls.push('compute.run'); ownedJobs.set(input.jobId, { runId: input.runId, kind: 'compute', status: 'running', stopped: false })
+      return compute(input)
+    },
       readArtifact: unused, cancel: unused, cancelRun: async () => {} },
     delegation: { availability: () => ({ ready: true, reason: 'Local catalog fixture' }),
-      startManaged: async input => { calls.push('delegate.start'); return { jobId: input.jobId, status: 'running',
+      startManaged: async input => {
+        calls.push('delegate.start'); ownedJobs.set(input.jobId, { runId: input.runId, kind: 'delegation', status: 'running', stopped: false })
+        return { jobId: input.jobId, status: 'running',
         terminal: false, stopped: false, artifacts: [] } },
-      readArtifact: async (_runId, _jobId, name) => { calls.push('delegate.read'); return {
+      readArtifact: async (runId, jobId, name) => { owned({ runId, jobId, kind: 'delegation' }); calls.push('delegate.read'); return {
         artifact: { name, digest: 'fixture', byteLength: 4 }, bytes: new TextEncoder().encode('done') } },
       cancel: unused, cancelRun: async () => {} },
     media: { discover: () => ({ capabilities: [] }), start: async () => {
@@ -79,13 +97,35 @@ it('discovers authorized services in empty and Markdown runs while keeping long-
   for (const runId of ['empty', 'markdown']) {
     expect((await h.names(runId)).filter(name => serviceNames.has(name))).toEqual(baseline)
     expect(await h.gateway.availableToolFamilies(runId)).toEqual(expect.arrayContaining([
-      expect.objectContaining({ family: 'jobs', count: 9 }), expect.objectContaining({ family: 'media', count: 1 }),
+      expect.objectContaining({ family: 'jobs', count: 13 }), expect.objectContaining({ family: 'media', count: 4 }),
     ]))
+    const available = await h.gateway.availableToolFamilies(runId)
+    expect(available.find(item => item.family === 'jobs')!.description).toContain(`可用工具：${jobs.join('、')}。`)
+    expect(available.find(item => item.family === 'media')!.description).toContain(`可用工具：${media.join('、')}。`)
     expect(await h.names(runId)).not.toEqual(expect.arrayContaining(['web.search', 'mcp.discover']))
+    const discovered = await h.gateway.execute(runId, 'builtin-search', { name: 'asset.search', input: { query: '柱形图' } })
+    expect(discovered).toMatchObject({ kind: 'read', data: { directory: { available: false }, entries: expect.arrayContaining([
+      expect.objectContaining({ id: 'chart:bar', action: expect.objectContaining({ tool: 'object.insert' }) }),
+    ]) } })
   }
   await h.gateway.beginRun({ runId: 'without-file-grant', actor: 'agent', documents: [] })
   await h.gateway.loadToolFamilies('without-file-grant', ['jobs', 'media'])
-  expect((await h.names('without-file-grant')).filter(name => serviceNames.has(name))).toEqual([])
+  expect((await h.names('without-file-grant')).filter(name => serviceNames.has(name))).toEqual(['asset.search'])
+  expect((await h.gateway.availableToolFamilies('without-file-grant')).filter(item => item.family === 'jobs')).toEqual([])
+  // A family may also advertise document tools; none of these service routes gains a host grant.
+  for (const call of [
+    { name: 'compute.run', input: { code: 'print(1)' } },
+    { name: 'delegate.start', input: { goal: 'Do work', expectedArtifacts: ['answer.txt'] } },
+    { name: 'media.start', input: { kind: 'speech', prompt: 'Read this' } },
+  ]) {
+    expect(await h.gateway.resolveRunTool('without-file-grant', call.name), call.name).toBeNull()
+    expect(await h.gateway.execute('without-file-grant', call.name, call), call.name).toMatchObject({ kind: 'error' })
+  }
+  const builtin = await h.gateway.execute('without-file-grant', 'builtin-search', { name: 'asset.search', input: { query: '柱形图' } })
+  expect(builtin).toMatchObject({ kind: 'read', data: { directory: { available: false }, entries: expect.arrayContaining([
+    expect.objectContaining({ id: 'chart:bar' }),
+  ]) } })
+  expect(document.read()).toMatchObject({ revision: 0, undoDepth: 0, redoDepth: 0 })
   expect(h.calls).toEqual([])
 })
 
@@ -116,20 +156,42 @@ it('one jobs load exposes working compute, delegation and all job management rou
   expect(h.calls).toEqual(['compute.run', 'job.status', 'job.wait', 'job.logs', 'job.cancel', 'delegate.start', 'delegate.read'])
 })
 
-it('loading jobs and media never grants write permission to a read-only run', async () => {
+it('loading jobs and media never grants permission to submit write jobs in a read-only run', async () => {
   const h = fixture()
   await h.begin('read-only', 'read-only')
   await h.gateway.loadToolFamilies('read-only', ['jobs', 'media'])
   expect(await h.names('read-only')).toContain('media.start')
+  const observed = []
   for (const call of [
     { name: 'compute.run', input: { code: 'print(1)' } },
     { name: 'delegate.start', input: { goal: 'Do work', expectedArtifacts: ['answer.txt'] } },
-    { name: 'job.cancel', input: { job: 'compute-prior-job' } },
     { name: 'media.start', input: { kind: 'speech', prompt: 'Read this' } },
-  ]) expect(await h.gateway.execute('read-only', call.name, call))
-    .toMatchObject({ kind: 'error', message: expect.stringContaining('只读') })
+  ]) observed.push({ name: call.name, result: await h.gateway.execute('read-only', call.name, call) })
+  for (const item of observed) expect(item.result, item.name).toMatchObject({ kind: 'error', message: expect.stringContaining('只读') })
   expect(h.calls).toEqual([])
   expect(h.gateway.runFileAccess('read-only')?.permission).toBe('read-only')
+})
+
+it('keeps cancellation scoped to the owning run while preserving legal cancellation and frozen read-only authority', async () => {
+  const h = fixture()
+  await h.begin('owner')
+  const created = await h.gateway.execute('owner', 'compute', { name: 'compute.run', input: { code: 'print(1)' } })
+  if (created.kind !== 'read') throw new Error(JSON.stringify(created))
+  const job = (created.data as { job: string }).job
+  await h.begin('reader', 'read-only')
+  await h.gateway.loadToolFamilies('reader', ['jobs'])
+  expect(await h.names('reader')).toContain('job.cancel')
+  expect(await h.gateway.execute('reader', 'cancel-foreign', { name: 'job.cancel', input: { job } }))
+    .toMatchObject({ kind: 'error', code: 'job-not-authorized' })
+  expect(await h.gateway.execute('reader', 'cancel-unknown', { name: 'job.cancel', input: { job: 'compute-prior-job' } }))
+    .toMatchObject({ kind: 'error', code: 'unknown-job' })
+  expect(h.calls).toEqual(['compute.run'])
+  expect(await h.gateway.execute('owner', 'status', { name: 'job.status', input: { job } }))
+    .toMatchObject({ kind: 'read', data: { status: 'running', snapshot: { runId: 'owner', stopped: false } } })
+  expect(await h.gateway.execute('owner', 'cancel-own', { name: 'job.cancel', input: { job } }))
+    .toMatchObject({ kind: 'read', data: { status: 'cancelled', snapshot: { runId: 'owner', stopped: true } } })
+  expect(h.calls).toEqual(['compute.run', 'job.status', 'job.cancel'])
+  expect(h.gateway.runFileAccess('reader')?.permission).toBe('read-only')
 })
 
 it('exposes an exact deferred service from the registration and honestly returns its missing connection without granting unrelated routes', async () => {

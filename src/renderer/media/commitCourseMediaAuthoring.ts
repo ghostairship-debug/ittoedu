@@ -1,3 +1,5 @@
+import { planCourseElementInsertion } from '../../core/course/courseElementInsertPlan'
+import { courseInsertionFrame as frame } from '../../core/course/courseInsertionGeometry'
 import { componentContainers } from '../../shared/contracts/component-platform/project'
 import { nanoid } from 'nanoid'
 import type { AssetMeta, AssetSource, ProjectAudioSettings, SoundDefinition } from '../../shared/contracts/media-v1'
@@ -5,7 +7,7 @@ import type { ComponentAsset, ComponentDefinition, ComponentInstance } from '../
 import { componentDefinitionBuiltinKey } from '../../shared/contracts/component-platform/project'
 import type { ComponentEdit } from '../../shared/contracts/component-platform/operations'
 import { flowBodyLayoutEdits } from '../../core/course/courseFlowEdits'
-import { equalComponentValue } from '../../core/drivers/courseV10Operations'
+import { equalComponentValue } from '../../shared/componentValue'
 import type { EditorStoreKernel } from '../store/editorStoreKernel'
 import type { CapturedCourseTarget, CourseV10ViewState } from '../documents/CourseV10DocumentBridge'
 import { capturedCourseViewIsCurrent } from '../documents/CourseV10DocumentBridge'
@@ -24,8 +26,8 @@ import { courseAudioSettings, courseAudioSettingsEdits, courseSoundEdits, course
 export interface ImportedAssetBatchItem { meta: AssetMeta & { source?: AssetSource }; bytes: Uint8Array }
 export { insertionContainer, insertionIndex, definitionInsertionEdits, courseAuthorData, resolveCourseInsertionPlacement } from '../../core/course/courseElementInsertion'
 export type { CourseElementKind } from '../../core/course/courseElementInsertion'
-import { definitionInsertionEdits, courseAuthorData, insertionContainer, resolveCourseInsertionPlacement, courseInsertionFrame as frame,
-  prepareCourseElementEdits, prepareCourseTeacherControllerEdits, type CourseInsertionOptions as ElementInsertionOptions, type CourseElementKind } from '../../core/course/courseElementInsertion'
+import { definitionInsertionEdits, courseAuthorData, insertionContainer, resolveCourseInsertionPlacement,
+  prepareCourseTeacherControllerEdits, type CourseInsertionOptions as ElementInsertionOptions, type CourseElementKind } from '../../core/course/courseElementInsertion'
 export interface CourseInsertionOptions extends ElementInsertionOptions {
   /** Captured and mapped by the input owner; undefined retains explicit block-boundary placement. */
   flowSelection?: DocumentSelection | null
@@ -75,10 +77,11 @@ export async function commitCourseInsertion(kernel: EditorStoreKernel, target: C
 }
 export async function insertCourseElement(kernel: EditorStoreKernel, target: CapturedCourseTarget,
   kind: CourseElementKind, options: CourseInsertionOptions = {}): Promise<CourseInsertionResult> {
-  const prepared = prepareCourseInsertion(target, options), working = prepared.target
-  const { edits, instanceIds } = prepareCourseElementEdits(working.project, working.surfaceId, working.instanceId, kind,
-    { ...prepared.options, container: prepared.options.container ?? insertionContainer(working, prepared.options) })
-  await kernel.editCaptured(kernel.capture([...prepared.edits, ...edits], target))
+  const { edits, instanceIds } = planCourseElementInsertion(target.project, {
+    surfaceId: target.surfaceId, selectedInstanceId: target.instanceId, stateId: target.activeStateId, kind,
+    options: { ...options, container: options.container ?? insertionContainer(target, options) }, flowSelection: options.flowSelection,
+  })
+  await kernel.editCaptured(kernel.capture(edits, target))
   if (capturedCourseViewIsCurrent(kernel.readView(), target)) kernel.selectInstances(instanceIds, target.surfaceId, target.documentId)
   return { instanceIds, documentId: target.documentId, surfaceId: target.surfaceId }
 }

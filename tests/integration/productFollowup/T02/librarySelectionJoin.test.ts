@@ -66,7 +66,7 @@ it('the public V10 asset tools save all frozen selections and retain actual cont
     await host.tools.beginRun({ runId, actor: 'agent', documents: [{ documentId: initial.documentId, writable: [{ kind: 'document' }],
       selection: [{ kind: 'course-instance', surfaceId, instanceId: 'first' }, { kind: 'course-instance', surfaceId, instanceId: 'second' }] }],
       fileAccess: { workspaceRoot: workspace, permission: 'workspace' } })
-    // No tools.load or private asset handler: these are the actual authorized default run tools.
+    // Canonical descriptions and authorized named calls remain legal without tools.load.
     const advertised = await host.tools.describe(['asset.save', 'asset.import', 'asset.use', 'asset.update', 'asset.delete'])
     for (const name of ['asset.save', 'asset.import', 'asset.use', 'asset.update', 'asset.delete']) expect(advertised.some(value => value.name === name), name).toBe(true)
     const saved = data(await call('save-selection', 'asset.save', { title: '双对象资料', description: '教师明确要求保存当前多选' }))

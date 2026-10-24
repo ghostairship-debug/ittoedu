@@ -1,3 +1,4 @@
+// @requires-player-bundle
 // @vitest-environment node
 import path from 'node:path'
 import fs from 'node:fs/promises'

@@ -3,7 +3,7 @@ import { componentDefinitionBuiltinKey, owningContainer } from '../../../shared/
 import type { DocumentBlock } from '../../../shared/document/content'
 import { documentBlockChildren } from '../../../shared/document/content'
 import { allDocumentTextSlots, documentComponentDataVersions, inlineComponentIds } from '../../../shared/document/textInteraction'
-import { equalComponentValue } from '../../../core/drivers/courseV10Operations'
+import { equalComponentValue } from '../../../shared/componentValue'
 import { resolveComponentOuterPresentation } from '../../../shared/componentPresentation'
 import { componentPaintStyle } from '../../../player/components/componentPlacementStyle'
 import type { FlowMediaLayoutWidths } from '../../../shared/flowMediaLayout'

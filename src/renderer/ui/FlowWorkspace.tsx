@@ -749,12 +749,11 @@ export function FlowWorkspace({ documentId, project, surfaceId, toolbarContainer
           objectMenu={id => { const value=actions(id); return value ? flowBlockCommands(value.block,value.commands,value.replaceMedia,value.mediaTools) : [] }}
           renderTextActions={selection => <FlowTextInteractionActions project={project} surfaceId={surfaceId} selection={selection} drain={drain}
             commit={async (edits, revision) => { const target = bridge.captureTarget(documentId); if (target.project.revision !== revision) throw new Error('正文在操作期间已改变，请重新选择'); await bridge.editCaptured(bridge.capture(edits, target)) }} select={id => runtime.selectInstances([id], surfaceId)} report={message => setError(message)} />}
-          renderInline={(id, host) => { runtime.onElement(id, host); runtime.onTargetElement(id, host); return () => { if (runtime.world.contentElement(id) === host) { runtime.onElement(id, null); runtime.onTargetElement(id, null) } } }}
+          renderInline={(id, host) => runtime.world.attachProjection(id, { content: host, target: host, subtree: host })}
           renderQuickBarActions={target => { const id=target.selection?.kind === 'object' ? target.selection.blockId : null, value=id && actions(id); return value ? <FlowBlockQuickActions {...value}/> : null }}
           renderQuickBarMenu={target => { const id=target.selection?.kind === 'object' ? target.selection.blockId : null, value=id && actions(id); return value ? <FlowBlockQuickMenu {...value}/> : null }}
           renderObject={(block, host) => {
             let objectProject = project.instances[block.id] ? project : projectFlowPreparedResources(bridge.captureOwnedTarget(documentId), preparedResources.current)
-            let disposed=false
             const shell = host.closest<HTMLElement>('[data-flow-block-id]') ?? host
             shell.dataset.componentFlowId = block.id
             shell.dataset.componentInstance = block.id
@@ -768,7 +767,6 @@ export function FlowWorkspace({ documentId, project, surfaceId, toolbarContainer
                 && (!active || componentContainerForInstance(current.project, block.id)?.id === surfaceId)
             }
             if (!ownsBody()) return
-            if (!instance.container) runtime.onTargetElement(block.id, shell)
             const bodyLayout = instance.flowLayout
             // A deferred React unmount must own a disposable target, never the
             // host that the NodeView will reuse for the next render.
@@ -802,17 +800,18 @@ export function FlowWorkspace({ documentId, project, surfaceId, toolbarContainer
               root!.render(<>{instance.childIds!.filter(id => !inlineIds.has(id)
                 && !(!objectProject.instances[id]?.frame && !objectProject.instances[id]?.flowPlacement && documentInlineIds.has(id))).map(id=>runtime.renderInstance(id,objectProject,presentation.childrenPlacement))}</>)
             }
-            // Attach and size the NodeView shell before moving its retained runtime root.
-            queueMicrotask(()=>{if(!disposed && host.isConnected && ownsBody()){place();if(!instance.container)runtime.onElement(block.id,host);runtime.world.afterProjectionMutation()}})
+            // PM/React own the view. World owns the delayed retained-root attachment.
+            const releaseRuntime = runtime.world.attachProjection(block.id, {
+              content: instance.container ? undefined : host, target: instance.container ? undefined : shell,
+              subtree: stage, isCurrent: ownsBody, prepare: place, defer: true,
+            })
             const note=block.type==='course-instance' && bodyLayout?.caption ? window.document.createElement('figcaption') : null
             if(note) {note.innerHTML=renderDocumentText(bodyLayout!.caption!);shell.append(note)}
             return () => {
-              disposed=true
               if(containerRoots.current.get(block.id)?.root===root)containerRoots.current.delete(block.id)
-              if(!instance.container){runtime.onElement(block.id,null,host);runtime.onTargetElement(block.id,null,shell)}
+              releaseRuntime()
               resize?.disconnect()
               if(root)queueMicrotask(()=>root.unmount())
-              runtime.world.beforeProjectionRemoval(stage)
               // Restore the reusable NodeView host before discarding this render's
               // stage. Children stay its siblings so their selection is unchanged.
               stage.before(host)

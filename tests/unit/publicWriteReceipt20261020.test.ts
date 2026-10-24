@@ -254,7 +254,10 @@ it('keeps Gateway execute and lookup compact, reuses the same operation, and nev
     expect(await gateway.execute('gateway', 'write', call)).toMatchObject({ kind: 'document-operation', result: result.result })
     expect(session.read()).toMatchObject({ revision: 1, undoDepth: 1 })
     const internal = session.lookupOperation(result.result.operationId)!
-    expect('appliedChanges' in internal && (internal.appliedChanges?.changes[0].value as { html: string }).html === body).toBe(true)
+    expect('appliedChanges' in internal).toBe(true)
+    const exact = 'appliedChanges' in internal && internal.appliedChanges?.changes.find(change => JSON.stringify(change.path) === JSON.stringify(['instances', 'web', 'data', 'html']))
+    expect(exact && exact.exists).toBe(true)
+    expect(exact && exact.value === body).toBe(true)
     const invalid = await gateway.execute('gateway', 'invalid', { name: 'object.update', input: {
       target, epoch: 'model-forged', properties: { data: { html: 'INVALID_GATEWAY_PAYLOAD'.repeat(100_000) } },
     } })

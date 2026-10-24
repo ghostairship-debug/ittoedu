@@ -126,16 +126,20 @@ it('reuses a matching source build and accepts a completed dependency reinstall 
   await fs.mkdir(path.join(root, 'node_modules'), { recursive: true })
   await fs.writeFile(path.join(root, 'package-lock.json'), 'first lock')
   await fs.writeFile(path.join(root, 'node_modules/.package-lock.json'), 'first installation')
-  const outputs: Record<string, string> = { 'build:player': 'dist-player/index.js', 'build:renderer': 'dist-renderer/index.js',
-    'build:electron': 'dist-electron/index.js', 'build:clipboard-helper': 'resources/clipboard-file-list/clipboard-file-list.exe',
+  const outputs: Record<string, string> = { 'build:player:raw': 'dist-player/index.js', 'build:renderer:raw': 'dist-renderer/index.js',
+    'build:electron:raw': 'dist-electron/index.js', 'build:clipboard-helper': 'resources/clipboard-file-list/clipboard-file-list.exe',
     'build:file-publish-helper': 'resources/file-publish/file-publish.exe' }
   const run = async (script: string) => {
     calls.push(script)
+    if (script === 'generate:component-sources') { const file = path.join(root, 'src/shared/generated/componentBuiltinSourceLoaders.ts'); await fs.mkdir(path.dirname(file), { recursive: true }); await fs.mkdir(path.join(root, 'src/shared/generated/componentBuiltinSources'), { recursive: true }); await fs.writeFile(file, 'generated sources') }
     if (outputs[script]) { const file = path.join(root, outputs[script]); await fs.mkdir(path.dirname(file), { recursive: true }); await fs.writeFile(file, 'fixture output') }
   }
   try {
-    expect(await prepareSourceLaunch(root, run)).toHaveLength(5)
+    expect(await prepareSourceLaunch(root, run)).toHaveLength(6)
+    expect(calls).toEqual(['generate:component-sources', 'check:built-in-components', 'build:player:raw', 'build:renderer:raw', 'build:electron:raw', 'build:clipboard-helper', 'build:file-publish-helper'])
     calls.length = 0
+    expect(await prepareSourceLaunch(root, run, ['renderer'])).toEqual([])
+    expect(await prepareSourceLaunch(root, run, ['electron'])).toEqual([])
     const stat = vi.spyOn(fs, 'stat')
     try {
       expect(await prepareSourceLaunch(root, run)).toEqual([])
@@ -144,28 +148,32 @@ it('reuses a matching source build and accepts a completed dependency reinstall 
       }
     } finally { stat.mockRestore() }
     expect(calls).toEqual([])
-    for (const input of ['src/components/text/render.ts', 'scripts/generate-component-builtin-sources.ts']) {
+    for (const input of ['src/components/text/render.ts', 'scripts/generate-component-builtin-sources.ts', 'src/renderer/interactions/componentInteractionRuntime.ts', 'src/player/surfaces/publishedCourseState.ts']) {
       const file = path.join(root, input)
       await fs.mkdir(path.dirname(file), { recursive: true })
       await fs.writeFile(file, 'changed source input')
-      expect(await prepareSourceLaunch(root, run)).toEqual(['player', 'renderer', 'electron'])
+      expect(await prepareSourceLaunch(root, run)).toEqual(['sources', 'player', 'renderer', 'electron'])
       calls.length = 0
     }
     for (const input of ['index.html', 'document-export.html', 'pptx-import.html', 'compute.html']) {
       await fs.writeFile(path.join(root, input), '<html>new worker input</html>')
       expect(await prepareSourceLaunch(root, run)).toEqual(['renderer'])
-      expect(calls).toEqual(['build:renderer'])
+      expect(calls).toEqual(['build:renderer:raw'])
       calls.length = 0
       await fs.writeFile(path.join(root, input), '<html>modified worker input</html>')
       expect(await prepareSourceLaunch(root, run)).toEqual(['renderer'])
-      expect(calls).toEqual(['build:renderer'])
+      expect(calls).toEqual(['build:renderer:raw'])
       calls.length = 0
     }
+    await fs.writeFile(path.join(root, 'dist-electron/index.js'), 'tampered output')
+    expect(await prepareSourceLaunch(root, run, ['renderer'])).toEqual([])
+    expect(await prepareSourceLaunch(root, run, ['electron'])).toEqual(['electron'])
+    calls.length = 0
     await fs.writeFile(path.join(root, 'package-lock.json'), 'new requested lock')
     await expect(prepareSourceLaunch(root, run)).rejects.toThrow('npm ci')
     expect(calls).toEqual([])
     await fs.writeFile(path.join(root, 'node_modules/.package-lock.json'), 'updated installed lock after reinstall')
-    expect(await prepareSourceLaunch(root, run)).toEqual(['player', 'renderer', 'electron'])
+    expect(await prepareSourceLaunch(root, run)).toEqual(['sources', 'player', 'renderer', 'electron'])
     expect(await prepareSourceLaunch(root, run)).toEqual([])
   } finally { await fs.rm(root, { recursive: true, force: true }) }
 })

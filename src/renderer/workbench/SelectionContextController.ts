@@ -1,5 +1,5 @@
 import type { ComponentAuthorField } from '../../shared/contracts/component-platform/runtime'
-import { equalComponentValue } from '../../core/drivers/courseV10Operations'
+import { equalComponentValue } from '../../shared/componentValue'
 import type { SlideEditorView } from '../../core/tools/slideLayerView'
 import { useSyncExternalStore } from 'react'
 import type { DocumentContextSelection } from '../../shared/document/ports'

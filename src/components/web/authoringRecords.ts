@@ -2,7 +2,7 @@ import type { ComponentAuthorRecord, ComponentAuthorField } from '../../shared/c
 import type { ComponentEdit } from '../../shared/contracts/component-platform/operations'
 import type { CourseProjectV10, JsonValue } from '../../shared/contracts/component-platform/project'
 import { webAuthoringRecordSchema, webAuthoringRecordsSchema } from './data'
-import { equalComponentValue } from '../../core/drivers/courseV10Operations'
+import { equalComponentValue } from '../../shared/componentValue'
 import { anchorOwnedDocumentAuthoring } from './ownedDocumentIdentity'
 
 export function assertAuthorRecordBinding(previous: ComponentAuthorRecord | undefined, spot: ComponentAuthorField): void {

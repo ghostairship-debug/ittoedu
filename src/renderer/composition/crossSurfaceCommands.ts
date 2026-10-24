@@ -19,7 +19,8 @@ import { componentRuleEdits, createComponentInteractionCopyIdentities, interacti
 import { remapComponentInputData } from '../../components/input/authoring'
 import { inputDataSchema } from '../../components/input/data'
 import type { InteractionRule } from '../../shared/interactionTypes'
-import { componentParentMatrix, equalComponentValue } from '../../core/drivers/courseV10Operations'
+import { componentParentMatrix } from '../../core/drivers/courseV10Operations'
+import { equalComponentValue } from '../../shared/componentValue'
 import { COURSE_OBJECT_CLIPBOARD_COMMAND_EVENT } from '../../shared/ipcTypes'
 export { componentParentMatrix } from '../../core/drivers/courseV10Operations'
 

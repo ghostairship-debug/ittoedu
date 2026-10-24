@@ -2,7 +2,7 @@ import { mapMarkdownRange } from '../../../core/tools/ToolTargets'
 import type { HtmlSelectedTarget } from './htmlPreviewController'
 import type { ComponentAuthorRecord } from '../../../shared/contracts/component-platform/runtime'
 import { patchHtmlAuthoringRecords, readHtmlAuthoringRecords } from '../../../shared/html/htmlAuthoringRecords'
-import { equalComponentValue } from '../../../core/drivers/courseV10Operations'
+import { equalComponentValue } from '../../../shared/componentValue'
 import type { HtmlSourceAnalysis } from './htmlSourceAnalysis'
 
 export interface HtmlTextDraft {

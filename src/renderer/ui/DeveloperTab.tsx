@@ -17,7 +17,8 @@ import { notifyCourseDrafts, registerCourseDraftProvider, type AdvancedDraftIssu
 import { componentInteractionView, componentRuleEdits } from '../interactions/componentInteractionAuthoring'
 import { replaceCourseNetworkDeclaration, type CourseNetworkDeclaration } from '../course/courseLogicAuthoringCommands'
 import { loadBuiltinComponentSource } from '../../core/components/source/builtinSources'
-import { applyComponentOperation, equalComponentValue } from '../../core/drivers/courseV10Operations'
+import { applyComponentOperation } from '../../core/drivers/courseV10Operations'
+import { equalComponentValue } from '../../shared/componentValue'
 
 type DeveloperSection = 'runtime' | 'object' | 'rules' | 'component'
 type JsonDraftContext = { kind: 'network' } | { kind: 'object'; instanceId: string } | { kind: 'definition'; definitionId: string }

@@ -31,7 +31,7 @@ import type { ModelToolCall, ToolResult, ToolTarget } from '../../../shared/work
 import { isCourseInstanceRange, readEditableTargetContent, readTarget } from '../../../core/tools/ToolTargets'
 import { executionContentOutputSchema } from '../../../shared/workbench/executionDesktop'
 import type { AttachmentService } from '../attachments/AttachmentService'
-import { projectExecutionContext, contextMessageId, contextSourceIndex, projectImagesForTextModel, initialHistorySources, ContextProjectionMetadata } from './ExecutionContextProjection'
+import { projectExecutionContext, contextMessageId, contextSourceIndex, projectImagesForTextModel, initialHistorySources, ContextProjectionMetadata, projectCurrentToolResult } from './ExecutionContextProjection'
 import { contextReadSchema, contextReadTool, readContextMessage } from './ContextReadTool'
 import { DisplayEventBuffer } from './DisplayEventBuffer'
 import { appendObservationModelMessages, type ObservationModelInput } from './observationModelInput'
@@ -61,7 +61,7 @@ import type { WebMaterialResult } from '../network/WebResearchService'
 import { continueDocumentTargets } from './continuationTargets'
 import { executionAdvancementModeSchema, type ExecutionAdvancementMode } from '../../../shared/workbench/conversations'
 import { programmaticExecuteInputSchema, programmaticReadInputSchema } from '../../../shared/workbench/programmatic'
-import { ProgrammaticToolRunner, projectProgrammaticModelResult, readProgrammaticResult } from './ProgrammaticToolRunner'
+import { ProgrammaticToolRunner, readProgrammaticResult } from './ProgrammaticToolRunner'
 import { programmaticTools } from '../../../core/tools/ProgrammaticTools'
 
 interface EditProjectionPort {
@@ -234,7 +234,7 @@ const taskModeTool: ModelToolDefinition = { name: TASK_MODE,
 export const loadToolsSchema = z.object({ families: z.array(z.enum(toolFamilies)).min(1).max(toolFamilies.length).optional(),
   names: z.array(z.string().min(1)).min(1).optional() }).strict()
 export const loadToolsDefinition: ModelToolDefinition = { name: LOAD_TOOLS,
-  description: '按 names 展开具体工具，或按 families 展开完整相关工具族；已有定义直接使用。披露不限制合法调用，不增加文档或文件授权；未知名称逐项诊断，有效项仍展开。',
+  description: '按 names 展开具体工具，或按 families 展开完整相关工具族；已有定义直接使用。披露不限制合法调用，不增加文档或文件授权；未知名称逐项诊断，有效项仍展开。资产库维护按需展开：asset.save（将组件存入库）、asset.import（导入组件归档）、asset.delete（删除库条目）。',
   inputSchema: z.toJSONSchema(loadToolsSchema) as ModelJsonObject }
 /** A selection travels with the task up to this size; larger ones stay readable through paged `read`. */
 const SELECTION_PREVIEW_CHARS = 4000
@@ -2734,13 +2734,8 @@ export class ExecutionEngine {
       ...(tool.result?.kind === 'error' ? { error: safeDetailString(tool.result.message) } : serviceOutcome ? { error: safeDetailString(serviceOutcome.message) } : {}),
       ...applicationEventFacts(tool.call.name, tool.result) })
     if (tool.origin !== 'host') {
-      let projected = publicResult && modelToolResult(tool.call.name, tool.call.name === 'programmatic.execute'
-        ? projectProgrammaticModelResult({ ...tool, result: publicResult }, record.tools)! : publicResult,
-        { sourceId: toolResultSourceId(record.runId, tool.callId) })
-      if (projected?.kind === 'read' && projected.data && typeof projected.data === 'object'
-        && (isViewObservationTool(tool.call.name) || isHtmlActionTool(tool.call.name)))
-        projected = { ...projected, data: { ...projected.data, fullObservationSource: { sourceId: toolResultSourceId(record.runId, tool.callId),
-          notice: '按来源用 context.read 回读同次完整观察；imageIndexes 显式取回同次原图。历史图和句柄不代表当前活动页。' } } }
+      const projected = projectCurrentToolResult({ callId: tool.callId, call: tool.call, result: publicResult },
+        record.tools, toolResultSourceId(record.runId, tool.callId))
       record.messages.push({ role: 'tool', tool_call_id: tool.providerCallId, content: JSON.stringify(projected) })
     }
     await this.checkpoint(record)

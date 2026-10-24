@@ -1,3 +1,4 @@
+import { interactionRules } from '../../src/shared/componentInteractionData'
 // @vitest-environment node
 import { randomUUID } from 'node:crypto'
 import { expect, it } from 'vitest'
@@ -189,4 +190,23 @@ it('discovers a built-in chart without an asset service and reads project entrie
   await expect(h.gateway.issueTarget('read-only-discovery', hidden.documentId, { kind: 'document' })).rejects.toThrow()
   expect(visible.read().undoDepth).toBe(0)
   expect(hidden.read().undoDepth).toBe(0)
+})
+
+it('combines caret insertion, initial appearance and click with a following mutation in one atomic batch', async () => {
+  const h = await fixture(), target = await h.handle({ kind: 'course-surface', surfaceId: h.surfaceId }), at = await h.selection(2, 2)
+  const neighbor = await h.handle({ kind: 'course-instance', surfaceId: h.surfaceId, instanceId: 'b' })
+  const before = h.session.read()
+  const result = await h.call('batch', { operations: [
+    { name: 'object.insert', input: { target, at, kind: 'text', text: '新正文', appearance: { bold: true, fontSize: 28 }, click: { action: 'scene.next' } } },
+    { name: 'object.update', input: { target: neighbor, properties: { label: '同批相邻对象' } } },
+  ] })
+  applied(result)
+  const current = h.model(), inserted = current.project.instances[testContainerInstance(current.project, h.surfaceId).childIds[1]]
+  expect(inserted.data).toMatchObject({ content: { inlines: [{ type: 'text', text: '新正文' }] }, appearance: { bold: true, fontSize: 28 } })
+  expect(current.project.instances.b.name).toBe('同批相邻对象')
+  const rules = Object.values(current.project.instances).filter(instance => componentDefinitionBuiltinKey(current.project.definitions[instance.definitionId]) === 'guoling.interactions').flatMap(interactionRules)
+  expect(rules.some(rule => 'nodeId' in rule.trigger && rule.trigger.nodeId === inserted.id && rule.actions.some(step => step.action.type === 'scene.next'))).toBe(true)
+  expect(h.session.read()).toMatchObject({ revision: before.revision + 1, undoDepth: before.undoDepth + 1 })
+  await h.undo()
+  expect(h.model().project.instances).toEqual(h.project.instances)
 })

@@ -15,7 +15,7 @@ import type { DocumentSelection } from '../../src/shared/document/ports'
 import { emptyDocumentResources } from '../../src/shared/document/resources'
 import { createV10StoreHost, deferred } from '../helpers/courseV10StoreHost'
 import { setRootContainers } from '../helpers/glxWorkFixture'
-import { insertCourseMedia } from '../../src/renderer/media/commitCourseMediaAuthoring'
+import { insertCourseMedia, insertCourseElement } from '../../src/renderer/media/commitCourseMediaAuthoring'
 import { insertComponentPackagesAtTarget } from '../../src/renderer/components/insertComponentPackages'
 import { captureFlowMenuTarget, refreshFlowMenuTarget, releaseFlowMenuTarget, resolveFlowMenuInsertionOptions, insertFlowMenu } from '../../src/renderer/ui/flow/flowInsertCommands'
 import { registerFlowMenuCapture, registerFlowWorkspaceDrain } from '../../src/renderer/document/flowWorkspaceRegistry'
@@ -244,4 +244,22 @@ it('offers the actual explicit block-after action for a table slot without block
   const blocks = fromEditorDocument(mounted.editor.view.state.doc).blocks
   expect(blocks).toHaveLength(2); expect(blocks[0]).toEqual(table); expect(blocks[1].type).toBe('table')
   expect(mounted.rendered.queryByRole('alert')).toBeNull()
+})
+
+it('inserts into the active non-entry group root when the current work has no Surface', async () => {
+  const project = createBlankCourseProjectV10('多个普通作品根'), entry = project.rootIds[0]
+  project.definitions.rootGroup = { id: 'rootGroup', role: 'mixed', implementation: { kind: 'builtin', key: 'guoling.group' } }
+  project.instances[entry] = { id: entry, definitionId: 'rootGroup', data: {}, childIds: [] }
+  project.instances.otherRoot = { id: 'otherRoot', definitionId: 'rootGroup', data: {}, childIds: [] }
+  project.rootIds.push('otherRoot')
+  const h = await createV10StoreHost(project); stops.push(() => h.bridge.dispose())
+  h.bridge.selectSurface(h.first.documentId, 'otherRoot')
+  const target = h.kernel.captureTarget()
+  expect(target).toMatchObject({ surfaceId: null, rootInstanceId: 'otherRoot', instanceId: null })
+  const result = await insertCourseElement(h.kernel, target, 'text', { text: '当前作品正文' })
+  expect(h.model().project.instances.otherRoot.childIds).toEqual(result.instanceIds)
+  expect(h.model().project.instances[entry].childIds).toEqual([])
+  expect(h.first.read().undoDepth).toBe(1)
+  await h.bridge.undo(h.first.documentId)
+  expect(h.model().project.instances.otherRoot.childIds).toEqual([])
 })

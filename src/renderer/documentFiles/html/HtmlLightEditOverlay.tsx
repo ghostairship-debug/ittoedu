@@ -5,7 +5,7 @@ import { captureSelection, workbenchSelection } from '../../workbench/SelectionC
 import { TextAiButton, textCardLabel } from '../../workbench/elementCards/ElementTextCards'
 import type { HtmlSelectedTarget } from './htmlPreviewController'
 import { readEditableTargetContent, prepareExecutionContentOutput } from '../../../core/tools/ToolTargets'
-import { equalComponentValue } from '../../../core/drivers/courseV10Operations'
+import { equalComponentValue } from '../../../shared/componentValue'
 import { readHtmlAuthoringRecords } from '../../../shared/html/htmlAuthoringRecords'
 import type { ExecutionSelectionTarget } from '../../../shared/workbench/executionDesktop'
 

@@ -38,8 +38,8 @@ export interface ToolRegistration<Context> {
   /** Equal values identify existing effects which must not replay an unresolved operation. */
   effect: string | null | ((input: unknown) => string | null)
   family?: ToolFamily | null
-  /** Common target actions stay direct; other family tools are revealed on demand. */
-  exposure?: 'direct'
+  /** Definition disclosure only; deferred names remain callable under the same grant. */
+  exposure?: 'direct' | 'deferred'
   supports(context: ToolSupportContext): boolean
   targets(input: unknown, resolver: ToolTargetResolver): TargetResolution | Promise<TargetResolution>
   handler(context: Context, input: unknown): Promise<ToolResult>
@@ -54,7 +54,7 @@ export function toolRegistrationFor<Context>() {
       capability: ToolCapability
       effect: string | null | ((input: z.output<Schema>) => string | null)
       family?: ToolFamily | null
-      exposure?: 'direct'
+      exposure?: 'direct' | 'deferred'
       supports(context: ToolSupportContext): boolean
       targets(input: z.output<Schema>, resolver: ToolTargetResolver): TargetResolution | Promise<TargetResolution>
       handler(context: Context, input: z.output<Schema>): Promise<ToolResult>

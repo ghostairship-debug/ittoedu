@@ -1,7 +1,7 @@
 import { allDocumentTextSlots, documentComponentDataVersions, documentTextRanges, inlineComponentIds } from '../../shared/document/textInteraction'
 import type { BehaviorAttachment, ComponentContainer, ComponentEdit, ComponentInstance, CourseProjectV10 } from '../../shared/contracts/component-platform'
 import { componentDefinitionBuiltinKey, owningContainer } from '../../shared/contracts/component-platform/project'
-import { equalComponentValue } from '../drivers/courseV10Operations'
+import { equalComponentValue } from '../../shared/componentValue'
 
 export interface TextRelationshipSlot { instanceId: string; dataPath: string[] }
 /** The structural editor supplies actual old-to-new slots; range identity supplies the surviving portions. */

@@ -1,6 +1,7 @@
 import { isNativeFlowLayoutGroup, isNativeFlowContainerStyle, isNativeFlowItemStyle, componentFlowStylePolicy, isFlowStickyStyle } from '../../../../shared/flowNativeLayout'
 import { componentSurface } from '../../../../shared/contracts/component-platform/project'
-import { captureComponentOperation, equalComponentValue, presentationComponentEdits } from '../../../../core/drivers/courseV10Operations'
+import { captureComponentOperation, presentationComponentEdits } from '../../../../core/drivers/courseV10Operations'
+import { equalComponentValue } from '../../../../shared/componentValue'
 import { componentDataEdits } from '../../../../core/course/componentDataEdits'
 import { frameCorners, multiplyMatrices, translateFrame } from '../../../../core/components/geometry'
 import { contentPlacementRegion } from '../../../../core/contentApply/planning/placement'

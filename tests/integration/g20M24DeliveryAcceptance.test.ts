@@ -1,3 +1,4 @@
+// @requires-player-bundle
 // @vitest-environment node
 import { componentSurfaces } from '../../src/shared/contracts/component-platform/project'
 import { testContainerInstance } from '../helpers/glxWorkFixture'

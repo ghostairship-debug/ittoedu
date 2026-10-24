@@ -1,5 +1,5 @@
 import { previewCourseStyleRemix, planCourseStyleRemixEdits, replaceCourseRemixText, type RemixSlot as CourseRemixSlot } from '../../../core/course/courseProductivityEdits'
-import { equalComponentValue } from '../../../core/drivers/courseV10Operations'
+import { equalComponentValue } from '../../../shared/componentValue'
 import { textComponentDataSchema } from '../../../components/text/data'
 import { measureTextComponent, renderTextComponent } from '../../../components/text/render'
 import { designProductionStep, type ProductivityContext, type ProductivityApplyResult } from './index'

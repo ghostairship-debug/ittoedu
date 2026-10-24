@@ -1,6 +1,7 @@
 import { componentContainers } from '../../../shared/contracts/component-platform/project'
 import { componentDataEdits } from '../../course/componentDataEdits'
-import { equalComponentValue, prepareComponentTextRelationships } from '../../drivers/courseV10Operations'
+import { prepareComponentTextRelationships } from '../../drivers/courseV10Operations'
+import { equalComponentValue } from '../../../shared/componentValue'
 import { professionalElementDefaultSize } from '../../course/professionalElementDefaults'
 import { allDocumentTextSlots, inlineComponentIds, documentTextRanges, projectDataTextRanges, type DocumentRangeProjection } from '../../../shared/document/textInteraction'
 import type { ComponentEdit, ComponentInstance, CourseProjectV10, JsonValue } from '../../../shared/contracts/component-platform'

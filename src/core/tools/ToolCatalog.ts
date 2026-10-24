@@ -223,8 +223,9 @@ export function visibleRunToolNames(allowed: readonly string[], loadedFamilies: 
   const direct = allowed.filter(name => {
     if (name === 'batch') return false
     const registration = toolRegistration(name)
+    const exposure = registration && 'exposure' in registration ? registration.exposure : undefined
     return !!registration && (loadedNames.has(name) || registration.family && loadedFamilies.has(registration.family)
-      || (profile === 'general' ? !registration.family || 'exposure' in registration && registration.exposure === 'direct' : core.has(name)))
+      || (profile === 'general' ? !registration.family && exposure !== 'deferred' || exposure === 'direct' : core.has(name)))
   })
   const canBatch = allowed.includes('batch') && mutationNamesIn(direct).length > 0
   return allowed.filter(name => direct.includes(name) || name === 'batch' && canBatch)

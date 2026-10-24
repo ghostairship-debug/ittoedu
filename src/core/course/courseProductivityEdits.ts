@@ -3,7 +3,7 @@ import { documentTextContentSchema, normalizeDocumentText, type FlowInline, type
 import type { CourseProjectV10, JsonValue } from '../../shared/contracts/component-platform/project'
 import { componentIsLocked, componentDefinitionBuiltinKey, resolveComponentPresentation } from '../../shared/contracts/component-platform/project'
 import type { ComponentEdit } from '../../shared/contracts/component-platform/operations'
-import { equalComponentValue } from '../drivers/courseV10Operations'
+import { equalComponentValue } from '../../shared/componentValue'
 import { duplicateSurfaceEdits } from './courseSurfaceStructure'
 import { planTextRunRemap } from '../../shared/textRuns'
 import type { TextRun } from '../../shared/contracts/native-v1/types'

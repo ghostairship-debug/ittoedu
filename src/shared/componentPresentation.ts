@@ -4,6 +4,7 @@ import { componentLayoutInput } from '../components/web/measuredFragmentBox'
 import { flowObjectExtent } from '../core/components/geometry/flowObjectExtent'
 import { resolveFlowMediaLayoutProjection, type FlowMediaLayoutWidths } from './flowMediaLayout'
 import { isNativeFlowLayoutGroup, nativeFlowContainerStyle, nativeFlowItemStyle, nativeFlowMediaBlockSize, flowStickyStyle } from './flowNativeLayout'
+import { isContentProgramImplementation } from './contentProgramImplementation'
 
 export interface ComponentOuterPresentationInput {
   placement: 'free' | 'flow'
@@ -75,7 +76,7 @@ export function resolveComponentOuterPresentation(project: CourseProjectV10, ins
   const definition = project.definitions[instance.definitionId], frame = instance.frame
   const implementation = instance.implementationOverride ?? definition?.implementation
   const program = !instance.container && project.rootIds.includes(instance.id)
-    && (implementation?.kind === 'source' || implementation?.kind === 'builtin' && ['guoling.web', 'guoling.html-program'].includes(implementation.key))
+    && isContentProgramImplementation(implementation)
   const key = componentDefinitionBuiltinKey(definition)
   const documentBlock = key === 'guoling.document-block'
   const data = instance.data && typeof instance.data === 'object' && !Array.isArray(instance.data) ? instance.data : {}

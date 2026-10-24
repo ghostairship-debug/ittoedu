@@ -12,7 +12,8 @@ import type { DocumentSnapshot } from '../../../shared/workbench/document'
 import type { ToolResult } from '../../../shared/workbench/tools'
 import { componentDefinitionSchema, componentFrameSchema, jsonValueSchema, resolveComponentPresentation, type ComponentAsset, type ComponentEdit, type ComponentFrame, type ComponentOperationBatch, type CourseProjectV10 } from '../../../shared/contracts/component-platform'
 import { contentPlacementRegion } from '../../contentApply/planning/placement'
-import { captureComponentOperation, equalComponentValue, presentationComponentEdits } from '../../drivers/courseV10Operations'
+import { captureComponentOperation, presentationComponentEdits } from '../../drivers/courseV10Operations'
+import { equalComponentValue } from '../../../shared/componentValue'
 import { applyComponentStylePatch, cssStyleName } from '../../../shared/componentStylePatch'
 import { CourseV10Driver } from '../../drivers/CourseV10Driver'
 import type { ContentApplyDiagnostic, ContentApplyIntent, ContentApplyRequest, ContentApplyTarget, ContentApplyResult, ContentApplySource, SurfaceApplyRequest } from '../../contentApply/planning/types'
@@ -617,6 +618,9 @@ export class ComponentProjectFileCoordinator {
       }
       const currentFiles = authoringFiles(after, scope.state)
       const resolved = componentProjectApplyReceiptFiles(baseline, original, result, after, scope, currentFiles)
+      // Result paths are lazy metadata. Prepare only their builtin closures before
+      // copying or returning Source values, just as an explicit project.read does.
+      await Promise.all(resolved.files.map(prepareComponentProjectFileSource))
       const prefix = fileKey(baseline.documentId, '', scope), reads = this.reads.get(runId)
       const observations = [...(reads?.entries() ?? [])].filter(([savedKey, seen]) => savedKey.startsWith(prefix)
         && !seen.unavailable && seen.snapshot.epoch === baseline.epoch).map(([, seen]) => seen)

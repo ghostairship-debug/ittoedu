@@ -1,5 +1,6 @@
 import type { DocumentCommand, DocumentDriver, DocumentModel } from '../../shared/workbench/document'
-import { applyComponentOperation, applyValidatedComponentOperation, beginComponentOperationPlanning, ComponentOperationConflict, describeComponentChanges, describeComponentOperationChanges, equalComponentValue } from './courseV10Operations'
+import { applyComponentOperation, applyValidatedComponentOperation, beginComponentOperationPlanning, ComponentOperationConflict, describeComponentChanges, describeComponentOperationChanges } from './courseV10Operations'
+import { equalComponentValue } from '../../shared/componentValue'
 import { cloneDocumentResources } from './resources'
 import { validateComponentData } from '../components/validateComponentData'
 import { createCourseProjectV10Archive, openCourseProjectV10Archive, validateCourseProjectV10Archive, validateCourseProjectV10Resources } from './codecs/courseProjectV10Archive'

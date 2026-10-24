@@ -34,8 +34,8 @@ import { courseConfigureInputSchema, objectUpdatePropertiesInputSchema } from '.
 import { duplicateSurfaceEdits } from '../course/courseSurfaceStructure'
 import { RECIPE_CATALOG, planCourseRecipeEdits } from '../course/courseRecipeEdits'
 import { inspectCourseRemixSlots, planCourseStyleRemixEdits, planCourseProductivityEdits } from '../course/courseProductivityEdits'
-import { prepareCourseElementEdits, prepareCourseTeacherControllerEdits } from '../course/courseElementInsertion'
-import { prepareFlowBodyInsertion } from '../course/courseFlowInsertion'
+import { prepareCourseTeacherControllerEdits } from '../course/courseElementInsertion'
+import { planCourseElementInsertion, CourseInsertionError } from '../course/courseElementInsertPlan'
 import { prepareCourseFlowColumns } from '../course/courseFlowLayoutEdits'
 import { courseGeometryEdits } from '../course/courseGeometryEdits'
 import { courseObjectRemovalEdits, courseObjectOrder, courseObjectOrderEdits, courseObjectMoveEdits, courseGlobalPlacementEdits, createCourseObjectPastePlanningBatch } from '../course/courseObjectEdits'
@@ -49,7 +49,8 @@ import { interactionBehavior, interactionRules, remapComponentInteractionData, c
 import { coursePresentationEdits } from './coursePresentationEdits'
 import { isSpatialGraphScopedEdit, spatialGraphItem, spatialGraphDependencyPaths } from '../course/courseSpatialEdits'
 import { courseTextAdvisories } from './courseTextAdvisories'
-import { captureComponentOperation, componentValueAt, presentationComponentEdits, componentFieldIdentityPaths, equalComponentValue } from '../drivers/courseV10Operations'
+import { captureComponentOperation, componentValueAt, presentationComponentEdits, componentFieldIdentityPaths } from '../drivers/courseV10Operations'
+import { equalComponentValue } from '../../shared/componentValue'
 import { imageDataSchema } from '../../components/image/data'
 import type { ComponentEdit, ComponentExpectation, ComponentOperationBatch } from '../../shared/contracts/component-platform/operations'
 import { componentDefinitionBuiltinKey, componentIsLocked, resolveComponentPresentation, containerChildIds, owningContainer, type ComponentContainer, type ComponentTarget } from '../../shared/contracts/component-platform/project'
@@ -2662,11 +2663,9 @@ export class DocumentToolGateway implements ToolGateway {
           if (target.kind !== 'course-surface' && (target.kind !== 'course-instance' || target.authorField || target.dataPath || target.from !== undefined))
             throw new ToolError('invalid-target', '专业插入需要已观察页面或容器，当前目标不是插入容器。可对文档使用 listChildren 取得页面 target，再把返回的页面 target 用于 object.insert；未修改原文档。')
           if (mutation.name === 'teacher.ensure' && target.kind !== 'course-surface') throw new ToolError('invalid-target', '教师控制台需要已观察页面')
-          let project = resolveComponentPresentation(model.project, target.surfaceId, target.stateId ?? null)
-          if (target.kind === 'course-instance' && !project.instances[target.instanceId]?.childIds) throw new ToolError('invalid-target', '所选对象不是容器')
-          if (target.kind === 'course-instance' && componentIsLocked(project, target.instanceId)) throw new ToolError('locked-target', '容器已锁定，请先解锁')
-          let container: ComponentContainer = target.kind === 'course-instance' ? { kind: 'instance', instanceId: target.instanceId } : { kind: 'surface', surfaceId: target.surfaceId }
-          let index = mutation.name === 'object.insert' ? mutation.input.index : undefined
+          const project = resolveComponentPresentation(model.project, target.surfaceId, target.stateId ?? null)
+          const container: ComponentContainer = target.kind === 'course-instance' ? { kind: 'instance', instanceId: target.instanceId } : { kind: 'surface', surfaceId: target.surfaceId }
+          let afterInstanceId: string | undefined, flowSelection: import('../../shared/document/ports').DocumentSelection | undefined
           if (mutation.name === 'object.insert' && mutation.input.after) {
             const position = this.handle(runId, mutation.input.after)
             if (position.documentId !== snapshot.documentId) throw new ToolError('cross-document-batch', '插入位置必须属于同一文档')
@@ -2674,71 +2673,49 @@ export class DocumentToolGateway implements ToolGateway {
             if (after.kind !== 'course-instance' || after.authorField || after.dataPath || after.from !== undefined
               || after.surfaceId !== target.surfaceId || (after.stateId ?? null) !== (target.stateId ?? null))
               throw new ToolError('invalid-target', 'after需要同一展示状态中的整对象句柄')
-            const children = containerChildIds(project, container), offset = children.indexOf(after.instanceId)
-            if (offset < 0) throw new ToolError('invalid-target', 'after对象已不在目标插入容器中，请重新定位')
-            index = offset + 1
+            afterInstanceId = after.instanceId
           }
           if (mutation.name === 'object.insert' && mutation.input.at) {
-            const insertionSurfaceId = target.surfaceId
-            if (componentContainers(project).find(value => value.id === insertionSurfaceId)?.kind !== 'flow')
-              throw new ToolError('invalid-target', 'at只用于Flow正文插入')
             const position = this.handle(runId, mutation.input.at)
             if (position.documentId !== snapshot.documentId) throw new ToolError('cross-document-batch', '插入光标必须属于同一文档')
             const observed = this.resolve(position, snapshot, false, true)
-            const mapped = mapExternalCourseTextTarget(snapshot.model, model, observed)
-            const selection = flowInsertionSelection(model, target.surfaceId, mapped, target.stateId)
-            const split = prepareFlowBodyInsertion(project, target.surfaceId, selection, { deferTextRelationshipCleanup: true })
-            const preparedOwner: ToolTarget = split.container.kind === 'instance'
-              ? { kind: 'course-instance', surfaceId: target.surfaceId, instanceId: split.container.instanceId, stateId: target.stateId }
-              : { kind: 'course-surface', surfaceId: target.surfaceId, stateId: target.stateId }
-            if (!containsTarget(target, preparedOwner, model) || !this.canWrite(run, snapshot, preparedOwner))
-              throw new ToolError('not-authorized', '正文插入位置不属于本次授权的目标容器')
-            if (split.edits.length) {
-              const splitEdits = mapWorkingPresentation(model.project, target.surfaceId, target.stateId ?? null, split.edits)
-              const splitCommand = captureWorkingOperation(model.project, splitEdits)
-              model = await applyPlanned(splitCommand); componentEdits.push(...splitCommand.edits)
-              for (const expected of splitCommand.expected) componentReadPaths.set(JSON.stringify(expected.path), expected.path)
-              if (model.kind !== 'course-v10') throw new Error('正文插入改变了文档格式')
-              project = resolveComponentPresentation(model.project, target.surfaceId, target.stateId ?? null)
-            }
-            container = split.container; index = split.index
+            flowSelection = flowInsertionSelection(model, target.surfaceId, mapExternalCourseTextTarget(snapshot.model, model, observed), target.stateId)
           }
-          const prepared = mutation.name === 'teacher.ensure' ? prepareCourseTeacherControllerEdits(project, target.surfaceId)
-            : prepareCourseElementEdits(project, target.surfaceId, null, mutation.input.kind, { ...mutation.input, container, index })
+          let prepared: { edits: ComponentEdit[]; stages?: ComponentEdit[][]; instanceIds: string[]; bodyContainer?: ComponentContainer }
+          try {
+            prepared = mutation.name === 'teacher.ensure' ? prepareCourseTeacherControllerEdits(project, target.surfaceId)
+              : planCourseElementInsertion(project, { surfaceId: target.surfaceId, stateId: target.stateId, kind: mutation.input.kind,
+                options: { ...mutation.input, container }, afterInstanceId, flowSelection,
+                appearance: mutation.input.appearance, click: mutation.input.click, references })
+          } catch (error) {
+            if (error instanceof CourseInsertionError) throw new ToolError(error.code, error.message)
+            throw error
+          }
+          if (prepared.bodyContainer) {
+            const body = prepared.bodyContainer
+            const owner: ToolTarget = body.kind === 'instance'
+              ? { kind: 'course-instance', surfaceId: target.surfaceId, instanceId: body.instanceId, stateId: target.stateId }
+              : body.kind === 'surface' ? { kind: 'course-surface', surfaceId: body.surfaceId, stateId: target.stateId } : { kind: 'document' }
+            if (!containsTarget(target, owner, model) || !this.canWrite(run, snapshot, owner))
+              throw new ToolError('not-authorized', '正文插入位置不属于本次授权的目标容器')
+          }
           for (const edit of prepared.edits) if (edit.type === 'instance.insert') {
             const owner: ToolTarget = edit.container.kind === 'global' || edit.container.kind === 'project' ? { kind: 'document' } : edit.container.kind === 'surface'
               ? { kind: 'course-surface', surfaceId: edit.container.surfaceId, stateId: target.stateId }
               : { kind: 'course-instance', surfaceId: target.surfaceId, instanceId: edit.container.instanceId, stateId: target.stateId }
             if (!this.canWrite(run, snapshot, owner)) throw new ToolError('not-authorized', '插入容器不属于本次授权范围')
           }
-          const edits = mapWorkingPresentation(model.project, target.surfaceId, target.stateId ?? null, prepared.edits)
-          const command = captureWorkingOperation(model.project, edits)
-          model = await applyPlanned(command); componentEdits.push(...command.edits)
-          for (const expected of command.expected) componentReadPaths.set(JSON.stringify(expected.path), expected.path)
+          // A presentation adapter resolves each stage against the preceding
+          // working model; the final Session command is still one atomic batch.
+          for (const stage of prepared.stages ?? [prepared.edits]) {
+            if (model.kind !== 'course-v10') throw new Error('插入改变了文档格式')
+            const edits = mapWorkingPresentation(model.project, target.surfaceId, target.stateId ?? null, stage)
+            const command = captureWorkingOperation(model.project, edits)
+            model = await applyPlanned(command); componentEdits.push(...command.edits)
+            for (const expected of command.expected) componentReadPaths.set(JSON.stringify(expected.path), expected.path)
+          }
           const insertedTarget: Extract<ToolTarget, { kind: 'course-instance' }> = {
             kind: 'course-instance', surfaceId: target.surfaceId, instanceId: prepared.instanceIds[0]!, stateId: target.stateId,
-          }
-          if (mutation.name === 'object.insert' && mutation.input.appearance !== undefined) {
-            // Reuse post-insert appearance semantics, including the captured presentation state.
-            const insertedModel = model as Extract<DocumentModel, { kind: 'course-v10' }>
-            const appearanceEdits = mapWorkingPresentation(insertedModel.project, target.surfaceId, target.stateId ?? null,
-              courseInstanceAppearanceEdits(insertedModel, insertedTarget, mutation.input.appearance))
-            if (appearanceEdits.length) {
-              const appearanceCommand = captureWorkingOperation(insertedModel.project, appearanceEdits)
-              model = await applyPlanned(appearanceCommand); componentEdits.push(...appearanceCommand.edits)
-              for (const expected of appearanceCommand.expected) componentReadPaths.set(JSON.stringify(expected.path), expected.path)
-            }
-          }
-          if (mutation.name === 'object.insert' && mutation.input.click) {
-            const click = mutation.input.click
-            const insertedModel = model as Extract<DocumentModel, { kind: 'course-v10' }>
-            const project = resolveComponentPresentation(insertedModel.project, target.surfaceId, target.stateId ?? null)
-            const clickEdits = mapWorkingPresentation(insertedModel.project, target.surfaceId, target.stateId ?? null,
-              componentClickInteractionEdits({ project, surfaceId: target.surfaceId, activeStateId: target.stateId ?? null,
-                instanceId: insertedTarget.instanceId }, click.action, click.value, references))
-            const clickCommand = captureWorkingOperation(insertedModel.project, clickEdits)
-            model = await applyPlanned(clickCommand); componentEdits.push(...clickCommand.edits)
-            for (const expected of clickCommand.expected) componentReadPaths.set(JSON.stringify(expected.path), expected.path)
           }
           finalTargets.push(insertedTarget)
           continue

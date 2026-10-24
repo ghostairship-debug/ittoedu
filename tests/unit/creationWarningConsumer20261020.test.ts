@@ -1,3 +1,4 @@
+// @requires-player-bundle CREATION_BOUNDARY_USE_DIST_PLAYER=1
 // @vitest-environment node
 import { afterAll, beforeAll, expect, it } from 'vitest'
 import { build } from 'esbuild'

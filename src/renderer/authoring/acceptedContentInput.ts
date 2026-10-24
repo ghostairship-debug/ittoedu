@@ -1,6 +1,6 @@
 import { CourseV10Driver } from '../../core/drivers/CourseV10Driver'
 import { resolveComponentPresentation } from '../../shared/contracts/component-platform/project'
-import { equalComponentValue } from '../../core/drivers/courseV10Operations'
+import { equalComponentValue } from '../../shared/componentValue'
 import { isCourseComponentInputFailure, settleCourseComponentInput, type CapturedComponentOperation, type CapturedCourseTarget, type CourseV10DocumentBridge } from '../documents/CourseV10DocumentBridge'
 
 /** Runtime-only facts retained by the existing input owner while its original ACK is unknown. */

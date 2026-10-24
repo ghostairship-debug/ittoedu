@@ -1,8 +1,9 @@
+import { componentAppearanceEdits } from '../course/componentAppearanceEdits'
 import { componentContainers } from '../../shared/contracts/component-platform/project'
 import type { DocumentModel } from '../../shared/workbench/document'
 import type { ComponentEdit } from '../../shared/contracts/component-platform/operations'
 import { componentDefinitionBuiltinKey, type JsonValue } from '../../shared/contracts/component-platform/project'
-import { equalComponentValue } from '../drivers/courseV10Operations'
+import { equalComponentValue } from '../../shared/componentValue'
 import type { objectConvertOptionsInputSchema, objectUpdatePropertiesInputSchema } from './toolSchemas'
 import { courseInstanceContext, type CourseInstanceTarget } from './ToolTargets'
 import { parseTableData, tableCellContent } from '../../components/table/data'
@@ -12,9 +13,7 @@ import { changeChartType, replaceChartTableData } from '../../components/chart/c
 import { chartDataEdit } from '../../components/chart/edit'
 import { plainDocumentText } from '../../shared/document/content'
 import { componentDataEdits } from '../course/componentDataEdits'
-import { textAppearanceSchema } from '../../components/text/data'
 import { z } from 'zod'
-import { documentTextStyleSchema } from '../../shared/document/content'
 export { componentDataPropertyFields } from '../course/componentDataEdits'
 
 /** Copy only observed professional appearance fields. Shadow CSS stays software-owned. */
@@ -45,29 +44,8 @@ export function readCourseInstanceAppearance(model: DocumentModel, target: Cours
 /** Public appearance maps to the same professional data and wrapper style that renderers consume. */
 export function courseInstanceAppearanceEdits(model: DocumentModel, target: CourseInstanceTarget,
   appearance: Record<string, JsonValue>): ComponentEdit[] {
-  const { project, instance } = courseInstanceContext(model, target)
-  const builtin = componentDefinitionBuiltinKey(project.definitions[instance.definitionId])
-  const fields = { ...appearance }, edits: ComponentEdit[] = []
-  if (builtin === 'guoling.text' || builtin === 'guoling.formula') {
-    if (Object.hasOwn(fields, 'shadows')) {
-      const shadows = z.array(z.object({ x: z.number().finite(), y: z.number().finite(),
-        blur: z.number().finite().nonnegative(), color: documentTextStyleSchema.shape.color.unwrap() }).strict()).parse(fields.shadows)
-      const value = shadows.length ? shadows.map(shadow => `${shadow.x}px ${shadow.y}px ${shadow.blur}px ${shadow.color}`).join(', ') : 'none'
-      if (!equalComponentValue(instance.style?.textShadow, value)) edits.push({ type: 'style.set', instanceId: instance.id, path: ['textShadow'], value })
-      delete fields.shadows
-    }
-    if (Object.keys(fields).length) {
-      textAppearanceSchema.partial().parse(fields)
-      edits.push(...componentDataEdits(project, target, { kind: 'patch', data: { appearance: fields } }))
-    }
-  } else if (['guoling.table', 'guoling.chart', 'guoling.shape'].includes(builtin ?? '')) {
-    edits.push(...componentDataEdits(project, target, { kind: 'patch', data: { style: fields } }))
-  } else if (builtin === 'guoling.image') {
-    const forbidden = ['assetId', 'originalAssetId', 'alt'].filter(key => Object.hasOwn(fields, key))
-    if (forbidden.length) throw new Error(`外观不能替换资源或正文：${forbidden.join('、')}`)
-    edits.push(...componentDataEdits(project, target, { kind: 'patch', data: fields }))
-  } else throw new Error('当前对象不支持专业外观参数，请使用已观察的公开 data/style 属性')
-  return edits
+  const { project } = courseInstanceContext(model, target)
+  return componentAppearanceEdits(project, target, appearance)
 }
 
 /** Selected instance properties use the same public operations as the inspector. */

@@ -2,7 +2,7 @@ import { remapDocumentData, type TextRangeProjection } from '../../shared/docume
 import type { ComponentEdit, CourseProjectV10, JsonValue } from '../../shared/contracts/component-platform'
 import { componentDefinitionBuiltinKey, resolveComponentPresentation } from '../../shared/contracts/component-platform/project'
 import { componentRuleEdits, interactionBehavior, componentInteractionDataSchema } from '../../shared/componentInteractionData'
-import { equalComponentValue } from '../drivers/courseV10Operations'
+import { equalComponentValue } from '../../shared/componentValue'
 import { componentInputDataPropertyEdits } from '../../components/input/authoring'
 import { chartDataSchema, chartTableDataSchema } from '../../components/chart/data'
 import { changeChartType, replaceChartTableData } from '../../components/chart/contentOperations'

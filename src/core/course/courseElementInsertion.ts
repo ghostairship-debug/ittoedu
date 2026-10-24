@@ -1,7 +1,7 @@
-import { componentContainerForInstance, componentSurface } from '../../shared/contracts/component-platform/project'
+import { courseInsertionFrame } from './courseInsertionGeometry'
+import { componentSurface } from '../../shared/contracts/component-platform/project'
 import { nanoid } from 'nanoid'
 import type { ComponentContainer, ComponentDefinition, ComponentInstance, CourseProjectV10, JsonValue } from '../../shared/contracts/component-platform/project'
-import type { ComponentFrame } from '../../shared/contracts/component-platform/frame'
 import { componentDefinitionBuiltinKey, containerChildIds, owningContainer } from '../../shared/contracts/component-platform/project'
 import { courseSettingsEdits } from './courseSemanticEdits'
 import { courseGlobalPlacementEdits } from './courseObjectEdits'
@@ -64,18 +64,6 @@ export function resolveCourseInsertionPlacement(target: CourseInsertionTarget, o
     flowPlacement: { space: 'paper', plane: 'overlay' } })) : []
   return { container, index: insertionIndex(target, container, options), edits }
 }
-export function courseInsertionFrame(target: CourseInsertionTarget, width: number, height: number, options: CourseInsertionOptions): ComponentFrame {
-  const requested = options.container?.kind === 'instance' ? componentSurface(target.project, options.container.instanceId)
-    : options.container?.kind === 'surface' ? componentSurface(target.project, options.container.surfaceId) : undefined
-  const surface = requested ?? (target.surfaceId ? componentSurface(target.project, target.surfaceId)
-    : target.instanceId ? componentContainerForInstance(target.project, target.instanceId) : undefined)
-  const size = surface?.designSize ?? { width: 1280, height: 720 }
-  const actualWidth = options.width ?? width, actualHeight = options.height ?? height
-  return { width: actualWidth, height: actualHeight,
-    transform: [1, 0, 0, 1, options.x ?? (options.center ? options.center.x - actualWidth / 2 : options.origin === 'slide-authoring' ? 80 : surface?.kind === 'slide' ? (size.width - width) / 2 : 0),
-      options.y ?? (options.center ? options.center.y - actualHeight / 2 : options.origin === 'slide-authoring' ? 80 : surface?.kind === 'slide' ? (size.height - height) / 2 : 0)] }
-}
-
 /** The original professional insertion algorithm; the caller retains capture, CAS and History. */
 export function prepareCourseElementEdits(project: CourseProjectV10, surfaceId: string | null, selectedInstanceId: string | null,
   kind: CourseElementKind, options: CourseInsertionOptions = {}): { edits: ComponentEdit[]; instanceIds: string[] } {

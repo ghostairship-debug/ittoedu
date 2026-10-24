@@ -2,12 +2,22 @@
 
 主执行者先读[当前状态](CURRENT_STATUS.md)和用户指定范围；已注入的 AGENTS 无需重读。合同、历史和证据按相关动作取用，不顺序通读全部资料。
 
+本批架构优化已获commit／push授权，各轮“未提交”保留历史时点；仅提交本批增量，其他未提交成果及发行暂停保持。
+
 | 用途 | 唯一入口或直接依据 |
 |---|---|
 | 当前实现、剩余与交付边界 | [CURRENT_STATUS](CURRENT_STATUS.md)；最新为10月24日资源、运行性能与动画基础修复，软件与作品责任、资源/加载实测及剩余长帧分别记录；前一轮交互成果与旧条件专项、创作质量／效率边界保留 |
 | 已执行批次的原规格 | [软件方案全部 §1—28](../archive/联网搜索解耦与多后端接入方案-2026-10-12.md)、[互动演示创作方案](../archive/互动演示创作方案-2026-10-12.md)、[历史启动提示词](../archive/果铃软件与创作修复-Codex执行提示词-2026-10-12.md)；原批次已于10月13日收口，不再自动执行 |
 | 唯一开发结果与证据 | [软件与创作修复结果](SOFTWARE_AUTHORING_RESULT.md)；最新关闭、Markdown、HTML／GLX 编辑和统一编辑复核结果在前，早期阶段按原日期读取 |
 | 实际接续任务 | [TASK_BOARD](TASK_BOARD.md)及对应卡；queued 不自动启动，未实施候选不计完成 |
+| 架构优化整体收口（2026-10-24，仅文档评估） | [原方案§15逐包最终状态](../../output/architecture-audit-20261024/IMPLEMENTATION_PLAN.md#architecture-batch-closeout)；本批已选范围全部收口，P5-A计量后不采用，广义P2-C／D／E、P4及P5-B／C／D未选方向按证据暂缓，无默认下一轮。原14红例中4项有后续原例关闭证据，其余10项保留准确边界；目录旧失败已由§14收口，不回写历史统计。本次未改代码／测试／配置或运行验证，现有dirty和发行暂停保持 |
+| 架构服务发现与作业归属维护（2026-10-24，已收口） | [唯一结果](20261024-architecture-service-discovery/RESULT.md)；按[原方案§14](../../output/architecture-audit-20261024/IMPLEMENTATION_PLAN.md#next-round-after-positive)完成目录→只读提交／取消归属维护，原5项＋新增归属1项及真实持久接续1项共7项通过，主类型与独审通过。三个start拒绝、跨run／接续只读不可取消及零取消服务调用已证实；未发现实际越权，产品源码／权限／检查定义未改，其他包不追加，现有dirty保全，未commit／push／发布 |
+| 架构正收益切片（2026-10-24，已实施） | [唯一结果](20261024-architecture-positive/RESULT.md)；[原方案§13](../../output/architecture-audit-20261024/IMPLEMENTATION_PLAN.md#positive-return-next-slices)三个切片已依次开发／验证／独审，42项相关检查及完整三段类型检查通过；双Player原生子项与隔离资产库冷开覆盖。当时2条服务目录旧失败已由后续§14收口，原统计不回写；其余包未追加，现有dirty保全，未commit／push／发布 |
+| 架构第五轮（2026-10-24，Electron／e2e增量已采用） | [唯一结果](20261024-architecture-fifth-round/RESULT.md)；两套暖完整3.13／5.18秒对无改增量0.55／0.79秒，确定错误两模式同诊断、恢复通过，最终无cache执行及独审通过。原三段及主段、配置／正式emit保持；P1-C本轮范围收口，未追加其他包，现有dirty保全，未commit／push／发布 |
+| 架构第四轮（2026-10-24，停止／丢ACK定性完成） | [唯一结果](20261024-architecture-fourth-round/RESULT.md)；两条夹具维护及原行为／同操作查证通过，两项选中检查、主类型及独审通过，产品源码未改。[第四轮后取舍与下一轮标准](../../output/architecture-audit-20261024/IMPLEMENTATION_PLAN.md#next-round-after-fourth)已由第五轮按范围执行；结构方向继续暂缓，不按旧红例逐项扩面，现有dirty保全，未commit／push／发布 |
+| 架构第三轮（2026-10-24，P1-C采用／P5-A未采用） | [唯一结果](20261024-architecture-third-round/RESULT.md)；主配置增量有收益且诊断保持，原三段检查不减。P5-A计量后保留原实现；独审通过。[第三轮后再评估／下一轮标准](../../output/architecture-audit-20261024/IMPLEMENTATION_PLAN.md#next-round-after-third)已由第四轮按范围执行；P2-D结构迁移仍暂缓，现有dirty保全，未commit／push／发布 |
+| 架构收敛第二轮（2026-10-24，已实施） | [唯一结果](20261024-architecture-second-round/RESULT.md)；P2-B与Source正确性修复完成，20项聚焦、真实输入／迟ACK与保存重开、相关类型／构建及独审通过。[原方案§10](../../output/architecture-audit-20261024/IMPLEMENTATION_PLAN.md#next-round-after-second)已由第三轮接续；广义P2-C优化未实施，现有dirty保全，未commit／push／发布 |
+| 架构收敛首轮（2026-10-24，已实施） | [唯一结果与证据边界](20261024-architecture-first-round/RESULT.md)；P1-A／P1-B／P2-A／P3开发、相关最小充分验证及独审完成。[原方案§9](../../output/architecture-audit-20261024/IMPLEMENTATION_PLAN.md#next-round-after-first)的后续选择已由第二轮实际结果接续；未复验原红例及既有dirty保留，未commit／push／发布 |
 | 资源、运行性能与动画基础（2026-10-24） | [修复报告](../../output/resource-runtime-repair-20261024/REPORT.md)、[性能对照](../../output/resource-runtime-repair-20261024/PERFORMANCE.md)、[接口变化](../../output/resource-runtime-repair-20261024/SOFTWARE_CHANGES.md)、[创作交接](../../output/resource-runtime-repair-20261024/CREATIVE_HANDOFF.md)；GLX 17.50→8.43MB、正式HTML 29.53→16.39MB。原件只读，本轮独立本地提交，前一轮dirty保留，不push/发布 |
 | 编辑阻断与体验回退修复（2026-10-23，收口） | [唯一结果及A01–A20／B01–B21覆盖](20261023-editing-regressions/RESULT.md)；P1–P9软件修复与独审完成，指定GLX、大小HTML副本实际编辑／保存／新进程冷开、最终工具栏视觉及相关类型／构建通过。性能与外部条件边界保留；实施时未提交，本地提交沿下文最新授权 |
 | 审计整合与组件／Flow重构（2026-10-23，已完成） | [唯一结果与证据](20261023-audit-refactor/RESULT.md)；审计归并、B1–B8裁决、混排／插入／发现／分栏及恢复／运行／输出已实施并独审，真实模型接力、人工状态保留、保存新进程冷开与正式compiled离线互动通过；无可比基线，不签普遍提速，实施时未提交，本地提交沿下文最新授权 |

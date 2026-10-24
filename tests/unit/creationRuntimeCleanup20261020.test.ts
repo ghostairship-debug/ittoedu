@@ -1,3 +1,4 @@
+// @requires-player-bundle CREATION_BOUNDARY_USE_DIST_PLAYER=1
 import { testContainerInstance } from '../helpers/glxWorkFixture'
 // @vitest-environment node
 import { mkdir, readFile, writeFile } from 'node:fs/promises'

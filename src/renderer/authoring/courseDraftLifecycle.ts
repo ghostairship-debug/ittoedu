@@ -2,7 +2,7 @@ import type { CourseV10DocumentBridge } from '../documents/CourseV10DocumentBrid
 import type { AdvancedDraftRecovery } from '../../shared/workbench/desktop'
 import type { AuthoringDraftRecovery, AuthoringDraftWrite, AuthoringRecoveryClaim, DocumentHostAPI, PropertyDraftRecovery } from '../../shared/workbench/desktop'
 import type { DocumentSnapshot } from '../../shared/workbench/document'
-import { equalComponentValue } from '../../core/drivers/courseV10Operations'
+import { equalComponentValue } from '../../shared/componentValue'
 export type { AdvancedDraftRecovery } from '../../shared/workbench/desktop'
 
 export interface AdvancedDraftIssue { documentId: string; epoch: string; message: string }

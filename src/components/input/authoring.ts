@@ -5,7 +5,7 @@ import type { EditorStoreKernel } from '../../renderer/store/editorStoreKernel'
 import { buildInputRuleFamily, inspectInputRuleFamily, type InputRuleConfig } from '../../core/tools/inputRuleFamily'
 import { componentRuleEdits, interactionBehavior, interactionRules, componentInteractionOwner } from '../../shared/componentInteractionData'
 import { inputAnswerContent, inputDataSchema } from './data'
-import { equalComponentValue } from '../../core/drivers/courseV10Operations'
+import { equalComponentValue } from '../../shared/componentValue'
 import { normalizeShortAnswer } from '../../shared/assessmentEvaluators'
 import { prepareCourseInteractionAction, type CourseAuthoringReferences } from '../../core/course/courseAuthoringReferences'
 

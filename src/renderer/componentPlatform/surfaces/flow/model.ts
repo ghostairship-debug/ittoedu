@@ -1,7 +1,7 @@
 import { componentContainers } from '../../../../shared/contracts/component-platform/project'
 import { containerChildIds, owningContainer, type ComponentContainer, type ComponentInstance, type CourseProjectV10, type JsonValue } from '../../../../shared/contracts/component-platform/project'
 import type { ComponentEdit } from '../../../../shared/contracts/component-platform/operations'
-import { equalComponentValue } from '../../../../core/drivers/courseV10Operations'
+import { equalComponentValue } from '../../../../shared/componentValue'
 import type { TextComponentData } from '../../../../components/text/data'
 
 /** The view borrows the canonical ownership relation; it never stores a body document. */

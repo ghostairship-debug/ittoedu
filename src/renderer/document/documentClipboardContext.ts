@@ -13,7 +13,7 @@ import type { CourseObjectClipboardSource } from '../composition/crossSurfaceCom
 import { componentDefinitionBuiltinKey, owningContainer, resolveComponentPresentation, type CourseProjectV10, type JsonValue } from '../../shared/contracts/component-platform/project'
 import { normalizeWorkProject } from '../../shared/contracts/component-platform/workProjectMigration'
 import type { ComponentLibraryEntry } from '../../shared/contracts/component-platform/library'
-import { equalComponentValue } from '../../core/drivers/courseV10Operations'
+import { equalComponentValue } from '../../shared/componentValue'
 
 const bytesSchema = z.array(z.number().int().min(0).max(255))
 const contextSchema = z.object({

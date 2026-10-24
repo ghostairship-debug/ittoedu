@@ -28,9 +28,11 @@ function sourceLaunchFacts(root) {
     return { present: true, records: [[relative, String(stat.size), String(stat.mtimeNs), String(stat.ctimeNs)]] }
   }
   return {
-    async fingerprint(entries) {
+    async fingerprint(entries, excluded = []) {
       const snapshots = await Promise.all(entries.map(entry => read(path.normalize(entry))))
-      return createHash('sha256').update(JSON.stringify(snapshots.flatMap(item => item.records))).digest('hex')
+      const omitted = excluded.map(entry => path.normalize(entry))
+      const records = snapshots.flatMap(item => item.records).filter(([entry]) => !omitted.some(root => entry === root || entry.startsWith(root + path.sep)))
+      return createHash('sha256').update(JSON.stringify(records)).digest('hex')
     },
     async present(entries) { return (await Promise.all(entries.map(entry => read(path.normalize(entry))))).every(item => item.present) },
     invalidate(entries) {
@@ -39,7 +41,7 @@ function sourceLaunchFacts(root) {
     },
   }
 }
-export async function prepareSourceLaunch(root = repository, run = runScript) {
+export async function prepareSourceLaunch(root = repository, run = runScript, targets = ['player', 'renderer', 'electron', 'clipboard', 'publish']) {
   const filename = path.join(root, 'output/source-launch-state.json')
   const lock = createHash('sha256').update(await fs.readFile(path.join(root, 'package-lock.json'))).digest('hex')
   const facts = sourceLaunchFacts(root)
@@ -48,18 +50,32 @@ export async function prepareSourceLaunch(root = repository, run = runScript) {
   try { previous = JSON.parse(await fs.readFile(filename, 'utf8')) } catch (error) { if (error.code !== 'ENOENT') console.warn('启动构建索引不可读，将重新核对构建') }
   if (previous.lock && previous.lock !== lock && previous.installation === installation)
     throw new Error('依赖锁已变更；请先执行 npm ci 后重试。安装完成会自动重建，无需删除启动索引。')
-  const shared = ['src/shared', 'src/core', 'src/components', 'scripts/generate-component-builtin-sources.ts', 'package.json', 'package-lock.json', 'node_modules/.package-lock.json']
+  const shared = ['src/shared', 'src/core', 'src/components', 'scripts/prepare-source-launch.mjs', 'scripts/generate-component-builtin-sources.ts', 'package.json', 'package-lock.json', 'node_modules/.package-lock.json']
+  const generated = ['src/shared/generated/componentBuiltinSources', 'src/shared/generated/componentBuiltinSourceLoaders.ts']
   const rendererHtml = (await fs.readdir(root)).filter(name => name.endsWith('.html')).sort()
   const groups = [
-    { name: 'player', inputs: [...shared, 'src/player', 'vite.player.config.ts', 'scripts/htmlPreviewAgentPlugin.ts', 'resources/built-in-components'], outputs: ['dist-player'], scripts: ['check:built-in-components', 'build:player'] },
-    { name: 'renderer', inputs: [...shared, ...rendererHtml, 'src/player', 'src/renderer', 'vite.renderer.config.ts', 'scripts/htmlPreviewAgentPlugin.ts', 'dist-player'], outputs: ['dist-renderer'], scripts: ['build:renderer'] },
-    { name: 'electron', inputs: [...shared, 'src/main', 'src/preload', 'tsconfig.electron.json', 'scripts/build-electron.mjs'], outputs: ['dist-electron'], scripts: ['build:electron'] },
+    // Builtin source entries also bundle renderer interaction and Player state rules.
+    { name: 'sources', inputs: [...shared, 'src/renderer', 'src/player'], excluded: generated, outputs: generated, scripts: ['generate:component-sources'] },
+    { name: 'player', dependencies: ['sources'], inputs: [...shared, 'src/player', 'vite.player.config.ts', 'scripts/build-compiled-player.mjs', 'scripts/htmlPreviewAgentPlugin.ts', 'resources/built-in-components'], outputs: ['dist-player'], scripts: ['check:built-in-components', 'build:player:raw'] },
+    { name: 'renderer', dependencies: ['player', 'sources'], inputs: [...shared, ...rendererHtml, 'src/player', 'src/renderer', 'vite.renderer.config.ts', 'scripts/htmlPreviewAgentPlugin.ts', 'dist-player'], outputs: ['dist-renderer'], scripts: ['build:renderer:raw'] },
+    { name: 'electron', dependencies: ['sources'], inputs: [...shared, 'src/main', 'src/preload', 'tsconfig.electron.json', 'scripts/build-electron.mjs'], outputs: ['dist-electron'], scripts: ['build:electron:raw'] },
     { name: 'clipboard', inputs: ['resources/clipboard-file-list/Program.cs', 'scripts/build-clipboard-helper.ps1'], outputs: ['resources/clipboard-file-list/clipboard-file-list.exe'], scripts: ['build:clipboard-helper'] },
     { name: 'publish', inputs: ['resources/file-publish/Program.cs', 'scripts/build-file-publish-helper.ps1'], outputs: ['resources/file-publish/file-publish.exe'], scripts: ['build:file-publish-helper'] },
   ]
-  const next = { lock, installation }, rebuilt = []
+  const selected = new Set()
+  const include = name => {
+    const group = groups.find(value => value.name === name)
+    if (!group) throw new Error(`未知构建目标：${name}`)
+    if (selected.has(name)) return
+    for (const dependency of group.dependencies ?? []) include(dependency)
+    selected.add(name)
+  }
+  targets.forEach(include)
+  const sameInstallation = previous.lock === lock && previous.installation === installation
+  const next = { ...(sameInstallation ? previous : {}), lock, installation }, rebuilt = []
   for (const group of groups) {
-    let identity = await facts.fingerprint(group.inputs)
+    if (!selected.has(group.name)) continue
+    let identity = await facts.fingerprint(group.inputs, group.excluded)
     let outputIdentity = await facts.fingerprint(group.outputs)
     if (previous[group.name]?.identity !== identity || previous[group.name]?.outputIdentity !== outputIdentity || !await facts.present(group.outputs)) {
       for (const script of group.scripts) await run(script, root)
@@ -67,7 +83,7 @@ export async function prepareSourceLaunch(root = repository, run = runScript) {
       // A build can update generated inputs as well as its outputs. Refresh this
       // group's facts after it completes; later groups share the refreshed view.
       facts.invalidate([...group.inputs, ...group.outputs])
-      identity = await facts.fingerprint(group.inputs)
+      identity = await facts.fingerprint(group.inputs, group.excluded)
       outputIdentity = await facts.fingerprint(group.outputs)
     }
     next[group.name] = { identity, outputIdentity }
@@ -86,5 +102,6 @@ function runScript(script, root) {
   })
 }
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  prepareSourceLaunch().catch(error => { console.error(error.message); process.exitCode = 1 })
+  prepareSourceLaunch(repository, runScript, process.argv.length > 2 ? process.argv.slice(2) : undefined)
+    .catch(error => { console.error(error.message); process.exitCode = 1 })
 }

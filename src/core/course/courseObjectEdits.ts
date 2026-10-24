@@ -11,10 +11,11 @@ import type { LibraryDiagnostic, LibraryExtractResult } from '../components/libr
 import { associatedComponentInteractionRules, componentInteractionDataSchema, componentRuleEdits, createComponentInteractionCopyIdentities, interactionBehavior, interactionRules, remapComponentInteractionData } from '../../shared/componentInteractionData'
 import { remapComponentInputData } from '../../components/input/authoring'
 import { inputDataSchema } from '../../components/input/data'
-import { componentParentMatrix, equalComponentValue } from '../drivers/courseV10Operations'
+import { componentParentMatrix } from '../drivers/courseV10Operations'
+import { equalComponentValue } from '../../shared/componentValue'
 import { globalVisibilityAtSurface } from './courseSemanticEdits'
 import { courseSurfaceReference, prepareCourseVisibility, type CourseAuthoringReferences } from './courseAuthoringReferences'
-import { courseInsertionFrame } from './courseElementInsertion'
+import { courseInsertionFrame } from './courseInsertionGeometry'
 import { createProfessionalDocumentIdentityCopy } from '../components/library/professionalCopy'
 import { rebindComponentBackground } from '../../shared/componentBackgroundPaint'
 

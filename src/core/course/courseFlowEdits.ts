@@ -3,7 +3,8 @@ import type { ComponentContainer, ComponentFlowAuthoring, ComponentFlowBodyLayou
 import type { ComponentFrame } from '../../shared/contracts/component-platform/frame'
 import type { ComponentEdit } from '../../shared/contracts/component-platform/operations'
 import { componentIsLocked, containerChildIds, owningContainer } from '../../shared/contracts/component-platform/project'
-import { componentParentMatrix, equalComponentValue } from '../drivers/courseV10Operations'
+import { componentParentMatrix } from '../drivers/courseV10Operations'
+import { equalComponentValue } from '../../shared/componentValue'
 import { composeMatrices, IDENTITY_MATRIX, reparentFrame } from '../components/geometry'
 import { prepareCourseFlowPlacement, type CourseAuthoringReferences } from './courseAuthoringReferences'
 

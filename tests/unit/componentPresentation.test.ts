@@ -32,6 +32,26 @@ function addContainer(project: CourseProjectV10, surface: ComponentSurface) {
 }
 
 describe('shared component outer presentation', () => {
+  it('uses the effective implementation for a root program viewport while preserving local placement', () => {
+    const project = fixture(), instance = project.instances.image
+    const definition = project.definitions[instance.definitionId]!
+    project.rootIds = [instance.id]
+    const present = () => resolveComponentOuterPresentation(project, instance,
+      { placement: 'free', purpose: 'playback', inlineSize: 600, viewport: { width: 900, height: 500 } })
+    expect(present().layoutInput.mode).toBe('free-frame')
+    const source = { kind: 'source' as const, language: 'javascript' as const, source: 'program.js' }
+    instance.implementationOverride = source
+    expect(present().layoutInput).toMatchObject({ mode: 'program-viewport', inlineSize: 900, blockSize: 500 })
+    definition.implementation = source
+    instance.implementationOverride = { kind: 'builtin', key: 'guoling.text' }
+    expect(present().layoutInput.mode).toBe('free-frame')
+    for (const key of ['guoling.web', 'guoling.html-program']) {
+      instance.implementationOverride = { kind: 'builtin', key }
+      expect(present().layoutInput.mode).toBe('program-viewport')
+    }
+    project.rootIds = ['flow']
+    expect(present().layoutInput.mode).toBe('free-frame')
+  })
   it('keeps the native global Web input owner distinct from page Web and professional Source identity', () => {
     const project = fixture(), instance = project.instances.group
     expect(isGlobalFramedWebDocument(project, instance)).toBe(false)

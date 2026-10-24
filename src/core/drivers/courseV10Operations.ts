@@ -1,3 +1,4 @@
+import { equalComponentValue } from '../../shared/componentValue'
 import { componentTextRelationshipEdits, type TextRelationshipPlanOptions } from '../course/componentTextRelationshipEdits'
 import { canonicalNavigationGuard, removeNavigationGuardSurfaces } from '../../shared/courseNavigationGuards'
 import { allDocumentTextSlots, documentComponentDataVersions, inlineComponentIds } from '../../shared/document/textInteraction'
@@ -24,16 +25,6 @@ export function componentParentMatrix(project: CourseProjectV10, id: string): Af
 export class ComponentOperationConflict extends Error {
   readonly code = 'component-field-conflict'
   constructor(readonly path: string[], message = `目标内容或归属已变化：${path.join('.')}`) { super(message) }
-}
-
-export function equalComponentValue(left: unknown, right: unknown): boolean {
-  if (Object.is(left, right)) return true
-  if (!left || !right || typeof left !== 'object' || typeof right !== 'object') return false
-  if (Array.isArray(left) || Array.isArray(right)) return Array.isArray(left) && Array.isArray(right)
-    && left.length === right.length && left.every((value, index) => equalComponentValue(value, right[index]))
-  const leftRecord = left as Record<string, unknown>, rightRecord = right as Record<string, unknown>
-  const keys = Object.keys(leftRecord)
-  return keys.length === Object.keys(rightRecord).length && keys.every(key => Object.hasOwn(rightRecord, key) && equalComponentValue(leftRecord[key], rightRecord[key]))
 }
 
 /** Legacy surface addresses resolve once to the canonical container instance. */
