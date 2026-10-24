@@ -109,7 +109,8 @@ it.each([1, 4, 16])('keeps the public operation producer small for %i real Sessi
     expect(serialized).not.toContain('PAYLOAD_SENTINEL')
     sizes.push(bytes(result)); tokens.push(estimateSerializedTokens(serialized))
     const internal = h.session.lookupOperation('apply')!
-    expect('appliedChanges' in internal && (internal.appliedChanges?.changes[0].value as { html: string }).html === body).toBe(true)
+    const exact = 'appliedChanges' in internal && internal.appliedChanges?.changes.find(change => JSON.stringify(change.path) === JSON.stringify(['instances', 'object-0', 'data', 'html']))
+    expect(exact && exact.value).toBe(body)
     const current = h.session.read() as ComponentProjectSnapshot
     expect(current.undoDepth).toBe(1)
     for (let index = 0; index < count; index++) expect((current.model.project.instances[`object-${index}`].data as { html: string }).html === body).toBe(true)
@@ -224,8 +225,10 @@ it('keeps full ordinary operation records internally while the public lookup pro
   expect(result).toMatchObject({ kind: 'document-operation', result: { documentId: 'public-write', operationId: 'ordinary', revision: 1 } })
   expect(JSON.stringify(result)).not.toContain('ORDINARY_OPERATION_PAYLOAD')
   const retained = h.session.lookupOperation('ordinary')!
-  expect('appliedChanges' in retained && (retained.appliedChanges?.changes[0].value as { html: string }).html === body).toBe(true)
-  expect('appliedChanges' in original && (original.appliedChanges?.changes[0].value as { html: string }).html === body).toBe(true)
+  for (const record of [retained, original]) {
+    const exact = 'appliedChanges' in record && record.appliedChanges?.changes.find(change => JSON.stringify(change.path) === JSON.stringify(['instances', 'object-0', 'data', 'html']))
+    expect(exact && exact.value).toBe(body)
+  }
 })
 
 it('keeps Gateway execute and lookup compact, reuses the same operation, and never echoes 2MB invalid arguments', async () => {

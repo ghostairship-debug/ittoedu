@@ -7,17 +7,16 @@ import { locateDocumentBlock, planDocumentBlockInsertion } from '../../shared/do
 import { projectFlowDocument, flowDocumentEdits } from '../components/document/flowDocumentProjection'
 import { applyComponentOperation, captureComponentOperation } from '../drivers/courseV10Operations'
 
-/** Prepare only the body split and its actual reading container. The existing caller
- * prepares the object against this working project, then captures all edits once. */
-export function prepareFlowBodyInsertion(project: CourseProjectV10, surfaceId: string, selection: DocumentSelection | null,
-  options: { deferTextRelationshipCleanup?: boolean } = {}): {
+/** A split is only a working stage of insertion. Preserve relationship sources here;
+ * the caller captures the split and inserted objects together for final cleanup. */
+export function prepareFlowBodyInsertion(project: CourseProjectV10, surfaceId: string, selection: DocumentSelection | null): {
   edits: ComponentEdit[]; project: CourseProjectV10; container: ComponentContainer; index: number
 } {
   if (componentSurface(project, surfaceId)?.kind !== 'flow') throw new Error('当前页面不是讲义')
   const before = projectFlowDocument(project, surfaceId).content
   const plan = planDocumentBlockInsertion(before, selection)
-  const edits = flowDocumentEdits(project, surfaceId, plan.content.blocks, project, undefined, undefined, options)
-  const working = edits.length ? applyComponentOperation(project, captureComponentOperation(project, edits, [], { deferTextRelationships: options.deferTextRelationshipCleanup })) : project
+  const edits = flowDocumentEdits(project, surfaceId, plan.content.blocks, project, undefined, undefined, { deferTextRelationshipCleanup: true })
+  const working = edits.length ? applyComponentOperation(project, captureComponentOperation(project, edits, [], { deferTextRelationships: true })) : project
   const container: ComponentContainer = { kind: 'instance', instanceId: plan.parentId ?? surfaceId }
   const body = plan.parentId ? documentBlockChildren(locateDocumentBlock(plan.content.blocks, plan.parentId)!.block)! : plan.content.blocks
   const siblings = containerChildIds(working, container)

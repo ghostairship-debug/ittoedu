@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import type { InteractionRule } from '../../shared/interactionTypes'
 import { useEditorStore, selectEditingScope } from '../store/editorStore'
-import { componentInteractionView, componentRuleEdits, componentRevealSequenceEdits, duplicateComponentRule } from '../interactions/componentInteractionAuthoring'
+import { componentInteractionView } from '../interactions/componentInteractionAuthoring'
 import { buildInteractionTemplateRule, SCENE_ENTER_REVEAL_SEQUENCE_TEMPLATE_ID } from '../interactions/interactionTemplates'
 import { previewComponentMotion } from '../interactions/componentMotionPreview'
 import { SceneAutomationEditor, InteractionEditor } from './InteractionEditor'
@@ -9,7 +9,7 @@ import { CourseLogicAuthoringPanel } from './CourseLogicAuthoringPanel'
 import { courseLogicAuthoringView, commitCourseLogicAuthoringCommand } from '../course/courseLogicAuthoringCommands'
 import { ensureCourseTeacherController } from '../media/commitCourseMediaAuthoring'
 import { componentDefinitionBuiltinKey } from '../../shared/contracts/component-platform/project'
-import { removeComponentRule, moveComponentRule } from '../../shared/componentInteractionData'
+import { planComponentRuleChange, type ComponentRuleChange } from '../../shared/componentInteractionData'
 
 export function AutomationTab() {
   const courseView = useEditorStore(state => state.courseView)
@@ -24,28 +24,18 @@ export function AutomationTab() {
   const contextId = surfaceId ?? courseView.rootInstanceId
   if (!project || !contextId || !documentId) return <div className="properties-scroll" data-testid="automation-tab"><section className="property-section interaction-overview"><h2>互动与动画</h2><p>请打开作品并选择内容。</p></section></div>
   const view = componentInteractionView(courseView.editingProject ?? project, contextId, scope === 'global')
-  const commit = (change: (rules: InteractionRule[]) => InteractionRule[]) => {
+  const commit = (change: ComponentRuleChange) => {
     try {
       const target = kernel.captureTarget(documentId)
       const current = componentInteractionView(target.editingProject, contextId, scope === 'global')
-      const edits = componentRuleEdits(target.project, current.target, change(structuredClone(current.rules)))
+      const edits = planComponentRuleChange(target.editingProject, current.target, change)
       void kernel.editCaptured(kernel.capture(edits, target)).catch(error => setError(String(error)))
     } catch (error) { setError(String(error)) }
   }
-  const add = (rule: InteractionRule) => commit(rules => [...rules, rule])
-  const reveal = (rule: InteractionRule) => {
-    try {
-      const target = kernel.captureTarget(documentId)
-      const current = componentInteractionView(target.editingProject, contextId, scope === 'global')
-      const edits = componentRevealSequenceEdits(target.project, current.target, rule, current.rules)
-      void kernel.editCaptured(kernel.capture(edits, target)).catch(error => setError(String(error)))
-    } catch (error) { setError(String(error)) }
-  }
-  const update = (ruleId: string, patch: Partial<Omit<InteractionRule, 'id'>>) => commit(rules => {
-    if (!rules.some(rule => rule.id === ruleId)) throw new Error('互动规则已不存在')
-    return rules.map(rule => rule.id === ruleId ? { ...rule, ...patch } : rule)
-  })
-  const remove = (ruleId: string) => commit(rules => removeComponentRule(rules, ruleId))
+  const add = (rule: InteractionRule) => commit({ kind: 'add', rule })
+  const reveal = (rule: InteractionRule) => commit({ kind: 'reveal', rule })
+  const update = (ruleId: string, patch: Partial<Omit<InteractionRule, 'id'>>) => commit({ kind: 'patch', ruleId, patch })
+  const remove = (ruleId: string) => commit({ kind: 'remove', ruleId })
   const selectedNode = view.nodes.find(node => node.id === courseView.selectedInstanceId)
   const controller = Object.values(project.instances).find(instance => componentDefinitionBuiltinKey(project.definitions[instance.definitionId]) === 'guoling.navigation')
   const teacher = () => {
@@ -85,8 +75,8 @@ export function AutomationTab() {
       onApplyRevealSequenceTemplate={intent => reveal(buildInteractionTemplateRule({ templateId: SCENE_ENTER_REVEAL_SEQUENCE_TEMPLATE_ID, ...intent,
         conditions: [...(scope === 'global' ? [{ type: 'scene.in' as const, sceneIds: [courseView.rootInstanceId ?? contextId] }] : []),
           ...(courseView.activeStateId ? [{ type: 'presentation.in' as const, stateIds: [courseView.activeStateId] }] : [])] }))}
-      onDuplicateRule={ruleId => commit(rules => { const index = rules.findIndex(rule => rule.id === ruleId); if (index >= 0) rules.splice(index + 1, 0, duplicateComponentRule(rules[index]!)); return rules })}
-      onMoveRule={(ruleId, direction) => commit(rules => moveComponentRule(rules, ruleId, direction))} />
+      onDuplicateRule={ruleId => commit({ kind: 'duplicate', ruleId })}
+      onMoveRule={(ruleId, direction) => commit({ kind: 'move', ruleId, direction })} />
     {clickRulesOpen && (selectedNode ? <InteractionEditor {...shared} selectedNode={selectedNode} /> : <p role="status">请在画布选择一个对象，再编辑点击规则。</p>)}
   </div>
 }

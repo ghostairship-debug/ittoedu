@@ -47,8 +47,8 @@ export function planCourseElementInsertion(project: CourseProjectV10, request: C
   const append = (stage: ComponentEdit[]) => { if (stage.length) { stages.push(stage); edits.push(...stage) } }
   let working = project, bodyContainer: ComponentContainer | undefined
   if (request.flowSelection !== undefined && options.destination !== 'paper') {
-    if (!surfaceId || componentSurface(project, surfaceId)?.kind !== 'flow') throw new CourseInsertionError('invalid-target', 'at只用于Flow正文插入')
-    const split = prepareFlowBodyInsertion(project, surfaceId, request.flowSelection, { deferTextRelationshipCleanup: true })
+    if (!surfaceId || componentSurface(project, surfaceId)?.kind !== 'flow') throw new CourseInsertionError('invalid-target', '当前目标不是 Flow 正文，无法按光标位置插入')
+    const split = prepareFlowBodyInsertion(project, surfaceId, request.flowSelection)
     working = split.project; append(split.edits)
     bodyContainer = container = split.container
     options.index = split.index

@@ -84,6 +84,36 @@ export function componentRuleEdits(project: CourseProjectV10, target: ComponentT
   ]
 }
 
+export type ComponentRuleChange =
+  | { kind: 'add' | 'reveal' | 'replace'; rule: InteractionRule }
+  | { kind: 'patch'; ruleId: string; patch: Partial<Omit<InteractionRule, 'id'>> }
+  | { kind: 'duplicate' | 'remove'; ruleId: string }
+  | { kind: 'move'; ruleId: string; direction: -1 | 1 }
+
+function componentRuleIndex(rules: readonly InteractionRule[], ruleId: string): number {
+  const index = rules.findIndex(rule => rule.id === ruleId)
+  if (index < 0) throw Object.assign(new Error('互动规则已不存在'), { code: 'invalid-target' })
+  return index
+}
+
+/** The caller supplies its effective presentation; protocol references and Session capture stay outside. */
+export function planComponentRuleChange(project: CourseProjectV10, target: ComponentTarget, change: ComponentRuleChange,
+  references?: CourseAuthoringReferences): ComponentEdit[] {
+  let rules = structuredClone(interactionRules(interactionBehavior(project, target)))
+  if (change.kind === 'reveal') return componentRevealSequenceEdits(project, target, change.rule, rules, references)
+  if (change.kind === 'add') rules.push(change.rule)
+  else if (change.kind === 'replace') rules[componentRuleIndex(rules, change.rule.id)] = change.rule
+  else if (change.kind === 'patch') {
+    const index = componentRuleIndex(rules, change.ruleId)
+    rules[index] = { ...rules[index]!, ...change.patch }
+  } else if (change.kind === 'duplicate') {
+    const index = componentRuleIndex(rules, change.ruleId)
+    rules.splice(index + 1, 0, duplicateComponentRule(rules[index]!))
+  } else if (change.kind === 'remove') rules = removeComponentRule(rules, change.ruleId)
+  else if (change.kind === 'move') rules = moveComponentRule(rules, change.ruleId, change.direction)
+  return componentRuleEdits(project, target, rules, references)
+}
+
 /** Copies only the professional rule identities and declared references; prose/source stay intact. */
 export function remapComponentInteractionData(data: JsonValue, identities: {
   instances: ReadonlyMap<string, string>; surfaces: ReadonlyMap<string, string>
@@ -232,7 +262,7 @@ export function duplicateComponentRule(rule: InteractionRule): InteractionRule {
 
 /** Removing an action also removes its completion program, including later followers. */
 export function removeComponentRule(rules: readonly InteractionRule[], ruleId: string): InteractionRule[] {
-  if (!rules.some(rule => rule.id === ruleId)) throw new Error('互动规则已不存在')
+  componentRuleIndex(rules, ruleId)
   const removed = new Set([ruleId]), actions = new Set<string>()
   let changed = true
   while (changed) {
@@ -247,8 +277,7 @@ export function removeComponentRule(rules: readonly InteractionRule[], ruleId: s
 
 /** Click rules and automation have separate lists in the editor; move within that list. */
 export function moveComponentRule(rules: readonly InteractionRule[], ruleId: string, direction: -1 | 1): InteractionRule[] {
-  const index = rules.findIndex(rule => rule.id === ruleId)
-  if (index < 0) throw new Error('互动规则已不存在')
+  const index = componentRuleIndex(rules, ruleId)
   const click = rules[index].trigger.type === 'node.click'
   let next = index + direction
   while (next >= 0 && next < rules.length && (rules[next].trigger.type === 'node.click') !== click) next += direction

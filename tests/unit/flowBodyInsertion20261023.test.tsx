@@ -22,11 +22,12 @@ import { registerFlowMenuCapture, registerFlowWorkspaceDrain } from '../../src/r
 import * as editorSession from '../../src/renderer/document/editorSession'
 import { SharedDocumentEditor } from '../../src/renderer/document/SharedDocumentEditor'
 import { fromEditorDocument } from '../../src/renderer/document/documentAdapter'
+import { owningContainer } from '../../src/shared/contracts/component-platform/project'
 
 const stops: (() => void)[] = []
 afterEach(() => { cleanup(); for (const stop of stops.splice(0)) stop(); vi.restoreAllMocks() })
 const point = (blockId: string, offset: number) => ({ blockId, offset, slot: { kind: 'field' as const, field: 'content' as const }, affinity: 'after' as const })
-const caret = (blockId: string, offset: number): DocumentSelection => ({ revision: '0', kind: 'text', anchor: point(blockId, offset), head: point(blockId, offset) })
+const caret = (blockId: string, offset: number): Extract<DocumentSelection, { kind: 'text' }> => ({ revision: '0', kind: 'text', anchor: point(blockId, offset), head: point(blockId, offset) })
 const text = (value: string) => ({ inlines: value ? [{ type: 'text' as const, text: value }] : [] })
 const paragraph = (id: string, value: string): DocumentBlock => ({ id, type: 'paragraph', content: text(value) })
 const divider: DocumentBlock = { id: 'object', type: 'divider' }
@@ -116,6 +117,58 @@ it('composes prepared media and library insertion with the same split before one
     expect(h.operations).toHaveLength(1)
     await h.bridge.undo(h.first.documentId)
     expect(projectFlowDocument(h.model().project, 'flow')).toEqual(projectFlowDocument(course(), 'flow'))
+  }
+})
+
+it.each(['element', 'media', 'library'] as const)('retains inline children and range bindings for %s splits and non-collapsed selections, with Undo and archive reopen', async entry => {
+  for (const selected of [false, true]) {
+    const project = course()
+    project.instances.body.data = JSON.parse(JSON.stringify({ ...createTextComponentData(), content: { inlines: [
+      { type: 'text', text: '甲', rangeIds: ['R'] }, { type: 'component', instanceId: 'inline', accessibleText: '输入', rangeIds: ['R'] },
+      { type: 'text', text: '乙', rangeIds: ['R'] },
+    ] } }))
+    project.instances.body.childIds = ['inline']
+    project.instances.inline = { id: 'inline', definitionId: TEXT_DEFINITION.id, data: JSON.parse(JSON.stringify(createTextComponentData('行内'))) }
+    project.definitions.note = { id: 'note', role: 'behavior', implementation: { kind: 'builtin', key: 'guoling.popover' } }
+    project.instances.note = { id: 'note', definitionId: 'note', data: { label: '注释', content: '保留内容' }, attachments: [
+      { instanceId: 'note', target: { kind: 'text-range', instanceId: 'body', dataPath: ['content'], rangeId: 'R' } },
+    ] }
+    project.instances.flow.childIds!.push('note')
+    const h = await createV10StoreHost(project); stops.push(() => h.bridge.dispose())
+    const options = { destination: 'document' as const, flowSelection: selected
+      ? { ...caret('body', 0), head: point('body', 3) } : caret('body', 1) }
+    const target = h.kernel.captureTarget()
+    if (entry === 'element') await insertCourseElement(h.kernel, target, 'chart', options)
+    else if (entry === 'media') await insertCourseMedia(h.kernel, target, [{ meta: { id: 'image', kind: 'image', filename: 'image.png', path: 'assets/image.png', mimeType: 'image/png', width: 10, height: 10, byteLength: 3 }, bytes: Uint8Array.of(1, 2, 3) }], options)
+    else expect(await insertComponentPackagesAtTarget(h.kernel, target, [{ schemaVersion: 2, id: 'library', title: '库文字',
+      definitions: { [TEXT_DEFINITION.id]: TEXT_DEFINITION }, example: { rootIds: ['example'], instances: { example: { id: 'example', definitionId: TEXT_DEFINITION.id, data: JSON.parse(JSON.stringify(createTextComponentData('库内容'))) } } }, assets: {}, resources: { assets: {}, components: {} } }], options)).toMatchObject({ ok: true })
+    const next = h.model().project, children = next.instances.section.childIds!
+    expect(h.operations).toHaveLength(1); expect(h.first.read().undoDepth).toBe(1)
+    if (selected) {
+      // Insertion preserves a non-collapsed selection and uses its logical end.
+      expect(children).toHaveLength(2); expect(children[0]).toBe('body')
+      expect(next.instances.body.data).toEqual(project.instances.body.data)
+      expect(owningContainer(next, 'inline')).toEqual({ kind: 'instance', instanceId: 'body' })
+      expect(next.instances.note.attachments).toEqual(project.instances.note.attachments)
+    } else {
+      expect(children).toHaveLength(3); expect(children[0]).toBe('body')
+      const tailId = children[2]!
+      expect(owningContainer(next, 'inline')).toEqual({ kind: 'instance', instanceId: tailId })
+      expect(next.instances.note.attachments?.map(attachment => attachment.target)).toEqual(['body', tailId].map(instanceId => ({ kind: 'text-range', instanceId, dataPath: ['content'], rangeId: 'R' })))
+      expect(owningContainer(next, 'note')).toEqual({ kind: 'instance', instanceId: 'flow' })
+      expect(projectFlowDocument(next, 'flow').content.blocks[0]).toMatchObject({ type: 'section', blocks: [
+        { id: 'body', content: { inlines: [{ type: 'text', text: '甲', rangeIds: ['R'] }] } },
+        expect.anything(), { id: tailId, content: { inlines: [{ type: 'component', instanceId: 'inline', accessibleText: '输入', rangeIds: ['R'] }, { type: 'text', text: '乙', rangeIds: ['R'] }] } },
+      ] })
+    }
+    await h.bridge.undo()
+    expect(h.model().project).toEqual({ ...project, revision: h.model().project.revision })
+    await h.bridge.redo()
+    const reopened = h.driver.load(h.driver.serialize(h.model()))
+    if (reopened.kind !== 'course-v10') throw new Error('Expected course archive')
+    expect(reopened.project).toEqual(h.model().project)
+    expect(Object.keys(reopened.resources.assets)).toEqual(Object.keys(h.model().resources.assets))
+    for (const [id, bytes] of Object.entries(reopened.resources.assets)) expect(Array.from(bytes)).toEqual(Array.from(h.model().resources.assets[id]!))
   }
 })
 

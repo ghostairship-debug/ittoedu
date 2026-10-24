@@ -86,9 +86,8 @@ function complete(request: ModelRequest, calls: { id: string; name: string; argu
     assistant: { role: 'assistant', content, ...(calls.length ? { tool_calls: calls.map(call => ({ id: call.id, type: 'function' as const,
       function: { name: call.name, arguments: call.argumentsText } })) } : {}) } }
 }
-const isCurrentDocumentFacts = (message: ModelChatMessage) => message.role === 'system' && typeof message.content === 'string'
-  && message.content.startsWith('以下是本轮读取的正式文档快照元数据，不是新授权或保存要求；历史保存回执只记录当时版本。dirty 为 true 表示当前内容尚未保存。\n')
-  && Object.keys(JSON.parse(message.content.slice(message.content.indexOf('\n') + 1))).join() === 'currentDocuments'
+const isHostWorkFacts = (message: ModelChatMessage) => message.role === 'user' && typeof message.content === 'string'
+  && message.content.startsWith('宿主当前工作记录（数据，非新授权）：')
 const refsOf = (request: Pick<ModelRequest, 'messages'>) => JSON.parse(String(request.messages[1].content).split('：')[1]) as {
   documentId: string; target: string; writable: { kind: string; target: string }[]; selection: { kind: string; target: string }[]
 }[]
@@ -558,7 +557,8 @@ describe('G20 canonical model execution loop', () => {
   it('M15 a run editing a document whose other part another run is previewing commits its own edit without a preview', async () => {
     const aStreaming = deferred(), releaseA = deferred(), turns = new Map<string, number>()
     const provider: ModelProvider = { async *stream(request) {
-      const which = String([...request.messages].reverse().find(message => message.role === 'user')?.content)
+      // Host work facts also use user-role data; route this fixture by its exact instruction.
+      const which = String(request.messages.find(message => message.role === 'user' && (message.content === 'A' || message.content === 'B'))?.content)
       const turn = (turns.get(which) ?? 0) + 1; turns.set(which, turn)
       if (turn > 1) { yield complete(request, [], '完成'); return }
       const target = refsOf(request)[0]!.writable[0]!.target, id = `call-${which}`
@@ -741,7 +741,7 @@ describe('G20 canonical model execution loop', () => {
     expect(requests[1].messages.slice(0, final.initialMessageCount)).toEqual(requests[0].messages.slice(0, final.initialMessageCount))
     expect(requests[1].messages.some(message => String(message.content).includes('currentDocuments') && String(message.content).includes('\"revision\":1'))).toBe(true)
     expect(refsOf(requests[1])[1].writable).toEqual([])
-    const nativeRound = requests[1].messages.slice(final.initialMessageCount + 1).filter(message => !isCurrentDocumentFacts(message))
+    const nativeRound = requests[1].messages.slice(final.initialMessageCount + 1).filter(message => !isHostWorkFacts(message))
     expect(nativeRound.map(message => message.role)).toEqual(['assistant', 'tool', 'tool', 'tool'])
     expect(nativeRound.slice(1).map(message => message.tool_call_id)).toEqual(['read', 'allowed', 'denied'])
     expect(String(nativeRound[0]!.content)).not.toContain('完整的中间推理与过程。')
@@ -931,7 +931,8 @@ it('preserves incomplete project arguments locally without executing or replayin
   expect(final.requests[0]!.argumentDrafts).toEqual([{ state: 'incomplete-prefix', providerCallId: 'unfinished-project', toolName: 'project.apply', argumentsText: prefix }])
   expect(final.requests[0]!.failure?.outcome).toBe('unknown')
   expect(final.tools).toEqual([])
-  expect(final.messages.some(message => JSON.stringify(message).includes('未完成'))).toBe(false)
+  expect(JSON.stringify(final.messages)).not.toContain(prefix)
+  expect(JSON.stringify(final.messages)).not.toContain('<article>未完成')
   expect(execute).not.toHaveBeenCalled()
   expect(h.session.read()).toMatchObject({ revision: 0, undoDepth: 0, model: { source: '前文 OLD 后文' } })
   await h.engine.recover(started.runId)
@@ -1103,7 +1104,7 @@ it('M26 context.read uses an actual stored source, rejects another run, and puts
       ]); return
     }
     if (turns === 2) {
-      const native = request.messages.filter(message => !isCurrentDocumentFacts(message))
+      const native = request.messages.filter(message => !isHostWorkFacts(message))
       expect(native.slice(-3).map(message => message.role)).toEqual(['tool', 'tool', 'user'])
       expect(native.at(-1)?.content).toEqual(expect.arrayContaining([{ type: 'image_url', image_url: { url: image } }]))
       yield complete(request, [{ id: 'foreign-context', name: 'context.read', argumentsText: JSON.stringify({ sourceId: 'run:unrelated-run:0' }) }]); return
@@ -1509,9 +1510,9 @@ it('aligns OAuth streamed edits and multiple tools after reasoning and message i
 })
 
 it('archives whole OAuth rounds on actual wire and never resurrects old native payloads in later turns', async () => {
-  const wires: string[] = []; let turns = 0
+  const wires: string[] = [], requests: ModelRequest[] = []; let turns = 0
   const provider: ModelProvider = { async *stream(request) {
-    wires.push(serializeChatGPTResponsesRequest(request)); turns++
+    requests.push(structuredClone(request)); wires.push(serializeChatGPTResponsesRequest(request)); turns++
     if (turns > 4) { yield complete(request); return }
     const call = { id: `call-${turns}`, name: turns % 2 ? 'read' : 'inspect', argumentsText: JSON.stringify({ target: refsOf(request)[0].target }) }
     const event = complete(request, [call], `turn-${turns}`)
@@ -1523,7 +1524,7 @@ it('archives whole OAuth rounds on actual wire and never resurrects old native p
     yield event
   } }
   const h = await fixture(provider)
-  // A declared window whose soft pressure is reached on the fourth request (three complete rounds).
+  // Projection archives complete old native rounds before budget compaction is necessary.
   const oauth = { ...selection, contextWindow: 600_000, connection: { ...selection.connection, provider: 'openai', protocol: 'chatgpt-responses' as const,
     baseURL: CHATGPT_RESPONSES_BASE_URL, auth: { kind: 'oauth' as const, credentialRef: 'fixture-only' } } }
   const engine = new ExecutionEngine({ registry: h.registry, gateway: h.gateway, edits: h.edits, runs: h.runs,
@@ -1534,8 +1535,13 @@ it('archives whole OAuth rounds on actual wire and never resurrects old native p
   expect(wires[3]).not.toContain('MARKER-1-')
   expect(wires[4]).not.toContain('MARKER-1-')
   expect(wires[3]).toContain('MARKER-2-' + 'x'.repeat(550_000))
-  expect(JSON.stringify(final.messages)).toContain('MARKER-1-')
-  expect(final.compacted?.fromMessage).toBeGreaterThan(final.initialMessageCount)
+  expect(JSON.stringify(final.messages)).toContain('MARKER-1-' + 'x'.repeat(550_000))
+  const archived = requests[3].messages.find(message => typeof message.content === 'string' && message.content.includes('"archivedContext"') && message.content.includes('"call-1"'))!
+  expect(archived).toBeDefined()
+  const archive = JSON.parse(String(archived.content))
+  expect(archive.archivedContext).toMatch(new RegExp(`^run:${started.runId}:\\d+$`))
+  expect(archive.calls).toEqual([{ id: 'call-1', name: 'read', resultSourceId: expect.stringMatching(new RegExp(`^run:${started.runId}:\\d+$`)) }])
+  expect(JSON.parse(wires[3]).input.filter((item: { type: string }) => item.type === 'function_call').map((item: { call_id: string }) => item.call_id)).toEqual(['call-2', 'call-3'])
   expect(final.requests[0].inputTokens).toBe(90_000)
   for (const wire of wires) {
     const input = JSON.parse(wire).input

@@ -2,21 +2,16 @@
 
 更新：2026-10-24。本文是当前开发入口；具体检查、失败及条件以链接中的原始结果为准。整理前的逐轮时间线已完整保留在[历史快照](../archive/20261022-开发状态快照.md)，不再作为并行启动清单。
 
-本批Git交付：Owner现已授权提交并推送本批架构优化，其他未提交成果保留；下述“未commit／push”为各轮实施时点。发行、打Portable和部署继续暂停。
+Owner最新授权：本轮审查后续维护与原有全部未提交成果一并commit并push；不删除原成果。各旧结果的未提交描述保留历史时点，发行、Portable与部署继续暂停。
 
 ## 当前有效结果
 
 | 范围 | 已成立的结果与证据边界 |
 |---|---|
-| 架构优化整体收口评估（10月24日，仅文档） | [原方案§15](../../output/architecture-audit-20261024/IMPLEMENTATION_PLAN.md#architecture-batch-closeout)逐项核对原P0—P6与全部子包：已选实施／试验／维护收口，P5-A计量后不采用；其他广义迁移／资源／闭包／视觉试点保留条件性暂缓，无默认下一轮，本批可以结束。原14项中Gateway／Source／停止／丢ACK共4项有后续原例通过，另10项保留未决边界、不等同当前10个缺陷；§13另遇两条目录失败已由§14关闭。各轮证据／独审复用不合并通过数，本次未改代码／测试／配置或运行验证，无新增active卡；现有dirty保全，未commit／push／发布，发行暂停保持。 |
-| 架构服务发现与作业归属维护（10月24日，收口） | 按[原方案§14](../../output/architecture-audit-20261024/IMPLEMENTATION_PLAN.md#next-round-after-positive)顺序完成两份测试维护。逐调用确认三个start只读拒绝、旧read来自job.cancel回显身份夹具；准确目录和真实作业owner／接续不可取消／零取消调用验证通过，原5项＋归属反例1项＋真实持久接续1项共7项及主类型通过，独审通过。见[唯一结果](20261024-architecture-service-discovery/RESULT.md)。无实际越权证据，产品源码／权限／检查定义未改；本批架构优化收口，其余历史未决保留，未追加包，现有dirty保全，无commit／push／发布。 |
-| 架构正收益三切片（10月24日） | 按§13依次完成模型结果投影归位、内容程序分类归一和三项资产库维护定义按需披露，逐项独审通过。42项不同相关检查及完整三段类型检查通过，真实Chromium双Player原生子项和隔离真实资产库保存／导入／删除／Undo／冷开覆盖；当时2条服务目录旧失败已由后续§14收口，原始before失败及旧统计保留，未扩包。见[唯一结果](20261024-architecture-positive/RESULT.md)。收益限于职责／规则维护点和定义披露量，现有dirty保全，无commit／push／发布。 |
-| 架构第五轮Electron／e2e noEmit增量（10月24日） | 两套隔离试验同条件暖完整3.13／5.18秒对无改增量0.55／0.79秒；确定错误完整／增量同诊断、恢复后通过，最终精确参数首次无cache执行成功。两段已分别采用，原三段顺序／失败传播及主段、配置和正式emit保持，独审通过。见[唯一结果](20261024-architecture-fifth-round/RESULT.md)。未新测全链耗时，未跑GUI／构建或追加包；原dirty保全，未commit／push／发布。 |
-| 架构第四轮停止／丢ACK定性（10月24日） | 两条历史红例均为夹具漂移：停止用例等待旧文案、ACK用例在schema筛选时抛错尚未到预览。仅等价维护两条测试，原停止／一次提交／History／原生消息／Undo／预览隔离保留，补零写入和原操作查证。两项选中检查、主类型及独审通过，见[唯一结果](20261024-architecture-fourth-round/RESULT.md)。产品源码和共享helper未改，无新增直接consumer验证；P2-D整体迁移及其余包未启动，原dirty保全，未commit／push／发布。 |
-| 架构第三轮P1-C／P5-A（10月24日） | 仅主类型检查采用原生增量，检查范围／失败传播及Electron／e2e原段不减。隔离副本暖全量12.06s、无改增量1.37s；确定类型错误两模式同诊断，恢复后通过，实际三段typecheck及最终主命令通过。P5-A fixture重复约1.20ms，真实咖啡GLX三个Source均不同，无足够收益，计量后保留原实现。见[唯一结果](20261024-architecture-third-round/RESULT.md)。独审通过，原dirty保全，无commit／push／发布。 |
-| 架构收敛第二轮（10月24日） | P2-B按文档收敛Bridge准备，纯选择复用未变展示投影；Source单例确认“提交成功、回执读取惰性builtin源码前未准备”并修复，原断言不变。20项选中检查、真实Chromium双文档输入／迟ACK／UndoRedo／保存新Session重开、实际Main Source文件冷开、最终主类型及Renderer／Electron构建通过，独审通过。见[唯一结果](20261024-architecture-second-round/RESULT.md)。广义P2-C优化未实施，其他后续包未启动；原dirty保全，无commit／push／发布。 |
-| 架构收敛首轮（10月24日） | 按完善方案完成P1-A构建去重、P1-B两组helper依赖收敛、P2-A对象插入专业规划及P3 Flow运行根挂接。聚焦行为、真实Chromium正文／浮层与输入／保存重开、生产Player实际consumer、主类型及Renderer／Electron构建通过，独立增量评审通过；原审计红例及旧delivery夹具的Image.decode／时序失败保留，未签全矩阵或整体提速。见[唯一结果](20261024-architecture-first-round/RESULT.md)。现有dirty保留，本轮未commit、push或发布；其他工作包未启动。 |
+| 架构优化批次（10月24日，已收口） | [原方案§15](../../output/architecture-audit-20261024/IMPLEMENTATION_PLAN.md#architecture-batch-closeout)为原批次逐包状态与重启条件；选中实施、试验和维护已收口，其他广义方向条件性暂缓。架构批次已提交推送为 `7952cc24`；历史红例的新结论见下一行，不回写原统计。 |
+| 架构审查后续维护（10月24日） | [结果与合同未决](20261024-architecture-review-followup/RESULT.md)：回执夹具、Engine四条维护、互动规则共用规划及Flow切分清理归一完成；Engine另两条合同断言保留。Owner已授权本轮与原有统一选中、作品等全部未提交成果一并commit并push，发行／Portable／部署继续暂停。 |
 | 资源、运行性能与动画基础（10月24日） | 已在软件层统一归档内容实体、发布衍生图片/内嵌池、lazy资源解码、正式树查询与导航状态依赖；增补同批Flow/iframe几何，修复字体输入误判及compiled无用依赖。真实v08 GLX 17.50→8.43MB，正式单HTML 29.53→16.39MB；实际Electron编辑/UndoRedo/保存新profile冷开及离线七章/三实验通过。总GLX冷启动未证实提速、滚动百毫秒长帧与作品路线问题保留。见[本轮报告](../../output/resource-runtime-repair-20261024/REPORT.md)、[同条件数据](../../output/resource-runtime-repair-20261024/PERFORMANCE.md)及[创作交接](../../output/resource-runtime-repair-20261024/CREATIVE_HANDOFF.md)。正式作品未改，前一轮交互dirty隔离保留；本轮按Owner明确要求本地commit，不push/发行。 |
+| 统一选中、整体拖动与双击编辑（10月24日） | 按Owner确定方案完成U01–U19及相关同类迁移：单击选择、主体移动／正文读序、双击编辑、单一条／能力框、字段与组层级同目标。聚焦检查、三套类型、player／renderer构建及独立源码评审通过；5个真实Chromium用例、代表GLX保存新进程冷开与离线互动通过，实际发现的Flow双击与Slide叠框已修并复验。见[唯一结果](20261024-unified-selection-editing/RESULT.md)。证据不替代完整Electron壳层／全部旧作品／物理IME或Owner接受；无关旧夹具红例保留。实施时未commit，本次纳入整体提交。 |
 | 编辑阻断与体验回退修复（10月23日收口） | P1–P9软件修复及独立复核完成；按现有owner收口输入／原稿／连接与失败出口、HTML作者事实、Flow范围与关系、输出布局、异步归属、取消和保存查证。指定旧GLX与大小HTML副本实际编辑／保存／新进程冷开及GLX Undo／Redo通过；最后移动图标改为工具栏固定入口，实际画面与相关类型／构建通过。完整A01–A20／B01–B21裁定、证据、原失败与条件边界见[唯一结果](20261023-editing-regressions/RESULT.md)。不签普遍提速、物理IME／Word GUI或Owner整体接受；该实施批次未提交，后续本地提交沿本页最新授权。 |
 | 审计整合与组件／Flow重构（10月23日收口） | 审计核实归并、B1–B8集中架构裁决及各片独审完成。混排、语义插入、专业默认、同源发现、分栏／范围、恢复保存关闭及运行／输出直接消费者已闭合；DocumentSession仍为唯一writer。真实模型创建接续、人改后准确局改、人工布局／图片／批注保留、保存新进程冷开及Published／正式compiled断网互动通过。实跑新增非法颜色、跨列同步、焦点错位与compiled交付缺陷已修。见[唯一结果与证据](20261023-audit-refactor/RESULT.md)。有修复接续而非首轮一次成功，无可比基线不签普遍提速；物理IME、设备／Word GUI、Owner整体接受及旧整作目标保留；该实施批次未提交，后续本地提交沿本页最新授权。 |
 | Flow 导航运动、全局视口与原生吸顶（10月23日） | 原平滑导航、真实停靠、`flowMotion`及iframe滚轮接管保留。后续已纠正交互Overlay缩小视口的旧设计：所有viewport-pinned全局实例统一完整画布，删除controllerInsets固定预算，绘制／逆投影／运行拖拽共用解析布局；Flow读序接通原生CSS sticky，无新增滚动API。生产model／compiled与正式导出1440／390、真实Electron滚动条＋120%缩放、正反吸顶有直接证据，咖啡及素材未改。文件、最新验证、旧夹具失败与创作接续见[全局视口与吸顶结果](20261022-flow-navigation/GLOBAL_VIEWPORT_AND_STICKY_RESULT_20261023.md)；原导航证据见[历史结果](20261022-flow-navigation/RESULT.md)。该实施批次未提交，后续本地提交沿本页最新授权。 |
@@ -45,11 +40,7 @@
 
 ## 授权与交付边界
 
-Owner 2026-10-24明确要求本轮资源、运行性能与动画基础软件修复后本地git commit；该直接授权只覆盖本轮增量及对应报告，不延伸到上一轮交互dirty、其他创作工程、push、Portable或发布。正式v08原件、素材和路线保持只读。
-
-已执行旧批次按[软件与创作修复结果](SOFTWARE_AUTHORING_RESULT.md)和[归档入口](../archive/README.md)追溯，不重启原 goal 或机械重跑旧矩阵。四张软件／旧作品接续卡仍为 queued，咖啡 v08 按现有卡保留；卫生整理不启动创作、模型调用或产品开发；具体接续以 Owner 最新目标为准。
-
-10月23日卫生整理及本地提交已完成（`63992093a`）。10月24日统一交互方案实施时未提交，其成果继续保留在工作树；本轮资源、运行性能与动画基础按Owner明确要求独立本地提交。各实施RESULT中的未提交描述保留为当时事实；不改用户原始作品，不调用付费模型。push、Portable、发布和部署继续暂停，不签Owner整体接受，不迁移真实用户数据或扩大凭据与费用边界。
+Owner本次明确授权完成审查后续维护，并将本轮和原有统一选中、作品等全部未提交成果一并commit并push；不启动创作、不调用付费模型、不打Portable、不发布或部署。旧RESULT中的“未提交／仅本地提交”描述原实施时点；原始作品、恢复稿和已有证据保全，原未签范围与Owner整体接受不因此关闭。queued不自动启动，剩余任务按Owner当前目标选取。
 
 ## 历史与原始证据
 

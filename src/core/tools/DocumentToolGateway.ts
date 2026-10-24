@@ -45,7 +45,7 @@ import { componentInputRuleEdits } from '../../components/input/authoring'
 import { componentTextInteractionEdits } from '../course/componentTextInteractionEdits'
 import { executeCourseLogicAuthoringCommand, replaceCourseNetworkDeclaration } from '../course/courseLogicAuthoringCommands'
 import { courseAudioSettingsEdits, courseSoundEdits, courseSoundImportEdits } from '../course/courseMediaEdits'
-import { interactionBehavior, interactionRules, remapComponentInteractionData, componentRuleEdits, componentClickInteractionEdits, componentRevealSequenceEdits, duplicateComponentRule, removeComponentRule } from '../../shared/componentInteractionData'
+import { interactionRules, remapComponentInteractionData, componentClickInteractionEdits, planComponentRuleChange } from '../../shared/componentInteractionData'
 import { coursePresentationEdits } from './coursePresentationEdits'
 import { isSpatialGraphScopedEdit, spatialGraphItem, spatialGraphDependencyPaths } from '../course/courseSpatialEdits'
 import { courseTextAdvisories } from './courseTextAdvisories'
@@ -2758,26 +2758,13 @@ export class DocumentToolGateway implements ToolGateway {
             } else {
               if (target.kind === 'course-instance') throw new ToolError('invalid-target', '规则编辑需要页面或整课目标；对象目标只支持点击快捷规则')
               const owner: ComponentTarget = surfaceId ? { kind: 'surface', surfaceId } : { kind: 'project' }
-              const rules = structuredClone(interactionRules(interactionBehavior(project, owner)))
-              if (change.kind === 'add' || change.kind === 'reveal' || change.kind === 'update') {
+              if ('rule' in change) {
                 const rule = { ...change.rule, id: change.kind === 'update' ? courseInteractionRuleReference(change.ruleId, owner, references) : this.createId(),
                   actions: change.rule.actions.map(step => ({ ...step, id: step.id ?? this.createId() })) }
-                if (change.kind === 'reveal') edits = componentRevealSequenceEdits(project, owner, rule, rules, references)
-                else {
-                  if (change.kind === 'update') {
-                    const index = rules.findIndex(item => item.id === rule.id)
-                    if (index < 0) throw new ToolError('invalid-target', '规则已不存在')
-                    rules[index] = rule
-                  } else rules.push(rule)
-                  edits = componentRuleEdits(project, owner, rules, references)
-                }
+                edits = planComponentRuleChange(project, owner, { kind: change.kind === 'update' ? 'replace' : change.kind, rule }, references)
               } else {
-                const ruleId = 'ruleId' in change ? courseInteractionRuleReference(change.ruleId, owner, references) : ''
-                const index = rules.findIndex(rule => rule.id === ruleId)
-                if (index < 0) throw new ToolError('invalid-target', '规则已不存在')
-                if (change.kind === 'duplicate') rules.splice(index + 1, 0, duplicateComponentRule(rules[index]))
-                else rules.splice(0, rules.length, ...removeComponentRule(rules, ruleId))
-                edits = componentRuleEdits(project, owner, rules, references)
+                edits = planComponentRuleChange(project, owner, { kind: change.kind,
+                  ruleId: courseInteractionRuleReference(change.ruleId, owner, references) }, references)
               }
             }
             edits = mapWorkingPresentation(model.project, surfaceId, stateId, edits)
