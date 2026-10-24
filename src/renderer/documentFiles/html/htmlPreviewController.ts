@@ -10,6 +10,7 @@ import type { HtmlSourceAnalysis } from './htmlSourceAnalysis'
 
 export type HtmlTargetReport = z.infer<typeof htmlPreviewTargetReportSchema>
 export type HtmlSelectedTarget = { report: HtmlTargetReport; resolved: HtmlPreviewResolvedTarget }
+export type HtmlPreviewGesture = Extract<import('../../../shared/workbench/htmlPreview').HtmlPreviewPageMessage, { event: 'gesture' }>
 type HtmlSourceChange = Extract<HtmlPreviewRequest, { type: 'html-preview.edit' }>['change']
 type HtmlEditIntent = Exclude<HtmlSourceChange, { kind: 'image' }>
   | (Omit<Extract<HtmlSourceChange, { kind: 'image' }>, 'bytes'> & { bytes: Uint8Array })
@@ -24,6 +25,9 @@ export interface HtmlPreviewControllerEvents {
   onEditSettled(): void
   onPatchMismatch(): void
   onSelection?(handle: string, selection: { anchor: number; focus: number; word?: boolean }): void
+  onContentEditing?(editing: boolean): void
+  beforeTargetChange?(target: HtmlSelectedTarget | null): Promise<boolean>
+  onGesture?(gesture: HtmlPreviewGesture, target: HtmlSelectedTarget): void
 }
 
 /** Renderer broker. The opaque page only reports observations; all writes go through Main. */
@@ -35,6 +39,9 @@ export class HtmlPreviewController {
   private reloading = false
   private reloadFrameLoaded = false
   private selected: HtmlSelectedTarget | null = null
+  private contentEditing = false
+  private writing = 0
+  private pendingGesture: { start: HtmlPreviewGesture; latest: HtmlPreviewGesture; delivered: boolean } | null = null
   private resolvingSelection: { handle: string; selection?: HtmlTargetReport['selection'] } | null = null
   private requestSerial = 0
   private modeRequest: { requestId: string; enabled: boolean } | null = null
@@ -65,7 +72,7 @@ export class HtmlPreviewController {
       this.iframe.contentWindow?.postMessage({ type: 'html-preview.authoring-records', loadId: this.lease.loadId, records }, '*')
     }
     if (changed && this.editMode) this.iframe.contentWindow?.postMessage({ type: 'html-preview.refresh-targets', loadId: this.lease.loadId }, '*')
-    if (this.selected && (this.selected.resolved.status !== 'editable'
+    if (!this.writing && this.selected && (this.selected.resolved.status !== 'editable'
       || this.selected.resolved.locator.revision !== snapshot.revision)) this.select(null)
   }
 
@@ -102,7 +109,12 @@ export class HtmlPreviewController {
       this.pendingConfirmation = null
       this.events.onEditModeError?.(message.message)
     }
-    if (this.visible && message.event === 'targets') void this.resolve(message.targets)
+    if (this.visible && message.event === 'targets') {
+      if (message.intent !== 'observe' || !this.resolvingSelection && message.targets[0]?.handle === this.selected?.report.handle) {
+        void this.resolve(message.targets, message.intent === 'observe' ? undefined : message.intent)
+      }
+    }
+    if (this.visible && this.editMode && message.event === 'gesture') this.receiveGesture(message)
     if (this.visible && this.editMode && message.event === 'selection') {
       const selection = { anchor: message.anchor, focus: message.focus, ...(message.word ? { word: true } : {}) }
       if (this.resolvingSelection?.handle === message.handle) this.resolvingSelection.selection = selection
@@ -130,6 +142,12 @@ export class HtmlPreviewController {
     return true
   }
   clearSelection(): void { this.select(null) }
+  setContentEditing(editing: boolean): void {
+    this.contentEditing = editing && this.selected?.resolved.status === 'editable'
+    this.publishSelection()
+    this.events.onContentEditing?.(this.contentEditing)
+  }
+  beginContentEditing(): void { if (this.selected) void this.resolve([this.selected.report], 'edit') }
   selectSource(domPath: HtmlTargetReport['domPath'], kind: HtmlTargetReport['kind'] | null, expectedText?: string): void {
     if (!this.active || !this.visible) return
     this.iframe.contentWindow?.postMessage({ type: 'html-preview.select-source', loadId: this.lease.loadId, domPath, kind,
@@ -182,12 +200,37 @@ export class HtmlPreviewController {
     this.iframe.contentWindow?.postMessage({ type: 'html-preview.patch', loadId: this.lease.loadId, ...patch }, '*')
   }
 
-  private select(value: HtmlSelectedTarget | null, issue?: string): void {
-    this.selected = value
-    if (!value) this.resolvingSelection = null
+  private publishSelection(): void {
     this.iframe.contentWindow?.postMessage({ type: 'html-preview.selection', loadId: this.lease.loadId,
-      handle: value?.report.handle ?? null, editable: value?.resolved.status === 'editable' }, '*')
+      handle: this.selected?.report.handle ?? null, editable: this.selected?.resolved.status === 'editable', editing: this.contentEditing }, '*')
+  }
+  private select(value: HtmlSelectedTarget | null, issue?: string, intent?: 'select' | 'edit'): void {
+    if (value?.report.handle !== this.selected?.report.handle || !value || value.resolved.status !== 'editable') this.contentEditing = false
+    this.selected = value
+    if (!value) { this.resolvingSelection = null; this.pendingGesture = null }
+    if (intent === 'edit' && value?.resolved.status === 'editable') this.contentEditing = true
+    this.publishSelection()
     this.events.onTarget(value, issue)
+    this.events.onContentEditing?.(this.contentEditing)
+  }
+  private receiveGesture(gesture: HtmlPreviewGesture): void {
+    if (gesture.phase === 'start') this.pendingGesture = { start: gesture, latest: gesture, delivered: false }
+    const pending = this.pendingGesture
+    if (!pending || pending.start.handle !== gesture.handle || pending.start.pointerId !== gesture.pointerId) return
+    pending.latest = gesture
+    if (this.resolvingSelection?.handle === gesture.handle) return
+    this.deliverGesture()
+  }
+  private deliverGesture(): void {
+    const pending = this.pendingGesture, target = this.selected
+    if (!pending || !target || target.report.handle !== pending.start.handle || target.resolved.status !== 'editable') return
+    if (!pending.delivered) {
+      if (pending.latest.phase === 'cancel') { this.pendingGesture = null; return }
+      pending.delivered = true
+      this.events.onGesture?.(pending.start, target)
+      if (pending.latest !== pending.start) this.events.onGesture?.(pending.latest, target)
+    } else this.events.onGesture?.(pending.latest, target)
+    if (pending.latest.phase === 'end' || pending.latest.phase === 'cancel') this.pendingGesture = null
   }
 
   /** Discovery is replaceable observation. Retain all chunks of the latest scan,
@@ -222,9 +265,12 @@ export class HtmlPreviewController {
     } catch { /* Discovery cannot block the existing click-to-resolve editor. */ }
   }
 
-  private async resolve(targets: HtmlTargetReport[]): Promise<void> {
+  private async resolve(targets: HtmlTargetReport[], intent?: 'select' | 'edit'): Promise<void> {
     const serial = ++this.requestSerial
-    if (targets.length !== 1) { this.select(null); return }
+    if (targets.length !== 1) {
+      if (this.events.beforeTargetChange && await this.events.beforeTargetChange(null) === false || serial !== this.requestSerial) return
+      this.select(null); return
+    }
     const report = targets[0]!
     const selection = this.resolvingSelection = { handle: report.handle, selection: report.selection }
     try {
@@ -232,22 +278,29 @@ export class HtmlPreviewController {
         leaseId: this.lease.leaseId, loadId: this.lease.loadId, revision: this.revision, targets: [report] })
       if (!this.active || serial !== this.requestSerial || response.revision !== this.revision) return
       if (selection.selection) report.selection = selection.selection
-      this.resolvingSelection = null
       const resolved = response.targets[0]
       if (!resolved) { this.select(null); return }
+      const next = { report, resolved }
+      if (this.selected?.report.handle !== report.handle && this.events.beforeTargetChange
+        && await this.events.beforeTargetChange(next) === false) return
+      if (!this.active || serial !== this.requestSerial) return
+      if (response.revision !== this.revision) { void this.resolve(targets, intent); return }
+      this.resolvingSelection = null
       if (resolved.status !== 'editable') {
         this.select({ report, resolved }, '不能直接修改这个位置；可以让 AI 修改本页 HTML 源码。')
         return
       }
-      this.select({ report, resolved })
+      this.select(next, undefined, intent)
+      this.deliverGesture()
     } catch (error) { if (this.active && serial === this.requestSerial) this.select(null,
       error instanceof Error ? error.message : '未能读取此处编辑位置，可重新选择或在源码中继续。') }
   }
 
   async editText(value: string, target?: HtmlSelectedTarget): Promise<HtmlPreviewEditOutcome> { return this.edit({ kind: 'text', value }, target) }
   async editStyle(patch: Record<string, string | null>): Promise<HtmlPreviewEditOutcome> { return this.edit({ kind: 'style', patch }) }
-  async editGeometry(geometry: NonNullable<NonNullable<HtmlTargetReport['authoring']>['record']['overrides']['geometry']>): Promise<HtmlPreviewEditOutcome> {
-    return this.edit({ kind: 'geometry', geometry })
+  async editGeometry(geometry: NonNullable<NonNullable<HtmlTargetReport['authoring']>['record']['overrides']['geometry']>, target?: HtmlSelectedTarget,
+    frame?: NonNullable<HtmlTargetReport['geometry']>['frame']): Promise<HtmlPreviewEditOutcome> {
+    return this.edit({ kind: 'geometry', geometry }, target, frame)
   }
   previewGeometry(authorKey: string, geometry: NonNullable<NonNullable<HtmlTargetReport['authoring']>['record']['overrides']['geometry']> | null): void {
     if (!this.active) return
@@ -257,7 +310,7 @@ export class HtmlPreviewController {
     return this.edit({ kind: 'image', ...image })
   }
 
-  private async edit(change: HtmlEditIntent, captured?: HtmlSelectedTarget): Promise<HtmlPreviewEditOutcome> {
+  private async edit(change: HtmlEditIntent, captured?: HtmlSelectedTarget, frame?: NonNullable<HtmlTargetReport['geometry']>['frame']): Promise<HtmlPreviewEditOutcome> {
     const target = captured ?? this.selected
     if (!target || !this.active || target.resolved.status !== 'editable'
       || target.resolved.locator.revision !== this.revision) return { status: 'rejected', reason: 'stale-revision' }
@@ -267,6 +320,7 @@ export class HtmlPreviewController {
       leaseId: this.lease.leaseId, loadId: this.lease.loadId, target: target.report.handle,
       change: change.kind === 'image' ? { ...change, bytes: Uint8Array.from(change.bytes) } : change }
     this.events.onEditing()
+    this.writing++
     try {
       const result = await window.desktopAPI.workspaceFiles!(request) as HtmlPreviewEditOutcome
       if (result.status === 'applied' && this.active) {
@@ -279,10 +333,39 @@ export class HtmlPreviewController {
           this.events.onApplied(result.revision, result.patch, target.report.rawText)
           if (change.kind === 'style' && !result.patch.authoringRecords) this.events.onPatchMismatch()
         }
-        if (this.selected === target) this.select(null)
+        if (this.selected === target && !superseded) {
+          const report = { ...target.report, rawText: result.patch.value }
+          if (frame && report.geometry && change.kind === 'geometry') {
+            const previous = report.geometry, offset = previous.sourceOffset
+            report.geometry = { ...previous, frame, author: { ...previous.author, ...change.geometry },
+              ...(offset ? { sourceOffset: { ...offset, current: {
+                x: offset.current.x + (frame.width - previous.frame.width) * offset.widthDelta.x + (frame.height - previous.frame.height) * offset.heightDelta.x,
+                y: offset.current.y + (frame.width - previous.frame.width) * offset.widthDelta.y + (frame.height - previous.frame.height) * offset.heightDelta.y,
+              } } } : {}) }
+          }
+          if (result.patch.authoringRecords && report.authoring) {
+            const record = result.patch.authoringRecords[report.authoring.authorKey]
+            if (record) report.authoring = { ...report.authoring, record }
+          } else if (report.authoring) {
+            report.authoring = { ...report.authoring, record: { ...report.authoring.record,
+              binding: { ...report.authoring.record.binding, baseline: result.patch.value } } }
+          }
+          // Main's ephemeral handle belongs to one revision. Re-resolve this
+          // same address after the canonical write so retained selection can
+          // immediately edit or resize again without a new click.
+          let retained: HtmlSelectedTarget = { report, resolved: { handle: report.handle, status: 'not-editable', reason: 'source-changed' } }
+          try {
+            const refreshed = await window.desktopAPI.workspaceFiles!({ type: 'html-preview.resolve-target',
+              leaseId: this.lease.leaseId, loadId: this.lease.loadId, revision: result.revision, targets: [report] })
+            if (refreshed.revision === result.revision && refreshed.targets[0]) retained = { report, resolved: refreshed.targets[0] }
+          } catch { /* The edit receipt remains applied; the next explicit hit can resolve its current address. */ }
+          if (this.selected === target && this.revision === result.revision) this.select(retained)
+          this.iframe.contentWindow?.postMessage({ type: 'html-preview.refresh-targets', loadId: this.lease.loadId }, '*')
+        }
       }
       return result
     } finally {
+      this.writing--
       this.events.onEditSettled()
     }
   }
@@ -292,6 +375,7 @@ export class HtmlPreviewController {
     this.requestSerial += 1
     window.removeEventListener('message', this.onMessage)
     this.selected = null
+    this.pendingGesture = null
     this.pendingConfirmation = null
     this.recordsSource = undefined
   }

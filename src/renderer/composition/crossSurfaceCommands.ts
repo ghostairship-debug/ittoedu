@@ -62,6 +62,7 @@ export { prepareCourseObjectPaste, type CourseObjectClipboardSource, type Course
 export { componentIsLocked } from '../../shared/contracts/component-platform/project'
 import { capturedCourseViewIsCurrent } from '../documents/CourseV10DocumentBridge'
 import { interactionSelectionIdentity } from '../documents/interactionSelection'
+import { requestAuthorFieldAction } from '../editing/commands/objectContextMenu'
 interface ObjectClipboard extends CourseObjectClipboardSource {
   matrices: Record<string, AffineMatrix>
   moveAvailable?: boolean
@@ -110,7 +111,7 @@ export function createCrossSurfaceCommands(ports: CrossSurfaceCommandPorts) {
       const view = kernel.readView()
       if (view.activeDocumentId !== documentId || view.snapshot?.epoch !== before.snapshot?.epoch
         || view.activation !== before.activation || view.rootInstanceId !== before.rootInstanceId
-        || view.editingContainerId !== before.editingContainerId || view.editingPlane !== before.editingPlane
+        || view.editingContainerId !== before.editingContainerId || view.activeGroupId !== before.activeGroupId || view.editingPlane !== before.editingPlane
         || view.surfaceId !== before.surfaceId || view.activeStateId !== before.activeStateId || scope() !== beforeScope) return false
       await select(documentId)
       return true
@@ -301,6 +302,15 @@ export function createCrossSurfaceCommands(ports: CrossSurfaceCommandPorts) {
     }) },
     updateNode(nodeId: string, patch: EditorCanvasNodePatch) { commands.updateNodes([{ nodeId, patch }]) },
     nudgeSelection(dx: number, dy: number) { run(async () => {
+      const view = kernel.readView(), selection = view.interactionSelection
+      if (selection?.kind === 'author-field') {
+        if (!view.activeDocumentId || !view.snapshot
+          || !requestAuthorFieldAction({ documentId: view.activeDocumentId, epoch: view.snapshot.epoch,
+            selectionIdentity: interactionSelectionIdentity(selection), action: 'nudge', dx, dy }))
+          throw new Error('此处内容没有可独立移动的几何位置；请明确选择整体后移动。')
+        return
+      }
+      if (selection?.kind === 'document') throw new Error('当前选择是正文范围，不能按独立对象移动；请使用正文读序或布局操作。')
       const target = kernel.captureTarget()
       await write(selectedRoots(target.editingProject, target.instanceIds).filter(id => !componentIsLocked(target.editingProject,id) && target.editingProject.instances[id].frame).map(instanceId => {
         const delta = transformVector(invertMatrix(componentParentMatrix(target.editingProject, instanceId)), { x: dx, y: dy })

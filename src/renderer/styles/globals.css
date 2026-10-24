@@ -6253,3 +6253,12 @@ button:disabled {
 .scene-state-card--base,.scene-state-card:hover{background:var(--panel-bg-hover);border-color:var(--border-strong)}
 .toolbar{min-height:52px;padding-right:calc(100vw - env(titlebar-area-width,100vw) + 12px);-webkit-app-region:drag}
 .toolbar :is(button,input,select,summary,.export-menu__panel,.toolbar__dropdown-panel){-webkit-app-region:no-drag}
+
+/* The author-field owner supplies the current solid selection; hover is only discovery. */
+.author-field-affordance[data-selected="true"] { visibility: hidden; }
+.shared-document-editor [data-flow-editing-target="true"] { outline: 2px solid #2563eb; }
+.shared-document-editor[data-document-selection-active="false"] .ProseMirror-selectednode,
+.shared-document-editor[data-document-selection-active="false"] [data-flow-editing-target="true"] { outline: none; }
+.shared-document-editor .ProseMirror[data-flow-input-active="false"] [data-flow-object-movable="true"] { cursor: move; }
+.shared-document-editor .ProseMirror[data-flow-input-active="false"] [data-flow-object-movable="false"] { cursor: default; }
+.shared-document-editor .ProseMirror[data-flow-input-active="true"] { cursor: text; }

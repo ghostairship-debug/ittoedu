@@ -13,7 +13,7 @@ interface QuickBarState {
   direction: 'up' | 'down'
   maxHeight: number
 }
-const QuickBarContext = createContext<QuickBarState>({ open: null, setOpen: () => {}, direction: 'down', maxHeight: 320 })
+const QuickBarContext = createContext<QuickBarState | null>(null)
 
 const stop = (event: SyntheticEvent) => event.stopPropagation()
 /** Keep the document's text selection and the canvas selection while the bar is used. */
@@ -100,7 +100,7 @@ export interface QuickBarButtonProps {
   icon?: ReactNode
   /** Visible text next to the icon; icon-only buttons still carry `label` for assistive technology. */
   text?: string
-  pressed?: boolean
+  pressed?: boolean | 'mixed'
   disabled?: boolean
   danger?: boolean
   onClick(): void
@@ -126,18 +126,40 @@ export interface QuickBarPopoverButtonProps extends Omit<QuickBarButtonProps, 'o
 }
 export function QuickBarPopoverButton({ children, popoverLabel, popupRole = 'dialog', openToken, ...button }: QuickBarPopoverButtonProps) {
   const id = useId()
-  const { open, setOpen, direction, maxHeight } = useContext(QuickBarContext)
+  const owner = useContext(QuickBarContext)
+  const [localOpen, setLocalOpen] = useState<string | null>(null)
+  const [localPlacement, setLocalPlacement] = useState({ direction: 'down' as 'up' | 'down', maxHeight: 320 })
+  const { open, setOpen, direction, maxHeight } = owner ?? { open: localOpen, setOpen: setLocalOpen, ...localPlacement }
   const expanded = open === id
   const close = () => setOpen(null)
+  const anchor = useRef<HTMLSpanElement>(null)
   const popup = useRef<HTMLDivElement>(null)
+  // A toolbar portaled into another bar keeps its React owner context, not the target DOM's context.
+  // Standalone document toolbars therefore own only their local popover; no second toolbar is needed.
+  useEffect(() => {
+    if (owner || !expanded) return
+    const outside = (event: PointerEvent) => { if (!(event.target instanceof Node && anchor.current?.contains(event.target))) setLocalOpen(null) }
+    const escape = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || event.isComposing) return
+      event.preventDefault(); event.stopPropagation(); setLocalOpen(null)
+    }
+    document.addEventListener('pointerdown', outside, true); window.addEventListener('keydown', escape, true)
+    return () => { document.removeEventListener('pointerdown', outside, true); window.removeEventListener('keydown', escape, true) }
+  }, [owner, expanded])
   const [horizontal, setHorizontal] = useState(0)
+  const hasOwner = owner !== null
   const measurePopover = useCallback(() => {
-    const node = popup.current, toolbar = node?.closest<HTMLElement>('[data-selection-quick-bar]')
+    const node = popup.current, toolbar = hasOwner ? node?.closest<HTMLElement>('[data-selection-quick-bar]') : anchor.current
     if (!node || !toolbar) return
-    const left = toolbar.getBoundingClientRect().left, width = node.getBoundingClientRect().width
+    const rect = toolbar.getBoundingClientRect(), left = rect.left, width = node.getBoundingClientRect().width
     const next = Math.max(8, Math.min(left, window.innerWidth - width - 8)) - left
     setHorizontal(previous => previous === next ? previous : next)
-  }, [])
+    if (!hasOwner) {
+      const above = Math.max(0, rect.top - 8), below = Math.max(0, window.innerHeight - rect.bottom - 8)
+      const placement = below >= above ? { direction: 'down' as const, maxHeight: below } : { direction: 'up' as const, maxHeight: above }
+      setLocalPlacement(previous => previous.direction === placement.direction && previous.maxHeight === placement.maxHeight ? previous : placement)
+    }
+  }, [hasOwner])
   useLayoutEffect(measurePopover)
   useEffect(() => {
     if (!expanded) return
@@ -147,7 +169,7 @@ export function QuickBarPopoverButton({ children, popoverLabel, popupRole = 'dia
     return () => { observer?.disconnect(); window.removeEventListener('resize', measurePopover); document.removeEventListener('scroll', measurePopover, true) }
   }, [expanded, measurePopover])
   useEffect(() => { if (openToken) setOpen(id) }, [openToken])
-  return <span className="selection-quick-bar__anchor">
+  return <span ref={anchor} className="selection-quick-bar__anchor" style={hasOwner ? undefined : { position: 'relative' }}>
     <button type="button" className={`selection-quick-bar__button${button.text ? ' selection-quick-bar__button--text' : ''}`}
       aria-label={button.label} title={button.label} aria-expanded={expanded} aria-haspopup={popupRole} disabled={button.disabled}
       onMouseDown={keepSelection} onClick={() => setOpen(expanded ? null : id)}>

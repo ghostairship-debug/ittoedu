@@ -33,18 +33,20 @@ function fixture(): CourseProjectV10 {
 }
 const identity = [1, 0, 0, 1, 0, 0] as const
 
-it('ordinary text hit drags and resizes only the child through Session, retaining the card, siblings, history and saved frame', async () => {
+// Owner 2026-10-24: ordinary clicks select the group; child manipulation requires entering its scope.
+it('after group entry, text hit drags and resizes only the child through Session, retaining the card, siblings, history and saved frame', async () => {
   const project = fixture(), host = await createCourseDocumentHost()
   await host.documents.createFrom!({ project, resources: { assets: {}, components: {} } })
   const kernel = createEditorStoreKernel({ bridge: host.bridge, commit() {} })
   const controller = createSlideWorkspaceAuthoringController({
     read: () => { const view = host.bridge.read(); return { project: view.editingProject!, surfaceId: view.surfaceId!,
-      documentId: view.activeDocumentId!, activeStateId: view.activeStateId, selectedInstanceIds: view.selectedInstanceIds } },
+      documentId: view.activeDocumentId!, activeStateId: view.activeStateId, activeGroupId: view.activeGroupId, selectedInstanceIds: view.selectedInstanceIds } },
     capture: () => kernel.captureTarget(), select: ids => kernel.selectInstances(ids),
     commit: (edits, target, group) => kernel.editCaptured(kernel.capture(edits, target), group),
     report: message => { throw new Error(message) },
   })
   try {
+    host.bridge.enterGroup(host.bridge.read().activeDocumentId!, 'card')
     controller.pointerDown({ x: 229.5, y: 294.25 }, identity)
     expect(host.bridge.read().selectedInstanceIds).toEqual(['text'])
     controller.pointerMove({ x: 260.5, y: 317.25, altKey: true }, identity)
@@ -79,7 +81,8 @@ it('card background still selects the group, explicit deep selection reaches its
   const project = fixture(), targets = freeSurfaceTargets(project, 'slide')
   expect(hitFreeObject(targets, { x: 60, y: 210 })?.instanceId).toBe('card')
   expect(hitFreeObject(targets, { x: 60, y: 210 }, true)?.instanceId).toBe('background')
-  expect(hitFreeObject(targets, { x: 229.5, y: 294.25 })?.instanceId).toBe('text')
+  expect(hitFreeObject(targets, { x: 229.5, y: 294.25 })?.instanceId).toBe('card')
+  expect(hitFreeObject(targets, { x: 229.5, y: 294.25 }, false, identity, 'card')?.instanceId).toBe('text')
   project.instances.card.locked = true
   const host = await createCourseDocumentHost()
   await host.documents.createFrom!({ project, resources: { assets: {}, components: {} } })

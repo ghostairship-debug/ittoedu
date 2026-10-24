@@ -24,7 +24,6 @@ import { serializeDocumentMarkdown, type MarkdownDocument } from '../../shared/d
 import type { DocumentOperation } from '../document/editorSession'
 import type { FlowParagraphBlockRect } from '../../shared/flowParagraphAnchors'
 import { flowParagraphAnchorAt, flowParagraphAnchoredFrame } from '../../shared/flowParagraphAnchors'
-import { createFlowViewportGeometry } from '../../shared/flowViewportGeometry'
 import { isViewportComponent, projectTeacherControllerInstances, restoreTeacherControllerFrameEdits, createTeacherControllerHudGeometry, teacherControllerReferenceSize, type TeacherControllerHudGeometry } from '../../shared/teacherControllerViewportGeometry'
 import { createFlowReadingNavigation, observeFlowReading } from '../../shared/flowReading'
 import { resolveFlowChapterEntry } from '../../shared/flowChapterEntry'
@@ -47,6 +46,7 @@ import { EDITOR_PAGE_INSETS, formatPageInsets } from '../../shared/pageFrame'
 import { NativeSelectionContext } from '../workbench/NativeSelectionContext'
 import { proEditorRailController } from './proEditorRailController'
 import { SlideLayerSelectionOverlay } from './workspaces/SlideLayerSelectionOverlay'
+import { QuickBarPopoverButton } from '../editing/quickbar/SelectionQuickBar'
 import { FreeTransformGesture, freeSurfaceTargets, type FreeResizeHandle } from '../componentPlatform/surfaces/slide'
 import type { WorkspaceMediaDropHandler } from '../lessonWorkspace/workspaceMediaDrop'
 import type { ImportedImageAsset } from '../project/assetManager'
@@ -127,7 +127,7 @@ export function FlowWorkspace({ documentId, project, surfaceId, toolbarContainer
   const [layoutBody, setLayoutBody] = useState<HTMLElement | null>(null)
   const [controllerPreview, setControllerPreview] = useState<Record<string, ComponentFrame>>({})
   const controllerGesture = useRef<{ pointerId: number; start: { x: number; y: number }; moved: boolean; captured: CapturedCourseTarget;
-    original: CourseProjectV10; display: CourseProjectV10; viewport: TeacherControllerHudGeometry; offset: { x: number; y: number }; value: FreeTransformGesture; edits: ComponentEdit[] } | null>(null)
+    capture: HTMLDivElement; original: CourseProjectV10; display: CourseProjectV10; viewport: TeacherControllerHudGeometry; offset: { x: number; y: number }; value: FreeTransformGesture; edits: ComponentEdit[] } | null>(null)
   const [, refreshNavigation] = useState(0)
   useEffect(() => runtime.navigation.subscribe?.(() => refreshNavigation(value => value + 1)), [runtime.navigation])
   useEffect(() => runtime.navigation.subscribePlacement?.(() => refreshNavigation(value => value + 1)), [runtime.navigation])
@@ -135,7 +135,7 @@ export function FlowWorkspace({ documentId, project, surfaceId, toolbarContainer
   const [formatHeight, setFormatHeight] = useState(0)
   useLayoutEffect(() => {
     if (toolbarContainer || !formatHost) { setFormatHeight(0); return }
-    const measure = () => setFormatHeight(Math.ceil(formatHost.getBoundingClientRect().height) + 8)
+    const measure = () => setFormatHeight(formatHost.childElementCount ? Math.ceil(formatHost.getBoundingClientRect().height) + 8 : 0)
     measure()
     const observer = new ResizeObserver(measure)
     observer.observe(formatHost)
@@ -143,7 +143,14 @@ export function FlowWorkspace({ documentId, project, surfaceId, toolbarContainer
   }, [toolbarContainer, formatHost])
   const [error, setError] = useState<string | null>(null)
   const authorInteraction = useComponentAuthorInteraction({ root: workspace, documentId, surfaceId,
-    enabled: !readOnly, contextKey: globalEditing ? 'global' : 'body', selectImage: onSelectImageAsset, report: setError })
+    enabled: !readOnly, contextKey: globalEditing ? 'global' : 'body', selectImage: onSelectImageAsset, report: setError,
+    onObjectPointer: (detail, point) => {
+      if (detail.phase && detail.pointerId !== undefined && flowDocumentBlock(project, surfaceId, detail.instanceId)) editor.current?.objectPointer({
+        blockId: detail.instanceId, phase: detail.phase, pointerId: detail.pointerId, point, button: detail.button, modifiers: { shift: detail.shiftKey, alt: detail.altKey, ctrl: detail.ctrlKey, meta: detail.metaKey },
+      })
+      else if (detail.phase && detail.pointerId !== undefined) workspace.current?.querySelector<HTMLElement>(`[data-flow-overlay-id="${CSS.escape(detail.instanceId)}"]`)?.dispatchEvent(
+        new CustomEvent('flow-object-pointer', { detail: { ...detail, point, modifiers: { shift: detail.shiftKey, alt: detail.altKey, ctrl: detail.ctrlKey, meta: detail.metaKey } } }))
+    } })
   const selectedAuthorSpot = runtime.selectedInstanceIds.length === 1
     && authorInteraction.selectedSpot?.instanceId === runtime.selectedInstanceIds[0] ? authorInteraction.selectedSpot : undefined
   const [selection, setSelection] = useState<DocumentSelection | null>(null)
@@ -492,7 +499,7 @@ export function FlowWorkspace({ documentId, project, surfaceId, toolbarContainer
   const controllerProjection = Object.keys(controllerPreview).length ? { ...controllerBaseProjection,
     instances: Object.fromEntries(Object.entries(controllerBaseProjection.instances).map(([id, instance]) =>
       [id, controllerPreview[id] ? { ...instance, frame: controllerPreview[id] } : instance])) } : controllerBaseProjection
-  const selectedControllerTargets = freeSurfaceTargets(controllerProjection, surfaceId).filter(target => runtime.selectedInstanceIds.includes(target.instanceId)
+  const selectedControllerTargets = freeSurfaceTargets(controllerProjection, surfaceId).filter(target => interactionSelection?.kind !== 'author-field' && runtime.selectedInstanceIds.includes(target.instanceId)
     && teacherChrome(target.instanceId) && !flowStructureDisabledReason(project, target.instanceId))
   const controllerPointerMatrix = (): [number, number, number, number, number, number] => {
     const box = workspace.current?.getBoundingClientRect()
@@ -503,7 +510,7 @@ export function FlowWorkspace({ documentId, project, surfaceId, toolbarContainer
     if (readOnly || event.button !== 0 || !handle || !selectedControllerTargets.length) return
     event.preventDefault(); event.stopPropagation(); event.currentTarget.setPointerCapture(event.pointerId)
     controllerGesture.current = { pointerId: event.pointerId, start: { x: event.clientX, y: event.clientY }, moved: false,
-      captured: bridge.captureTarget(documentId), original: project, display: controllerBaseProjection, viewport: hudGeometry,
+      capture: event.currentTarget, captured: bridge.captureTarget(documentId), original: project, display: controllerBaseProjection, viewport: hudGeometry,
       offset: runtime.navigation.placement?.() ?? { x: 0, y: 0 }, edits: [], value: new FreeTransformGesture({
         mode: handle === 'move' ? 'drag' : handle === 'rotate' ? 'rotate' : 'resize', handle: handle === 'rotate' || handle === 'move' ? undefined : handle as FreeResizeHandle,
         targets: selectedControllerTargets, pointer: { x: event.clientX, y: event.clientY }, surfaceToPointer: controllerPointerMatrix() }) }
@@ -513,7 +520,7 @@ export function FlowWorkspace({ documentId, project, surfaceId, toolbarContainer
     if (readOnly || event.button !== 0 || flowStructureDisabledReason(project, instanceId) || !targets.length) return
     event.preventDefault(); event.stopPropagation()
     controllerGesture.current = { pointerId: event.pointerId, start: { x: event.clientX, y: event.clientY }, moved: false,
-      captured: bridge.captureTarget(documentId), original: project, display: controllerBaseProjection, viewport: hudGeometry,
+      capture: event.currentTarget, captured: bridge.captureTarget(documentId), original: project, display: controllerBaseProjection, viewport: hudGeometry,
       offset: runtime.navigation.placement?.() ?? { x: 0, y: 0 }, edits: [], value: new FreeTransformGesture({
         mode: 'drag', targets, pointer: { x: event.clientX, y: event.clientY }, surfaceToPointer: controllerPointerMatrix() }) }
   }
@@ -534,6 +541,16 @@ export function FlowWorkspace({ documentId, project, surfaceId, toolbarContainer
     if (!cancel && gesture.moved && gesture.edits.length) void edit(restoreTeacherControllerFrameEdits(gesture.edits, gesture.original,
       gesture.display, gesture.viewport, gesture.offset, runtime.navigation), gesture.captured)
   }
+  useEffect(() => {
+    const cancel = (event: KeyboardEvent) => {
+      const gesture = controllerGesture.current
+      if (event.key !== 'Escape' || !gesture) return
+      event.preventDefault(); controllerGesture.current = null; setControllerPreview({})
+      if (gesture.capture.hasPointerCapture?.(gesture.pointerId)) gesture.capture.releasePointerCapture(gesture.pointerId)
+    }
+    window.addEventListener('keydown', cancel, true)
+    return () => { window.removeEventListener('keydown', cancel, true); const gesture = controllerGesture.current; controllerGesture.current = null; if (gesture?.capture.hasPointerCapture?.(gesture.pointerId)) gesture.capture.releasePointerCapture(gesture.pointerId) }
+  }, [])
   const mediaKind = (instance: ComponentInstance,owner=project): FlowMediaKind | undefined => {
     const key = componentDefinitionBuiltinKey(owner.definitions[instance.definitionId])
     return key && ['guoling.image','guoling.video','guoling.audio'].includes(key) ? key.slice(8) as FlowMediaKind : undefined
@@ -614,22 +631,24 @@ export function FlowWorkspace({ documentId, project, surfaceId, toolbarContainer
     style={{ position: 'relative', width: '100%', height: '100%', overflow: 'hidden', isolation: 'isolate' }}
     onContextMenuCapture={event => { authorInteraction.contextMenuFromElement(event) }}
     onPointerDownCapture={event => {
-      if (authorInteraction.pointerFromElement(event)) return
+      const targetElement = event.target instanceof Element ? event.target : null
+      if (!targetElement?.closest('.ProseMirror') && authorInteraction.pointerFromElement(event)) return
       if (!contentDraft || contentDraft.target.documentId !== documentId || contentDraft.composing) return
       const target=event.target instanceof Element ? event.target : null
       if(target?.closest('[data-component-professional-editor],.text-edit-toolbar,.selection-quick-bar'))return
       void commitContentEdit().catch(failure=>setError(failure instanceof Error ? failure.message:String(failure)))
     }}
     onDoubleClickCapture={async event => {
-      if(readOnly || !(event.target instanceof Element) || event.target.closest('[data-component-professional-editor]')
-        || event.target.closest('[contenteditable]')?.getAttribute('contenteditable') === 'true')return
+      if (event.target instanceof Element && event.target.closest('.ProseMirror') && !event.target.closest('[data-component-render]')) return
+      if(readOnly || !(event.target instanceof Element) || event.target.closest('[data-component-professional-editor]'))return
       const id=event.target.closest<HTMLElement>('[data-component-instance]')?.dataset.componentInstance
       const instance=id && project.instances[id]
       if(instance) {
+        event.preventDefault(); event.stopPropagation()
         const content=runtime.world.contentElement?.(instance.id), matrix=content && flowContentClientMatrix(content)
         if(matrix) {
           const point=transformPoint(invertMatrix(matrix),{x:event.clientX,y:event.clientY})
-          if(await beginRegisteredSpot(instance.id,point)) {
+          if(await beginRegisteredSpot(instance.id, point, undefined, undefined, undefined, true)) {
             event.preventDefault();event.stopPropagation()
             return
           }
@@ -643,7 +662,15 @@ export function FlowWorkspace({ documentId, project, surfaceId, toolbarContainer
       beginContentEdit(instance.id,'canvas')
     }}>
     {!readOnly && runtime.selectedInstanceIds.length > 0 && (Boolean(selectedAuthorSpot) || runtime.selectedInstanceIds.every(id => globals.includes(id) || floating.includes(id)))
-      && <NativeSelectionContext documentId={documentId} revision={project.revision} surfaceId={surfaceId} itemIds={runtime.selectedInstanceIds} enabled textEditing={Boolean(contentDraft)} authorSpot={selectedAuthorSpot} authorBounds={authorInteraction.authorBounds} />}
+      && <NativeSelectionContext documentId={documentId} revision={project.revision} surfaceId={surfaceId} itemIds={runtime.selectedInstanceIds} enabled textEditing={Boolean(contentDraft)} authorSpot={selectedAuthorSpot} authorBounds={authorInteraction.authorBounds} >
+        {!selectedAuthorSpot && runtime.selectedInstanceIds.length === 1 && floating.includes(runtime.selectedInstanceIds[0]) && <FlowFloatingActions
+          project={project} instanceId={runtime.selectedInstanceIds[0]} paperWidth={paperLayout.width} paragraphRects={paperLayout.rects} readPaperOffset={readPaperOffset} onEdits={edit} />}
+      </NativeSelectionContext>}
+    {!readOnly && authorInteraction.authorTarget && <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 9 }} onPointerDown={event => {
+      const handle = event.target instanceof Element ? event.target.closest('[data-handle]')?.getAttribute('data-handle') : null
+      if (!handle || contentDraft) return
+      authorInteraction.beginTransform(event, handle === 'move' ? 'drag' : handle === 'rotate' ? 'rotate' : 'resize', handle === 'move' || handle === 'rotate' ? undefined : handle as FreeResizeHandle)
+    }}><SlideLayerSelectionOverlay targets={[authorInteraction.authorTarget]} scale={1} surfaceToPointer={[1, 0, 0, 1, 0, 0]} movable={!contentDraft && !flowStructureDisabledReason(project, authorInteraction.authorTarget.instanceId)} resizable={!contentDraft && !flowStructureDisabledReason(project, authorInteraction.authorTarget.instanceId)} rotatable={!contentDraft && !flowStructureDisabledReason(project, authorInteraction.authorTarget.instanceId)} /></div>}
     {!readOnly && selectedControllerTargets.length > 0 && <div data-flow-controller-selection="true"
       style={{ position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 8 }}
       onPointerDown={beginControllerResize} onPointerMove={moveControllerResize} onPointerUp={event => finishControllerResize(event)}
@@ -666,7 +693,8 @@ export function FlowWorkspace({ documentId, project, surfaceId, toolbarContainer
       style={{ display: globalEditing ? 'none' : undefined, position: 'relative', isolation: 'isolate', zIndex: 4, overflow: 'auto', height: '100%', padding: flowScrollPadding(layout) }}>
       <article ref={paper} className="flow-paper flow-body-content" data-testid="flow-paper" data-flow-reading-width={layout.readingWidth}
         onPointerDownCapture={event => { paperPointer.current = { x: event.clientX, y: event.clientY } }}
-        onClick={event => { if (!readOnly && event.target === event.currentTarget) editor.current?.focusEndParagraph() }}
+        onClick={event => { if (!readOnly && event.target === event.currentTarget) runtime.selectInstances([], surfaceId) }}
+        onDoubleClick={event => { if (!readOnly && event.target === event.currentTarget) editor.current?.focusEndParagraph() }}
         onDragOver={event => { if (onDropWorkspaceMedia && event.dataTransfer.types.includes(WORKSPACE_MEDIA_DRAG_TYPE)) { event.preventDefault(); event.dataTransfer.dropEffect = 'copy' } }}
         onDrop={drop} style={{ position: 'relative', isolation: 'isolate', width: '100%', maxWidth: flowPaperMaxWidth(layout), containerType: 'inline-size', minHeight: readOnly ? '100%' : paperMinimumHeight || '200%', margin: '0 auto', padding: flowPaperPadding(layout), color: '#1f2937' }}>
         <style>{FLOW_BODY_CSS}</style>
@@ -696,7 +724,7 @@ export function FlowWorkspace({ documentId, project, surfaceId, toolbarContainer
             latest.current.runtime.selectInstances([prepared.groupId], surfaceId)
           }}
           contextualCardSuppressed={interactionSelection?.kind !== 'document'}
-          target="flow" deferLayoutSource toolbarHost={toolbarContainer ?? formatHost} sourceDraft={draft?.surfaceId === surfaceId ? draft.source : undefined}
+          target="flow" blockMoveDisabledReason={id => flowStructureDisabledReason(project, id)} deferLayoutSource toolbarHost={toolbarContainer ?? formatHost} sourceDraft={draft?.surfaceId === surfaceId ? draft.source : undefined}
           sourceDiagnostics={draft?.surfaceId===surfaceId ? draft.diagnostics:undefined}
           clipboardContext={clipboardContext} clipboardResourcePort={clipboardResourcePort}
           onDiscardDraft={async () => {
@@ -825,25 +853,25 @@ export function FlowWorkspace({ documentId, project, surfaceId, toolbarContainer
         {floating.filter(id => project.instances[id].flowPlacement?.space === 'paper').map(id => <FlowFloatingInstance key={id} project={project} instanceId={id}
           readPaperOffset={readPaperOffset}
           readObservationScale={readContentScale}
-          selected={runtime.selectedInstanceIds.includes(id)} readOnly={readOnly} paperWidth={paperLayout.width} paragraphRects={paperLayout.rects}
-          onSelect={() => runtime.selectInstances([id], surfaceId)} onEdits={edit} onElement={runtime.onElement} onTargetElement={runtime.onTargetElement} />)}
+          selected={interactionSelection?.kind !== 'author-field' && runtime.selectedInstanceIds.includes(id)} editing={contentDraft?.instanceId === id} readOnly={readOnly} paperWidth={paperLayout.width} paragraphRects={paperLayout.rects}
+          onSelect={() => runtime.selectInstances([id], surfaceId)} captureTarget={() => bridge.captureTarget(documentId)} onEdits={edit} onElement={runtime.onElement} onTargetElement={runtime.onTargetElement} />)}
       </article>
     </div>
     {floating.filter(id => project.instances[id].flowPlacement?.space === 'viewport').map(id => <FlowFloatingInstance key={id} project={project} instanceId={id}
       readPaperOffset={readPaperOffset}
       readObservationScale={readContentScale}
-      selected={runtime.selectedInstanceIds.includes(id)} readOnly={readOnly} paperWidth={paperLayout.width} paragraphRects={paperLayout.rects}
+      selected={interactionSelection?.kind !== 'author-field' && runtime.selectedInstanceIds.includes(id)} editing={contentDraft?.instanceId === id} readOnly={readOnly} paperWidth={paperLayout.width} paragraphRects={paperLayout.rects}
       globalPlane={project.global.underlay.includes(id) ? 'underlay' : project.global.overlay.includes(id) ? 'overlay':undefined}
       viewport={{ width: viewport.width / readBaseScale(), height: viewport.height / readBaseScale() }}
-      onSelect={() => runtime.selectInstances([id], surfaceId)} onEdits={edit} onElement={runtime.onElement} onTargetElement={runtime.onTargetElement} />)}
+      onSelect={() => runtime.selectInstances([id], surfaceId)} captureTarget={() => bridge.captureTarget(documentId)} onEdits={edit} onElement={runtime.onElement} onTargetElement={runtime.onTargetElement} />)}
     </div>
     {globals.map(id=><FlowFloatingInstance key={id} project={teacherChrome(id) ? controllerProjection : project} instanceId={id}
       readObservationScale={teacherChrome(id) ? undefined : readContentScale}
-      selected={runtime.selectedInstanceIds.includes(id)} readOnly={readOnly} paperWidth={paperLayout.width} paragraphRects={paperLayout.rects}
+      selected={interactionSelection?.kind !== 'author-field' && runtime.selectedInstanceIds.includes(id)} editing={contentDraft?.instanceId === id} readOnly={readOnly} paperWidth={paperLayout.width} paragraphRects={paperLayout.rects}
       globalPlane={project.global.underlay.includes(id) ? 'underlay':'overlay'} viewport={teacherChrome(id) ? viewport : { width: viewport.width / readBaseScale(), height: viewport.height / readBaseScale() }}
       controllerDrag={{ start: beginControllerDrag, move: moveControllerResize, finish: finishControllerResize }}
-      onSelect={()=>runtime.selectInstances([id],surfaceId)} onEdits={edits => edit(restoreTeacherControllerFrameEdits(edits, project, controllerProjection, hudGeometry,
-        runtime.navigation.placement?.() ?? { x: 0, y: 0 }, runtime.navigation))} onElement={runtime.onElement} onTargetElement={runtime.onTargetElement}/>)}
+      onSelect={()=>runtime.selectInstances([id],surfaceId)} captureTarget={() => bridge.captureTarget(documentId)} onEdits={(edits, captured) => edit(restoreTeacherControllerFrameEdits(edits, project, controllerProjection, hudGeometry,
+        runtime.navigation.placement?.() ?? { x: 0, y: 0 }, runtime.navigation), captured)} onElement={runtime.onElement} onTargetElement={runtime.onTargetElement}/>)}
     </div>,observationHost)}
     {!readOnly && <div className="canvas-view-controls" role="group" aria-label="画布视图">
       <button type="button" aria-label="缩小画布" onClick={() => viewSession.current?.zoomTo(viewZoom - 0.1)}><Minus size={14} /></button>
@@ -863,9 +891,9 @@ export function FlowWorkspace({ documentId, project, surfaceId, toolbarContainer
   </div>
 }
 
-function FlowFloatingInstance({ project, instanceId, selected, readOnly, paperWidth, paragraphRects, onSelect, onEdits, onElement, onTargetElement,globalPlane,viewport,readObservationScale,readPaperOffset,controllerDrag }: {
-  project: CourseProjectV10; instanceId: string; selected: boolean; readOnly: boolean; paperWidth: number; paragraphRects: readonly FlowParagraphBlockRect[];
-  onSelect(): void; onEdits(edits: ComponentEdit[]): void; onElement(id: string, element: HTMLElement | null, expectedDefault?: HTMLElement): void; onTargetElement(id: string, element: HTMLElement | null, expectedDefault?: HTMLElement): void
+function FlowFloatingInstance({ project, instanceId, selected, editing, readOnly, paperWidth, paragraphRects, onSelect, onEdits, captureTarget, onElement, onTargetElement,globalPlane,viewport,readObservationScale,readPaperOffset,controllerDrag }: {
+  project: CourseProjectV10; instanceId: string; selected: boolean; editing?: boolean; readOnly: boolean; paperWidth: number; paragraphRects: readonly FlowParagraphBlockRect[];
+  onSelect(): void; onEdits(edits: ComponentEdit[], captured?: CapturedCourseTarget): void; captureTarget(): CapturedCourseTarget; onElement(id: string, element: HTMLElement | null, expectedDefault?: HTMLElement): void; onTargetElement(id: string, element: HTMLElement | null, expectedDefault?: HTMLElement): void
   globalPlane?:'underlay'|'overlay'
   viewport?:{width:number;height:number}
   readObservationScale?():number
@@ -878,10 +906,10 @@ function FlowFloatingInstance({ project, instanceId, selected, readOnly, paperWi
 }) {
   const runtime=useCourseV10Runtime()
   const instance = project.instances[instanceId], placement = instance?.flowPlacement
-  const definition=project.definitions[instance.definitionId]
   const controller = isViewportComponent(project, instanceId)
   const [preview, setPreview] = useState<typeof instance.frame | null>(null)
-  const drag = useRef<{ x: number; y: number; frame: NonNullable<typeof instance.frame>; storedFrame: NonNullable<typeof instance.frame>; resize: boolean; point(value:{x:number;y:number}):{x:number;y:number} } | null>(null)
+  const drag = useRef<{ pointerId: number; capture: HTMLElement; start: { x: number; y: number }; moved: boolean; frame: ComponentFrame; storedFrame: ComponentFrame; mode: string; captured: CapturedCourseTarget; value: FreeTransformGesture; shown: ComponentFrame } | null>(null)
+  const remotePointer = useRef<(event: Event) => void>(() => {})
   const pendingController = useRef<{ input: React.PointerEvent<HTMLDivElement>; latest: React.PointerEvent<HTMLDivElement>; ended: boolean; cancel?: boolean } | null>(null)
   const freezePointer = (event: React.PointerEvent<HTMLDivElement>) => ({ ...event, currentTarget: event.currentTarget,
     preventDefault: () => event.preventDefault(), stopPropagation: () => event.stopPropagation() })
@@ -896,6 +924,17 @@ function FlowFloatingInstance({ project, instanceId, selected, readOnly, paperWi
     const previous = boundTarget.current; boundTarget.current = element
     onTargetElement(instanceId, element, element ? undefined : previous ?? undefined)
   }, [instanceId, onTargetElement])
+  useEffect(() => {
+    const cancel = (event: KeyboardEvent) => { if (event.key !== 'Escape') return; const current = drag.current; if (current) { event.preventDefault(); drag.current = null; setPreview(null); if (current.capture.hasPointerCapture?.(current.pointerId)) current.capture.releasePointerCapture(current.pointerId) }; if (pendingController.current) pendingController.current.cancel = true }
+    window.addEventListener('keydown', cancel, true)
+    return () => { window.removeEventListener('keydown', cancel, true); const current = drag.current; drag.current = null; if (current?.capture.hasPointerCapture?.(current.pointerId)) current.capture.releasePointerCapture(current.pointerId) }
+  }, [])
+  useEffect(() => {
+    const element = boundTarget.current
+    const accept = (event: Event) => remotePointer.current(event)
+    element?.addEventListener('flow-object-pointer', accept)
+    return () => element?.removeEventListener('flow-object-pointer', accept)
+  }, [])
   if (!instance?.frame) return null
   const originalFrame = instance.frame
   const stored = preview ?? originalFrame
@@ -905,92 +944,120 @@ function FlowFloatingInstance({ project, instanceId, selected, readOnly, paperWi
   const structureDisabledReason = flowStructureDisabledReason(project, instanceId)
   const owner = componentContainerForInstance(project, instanceId)
   const surfaceId = owner?.kind === 'flow' ? owner.id : undefined
-  const updatePlacement = (value: typeof placement | null) => {
-    if (!surfaceId) return
-    onEdits(flowPlacementEdits(project, instanceId, value ? { kind: 'overlay', surfaceId, placement: value } : { kind: 'document', surfaceId }))
-  }
-  const changeMode = (mode: FlowFloatingMode) => {
-    if (!placement || !surfaceId) return
-    const measured = flowFloatingModeEdits(instanceId, frame, placement, mode, paperWidth, paragraphRects, readPaperOffset?.() ?? { x: 0, y: 0 })
-    const nextFrame = measured.find(value => value.type === 'frame.set')
-    const nextPlacement = measured.find(value => value.type === 'instance.flowPlacement.set')
-    if (nextFrame?.type === 'frame.set' && nextFrame.frame && nextPlacement?.type === 'instance.flowPlacement.set' && nextPlacement.flowPlacement)
-      onEdits(flowPlacementEdits(project, instanceId, { kind: 'overlay', surfaceId, frame: nextFrame.frame, placement: nextPlacement.flowPlacement }))
-  }
-  const begin = (event: React.PointerEvent, resize: boolean) => {
-    if (readOnly || structureDisabledReason) return
+  const transformTarget = freeSurfaceTargets(project, surfaceId ?? '').find(value => value.instanceId === instanceId)
+  const movable = !readOnly && !editing && !structureDisabledReason && Boolean(transformTarget)
+  const begin = (event: React.PointerEvent<HTMLDivElement>, handle: string = 'move', released = false) => {
+    if (!movable || !transformTarget || event.button !== 0) return
     event.stopPropagation(); event.preventDefault(); onSelect()
-    event.currentTarget.setPointerCapture(event.pointerId)
-    const geometry=createFlowViewportGeometry({viewportClientRect:{x:0,y:0,width:0,height:0},layoutViewportSize:{width:0,height:0},paperOriginLayout:{x:0,y:0},paperScrollLayout:{x:0,y:0},playbackZoom:readObservationScale?.() ?? 1})
-    const point=geometry.clientToViewport({x:event.clientX,y:event.clientY})
-    drag.current = { ...point, frame, storedFrame: originalFrame, resize,point:geometry.clientToViewport }
+    const matrix = boundTarget.current && flowContentClientMatrix(boundTarget.current)
+    if (!matrix) return
+    if (!released) event.currentTarget.setPointerCapture?.(event.pointerId)
+    drag.current = { pointerId: event.pointerId, capture: event.currentTarget, start: { x: event.clientX, y: event.clientY }, moved: false,
+      frame, storedFrame: originalFrame, shown: frame, mode: handle, captured: captureTarget(), value: new FreeTransformGesture({
+        mode: handle === 'move' ? 'drag' : handle === 'rotate' ? 'rotate' : 'resize',
+        handle: handle === 'move' || handle === 'rotate' ? undefined : handle as FreeResizeHandle,
+        resizeMode: 'box', minimumBoxSize: { width: 12, height: 12 }, targets: [{ ...transformTarget, frame, parentToSurface: [1, 0, 0, 1, 0, 0], ancestors: [] }],
+        pointer: { x: event.clientX, y: event.clientY }, surfaceToPointer: multiplyMatrices(matrix, invertMatrix(frame.transform)) }) }
   }
-  const sampleDrag = (start: NonNullable<typeof drag.current>, event: React.PointerEvent) => {
-    const point = start.point({ x: event.clientX, y: event.clientY }), x = point.x - start.x, y = point.y - start.y
-    if (!x && !y) return start.frame
-    if (!start.resize) return { ...start.frame, transform: [...start.frame.transform.slice(0, 4), start.frame.transform[4] + x, start.frame.transform[5] + y] as typeof frame.transform }
-    const [a,b,c,d] = start.frame.transform, determinant = a*d-b*c
-    return determinant ? { ...start.frame, width: Math.max(12, start.frame.width + (d*x-c*y)/determinant), height: Math.max(12, start.frame.height + (-b*x+a*y)/determinant) } : null
+  const moveDrag = (event: React.PointerEvent<HTMLDivElement>) => {
+    const start = drag.current
+    if (!start || start.pointerId !== event.pointerId) return
+    if (!start.moved && Math.hypot(event.clientX - start.start.x, event.clientY - start.start.y) < 3) return
+    start.moved = true
+    const edit = start.value.update({ x: event.clientX, y: event.clientY }, { shift: event.shiftKey, alt: event.altKey }).edits.find(value => value.type === 'frame.set')
+    if (edit?.type === 'frame.set' && edit.frame) { start.shown = edit.frame; setPreview(edit.frame) }
   }
-  const moveDrag = (event: React.PointerEvent) => { const start = drag.current; if (start) setPreview(sampleDrag(start, event)) }
-  const finishDrag = (event: React.PointerEvent) => {
-    const start = drag.current; if (!start) return
-    const shown = sampleDrag(start, event); drag.current = null; setPreview(null)
-    if (!shown || shown.width === start.frame.width && shown.height === start.frame.height && shown.transform.every((value, index) => value === start.frame.transform[index])) return
-    const next = start.resize ? { ...start.storedFrame, width: shown.width, height: shown.height } : { ...start.storedFrame, transform: shown.transform }
-    if (start.resize) { onEdits([{ type: 'frame.set', instanceId, frame: next }]); return }
-    const anchor = placement?.space === 'paper' && placement.paragraphAnchor ? flowParagraphAnchorAt({ x: next.transform[4], y: next.transform[5], width: next.width, height: next.height }, paperWidth, paragraphRects) : undefined
+  const finishDrag = (event: React.PointerEvent<HTMLDivElement>, cancel = false) => {
+    const start = drag.current
+    if (!start || start.pointerId !== event.pointerId) return
+    if (!cancel) moveDrag(event)
+    drag.current = null; setPreview(null)
+    if (start.capture.hasPointerCapture?.(start.pointerId)) start.capture.releasePointerCapture(start.pointerId)
+    const shown = start.shown
+    if (cancel || !start.moved || shown.width === start.frame.width && shown.height === start.frame.height && shown.transform.every((value, index) => value === start.frame.transform[index])) return
+    const positionChanged = shown.transform[4] !== start.frame.transform[4] || shown.transform[5] !== start.frame.transform[5]
+    const next = { ...start.storedFrame, ...shown, transform: positionChanged ? shown.transform : [...shown.transform.slice(0, 4), start.storedFrame.transform[4], start.storedFrame.transform[5]] as typeof shown.transform }
+    const anchor = positionChanged && placement?.space === 'paper' && placement.paragraphAnchor ? flowParagraphAnchorAt({ x: next.transform[4], y: next.transform[5], width: next.width, height: next.height }, paperWidth, paragraphRects) : undefined
     onEdits(placement && surfaceId ? flowPlacementEdits(project, instanceId, { kind: 'overlay', surfaceId, frame: next,
-      placement: anchor ? { ...placement, paragraphAnchor: anchor } : placement }) : [{ type: 'frame.set', instanceId, frame: next }])
+      placement: anchor ? { ...placement, paragraphAnchor: anchor } : placement }) : [{ type: 'frame.set', instanceId, frame: next }], start.captured)
+  }
+  remotePointer.current = event => {
+    const input = (event as CustomEvent<{ phase: 'start' | 'update' | 'end' | 'cancel'; pointerId: number; point: { x: number; y: number }; button?: number; modifiers?: { shift?: boolean; alt?: boolean; ctrl?: boolean; meta?: boolean } }>).detail
+    const element = boundTarget.current
+    if (!input || !element) return
+    // The realm retains its own pointer capture. This adapter feeds the original placement owner only.
+    const pointer = { pointerId: input.pointerId, clientX: input.point.x, clientY: input.point.y, button: input.button ?? 0,
+      shiftKey: input.modifiers?.shift, altKey: input.modifiers?.alt, ctrlKey: input.modifiers?.ctrl, metaKey: input.modifiers?.meta,
+      currentTarget: element, preventDefault() {}, stopPropagation() {} } as React.PointerEvent<HTMLDivElement>
+    if (controller) {
+      if (input.phase === 'start') controllerDrag?.start(pointer, instanceId)
+      else if (input.phase === 'update') controllerDrag?.move(pointer)
+      else controllerDrag?.finish(pointer, input.phase === 'cancel')
+    } else if (input.phase === 'start') begin(pointer, 'move', true)
+    else if (input.phase === 'update') moveDrag(pointer)
+    else finishDrag(pointer, input.phase === 'cancel')
   }
   return <div ref={target} data-flow-overlay-id={instanceId} data-component-instance={instanceId} data-controller-authoring-id={controller ? instanceId : undefined} data-component-placement="free" data-playback-bounds="true"
     style={{ ...componentPaintStyle(instance,project.definitions[instance.definitionId]), position: 'absolute', left: 0, top: 0, width: frame.width, height: frame.height,
       transform: `${globalPlane && !controller ? 'var(--flow-observation-transform, translate(0px, 0px)) ' : ''}matrix(${frame.transform.join(',')})`, transformOrigin: '0 0', zIndex: globalPlane ? globalPlane === 'underlay' ? 1 : 6 : placement?.space === 'viewport' ? placement.plane === 'underlay' ? 3 : 5 : placement?.plane === 'underlay' ? 1 : 4,
-      display: instance.visible === false ? 'none' : undefined, outline: selected ? '2px solid #2563eb' : undefined }}
-    onPointerDownCapture={event => { if (controller && !readOnly && event.button === 0) {
+      display: instance.visible === false ? 'none' : undefined, cursor: movable ? 'move' : undefined, outline: selected && (!transformTarget || controller && Boolean(structureDisabledReason)) ? '2px solid #2563eb' : undefined }}
+    onPointerDownCapture={event => {
+      if (readOnly || event.button !== 0 || (event.target instanceof Element && event.target.closest('[data-component-professional-editor],.selection-quick-bar'))) return
+      const handle = event.target instanceof Element ? event.target.closest('[data-handle]')?.getAttribute('data-handle') : null
+      if (handle && !controller) { begin(event, handle); return }
       event.preventDefault(); event.stopPropagation()
       const input = freezePointer(event), pending = { input, latest: input, ended: false, cancel: false }; pendingController.current = pending
-      input.currentTarget.setPointerCapture(input.pointerId)
+      input.currentTarget.setPointerCapture?.(input.pointerId)
       void visibleAt(input.currentTarget, { x: input.clientX, y: input.clientY }).then(hit => {
         if (pendingController.current !== pending) return
         pendingController.current = null
         if (pending.cancel || !input.currentTarget.isConnected || hit?.instanceId !== instanceId) return
-        onSelect(); controllerDrag?.start(input, instanceId)
-        controllerDrag?.move(pending.latest)
-        if (pending.ended) controllerDrag?.finish(pending.latest, pending.cancel)
+        onSelect()
+        if (controller) { controllerDrag?.start(input, instanceId); controllerDrag?.move(pending.latest); if (pending.ended) controllerDrag?.finish(pending.latest) }
+        else { begin(input, 'move', pending.ended); moveDrag(pending.latest); if (pending.ended) finishDrag(pending.latest) }
       })
-    } }}
-    onPointerMove={event => { if (pendingController.current) pendingController.current.latest = freezePointer(event); else controllerDrag?.move(event) }}
-    onPointerUp={event => { if (pendingController.current) { pendingController.current.latest = freezePointer(event); pendingController.current.ended = true } else controllerDrag?.finish(event) }}
-    onPointerCancel={event => { if (pendingController.current) { pendingController.current.latest = freezePointer(event); pendingController.current.ended = true; pendingController.current.cancel = true } else controllerDrag?.finish(event, true) }}
-    onLostPointerCapture={event => { if (pendingController.current) { if (!pendingController.current.ended) pendingController.current.cancel = true } else controllerDrag?.finish(event, true) }}
-    onPointerDown={event => { if (!readOnly) {
-      event.stopPropagation()
-      const element = event.currentTarget, point = { x: event.clientX, y: event.clientY }
-      void visibleAt(element, point).then(hit => {
-        if (element.isConnected && hit?.instanceId === instanceId) onSelect()
-      })
-    } }}>
+    }}
+    onPointerMove={event => { if (pendingController.current && pendingController.current.input.pointerId === event.pointerId) pendingController.current.latest = freezePointer(event); else if (controller) controllerDrag?.move(event); else moveDrag(event) }}
+    onPointerUp={event => { if (pendingController.current && pendingController.current.input.pointerId === event.pointerId) { pendingController.current.latest = freezePointer(event); pendingController.current.ended = true } else if (controller) controllerDrag?.finish(event); else finishDrag(event) }}
+    onPointerCancel={event => { if (pendingController.current && pendingController.current.input.pointerId === event.pointerId) { pendingController.current.latest = freezePointer(event); pendingController.current.ended = true; pendingController.current.cancel = true } else if (controller) controllerDrag?.finish(event, true); else finishDrag(event, true) }}
+    onLostPointerCapture={event => { if (pendingController.current && pendingController.current.input.pointerId === event.pointerId) { if (!pendingController.current.ended) pendingController.current.cancel = true } else if (controller) controllerDrag?.finish(event, true); else finishDrag(event, true) }}
+    onClickCapture={event => { event.preventDefault(); event.stopPropagation() }}>
     <div ref={bind} data-component-render={instanceId} style={{ width: '100%', height: '100%' }} />
     {!readOnly && <ImageSafeAreaGuides instance={{ ...instance, frame }} project={project} />}
     {instance.childIds?.map(id=>runtime.renderInstance(id,project,'free'))}
-    {!readOnly && selected && !controller && <>
-      <div className="flow-overlay-toolbar" data-flow-selection-preserving-target="true" style={{ position: 'absolute', top: -28, display: 'flex', gap: 4, background: '#fff', whiteSpace: 'nowrap' }}>
-        <button type="button" disabled={Boolean(structureDisabledReason)} title={structureDisabledReason ?? undefined} onPointerDown={event => begin(event, false)} onPointerMove={moveDrag}
-          onPointerUp={finishDrag} onPointerCancel={() => { drag.current = null; setPreview(null) }}>移动</button>
-        {placement && <>
-          <select aria-label="浮层定位模式" disabled={Boolean(structureDisabledReason)} value={placement.space === 'viewport' ? 'viewport' : placement.paragraphAnchor ? 'paragraph' : 'fixed'}
-            onChange={event => changeMode(event.target.value as FlowFloatingMode)}>
-            <option value="fixed">固定在纸面</option><option value="paragraph">随段落移动</option><option value="viewport">固定在视口</option>
-          </select>
-          <button type="button" disabled={Boolean(structureDisabledReason)} title={structureDisabledReason ?? undefined} onClick={() => updatePlacement({ ...placement, plane: placement.plane === 'overlay' ? 'underlay' : 'overlay' })}>{placement.plane === 'overlay' ? '移到正文下方' : '移到正文上方'}</button>
-          <button type="button" disabled={Boolean(structureDisabledReason)} title={structureDisabledReason ?? undefined} onClick={() => updatePlacement(null)}>转为正文</button>
-        </>}
-        <button type="button" disabled={Boolean(structureDisabledReason)} title={structureDisabledReason ?? undefined} onClick={() => onEdits([{ type: 'instance.remove', instanceId }])}>删除</button>
-      </div>
-      <button type="button" disabled={Boolean(structureDisabledReason)} title={structureDisabledReason ?? undefined} aria-label="调整浮层大小" style={{ position: 'absolute', right: -5, bottom: -5, width: 10, height: 10, padding: 0, border: 0, background: '#2563eb', cursor: 'nwse-resize' }}
-        onPointerDown={event => begin(event, true)} onPointerMove={moveDrag} onPointerUp={finishDrag}
-        onPointerCancel={() => { drag.current = null; setPreview(null) }} />
-    </>}
+    {!readOnly && selected && !controller && transformTarget && <SlideLayerSelectionOverlay
+      targets={[{ ...transformTarget, frame: { ...frame, transform: [1, 0, 0, 1, 0, 0] }, parentToSurface: [1, 0, 0, 1, 0, 0], ancestors: [] }]}
+      scale={readObservationScale?.() ?? 1} movable={movable} resizable={movable} rotatable={movable} />}
+
   </div>
+}
+
+function FlowFloatingActions({ project, instanceId, paperWidth, paragraphRects, readPaperOffset, onEdits }: {
+  project: CourseProjectV10; instanceId: string; paperWidth: number; paragraphRects: readonly FlowParagraphBlockRect[];
+  readPaperOffset?(): { x: number; y: number }; onEdits(edits: ComponentEdit[]): void
+}) {
+  const instance = project.instances[instanceId], placement = instance?.flowPlacement
+  const owner = instance && componentContainerForInstance(project, instanceId)
+  if (!instance?.frame || !placement || owner?.kind !== 'flow') return null
+  const disabled = flowStructureDisabledReason(project, instanceId)
+  const stored = instance.frame
+  const anchored = placement.space === 'paper' && placement.paragraphAnchor ? flowParagraphAnchoredFrame(placement.paragraphAnchor,
+    { x: stored.transform[4], y: stored.transform[5], width: stored.width, height: stored.height }, paperWidth, paragraphRects) : null
+  const frame = anchored ? { ...stored, transform: [...stored.transform.slice(0, 4), anchored.x, anchored.y] as typeof stored.transform } : stored
+  const update = (value: typeof placement | null) => onEdits(flowPlacementEdits(project, instanceId, value ? { kind: 'overlay', surfaceId: owner.id, placement: value } : { kind: 'document', surfaceId: owner.id }))
+  const changeMode = (mode: FlowFloatingMode) => {
+    const measured = flowFloatingModeEdits(instanceId, frame, placement, mode, paperWidth, paragraphRects, readPaperOffset?.() ?? { x: 0, y: 0 })
+    const nextFrame = measured.find(value => value.type === 'frame.set'), nextPlacement = measured.find(value => value.type === 'instance.flowPlacement.set')
+    if (nextFrame?.type === 'frame.set' && nextFrame.frame && nextPlacement?.type === 'instance.flowPlacement.set' && nextPlacement.flowPlacement)
+      onEdits(flowPlacementEdits(project, instanceId, { kind: 'overlay', surfaceId: owner.id, frame: nextFrame.frame, placement: nextPlacement.flowPlacement }))
+  }
+  return <QuickBarPopoverButton label="浮层定位" text="定位" popoverLabel="浮层定位">
+    {() => <div className="selection-quick-bar__menu">
+      <select aria-label="浮层定位模式" disabled={Boolean(disabled)} title={disabled ?? undefined} value={placement.space === 'viewport' ? 'viewport' : placement.paragraphAnchor ? 'paragraph' : 'fixed'} onChange={event => changeMode(event.target.value as FlowFloatingMode)}>
+        <option value="fixed">固定在纸面</option><option value="paragraph">随段落移动</option><option value="viewport">固定在视口</option>
+      </select>
+      <button type="button" disabled={Boolean(disabled)} title={disabled ?? undefined} onClick={() => update({ ...placement, plane: placement.plane === 'overlay' ? 'underlay' : 'overlay' })}>{placement.plane === 'overlay' ? '移到正文下方' : '移到正文上方'}</button>
+      <button type="button" disabled={Boolean(disabled)} title={disabled ?? undefined} onClick={() => update(null)}>转为正文</button>
+    </div>}
+  </QuickBarPopoverButton>
 }

@@ -9,6 +9,7 @@ import { installHtmlFrameAuthoring } from '../../shared/html/htmlFrameAuthoring'
 import type { ComponentAuthorRecord, ComponentAuthorGeometry } from '../../shared/contracts/component-platform/runtime'
 import { componentAuthorRecordsSchema } from '../../shared/contracts/component-platform/schema'
 import { installAuthoringInputArbitration, authoringCaretOffset } from '../../components/web/ownedDocumentAuthoring'
+import { createAuthoringFrameGeometry } from '../../components/web/authoringFrame'
 
 type HtmlPreviewTargetReport = z.infer<typeof htmlPreviewTargetReportSchema>
 
@@ -20,7 +21,7 @@ type EditMode = { type: 'html-preview.edit-mode'; loadId: string; requestId: str
 type Visibility = { type: 'html-preview.visibility'; loadId: string; active: boolean }
 type ConfirmTargets = { type: 'html-preview.confirm-targets'; loadId: string; scanId: string; handles: string[] }
 type RefreshTargets = { type: 'html-preview.refresh-targets'; loadId: string }
-type Selection = { type: 'html-preview.selection'; loadId: string; handle: string | null; editable: boolean }
+type Selection = { type: 'html-preview.selection'; loadId: string; handle: string | null; editable: boolean; editing?: boolean }
 type AuthoringRecords = { type: 'html-preview.authoring-records'; loadId: string; records: Record<string, ComponentAuthorRecord> }
 type AuthoringPreview = { type: 'html-preview.authoring-preview'; loadId: string; authorKey: string; geometry: ComponentAuthorGeometry | null }
 type CardTargets = { type: 'html-preview.card-targets'; loadId: string; authorKeys: string[] }
@@ -306,6 +307,23 @@ export function mountHtmlPreviewAgent(doc: Document, inheritedTracking?: Runtime
   }
   let hovered: string | null = null
   let selected: string | null = null
+  let editingHandle: string | null = null
+  const cursorSheets = new Map<Document, { sheet: CSSStyleSheet; cursor: string }>()
+  const setCursor = (document: Document, cursor: string) => {
+    const view = document.defaultView as (Window & typeof globalThis) | null
+    if (!view?.CSSStyleSheet || !('adoptedStyleSheets' in document)) return
+    let current = cursorSheets.get(document)
+    if (!current) {
+      const sheet = new view.CSSStyleSheet()
+      if (!sheet.replaceSync) return
+      current = { sheet, cursor: '' }; cursorSheets.set(document, current)
+      document.adoptedStyleSheets = [...document.adoptedStyleSheets, sheet]
+    }
+    if (current.cursor === cursor) return
+    current.cursor = cursor
+    current.sheet.replaceSync(cursor ? `html,body,body *{cursor:${cursor}!important}` : '')
+  }
+  const resetCursors = () => { for (const document of cursorSheets.keys()) setCursor(document, '') }
   const candidates = new Set<string>()
   const confirmed = new Set<string>()
   let markers: HTMLDivElement | null = null
@@ -327,7 +345,8 @@ export function mountHtmlPreviewAgent(doc: Document, inheritedTracking?: Runtime
           || rect.x >= win.innerWidth || rect.y >= win.innerHeight) return []
         const editable = confirmed.has(handle)
         if (!editable && handle !== selected) return []
-        return [{ handle, rect, editable, active: handle === selected || handle === hovered,
+        if (handle === selected) return [] // The host owns the one selected frame and its handles.
+        return [{ handle, rect, editable, active: handle === hovered,
           state: handle === selected ? 'selected' : handle === hovered ? 'hovered' : 'editable' }]
       })
     })
@@ -417,8 +436,8 @@ export function mountHtmlPreviewAgent(doc: Document, inheritedTracking?: Runtime
   }
   const stopFrameTargets = frameBridge.onTargets(message => {
     if (!editMode || !visible || !loadId) return
-    if (message.event === 'selection') { send(message); return }
-    if (message.event === 'targets') send({ event: 'targets', targets: message.targets })
+    if (message.event === 'selection' || message.event === 'gesture') { send(message); return }
+    if (message.event === 'targets') send({ event: 'targets', targets: message.targets, ...(message.intent ? { intent: message.intent } : {}) })
     else {
       for (const target of message.targets) candidates.add(target.handle)
       send({ event: 'edit-targets', scanId, targets: message.targets })
@@ -471,8 +490,12 @@ export function mountHtmlPreviewAgent(doc: Document, inheritedTracking?: Runtime
     visible = value
     authoring.setActive?.(value)
     frameBridge.setVisibility(value)
-    if (!visible) { hovered = null; authoring.suppressText(); drawMarkers() }
-    else scheduleDiscovery()
+    if (!visible) { hovered = null; authoring.suppressText(); resetCursors(); drawMarkers() }
+    else {
+      const node = editingHandle && nodes.get(editingHandle)
+      authoring.suppressText(isText(node) ? node : undefined)
+      scheduleDiscovery()
+    }
     if (!visible) pauseControlledActivity()
     else {
       for (const media of pausedMedia) if (media.isConnected) void media.play().catch(() => undefined)
@@ -484,55 +507,105 @@ export function mountHtmlPreviewAgent(doc: Document, inheritedTracking?: Runtime
   doc.addEventListener('play', onActivity, true)
   doc.addEventListener('animationstart', onActivity, true)
   doc.addEventListener('transitionrun', onActivity, true)
-  const textReportAt = (event: MouseEvent) => {
-    const document = isNode(event.target) ? event.target.ownerDocument : null
-    const text = document && textAtPoint(document, event.clientX, event.clientY)
-    const value = text && editableText(text) && isNode(event.target) && event.target.contains(text) ? report(text) : null
-    const offset = text && authoringCaretOffset(document!, text, event.clientX, event.clientY)
+  type PointerLocation = Pick<MouseEvent, 'target' | 'clientX' | 'clientY'>
+  const pickTarget = (event: PointerLocation): Text | HTMLImageElement | null => {
+    const document = isNode(event.target) ? event.target.ownerDocument ?? doc : doc
+    const capturedAtRoot = event.target === document.documentElement || event.target === document.body || event.target === document
+    const rootPoint = capturedAtRoot && pointInRoot(document, { x: event.clientX, y: event.clientY })
+    const observed = rootPoint && authoring.hit(rootPoint.x, rootPoint.y)?.node
+    if (isText(observed) || isImage(observed)) return observed
+    // Pointer capture can retarget click/dblclick to documentElement. The
+    // painted point remains authoritative, including the image under it.
+    const painted = document.elementFromPoint?.(event.clientX, event.clientY) ?? event.target
+    if (isImage(painted)) return painted
+    const text = textAtPoint(document, event.clientX, event.clientY)
+    return text && editableText(text) && isNode(painted) && painted.contains(text) ? text : null
+  }
+  const targetReportAt = (event: MouseEvent) => {
+    const target = pickTarget(event)
+    if (isImage(target)) return report(target)
+    const text = isText(target) ? target : null
+    const value = text && report(text)
+    const offset = text && authoringCaretOffset(text.ownerDocument, text, event.clientX, event.clientY)
     if (value && offset !== null && offset !== undefined) value.selection = { anchor: offset, focus: offset, ...(event.type === 'dblclick' ? { word: true } : {}) }
     if (value && text) selectingText = { node: text, handle: value.handle, anchor: offset ?? 0 }
     return value
   }
   let selectingText: { node: Text; handle: string; anchor: number } | undefined
-  const onClick = (event: MouseEvent, word = false) => {
+  const onClick = (event: MouseEvent) => {
     if (!visible || !loadId || !editMode || event.button !== 0) return
     authoring.refresh()
-    const target = event.target
-    const image = isImage(target) ? target : null
-    const targetReport = image ? report(image) : textReportAt(event)
-    if (word && targetReport?.selection) targetReport.selection.word = true
+    const targetReport = targetReportAt(event)
     if (targetReport) {
       selected = targetReport.handle; drawMarkers()
-      send({ event: 'targets', targets: [targetReport] })
+      send({ event: 'targets', targets: [targetReport], intent: 'select' })
       event.preventDefault(); event.stopImmediatePropagation()
-    }
+    } else { selected = null; send({ event: 'targets', targets: [], intent: 'select' }) }
   }
   const onDoubleClick = (event: MouseEvent) => {
-    if (!visible || !loadId || !editMode || event.button !== 0 || isImage(event.target)) return
-    const targetReport = textReportAt(event)
+    if (!visible || !loadId || !editMode || event.button !== 0) return
+    const targetReport = targetReportAt(event)
     if (targetReport) {
-      if (selected !== targetReport.handle) { selected = targetReport.handle; drawMarkers(); send({ event: 'targets', targets: [targetReport] }) }
-      else if (targetReport.selection) send({ event: 'selection', handle: targetReport.handle, ...targetReport.selection })
+      selected = targetReport.handle; drawMarkers()
+      send({ event: 'targets', targets: [targetReport], intent: 'edit' })
       event.preventDefault(); event.stopImmediatePropagation()
     }
   }
   inputOptions.editing = () => inputWindow.__cwHtmlPreviewInputOwner === inputOptions && !disposed && visible && Boolean(loadId) && editMode
-  inputOptions.select = (_point, event, word) => event.type === 'dblclick' ? onDoubleClick(event as MouseEvent) : onClick(event as MouseEvent, word)
+  inputOptions.select = (_point, event) => onClick(event as MouseEvent)
+  inputOptions.edit = (_point, event) => onDoubleClick(event as MouseEvent)
+  const contentEditing: NonNullable<PreviewInputOwner['options']['contentEditing']> = (point, event) => {
+    const node = editingHandle ? nodes.get(editingHandle) : undefined
+    return Boolean(node && pickTarget({ target: event.target, clientX: point.x, clientY: point.y }) === node)
+  }
+  inputOptions.contentEditing = contentEditing
   const extendSelection = (point: { x: number; y: number }) => {
     if (!selectingText || !editMode || !visible) return
     const focus = authoringCaretOffset(selectingText.node.ownerDocument, selectingText.node, point.x, point.y)
     if (focus !== undefined) send({ event: 'selection', handle: selectingText.handle, anchor: selectingText.anchor, focus })
   }
   inputOptions.extend = extendSelection
-  const onPointerMove = (event: MouseEvent) => {
+  const frameFacts = createAuthoringFrameGeometry()
+  const pointInRoot = (document: Document, point: { x: number; y: number }) => {
+    let current = point, owner = document
+    while (owner !== doc) {
+      const frame = owner.defaultView?.frameElement as HTMLIFrameElement | null, matrix = frame && frameFacts.frameMatrix(frame)
+      if (!matrix || !frame) return
+      current = { x: matrix[0] * current.x + matrix[2] * current.y + matrix[4], y: matrix[1] * current.x + matrix[3] * current.y + matrix[5] }
+      owner = frame.ownerDocument
+    }
+    return current
+  }
+  let pointerTarget: { handle: string; pointerId: number; document: Document } | undefined
+  const gesture: NonNullable<PreviewInputOwner['options']['gesture']> = (point, event, phase) => {
+    if (phase === 'start') {
+      const target = selected ? nodes.get(selected) : undefined
+      const value = isText(target) || isImage(target) ? report(target) : undefined
+      pointerTarget = value?.geometry && value.authoring && isNode(event.target)
+        ? { handle: value.handle, pointerId: (event as PointerEvent).pointerId ?? 0, document: event.target.ownerDocument ?? doc } : undefined
+    }
+    const current = pointerTarget
+    if (!current) return
+    const rootPoint = pointInRoot(current.document, point)
+    if (rootPoint) send({ event: 'gesture', phase, handle: current.handle, pointerId: current.pointerId,
+      x: rootPoint.x, y: rootPoint.y, shift: (event as MouseEvent).shiftKey === true, alt: (event as MouseEvent).altKey === true })
+    if (phase === 'end' || phase === 'cancel') pointerTarget = undefined
+  }
+  inputOptions.gesture = gesture
+  const onPointerMove = (event: PointerLocation) => {
     if (!editMode || !visible) return
     const document = isNode(event.target) ? event.target.ownerDocument : null
-    const target = isImage(event.target) ? event.target : document && textAtPoint(document, event.clientX, event.clientY)
-    const handle = target && isNode(event.target) && event.target.contains(target) ? handles.get(target) ?? null : null
+    const target = pickTarget(event)
+    const handle = target ? handles.get(target) ?? null : null
+    if (document) setCursor(document, target && handle !== editingHandle && authoring.geometry(target) ? 'move' : handle === editingHandle ? 'text' : 'default')
     const next = handle && confirmed.has(handle) ? handle : null
     if (hovered !== next) { hovered = next; drawMarkers() }
   }
-  const onPointerLeave = () => { if (hovered) { hovered = null; drawMarkers() } }
+  inputOptions.hover = point => {
+    const target = doc.elementFromPoint?.(point.x, point.y)
+    if (target) onPointerMove({ target, clientX: point.x, clientY: point.y })
+  }
+  const onPointerLeave = () => { resetCursors(); if (hovered) { hovered = null; drawMarkers() } }
   type ChildDocument = { root: Element; observer: MutationObserver; view: Window | null; inputOwner: PreviewInputOwner['options'] }
   const childDocuments = new Map<Document, ChildDocument>()
   const childLoaded = (event: Event) => {
@@ -569,7 +642,12 @@ export function mountHtmlPreviewAgent(doc: Document, inheritedTracking?: Runtime
       })
       observer.observe(document.documentElement, { subtree: true, childList: true, characterData: true, attributes: true })
       const inputOwner: PreviewInputOwner['options'] = { editing: () => !disposed && visible && editMode,
-        select: (_point, event, word) => event.type === 'dblclick' ? onDoubleClick(event as MouseEvent) : onClick(event as MouseEvent, word), extend: extendSelection }
+        select: (_point, event) => onClick(event as MouseEvent), edit: (_point, event) => onDoubleClick(event as MouseEvent),
+        contentEditing, extend: extendSelection, gesture }
+      inputOwner.hover = point => {
+        const target = document.elementFromPoint?.(point.x, point.y)
+        if (target) onPointerMove({ target, clientX: point.x, clientY: point.y })
+      }
       if (view) Object.defineProperty(view, '__cwHtmlPreviewInputOwner', { configurable: true, value: inputOwner })
       childDocuments.set(document, { root: document.documentElement, observer, view, inputOwner })
       document.addEventListener('click', onClick, true)
@@ -655,8 +733,9 @@ export function mountHtmlPreviewAgent(doc: Document, inheritedTracking?: Runtime
       const previousMode = editMode
       try {
         editMode = message.enabled
+        if (!editMode) resetCursors()
         authoring.suppressText()
-        selected = null; hovered = null; confirmed.clear()
+        selected = null; editingHandle = null; hovered = null; confirmed.clear()
         if (editMode) discoverTargets()
         else { scanId = ''; if (discoveryFrame) win.cancelAnimationFrame(discoveryFrame); discoveryFrame = 0; drawMarkers() }
         frameBridge.setEditMode(editMode)
@@ -668,18 +747,24 @@ export function mountHtmlPreviewAgent(doc: Document, inheritedTracking?: Runtime
           message: error instanceof Error ? error.message : '预览编辑未能准备完成，可重试或在源码中继续。' })
       }
     }
-    if (message.type === 'html-preview.refresh-targets') scheduleDiscovery()
+    if (message.type === 'html-preview.refresh-targets') {
+      const node = selected ? nodes.get(selected) : undefined
+      const value = isText(node) || isImage(node) ? report(node) : undefined
+      if (value) send({ event: 'targets', targets: [value], intent: 'observe' })
+      scheduleDiscovery()
+    }
     if (message.type === 'html-preview.confirm-targets' && editMode && message.scanId === scanId && Array.isArray(message.handles)) {
       for (const handle of message.handles) if (candidates.has(handle)) confirmed.add(handle)
       frameBridge.confirm(message.handles, scanId)
       drawMarkers()
     }
     if (message.type === 'html-preview.selection' && editMode) {
-      frameBridge.select(message.handle, message.editable)
+      frameBridge.select(message.handle, message.editable, message.editing === true)
       selected = typeof message.handle === 'string' && nodes.has(message.handle) ? message.handle : null
+      editingHandle = message.editing === true ? message.handle : null
       if (selected && !message.editable) confirmed.delete(selected)
       else if (selected) confirmed.add(selected)
-      const selectedNode = selected && message.editable ? nodes.get(selected) : undefined
+      const selectedNode = selected && message.editable && message.editing === true ? nodes.get(selected) : undefined
       tracking.withoutTracking(() => authoring.suppressText(isText(selectedNode) ? selectedNode : undefined))
       drawMarkers()
     }
@@ -789,6 +874,8 @@ export function mountHtmlPreviewAgent(doc: Document, inheritedTracking?: Runtime
     doc.removeEventListener('animationstart', onActivity, true)
     doc.removeEventListener('transitionrun', onActivity, true)
     pausedMedia.clear(); pausedAnimations.clear()
+    for (const [document, value] of cursorSheets) document.adoptedStyleSheets = document.adoptedStyleSheets.filter(sheet => sheet !== value.sheet)
+    cursorSheets.clear()
     win.removeEventListener('click', onClick, true)
     win.removeEventListener('dblclick', onDoubleClick, true)
     win.removeEventListener('mousemove', onPointerMove, true)

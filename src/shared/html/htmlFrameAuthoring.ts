@@ -10,8 +10,9 @@ import { mapSrcsetUrls } from './responsiveImage'
 type HtmlPreviewTargetReport = Extract<HtmlPreviewRequest, { type: 'html-preview.resolve-target' }>['targets'][number]
 
 export type HtmlFrameSources = Record<string, { html: string; base: string; resources?: Record<string, string> }>
-export type HtmlFrameTargetEvent = { event: 'targets' | 'edit-targets'; targets: HtmlPreviewTargetReport[] }
+export type HtmlFrameTargetEvent = { event: 'targets' | 'edit-targets'; targets: HtmlPreviewTargetReport[]; intent?: 'select' | 'edit' }
   | { event: 'selection'; handle: string; anchor: number; focus: number; word?: boolean }
+  | { event: 'gesture'; handle: string; phase: 'start' | 'update' | 'end' | 'cancel'; pointerId: number; x: number; y: number; shift: boolean; alt: boolean }
 export interface HtmlFrameAuthoringBridge {
   setRecords(records: Record<string, ComponentAuthorRecord>): void
   setSources(sources: HtmlFrameSources): void
@@ -19,7 +20,7 @@ export interface HtmlFrameAuthoringBridge {
   setVisibility(active: boolean): void
   refresh(): void
   confirm(handles: string[], scanId?: string): void
-  select(handle: string | null, editable: boolean): void
+  select(handle: string | null, editable: boolean, editing?: boolean): void
   previewGeometry(authorKey: string, geometry: ComponentAuthorRecord['overrides']['geometry'] | null): void
   isRemoteHandle(handle: string): boolean
   onTargets(listener: (event: HtmlFrameTargetEvent) => void): () => void
@@ -71,8 +72,16 @@ export function installHtmlFrameAuthoring(factory: typeof createDomAuthoring, ta
   let route = '', sourceChain: string[] = [], base = doc.baseURI, observe = false, editMode = initialControl?.editMode ?? false, visible = initialControl?.visible ?? true
   let adapter: ReturnType<typeof createDomAuthoring> | undefined, disposed = false, scanQueued = false, childrenDirty = false, serial = 0, selected: string | null = null
   let marker: HTMLDivElement | undefined, confirmationScan: string | undefined
+  let editingHandle: string | null = null
+  let cursorSheet: CSSStyleSheet | undefined, currentCursor = ''
+  const cursor = (value: string) => {
+    if (value === currentCursor || !('adoptedStyleSheets' in doc) || !win.CSSStyleSheet?.prototype.replaceSync) return
+    if (!cursorSheet) { cursorSheet = new win.CSSStyleSheet(); doc.adoptedStyleSheets = [...doc.adoptedStyleSheets, cursorSheet] }
+    currentCursor = value; cursorSheet.replaceSync(value ? `html,body,body *{cursor:${value}!important}` : '')
+  }
   const confirmed = new Set<string>()
   let selectingText: { node: Node; handle: string; anchor: number } | undefined
+  let pointerTarget: { handle: string; pointerId: number } | undefined
   const pausedMedia = new Set<HTMLMediaElement>(), pausedAnimations = new Set<Animation>()
   const token = Math.random().toString(36).slice(2)
   const restore: Array<() => void> = []
@@ -156,7 +165,9 @@ export function installHtmlFrameAuthoring(factory: typeof createDomAuthoring, ta
   const setVisible = (value: boolean) => {
     const previous = visible; visible = value
     adapter?.setActive(value)
+    if (!value) cursor('')
     if (!value) adapter?.suppressText()
+    else adapter?.suppressText(editingHandle ? nodes.get(editingHandle) : undefined)
     if (!visible) pauseActivity()
     else if (!previous) {
       for (const media of pausedMedia) if (media.isConnected) void media.play().catch(() => undefined)
@@ -179,15 +190,20 @@ export function installHtmlFrameAuthoring(factory: typeof createDomAuthoring, ta
   }
   const isFrame = (node: unknown): node is HTMLIFrameElement => Boolean(node && typeof node === 'object' && (node as Element).localName === 'iframe')
   const isImage = (node: unknown): node is HTMLImageElement => Boolean(node && typeof node === 'object' && (node as Element).localName === 'img')
-  const emit = (event: 'targets' | 'edit-targets', targets: HtmlPreviewTargetReport[]) => {
-    if (!targets.length || disposed) return
-    if (route) win.parent.postMessage({ protocol, type: 'targets', event, targets }, '*')
-    else for (const listener of listeners) listener({ event, targets })
+  const emit = (event: 'targets' | 'edit-targets', targets: HtmlPreviewTargetReport[], intent?: 'select' | 'edit') => {
+    if (disposed || !targets.length && event !== 'targets') return
+    if (route) win.parent.postMessage({ protocol, type: 'targets', event, targets, ...(intent ? { intent } : {}) }, '*')
+    else for (const listener of listeners) listener({ event, targets, ...(intent ? { intent } : {}) })
   }
   const emitSelection = (selection: { handle: string; anchor: number; focus: number; word?: boolean }) => {
     if (disposed) return
     if (route) win.parent.postMessage({ protocol, type: 'selection', ...selection }, '*')
     else for (const listener of listeners) listener({ event: 'selection', ...selection })
+  }
+  const emitGesture = (gesture: Omit<Extract<HtmlFrameTargetEvent, { event: 'gesture' }>, 'event'>) => {
+    if (disposed) return
+    if (route) win.parent.postMessage({ protocol, type: 'gesture', ...gesture }, '*')
+    else for (const listener of listeners) listener({ event: 'gesture', ...gesture })
   }
   const childState = (frame: HTMLIFrameElement) => {
     const persisted = frame.getAttribute('data-cw-frame-source')
@@ -233,6 +249,7 @@ export function installHtmlFrameAuthoring(factory: typeof createDomAuthoring, ta
     const root = doc.createElement('div'); root.dataset.htmlPreviewEditMarkers = ''
     root.style.cssText = 'position:fixed!important;inset:0!important;pointer-events:none!important;z-index:2147483647!important;'
     for (const handle of new Set([...confirmed, ...(selected ? [selected] : [])])) {
+      if (handle === selected) continue // Selected chrome is drawn once by the workbench host.
       const node = nodes.get(handle)
       if (!node?.isConnected || !adapter?.visible(node)) continue
       const bounds = localRect(node), element = doc.createElement('div'), active = handle === selected
@@ -253,7 +270,7 @@ export function installHtmlFrameAuthoring(factory: typeof createDomAuthoring, ta
     if (scanQueued || disposed || !visible || !editMode || !adapter) return
     scanQueued = true; win.requestAnimationFrame(scan)
   }
-  const clicked = (event: Event, point?: { x: number; y: number }, word = false) => {
+  const clicked = (event: Event, point?: { x: number; y: number }, intent: 'select' | 'edit' = event.type === 'dblclick' ? 'edit' : 'select') => {
     const pointer = event as MouseEvent
     if (!adapter || !editMode || !visible || pointer.button !== 0) return
     const x = point?.x ?? pointer.clientX, y = point?.y ?? pointer.clientY
@@ -272,14 +289,12 @@ export function installHtmlFrameAuthoring(factory: typeof createDomAuthoring, ta
     }
     if (!node) node = adapter.hit?.(x, y)?.node
     const value = node && report(node)
-    if (!value) return
+    if (!value) { selected = null; emit('targets', [], 'select'); return }
     const offset = node && caretFactory(doc, node, x, y)
     selectingText = node && offset !== undefined ? { node, handle: value.handle, anchor: offset } : undefined
-    if (offset !== undefined) value.selection = { anchor: offset, focus: offset, ...(word || event.type === 'dblclick' ? { word: true } : {}) }
-    const wasSelected = selected === value.handle
+    if (offset !== undefined) value.selection = { anchor: offset, focus: offset, ...(intent === 'edit' ? { word: true } : {}) }
     selected = value.handle; draw()
-    if (wasSelected && value.selection) emitSelection({ handle: value.handle, ...value.selection })
-    else emit('targets', [value])
+    emit('targets', [value], intent)
     event.preventDefault(); event.stopImmediatePropagation()
   }
   // Accessible child documents keep the top preview's author target owner;
@@ -289,10 +304,38 @@ export function installHtmlFrameAuthoring(factory: typeof createDomAuthoring, ta
       const owner = (win as Window & { __cwHtmlPreviewInputOwner?: Parameters<typeof inputFactory>[1] }).__cwHtmlPreviewInputOwner
       return !disposed && (owner ? owner.editing() : editMode && visible)
     },
-    select: (point, event, word) => {
+    select: (point, event) => {
       const owner = (win as Window & { __cwHtmlPreviewInputOwner?: Parameters<typeof inputFactory>[1] }).__cwHtmlPreviewInputOwner
-      if (owner?.editing()) owner.select(point, event, word)
-      else clicked(event, point, word)
+      if (owner?.editing()) owner.select(point, event)
+      else clicked(event, point, 'select')
+    },
+    edit: (point, event) => {
+      const owner = (win as Window & { __cwHtmlPreviewInputOwner?: Parameters<typeof inputFactory>[1] }).__cwHtmlPreviewInputOwner
+      if (owner?.editing()) owner.edit?.(point, event)
+      else clicked(event, point, 'edit')
+    },
+    contentEditing: (point, event) => {
+      const owner = (win as Window & { __cwHtmlPreviewInputOwner?: Parameters<typeof inputFactory>[1] }).__cwHtmlPreviewInputOwner
+      if (owner?.editing()) return owner.contentEditing?.(point, event) ?? false
+      return Boolean(editingHandle && nodes.get(editingHandle) === adapter?.hit?.(point.x, point.y)?.node)
+    },
+    gesture: (point, event, phase) => {
+      const owner = (win as Window & { __cwHtmlPreviewInputOwner?: Parameters<typeof inputFactory>[1] }).__cwHtmlPreviewInputOwner
+      if (owner?.editing()) { owner.gesture?.(point, event, phase); return }
+      if (phase === 'start') {
+        const node = selected ? nodes.get(selected) : undefined, value = node ? report(node) : undefined
+        pointerTarget = value?.geometry && value.authoring ? { handle: value.handle, pointerId: (event as PointerEvent).pointerId ?? 0 } : undefined
+      }
+      if (!pointerTarget) return
+      emitGesture({ ...pointerTarget, phase, x: point.x, y: point.y,
+        shift: (event as MouseEvent).shiftKey === true, alt: (event as MouseEvent).altKey === true })
+      if (phase === 'end' || phase === 'cancel') pointerTarget = undefined
+    },
+    hover: point => {
+      const owner = (win as Window & { __cwHtmlPreviewInputOwner?: Parameters<typeof inputFactory>[1] }).__cwHtmlPreviewInputOwner
+      if (owner?.editing()) { owner.hover?.(point); return }
+      const node = adapter?.hit?.(point.x, point.y)?.node, handle = node && handles.get(node)
+      cursor(node && handle !== editingHandle && adapter?.geometry(node) ? 'move' : handle === editingHandle ? 'text' : 'default')
     },
     extend: (point, event) => {
       const owner = (win as Window & { __cwHtmlPreviewInputOwner?: Parameters<typeof inputFactory>[1] }).__cwHtmlPreviewInputOwner
@@ -487,8 +530,9 @@ export function installHtmlFrameAuthoring(factory: typeof createDomAuthoring, ta
           for (const state of children.values()) state.aliasesSent = false
         }
         observe = Boolean(value.observe)
-        if (editMode !== Boolean(value.editMode)) { confirmed.clear(); confirmationScan = undefined; selectingText = undefined }
+        if (editMode !== Boolean(value.editMode)) { confirmed.clear(); confirmationScan = undefined; selectingText = undefined; editingHandle = null; pointerTarget = undefined }
         editMode = Boolean(value.editMode); setVisible(Boolean(value.visible))
+        if (!editMode) cursor('')
         if (changed) configureAdapter(); else if (changedRecords) adapter?.refresh()
         if (visible) schedule()
         if (visible) syncChildren(); else childrenDirty = true
@@ -498,7 +542,12 @@ export function installHtmlFrameAuthoring(factory: typeof createDomAuthoring, ta
         return
       }
       if (value.type === 'confirm') { applyConfirmation(value.handles, value.scanId); return }
-      if (value.type === 'select') { selected = nodes.has(value.handle) ? value.handle : null; adapter?.suppressText(selected && value.editable ? nodes.get(selected) : undefined); draw(); broadcast('select', { handle: value.handle, editable: value.editable }); return }
+      if (value.type === 'select') {
+        selected = nodes.has(value.handle) ? value.handle : null
+        editingHandle = selected && value.editing === true && value.editable ? selected : null
+        adapter?.suppressText(editingHandle ? nodes.get(editingHandle) : undefined)
+        draw(); broadcast('select', { handle: value.handle, editable: value.editable, editing: value.editing === true }); return
+      }
       if (value.type === 'preview') { adapter?.previewGeometry(value.authorKey, value.geometry ?? null); draw(); broadcast('preview', { authorKey: value.authorKey, geometry: value.geometry }); return }
     }
     const frame = allFrames().find(frame => frame.contentWindow === event.source)
@@ -515,6 +564,15 @@ export function installHtmlFrameAuthoring(factory: typeof createDomAuthoring, ta
       emitSelection({ handle: value.handle, anchor: value.anchor, focus: value.focus, ...(value.word === true ? { word: true } : {}) })
       return
     }
+    if (value.type === 'gesture' && typeof value.handle === 'string' && ['start', 'update', 'end', 'cancel'].includes(value.phase)
+      && Number.isSafeInteger(value.pointerId) && value.pointerId >= 0 && Number.isFinite(value.x) && Number.isFinite(value.y)) {
+      const map = frameGeometry.frameMatrix(frame)
+      if (!map) return
+      emitGesture({ handle: value.handle, phase: value.phase, pointerId: value.pointerId,
+        x: map[0] * value.x + map[2] * value.y + map[4], y: map[1] * value.x + map[3] * value.y + map[5],
+        shift: value.shift === true, alt: value.alt === true })
+      return
+    }
     if (value.type === 'targets' && (value.event === 'targets' || value.event === 'edit-targets') && Array.isArray(value.targets)) {
       const map = frameGeometry.frameMatrix(frame)
       if (!map) return
@@ -527,7 +585,7 @@ export function installHtmlFrameAuthoring(factory: typeof createDomAuthoring, ta
         return { ...target, rect, ...(textStyle ? { textStyle } : {}),
           ...(geometry && parent ? { geometry: { ...geometry, parentToInstance: frameGeometry.multiply(map, parent) } } : {}) }
       }) as HtmlPreviewTargetReport[]
-      emit(value.event, targets)
+      emit(value.event, targets, value.intent === 'edit' ? 'edit' : value.intent === 'select' ? 'select' : undefined)
     }
   }
   const applyConfirmation = (handles: string[], scanId?: string) => {
@@ -556,12 +614,15 @@ export function installHtmlFrameAuthoring(factory: typeof createDomAuthoring, ta
   const api: HtmlFrameAuthoringBridge = {
     setRecords(value) { records = value; recordsVersion++; adapter?.refresh(); for (const frame of children.keys()) sendState(frame); schedule() },
     setSources(value) { sources = value; sourcesVersion++; registerResources(); for (const frame of children.keys()) sendState(frame) },
-    setEditMode(value) { if (editMode !== value) { confirmed.clear(); confirmationScan = undefined; selectingText = undefined }
-      editMode = value; if (!value) adapter?.suppressText(); for (const frame of children.keys()) sendState(frame); schedule(); draw() },
+    setEditMode(value) { if (editMode !== value) { confirmed.clear(); confirmationScan = undefined; selectingText = undefined; editingHandle = null; pointerTarget = undefined }
+      editMode = value; if (!value) { adapter?.suppressText(); cursor('') }; for (const frame of children.keys()) sendState(frame); schedule(); draw() },
     setVisibility(value) { setVisible(value); for (const frame of children.keys()) sendState(frame); draw() },
     refresh() { adapter?.refresh(); syncChildren(); for (const frame of children.keys()) sendState(frame); schedule() },
     confirm(handles, scanId) { applyConfirmation(handles, scanId) },
-    select(handle, editable) { selected = nodes.has(handle ?? '') ? handle : null; adapter?.suppressText(selected && editable ? nodes.get(selected) : undefined); draw(); broadcast('select', { handle, editable }) },
+    select(handle, editable, editing = false) {
+      selected = nodes.has(handle ?? '') ? handle : null; editingHandle = selected && editable && editing ? selected : null
+      adapter?.suppressText(editingHandle ? nodes.get(editingHandle) : undefined); draw(); broadcast('select', { handle, editable, editing })
+    },
     previewGeometry(authorKey, geometry) { adapter?.previewGeometry(authorKey, geometry ?? null); broadcast('preview', { authorKey, geometry }); draw() },
     isRemoteHandle(handle) { return remoteHandles.has(handle) },
     onTargets(listener) { listeners.add(listener); return () => listeners.delete(listener) },
@@ -571,6 +632,7 @@ export function installHtmlFrameAuthoring(factory: typeof createDomAuthoring, ta
     matchesResource,
     controlState: () => ({ editMode, visible }),
     dispose() {
+      if (cursorSheet) doc.adoptedStyleSheets = doc.adoptedStyleSheets.filter(sheet => sheet !== cursorSheet)
       if (disposed) return; disposed = true; observer.disconnect(); win.removeEventListener('message', message)
       win.removeEventListener('scroll', schedule, true); win.removeEventListener('resize', schedule)
       for (const release of selectedRoots.values()) release(); adapter?.dispose(); marker?.remove()

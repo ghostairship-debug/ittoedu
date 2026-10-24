@@ -36,6 +36,8 @@ export interface TextComponentEditorOwner<Data> {
   onDiagnostic?(message: string): void
   onCompositionChange?(active: boolean): void
   toolbarHost?: HTMLElement | null
+  toolbarScope?: string
+  onCompleteEditing?(): void
   editorRef?: Ref<SharedDocumentEditorHandle>
 }
 /** Reuses professional formatting, inline math, IME and selection. Persistence/history stay with the caller. */
@@ -46,7 +48,7 @@ export function TextComponentEditor(props: TextComponentEditorOwner<TextComponen
       bold: props.data.appearance.bold, italic: props.data.appearance.italic,
       underline: props.data.appearance.underline, strike: props.data.appearance.strike,
       emphasis: props.data.appearance.emphasis, highlightColor: props.data.appearance.highlightColor })}
-    toolbarHost={props.toolbarHost} onUndo={props.onUndo} onRedo={props.onRedo}
+    toolbarHost={props.toolbarHost} toolbarScope={props.toolbarScope} onCompleteEditing={props.onCompleteEditing} onUndo={props.onUndo} onRedo={props.onRedo}
     onCompositionChange={active => props.onCompositionChange?.(active)}
     onDraft={(_source, diagnostics) => { if (diagnostics.length) props.onDiagnostic?.(diagnostics[0].message) }}
     onChange={(document, operation) => {
@@ -69,7 +71,7 @@ export function formulaDataFromEditor(data: FormulaComponentData, document: Mark
 export function FormulaComponentEditor(props: TextComponentEditorOwner<FormulaComponentData>) {
   const styles = textAppearanceStyles({ ...props.data.appearance, ...props.data.formula.style }, props.data.sizing)
   return <div className="component-text-editor" style={styles.box as CSSProperties}><div style={styles.content as CSSProperties}><SharedDocumentEditor document={formulaEditorDocument(props.data)} revision={props.revision} contentScope="formula"
-    toolbarHost={props.toolbarHost} onUndo={props.onUndo} onRedo={props.onRedo}
+    toolbarHost={props.toolbarHost} toolbarScope={props.toolbarScope} onCompleteEditing={props.onCompleteEditing} onUndo={props.onUndo} onRedo={props.onRedo}
     onCompositionChange={active => props.onCompositionChange?.(active)}
     onDraft={(_source, diagnostics) => { if (diagnostics.length) props.onDiagnostic?.(diagnostics[0].message) }}
     onChange={(document, operation) => {

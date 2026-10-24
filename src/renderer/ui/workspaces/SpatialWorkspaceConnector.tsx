@@ -73,6 +73,7 @@ export function SpatialWorkspaceConnector({ onDropWorkspaceMedia, onSelectImageA
   return <SpatialLocationWorkspace documentId={runtime.documentId} project={projection} surface={projectedSurface} view={view}
     teacherController={navigation}
     activeStateId={source.courseView.activeStateId}
+    activeGroupId={source.courseView.activeGroupId}
     selectionIds={runtime.selectedInstanceIds} canvasMode={source.canvasMode} renderInstance={(id, displayProjection) => runtime.renderInstance(id, displayProjection ?? projection)}
     resolveBackgroundAsset={id => runtime.world.assetUrl(id) ?? undefined}
     onViewportChange={size => state().setSpatialViewport(size, surface.id, runtime.documentId)}
@@ -96,6 +97,8 @@ export function SpatialWorkspaceConnector({ onDropWorkspaceMedia, onSelectImageA
       state().setActiveTab('properties')
       proEditorRailController.open('properties')
     }}
+    onEnterGroup={id => { safe(state().navigateCourseView(() => state().courseBridge.enterGroup(runtime.documentId, id))) }}
+    onEnterContainer={id => { safe(state().navigateCourseView(() => { state().courseBridge.enterContainer(runtime.documentId, id); state().setEditingScope('scene') })) }}
     contentEdit={source.contentEdit?.target.documentId === runtime.documentId && source.contentEdit.target.surfaceId === surface.id
       && source.contentEdit.target.activeStateId === source.courseView.activeStateId ? source.contentEdit : null}
     contentEditor={{ read: () => {

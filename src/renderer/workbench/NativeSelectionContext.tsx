@@ -5,7 +5,7 @@ import { useCourseEditorActions } from '../documents/CourseEditorActionsContext'
 import { selectionObjectCommands } from '../composition/selection/selectionObjectCommands'
 import { useContextMenu, type MenuCommand } from '../editing/commands/CommandMenu'
 import { IMAGE_FIT_LABEL, multiObjectCommands, singleObjectCommands, type SingleObjectState } from '../editing/commands/objectCommands'
-import { OBJECT_CONTEXT_MENU_EVENT, requestAuthorFieldAction, requestObjectEdit, type ObjectContextMenuRequest } from '../editing/commands/objectContextMenu'
+import { OBJECT_CONTEXT_MENU_EVENT, OBJECT_EDIT_EVENT, requestAuthorFieldAction, requestObjectEdit, type ObjectContextMenuRequest } from '../editing/commands/objectContextMenu'
 import { ImageCropOverlay } from '../editing/crop/ImageCropOverlay'
 import { SlideLightActions, slideLightMenuItems } from '../editing/quickbar/SlideLightActions'
 import type { SlideLightCommand } from '../editing/commands/slideLightCommands'
@@ -112,16 +112,18 @@ function ObjectActions({ view, patch, replaceImage, editText, extra = {} }: { vi
 const MULTI_ALIGN = [['left', '左对齐'], ['center', '水平居中'], ['right', '右对齐'], ['top', '顶对齐'], ['middle', '垂直居中'], ['bottom', '底对齐']] as const
 const sortedIds = (ids: readonly string[]) => JSON.stringify([...ids].sort())
 
-export function NativeSelectionContext({ documentId, revision, surfaceId, locationId: legacyLocationId, itemIds, stateId, sceneItemIds = [], enabled, bounds, authorBounds, textEditing = false, ownsDocumentSelection = true, authorSpot }: {
+export function NativeSelectionContext({ documentId, revision, surfaceId, locationId: legacyLocationId, itemIds, stateId, sceneItemIds = [], enabled, bounds, authorBounds, textEditing = false, ownsDocumentSelection = true, authorSpot, children }: {
   documentId?: string | null; revision: number; surfaceId?: string | null; locationId?: string | null; itemIds: readonly string[]; stateId?: string | null; sceneItemIds?: readonly string[]; enabled: boolean
   bounds?(itemId: string): Box | null
   /** Current field geometry, resolved by the owning workspace; never the enclosing object's frame. */
   authorBounds?(): Box | null
   authorSpot?: ComponentAuthorSpot
-  /** The text editing toolbar owns the selection while its text is edited. */
+  /** The current input owner supplies this same quick bar while its content is edited. */
   textEditing?: boolean
   /** Whether this control reports the document's current selection; Flow's text selection reports its own. */
   ownsDocumentSelection?: boolean
+  /** Surface-specific actions join the current selection's one bar. */
+  children?: ReactNode
 }) {
   const locationId = surfaceId ?? legacyLocationId
   const pageText = useRuntimeLightEditView(itemIds.length === 1 ? itemIds[0]! : '')
@@ -262,6 +264,18 @@ export function NativeSelectionContext({ documentId, revision, surfaceId, locati
         replaceImage: actions ? () => run(native.commands.replaceImage, report) : undefined }
     }
   }
+  useEffect(() => {
+    if (!root || !enabled || selectedField || textEditing || single?.view.type !== 'image' || single.disabledReason
+      || single.view.locked || !single.view.visible || !bounds || selection?.kind !== 'slide-native' || selection.spatialMode) return
+    const image = single.view
+    const edit = (event: Event) => {
+      const requested = (event as CustomEvent<{ itemId: string }>).detail
+      if (requested?.itemId !== image.id || Math.abs(((image.rotation % 360) + 540) % 360 - 180) > 0.000001) return
+      event.preventDefault(); setCropping(image.id)
+    }
+    root.addEventListener(OBJECT_EDIT_EVENT, edit)
+    return () => root.removeEventListener(OBJECT_EDIT_EVENT, edit)
+  }, [root, enabled, authorIdentity, textEditing, single?.view, single?.disabledReason, bounds, selection?.kind, selection?.kind === 'slide-native' && selection.spatialMode])
   // Commands report a failure next to the bar instead of throwing into React.
   const guarded = (items: MenuCommand[]): MenuCommand[] => items.map(item => ({ ...item, run: () => run(item.run, report) }))
   // This render's document and scope stay fixed while preparation drains its pending input.
@@ -311,7 +325,7 @@ export function NativeSelectionContext({ documentId, revision, surfaceId, locati
       await owner.courseKernel.editCaptured(owner.courseKernel.capture(edits, target))
     }, report)
     const localCommands = slideLightObjectCommands({ isText: true, locked, clickBindable: false, sounds: [], locations: [] })
-      .filter(command => command.kind === 'font' || command.kind === 'line-spacing' && localView?.lineSpacing)
+      .filter(command => command.kind === 'line-spacing' && localView?.lineSpacing)
     content = <>
       {localView && !disabledReason ? <>
         <TextFormatActions view={localView} patch={patchLocal} alignment={localView.alignment} highlight={localView.highlight} editText={fieldAction} />
@@ -386,7 +400,7 @@ export function NativeSelectionContext({ documentId, revision, surfaceId, locati
     else {
       content = <>
         <ObjectActions view={node} patch={patch} replaceImage={single.replaceImage} editText={single.editText} extra={objectState} />
-        {lightView && <SlideLightActions commands={lightCommands} fontFamily={lightView.fontFamily}
+        {lightView && <SlideLightActions commands={node.type === 'text' ? lightCommands.filter(command => command.kind !== 'font') : lightCommands} fontFamily={lightView.fontFamily}
           lineSpacing={lightView.lineSpacing} backgroundColor={pageView?.backgroundColor ?? null}
           onRun={runLight} onError={report} />}
         {pageText && (pageText.entries.length > 0 || pageText.pageCopy.length > 0) && <QuickBarPopoverButton label="页面文字" text="页面文字" icon={<Type size={14} />} popoverLabel="页面文字">
@@ -448,9 +462,10 @@ export function NativeSelectionContext({ documentId, revision, surfaceId, locati
   return <span ref={marker} className="native-selection-context" aria-hidden="true">
     {pinnedBoxes.map((box, index) => <span key={index} aria-hidden="true" data-pinned-object="true" className="native-selection-context__pinned"
       style={{ left: box.left, top: box.top, width: box.width, height: box.height, transform: box.rotation ? `rotate(${box.rotation}deg)` : undefined }} />)}
-    {content && <SelectionQuickBar label="选中对象快捷工具" anchor={anchor} bounds={view} suspended={gesture || textEditing || cropping !== null} selectionKey={`${documentId}:${locationId}:${stateId}:${ids}:${authorIdentity}`} aboveOffset={ROTATION_HANDLE_CLEARANCE}>
+    {content && !textEditing && <SelectionQuickBar label="选中对象快捷工具" anchor={anchor} bounds={view} suspended={gesture || cropping !== null} selectionKey={`${documentId}:${locationId}:${stateId}:${ids}:${authorIdentity}`} aboveOffset={ROTATION_HANDLE_CLEARANCE}>
       {globalNotice && <><QuickBarLabel>{globalNotice}</QuickBarLabel><QuickBarSeparator /></>}
       {content}
+      {children}
       <QuickBarButton label="属性" icon={<SlidersHorizontal size={14} />} onClick={() => {
         useEditorStore.getState().setActiveTab('properties')
         proEditorRailController.open('properties')

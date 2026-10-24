@@ -335,6 +335,8 @@ export function CourseV10RuntimeView(props: CourseV10RuntimeViewProps) {
     navigation.changed()
   }, [world, navigation, documentId])
   const selectedInstanceIds = props.selectedInstanceIds ?? (selectedInstanceId ? [selectedInstanceId] : [])
+  const selectionView = props.bridge?.read()
+  const selectionKind = selectionView?.activeDocumentId === documentId ? selectionView.interactionSelection?.kind : undefined
   const renderContainer = (containerId: string, project = renderProject, placement: 'free' | 'flow' = 'free') => <ContainerPreview containerId={containerId} model={{ ...model, project }} world={world} navigation={navigation} report={props.report} placement={placement} />
   const ports: CourseV10RuntimePorts = {
     documentId, project: renderProject, resources: model.resources, surfaceId, selectedInstanceId, selectedInstanceIds, player,
@@ -342,11 +344,11 @@ export function CourseV10RuntimeView(props: CourseV10RuntimeViewProps) {
     onComposition: compose, selectInstances, registerCamera, registerObservation, containerViewState,
     setPlaying, resetPlayback, previewAuthorSpot: world.previewAuthorSpot, renderContainer,
     renderInstance: (id, projection = renderProject, placement = 'free') => projection.instances[id] && <InstanceView key={id} instance={projection.instances[id]} project={projection} authorProject={model.project} surfaceId={surfaceId ?? rootInstanceId} placement={placement}
-      selectedInstanceId={selectedInstanceId} selectedInstanceIds={selectedInstanceIds} player={player} isPlaying={() => world.isPlaying()} onSelect={onSelect} onElement={world.bind} onTargetElement={world.bindTarget}
+      selectedInstanceId={selectedInstanceId} selectedInstanceIds={selectedInstanceIds} selectionKind={selectionKind} player={player} isPlaying={() => world.isPlaying()} onSelect={onSelect} onElement={world.bind} onTargetElement={world.bindTarget}
       renderContainer={renderContainer} />,
   }
   const view = props.renderWorkspace ? props.renderWorkspace(ports) : props.children ?? <CourseV10DocumentView project={renderProject} authorProject={model.project} surfaceId={surfaceId} rootInstanceId={rootInstanceId}
-    selectedInstanceId={selectedInstanceId} selectedInstanceIds={selectedInstanceIds} player={player} isPlaying={() => world.isPlaying()} onSelect={onSelect} onElement={world.bind} onTargetElement={world.bindTarget}
+    selectedInstanceId={selectedInstanceId} selectedInstanceIds={selectedInstanceIds} selectionKind={selectionKind} player={player} isPlaying={() => world.isPlaying()} onSelect={onSelect} onElement={world.bind} onTargetElement={world.bindTarget}
     renderContainer={renderContainer} />
   return <RuntimeContext.Provider value={ports}><ProjectionMutationBoundary model={{ ...model, project: renderProject }} host={host} projectionKey={projectionKey}
     report={error => callbacks.current.report(error instanceof Error ? error.message : '组件运行未完成')}>

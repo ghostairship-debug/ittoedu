@@ -35,12 +35,15 @@ export function requestObjectEdit(root: Element, itemId: string): boolean {
 
 /** A current field action is resolved by its active document owner, never by owning instance fallback. */
 export const AUTHOR_FIELD_ACTION_EVENT = 'course-author-field-action'
-export interface AuthorFieldActionRequest {
+interface AuthorFieldActionTarget {
   documentId: string
   epoch: string
   selectionIdentity: string
-  action: 'edit' | 'replace-image'
 }
+export type AuthorFieldActionRequest = AuthorFieldActionTarget & (
+  | { action: 'edit' | 'replace-image' }
+  | { action: 'nudge'; dx: number; dy: number }
+)
 export function requestAuthorFieldAction(request: AuthorFieldActionRequest): boolean {
   return !window.dispatchEvent(new CustomEvent<AuthorFieldActionRequest>(AUTHOR_FIELD_ACTION_EVENT, { detail: request, cancelable: true }))
 }

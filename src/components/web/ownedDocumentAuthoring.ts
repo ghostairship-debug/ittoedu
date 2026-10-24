@@ -1,5 +1,5 @@
 import type { createDomAuthoring } from './authoringDom'
-import type { ComponentAuthorGeometry, ComponentAuthorGeometryObservation, ComponentAuthorRecord, ComponentAuthorSpotInput } from '../../shared/contracts/component-platform/runtime'
+import type { ComponentAuthorGeometry, ComponentAuthorGeometryObservation, ComponentAuthorRecord, ComponentAuthorSpotInput, ComponentAuthorPointerInput } from '../../shared/contracts/component-platform/runtime'
 import type { DomTextOverrideController } from '../../player/lightEdit/domTextOverrides'
 import type { installHtmlBlobCapture } from './htmlBlobCapture'
 import { createAuthoringFrameGeometry } from './authoringFrame'
@@ -105,39 +105,60 @@ export function installOwnedDocumentBlobCarriers(win: Window & typeof globalThis
     subscribe(listener) { listeners.add(listener); return () => listeners.delete(listener) }, dispose }
 }
 
-/** Installed before authored listeners in this realm. It reports selection only;
- * workbench commands remain owned by the outer trusted input path. */
+/** Installed before authored listeners. Selection and geometry intent stay in
+ * the existing trusted host; only an active content input extends text ranges. */
 export function installAuthoringInputArbitration(doc: Document, options: {
   editing(): boolean
+  contentEditing?(point: { x: number; y: number }, event: Event): boolean
   select(point: { x: number; y: number }, event: Event, word?: boolean): void
+  edit?(point: { x: number; y: number }, event: Event): void
+  contextMenu?(point: { x: number; y: number }, event: Event): void
+  gesture?(point: { x: number; y: number }, event: Event, phase: 'start' | 'update' | 'end' | 'cancel'): void
   extend?(point: { x: number; y: number }, event: Event): void
   hover?(point: { x: number; y: number }): void
 }) {
   const win = doc.defaultView
   if (!win) return () => {}
-  let pointerSelected = false, selecting = false
-  let lastPress: { x: number; y: number; time: number } | undefined
+  let pointerSelected = false
+  let press: { pointerId?: number; mouse: boolean; content: boolean; point: { x: number; y: number }; event: Event } | undefined
+  const finish = (event: Event, phase: 'end' | 'cancel', point = press?.point) => {
+    const current = press
+    if (!current || !point) return
+    press = undefined
+    if (current.content) { if (phase === 'end') options.extend?.(point, event) }
+    else options.gesture?.(point, event, phase)
+    if (current.pointerId !== undefined) try { doc.documentElement.releasePointerCapture(current.pointerId) } catch { /* Capture may already have been lost. */ }
+  }
   const receive = (event: Event) => {
-    if (!options.editing()) { pointerSelected = false; return }
-    if (event.type === 'pointermove' || event.type === 'pointerup') {
-      if (selecting) { const pointer = event as PointerEvent; options.extend?.({ x: pointer.clientX, y: pointer.clientY }, event) }
-      else if (event.type === 'pointermove') { const pointer = event as PointerEvent; options.hover?.({ x: pointer.clientX, y: pointer.clientY }) }
-      if (event.type === 'pointerup') selecting = false
-      if (event.type === 'pointermove') return
+    if (!options.editing()) { finish(event, 'cancel'); pointerSelected = false; return }
+    const pointer = event as PointerEvent, point = { x: pointer.clientX, y: pointer.clientY }
+    const pointerMatches = press && (press.pointerId === undefined || pointer.pointerId === press.pointerId)
+    if (event.type === 'pointermove' || event.type === 'mousemove') {
+      if (press && (event.type === 'mousemove' ? press.mouse : pointerMatches)) {
+        press.point = point
+        if (press.content) options.extend?.(point, event)
+        else options.gesture?.(point, event, 'update')
+      } else if (!press && event.type === 'pointermove') options.hover?.(point)
     }
+    if (event.type === 'pointerup' && pointerMatches || event.type === 'mouseup' && press?.mouse) finish(event, 'end', point)
+    if ((event.type === 'pointercancel' || event.type === 'lostpointercapture') && pointerMatches) finish(event, 'cancel')
+    if (event.type === 'keydown' && (event as KeyboardEvent).key === 'Escape') finish(event, 'cancel')
     if (event.type === 'dblclick') {
-      const pointer = event as MouseEvent
-      if (pointer.button === 0) options.select({ x: pointer.clientX, y: pointer.clientY }, event, true)
+      if (pointer.button === 0) options.edit?.(point, event)
     }
+    if (event.type === 'contextmenu') options.contextMenu?.(point, event)
     if (event.type === 'pointerdown' || event.type === 'mousedown' || event.type === 'click') {
-      const pointer = event as MouseEvent
       if (pointer.button === 0 && (event.type === 'pointerdown' || !pointerSelected)) {
-        const time = event.timeStamp, word = event.type === 'pointerdown' && lastPress !== undefined && time - lastPress.time <= 500
-          && Math.hypot(pointer.clientX - lastPress.x, pointer.clientY - lastPress.y) <= 5
-        options.select({ x: pointer.clientX, y: pointer.clientY }, event, word)
-        if (event.type === 'pointerdown') lastPress = word ? undefined : { x: pointer.clientX, y: pointer.clientY, time }
+        finish(event, 'cancel')
+        const content = options.contentEditing?.(point, event) === true
+        options.select(point, event)
         pointerSelected = true
-        if (event.type === 'pointerdown') { selecting = true; try { doc.documentElement.setPointerCapture((event as PointerEvent).pointerId) } catch { /* Mouse-only input has no pointer capture. */ } }
+        if (event.type !== 'click') {
+          press = { point, event, content, mouse: event.type === 'mousedown',
+            ...(Number.isSafeInteger(pointer.pointerId) ? { pointerId: pointer.pointerId } : {}) }
+          if (!content) options.gesture?.(point, event, 'start')
+          if (press.pointerId !== undefined) try { doc.documentElement.setPointerCapture(press.pointerId) } catch { /* Mouse-only input has no pointer capture. */ }
+        }
       }
       if (event.type === 'click') pointerSelected = false
     }
@@ -150,10 +171,11 @@ export function installAuthoringInputArbitration(doc: Document, options: {
       try { if (win.parent !== win) win.parent.focus() } catch { /* The host's next explicit input still owns focus. */ }
     }
   }
-  const events = ['pointerdown', 'pointermove', 'pointerup', 'mousedown', 'mouseup', 'click', 'dblclick', 'auxclick', 'contextmenu',
+  const events = ['pointerdown', 'pointermove', 'pointerup', 'pointercancel', 'lostpointercapture', 'mousedown', 'mousemove', 'mouseup', 'click', 'dblclick', 'auxclick', 'contextmenu',
     'keydown', 'keyup', 'keypress', 'beforeinput', 'input', 'submit', 'dragstart']
   for (const name of events) win.addEventListener(name, receive, { capture: true, passive: false })
   const release = () => {
+    if (press) finish(press.event, 'cancel')
     for (const name of events) win.removeEventListener(name, receive, true)
     win.removeEventListener('pagehide', release)
   }
@@ -200,8 +222,8 @@ export function installOwnedDocumentAuthoring(token: string, documentPath: strin
   refreshResources?(root: Document, resources: Record<string, string>, bindings: Readonly<Record<string, string>>): void
   observe?: boolean
   onChange?(): void
-  onPointer?(point: { x: number; y: number; authorKey?: string; caretOffset?: number }): void
-  onDoubleClick?(point: { x: number; y: number; authorKey?: string; caretOffset?: number }): void
+  onPointer?(point: ComponentAuthorPointerInput): void
+  onDoubleClick?(point: ComponentAuthorPointerInput): void
   onSelection?(selection: { authorKey: string; anchor: number; focus: number; word?: boolean }): void
   onHover?(authorKey: string | undefined): void
   paintedElementAt?(x: number, y: number): Element | undefined
@@ -219,19 +241,37 @@ export function installOwnedDocumentAuthoring(token: string, documentPath: strin
   const resourceUrls = () => options.runtimeResources?.(state.resources) ?? state.resources
   let ended = false, queued = false, consumer: ReturnType<typeof factory> | undefined, sequence = 0
   let selectingText: { node: Node; authorKey: string; anchor: number } | undefined
+  let editingAuthorKey: string | undefined
+  let pointerTarget: { authorKey?: string; caretOffset?: number; pointerId?: number; button?: number; shiftKey?: boolean; altKey?: boolean; ctrlKey?: boolean; metaKey?: boolean } | undefined
+  const pointerFacts = (event: Event) => {
+    const pointer = event as PointerEvent
+    return { ...(Number.isSafeInteger(pointer.pointerId) ? { pointerId: pointer.pointerId } : {}), button: pointer.button,
+      shiftKey: pointer.shiftKey, altKey: pointer.altKey, ctrlKey: pointer.ctrlKey, metaKey: pointer.metaKey }
+  }
   const releaseInput = documentPath ? options.input?.(document, {
     editing: () => {
       const activity = options.activity?.() ?? (window as Window & { __guolingRuntimeActivity?: { active: boolean; visible: boolean; playing: boolean } }).__guolingRuntimeActivity
       return !ended && state.observe && activity?.active === true && activity.visible && !activity.playing
     },
-    select: (point, event, word) => {
+    contentEditing: point => editingAuthorKey !== undefined && consumer?.hit(point.x, point.y)?.authorKey === editingAuthorKey,
+    select: (point, event) => {
       const observed = consumer?.hit(point.x, point.y)
       const caretOffset = options.caret?.(document, observed?.node, point.x, point.y)
-      const value = { ...point, authorKey: observed?.authorKey, ...(caretOffset === undefined ? {} : { caretOffset }) }
-      selectingText = observed && caretOffset !== undefined ? { node: observed.node, authorKey: observed.authorKey, anchor: caretOffset } : undefined
-      if (event.type === 'dblclick') doubleClick(value); else pointer(value)
-      if ((word || event.type === 'dblclick') && selectingText) selection({ authorKey: selectingText.authorKey, anchor: caretOffset!, focus: caretOffset!, word: true })
+      pointerTarget = { authorKey: observed?.authorKey, ...(caretOffset === undefined ? {} : { caretOffset }), ...pointerFacts(event) }
+      selectingText = observed && observed.authorKey === editingAuthorKey && caretOffset !== undefined ? { node: observed.node, authorKey: observed.authorKey, anchor: caretOffset } : undefined
+      if (selectingText) selection({ authorKey: selectingText.authorKey, anchor: selectingText.anchor, focus: selectingText.anchor })
+      else if (event.type === 'click') pointer({ ...point, ...pointerTarget })
     },
+    edit: (point, event) => {
+      const observed = consumer?.hit(point.x, point.y), caretOffset = options.caret?.(document, observed?.node, point.x, point.y)
+      doubleClick({ ...point, authorKey: observed?.authorKey, ...(caretOffset === undefined ? {} : { caretOffset }), ...pointerFacts(event) })
+      if (observed && caretOffset !== undefined) selection({ authorKey: observed.authorKey, anchor: caretOffset, focus: caretOffset, word: true })
+    },
+    contextMenu: (point, event) => {
+      const observed = consumer?.hit(point.x, point.y)
+      pointer({ ...point, authorKey: observed?.authorKey, ...pointerFacts(event), button: 2 })
+    },
+    gesture: (point, _event, phase) => { if (pointerTarget) pointer({ ...point, ...pointerTarget, phase }); if (phase === 'end' || phase === 'cancel') pointerTarget = undefined },
     extend: point => { if (selectingText) { const focus = options.caret?.(document, selectingText.node, point.x, point.y); if (focus !== undefined) selection({ authorKey: selectingText.authorKey, anchor: selectingText.anchor, focus }) } },
     hover: point => hover(consumer?.hit(point.x, point.y)?.authorKey),
   }) : undefined
@@ -342,12 +382,12 @@ export function installOwnedDocumentAuthoring(token: string, documentPath: strin
     for (const frame of frames()) post(frame, { type: 'guoling.authoring.preview', authorKey, geometry })
     enqueue()
   }
-  const input = (authorKey?: string) => { consumer?.suppressText(authorKey); for (const frame of frames()) post(frame, { type: 'guoling.authoring.input', authorKey }) }
-  const pointer = (value: { x: number; y: number; authorKey?: string; caretOffset?: number }) => {
+  const input = (authorKey?: string) => { editingAuthorKey = authorKey; consumer?.suppressText(authorKey); for (const frame of frames()) post(frame, { type: 'guoling.authoring.input', authorKey }) }
+  const pointer = (value: ComponentAuthorPointerInput) => {
     if (documentPath) parentMessage({ type: 'guoling.authoring.pointer', ...value })
     else options.onPointer?.(value)
   }
-  const doubleClick = (value: { x: number; y: number; authorKey?: string; caretOffset?: number }) => {
+  const doubleClick = (value: ComponentAuthorPointerInput) => {
     if (documentPath) parentMessage({ type: 'guoling.authoring.double-click', ...value })
     else options.onDoubleClick?.(value)
   }
@@ -386,6 +426,10 @@ export function installOwnedDocumentAuthoring(token: string, documentPath: strin
     } else if (data.type === 'guoling.authoring.pointer' || data.type === 'guoling.authoring.double-click') {
       const child = children.get(frame), matrix = child && frameMatrix(frame, child)
       if (matrix) (data.type === 'guoling.authoring.pointer' ? pointer : doubleClick)({ ...point(matrix, Number(data.x), Number(data.y)), ...(typeof data.authorKey === 'string' ? { authorKey: data.authorKey } : {}),
+        ...(['start', 'update', 'end', 'cancel'].includes(data.phase) ? { phase: data.phase } : {}),
+        ...(Number.isSafeInteger(data.pointerId) ? { pointerId: data.pointerId } : {}),
+        ...(typeof data.button === 'number' ? { button: data.button } : {}),
+        shiftKey: data.shiftKey === true, altKey: data.altKey === true, ctrlKey: data.ctrlKey === true, metaKey: data.metaKey === true,
         ...(Number.isSafeInteger(data.caretOffset) && data.caretOffset >= 0 ? { caretOffset: data.caretOffset } : {}) })
     } else if (data.type === 'guoling.authoring.hover') {
       hover(typeof data.authorKey === 'string' ? data.authorKey : undefined)

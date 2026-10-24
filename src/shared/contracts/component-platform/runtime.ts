@@ -151,6 +151,26 @@ export interface ComponentAuthorSpot extends ComponentAuthorSpotInput {
   instanceId: string
   mountGeneration: number
 }
+/** Ephemeral author input facts; geometry and edits remain owned by the host. */
+export type ComponentAuthorPointerPhase = 'start' | 'update' | 'end' | 'cancel'
+export interface ComponentAuthorPointerInput {
+  x: number
+  y: number
+  authorKey?: string
+  caretOffset?: number
+  phase?: ComponentAuthorPointerPhase
+  pointerId?: number
+  button?: number
+  shiftKey?: boolean
+  altKey?: boolean
+  ctrlKey?: boolean
+  metaKey?: boolean
+}
+export interface ComponentAuthorPointerEventDetail extends Omit<ComponentAuthorPointerInput, 'x' | 'y'> {
+  instanceId: string
+  mountGeneration?: number
+  localPoint: { x: number; y: number }
+}
 /** A frozen semantic author address, without display geometry or a live mount identity. */
 export type ComponentAuthorField = Pick<ComponentAuthorSpotInput, 'kind' | 'authorKey' | 'scope' | 'binding' | 'bindingStatus'
   | 'fieldScope' | 'dataPath' | 'sourceRegion' | 'initialValue'>

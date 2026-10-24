@@ -7,6 +7,7 @@ import { captureSelection, workbenchSelection } from '../SelectionContextControl
 import type { DocumentSnapshot } from '../../../shared/workbench/document'
 import { componentSurface } from '../../../shared/contracts/component-platform/project'
 import { resolveCourseProjectDiagnosticTargetRoute, selectCourseProjectDiagnosticRoute } from '../../diagnostics/projectHealthNavigation'
+import { selectElementCardField } from './elementCardSelection'
 import './elementCards.css'
 
 /** How the editor finds a card's element: whether it is still there, and how to bring it into view. */
@@ -52,17 +53,7 @@ export function createComponentElementCardNavigation({ kernel, activateDocument,
           return { ...live, activeDocumentId: documentId, rootInstanceId: original?.rootInstanceId ?? null }
         } }, precise ? { ...scopedRoute, instanceId: undefined } : scopedRoute)
         if (componentSurface(project, target.surfaceId)) kernel.bridge.selectPresentationState(documentId, target.stateId ?? null, target.surfaceId)
-        if (target.authorField) {
-          const value = readTarget(snapshot.model, target)
-          if (typeof value !== 'string') throw new Error('字段内容类型已改变，请重新选择')
-          kernel.bridge.selectInteraction(documentId,
-            { kind: 'author-field', instanceId: target.instanceId, field: { ...target.authorField, initialValue: value } }, target.surfaceId)
-        }
-        else if (target.dataPath && target.from === undefined && target.to === undefined && target.fieldScope !== 'flowLayout') {
-          const value = readTarget(snapshot.model, target)
-          if (typeof value === 'string') kernel.bridge.selectInteraction(documentId,
-            { kind: 'author-field', instanceId: target.instanceId, field: { kind: 'text', dataPath: target.dataPath, fieldScope: target.fieldScope ?? 'data', initialValue: value } }, target.surfaceId)
-        }
+        selectElementCardField(kernel.bridge, snapshot, target)
         workbenchSelection.setManual(documentId, selected)
         const manual = workbenchSelection.getManual(documentId), interaction = kernel.readView().interactionSelection
         elementCards.requestOpen(key)

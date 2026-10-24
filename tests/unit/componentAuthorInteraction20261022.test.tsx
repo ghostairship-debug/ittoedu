@@ -16,6 +16,7 @@ vi.mock('../../src/renderer/authoring/professionalContentFields', async importOr
 }))
 vi.mock('../../src/renderer/store/editorStore', () => ({
   useEditorStore: Object.assign((select: (state: unknown) => unknown) => select(h.state), { getState: () => h.state }),
+  selectActiveSlideContentEdit: (state: any) => state.slideContentEdit,
 }))
 
 const spot = (id: string): ComponentAuthorSpot => ({
@@ -62,7 +63,7 @@ describe('a realm caret reaches the same professional plain-text input', () => {
       return h.state.slideContentEdit
     })
     const pointer = async (field: ComponentAuthorSpot, caretOffset?: number) => {
-      await act(async () => { element.dispatchEvent(new CustomEvent('component-author-pointer', { bubbles: true, detail: {
+      await act(async () => { element.dispatchEvent(new CustomEvent('component-author-double-click', { bubbles: true, detail: {
         instanceId: field.instanceId, localPoint: { x: 85, y: 20 }, mountGeneration: field.mountGeneration,
         authorKey: field.authorKey, caretOffset,
       } })) })
@@ -146,7 +147,7 @@ describe('registered content activation keeps the first semantic intent across a
       first.resolve({ authorKey: 'field-a', painted: true }); await pending
     })
     expect(h.state.courseBridge.selectAuthorSpot.mock.calls.map((call: unknown[]) => (call[1] as ComponentAuthorSpot).instanceId)).toEqual(['b'])
-    expect(h.state.beginSlideSpotEdit).toHaveBeenCalledTimes(1)
+    expect(h.state.beginSlideSpotEdit).not.toHaveBeenCalled()
   })
 
   it('does not replay a captured native cell after a newer registered-field intent wins during ACK', async () => {

@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react'
+import { useEffect, useImperativeHandle, useLayoutEffect, useRef, useState, type CSSProperties, type Ref } from 'react'
 import { registerAuthoringObservationDraft } from '../authoring/generation/authoringObservation'
 import { componentClientMatrix } from '../../player/components/runtime/componentClientMatrix'
 import { invertMatrix, transformVector } from '../../core/components/geometry'
@@ -11,6 +11,7 @@ export interface CanvasPlainTextBounds {
 }
 
 export interface PlainTextSelectionIntent { anchor?: number; focus?: number; anchorPoint?: { x: number; y: number }; point?: { x: number; y: number }; word?: boolean }
+export interface CanvasPlainTextEditorHandle { selectAll(): void; complete(): void }
 
 /** Browser selection in the existing plain input; this never invokes authored events. */
 function selectPlainText(element: HTMLElement, intent: PlainTextSelectionIntent, fallback: number, collapseAtPoint = false) {
@@ -55,6 +56,7 @@ interface CanvasPlainTextEditorProps {
   textStyle?: Record<string, string | undefined>
   escapeBehavior?: 'commit' | 'cancel'
   selectionIdentity?: string
+  editorRef?: Ref<CanvasPlainTextEditorHandle>
   onDraftChange?(value: string, composing: boolean): void
   onCommit(value: string): void
   onAdvance?(value: string, direction: 1 | -1): void
@@ -81,6 +83,7 @@ export function CanvasPlainTextEditor({
   textStyle,
   escapeBehavior = 'commit',
   selectionIdentity,
+  editorRef,
   onCommit,
   onAdvance,
   onCancel,
@@ -105,6 +108,32 @@ export function CanvasPlainTextEditor({
   observationRef.current = { label, value: draft, initialValue: value, bounds }
   const finishRef = useRef(finish)
   finishRef.current = finish
+
+  useImperativeHandle(editorRef, () => ({
+    selectAll() {
+      const inline = inlineRef.current, control = controlRef.current
+      if (inline) { inline.focus({ preventScroll: true }); selectPlainText(inline, { anchor: 0, focus: inline.textContent?.length ?? 0 }, 0) }
+      else if (control) { control.focus({ preventScroll: true }); control.setSelectionRange(0, control.value.length) }
+    },
+    complete() { finishRef.current(false) },
+  }), [])
+
+  // Font fields and palettes belong to this input. Their focus is not a document handoff.
+  const toolbarTarget = (target: EventTarget | null) => target instanceof Element && Boolean(target.closest('.selection-quick-bar,.text-edit-toolbar,.palette-button__panel,.shared-document-form,.command-menu'))
+  const afterBlur = (event: React.FocusEvent<HTMLElement>, inline = false) => {
+    if (toolbarTarget(event.relatedTarget)) return
+    const blurred = event.currentTarget
+    queueMicrotask(() => {
+      const active = blurred.ownerDocument.activeElement
+      if (toolbarTarget(active) || active === inlineRef.current || active === controlRef.current) return
+      if (!blurred.isConnected) { (inlineRef.current ?? controlRef.current)?.focus({ preventScroll: true }); return }
+      if (inline) {
+        if (finishedRef.current) return
+        if (composingRef.current) pendingFinishRef.current = false
+        else { finishedRef.current = true; onCommit(readInline()) }
+      } else finishRef.current(false)
+    })
+  }
 
   // Inline input inserts literal newlines, keeping source whitespace as plain text.
   const readInline = () => inlineRef.current?.textContent ?? ''
@@ -205,7 +234,7 @@ export function CanvasPlainTextEditor({
         else onCommit(text)
       }
     },
-    onBlur: () => finish(false),
+    onBlur: (event: React.FocusEvent<HTMLInputElement | HTMLTextAreaElement>) => afterBlur(event),
     onKeyDown: (
       event: React.KeyboardEvent<HTMLInputElement | HTMLTextAreaElement>,
     ) => {
@@ -243,7 +272,7 @@ export function CanvasPlainTextEditor({
         onPaste={event => { event.preventDefault(); elementInsert(event.clipboardData.getData('text/plain')); change() }}
         onCompositionStart={() => { composingRef.current = true; onDraftChange?.(readInline(), true) }}
         onCompositionEnd={() => { composingRef.current = false; change(); const pending = pendingFinishRef.current; pendingFinishRef.current = null; if (pending !== null && !finishedRef.current) { finishedRef.current = true; if (pending) onCancel(); else onCommit(readInline()) } }}
-        onBlur={() => { if (finishedRef.current) return; if (composingRef.current) pendingFinishRef.current = false; else { finishedRef.current = true; onCommit(readInline()) } }}
+        onBlur={event => afterBlur(event, true)}
         onKeyDown={event => {
           if (event.nativeEvent.isComposing || composingRef.current) return
           const command = event.ctrlKey || event.metaKey

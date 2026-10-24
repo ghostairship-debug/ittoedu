@@ -53,14 +53,14 @@ describe('sharedDocumentEditor', () => {
       act(() => { editor.view.focus(); editor.view.dispatch(editor.view.state.tr.setSelection(TextSelection.create(editor.view.state.doc, 1, 6))) })
       expect(inline.queryByRole('toolbar', { name: '选中内容快捷工具' })).toBeNull()
       const full = within(toolbarHost).getByRole('toolbar', { name: '正文工具' })
-      fireEvent.click(within(full).getByRole('button', { name: '粗体' }))
+      fireEvent.click(within(full).getByRole('button', { name: '加粗' }))
       let block = fromEditorDocument(editor.view.state.doc).blocks[0]
       expect(block.type === 'paragraph' && block.content.inlines[0]).toMatchObject({ text: 'alpha', style: { bold: true } })
       fireEvent.click(within(full).getByRole('button', { name: '清除文字格式' }))
       block = fromEditorDocument(editor.view.state.doc).blocks[0]
       expect(block.type === 'paragraph' && block.content.inlines.every(value => value.type !== 'text' || !value.style?.bold)).toBe(true)
       act(() => editor.view.dispatch(editor.view.state.tr.setSelection(TextSelection.create(editor.view.state.doc, editor.view.state.doc.content.size - 1))))
-      fireEvent.click(within(full).getByRole('button', { name: '粗体' }))
+      fireEvent.click(within(full).getByRole('button', { name: '加粗' }))
       act(() => editor.view.dispatch(editor.view.state.tr.insertText('!')))
       block = fromEditorDocument(editor.view.state.doc).blocks[0]
       expect(block.type === 'paragraph' && block.content.inlines.at(-1)).toMatchObject({ text: '!', style: { bold: true } })
@@ -76,8 +76,8 @@ describe('sharedDocumentEditor', () => {
       const flowEditor = factory.mock.results.at(-1)!.value as ReturnType<typeof createLayoutEditor>
       act(() => { flowEditor.view.focus(); flowEditor.view.dispatch(flowEditor.view.state.tr.setSelection(TextSelection.create(flowEditor.view.state.doc, 1, 6))) })
       const compact = flow.getByRole('toolbar', { name: '选中内容快捷工具' })
-      expect(within(compact).getByRole('button', { name: '当前选区加粗' })).toBeVisible()
-      fireEvent.click(within(compact).getByRole('button', { name: '当前选区加粗' }))
+      expect(within(compact).getByRole('button', { name: '加粗' })).toBeVisible()
+      fireEvent.click(within(compact).getByRole('button', { name: '加粗' }))
       fireEvent.click(within(compact).getByRole('button', { name: '更多文字格式' }))
       fireEvent.click(flow.getByRole('menuitem', { name: '清除文字格式' }))
       const flowBlock = fromEditorDocument(flowEditor.view.state.doc).blocks[0]
@@ -120,7 +120,7 @@ describe('sharedDocumentEditor', () => {
       act(() => editor.view.dispatch(editor.view.state.tr.setSelection(TextSelection.create(editor.view.state.doc, 1, 5))))
       expect(family.value).toBe('__mixed')
       expect(rendered.getByLabelText('字号').getAttribute('placeholder')).toBe('混合')
-      expect(rendered.getByRole('button', { name: '粗体' }).getAttribute('aria-pressed')).toBe('mixed')
+      expect(rendered.getByRole('button', { name: '加粗' }).getAttribute('aria-pressed')).toBe('mixed')
       fireEvent.change(family, { target: { value: 'KaiTi' } })
       expect(family.value).toBe('KaiTi')
       const changed = fromEditorDocument(editor.view.state.doc).blocks[0]
@@ -139,7 +139,7 @@ describe('sharedDocumentEditor', () => {
       expect(fromEditorDocument(editor.view.state.doc)).toEqual(initial.content)
       expect(family.value).toBe('Arial')
       expect((rendered.getByLabelText('字号') as HTMLInputElement).value).toBe('30')
-      expect(rendered.getByRole('button', { name: '粗体' }).getAttribute('aria-pressed')).toBe('false')
+      expect(rendered.getByRole('button', { name: '加粗' }).getAttribute('aria-pressed')).toBe('false')
     } finally { cleanup(); factory.mockRestore() }
   })
   it('captures a clicked DOM caret before toolbar focus changes and preserves subsequent stored marks', () => {
@@ -152,7 +152,7 @@ describe('sharedDocumentEditor', () => {
     const editor = factory.mock.results.at(-1)!.value as ReturnType<typeof createLayoutEditor>
     try {
       act(() => { editor.view.focus(); editor.view.dispatch(editor.view.state.tr.setSelection(TextSelection.create(editor.view.state.doc, 1, 5))) })
-      expect(rendered.getByRole('button', { name: '粗体' })).toHaveAttribute('aria-pressed', 'mixed')
+      expect(rendered.getByRole('button', { name: '加粗' })).toHaveAttribute('aria-pressed', 'mixed')
       // Browser caret changes before its asynchronous selectionchange reaches PM.
       const end = editor.view.domAtPos(5)
       document.getSelection()!.collapse(end.node, end.offset)
@@ -161,7 +161,7 @@ describe('sharedDocumentEditor', () => {
       fireEvent.change(rendered.getByLabelText('字体'), { target: { value: 'KaiTi' } })
       fireEvent.change(rendered.getByLabelText('字号'), { target: { value: '32' } })
       expect(editor.view.state.selection.empty).toBe(true)
-      expect(rendered.getByRole('button', { name: '粗体' })).toHaveAttribute('aria-pressed', 'false')
+      expect(rendered.getByRole('button', { name: '加粗' })).toHaveAttribute('aria-pressed', 'false')
       expect(onChange).not.toHaveBeenCalled()
       act(() => editor.view.dispatch(editor.view.state.tr.insertText('新')))
       const block = fromEditorDocument(editor.view.state.doc).blocks[0]
@@ -303,16 +303,16 @@ it.each([[2, 2], [1, 3]])('retains the current field owner through a late revisi
     expect(factory).toHaveBeenCalledTimes(1)
     expect(editor.view.dom.textContent).toBe('正文')
     const state = editor.view.state
-    fireEvent.click(editor.view.dom.querySelector('[data-flow-idle-rich-text]')!)
-    expect(onSelection).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ kind: 'text', revision: '2' }))
+    fireEvent.pointerDown(editor.view.dom.querySelector('[data-flow-idle-rich-text]')!, { button: 0 })
+    expect(onSelection).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ kind: 'object', blockId: 'body', revision: '2' }))
     expect(onContextualTargetChange).toHaveBeenCalledTimes(1)
     expect(owner).toBe('document')
     expect(editor.view.state.doc.eq(state.doc)).toBe(true)
-    expect(editor.view.state.selection.eq(state.selection)).toBe(true)
+    expect(editor.readSelection()).toMatchObject({ kind: 'object', blockId: 'body' })
     expect(onChange).not.toHaveBeenCalled()
     onSelection.mockClear()
     ui.rerender(<SharedDocumentEditor {...props} revision="3" />)
-    expect(onSelection).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ kind: 'text', revision: '3' }))
+    expect(onSelection).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ kind: 'object', blockId: 'body', revision: '3' }))
     expect(owner).toBe('document')
     expect(factory).toHaveBeenCalledTimes(1)
     expect(onChange).not.toHaveBeenCalled()
@@ -342,7 +342,7 @@ it.each(['external', 'focused', 'content', 'explicit'] as const)('keeps an exter
       act(() => { expect(handle.current!.focusBlock('body')).toBe(true) })
       expect(editor.view.hasFocus()).toBe(true)
     } else {
-      if (mode === 'focused') act(() => editor.view.focus())
+      if (mode === 'focused') act(() => editor.view.dom.focus())
       const text = editor.view.dom.querySelector('p')!.firstChild!
       if (mode === 'content') text.textContent = '正文修改'
       const range = document.createRange(); range.setStart(text, 0); range.collapse(true)
@@ -355,8 +355,8 @@ it.each(['external', 'focused', 'content', 'explicit'] as const)('keeps an exter
     if (mode === 'external') {
       expect(editor.view.state.doc.eq(before)).toBe(true)
       expect(owner).toBe('external'); expect(onSelection).not.toHaveBeenCalled(); expect(onContextualTargetChange).not.toHaveBeenCalled(); expect(onChange).not.toHaveBeenCalled()
-      // An actual ordinary text click still reacquires the same local PM caret.
-      fireEvent.click(editor.view.dom.querySelector('p')!)
+      // An actual ordinary pointer now reacquires the block as an object without input.
+      fireEvent.pointerDown(editor.view.dom.querySelector('p')!, { button: 0 })
       expect(owner).toBe('document'); expect(onSelection).toHaveBeenCalledOnce(); expect(onContextualTargetChange).toHaveBeenCalledOnce()
     } else {
       expect(owner).toBe('document'); expect(onSelection).toHaveBeenCalledOnce(); expect(onContextualTargetChange).toHaveBeenCalledOnce()

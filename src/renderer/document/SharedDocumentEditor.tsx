@@ -7,14 +7,13 @@ import { workbenchSelection } from '../workbench/SelectionContextController'
 import { cancelEditPreview, useEditPreviews } from '../workbench/EditPreviewProjection'
 import { projectDocumentRanges } from '../../shared/document/textInteraction'
 import { pinnedSelectionKey, pinnedSelectionPlugin, sourcePinnedSelectionEffect, sourcePinnedSelectionField } from './selectionDecorations'
-import { FONT_FAMILY_OPTIONS } from '../../shared/fonts/fontFamilyCatalog'
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState, useMemo, type ReactNode } from 'react'
-import { Baseline, Bold, Highlighter, Italic, Link2, MoreHorizontal, Sigma, SlidersHorizontal, Table2, Underline, Superscript, Subscript, Code, Eraser } from 'lucide-react'
+import { Link2, MoreHorizontal, Sigma, SlidersHorizontal, Table2, Superscript, Subscript, Code, Eraser } from 'lucide-react'
 import { stepFontSize } from '../../shared/fontSizeStep'
 import { LatexFormulaAuthoringEditor } from '../ui/LatexFormulaAuthoringEditor'
-import { PaletteButton } from '../editing/color/PaletteButton'
+import { TextFormatControls } from '../editing/quickbar/TextFormatControls'
 import type { QuickBarBounds, QuickBarRect } from '../editing/quickbar/placeQuickBar'
-import { QuickBarAiButton, QuickBarButton, QuickBarColorButton, QuickBarPopoverButton, QuickBarSeparator, SelectionQuickBar } from '../editing/quickbar/SelectionQuickBar'
+import { QuickBarAiButton, QuickBarButton, QuickBarPopoverButton, QuickBarSeparator, SelectionQuickBar } from '../editing/quickbar/SelectionQuickBar'
 import { usePointerGesture } from '../editing/quickbar/usePointerGesture'
 import { CommandMenuItems, useContextMenu, type MenuCommand } from '../editing/commands/CommandMenu'
 import { createPortal } from 'react-dom'
@@ -154,13 +153,15 @@ export function readDocumentFormatting(state: EditorState, defaults?: DocumentIn
     const first = get(samples[0] ?? {})
     return samples.some(style => get(style) !== first) ? 'mixed' : first
   }
-  return { paragraphType: paragraphTypes.size === 1 ? [...paragraphTypes][0] : '', fontFamily: values(style => style.fontFamily), fontSize: values(style => style.fontSize),
+  return { color: values(style => style.color), highlightColor: values(style => style.highlightColor), paragraphType: paragraphTypes.size === 1 ? [...paragraphTypes][0] : '', fontFamily: values(style => style.fontFamily), fontSize: values(style => style.fontSize),
     flags: Object.fromEntries(FORMAT_FLAGS.map(key => [key, values(style => Boolean(style[key]))])) as Record<typeof FORMAT_FLAGS[number], boolean | 'mixed'> }
 }
 
 export interface SharedDocumentEditorProps {
   active?: boolean
   toolbarHost?: HTMLElement | null
+  toolbarScope?: string
+  onCompleteEditing?(): void
   /** The caller's saved field shape; the full document editor remains the default. */
   contentScope?: DocumentContentScope
   hiddenBlockIds?:readonly string[]
@@ -178,6 +179,7 @@ export interface SharedDocumentEditorProps {
   /** Main Flow owns semantic drafts; materialize source only at an actual source boundary. */
   deferLayoutSource?: boolean
   readOnly?: boolean
+  blockMoveDisabledReason?(blockId: string): string | null
   renderTextActions?(selection: DocumentSelection | null): ReactNode
   renderInline?(instanceId: string, container: HTMLElement): (() => void) | void
   renderObject?(block: DocumentBlock, container: HTMLElement): (() => void) | void
@@ -237,7 +239,11 @@ export interface SharedDocumentEditorProps {
 function editorMarkdownOptions(owner: Pick<SharedDocumentEditorProps, 'target' | 'resolveImage'>): MarkdownOptions {
   return { createId: () => crypto.randomUUID(), target: owner.target, resolveImage: owner.resolveImage, recoverUnsupportedBlocks: owner.target === 'file' }
 }
+export interface DocumentObjectPointer { blockId: string; phase: 'start' | 'update' | 'end' | 'cancel'; pointerId: number; point: { x: number; y: number }; button?: number; modifiers?: { shift?: boolean; ctrl?: boolean; meta?: boolean; alt?: boolean } }
+
 export interface SharedDocumentEditorHandle {
+  /** A managed component realm delegates its whole-block gesture to this same reading owner. */
+  objectPointer(input: DocumentObjectPointer): void
   captureInsertionSelection(): DocumentInsertionSelection
   clearSelection(targets?: readonly ExecutionSelectionTarget[]): void
   focusAtClientPoint(point: { x: number; y: number }): boolean
@@ -269,8 +275,12 @@ export interface SharedDocumentEditorHandle {
 /** The caller owns persistence and undo; neither editor installs a history extension. */
 export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, SharedDocumentEditorProps>(function SharedDocumentEditor(props, ref) {
   const latest = useRef(props); latest.current = props
+  const [inputActive, setInputActive] = useState(props.target !== 'flow' || Boolean(props.contentScope && props.contentScope !== 'document'))
+  const flowObjectSelection = props.target === 'flow' && (!props.contentScope || props.contentScope === 'document')
+  const inputGeneration = useRef(0)
+  const bodyDrag = useRef<{ pointerId: number; blockId: string; start: { x: number; y: number }; moved: boolean; capture: HTMLElement | null; ready: boolean; latest: { x: number; y: number }; ended: boolean; canceled: boolean } | null>(null)
   const documentScope = (props.contentScope ?? 'document') === 'document'
-  const [format, setFormat] = useState<ReturnType<typeof readDocumentFormatting>>({ paragraphType: '', fontFamily: undefined, fontSize: undefined, flags: { bold: false, italic: false, underline: false, strike: false, emphasis: false } })
+  const [format, setFormat] = useState<ReturnType<typeof readDocumentFormatting>>({ color: undefined, highlightColor: undefined, paragraphType: '', fontFamily: undefined, fontSize: undefined, flags: { bold: false, italic: false, underline: false, strike: false, emphasis: false } })
   const [mode, setMode] = useState<'layout' | 'source'>(documentScope ? props.initialMode ?? (props.sourceDraft === undefined ? 'layout' : 'source') : 'layout')
   const [diagnostics, setDiagnostics] = useState<DocumentDiagnostic[]>(() => [...(props.sourceDiagnostics ?? props.projectionDiagnostics ?? [])])
   const diagnosticsRef = useRef<DocumentDiagnostic[]>([...(props.sourceDiagnostics ?? props.projectionDiagnostics ?? [])])
@@ -453,6 +463,7 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
       const table = layout.current && resolveDocumentTableEditorTarget(layout.current.view.state)
       if (table) publishContextualTarget({ selection, ...(deferredLayoutSource ? {} : { ranges: null, source: draft.current }), revision: latest.current.revision, mode: 'layout',
         label: '表格', message: '请选择表格中的文字后再交给 AI 修改' })
+      else if (latest.current.target === 'flow' && layout.current?.isInputActive()) publishContextualTarget({ selection, revision: latest.current.revision, mode: 'layout', label: '输入位置' })
       else publishContextualTarget(null)
       return
     }
@@ -502,10 +513,10 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
     return result.status === 'valid'
   }
   function updateActiveBlock(state: EditorState) {
-    if (latest.current.active === false || !interactionFocused.current || !documentScope || mode !== 'layout' || !state.selection.empty || !(state.selection instanceof TextSelection)) { setActiveBlock(null); return }
+    if (latest.current.active === false || latest.current.contextualCardSuppressed || !interactionFocused.current || !documentScope || mode !== 'layout' || !(state.selection instanceof NodeSelection) && (!state.selection.empty || !(state.selection instanceof TextSelection))) { setActiveBlock(null); return }
     const point = editorPositionToPoint(state.doc, state.selection.head)
-    const id = point?.blockId
-    let blockPosition: number | null = null
+    const id = state.selection instanceof NodeSelection ? state.selection.node.attrs.id : point?.blockId
+    let blockPosition: number | null = state.selection instanceof NodeSelection ? state.selection.from : null
     for (let depth = state.selection.$head.depth; depth > 0; depth--) {
       if (state.selection.$head.node(depth).attrs.id === id) { blockPosition = state.selection.$head.before(depth); break }
     }
@@ -532,7 +543,13 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
       if (!interactionFocused.current) return
       outsidePointerFrame.current = requestAnimationFrame(() => {
         outsidePointerFrame.current = null
-        if (!draggingBlock.current) { interactionFocused.current = false; setActiveBlock(null) }
+        if (!draggingBlock.current) {
+          interactionFocused.current = false; setActiveBlock(null)
+          const editor = layout.current, generation = inputGeneration.current
+          if (latest.current.target === 'flow' && editor?.isInputActive()) void editor.drain().then(ready => {
+            if (ready && layout.current === editor && generation === inputGeneration.current) editor.setInputActive(false)
+          })
+        }
       })
     }
     // A focused menu can be removed by an outside press without firing blur.
@@ -546,24 +563,26 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
   useEffect(() => {
     if (props.active === false) { setActiveBlock(null); objectMenu.close(); return }
     if (layout.current) updateActiveBlock(layout.current.view.state)
-  }, [props.active])
+  }, [props.active, props.contextualCardSuppressed])
   function applyDocumentContent(content: ReturnType<typeof fromEditorDocument>, tableSelection?: PreviousDocumentTableSelection) {
     const editor = layout.current
     if (!editor || latest.current.readOnly) return
     const view = editor.view
     try {
       const replacement = toEditorDocument(content)
+      if (view.state.doc.eq(replacement)) return
       const previousIds=new Set<string>();view.state.doc.descendants(node=>{if(node.attrs.id)previousIds.add(node.attrs.id)})
       let inserted:string|undefined
       replacement.descendants(node=>{if(!inserted && node.attrs.id && !previousIds.has(node.attrs.id) && node.type.name!=='section')inserted=node.attrs.id})
-      const selected = inserted ?? activeBlock?.id
+      const selected = inserted ?? (view.state.selection instanceof NodeSelection ? view.state.selection.node.attrs.id : activeBlock?.id)
+      if (inserted) editor.setInputActive(true)
       editor.boundary()
       const transaction = view.state.tr.replaceWith(0, view.state.doc.content.size, replacement.content)
       if (tableSelection) restoreDocumentTableSelection(transaction, tableSelection, content)
       else if (selected) {
         let at = -1
         transaction.doc.descendants((node, position) => { if (at < 0 && node.attrs.id === selected) at = position; return at < 0 })
-        if (at >= 0) transaction.setSelection(Selection.near(transaction.doc.resolve(Math.min(at + 1, transaction.doc.content.size))))
+        if (at >= 0) transaction.setSelection(view.state.selection instanceof NodeSelection && NodeSelection.isSelectable(transaction.doc.nodeAt(at)!) ? NodeSelection.create(transaction.doc, at) : Selection.near(transaction.doc.resolve(Math.min(at + 1, transaction.doc.content.size))))
       }
       view.dispatch(transaction.scrollIntoView())
       view.focus()
@@ -583,7 +602,7 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
         editor.view.dispatch(editor.view.state.tr.setSelection(NodeSelection.create(editor.view.state.doc, at)).scrollIntoView())
         editor.view.focus()
       } : undefined,
-      disabledReason: previewSelection() ? '正在生成的范围暂时只读' : null })
+      disabledReason: previewSelection() ? '正在生成的范围暂时只读' : latest.current.blockMoveDisabledReason?.(blockId) ?? null })
   }
   function createColumns(instanceIds: readonly string[]) {
     try { void Promise.resolve(latest.current.onColumns?.(instanceIds)).catch(fail) }
@@ -666,7 +685,7 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
       if (handled && cut) previewBlocked()
       return handled
     },
-    readOnly: latest.current.readOnly, renderInline: latest.current.renderInline, renderObject: latest.current.renderObject, renderGroup: latest.current.renderGroup, objectRevision: latest.current.objectRevision,objectRevisionFor:latest.current.objectRevisionFor, objectChangedIds:latest.current.objectChangedIds,
+    inputChanged: setInputActive, blockMoveDisabledReason: latest.current.blockMoveDisabledReason, readOnly: latest.current.readOnly, renderInline: latest.current.renderInline, renderObject: latest.current.renderObject, renderGroup: latest.current.renderGroup, objectRevision: latest.current.objectRevision,objectRevisionFor:latest.current.objectRevisionFor, objectChangedIds:latest.current.objectChangedIds,
     beforeProjectionMutation:latest.current.beforeProjectionMutation,afterProjectionMutation:latest.current.afterProjectionMutation,
     runtimeSpacers: latest.current.runtimeSpacers,
     clipboardContext: latest.current.clipboardContext, clipboardResourcePort: latest.current.clipboardResourcePort,
@@ -730,7 +749,8 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
       } else if (layoutSelection.current) {
         try { editor.view.updateState(editor.view.state.apply(editor.view.state.tr.setSelection(Selection.fromJSON(editor.view.state.doc, layoutSelection.current)))) } catch { /* The owner may have replaced the selected block. */ }
       }
-      if (focusAfterSwitch.current) { editor.view.focus(); focusAfterSwitch.current = false }
+      setInputActive(editor.isInputActive())
+      if (focusAfterSwitch.current) { editor.setInputActive(true); editor.view.focus(); focusAfterSwitch.current = false }
       queueMicrotask(() => { if (layout.current === editor) updateActiveBlock(editor.view.state) })
       return () => { reportLayoutMount?.(null); setActiveBlock(null); layoutSelection.current = editor.view.state.selection.toJSON(); editor.destroy(); if (layout.current === editor) layout.current = null }
     }
@@ -868,6 +888,7 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
       select: target => {
         const bounds = range(target); if (!bounds) return false
         if (mode === 'layout' && layout.current) {
+          if (latest.current.target === 'flow') { ++inputGeneration.current; layout.current.setInputActive(false) }
           const view = layout.current.view, pieces = [...bounds.pieces].sort((a,b) => a.from-b.from)
           if (pieces.some((piece,index) => index > 0 && view.state.doc.textBetween(pieces[index-1].to,piece.from,'\n','\uFFFC').trim())) throw new Error('这些结果位于多个文字区域，请在源码视图中选择。')
           view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, bounds.from, bounds.to)).scrollIntoView()); view.focus(); return true
@@ -888,6 +909,7 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
     if (source.current) source.current.dispatch({ effects: sourcePinnedSelectionEffect.of([...pins.flatMap(pin => sourcePreviewRanges(pin, mapRef.current, draft.current, toEditorDocument(projection.current.document.content))), ...(localPin?.mode === 'source' && localPin.revision === props.revision ? [localPin] : [])]) })
   }, [mode, props.pinnedTargets, props.revision, fallbackMap, localPin])
   useImperativeHandle(ref, () => ({
+    objectPointer: acceptObjectPointer,
     captureInsertionSelection: () => {
       const editor = layout.current
       if (!editor || mode !== 'layout' || latest.current.readOnly || sourceComposing.current || editor.view.composing) throw new Error('请在正文中选择插入位置并完成当前输入')
@@ -900,6 +922,8 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
       try {
         const hit = editor.view.posAtCoords({ left: point.x, top: point.y })
         if (!hit) return false
+        ++inputGeneration.current
+        editor.setInputActive(true)
         editor.view.dispatch(editor.view.state.tr.setSelection(TextSelection.near(editor.view.state.doc.resolve(hit.pos))))
         editor.view.focus()
         return true
@@ -912,6 +936,8 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
       try {
         const from = view.posAtCoords({ left: anchor.x, top: anchor.y }), to = view.posAtCoords({ left: head.x, top: head.y })
         if (!from || !to) return false
+        ++inputGeneration.current
+        editor.setInputActive(true)
         view.dispatch(view.state.tr.setSelection(TextSelection.between(view.state.doc.resolve(from.pos), view.state.doc.resolve(to.pos))))
         view.focus(); return true
       } catch { return false }
@@ -933,6 +959,8 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
     focusEndParagraph: () => {
       const editor = layout.current
       if (!editor || mode !== 'layout' || latest.current.readOnly || editor.view.composing) return false
+      ++inputGeneration.current
+      editor.setInputActive(true)
       const view = editor.view, transaction = view.state.tr
       if (view.state.doc.lastChild?.type !== documentEditorSchema.nodes.paragraph) {
         editor.boundary()
@@ -956,6 +984,8 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
         return true
       })
       if (position === null) return false
+      ++inputGeneration.current
+      editor.setInputActive(true)
       editor.view.dispatch(editor.view.state.tr.setSelection(TextSelection.create(editor.view.state.doc, position)).scrollIntoView())
       editor.view.focus()
       return true
@@ -974,6 +1004,8 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
         return false
       })
       if (position === null) return false
+      ++inputGeneration.current
+      editor.setInputActive(true)
       editor.view.dispatch(editor.view.state.tr.setSelection(TextSelection.create(editor.view.state.doc, position)).scrollIntoView())
       editor.view.focus()
       return true
@@ -981,16 +1013,8 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
     selectBlock: (blockId) => {
       const editor = layout.current
       if (!editor || mode !== 'layout') return false
-      let position: number | null = null
-      editor.view.state.doc.descendants((node, offset) => {
-        if (position !== null) return false
-        if (node.attrs.id === blockId && NodeSelection.isSelectable(node)) { position = offset; return false }
-        return true
-      })
-      if (position === null) return false
-      editor.view.dispatch(editor.view.state.tr.setSelection(NodeSelection.create(editor.view.state.doc, position)).scrollIntoView())
-      editor.view.focus()
-      return true
+      ++inputGeneration.current
+      return editor.selectBlock(blockId)
     },
   }), [diagnostics, mode])
   async function drain() {
@@ -1257,15 +1281,13 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
       ? <div role="alert" className="shared-document-more__mode-notice">{commandError}</div>
       : null}
   </>
-  const toolbar = <div ref={toolbarRef} tabIndex={-1} className="shared-document-toolbar" onPointerDownCapture={() => layout.current?.syncDomTextSelection()} role="toolbar" aria-label="正文工具">
+  const toolbar = <div ref={toolbarRef} tabIndex={-1} className="shared-document-toolbar" onPointerDownCapture={() => layout.current?.syncDomTextSelection()} role={props.toolbarHost?.closest('[role="toolbar"]') ? undefined : 'toolbar'} aria-label={props.toolbarHost?.closest('[role="toolbar"]') ? undefined : '正文工具'}>
       {documentScope && modeControls}
       {mode === 'layout' && props.contentScope === 'formula' && <button type="button" onMouseDown={event => event.preventDefault()} onClick={openMath}>编辑公式</button>}
       {mode === 'layout' && props.contentScope !== 'formula' && <>
-        {([['bold', '粗体'], ['italic', '斜体'], ['underline', '下划线']] as const).map(([key, label]) => <button key={key} type="button" onMouseDown={event => event.preventDefault()} aria-label={label} title={label} aria-pressed={format.flags[key]} onClick={() => toggleStyle(key)}>{key === 'bold' ? <Bold size={16} /> : key === 'italic' ? <Italic size={16} /> : <Underline size={16} />}</button>)}
-        <label><input aria-label="字号" type="number" min="8" max="400" value={format.fontSize === 'mixed' ? '' : format.fontSize ?? ''} placeholder={format.fontSize === 'mixed' ? '混合' : '默认'} onChange={event => { const value = Number(event.target.value); if (value >= 8 && value <= 400) style({ fontSize: value }) }} /></label>
-        <label><select aria-label="字体" value={format.fontFamily === 'mixed' ? '__mixed' : format.fontFamily ?? ''} onChange={event => { if (event.target.value && event.target.value !== '__mixed') style({ fontFamily: event.target.value }) }}><option value="">默认字体</option>{format.fontFamily === 'mixed' && <option value="__mixed">混合字体</option>}{format.fontFamily && format.fontFamily !== 'mixed' && !FONT_FAMILY_OPTIONS.some(option => option.family === format.fontFamily) && <option value={format.fontFamily}>{format.fontFamily}</option>}{FONT_FAMILY_OPTIONS.map(option => <option key={option.family} value={option.family}>{option.label}</option>)}</select></label>
-        <PaletteButton label="文字颜色" text="颜色" onPick={color => { if (color) style({ color }) }} />
-        <PaletteButton label="高亮颜色" text="高亮" variant="highlight" onPick={highlightColor => style({ highlightColor })} />
+        <TextFormatControls value={{ fontFamily: format.fontFamily, fontSize: format.fontSize, color: format.color, highlightColor: format.highlightColor, ...format.flags }} onStyle={style} onToggle={toggleStyle}
+          onStep={direction => style(effective => ({ fontSize: stepFontSize(effective.fontSize ?? 16, direction) }))}
+          scope={<>{props.toolbarScope && `${props.toolbarScope} · `}{(semanticSelection?.kind === 'cells' ? '所选单元格' : semanticSelection?.kind === 'text' && (semanticSelection.anchor.blockId !== semanticSelection.head.blockId || semanticSelection.anchor.offset !== semanticSelection.head.offset || JSON.stringify(semanticSelection.anchor.slot) !== JSON.stringify(semanticSelection.head.slot)) ? '所选文字' : '输入位置')}</>} />
         <button type="button" aria-label="链接" title="链接" onMouseDown={event => event.preventDefault()} onClick={() => { const editor=layout.current;if(!editor)return;const state=editor.view.state;let selected=state.selection;const mark=state.selection.$from.marks().find(mark=>mark.type===documentEditorSchema.marks.link);if(mark && selected.empty){const parent=selected.$from.parent,base=selected.$from.start();let from=selected.from,to=selected.to;parent.forEach((node,pos)=>{if(node.marks.some(value=>value.eq(mark))){if(base+pos<=selected.from && base+pos+node.nodeSize>=selected.from){from=base+pos;to=base+pos+node.nodeSize}}});while(from>base && state.doc.resolve(from).nodeBefore?.marks.some(value=>value.eq(mark)))from-=state.doc.resolve(from).nodeBefore!.nodeSize;while(to<selected.$from.end() && state.doc.resolve(to).nodeAfter?.marks.some(value=>value.eq(mark)))to+=state.doc.resolve(to).nodeAfter!.nodeSize;selected=TextSelection.create(state.doc,from,to)}linkTarget.current?.release();linkTarget.current=editor.trackSelection(selected);setLinkDraft(mark?.attrs.href ?? '') }}><Link2 size={16} /></button>
         <button type="button" aria-label="公式" title="公式" onMouseDown={event => event.preventDefault()} onClick={openMath}><Sigma size={16} /></button>
         {documentScope && <button type="button" aria-label="插入表格" title="插入表格" onMouseDown={event => event.preventDefault()} onClick={insertTable}><Table2 size={16} aria-hidden="true" /></button>}
@@ -1286,6 +1308,7 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
         }}><MoreHorizontal size={16} /></button>
       </>}
       {mode === 'layout' && !props.readOnly && props.renderTextActions?.(semanticSelection)}
+      {props.onCompleteEditing && <QuickBarButton label="完成编辑" text="完成编辑" onClick={props.onCompleteEditing} />}
       {preserveButton}{discardButton}
     </div>
   const editorForms = <>
@@ -1314,9 +1337,9 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
   const hostAiButton = contextualTarget ? props.renderAiButton?.(contextualTarget, quickBarIssue) : undefined
   const tableTools = contextualTarget && mode === 'layout' ? activeTableMenu() : []
   const textSelection = contextualTarget?.selection?.kind === 'text' ? contextualTarget.selection : null
-  const textTools = !!(contextualTarget && mode === 'layout' && textSelection
-    && (textSelection.anchor.blockId !== textSelection.head.blockId || JSON.stringify(textSelection.anchor.slot) !== JSON.stringify(textSelection.head.slot)
-      || textSelection.anchor.offset !== textSelection.head.offset))
+  const selectedNode = layout.current?.view.state.selection
+  const textObjectTools = selectedNode instanceof NodeSelection && (selectedNode.node.isTextblock || ['compound', 'layout_group', 'section'].includes(selectedNode.node.type.name))
+  const textTools = !!(contextualTarget && mode === 'layout' && (textSelection || textObjectTools))
   const cellTextTools = !!(contextualTarget && mode === 'layout' && contextualTarget.selection?.kind === 'cells')
   const propertyId = contextualTarget?.selection?.kind === 'cells' ? contextualTarget.selection.tableId
     : contextualTarget?.selection?.kind === 'object' ? contextualTarget.selection.blockId : textSelection?.head.blockId
@@ -1334,12 +1357,10 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
   const quickBar = props.active !== false && documentScope && contextualTarget && !props.readOnly && !props.contextualCardSuppressed && quickBarPlace
     && <SelectionQuickBar anchor={quickBarPlace.anchor} bounds={quickBarPlace.bounds} label="选中内容快捷工具" selectionKey={selectionKey}
       suspended={pointerGesture || dismissedGeneration === targetGeneration}>
-      {(textTools || cellTextTools) && <>
-        <QuickBarButton label="当前选区加粗" icon={<Bold size={14} />} pressed={format.flags.bold === true} onClick={() => toggleStyle('bold')} />
-        <QuickBarButton label="当前选区斜体" icon={<Italic size={14} />} pressed={format.flags.italic === true} onClick={() => toggleStyle('italic')} />
-        <QuickBarButton label="当前选区下划线" icon={<Underline size={14} />} pressed={format.flags.underline === true} onClick={() => toggleStyle('underline')} />
-        <QuickBarColorButton label="当前选区文字颜色" icon={<Baseline size={14} />} onPick={color => { if (color) style({ color }) }} />
-        <QuickBarColorButton label="当前选区高亮" icon={<Highlighter size={14} />} variant="highlight" onPick={highlightColor => style({ highlightColor })} />
+      {flowObjectSelection && (textTools || cellTextTools) && <>
+        <TextFormatControls value={{ fontFamily: format.fontFamily, fontSize: format.fontSize, color: format.color, highlightColor: format.highlightColor, ...format.flags }} onStyle={style} onToggle={toggleStyle}
+          onStep={direction => style(effective => ({ fontSize: stepFontSize(effective.fontSize ?? 16, direction) }))}
+          scope={semanticSelection?.kind === 'object' ? '全文' : semanticSelection?.kind === 'cells' ? '所选单元格' : semanticSelection?.kind === 'text' && semanticSelection.anchor.blockId === semanticSelection.head.blockId && semanticSelection.anchor.offset === semanticSelection.head.offset && JSON.stringify(semanticSelection.anchor.slot) === JSON.stringify(semanticSelection.head.slot) ? '输入位置' : '所选文字'} />
         {textTools && <>
         <QuickBarButton label="当前选区链接" icon={<Link2 size={14} />} onClick={() => {
           const state = layout.current?.view.state
@@ -1359,19 +1380,17 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
             <button type="button" aria-label="上标" title="上标" role="menuitem" onMouseDown={event => event.preventDefault()} onClick={() => { close(); style({ baseline: 0.35 }) }}><Superscript size={16} /></button>
             <button type="button" aria-label="下标" title="下标" role="menuitem" onMouseDown={event => event.preventDefault()} onClick={() => { close(); style({ baseline: -0.25 }) }}><Subscript size={16} /></button>
             <button type="button" aria-label="行内代码" title="行内代码" role="menuitem" onMouseDown={event => event.preventDefault()} onClick={() => { const editor = layout.current; close(); if (editor) { editor.boundary(); toggleMark(documentEditorSchema.marks.code)(editor.view.state, editor.view.dispatch) } }}><Code size={16} /></button>
-            <label><input aria-label="选区字号" type="number" min="8" max="400" value={format.fontSize === 'mixed' ? '' : format.fontSize ?? ''} placeholder={format.fontSize === 'mixed' ? '混合' : '默认'}
-              onChange={event => { const value = Number(event.target.value); if (value >= 8 && value <= 400) style({ fontSize: value }) }} /></label>
-            <label><select aria-label="选区字体" value={format.fontFamily === 'mixed' ? '__mixed' : format.fontFamily ?? ''}
-              onChange={event => { if (event.target.value && event.target.value !== '__mixed') { close(); style({ fontFamily: event.target.value }) } }}>
-              <option value="">默认字体</option>{format.fontFamily === 'mixed' && <option value="__mixed">混合字体</option>}
-              {FONT_FAMILY_OPTIONS.map(option => <option key={option.family} value={option.family}>{option.label}</option>)}
-            </select></label>
             <button type="button" aria-label="清除文字格式" title="清除文字格式" role="menuitem" onMouseDown={event => event.preventDefault()} onClick={() => { close(); clearFormatting() }}><Eraser size={16} /></button>
           </div>}
         </QuickBarPopoverButton>
         </>}
         <QuickBarSeparator />
       </>}
+      {flowObjectSelection && inputActive && <QuickBarButton label="完成编辑" text="完成编辑" onClick={() => { void completeFlowInput() }} />}
+      {flowObjectSelection && modeControls}
+      {flowObjectSelection && mode === 'layout' && <QuickBarButton label="插入表格" icon={<Table2 size={16} />} onClick={insertTable} />}
+      {flowObjectSelection && props.renderTextActions?.(semanticSelection)}
+      {flowObjectSelection && <>{preserveButton}{discardButton}</>}
       {tableTools.length > 0 && <QuickBarPopoverButton label="表格操作" text="表格操作" popupRole="menu">
         {close => <div className="selection-quick-bar__menu" role="menu" aria-label="表格操作">
           <CommandMenuItems items={tableTools} onRun={command => { close(); command.run() }} />
@@ -1405,6 +1424,113 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
       {props.renderQuickBarMenu?.(contextualTarget)}
       {commandError && <span role="alert" className="selection-quick-bar__notice" title={commandError}>{commandError}</span>}
     </SelectionQuickBar>
+  async function completeFlowInput() {
+    const editor = layout.current
+    if (!flowObjectSelection || !editor?.isInputActive() || editor.view.composing) return
+    const point = editorPositionToPoint(editor.view.state.doc, editor.view.state.selection.head)
+    const generation = inputGeneration.current
+    if (!point || !(await editor.drain()) || layout.current !== editor || generation !== inputGeneration.current || !editor.isInputActive()) return
+    editor.selectBlock(point.blockId)
+  }
+  function beginBodyDrag(event: React.PointerEvent<HTMLDivElement>) {
+    const editor = layout.current, target = event.target instanceof Element ? event.target : null
+    if (!flowObjectSelection || mode !== 'layout' || props.active === false || props.readOnly || !editor || event.button !== 0
+      || !target || !editor.view.dom.contains(target) || target.closest('[data-component-professional-editor]')) return
+    const blockElement = target.closest<HTMLElement>('[data-flow-block-id]')
+    const blockId = blockElement?.dataset.flowBlockId
+    if (editor.isInputActive()) {
+      if (!blockId || !target.closest('[data-component-render]')) return
+      event.preventDefault(); event.stopPropagation()
+      acceptObjectPointer({ blockId, phase: 'start', pointerId: event.pointerId, point: { x: event.clientX, y: event.clientY }, button: event.button, modifiers: { shift: event.shiftKey, ctrl: event.ctrlKey, meta: event.metaKey, alt: event.altKey } })
+      if (bodyDrag.current && blockElement) { bodyDrag.current.capture = blockElement; blockElement.setPointerCapture?.(event.pointerId) }
+      return
+    }
+    if (!blockId || !editor.selectBlock(blockId)) return
+    ++inputGeneration.current
+    event.preventDefault(); event.stopPropagation()
+    if (event.ctrlKey || event.metaKey || event.shiftKey || previewSelection() || props.blockMoveDisabledReason?.(blockId)) return
+    // Capture the selected block itself, so click/double-click stays inside this PM.
+    const capture = blockElement!
+    capture.setPointerCapture?.(event.pointerId)
+    bodyDrag.current = { pointerId: event.pointerId, blockId, start: { x: event.clientX, y: event.clientY }, latest: { x: event.clientX, y: event.clientY }, moved: false, capture, ready: true, ended: false, canceled: false }
+    draggedBlockContent.current = fromEditorDocument(editor.view.state.doc)
+  }
+  function updateBodyPointer(pointerId: number, point: { x: number; y: number }) {
+    const drag = bodyDrag.current
+    if (!drag || drag.pointerId !== pointerId) return
+    drag.latest = point
+    if (!drag.ready || drag.canceled || !drag.moved && Math.hypot(point.x - drag.start.x, point.y - drag.start.y) < 3) return
+    drag.moved = true; draggingBlock.current = true
+    setBlockDrop(resolveBlockDrop(drag.blockId, point))
+  }
+  function moveBodyDrag(event: React.PointerEvent<HTMLDivElement>) {
+    if (bodyDrag.current?.pointerId !== event.pointerId) return
+    event.preventDefault(); event.stopPropagation()
+    updateBodyPointer(event.pointerId, { x: event.clientX, y: event.clientY })
+  }
+  function finishBodyPointer(pointerId: number, point: { x: number; y: number }, cancel: boolean) {
+    const drag = bodyDrag.current
+    if (!drag || drag.pointerId !== pointerId) return
+    drag.ended = true; drag.canceled ||= cancel; drag.latest = point
+    if (!drag.ready) return
+    if (!drag.canceled) updateBodyPointer(pointerId, point)
+    const destination = !drag.canceled && drag.moved ? resolveBlockDrop(drag.blockId, point) : null
+    bodyDrag.current = null; draggingBlock.current = false; draggedBlockContent.current = null; setBlockDrop(null)
+    if (drag.capture?.hasPointerCapture?.(drag.pointerId)) drag.capture.releasePointerCapture(drag.pointerId)
+    if (!destination || !layout.current) return
+    try {
+      const content = fromEditorDocument(layout.current.view.state.doc)
+      applyDocumentContent(applyDocumentBlockCommand(content, { action: 'move', blockId: drag.blockId, targetId: destination.targetId, side: destination.side }))
+      layout.current.selectBlock(drag.blockId)
+    } catch (error) { fail(error instanceof Error ? error.message : String(error)) }
+  }
+  function finishBodyDrag(event?: React.PointerEvent<HTMLDivElement>, cancel = false) {
+    const drag = bodyDrag.current
+    if (drag) finishBodyPointer(event?.pointerId ?? drag.pointerId, event ? { x: event.clientX, y: event.clientY } : drag.latest, cancel)
+  }
+  function acceptObjectPointer(input: DocumentObjectPointer) {
+    const editor = layout.current
+    if (!flowObjectSelection || mode !== 'layout' || props.active === false || props.readOnly || !editor) return
+    if (input.phase !== 'start') {
+      if (input.phase === 'update') updateBodyPointer(input.pointerId, input.point)
+      else finishBodyPointer(input.pointerId, input.point, input.phase === 'cancel')
+      return
+    }
+    if (input.button && input.button !== 0) return
+    finishBodyDrag(undefined, true)
+    ++inputGeneration.current
+    const drag = { pointerId: input.pointerId, blockId: input.blockId, start: input.point, latest: input.point, moved: false, capture: null, ready: false, ended: false, canceled: false }
+    bodyDrag.current = drag
+    const activate = (ready: boolean) => {
+      if (bodyDrag.current !== drag || layout.current !== editor) return
+      if (!ready || drag.canceled || !editor.selectBlock(input.blockId)) { bodyDrag.current = null; return }
+      drag.ready = true
+      draggedBlockContent.current = fromEditorDocument(editor.view.state.doc)
+      if (input.modifiers?.ctrl || input.modifiers?.meta || input.modifiers?.shift || previewSelection() || props.blockMoveDisabledReason?.(input.blockId)) { bodyDrag.current = null; return }
+      updateBodyPointer(drag.pointerId, drag.latest)
+      if (drag.ended) finishBodyPointer(drag.pointerId, drag.latest, false)
+    }
+    if (editor.isInputActive()) void editor.drain().then(activate)
+    else activate(true)
+  }
+  function enterBodyInput(event: React.MouseEvent<HTMLDivElement>) {
+    const editor = layout.current, target = event.target instanceof Element ? event.target : null
+    if (!flowObjectSelection || mode !== 'layout' || props.active === false || props.readOnly || !editor || editor.isInputActive() || !target || !editor.view.dom.contains(target) || target.closest('[data-component-render]')) return
+    event.preventDefault(); event.stopPropagation(); finishBodyDrag(undefined, true)
+    ++inputGeneration.current
+    const hit = editor.view.posAtCoords({ left: event.clientX, top: event.clientY })
+    let position = hit?.pos
+    if (position === undefined) {
+      const selected = editor.view.state.selection
+      if (selected instanceof NodeSelection) position = selected.from + 1
+    }
+    if (position === undefined) return
+    const selection = TextSelection.near(editor.view.state.doc.resolve(position))
+    if (!(selection instanceof TextSelection)) return
+    editor.setInputActive(true)
+    editor.view.dispatch(editor.view.state.tr.setSelection(selection))
+    editor.view.focus()
+  }
   function resolveBlockDrop(sourceId: string, point: { x: number; y: number }) {
     const view = layout.current?.view
     if (!view || props.readOnly || mode !== 'layout') return null
@@ -1447,10 +1573,18 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
     paper.addEventListener('dragover', over, true); paper.addEventListener('drop', drop, true)
     return () => { paper.removeEventListener('dragover', over, true); paper.removeEventListener('drop', drop, true) }
   }, [mode])
-  return <div ref={attachRoot} inert={props.active === false}
-    onPointerDownCapture={() => {
+  return <div ref={attachRoot} inert={props.active === false} data-document-selection-active={props.contextualCardSuppressed ? 'false' : 'true'}
+    onPointerDownCapture={event => {
+      ++inputGeneration.current
+      beginBodyDrag(event)
       if (outsidePointerFrame.current !== null) { cancelAnimationFrame(outsidePointerFrame.current); outsidePointerFrame.current = null }
     }}
+    onPointerMoveCapture={moveBodyDrag}
+    onPointerUpCapture={event => finishBodyDrag(event)}
+    onPointerCancelCapture={event => finishBodyDrag(event, true)}
+    onLostPointerCapture={event => finishBodyDrag(event, true)}
+    onDoubleClickCapture={enterBodyInput}
+    onClickCapture={event => { const editor = layout.current; if (flowObjectSelection && event.target instanceof Element && editor?.view.dom.contains(event.target) && (!editor.isInputActive() || event.target.closest('[data-component-render]')) && !event.target.closest('[data-component-professional-editor]')) { event.preventDefault(); event.stopPropagation() } }}
     onFocusCapture={() => { ++focusGeneration.current; interactionFocused.current = true; if (layout.current) updateActiveBlock(layout.current.view.state) }}
     onBlurCapture={() => {
       const generation = ++focusGeneration.current
@@ -1489,6 +1623,8 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
     }}
     className={`shared-document-editor${props.target === 'flow' ? ' shared-document-editor--flow' : props.target === 'file' && documentScope ? ' shared-document-editor--file' : ''}`} onKeyDown={event => {
     if (props.active === false) return
+    if (flowObjectSelection && event.key === 'Escape' && bodyDrag.current) { event.preventDefault(); event.stopPropagation(); finishBodyDrag(undefined, true); return }
+    if (flowObjectSelection && (event.key === 'Escape' || event.key === 'Enter' && (event.ctrlKey || event.metaKey)) && layout.current?.isInputActive() && !event.nativeEvent.isComposing) { event.preventDefault(); event.stopPropagation(); void completeFlowInput(); return }
     if (documentScope && event.key === 'Escape' && contextualTarget) { event.preventDefault(); setDismissedGeneration(targetGeneration) }
     if (documentScope && event.key === '/' && mode === 'layout' && !event.nativeEvent.isComposing && !props.readOnly && activeBlock && layout.current) {
       const selection = layout.current.view.state.selection
@@ -1503,7 +1639,8 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
     // Capture runs before PM/CM schedule their terminal publication on the target.
     queueMicrotask(() => queueMicrotask(() => props.onCompositionChange?.(false, deferredLayoutSource && mode === 'layout' ? materializeSource() : draft.current)))
   }}>
-     {props.active !== false && !props.readOnly && (props.toolbarHost ? createPortal(<>{toolbar}{editorForms}</>, props.toolbarHost) : <>{toolbar}{editorForms}</>)}
+     {props.active !== false && !props.readOnly && (!flowObjectSelection || mode === 'source') && (props.toolbarHost ? createPortal(<>{toolbar}{editorForms}</>, props.toolbarHost) : <>{toolbar}{editorForms}</>)}
+     {flowObjectSelection && mode === 'layout' && editorForms}
      {quickBar}
      {props.active !== false && objectMenu.element}
      {props.active !== false && formattingMenu.element}
@@ -1512,7 +1649,7 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
        <button type="button" onClick={() => setInsertionFallback(null)}>取消</button>
      </div>}
      {props.active !== false && blockDrop && createPortal(<div className="document-block-drop-indicator" style={{ left: blockDrop.left, top: blockDrop.top, width: blockDrop.width }} />, window.document.body)}
-      {props.active !== false && documentScope && mode === 'layout' && !props.readOnly && activeBlock && <DocumentBlockHandle blockId={activeBlock.id} rect={activeBlock.rect} commands={activeBlockMenu(activeBlock.id)} disabledReason={previewSelection() ? '正在生成的范围暂时只读' : null} onDragStart={id => { draggingBlock.current = true; draggedBlockId.current = id; if (layout.current) draggedBlockContent.current = fromEditorDocument(layout.current.view.state.doc) }} />}
+      {props.active !== false && documentScope && mode === 'layout' && !props.readOnly && activeBlock && <DocumentBlockHandle blockId={activeBlock.id} rect={activeBlock.rect} commands={activeBlockMenu(activeBlock.id)} disabledReason={previewSelection() ? '正在生成的范围暂时只读' : props.blockMoveDisabledReason?.(activeBlock.id) ?? null} onDragStart={id => { draggingBlock.current = true; draggedBlockId.current = id; if (layout.current) draggedBlockContent.current = fromEditorDocument(layout.current.view.state.doc) }} />}
      {props.active !== false && allPreviews.length > 0 && <div className="document-generation-status" role="status">{allPreviews.length} 处正文正在生成，生成部分尚未保存。{allPreviews.map((preview, index) => <button key={preview.editId} type="button" aria-label={`停止生成第 ${index + 1} 处`} onClick={preview.cancel}>停止生成 {index + 1}</button>)}{commandError && <span role="alert">{commandError}</span>}</div>}
     {diagnostics.length > 0 && <ul role="alert" aria-label="源文问题">{diagnostics.map((diagnostic, index) => <li key={index}><button type="button" onMouseDown={event => event.preventDefault()} onClick={() => locateDiagnostic(diagnostic)}>第 {diagnostic.line} 行，第 {diagnostic.column} 列：{diagnostic.message}</button></li>)}</ul>}
      {mode === 'layout' ? <div ref={layoutHost} /> : <div ref={sourceHost} />}

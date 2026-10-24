@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { TextRangeProjection } from '../../../shared/document/textInteraction'
-import type { ComponentAuthorSpot, CourseProjectV10 } from '../../../shared/contracts/component-platform'
+import type { ComponentAuthorField, ComponentAuthorSpot, CourseProjectV10 } from '../../../shared/contracts/component-platform'
+import { componentIsLocked } from '../../../shared/contracts/component-platform/project'
 import type { GeometryPoint } from '../../../core/components/geometry'
 import { frameToSpaceMatrix, invertMatrix, transformPoint } from '../../../core/components/geometry'
 import { TextComponentEditor } from '../../../components/text/editor'
@@ -8,14 +9,15 @@ import { ProfessionalContentEditor } from './ProfessionalContentEditor'
 import { createTextComponentData, renderTextComponent, renderFormulaComponent, measureTextComponent } from '../../../components/text'
 import { layoutTable, editTableData, parseTableData, tableLayoutCellContent } from '../../../components/table'
 import { chartDataSchema, editChartData } from '../../../components/chart'
-import { componentFrameStyle, freeSurfaceTargets } from '../../componentPlatform/surfaces/slide'
-import { CanvasPlainTextEditor, type CanvasPlainTextBounds, type PlainTextSelectionIntent } from '../CanvasPlainTextEditor'
+import { componentFrameStyle, freeSurfaceTargets, type FreeObjectTarget } from '../../componentPlatform/surfaces/slide'
+import { CanvasPlainTextEditor, type CanvasPlainTextBounds, type CanvasPlainTextEditorHandle, type PlainTextSelectionIntent } from '../CanvasPlainTextEditor'
 import type { SlideContentEdit, SlideContentLayoutReady } from '../../store/slices/slideAuthoringSlice'
 import { componentDefinitionPresentation } from '../properties/componentDefinitionPresentation'
-import { SelectionQuickBar } from '../../editing/quickbar/SelectionQuickBar'
+import { QuickBarButton, QuickBarLabel, SelectionQuickBar } from '../../editing/quickbar/SelectionQuickBar'
 import { visibleBounds, type QuickBarBounds, type QuickBarRect } from '../../editing/quickbar/placeQuickBar'
 import type { SharedDocumentEditorHandle } from '../../document/SharedDocumentEditor'
-import { authorFieldIdentity } from '../../documents/interactionSelection'
+import { authorFieldIdentity, type CourseInteractionSelection } from '../../documents/interactionSelection'
+import { authorFieldRichContent } from '../../authoring/professionalContentFields'
 import { authorSpotValue } from '../../../core/components/authoring/componentAuthorEdits'
 import { elementTextFontRequests, prepareTextFonts } from '../../../shared/fonts/ensureBundledFonts'
 
@@ -25,6 +27,8 @@ interface Ports {
   readProject?(): CourseProjectV10
   fieldIsCurrent?(identity: string): boolean
   surfaceId: string
+  /** A program view supplies its existing free-frame projection without inventing a surface. */
+  resolveTarget?(instanceId: string): FreeObjectTarget | null
   edit: SlideContentEdit | null
   begin(instanceId: string): SlideContentEdit | null
   update(data: unknown, composing?: boolean, height?: number, width?: number, rangeProjection?: TextRangeProjection[], historyGroup?: string, layoutReady?: SlideContentLayoutReady): void
@@ -83,6 +87,7 @@ export function useSlideNativeTextEditor(ports: Ports, contextKey: string) {
   const [toolbarPlace, setToolbarPlace] = useState<{ anchor: QuickBarRect; bounds: QuickBarBounds } | null>(null)
   const editorRoot = useRef<HTMLDivElement>(null)
   const richEditor = useRef<SharedDocumentEditorHandle>(null)
+  const plainEditor = useRef<CanvasPlainTextEditorHandle>(null)
   const nativeObservation = useRef<{ context: string; field: Field; activate(): boolean; read(): ComponentAuthorSpot | undefined } | null>(null)
   const pendingCaret = useRef<{ instanceId: string; contextKey: string; client: GeometryPoint; caretOffset?: number } | null>(null)
   const [selectionIntent, setSelectionIntent] = useState<{ instanceId: string; authorKey?: string; value: PlainTextSelectionIntent } | null>(null)
@@ -108,27 +113,30 @@ export function useSlideNativeTextEditor(ports: Ports, contextKey: string) {
     editor?.focus({ preventScroll: true })
   }, [ports.edit?.instanceId, ports.edit?.target.documentId, ports.edit?.source, toolbarHost, field?.childId])
   useEffect(() => { setField(null); nativeObservation.current = null }, [contextKey])
-  const fieldRequest = (instanceId: string, definitionId: string, context: string, kind: Field['kind'], childId: string, client?: GeometryPoint) => {
+  const fieldRequest = (instanceId: string, definitionId: string, context: string, kind: Field['kind'], childId: string, client?: GeometryPoint, address?: ComponentAuthorField) => {
     const currentTarget = () => {
       const ports = latest.current, project = ports.readProject?.() ?? ports.project, instance = project.instances[instanceId]
-      if (latestContext.current !== context || !instance || instance.definitionId !== definitionId || instance.locked) return null
-      const target = freeSurfaceTargets(project, ports.surfaceId).find(value => value.instanceId === instanceId)
+      if (latestContext.current !== context || !instance || instance.definitionId !== definitionId) return null
+      const target = ports.resolveTarget ? ports.resolveTarget(instanceId) : freeSurfaceTargets(project, ports.surfaceId).find(value => value.instanceId === instanceId)
       return target ? { ports, project, instance, target } : null
     }
     const read = () => {
       const current = currentTarget()
       if (!current) return undefined
-      if (kind === 'table-cell') return fieldAuthorSpot(current.project, { instanceId, kind, childId, bounds: { x: 0, y: 0, width: 0, height: 0 } })
+      const keepAddress = (spot: ComponentAuthorSpot | undefined) => spot && address && !address.authorKey
+        ? { ...spot, authorKey: undefined, fieldScope: address.fieldScope, scope: address.scope } : spot
+      // fieldAuthorSpot resolves the current cell's layout; the placeholder never escapes as its geometry.
+      if (kind === 'table-cell') return keepAddress(fieldAuthorSpot(current.project, { instanceId, kind, childId, bounds: { x: 0, y: 0, width: 0, height: 0 } }))
       const svg = [...(current.ports.host()?.querySelectorAll<SVGSVGElement>('svg[data-native-chart-id]') ?? [])].find(node => node.dataset.nativeChartId === instanceId)
       const text = [...(svg?.querySelectorAll<SVGTextElement>('[data-chart-text], [data-chart-category-id], [data-chart-series-id]') ?? [])].find(node =>
         kind === 'category' ? node.dataset.chartCategoryId === childId : kind === 'series' ? node.dataset.chartSeriesId === childId : node.dataset.chartText === 'title')
       if (!text) return undefined
       const box = text.getBBox()
-      return fieldAuthorSpot(current.project, { instanceId, kind, childId, bounds: { x: box.x, y: box.y, width: Math.max(160, box.width), height: 32 } })
+      return keepAddress(fieldAuthorSpot(current.project, { instanceId, kind, childId, bounds: { x: box.x, y: box.y, width: Math.max(160, box.width), height: 32 } }))
     }
     const activate = () => {
       const current = currentTarget(), spot = read()
-      if (!current || !spot || !current.ports.begin(instanceId)) return false
+      if (!current || !spot || componentIsLocked(current.project, instanceId) || !current.ports.begin(instanceId)) return false
       const field: Field = { instanceId, kind, childId, selectionIdentity: authorFieldIdentity(instanceId, spot),
         bounds: { x: spot.localBounds.transform[4], y: spot.localBounds.transform[5], width: spot.localBounds.width, height: spot.localBounds.height } }
       nativeObservation.current = { context, field, activate, read }
@@ -145,10 +153,47 @@ export function useSlideNativeTextEditor(ports: Ports, contextKey: string) {
     }
     return { read, activate, select }
   }
+  /** Recover a supported native field from formal selection without a previous screen hit or input side effect. */
+  const resolveSelection = (selection: CourseInteractionSelection | null | undefined) => {
+    if (selection?.kind !== 'author-field' || selection.field.kind !== 'text' || selection.field.sourceRegion
+      || selection.field.binding || selection.field.fieldScope && selection.field.fieldScope !== 'data') return null
+    const p = latest.current, project = p.readProject?.() ?? p.project, instance = project.instances[selection.instanceId], path = selection.field.dataPath
+    if (!instance || !path || !(p.resolveTarget ? p.resolveTarget(instance.id) : freeSurfaceTargets(project, p.surfaceId).some(target => target.instanceId === instance.id))) return null
+    const builtin = componentDefinitionPresentation(project.definitions[instance.definitionId]).builtinKey
+    let kind: Field['kind'] | undefined, childId = ''
+    const indexAt = (value: string | undefined) => value && /^(0|[1-9]\d*)$/.test(value) ? Number(value) : -1
+    try {
+      if (builtin === 'guoling.table') {
+        const data = parseTableData(instance.data)
+        if (path.length === 5 && path[0] === 'rows' && path[2] === 'cells' && (path[4] === 'content' || path[4] === 'text')) {
+          const cell = data.rows[indexAt(path[1])]?.cells[indexAt(path[3])]
+          if (!cell || path[4] !== (cell.content ? 'content' : 'text')) return null
+          kind = 'table-cell'; childId = cell.id
+        } else if (path.length === 3 && path[0] === 'columns' && path[2] === 'header') {
+          const column = data.columns[indexAt(path[1])]
+          if (!column) return null
+          kind = 'table-cell'; childId = `flow_header_${column.id}`
+        }
+      } else if (builtin === 'guoling.chart') {
+        const data = chartDataSchema.parse(instance.data)
+        if (path.length === 1 && path[0] === 'title') kind = 'title'
+        else if (path.length === 3 && path[0] === 'categories' && path[2] === 'label') { kind = 'category'; childId = data.categories[indexAt(path[1])]?.id ?? '' }
+        else if (path.length === 3 && path[0] === 'series' && path[2] === 'name') { kind = 'series'; childId = data.series[indexAt(path[1])]?.id ?? '' }
+      }
+      if (!kind || kind !== 'title' && !childId) return null
+      const value = authorSpotValue(instance.data, path)
+      if (typeof value !== 'string' && !authorFieldRichContent(value)) return null
+      const request = fieldRequest(instance.id, instance.definitionId, latestContext.current, kind, childId, undefined, selection.field)
+      const spot = request.read()
+      if (!spot || JSON.stringify(spot.dataPath) !== JSON.stringify(path)
+        || selection.field.authorKey && selection.field.authorKey !== spot.authorKey) return null
+      return { spot, read: request.read, activate: request.activate }
+    } catch { return null }
+  }
   /** Capture the semantic field before a draft flush; invoking it never repeats a stale screen hit-test. */
   const capture = (instanceId: string, surfacePoint: GeometryPoint, client: GeometryPoint, selectOnly = false): (() => boolean) | null => {
     const p = latest.current, project = p.readProject?.() ?? p.project, instance = project.instances[instanceId]
-    const target = freeSurfaceTargets(project, p.surfaceId).find(value => value.instanceId === instanceId)
+    const target = p.resolveTarget ? p.resolveTarget(instanceId) : freeSurfaceTargets(project, p.surfaceId).find(value => value.instanceId === instanceId)
     if (!instance || !target || instance.locked) return null
     const context = latestContext.current, definitionId = instance.definitionId
     const matrix = frameToSpaceMatrix(target.frame, target.parentToSurface), local = transformPoint(invertMatrix(matrix), surfacePoint)
@@ -198,7 +243,7 @@ export function useSlideNativeTextEditor(ports: Ports, contextKey: string) {
     setField(previous => previous && previous.instanceId === field.instanceId && previous.kind === field.kind && previous.childId === field.childId
       && previous.selectionIdentity !== identity ? { ...previous, selectionIdentity: identity } : previous)
   }, [draft?.target, field?.kind, field?.childId])
-  const target = draft && freeSurfaceTargets(ports.project, ports.surfaceId).find(value => value.instanceId === draft.instanceId)
+  const target = draft && (ports.resolveTarget ? ports.resolveTarget(draft.instanceId) : freeSurfaceTargets(ports.project, ports.surfaceId).find(value => value.instanceId === draft.instanceId))
   const authoredFrame = draft?.frame === undefined ? target?.frame : draft.frame
   const outerMatrix = target && authoredFrame && frameToSpaceMatrix(authoredFrame, target.parentToSurface)
   const frame = target && authoredFrame && outerMatrix && (draft?.authorSpot
@@ -215,7 +260,7 @@ export function useSlideNativeTextEditor(ports: Ports, contextKey: string) {
       if (replacement) { replacement.focus({ preventScroll: true }); return }
     }
     const active = document.activeElement
-    if (afterBlur && active && (editorRoot.current?.contains(active) || active.closest('.text-edit-toolbar,.selection-quick-bar,.palette-button__panel'))) return
+    if (afterBlur && active && (editorRoot.current?.contains(active) || active.closest('.text-edit-toolbar,.selection-quick-bar,.palette-button__panel,.shared-document-form,.command-menu'))) return
     void latest.current.commit().catch(error => latest.current.report(error instanceof Error ? error.message : String(error)))
   }) }
   const fieldValue = (): string => {
@@ -242,7 +287,8 @@ export function useSlideNativeTextEditor(ports: Ports, contextKey: string) {
     const identity = field.selectionIdentity
     // The professional cell draft already owns rich content. Navigation must not flatten it back to text.
     let data = parseTableData(current.data)
-    const target=freeSurfaceTargets(latest.current.project,latest.current.surfaceId).find(value=>value.instanceId===current.instanceId)
+    const p = latest.current
+    const target = p.resolveTarget ? p.resolveTarget(current.instanceId) : freeSurfaceTargets(p.project, p.surfaceId).find(value=>value.instanceId===current.instanceId)
     const dimensions=current.frame ?? target?.frame
     let cells = layoutTable(data,dimensions ? {width:dimensions.width,height:dimensions.height}:undefined).cells, index = cells.findIndex(cell => cell.id === field.childId)
     if (direction === 1 && index === cells.length - 1) {
@@ -267,7 +313,7 @@ export function useSlideNativeTextEditor(ports: Ports, contextKey: string) {
     data={{ ...createTextComponentData(tableLayoutCellContent(cellTable, cell)), appearance: {
       ...createTextComponentData().appearance, fontFamily: cell.style.fontFamily, fontSize: cell.style.fontSize,
       color: cell.style.textColor, bold: cell.style.bold, italic: cell.style.italic, align: cell.style.horizontalAlign } }}
-    revision={`${draft.target.epoch}:${draft.instanceId}:${cell.id}`} toolbarHost={toolbarHost}
+    revision={`${draft.target.epoch}:${draft.instanceId}:${cell.id}`} toolbarHost={toolbarHost} toolbarScope="单元格" onCompleteEditing={() => reportCommit()}
     onChange={(data, operation) => {
       const current = latest.current.edit
       if (!current || !field || current.instanceId !== field.instanceId) return false
@@ -315,7 +361,7 @@ export function useSlideNativeTextEditor(ports: Ports, contextKey: string) {
       }} updateSpot={(value, composing) => ports.updateSpot?.(value, composing)} commit={ports.commit} commitInput={ports.commitInput}
       cancel={ports.cancel} preserve={ports.preserve} undo={ports.undo} redo={ports.redo} report={ports.report} /> : null
   useLayoutEffect(() => {
-    if (!rich) { setToolbarPlace(null); return }
+    if (!draft || !field || professional) { setToolbarPlace(null); return }
     const root = editorRoot.current, host = latest.current.host()
     if (!root || !host) return
     const position = () => {
@@ -334,8 +380,8 @@ export function useSlideNativeTextEditor(ports: Ports, contextKey: string) {
       changed?.observe(element, { attributes: true, attributeFilter: ['style', 'class'] })
     }
     return () => { window.removeEventListener('scroll', position, true); window.removeEventListener('resize', position); resized?.disconnect(); changed?.disconnect() }
-  }, [Boolean(rich), draft?.instanceId, contextKey])
-  return { begin, capture, placeCaret, cancel: ports.cancel, editor: professional ?? (draft && frame && field?.instanceId === draft.instanceId ? <><div ref={editorRoot} data-component-professional-editor="" className="text-edit-overlay"
+  }, [Boolean(rich), Boolean(professional), draft?.instanceId, field?.selectionIdentity, contextKey])
+  return { begin, capture, resolveSelection, placeCaret, cancel: ports.cancel, editor: professional ?? (draft && frame && field?.instanceId === draft.instanceId ? <><div ref={editorRoot} data-component-professional-editor="" className="text-edit-overlay"
     style={{ ...componentFrameStyle(frame), zIndex: 20, pointerEvents: 'auto', background: '#fff', overflow: 'visible' }}
     onPointerDown={event => event.stopPropagation()} onDoubleClick={event => event.stopPropagation()}
     onCompositionStart={() => { if (rich) { if (latest.current.setComposing) latest.current.setComposing(true); else latest.current.update(latest.current.edit?.data ?? null, true) } }}
@@ -364,14 +410,16 @@ export function useSlideNativeTextEditor(ports: Ports, contextKey: string) {
     {rich && <div data-author-field-identity={field?.selectionIdentity} style={{ position: 'absolute', left: field?.bounds.x, top: field?.bounds.y, width: field?.bounds.width, minHeight: field?.bounds.height }}>{rich}</div>}
     {field && field.kind !== 'table-cell' && field.instanceId === draft.instanceId && <CanvasPlainTextEditor key={field.kind + ':' + field.childId}
       bounds={field.bounds} value={fieldValue()} selectionIdentity={field.selectionIdentity} label="编辑图表文字"
-      maxLength={500} onDraftChange={updateField}
+      editorRef={plainEditor} maxLength={500} onDraftChange={updateField}
       onCommit={value => { updateField(value, false); reportCommit() }} onCancel={ports.cancel}
  />}
   </div>
-    {rich && <SelectionQuickBar anchor={toolbarPlace?.anchor ?? null} bounds={toolbarPlace?.bounds ?? null}
+    <SelectionQuickBar anchor={toolbarPlace?.anchor ?? null} bounds={toolbarPlace?.bounds ?? null}
       label="文字编辑工具" selectionKey={contextKey + ':' + draft.instanceId} aboveOffset={34}>
       <div className="text-edit-toolbar native-text-toolbar-host" ref={setToolbarHost}
-        style={{ maxWidth: toolbarPlace ? Math.max(0, toolbarPlace.bounds.right - toolbarPlace.bounds.left - 18) : undefined }} />
-    </SelectionQuickBar>}
+        style={{ maxWidth: toolbarPlace ? Math.max(0, toolbarPlace.bounds.right - toolbarPlace.bounds.left - 18) : undefined }}>
+        {!rich && <><QuickBarLabel>纯文本</QuickBarLabel><QuickBarButton label="全选文字" text="全选" onClick={() => plainEditor.current?.selectAll()} /><QuickBarButton label="完成编辑" text="完成" onClick={() => plainEditor.current?.complete()} /></>}
+      </div>
+    </SelectionQuickBar>
   </> : null) }
 }

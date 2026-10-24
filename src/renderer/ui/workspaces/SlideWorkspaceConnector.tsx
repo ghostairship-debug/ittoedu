@@ -30,7 +30,7 @@ export function SlideWorkspaceConnector(props: SlideWorkspaceConnectorProps) {
       project: view.activeDocumentId === runtime.documentId ? runtimeRef.current.project : null,
       documentId: view.activeDocumentId, epoch: view.snapshot?.epoch, surfaceId: view.surfaceId, selectedInstanceIds: view.selectedInstanceIds,
       interactionSelection: view.interactionSelection,
-      rootInstanceId: view.rootInstanceId, editingContainerId: view.editingContainerId,
+      rootInstanceId: view.rootInstanceId, editingContainerId: view.editingContainerId, activeGroupId: view.activeGroupId,
       activation: view.activation, activeStateId: view.activeStateId,
       canvasMode: state.canvasMode, contentEdit: selectActiveSlideContentEdit(state), drawTool: state.slideDrawTool, assetUrls: assetUrlsRef.current, editingScope: state.editingScope,
     }
@@ -39,7 +39,7 @@ export function SlideWorkspaceConnector(props: SlideWorkspaceConnectorProps) {
     project: source.courseView.activeDocumentId === runtime.documentId ? runtime.project : null,
     documentId: source.courseView.activeDocumentId, epoch: source.courseView.snapshot?.epoch, surfaceId: source.courseView.surfaceId, selectedInstanceIds: source.courseView.selectedInstanceIds,
     interactionSelection: source.courseView.interactionSelection,
-    rootInstanceId: source.courseView.rootInstanceId, editingContainerId: source.courseView.editingContainerId,
+    rootInstanceId: source.courseView.rootInstanceId, editingContainerId: source.courseView.editingContainerId, activeGroupId: source.courseView.activeGroupId,
     activation: source.courseView.activation, activeStateId: source.courseView.activeStateId,
     canvasMode: source.canvasMode, contentEdit: source.contentEdit, drawTool: source.drawTool, assetUrls, editingScope: source.editingScope,
   }
@@ -60,6 +60,11 @@ export function SlideWorkspaceConnector(props: SlideWorkspaceConnectorProps) {
       select: ids => runtime.selectInstances(ids),
       selectAuthorSpot: spot => state().courseBridge.selectAuthorSpot(runtime.documentId, spot),
       selectSurface: id => state().courseBridge.selectSurface(runtime.documentId, id),
+      enterGroup: id => state().navigateCourseView(documentId => state().courseBridge.enterGroup(documentId, id)),
+      leaveGroup: () => state().navigateCourseView(documentId => state().courseBridge.leaveGroup(documentId)),
+      enterContainer: id => state().navigateCourseView(documentId => {
+        state().courseBridge.enterContainer(documentId, id); state().setEditingScope('scene')
+      }),
       resetPlayback: async playing => {
         await state().commitSlideContentEdit()
         const current = runtimeRef.current, scope = state().courseView.surfaceId

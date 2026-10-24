@@ -4,6 +4,7 @@ import { lineStrokeHit, resolveNativeLinePoints } from '../../../../shared/nativ
 import { shapeDataSchema } from '../../../../components/shape/data'
 import type { ComponentFrame } from '../../../../shared/contracts/component-platform/frame'
 import { componentDefinitionBuiltinKey, owningContainer, type ComponentContainer, type CourseProjectV10 } from '../../../../shared/contracts/component-platform/project'
+import { editingLevelFromAncestry } from '../../../documents/containerEditingContext'
 
 export interface FreeObjectTarget {
   instanceId: string
@@ -13,7 +14,6 @@ export interface FreeObjectTarget {
   ancestors: string[]
   preserveAspectRatio: boolean
   resizeMode?: 'scale' | 'box'
-  directSelection?: boolean
   stroke?: { points: GeometryPoint[]; width: number }
 }
 export interface FreeBounds { left: number; top: number; right: number; bottom: number; width: number; height: number }
@@ -30,7 +30,7 @@ export function freeSurfaceTargets(project: CourseProjectV10, surfaceId: string)
       const shape = key === 'guoling.shape' ? shapeDataSchema.safeParse(instance.data) : null
       if (instance.frame) result.push({ instanceId: id, frame: instance.frame, parentToSurface: matrix, parent,
         ancestors, preserveAspectRatio: key === 'guoling.image' && imageData?.preserveAspectRatio !== false,
-        ...(key === 'guoling.text' ? { resizeMode: 'box' as const, directSelection: true } : {}),
+        ...(key === 'guoling.text' ? { resizeMode: 'box' as const } : {}),
         ...(shape?.success && (shape.data.shapeType === 'line' || shape.data.shapeType === 'elbow-arrow') ? {
           stroke: { points: resolveNativeLinePoints(shape.data.lineGeometry, instance.frame.width, instance.frame.height, shape.data.shapeType), width: shape.data.style.borderWidth } } : {}) })
       if (!instance.container) visit(instance.childIds ?? [], { kind: 'instance', instanceId: id },
@@ -62,9 +62,18 @@ export function selectedFreeTargets(targets: readonly FreeObjectTarget[], ids: r
   return targets.filter(target => selected.has(target.instanceId) && !target.ancestors.some(id => selected.has(id)))
 }
 
-/** Text remains directly editable inside a card; other children use explicit deep selection. */
-export function hitFreeObject(targets: readonly FreeObjectTarget[], point: GeometryPoint, deep = false, surfaceToPointer: AffineMatrix = IDENTITY_MATRIX): FreeObjectTarget | null {
+/** Resolve a visible leaf at the current author level without changing its geometry or lock ancestry. */
+export function freeTargetAtEditingLevel(targets: readonly FreeObjectTarget[], instanceId: string, activeGroupId: string | null = null, deep = false): FreeObjectTarget | null {
+  const target = targets.find(value => value.instanceId === instanceId)
+  if (!target) return null
+  const id = editingLevelFromAncestry(target.instanceId, target.ancestors, activeGroupId, deep)
+  return targets.find(value => value.instanceId === id) ?? null
+}
+
+/** Pointer selection starts at the current group level; explicit deep selection is type-independent. */
+export function hitFreeObject(targets: readonly FreeObjectTarget[], point: GeometryPoint, deep = false, surfaceToPointer: AffineMatrix = IDENTITY_MATRIX, activeGroupId: string | null = null): FreeObjectTarget | null {
   for (const target of [...targets].reverse()) {
+    if (activeGroupId && !target.ancestors.includes(activeGroupId)) continue
     const matrix = frameToSpaceMatrix(target.frame, target.parentToSurface)
     if (matrix[0] * matrix[3] - matrix[1] * matrix[2] === 0) continue
     if (target.stroke) {
@@ -79,14 +88,13 @@ export function hitFreeObject(targets: readonly FreeObjectTarget[], point: Geome
       })
       if (!hit) continue
     } else if (!frameContainsPoint(target.frame, point, target.parentToSurface)) continue
-    if (deep || target.directSelection || !target.ancestors.length) return target
-    return targets.find(value => value.instanceId === target.ancestors[0]) ?? target
+    return freeTargetAtEditingLevel(targets, target.instanceId, activeGroupId, deep)
   }
   return null
 }
 
 /** SAT intersection avoids selecting empty AABB corners beside a rotated object. */
-export function marqueeFreeTargets(targets: readonly FreeObjectTarget[], start: GeometryPoint, end: GeometryPoint): string[] {
+export function marqueeFreeTargets(targets: readonly FreeObjectTarget[], start: GeometryPoint, end: GeometryPoint, activeGroupId: string | null = null): string[] {
   const rect = [{ x: Math.min(start.x, end.x), y: Math.min(start.y, end.y) },
     { x: Math.max(start.x, end.x), y: Math.min(start.y, end.y) },
     { x: Math.max(start.x, end.x), y: Math.max(start.y, end.y) },
@@ -102,7 +110,8 @@ export function marqueeFreeTargets(targets: readonly FreeObjectTarget[], start: 
       return Math.max(...a) >= Math.min(...b) && Math.max(...b) >= Math.min(...a)
     })
   }
-  const ids = targets.filter(target => !target.ancestors.length && intersects(frameCorners(target.frame, target.parentToSurface))).map(target => target.instanceId)
+  const ids = targets.filter(target => freeTargetAtEditingLevel(targets, target.instanceId, activeGroupId)?.instanceId === target.instanceId
+    && intersects(frameCorners(target.frame, target.parentToSurface))).map(target => target.instanceId)
   return ids
 }
 

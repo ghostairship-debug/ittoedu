@@ -118,6 +118,9 @@ export interface LayoutEditorOptions {
   diagnostic(message: string): void
   readOnly?: boolean
   presentation?: 'flow'
+  /** Current PM input relation; selection remains enabled while input is inactive. */
+  inputChanged?(active: boolean): void
+  blockMoveDisabledReason?(blockId: string): string | null
   /** View-only space after document blocks; it is absent from the ProseMirror document and history. */
   runtimeSpacers?: readonly { readonly blockId: string; readonly height: number }[]
   renderInline?(instanceId: string, container: HTMLElement): (() => void) | void
@@ -138,6 +141,40 @@ export function createLayoutEditor(element: HTMLElement, initial: LayoutEditorOp
   let options = initial
   const draftSession = initial.draftSession ?? createDocumentDraftSession(initial.document)
   let composing = false
+  let inputActive = initial.presentation !== 'flow' || Boolean(initial.contentScope && initial.contentScope !== 'document')
+  const usesObjectSelection = () => options.presentation === 'flow' && (!options.contentScope || options.contentScope === 'document')
+  const canInput = () => !options.readOnly && (!usesObjectSelection() || inputActive)
+  function setInputActive(active: boolean) {
+    if (!usesObjectSelection() || inputActive === active) return
+    inputActive = active
+    view.setProps({ editable: canInput })
+    options.inputChanged?.(active)
+  }
+  function blockPosition(id: string): number | null {
+    let position: number | null = null
+    view.state.doc.descendants((node, at) => { if (position !== null) return false; if (node.attrs.id === id && NodeSelection.isSelectable(node)) { position = at; return false }; return true })
+    return position
+  }
+  function selectBlock(id: string): boolean {
+    const position = blockPosition(id)
+    if (position === null) return false
+    setInputActive(false)
+    view.dispatch(view.state.tr.setSelection(NodeSelection.create(view.state.doc, position)))
+    if (!view.editable) view.dom.focus({ preventScroll: true })
+    view.focus()
+    return true
+  }
+  function enterSelectedInput(): boolean {
+    const selected = view.state.selection
+    if (!(selected instanceof NodeSelection)) return false
+    let position: number | null = selected.node.isTextblock ? selected.from + 1 : null
+    if (position === null) selected.node.descendants((node, at) => { if (position === null && node.isTextblock) position = selected.from + 1 + at + 1; return position === null })
+    if (position === null) return false
+    setInputActive(true)
+    view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, position)))
+    view.focus()
+    return true
+  }
   let startingComposition = false
   let observingDomChange = false
   let group = crypto.randomUUID()
@@ -266,8 +303,8 @@ export function createLayoutEditor(element: HTMLElement, initial: LayoutEditorOp
         boundary(); return withFlowSelection(splitBlock)(state, dispatch, currentView)
       },
     }), keymap(baseKeymap), tablePlugin] }),
-    attributes: { role: 'textbox', 'aria-label': '正文编辑', 'aria-multiline': 'true' },
-    editable: () => !options.readOnly,
+    attributes: () => ({ tabindex: '0', role: 'textbox', 'aria-label': '正文编辑', 'aria-multiline': 'true', ...(usesObjectSelection() ? { 'data-flow-input-active': String(inputActive) } : {}) }),
+    editable: canInput,
     decorations: state => {
       const decorations: Decoration[] = []
       const spacers = options.presentation === 'flow'
@@ -276,7 +313,7 @@ export function createLayoutEditor(element: HTMLElement, initial: LayoutEditorOp
         const id = node.attrs.id as string | undefined
         if (!id) return
         decorations.push(Decoration.node(pos, pos + node.nodeSize, { 'data-testid': `flow-block-${id}`, 'data-flow-block-id': id,
-          'data-flow-layer-kind': 'document-block', ...(options.presentation === 'flow' ? { 'data-flow-body-block': node.attrs.data?.type ?? node.type.name } : {}) }))
+          'data-flow-layer-kind': 'document-block', ...(usesObjectSelection() ? { 'data-flow-object-movable': String(!options.blockMoveDisabledReason?.(id)) } : {}), ...(usesObjectSelection() && inputActive && editorPositionToPoint(state.doc, state.selection.head)?.blockId === id ? { 'data-flow-editing-target': 'true' } : {}), ...(options.presentation === 'flow' ? { 'data-flow-body-block': node.attrs.data?.type ?? node.type.name } : {}) }))
         const height = spacers.get(id)
         if (!height || !Number.isFinite(height) || height <= 0) return
         decorations.push(Decoration.widget(pos + node.nodeSize, () => {
@@ -344,7 +381,18 @@ export function createLayoutEditor(element: HTMLElement, initial: LayoutEditorOp
       } : {}),
     },
     handleDOMEvents: {
+      mousedown: (current, event) => {
+        if (!usesObjectSelection() || inputActive || options.readOnly || event.button !== 0) return false
+        const target = event.target instanceof Element ? event.target : null
+        const id = target?.closest<HTMLElement>('[data-flow-block-id]')?.dataset.flowBlockId
+        if (!id) return false
+        event.preventDefault(); selectBlock(id); return true
+      },
       keydown: (currentView, event) => {
+        if (usesObjectSelection() && !inputActive && !options.readOnly && !event.isComposing) {
+          if (event.key === 'Enter' || event.key === 'F2') { event.preventDefault(); enterSelectedInput(); return true }
+          if (event.key.length === 1 && !event.ctrlKey && !event.metaKey || event.key === 'Process' || event.keyCode === 229) { event.preventDefault(); return true }
+        }
         const complete = event.key === 'Escape' || event.key === 'Enter' && (event.ctrlKey || event.metaKey)
         if (!options.contentScope || options.contentScope === 'document' || !complete
           || event.isComposing || currentView.composing || event.keyCode === 229) return false
@@ -933,7 +981,7 @@ export function createLayoutEditor(element: HTMLElement, initial: LayoutEditorOp
     }
     return drain().then(ready => { if (ready) return invoke() })
   }
-  return { view, update, boundary, syncDomTextSelection, paintProjection, duplicateBlock,
+  return { view, update, boundary, syncDomTextSelection, paintProjection, duplicateBlock, selectBlock, setInputActive, isInputActive: () => !usesObjectSelection() || inputActive,
     captureInsertionSelection(): DocumentInsertionSelection {
       syncDomTextSelection()
       const target = { bookmark: view.state.selection.getBookmark(), insertion: true, valid: true }

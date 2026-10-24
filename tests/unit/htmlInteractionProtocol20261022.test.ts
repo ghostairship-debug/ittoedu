@@ -16,10 +16,10 @@ afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); document.body.rep
 it('arbitrates the first pointer event before authored handlers, then releases normal run behavior', () => {
   const button = document.createElement('button'); button.textContent = 'Start'; document.body.append(button)
   let editing = true
-  const select = vi.fn(), business = vi.fn()
+  const select = vi.fn(), edit = vi.fn(), business = vi.fn()
   // The same function source is used in the early parser bootstrap.
   const install = new Function(`return (${installAuthoringInputArbitration.toString()})`)() as typeof installAuthoringInputArbitration
-  const release = install(document, { editing: () => editing, select })
+  const release = install(document, { editing: () => editing, select, edit })
   button.addEventListener('pointerdown', business)
   button.addEventListener('click', business)
   button.addEventListener('dblclick', business)
@@ -32,8 +32,9 @@ it('arbitrates the first pointer event before authored handlers, then releases n
     expect(select).toHaveBeenCalledTimes(1)
     expect(select.mock.calls[0]?.[0]).toEqual({ x: 11, y: 22 })
     button.dispatchEvent(new MouseEvent('dblclick', { button: 0, clientX: 11, clientY: 22, bubbles: true, cancelable: true }))
-    expect(select).toHaveBeenCalledTimes(2)
-    expect(select.mock.calls[1]?.[1].type).toBe('dblclick')
+    expect(select).toHaveBeenCalledTimes(1)
+    expect(edit).toHaveBeenCalledTimes(1)
+    expect(edit.mock.calls[0]?.[1].type).toBe('dblclick')
     expect(business).not.toHaveBeenCalled()
     editing = false
     button.dispatchEvent(new MouseEvent('pointerdown', { button: 0, bubbles: true, cancelable: true }))

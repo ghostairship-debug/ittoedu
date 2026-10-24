@@ -8,7 +8,8 @@ import { DocumentAckUnknownError, DocumentBlockedInputError, DocumentProjection,
 import { captureComponentOperation, presentationComponentEdits, componentValueAt } from '../../core/drivers/courseV10Operations'
 import { equalComponentValue } from '../../shared/componentValue'
 import type { ComponentOperationBatch } from '../../shared/contracts/component-platform/operations'
-import { containerEditingPath, normalizeEditingContext } from './containerEditingContext'
+import { containerEditingPath, groupEditingPath, normalizeEditingContext, parentEditingGroup, type ContainerEditingContext } from './containerEditingContext'
+import { isNativeFlowLayoutGroup } from '../../shared/flowNativeLayout'
 import { authorFieldFromSpot, interactionInstanceIds, interactionSelectionIdentity, type CourseInteractionSelection } from './interactionSelection'
 import type { ComponentAuthorSpot } from '../../shared/contracts/component-platform/runtime'
 
@@ -22,6 +23,7 @@ export interface CapturedCourseTarget {
   readonly surfaceId: string | null
   readonly rootInstanceId?: string | null
   readonly editingContainerId?: string | null
+  readonly activeGroupId?: string | null
   readonly editingPlane?: 'underlay' | 'overlay'
   readonly instanceIds: readonly string[]
   readonly instanceId: string | null
@@ -32,7 +34,7 @@ export interface CapturedCourseTarget {
 /** Foreground qualification is primitive view state, never a retained model. */
 export type CapturedCourseViewScope = Pick<CapturedCourseTarget,
   'documentId' | 'epoch' | 'surfaceId' | 'activeStateId' | 'activation' | 'selectionIdentity' | 'instanceIds'
-  | 'rootInstanceId' | 'editingContainerId' | 'editingPlane'>
+  | 'rootInstanceId' | 'editingContainerId' | 'activeGroupId' | 'editingPlane'>
 
 export interface CapturedComponentOperation extends ComponentOperationBatch {
   readonly documentId: string
@@ -101,7 +103,7 @@ export interface CourseV10ViewState {
   activeStateId: string | null
   /** Conflict drafts are recovery input; only this model may feed runtime. */
   runtimeProject: CourseProjectV10 | null
-  views: readonly { documentId: string; model: Extract<DocumentModel, { kind: 'course-v10' }>; surfaceId: string | null; rootInstanceId?: string | null; editingContainerId?: string | null; editingPlane?: 'underlay' | 'overlay'; presentationStates?: Readonly<Record<string, string | null>>; activeStateId: string | null; selectedInstanceIds: readonly string[]; selectedInstanceId: string | null }[]
+  views: readonly { documentId: string; model: Extract<DocumentModel, { kind: 'course-v10' }>; surfaceId: string | null; rootInstanceId?: string | null; editingContainerId?: string | null; activeGroupId?: string | null; editingPlane?: 'underlay' | 'overlay'; presentationStates?: Readonly<Record<string, string | null>>; activeStateId: string | null; selectedInstanceIds: readonly string[]; selectedInstanceId: string | null }[]
   activeDocumentId: string | null
   activation: number
   selectedInstanceId: string | null
@@ -111,6 +113,8 @@ export interface CourseV10ViewState {
   surfaceId: string | null
   rootInstanceId?: string | null
   editingContainerId?: string | null
+  /** Transient ordinary-group scope; its ancestry remains derived from the author tree. */
+  activeGroupId?: string | null
   editingPlane?: 'underlay' | 'overlay'
   editingPath?: readonly string[]
   presentationStates?: Readonly<Record<string, string | null>>
@@ -124,10 +128,32 @@ export function capturedCourseViewIsCurrent(view: CourseV10ViewState, target: Ca
     && (target.activation === undefined || target.activation === view.activation)
     && (!('rootInstanceId' in target) || target.rootInstanceId === view.rootInstanceId)
     && (!('editingContainerId' in target) || target.editingContainerId === view.editingContainerId)
+    && (!('activeGroupId' in target) || target.activeGroupId === view.activeGroupId)
     && (!('editingPlane' in target) || target.editingPlane === view.editingPlane)
     && (target.selectionIdentity === undefined || target.selectionIdentity === interactionSelectionIdentity(view.interactionSelection))
     && view.selectedInstanceIds.length === target.instanceIds.length
     && view.selectedInstanceIds.every((id, index) => id === target.instanceIds[index])
+}
+
+function retainedEditingGroup(project: CourseProjectV10, context: ContainerEditingContext,
+  previous: (ContainerEditingContext & { activeGroupId: string | null }) | undefined): string | null {
+  if (!previous?.activeGroupId || previous.rootInstanceId !== context.rootInstanceId
+    || previous.surfaceId !== context.surfaceId || previous.editingContainerId !== context.editingContainerId
+    || previous.editingPlane !== context.editingPlane) return null
+  return groupEditingPath(project, context.surfaceId ?? context.rootInstanceId, previous.activeGroupId) ? previous.activeGroupId : null
+}
+
+/** Explicit layer/field locations adopt their actual parent scope; blank selection stays inside the current group. */
+function selectionEditingGroup(project: CourseProjectV10, context: ContainerEditingContext,
+  previous: (ContainerEditingContext & { activeGroupId: string | null }) | undefined, target: CourseInteractionSelection | null): string | null {
+  const ids = interactionInstanceIds(target)
+  if (!ids.length) return retainedEditingGroup(project, context, previous)
+  const parents = ids.map(id => parentEditingGroup(project, context.surfaceId ?? context.rootInstanceId, id))
+  const groupId = parents[0]
+  if (!groupId || parents.some(id => id !== groupId)) return null
+  const group = project.instances[groupId]
+  return componentSurface(project, context.surfaceId ?? '')?.kind === 'flow'
+    && isNativeFlowLayoutGroup(group, project.definitions[group.definitionId]) ? null : groupId
 }
 
 /** View states are scoped by their owning container and never saved into the author project. */
@@ -152,13 +178,13 @@ export class CourseV10DocumentBridge {
   private readonly attaching = new Map<string, Promise<DocumentProjection>>()
   private readonly projectionStops = new Map<string, () => void>()
   private readonly listeners = new Set<() => void>()
-  private readonly selections = new Map<string, { target: CourseInteractionSelection | null; surfaceId: string | null; rootInstanceId: string | null; editingContainerId: string | null; editingPlane?: 'underlay' | 'overlay'; path: readonly string[]; presentationStates: Record<string, string | null> }>()
+  private readonly selections = new Map<string, { target: CourseInteractionSelection | null; surfaceId: string | null; rootInstanceId: string | null; editingContainerId: string | null; activeGroupId: string | null; editingPlane?: 'underlay' | 'overlay'; path: readonly string[]; presentationStates: Record<string, string | null> }>()
   private navigation = 0
   private connected = false
   private connecting?: Promise<void>
   private stopEvents?: () => void
   private state: CourseV10ViewState = { documents: [], snapshot: null, project: null, editingProject: null, activeStateId: null, runtimeProject: null, views: [], activeDocumentId: null,
-    activation: 0, selectedInstanceIds: [], selectedInstanceId: null, surfaceId: null, rootInstanceId: null, editingContainerId: null, editingPath: [], presentationStates: {}, pending: 0, error: null }
+    activation: 0, selectedInstanceIds: [], selectedInstanceId: null, surfaceId: null, rootInstanceId: null, editingContainerId: null, activeGroupId: null, editingPath: [], presentationStates: {}, pending: 0, error: null }
 
   read = (): CourseV10ViewState => this.state
   subscribe = (listener: () => void): (() => void) => { this.listeners.add(listener); return () => { this.listeners.delete(listener) } }
@@ -173,7 +199,7 @@ export class CourseV10DocumentBridge {
     if (!selected) return
     const ids = interactionInstanceIds(selected.target)
     const update = { selectedInstanceIds: ids, selectedInstanceId: ids[0] ?? null, surfaceId: selected.surfaceId,
-      rootInstanceId: selected.rootInstanceId, editingContainerId: selected.editingContainerId, editingPlane: selected.editingPlane,
+      rootInstanceId: selected.rootInstanceId, editingContainerId: selected.editingContainerId, activeGroupId: selected.activeGroupId, editingPlane: selected.editingPlane,
       presentationStates: selected.presentationStates, activeStateId: selected.presentationStates[selected.surfaceId ?? ''] ?? null }
     this.state = { ...this.state, views: this.state.views.map(view => view.documentId === documentId ? { ...view, ...update } : view),
       ...(this.state.activeDocumentId === documentId ? { ...update, interactionSelection: selected.target, editingPath: selected.path,
@@ -187,6 +213,7 @@ export class CourseV10DocumentBridge {
       if (model?.kind !== 'course-v10') continue
       const old = this.selections.get(documentId)
       const context = normalizeEditingContext(model.project, old?.rootInstanceId, old?.editingContainerId, old?.path)
+      const activeGroupId = retainedEditingGroup(model.project, context, old)
       let presentationStates = old?.presentationStates ?? {}
       for (const [id, stateId] of Object.entries(presentationStates)) {
         if (stateId && !componentSurface(model.project, id)?.presentation?.states.some(state => state.id === stateId))
@@ -195,9 +222,9 @@ export class CourseV10DocumentBridge {
       const previousIds = interactionInstanceIds(old?.target)
       const instanceIds = previousIds.filter(id => Boolean(model.project.instances[id]))
       if (!old || old.surfaceId !== context.surfaceId || old.rootInstanceId !== context.rootInstanceId
-        || old.editingContainerId !== context.editingContainerId || old.editingPlane !== context.editingPlane || instanceIds.length !== previousIds.length
+        || old.editingContainerId !== context.editingContainerId || old.editingPlane !== context.editingPlane || old.activeGroupId !== activeGroupId || instanceIds.length !== previousIds.length
         || old.path.length !== context.path.length || old.path.some((id, index) => id !== context.path[index]) || presentationStates !== old.presentationStates) {
-        this.selections.set(documentId, { ...context, target: instanceIds.length === previousIds.length ? old?.target ?? null
+        this.selections.set(documentId, { ...context, activeGroupId, target: old?.activeGroupId && !activeGroupId ? null : instanceIds.length === previousIds.length ? old?.target ?? null
           : old?.target?.kind === 'objects' && instanceIds.length ? { kind: 'objects', instanceIds } : null,
           presentationStates })
       }
@@ -227,7 +254,7 @@ export class CourseV10DocumentBridge {
           selectedInstanceIds: interactionInstanceIds(selection?.target), selectedInstanceId: interactionInstanceIds(selection?.target)[0] ?? null,
           activeStateId: selection?.presentationStates[selection.surfaceId ?? ''] ?? null,
           surfaceId: selection?.surfaceId ?? null, rootInstanceId: selection?.rootInstanceId ?? null,
-          editingContainerId: selection?.editingContainerId ?? null, editingPlane: selection?.editingPlane, presentationStates: selection?.presentationStates ?? {} }] : []
+          editingContainerId: selection?.editingContainerId ?? null, activeGroupId: selection?.activeGroupId ?? null, editingPlane: selection?.editingPlane, presentationStates: selection?.presentationStates ?? {} }] : []
       }),
       project: model?.kind === 'course-v10' ? model.project : null,
       activeStateId: selection?.presentationStates[selection.surfaceId ?? ''] ?? null,
@@ -236,7 +263,7 @@ export class CourseV10DocumentBridge {
       selectedInstanceIds: interactionInstanceIds(selection?.target), selectedInstanceId: interactionInstanceIds(selection?.target)[0] ?? null,
       interactionSelection: selection?.target ?? null,
       surfaceId: selection?.surfaceId ?? null, rootInstanceId: selection?.rootInstanceId ?? null,
-      editingContainerId: selection?.editingContainerId ?? null, editingPlane: selection?.editingPlane, editingPath: selection?.path ?? [],
+      editingContainerId: selection?.editingContainerId ?? null, activeGroupId: selection?.activeGroupId ?? null, editingPlane: selection?.editingPlane, editingPath: selection?.path ?? [],
       presentationStates: selection?.presentationStates ?? {},
       pending: (active?.pending.length ?? 0) + Number(Boolean(active?.composing || active?.retainedComposition)), error: active?.error?.message ?? null }
     for (const listener of this.listeners) listener()
@@ -311,9 +338,9 @@ export class CourseV10DocumentBridge {
     const documentId = this.state.activeDocumentId
     if (!documentId) return () => true
     const { epoch, surfaceId, activeStateId, activation, selectionIdentity, instanceIds, rootInstanceId,
-      editingContainerId, editingPlane } = this.captureOwnedTarget(documentId)
+      editingContainerId, activeGroupId, editingPlane } = this.captureOwnedTarget(documentId)
     const scope: CapturedCourseViewScope = { documentId, epoch, surfaceId, activeStateId, activation, selectionIdentity,
-      instanceIds, rootInstanceId, editingContainerId, editingPlane }
+      instanceIds, rootInstanceId, editingContainerId, activeGroupId, editingPlane }
     return () => capturedCourseViewIsCurrent(this.state, scope)
   }
   private async activateAtNavigation(documentId: string, navigation: number, activateIf?: () => boolean): Promise<boolean> {
@@ -376,7 +403,7 @@ export class CourseV10DocumentBridge {
     return { documentId, epoch: view.committed!.epoch, activation: this.state.activation, project, resources: model.resources,
       editingProject: this.state.activeDocumentId === documentId && this.state.project === project
         ? this.state.editingProject ?? project : projectContainerPresentationStates(project, selection?.presentationStates ?? {}), activeStateId, surfaceId,
-      rootInstanceId: selection?.rootInstanceId ?? null, editingContainerId: selection?.editingContainerId ?? null,
+      rootInstanceId: selection?.rootInstanceId ?? null, editingContainerId: selection?.editingContainerId ?? null, activeGroupId: selection?.activeGroupId ?? null,
       editingPlane: selection?.editingPlane,
       instanceIds: [...interactionInstanceIds(selection?.target)], instanceId: interactionInstanceIds(selection?.target)[0] ?? null,
       selectionIdentity: interactionSelectionIdentity(selection?.target) }
@@ -531,7 +558,7 @@ export class CourseV10DocumentBridge {
     const view = this.projections.get(documentId)?.read(), model = view?.draft ?? view?.committed?.model
     if (model?.kind !== 'course-v10' || !model.project.rootIds.includes(surfaceId)) return
     const context = normalizeEditingContext(model.project, surfaceId)
-    this.selections.set(documentId, { ...context, target: null, presentationStates: this.selections.get(documentId)?.presentationStates ?? {} }); this.publishSelection(documentId)
+    this.selections.set(documentId, { ...context, activeGroupId: null, target: null, presentationStates: this.selections.get(documentId)?.presentationStates ?? {} }); this.publishSelection(documentId)
   }
   selectInstance(documentId: string, instanceId: string | null): void {
     this.selectInstances(documentId, instanceId ? [instanceId] : [])
@@ -545,10 +572,12 @@ export class CourseV10DocumentBridge {
       ? normalizeEditingContext(model.project, surfaceId)
       : normalizeEditingContext(model.project, old?.rootInstanceId, surfaceId ?? old?.editingContainerId, old?.path)
     const target: CourseInteractionSelection | null = ids.length ? { kind: 'objects', instanceIds: ids } : null
+    const activeGroupId = selectionEditingGroup(model.project, context, old, target)
     if (old && old.surfaceId === context.surfaceId && old.rootInstanceId === context.rootInstanceId
       && old.editingContainerId === context.editingContainerId && old.editingPlane === context.editingPlane
+      && old.activeGroupId === activeGroupId
       && interactionSelectionIdentity(old.target) === interactionSelectionIdentity(target)) return
-    this.selections.set(documentId, { ...context, target, presentationStates: old?.presentationStates ?? {} })
+    this.selections.set(documentId, { ...context, activeGroupId, target, presentationStates: old?.presentationStates ?? {} })
     this.publishSelection(documentId)
   }
   selectInteraction(documentId: string, target: CourseInteractionSelection | null, surfaceId?: string | null): void {
@@ -558,10 +587,12 @@ export class CourseV10DocumentBridge {
     const old = this.selections.get(documentId)
     const context = surfaceId && model.project.rootIds.includes(surfaceId) ? normalizeEditingContext(model.project, surfaceId)
       : normalizeEditingContext(model.project, old?.rootInstanceId, surfaceId ?? old?.editingContainerId, old?.path)
+    const activeGroupId = selectionEditingGroup(model.project, context, old, target)
     if (old && old.surfaceId === context.surfaceId && old.editingContainerId === context.editingContainerId
       && old.rootInstanceId === context.rootInstanceId && interactionSelectionIdentity(old.target) === interactionSelectionIdentity(target)
+      && old.activeGroupId === activeGroupId
       && (old.target?.kind !== 'author-field' || target?.kind !== 'author-field' || equalComponentValue(old.target.field, target.field))) return
-    this.selections.set(documentId, { ...context, target, presentationStates: old?.presentationStates ?? {} })
+    this.selections.set(documentId, { ...context, activeGroupId, target, presentationStates: old?.presentationStates ?? {} })
     this.publishSelection(documentId)
   }
   selectAuthorSpot(documentId: string, spot: ComponentAuthorSpot, surfaceId?: string | null): void {
@@ -578,7 +609,7 @@ export class CourseV10DocumentBridge {
       ? normalizeEditingContext(model.project, surface.id)
       : normalizeEditingContext(model.project, old?.rootInstanceId, old?.editingContainerId, old?.path)
     if (!context.rootInstanceId || !containerEditingPath(model.project, context.rootInstanceId, surface.id)) throw new Error('展示状态不属于当前作品范围')
-    this.selections.set(documentId, { ...context, target: old?.target ?? null,
+    this.selections.set(documentId, { ...context, activeGroupId: retainedEditingGroup(model.project, context, old), target: old?.target ?? null,
       presentationStates: { ...old?.presentationStates, [surface.id]: stateId } })
     this.publish({}, documentId)
   }
@@ -589,7 +620,7 @@ export class CourseV10DocumentBridge {
     const old = this.selections.get(documentId)
     const context = normalizeEditingContext(model.project, old?.rootInstanceId, containerId, old?.path)
     if (context.surfaceId !== containerId) throw new Error('容器不属于当前作品范围')
-    this.selections.set(documentId, { ...context, target: null, presentationStates: old?.presentationStates ?? {} })
+    this.selections.set(documentId, { ...context, activeGroupId: null, target: null, presentationStates: old?.presentationStates ?? {} })
     this.publish({ activation: this.state.activation + 1 }, documentId)
   }
   leaveContainer(documentId = this.state.activeDocumentId ?? ''): void {
@@ -599,7 +630,33 @@ export class CourseV10DocumentBridge {
     if (model?.kind !== 'course-v10') return
     const parent = old.path.at(-2)
     const context = normalizeEditingContext(model.project, old.rootInstanceId, parent ?? null)
-    this.selections.set(documentId, { ...context, target: { kind: 'objects', instanceIds: [old.editingContainerId] }, presentationStates: old.presentationStates })
+    this.selections.set(documentId, { ...context, activeGroupId: parentEditingGroup(model.project, context.surfaceId ?? context.rootInstanceId, old.editingContainerId),
+      target: { kind: 'objects', instanceIds: [old.editingContainerId] }, presentationStates: old.presentationStates })
+    this.publish({ activation: this.state.activation + 1 }, documentId)
+  }
+  /** Ordinary groups are inspection scopes inside the current real container. */
+  enterGroup(documentId: string, groupId: string): void {
+    const view = this.projection(documentId).read(), model = view.draft ?? view.committed?.model
+    if (model?.kind !== 'course-v10') return
+    const old = this.selections.get(documentId)
+    if (!old) return
+    if (old.activeGroupId === groupId) return
+    const path = groupEditingPath(model.project, old.surfaceId ?? old.rootInstanceId, groupId)
+    if (!path || (old.activeGroupId && !path.slice(0, -1).includes(old.activeGroupId))) throw new Error('组不属于当前编辑范围')
+    const group = model.project.instances[groupId]
+    if (componentSurface(model.project, old.surfaceId ?? '')?.kind === 'flow'
+      && isNativeFlowLayoutGroup(group, model.project.definitions[group.definitionId])) throw new Error('阅读组沿连续正文编辑，不进入自由组范围')
+    this.selections.set(documentId, { ...old, activeGroupId: groupId, target: null })
+    this.publish({ activation: this.state.activation + 1 }, documentId)
+  }
+  leaveGroup(documentId = this.state.activeDocumentId ?? ''): void {
+    const old = this.selections.get(documentId)
+    if (!old?.activeGroupId) return
+    const view = this.projection(documentId).read(), model = view.draft ?? view.committed?.model
+    if (model?.kind !== 'course-v10') return
+    const path = groupEditingPath(model.project, old.surfaceId ?? old.rootInstanceId, old.activeGroupId)
+    this.selections.set(documentId, { ...old, activeGroupId: path?.at(-2) ?? null,
+      target: model.project.instances[old.activeGroupId] ? { kind: 'objects', instanceIds: [old.activeGroupId] } : null })
     this.publish({ activation: this.state.activation + 1 }, documentId)
   }
   captureLatestAgentUndoTarget(): CourseAgentUndoTarget | null {

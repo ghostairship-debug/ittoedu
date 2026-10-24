@@ -8,7 +8,7 @@ import { mountHtmlPreviewAgent } from '../../src/player/htmlPreview/htmlPreviewA
 const bridges: HtmlFrameAuthoringBridge[] = []
 afterEach(() => { bridges.splice(0).forEach(bridge => bridge.dispose()); vi.restoreAllMocks(); document.body.replaceChildren() })
 
-it('reports opaque text style, first caret, drag focus and double-click word through the parser input owner', () => {
+it('reports opaque text style and caret on selection, then enables text range dragging only after explicit editing', () => {
   const frame = document.createElement('iframe'); document.body.append(frame)
   const doc = frame.contentDocument!, view = doc.defaultView as Window & typeof globalThis
   doc.body.innerHTML = '<p>Alpha Beta</p>'
@@ -25,7 +25,7 @@ it('reports opaque text style, first caret, drag focus and double-click word thr
     record: { kind: 'text', binding: { kind: 'dom', path: [{ tag: 'p', index: 0 }], textIndex: 0, baseline: 'Alpha Beta' }, overrides: {} } }
   const factory = (() => ({ describe: () => report, scan: () => [report], geometry: () => undefined,
     textStyle: () => ({ 'font-family': 'Georgia', 'font-size': '24px', 'white-space': 'normal' }),
-    visible: () => true, roots: () => [doc], setActive() {}, suppressText() {}, refresh() {}, previewGeometry() {}, dispose() {} })) as unknown as typeof createDomAuthoring
+    visible: () => true, hit: () => report, roots: () => [doc], setActive() {}, suppressText() {}, refresh() {}, previewGeometry() {}, dispose() {} })) as unknown as typeof createDomAuthoring
   const sent = vi.spyOn(view.parent, 'postMessage').mockImplementation(() => {})
   const bridge = installHtmlFrameAuthoring(factory, doc); bridges.push(bridge)
   const receive = (value: Record<string, unknown>) => view.dispatchEvent(new view.MessageEvent('message', {
@@ -38,9 +38,13 @@ it('reports opaque text style, first caret, drag focus and double-click word thr
   expect(target.textStyle).toEqual({ 'font-family': 'Georgia', 'font-size': '24px', 'white-space': 'normal' })
   expect(target.selection).toEqual({ anchor: 2, focus: 2 })
   pointer('pointermove', 7)
-  expect(sent.mock.calls.map(call => call[0]).find(value => value.type === 'selection')).toMatchObject({ handle: target.handle, anchor: 2, focus: 7 })
+  expect(sent.mock.calls.map(call => call[0]).find(value => value.type === 'selection')).toBeUndefined()
+  pointer('pointerup', 7)
   pointer('dblclick', 3)
-  expect(sent.mock.calls.at(-1)![0]).toMatchObject({ type: 'selection', handle: target.handle, anchor: 3, focus: 3, word: true })
+  expect(sent.mock.calls.at(-1)![0]).toMatchObject({ type: 'targets', intent: 'edit', targets: [{ handle: target.handle, selection: { anchor: 3, focus: 3, word: true } }] })
+  receive({ type: 'select', handle: target.handle, editable: true, editing: true })
+  pointer('pointerdown', 3); pointer('pointermove', 7)
+  expect(sent.mock.calls.map(call => call[0]).find(value => value.type === 'selection')).toMatchObject({ handle: target.handle, anchor: 3, focus: 7 })
   receive({ type: 'select', handle: null, editable: false })
   receive({ type: 'confirm', scanId: 'one', handles: [target.handle] })
   expect(doc.querySelector('[data-html-preview-edit-markers] > div')?.getAttribute('style')).toContain('dashed')

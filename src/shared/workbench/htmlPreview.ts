@@ -181,6 +181,14 @@ export const htmlPreviewPageMessageSchema = z.discriminatedUnion('event', [
     loadId: id,
     seq: z.number().int().nonnegative(),
     targets: z.array(htmlPreviewTargetReportSchema).max(HTML_PREVIEW_TARGET_MAX),
+    intent: z.enum(['select', 'edit', 'observe']).optional(),
+  }).strict(),
+  z.object({
+    event: z.literal('gesture'), protocol: z.literal(1), leaseId: id, loadId: id,
+    seq: z.number().int().nonnegative(), handle: id,
+    phase: z.enum(['start', 'update', 'end', 'cancel']),
+    pointerId: z.number().int().nonnegative(), x: coordinate, y: coordinate,
+    shift: z.boolean(), alt: z.boolean(),
   }).strict(),
   z.object({
     event: z.literal('edit-targets'),

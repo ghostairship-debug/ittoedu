@@ -91,7 +91,7 @@ function contentRealmBridge(nonce: string, fragmentBox: { resourceFactory: typeo
     if (typeof next.active !== 'boolean' || typeof next.visible !== 'boolean' || typeof next.playing !== 'boolean') return
     const becameVisible = next.visible && activity?.visible !== true
     activity = { active: next.active, visible: next.visible, playing: next.playing }
-    if (!next.active || !next.visible || next.playing) { contentAuthoring?.suppressText(); ownedAuthoring?.input() }
+    if (!next.active || !next.visible || next.playing) { editingAuthorKey = undefined; contentAuthoring?.suppressText(); ownedAuthoring?.input() }
     if (authoredDocument) authoredDocument.setActivity?.(activitySnapshot()!)
     else window.dispatchEvent(new CustomEvent('__runtime.activity', { detail: activitySnapshot() }))
     ownedAuthoring?.update()
@@ -236,6 +236,13 @@ function contentRealmBridge(nonce: string, fragmentBox: { resourceFactory: typeo
   const send = (message: Message) => { if (active) port.postMessage({ ...message, generation }) }
   let releaseInput = () => {}
   let selectingText: { authorKey: string; anchor: number } | undefined
+  let editingAuthorKey: string | undefined
+  let pointerTarget: { authorKey?: string; caretOffset?: number; pointerId?: number; button?: number; shiftKey?: boolean; altKey?: boolean; ctrlKey?: boolean; metaKey?: boolean } | undefined
+  const pointerFacts = (event: Event) => {
+    const pointer = event as PointerEvent
+    return { ...(Number.isSafeInteger(pointer.pointerId) ? { pointerId: pointer.pointerId } : {}), button: pointer.button,
+      shiftKey: pointer.shiftKey, altKey: pointer.altKey, ctrlKey: pointer.ctrlKey, metaKey: pointer.metaKey }
+  }
   let hoveredAuthorKey: string | undefined
   const installInput = () => {
     // document.open removes listeners while Chromium may retain the same
@@ -243,12 +250,25 @@ function contentRealmBridge(nonce: string, fragmentBox: { resourceFactory: typeo
     releaseInput()
     releaseInput = fragmentBox.input(document, {
       editing: () => active && observeHtml && activity?.active === true && activity.visible && !activity.playing,
-      select: (point, event, word) => {
+      contentEditing: point => editingAuthorKey !== undefined && hitAuthor(point.x, point.y) === editingAuthorKey,
+      select: (point, event) => {
         const authorKey = hitAuthor(point.x, point.y), caretOffset = caretAuthor(point.x, point.y, authorKey)
-        selectingText = typeof authorKey === 'string' && caretOffset !== undefined ? { authorKey, anchor: caretOffset } : undefined
-        send({ type: event.type === 'dblclick' ? 'authoring.double-click' : 'authoring.pointer', x: point.x + measuredPaintOrigin.left, y: point.y + measuredPaintOrigin.top,
+        pointerTarget = { authorKey, ...(caretOffset === undefined ? {} : { caretOffset }), ...pointerFacts(event) }
+        selectingText = authorKey === editingAuthorKey && typeof authorKey === 'string' && caretOffset !== undefined ? { authorKey, anchor: caretOffset } : undefined
+        if (selectingText) send({ type: 'authoring.selection', ...selectingText, focus: caretOffset })
+        else if (event.type === 'click') send({ type: 'authoring.pointer', ...pointerTarget, x: point.x + measuredPaintOrigin.left, y: point.y + measuredPaintOrigin.top })
+      },
+      edit: (point, event) => {
+        const authorKey = hitAuthor(point.x, point.y), caretOffset = caretAuthor(point.x, point.y, authorKey)
+        send({ type: 'authoring.double-click', ...pointerFacts(event), x: point.x + measuredPaintOrigin.left, y: point.y + measuredPaintOrigin.top,
           authorKey, ...(caretOffset === undefined ? {} : { caretOffset }) })
-        if ((word || event.type === 'dblclick') && selectingText) send({ type: 'authoring.selection', ...selectingText, focus: caretOffset, word: true })
+        if (authorKey && caretOffset !== undefined) send({ type: 'authoring.selection', authorKey, anchor: caretOffset, focus: caretOffset, word: true })
+      },
+      contextMenu: (point, event) => send({ type: 'authoring.pointer', ...pointerFacts(event), button: 2,
+        authorKey: hitAuthor(point.x, point.y), x: point.x + measuredPaintOrigin.left, y: point.y + measuredPaintOrigin.top }),
+      gesture: (point, _event, phase) => {
+        if (pointerTarget) send({ type: 'authoring.pointer', ...pointerTarget, phase, x: point.x + measuredPaintOrigin.left, y: point.y + measuredPaintOrigin.top })
+        if (phase === 'end' || phase === 'cancel') pointerTarget = undefined
       },
       extend: point => { if (selectingText) { const focus = caretAuthor(point.x, point.y, selectingText.authorKey); if (focus !== undefined) send({ type: 'authoring.selection', ...selectingText, focus }) } },
       hover: point => { const key = hitAuthor(point.x, point.y); if (key !== hoveredAuthorKey) { hoveredAuthorKey = key; send({ type: 'authoring.hover', authorKey: key }) } },
@@ -936,6 +956,7 @@ function contentRealmBridge(nonce: string, fragmentBox: { resourceFactory: typeo
       } else if (message.type === 'authoring.input') {
         if (!active || message.generation !== generation) return
         const authorKey = typeof message.authorKey === 'string' && message.active === true ? message.authorKey : undefined
+        editingAuthorKey = authorKey
         contentAuthoring?.suppressText(authorKey); ownedAuthoring?.input(authorKey)
         return
       } else if (message.type === 'authoring.preview') {
@@ -1465,10 +1486,14 @@ export async function preparePublishedNativeComponent(artifact: CompiledComponen
       return
     }
     if ((message.type === 'authoring.pointer' || message.type === 'authoring.double-click') && authoring && authorRoot?.isConnected
-      && (authorSpots.size || observedSpots.size) && Number.isFinite(message.x) && Number.isFinite(message.y)) {
+      && Number.isFinite(message.x) && Number.isFinite(message.y)) {
       authorRoot.dispatchEvent(new CustomEvent(message.type === 'authoring.pointer' ? 'component-author-pointer' : 'component-author-double-click', { bubbles: true, detail: {
         instanceId: scope.instanceId, mountGeneration: scope.generation, localPoint: { x: message.x + (sourceViewport?.left ?? 0), y: message.y + (sourceViewport?.top ?? 0) }, authorKey: message.authorKey,
         ...(Number.isSafeInteger(message.caretOffset) && message.caretOffset >= 0 ? { caretOffset: message.caretOffset } : {}),
+        ...(['start', 'update', 'end', 'cancel'].includes(message.phase) ? { phase: message.phase } : {}),
+        ...(Number.isSafeInteger(message.pointerId) ? { pointerId: message.pointerId } : {}),
+        ...(typeof message.button === 'number' ? { button: message.button } : {}),
+        shiftKey: message.shiftKey === true, altKey: message.altKey === true, ctrlKey: message.ctrlKey === true, metaKey: message.metaKey === true,
       } })); return
     }
     if (message.type === 'authoring.hover' && authoring && authorRoot?.isConnected) {

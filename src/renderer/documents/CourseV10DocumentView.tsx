@@ -4,6 +4,7 @@ import { componentSurface, componentSurfaces, isComponentVisibleAtSurface, type 
 import { componentPaintStyle } from '../../player/components/componentPlacementStyle'
 import { resolveComponentOuterPresentation } from '../../shared/componentPresentation'
 import { ImageSafeAreaGuides } from '../ui/workspaces/ImageSafeAreaGuides'
+import type { CourseInteractionSelection } from './interactionSelection'
 
 export interface CourseV10DocumentViewProps {
   project: CourseProjectV10
@@ -12,6 +13,8 @@ export interface CourseV10DocumentViewProps {
   rootInstanceId?: string | null
   selectedInstanceId: string | null
   selectedInstanceIds?: readonly string[]
+  /** A field's derived owner id is not an overall object selection. */
+  selectionKind?: CourseInteractionSelection['kind']
   player?: boolean
   /** Read the existing runtime at gesture time, including editor try-run. */
   isPlaying?(): boolean
@@ -22,7 +25,7 @@ export interface CourseV10DocumentViewProps {
 }
 
 /** Author geometry and ownership projection only; professional DOM belongs to component runtime. */
-export function InstanceView({ instance, project, authorProject = project, surfaceId, selectedInstanceId, selectedInstanceIds, player, isPlaying, onSelect, onElement, onTargetElement, renderContainer, placement = 'free' }: {
+export function InstanceView({ instance, project, authorProject = project, surfaceId, selectedInstanceId, selectedInstanceIds, selectionKind, player, isPlaying, onSelect, onElement, onTargetElement, renderContainer, placement = 'free' }: {
   instance: ComponentInstance
   surfaceId?: string | null
   placement?: 'free' | 'flow' | 'program'
@@ -59,7 +62,7 @@ export function InstanceView({ instance, project, authorProject = project, surfa
   const inlineIds = new Set(allDocumentTextSlots(instance.data).flatMap(slot => inlineComponentIds(slot.content)))
   for (const id of documentInlineChildIds(authorProject, instance.id)) if (!project.instances[id]?.frame && !project.instances[id]?.flowPlacement) inlineIds.add(id)
   const children = !instance.container ? instance.childIds?.filter(id => !inlineIds.has(id)).map(id => project.instances[id] && <InstanceView key={id} instance={project.instances[id]} project={project} authorProject={authorProject}
-    surfaceId={surfaceId} selectedInstanceId={selectedInstanceId} selectedInstanceIds={selectedInstanceIds} player={player} isPlaying={isPlaying} onSelect={onSelect}
+    surfaceId={surfaceId} selectedInstanceId={selectedInstanceId} selectedInstanceIds={selectedInstanceIds} selectionKind={selectionKind} player={player} isPlaying={isPlaying} onSelect={onSelect}
     onElement={onElement} onTargetElement={onTargetElement} renderContainer={renderContainer} placement={presentation.childrenPlacement} />) : undefined
   const content = presentation.section
     ? <summary ref={bind} data-component-render={instance.id} style={presentation.contentStyle as CSSProperties} />
@@ -67,7 +70,7 @@ export function InstanceView({ instance, project, authorProject = project, surfa
   const childContent = <div style={presentation.childrenStyle as CSSProperties}>{children}</div>
   return <div ref={bindTarget} hidden={!isComponentVisibleAtSurface(instance, surfaceId ?? '')} style={{ pointerEvents: 'auto', ...authoredStyle, ...presentation.outerStyle as CSSProperties,
     ...(placement === 'program' ? { position: 'absolute', inset: 0, width: '100%', height: '100%', transform: 'none' } as CSSProperties : {}),
-    outline: !player && (selectedInstanceIds?.includes(instance.id) ?? selectedInstanceId === instance.id) ? '2px solid #2563eb' : undefined }}
+    outline: !player && (selectionKind === undefined || selectionKind === 'objects') && (selectedInstanceIds?.includes(instance.id) ?? selectedInstanceId === instance.id) ? '2px solid #2563eb' : undefined }}
     data-component-instance={instance.id} data-component-placement={placement} onPointerDown={event => { if (!player && !isPlaying?.() && !instance.locked) { event.stopPropagation(); onSelect(instance.id) } }}>
     {instance.container && renderContainer ? renderContainer(instance.id, project, placement === 'flow' ? 'flow' : 'free') : presentation.section
       ? <details open={presentation.section.open} style={presentation.stageStyle as CSSProperties}>{content}{childContent}</details>
@@ -87,7 +90,7 @@ export function CourseV10DocumentView(props: CourseV10DocumentViewProps) {
     </div> : <p>请添加作品内容。</p>
   }
   const instances = (children: string[], placement: 'free' | 'flow' = 'free') => children.map(id => props.project.instances[id] && <InstanceView key={id} instance={props.project.instances[id]} project={props.project} authorProject={props.authorProject}
-    placement={placement}
+    placement={placement} selectionKind={props.selectionKind}
     surfaceId={surface.id} selectedInstanceId={props.selectedInstanceId} selectedInstanceIds={props.selectedInstanceIds} player={props.player} isPlaying={props.isPlaying} onSelect={props.onSelect} onElement={props.onElement} onTargetElement={props.onTargetElement} renderContainer={props.renderContainer} />)
   return <div style={{ overflow: 'auto', minHeight: 400, background: '#e8edf3', padding: 24 }}>
     <div aria-label={surface.title} onPointerDown={() => { if (!props.player && !props.isPlaying?.()) props.onSelect(null) }} style={{ position: 'relative', background: '#fff',

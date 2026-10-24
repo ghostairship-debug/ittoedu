@@ -17,7 +17,19 @@ export function slideSelectionChrome(targets: readonly FreeObjectTarget[], scale
   return { corners, points: { nw, n, ne, e: mid(ne, se), se, s, sw, w: mid(nw, sw), rotate: rotation } }
 }
 /** Chrome only. All handles route through the workspace's single affine owner. */
-export function SlideLayerSelectionOverlay({ targets, scale, surfaceToPointer, lineHandles, movable }: { targets: readonly FreeObjectTarget[]; scale: number; surfaceToPointer?: AffineMatrix; lineHandles?: boolean; movable?: boolean }) {
+export function selectionResizeCursor(direction: FreeResizeHandle): string {
+  return direction === 'n' || direction === 's' ? 'ns-resize' : direction === 'e' || direction === 'w' ? 'ew-resize'
+    : direction === 'nw' || direction === 'se' ? 'nwse-resize' : 'nesw-resize'
+}
+
+export function selectionHandleGesture(handle: FreeResizeHandle | 'rotate' | 'move' | null) {
+  return { mode: handle === 'rotate' ? 'rotate' as const : handle && handle !== 'move' ? 'resize' as const : 'drag' as const,
+    handle: handle && handle !== 'move' && handle !== 'rotate' ? handle : undefined }
+}
+
+export function SlideLayerSelectionOverlay({ targets, scale, surfaceToPointer, lineHandles, movable, resizable = true, rotatable = true }: {
+  targets: readonly FreeObjectTarget[]; scale: number; surfaceToPointer?: AffineMatrix; lineHandles?: boolean; movable?: boolean; resizable?: boolean; rotatable?: boolean
+}) {
   const overlay = slideSelectionChrome(surfaceToPointer ? targets.map(target => ({ ...target, parentToSurface: multiplyMatrices(surfaceToPointer, target.parentToSurface) })) : targets, surfaceToPointer ? 1 : scale)
   if (!overlay) return null
   const pixelScale = surfaceToPointer ? 1 : scale
@@ -27,11 +39,11 @@ export function SlideLayerSelectionOverlay({ targets, scale, surfaceToPointer, l
       <polygon points={overlay.corners.map(p => p.x + ',' + p.y).join(' ')} fill="none" stroke="#2563eb" strokeWidth={1 / pixelScale} />
       {movable && <polygon data-handle="move" points={overlay.corners.map(p => p.x + ',' + p.y).join(' ')} fill="none" stroke="transparent"
         strokeWidth={8 / pixelScale} style={{ pointerEvents: 'stroke', cursor: 'move' }} />}
-      <line x1={overlay.points.n.x} y1={overlay.points.n.y} x2={overlay.points.rotate.x} y2={overlay.points.rotate.y} stroke="#2563eb" strokeWidth={1 / pixelScale} />
+      {rotatable && <line x1={overlay.points.n.x} y1={overlay.points.n.y} x2={overlay.points.rotate.x} y2={overlay.points.rotate.y} stroke="#2563eb" strokeWidth={1 / pixelScale} />}
     </svg>
-    {(Object.entries(overlay.points) as [FreeResizeHandle | 'rotate', GeometryPoint][]).filter(([direction]) => !lineHandles || direction === 'rotate').map(([direction, p]) => <div key={direction}
+    {(Object.entries(overlay.points) as [FreeResizeHandle | 'rotate', GeometryPoint][]).filter(([direction]) => direction === 'rotate' ? rotatable : resizable && !lineHandles).map(([direction, p]) => <div key={direction}
       className="teacher-controller-overlay__handle" data-handle={direction}
       style={{ position: surfaceToPointer ? 'fixed' : 'absolute', left: p.x - size / 2, top: p.y - size / 2, width: size, height: size,
-        pointerEvents: 'auto', borderRadius: direction === 'rotate' ? '50%' : undefined }} />)}
+        pointerEvents: 'auto', cursor: direction === 'rotate' ? 'grab' : selectionResizeCursor(direction), borderRadius: direction === 'rotate' ? '50%' : undefined }} />)}
   </div>
 }

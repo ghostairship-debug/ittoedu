@@ -22,7 +22,7 @@ function fixture() {
 
 it('resolves the original object ID after ACK even when another object takes its old screen position', () => {
   const f = fixture(), down = { x: 40, y: 30 }, hit = f.controller.captureHit(down, matrix)
-  expect(hit).toEqual({ kind: 'object', instanceId: 'first' })
+  expect(hit).toEqual({ kind: 'object', instanceId: 'first', activeGroupId: null })
   f.project.instances.first.frame!.transform[4] = 500
   f.project.instances.other.frame!.transform[4] = 10
   f.controller.pointerDown(down, matrix, undefined, hit)
@@ -40,7 +40,7 @@ it('reports a retired original target without selecting the replacement at that 
 
 it('preserves a blank-down marquee intent when an object appears beneath the original point', () => {
   const f = fixture(), down = { x: 220, y: 30 }, hit = f.controller.captureHit(down, matrix)
-  expect(hit).toEqual({ kind: 'blank' })
+  expect(hit).toEqual({ kind: 'blank', activeGroupId: null })
   f.project.instances.other.frame!.transform[4] = 200
   const result = f.controller.pointerDown(down, matrix, undefined, hit)
   expect(result.marquee).toEqual({ start: down, end: down })

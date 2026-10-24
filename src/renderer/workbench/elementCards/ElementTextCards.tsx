@@ -9,8 +9,8 @@ import { useEditorStore } from '../../store/editorStore'
 import { ElementAiCard } from './ElementAiCard'
 import { elementCards, useVisibleCards, type ElementCardView } from './elementCardController'
 import './elementCards.css'
-import { readTarget } from '../../../core/tools/ToolTargets'
 import { authorFieldIdentity } from '../../documents/interactionSelection'
+import { selectElementCardField } from './elementCardSelection'
 
 /** What a text card starts from: the selected range, a name for it, and what the range holds now. */
 export interface TextCardStart { target: ExecutionSelectionTarget; capture: SelectionCapture;
@@ -165,23 +165,17 @@ function TextCardPanel({ card }: { card: ElementCardView }) {
   }, [card.key, JSON.stringify(card.target), card.textLost, pendingRebind])
   const completed = card.entries.some(entry => ['completed', 'partial'].includes(entry.state))
   const selectResult = () => {
-    try { if (!(card.target.kind === 'course-instance' && card.target.authorField) && workbenchSelection.targetView(card.documentId)?.select(card.target)) return } catch (error) { setSelectionError(error instanceof Error ? error.message : '结果暂不可定位，请重新选择。'); return }
+    const field = card.target.kind === 'course-instance' && (card.target.authorField
+      || card.target.dataPath && card.target.from === undefined && card.target.to === undefined && card.target.fieldScope !== 'flowLayout')
+    try { if (!field && workbenchSelection.targetView(card.documentId)?.select(card.target)) return } catch (error) { setSelectionError(error instanceof Error ? error.message : '结果暂不可定位，请重新选择。'); return }
     setSelectionError('')
     void workbenchSelection.prepare(card.documentId).then(snapshot => {
       if (card.epoch && snapshot.epoch !== card.epoch) throw new Error('这份作品已经重新打开，请重新定位当前内容。')
       const selected = captureSelection(snapshot, [card.target], card.label)
       if (card.target.kind === 'course-instance') {
         const owner = useEditorStore.getState(), target = card.target
-        if (target.authorField) {
-          const value = readTarget(snapshot.model, target)
-          if (typeof value !== 'string') throw new Error('字段内容类型已改变，请重新选择')
-          owner.courseBridge.selectInteraction(card.documentId,
-            { kind: 'author-field', instanceId: target.instanceId, field: { ...target.authorField, initialValue: value } }, target.surfaceId)
-        } else if (target.dataPath && target.from === undefined && target.to === undefined && target.fieldScope !== 'flowLayout') {
-          const value = readTarget(snapshot.model, target)
-          if (typeof value === 'string') owner.courseBridge.selectInteraction(card.documentId, { kind: 'author-field', instanceId: target.instanceId,
-            field: { kind: 'text', dataPath: target.dataPath, fieldScope: target.fieldScope ?? 'data', initialValue: value } }, target.surfaceId)
-        } else if (!target.dataPath && target.from === undefined && target.to === undefined) owner.selectNodes([target.instanceId])
+        if (!selectElementCardField(owner.courseBridge, snapshot, target)
+          && !target.dataPath && target.from === undefined && target.to === undefined) owner.selectNodes([target.instanceId])
       }
       else if (card.target.kind === 'course-object') useEditorStore.getState().selectNodes([card.target.itemId])
       workbenchSelection.setManual(card.documentId, selected)

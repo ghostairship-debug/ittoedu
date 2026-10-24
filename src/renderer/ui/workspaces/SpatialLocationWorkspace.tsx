@@ -1,10 +1,12 @@
-import { useComponentAuthorInteraction } from './useComponentAuthorInteraction'
+import { useComponentAuthorInteraction, type ComponentAuthorObjectPointer } from './useComponentAuthorInteraction'
 import { visibleComponentAuthorHit } from '../../components/componentAuthorHit'
 import type { ImportedImageAsset } from '../../project/assetManager'
 import type { TextRangeProjection } from '../../../shared/document/textInteraction'
 import { Hand, Maximize2, Minus, Plus } from 'lucide-react'
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode, type PointerEvent as ReactPointerEvent } from 'react'
 import type { ComponentEdit, ComponentFrame, ComponentSurface, CourseProjectV10 } from '../../../shared/contracts/component-platform'
+import { componentDefinitionBuiltinKey, componentIsLocked } from '../../../shared/contracts/component-platform/project'
+import { editingLevelInstanceId } from '../../documents/containerEditingContext'
 import { isComponentVisibleAtSurface } from '../../../shared/contracts/component-platform'
 import type { CapturedCourseTarget } from '../../documents/CourseV10DocumentBridge'
 import type { SpatialSurfaceViewState, SpatialGraphSelection } from '../../store/slices/spatialAuthoringSlice'
@@ -12,7 +14,7 @@ import { componentSpatialCameraMatrix, panComponentSpatialCamera, zoomComponentS
 import { spatialComponentCenter, spatialConnectionSegments, spatialConnectionTargets, spatialFramePose, spatialPathPoints, spatialPathTargetIds, spatialRelationLabelPosition, spatialSemanticVisible, type SpatialConnectionSegment, type SpatialGeometryTarget } from '../../../player/surfaces/spatial/componentPlatform/graph'
 import { composeMatrices, frameCorners, IDENTITY_MATRIX, invertMatrix, multiplyMatrices, rotationMatrix, scaleMatrix, transformPoint, translationMatrix, type AffineMatrix, type GeometryPoint } from '../../../core/components/geometry'
 import { FreeTransformGesture, type FreeResizeHandle, type FreeSnapGuide } from '../../componentPlatform/surfaces/slide/freeTransformGesture'
-import { freeSelectionBounds, freeSurfaceTargets, hitFreeObject, marqueeFreeTargets, sameFreeTarget, selectedFreeTargets, type FreeObjectTarget } from '../../componentPlatform/surfaces/slide/targets'
+import { freeSurfaceTargets, freeTargetAtEditingLevel, marqueeFreeTargets, sameFreeTarget, selectedFreeTargets, type FreeObjectTarget } from '../../componentPlatform/surfaces/slide/targets'
 import { spatialWorldTargets } from '../../componentPlatform/surfaces/spatial/targets'
 import { useContextMenu } from '../../editing/commands/CommandMenu'
 import { hiddenObjectCommands } from '../../editing/commands/hiddenObjectCommands'
@@ -28,7 +30,7 @@ import { resolveComponentBackground, resolveComponentSurfaceBackground } from '.
 import { mergeComponentBackground } from '../../../shared/componentBackgroundPaint'
 import { ComponentBackgroundPaint } from '../../components/ComponentBackgroundPaint'
 import { createTeacherControllerHudGeometry, teacherControllerReferenceSize, isViewportComponent, projectTeacherControllerInstances, restoreTeacherControllerFrameEdits, type TeacherControllerDisplayPort, type TeacherControllerHudGeometry } from '../../../shared/teacherControllerViewportGeometry'
-import { SlideLayerSelectionOverlay } from './SlideLayerSelectionOverlay'
+import { selectionHandleGesture, SlideLayerSelectionOverlay } from './SlideLayerSelectionOverlay'
 import { CourseNavigationControls } from './CourseNavigationControls'
 import { EDITOR_PAGE_INSETS, fitPage } from '../../../shared/pageFrame'
 import { MIXED_GLOBAL_GEOMETRY, mixedGlobalGeometryEdits, type MixedGlobalGeometryRequest } from './mixedGlobalGeometry'
@@ -39,6 +41,7 @@ export interface SpatialLocationWorkspaceProps {
   surface: ComponentSurface
   view: SpatialSurfaceViewState
   activeStateId?: string | null
+  activeGroupId?: string | null
   selectionIds: readonly string[]
   canvasMode: 'edit' | 'run'
   renderInstance(instanceId: string, displayProjection?: CourseProjectV10): ReactNode
@@ -55,6 +58,8 @@ export interface SpatialLocationWorkspaceProps {
   onCanvasModeChange(mode: 'edit' | 'run'): void
   onResetPlayback?(playing: boolean): Promise<void>
   onEditContent?(instanceId: string): void
+  onEnterGroup?(instanceId: string): void
+  onEnterContainer?(instanceId: string): void
   contentEdit?: SlideContentEdit | null
   contentEditor?: {
     read?(): SlideContentEdit | null
@@ -78,13 +83,18 @@ export interface SpatialLocationWorkspaceProps {
   activation?: number
 }
 const pointer = (event: { clientX: number; clientY: number }): GeometryPoint => ({ x: event.clientX, y: event.clientY })
-const inputOwnsPointer = (target: EventTarget | null) => target instanceof Element && Boolean(target.closest('input,textarea,select,button,a,[contenteditable="true"],[data-component-professional-editor]'))
-const handles: FreeResizeHandle[] = ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w']
-type PointerInput = Pick<ReactPointerEvent<Element>, 'pointerId' | 'button' | 'clientX' | 'clientY' | 'shiftKey' | 'altKey' | 'preventDefault' | 'stopPropagation'> & { target: EventTarget | null; visibleInstanceId?: string | null }
+// Only the current author input owns canvas pointer gestures. Runtime controls are
+// ordinary selectable objects while authoring, including input/button/link DOM.
+const inputOwnsPointer = (target: EventTarget | null) => target instanceof Element && Boolean(target.closest('[data-component-professional-editor],.canvas-plain-text-editor,.selection-quick-bar,.text-edit-toolbar,.shared-document-toolbar'))
+const keyboardInput = (target: EventTarget | null) => target instanceof Element && Boolean(target.closest('input,textarea,select,[contenteditable="true"]'))
+type PointerInput = Pick<ReactPointerEvent<Element>, 'pointerId' | 'button' | 'clientX' | 'clientY' | 'shiftKey' | 'altKey' | 'preventDefault' | 'stopPropagation'> & {
+  target: EventTarget | null; visibleInstanceId?: string | null; released?: boolean
+  finalPointer?: { clientX: number; clientY: number; shiftKey?: boolean; altKey?: boolean }
+}
 type PointerFinish = Pick<PointerInput, 'pointerId'> & Partial<Pick<PointerInput, 'clientX' | 'clientY' | 'shiftKey' | 'altKey'>>
 const frozenPointer = (event: PointerInput): PointerInput => ({ pointerId: event.pointerId, button: event.button,
   clientX: event.clientX, clientY: event.clientY, shiftKey: event.shiftKey, altKey: event.altKey, target: event.target,
-  visibleInstanceId: event.visibleInstanceId, preventDefault() {}, stopPropagation() {} })
+  visibleInstanceId: event.visibleInstanceId, released: event.released, finalPointer: event.finalPointer, preventDefault() {}, stopPropagation() {} })
 function distance(point: GeometryPoint, a: GeometryPoint, b: GeometryPoint) {
   const dx = b.x - a.x, dy = b.y - a.y, length = dx * dx + dy * dy
   const t = length ? Math.max(0, Math.min(1, ((point.x - a.x) * dx + (point.y - a.y) * dy) / length)) : 0
@@ -103,6 +113,9 @@ function RelationLabel({ text, segments, targets, matrix, interactive }: { text:
 export function SpatialLocationWorkspace(props: SpatialLocationWorkspaceProps) {
   const latest = useRef(props); latest.current = props
   const root = useRef<HTMLElement>(null), viewport = useRef<HTMLDivElement>(null)
+  const capturePointer = (event: PointerInput) => {
+    if (!event.released && !viewport.current!.hasPointerCapture(event.pointerId)) viewport.current!.setPointerCapture(event.pointerId)
+  }
   const menu = useContextMenu(), media = useWorkspaceMediaSource()
   const mediaRef = useRef(media); mediaRef.current = media
   const [size, setSize] = useState({ width: 800, height: 450 })
@@ -114,12 +127,12 @@ export function SpatialLocationWorkspace(props: SpatialLocationWorkspaceProps) {
   const [, refreshNavigation] = useState(0)
   useEffect(() => props.teacherController?.subscribe(() => refreshNavigation(value => value + 1)), [props.teacherController])
   useEffect(() => props.teacherController?.subscribePlacement?.(() => refreshNavigation(value => value + 1)), [props.teacherController])
-  const active = useRef<{ pointerId: number; last: GeometryPoint; pan?: { pointer: GeometryPoint; camera: SpatialSurfaceViewState['camera']; scale: number };
+  const active = useRef<{ pointerId: number; start: GeometryPoint; moved: boolean; last: GeometryPoint; pan?: { pointer: GeometryPoint; camera: SpatialSurfaceViewState['camera']; scale: number };
     marquee?: GeometryPoint; originalSelection?: readonly string[]; geometry?: FreeTransformGesture; targets: FreeObjectTarget[]; edits: ComponentEdit[]; captured: CapturedCourseTarget } | null>(null)
   const pendingMove = useRef<PointerInput | null>(null), moveFrame = useRef<number | null>(null)
   const visiblePointer = useRef<{ input: PointerInput; latest: PointerInput; ended: boolean; context: string } | null>(null)
   const hitContext = () => JSON.stringify([latest.current.documentId, latest.current.surface.id, latest.current.activeStateId,
-    latest.current.view.scope, latest.current.canvasMode, latest.current.activation])
+    latest.current.view.scope, latest.current.canvasMode, latest.current.activation, latest.current.activeGroupId])
   const applyMove = useRef<(input: PointerInput) => void>(() => {})
   const cancelPendingMove = () => {
     if (moveFrame.current !== null) cancelAnimationFrame(moveFrame.current)
@@ -132,10 +145,13 @@ export function SpatialLocationWorkspace(props: SpatialLocationWorkspaceProps) {
   }
   useEffect(() => () => cancelPendingMove(), [])
   const deferred = useRef<{ input: PointerInput; mode: 'drag' | 'resize' | 'rotate'; handle?: FreeResizeHandle;
-    latest: PointerInput; ended: boolean; documentId: string; surfaceId: string; stateId: string | null; scope: SpatialSurfaceViewState['scope']; epoch: string } | null>(null)
+    latest: PointerInput; ended: boolean; documentId: string; surfaceId: string; stateId: string | null; groupId: string | null; scope: SpatialSurfaceViewState['scope']; epoch: string } | null>(null)
   const resumePointer = useRef<(input: PointerInput, mode: 'drag' | 'resize' | 'rotate', handle?: FreeResizeHandle) => void>(() => {})
   const resumeMove = useRef<(input: PointerInput) => void>(() => {})
   const resumeFinish = useRef<(pointerId: number) => void>(() => {})
+  const finishPointer = useRef<(pointerId: number) => void>(() => {})
+  const realmPointer = useRef<(detail: ComponentAuthorObjectPointer, clientPoint: GeometryPoint) => void>(() => {})
+  const objectDoubleClick = useRef<(instanceId: string, clientPoint: GeometryPoint, target?: EventTarget | null) => void>(() => {})
   const spatial = props.surface.spatial
   const worldTargets = spatialWorldTargets(props.project, props.surface.id)
   const design = props.surface.designSize ?? { width: 1280, height: 720 }
@@ -181,9 +197,6 @@ export function SpatialLocationWorkspace(props: SpatialLocationWorkspaceProps) {
   const showGlobals = props.project.rootIds.includes(props.surface.id) || props.view.scope === 'global'
   const allTargets = freeSurfaceTargets(displayProject, props.surface.id)
     .filter(target => showGlobals || !globalIds.has(target.ancestors[0] ?? target.instanceId))
-  const allControllerTargets = allTargets.filter(target => isViewportComponent(props.project, target.instanceId))
-  const controllerTargets = allControllerTargets
-    .filter(target => isComponentVisibleAtSurface(props.project.instances[target.instanceId], props.surface.id))
   const isGlobalTarget = (target: FreeObjectTarget) => globalIds.has(target.ancestors[0] ?? target.instanceId)
   const scopeTargets = props.view.scope === 'global' ? allTargets.filter(isGlobalTarget) : allTargets
   const visibleTargets = scopeTargets.filter(target => isComponentVisibleAtSurface(props.project.instances[target.instanceId], props.surface.id)
@@ -218,19 +231,22 @@ export function SpatialLocationWorkspace(props: SpatialLocationWorkspaceProps) {
     onSelectField: (spot, activate, read) => authorInteraction.selectNativeField(spot, activate, read),
   }, props.documentId + ':' + props.surface.id + ':' + (props.activeStateId ?? ''))
   const authorInteraction = useComponentAuthorInteraction({ root, documentId: props.documentId, surfaceId: props.surface.id,
-    enabled: props.canvasMode === 'edit', contextKey: props.view.scope, selectImage: props.onSelectImageAsset, report: setError, wholeInstanceEditor: false })
+    enabled: props.canvasMode === 'edit', contextKey: `${props.view.scope}:${props.activeGroupId ?? ''}`, selectImage: props.onSelectImageAsset, report: setError, wholeInstanceEditor: false,
+    onObjectPointer: (detail, clientPoint) => realmPointer.current(detail, clientPoint),
+    resolveObjectTarget: id => editingLevelInstanceId(latest.current.project, latest.current.surface.id, id, latest.current.activeGroupId),
+    onObjectDoubleClick: (id, clientPoint) => objectDoubleClick.current(id, clientPoint) })
   const resolveVisibleAt = (point: GeometryPoint) => visibleComponentAuthorHit(viewport.current, point, id =>
     [...(viewport.current?.querySelectorAll<HTMLElement>('[data-component-render]') ?? [])].find(element => element.dataset.componentRender === id))
   const visibleTarget = (input: { visibleInstanceId?: string | null; altKey?: boolean }) => {
-    const leaf = viewportTargets.find(target => target.instanceId === input.visibleInstanceId)
-    return leaf && (input.altKey || leaf.directSelection || !leaf.ancestors.length ? leaf
-      : viewportTargets.find(target => target.instanceId === leaf.ancestors[0]) ?? leaf)
+    return input.visibleInstanceId ? freeTargetAtEditingLevel(viewportTargets, input.visibleInstanceId, props.activeGroupId, input.altKey) : null
   }
-  const beginNativePointer = (event: PointerInput): boolean => {
+  const visibleInstance = (input: { visibleInstanceId?: string | null; altKey?: boolean }) => input.visibleInstanceId
+    ? editingLevelInstanceId(props.project, props.surface.id, input.visibleInstanceId, props.activeGroupId, input.altKey) : null
+  const beginNativeEdit = (event: PointerInput): boolean => {
     if (props.canvasMode !== 'edit' || !props.contentEditor || spacePan.current || event.button !== 0
       || inputOwnsPointer(event.target) || event.target instanceof Element && event.target.closest('[data-handle],[data-controller-selection]')) return false
     const hit = viewportTargets.find(target => target.instanceId === event.visibleInstanceId)
-    if (!hit) return false
+    if (!hit || locked(hit)) return false
     const instance = props.project.instances[hit.instanceId], implementation = instance && (instance.implementationOverride ?? props.project.definitions[instance.definitionId]?.implementation)
     if (implementation?.kind !== 'builtin' || !['guoling.text', 'guoling.formula', 'guoling.table', 'guoling.chart'].includes(implementation.key)) return false
     const original = visibleTargets.find(target => target.instanceId === hit.instanceId)
@@ -241,6 +257,25 @@ export function SpatialLocationWorkspace(props: SpatialLocationWorkspaceProps) {
     event.preventDefault(); event.stopPropagation()
     void authorInteraction.beginNative(hit.instanceId, captured)
     return true
+  }
+  objectDoubleClick.current = (instanceId, clientPoint, target = viewport.current) => {
+    const context = hitContext(), id = visibleInstance({ visibleInstanceId: instanceId })
+    if (!id) return
+    const input = frozenPointer({ pointerId: 0, button: 0, clientX: clientPoint.x, clientY: clientPoint.y,
+      shiftKey: false, altKey: false, target, visibleInstanceId: instanceId, released: true, preventDefault() {}, stopPropagation() {} })
+    if (!componentIsLocked(props.project, id) && id === instanceId && beginNativeEdit(input)) return
+    void (async () => {
+      const contentEdit = props.contentEditor?.read ? props.contentEditor.read() : props.contentEdit
+      if (contentEdit?.composing) return
+      if (contentEdit) await props.contentEditor?.commit()
+      if (context !== hitContext() || !latest.current.project.instances[id]) return
+      latest.current.onSelect([id])
+      if (componentIsLocked(latest.current.project, id)) return
+      const instance = latest.current.project.instances[id]
+      if (instance.container) latest.current.onEnterContainer?.(id)
+      else if (componentDefinitionBuiltinKey(latest.current.project.definitions[instance.definitionId]) === 'guoling.group') latest.current.onEnterGroup?.(id)
+      else latest.current.onEditContent?.(id)
+    })().catch(failure => setError(failure instanceof Error ? failure.message : String(failure)))
   }
   const resetPreview = () => {
     for (const node of viewport.current?.querySelectorAll<HTMLElement>('[data-component-instance]') ?? []) {
@@ -256,9 +291,17 @@ export function SpatialLocationWorkspace(props: SpatialLocationWorkspaceProps) {
     const observer = new ResizeObserver(resize); observer.observe(element); resize()
     return () => observer.disconnect()
   }, [props.documentId, props.surface.id])
-  useEffect(() => { cancelPendingMove(); active.current = null; deferred.current = null; resetPreview(); setMarquee(null); setError(null) }, [props.documentId, props.surface.id, props.activeStateId, props.view.scope, props.canvasMode])
+  useEffect(() => { cancelPendingMove(); active.current = null; deferred.current = null; visiblePointer.current = null; resetPreview(); setMarquee(null); setError(null) }, [props.documentId, props.surface.id, props.activeStateId, props.activeGroupId, props.view.scope, props.canvasMode])
   useEffect(() => {
-    const down = (event: KeyboardEvent) => { if (event.code === 'Space' && !inputOwnsPointer(event.target)) { spacePan.current = true; event.preventDefault() } }
+    const down = (event: KeyboardEvent) => {
+      if (event.code === 'Space' && !inputOwnsPointer(event.target) && !keyboardInput(event.target)) { spacePan.current = true; event.preventDefault() }
+      if (event.key === 'Escape' && (visiblePointer.current || deferred.current || active.current)) {
+        event.preventDefault(); event.stopPropagation()
+        const pointerId = visiblePointer.current?.input.pointerId ?? deferred.current?.input.pointerId ?? active.current?.pointerId
+        visiblePointer.current = null
+        if (pointerId !== undefined) finishPointer.current(pointerId)
+      }
+    }
     const up = (event: KeyboardEvent) => { if (event.code === 'Space') spacePan.current = false }
     const blur = () => { spacePan.current = false }
     window.addEventListener('keydown', down); window.addEventListener('keyup', up); window.addEventListener('blur', blur)
@@ -314,17 +357,15 @@ export function SpatialLocationWorkspace(props: SpatialLocationWorkspaceProps) {
     return null
   }
   const begin = (event: PointerInput, mode: 'drag' | 'resize' | 'rotate' = 'drag', handle?: FreeResizeHandle) => {
-    const teacherButton = props.canvasMode === 'edit' && event.target instanceof Element && event.target.closest('button')
-      && isViewportComponent(props.project, event.target.closest('[data-component-instance]')?.getAttribute('data-component-instance') ?? '')
-    if (active.current || deferred.current || (event.button !== 0 && event.button !== 1) || inputOwnsPointer(event.target) && !teacherButton) return
+    if (active.current || deferred.current || (event.button !== 0 && event.button !== 1) || inputOwnsPointer(event.target)) return
     const contentEdit = props.contentEditor?.read ? props.contentEditor.read() : props.contentEdit
     if (contentEdit) {
       if (contentEdit.composing || !props.contentEditor) return
-      event.preventDefault(); event.stopPropagation(); viewport.current!.setPointerCapture(event.pointerId)
+      event.preventDefault(); event.stopPropagation(); capturePointer(event)
       const input: PointerInput = { pointerId: event.pointerId, button: event.button, clientX: event.clientX, clientY: event.clientY,
-        shiftKey: event.shiftKey, altKey: event.altKey, target: event.target, visibleInstanceId: event.visibleInstanceId, preventDefault() {}, stopPropagation() {} }
+        shiftKey: event.shiftKey, altKey: event.altKey, target: event.target, visibleInstanceId: event.visibleInstanceId, released: event.released, preventDefault() {}, stopPropagation() {} }
       const pending = { input, mode, handle, latest: input, ended: false, documentId: props.documentId, surfaceId: props.surface.id,
-        stateId: props.activeStateId ?? null, scope: props.view.scope, epoch: contentEdit.target.epoch }
+        stateId: props.activeStateId ?? null, groupId: props.activeGroupId ?? null, scope: props.view.scope, epoch: contentEdit.target.epoch }
       deferred.current = pending
       const rejected = (failure: unknown) => {
         if (deferred.current !== pending) return
@@ -336,8 +377,9 @@ export function SpatialLocationWorkspace(props: SpatialLocationWorkspaceProps) {
         if (deferred.current !== pending) return
         const current = latest.current
         if (current.documentId !== pending.documentId || current.surface.id !== pending.surfaceId || (current.activeStateId ?? null) !== pending.stateId
-          || current.view.scope !== pending.scope || current.canvasMode !== 'edit' || current.captureTarget().epoch !== pending.epoch) { deferred.current = null; return }
+          || (current.activeGroupId ?? null) !== pending.groupId || current.view.scope !== pending.scope || current.canvasMode !== 'edit' || current.captureTarget().epoch !== pending.epoch) { deferred.current = null; return }
         deferred.current = null
+        pending.input.released = pending.ended || pending.input.released
         resumePointer.current(pending.input, pending.mode, pending.handle)
         resumeMove.current(pending.latest)
         if (pending.ended) resumeFinish.current(pending.input.pointerId)
@@ -353,16 +395,22 @@ export function SpatialLocationWorkspace(props: SpatialLocationWorkspaceProps) {
       props.onGraphSelect(relationId ? { kind: 'relation', id: relationId } : { kind: 'path', id: pathId! })
       event.preventDefault(); event.stopPropagation(); return
     }
-    const hudHandle = event.target instanceof Element && event.target.closest('[data-controller-selection]')
+    const selectionHandle = event.target instanceof Element && event.target.closest('[data-controller-selection],[data-spatial-object-selection]')
     const hit = props.canvasMode === 'run' || event.button === 1 || spacePan.current ? null
-      : hudHandle ? controllerTargets.find(target => props.selectionIds.includes(target.instanceId)) ?? null
+      : selectionHandle ? visibleTargets.find(target => props.selectionIds.includes(target.instanceId)) ?? null
         : mode === 'drag' ? visibleTarget(event)
           : visibleTargets.find(target => props.selectionIds.includes(target.instanceId)) ?? null
+    const selectedId = props.canvasMode === 'edit' && mode === 'drag' && event.button === 0 && !spacePan.current && !selectionHandle ? visibleInstance(event) : null
+    if (selectedId && !hit) {
+      props.onGraphSelect(null)
+      props.onSelect(event.shiftKey ? props.selectionIds.includes(selectedId) ? props.selectionIds.filter(id => id !== selectedId) : [...props.selectionIds, selectedId] : [selectedId])
+      event.preventDefault(); event.stopPropagation(); return
+    }
     const pan = event.button === 1 || spacePan.current || (!hit && !event.shiftKey)
     if (!hit && !pan && props.canvasMode === 'edit') {
-      event.preventDefault(); event.stopPropagation(); viewport.current!.setPointerCapture(event.pointerId)
+      event.preventDefault(); event.stopPropagation(); capturePointer(event)
       const start = viewportPoint(event)
-      active.current = { pointerId: event.pointerId, last: pointer(event), marquee: start, originalSelection: props.selectionIds, targets: [], edits: [], captured: props.captureTarget() }
+      active.current = { pointerId: event.pointerId, start: pointer(event), moved: false, last: pointer(event), marquee: start, originalSelection: props.selectionIds, targets: [], edits: [], captured: props.captureTarget() }
       setMarquee({ start, end: start }); return
     }
     if (!hit && props.canvasMode === 'edit') { const graph = graphAt(at(event)); if (graph) { props.onGraphSelect(graph); event.stopPropagation(); return } }
@@ -371,10 +419,10 @@ export function SpatialLocationWorkspace(props: SpatialLocationWorkspaceProps) {
     const ids = mode !== 'drag' ? props.selectionIds : hit && event.shiftKey ? props.selectionIds.includes(hit.instanceId) ? props.selectionIds.filter(id => id !== hit.instanceId) : [...props.selectionIds, hit.instanceId] : hit && props.selectionIds.includes(hit.instanceId) ? props.selectionIds : hit ? [hit.instanceId] : []
     const targets = selectedFreeTargets(visibleTargets, ids).filter(target => !locked(target))
     if (hit && !targets.length || !hit && !pan) { event.stopPropagation(); return }
-    event.preventDefault(); event.stopPropagation(); viewport.current!.setPointerCapture(event.pointerId)
+    event.preventDefault(); event.stopPropagation(); capturePointer(event)
     gestureDisplay.current = { original: props.project, display: displayProject, viewport: controllerGeometry,
       offset: props.teacherController?.placement?.() ?? { x: 0, y: 0 } }
-    active.current = { pointerId: event.pointerId, last: pointer(event), targets, captured: props.captureTarget(), edits: [],
+    active.current = { pointerId: event.pointerId, start: pointer(event), moved: false, last: pointer(event), targets, captured: props.captureTarget(), edits: [],
       ...(pan ? { pan: { pointer: pointer(event), camera: { ...props.view.camera }, scale: renderScale } } : {}),
       geometry: pan ? undefined : new FreeTransformGesture({ mode, handle, targets: targets.map(viewportTarget), pointer: pointer(event), surfaceToPointer: controllerPointerMatrix(), snapTargets: viewportTargets.filter(target => !ids.includes(target.instanceId) && !target.ancestors.some(id => ids.includes(id))) }) }
   }
@@ -383,7 +431,9 @@ export function SpatialLocationWorkspace(props: SpatialLocationWorkspaceProps) {
     const gesture = active.current
     if (!gesture || gesture.pointerId !== event.pointerId) return
     const next = pointer(event)
-    if (gesture.marquee) { const end = viewportPoint(event); setMarquee({ start: gesture.marquee, end }); props.onSelect([...new Set([...(gesture.originalSelection ?? []), ...marqueeFreeTargets(viewportTargets, gesture.marquee, end)])]) }
+    if (!gesture.moved && Math.hypot(next.x - gesture.start.x, next.y - gesture.start.y) < 3) { gesture.last = next; return }
+    gesture.moved = true
+    if (gesture.marquee) { const end = viewportPoint(event); setMarquee({ start: gesture.marquee, end }); props.onSelect([...new Set([...(gesture.originalSelection ?? []), ...marqueeFreeTargets(viewportTargets, gesture.marquee, end, props.activeGroupId)])]) }
     else if (gesture.pan) props.onCamera(panComponentSpatialCamera(gesture.pan.camera,
       { x: (next.x - gesture.pan.pointer.x) / gesture.pan.scale, y: (next.y - gesture.pan.pointer.y) / gesture.pan.scale }))
     else if (gesture.geometry) {
@@ -437,22 +487,48 @@ export function SpatialLocationWorkspace(props: SpatialLocationWorkspaceProps) {
     active.current = null
     setMarquee(null)
     if (cancel && gesture.marquee) props.onSelect(gesture.originalSelection ?? [])
+    if (cancel && gesture.pan) props.onCamera(gesture.pan.camera)
     if (viewport.current?.hasPointerCapture(event.pointerId)) viewport.current.releasePointerCapture(event.pointerId)
     const frozen = gestureDisplay.current
-    const edits = frozen ? restoreTeacherControllerFrameEdits(gesture.edits, frozen.original, frozen.display, frozen.viewport, frozen.offset, props.teacherController) : gesture.edits
+    const edits = (frozen ? restoreTeacherControllerFrameEdits(gesture.edits, frozen.original, frozen.display, frozen.viewport, frozen.offset, props.teacherController) : gesture.edits)
+      .filter(edit => edit.type !== 'frame.set' || !edit.frame || (() => {
+        const original = frozen?.original.instances[edit.instanceId]?.frame ?? gesture.targets.find(target => target.instanceId === edit.instanceId)?.frame
+        return !original || original.width !== edit.frame.width || original.height !== edit.frame.height
+          || original.transform.some((value, index) => Math.abs(value - edit.frame!.transform[index]) > .000001)
+      })())
     if (!cancel && edits.length) void props.onEdits(edits, gesture.captured).catch(error => setError(String(error))).finally(resetPreview)
     else resetPreview()
   }
   resumeFinish.current = pointerId => finish({ pointerId })
+  finishPointer.current = pointerId => {
+    // Escape cancels a deferred gesture even if the button was already released.
+    if (deferred.current?.input.pointerId === pointerId) deferred.current = null
+    finish({ pointerId }, true)
+    if (viewport.current?.hasPointerCapture(pointerId)) viewport.current.releasePointerCapture(pointerId)
+  }
+  realmPointer.current = (detail, clientPoint) => {
+    if (props.canvasMode !== 'edit' || typeof detail.pointerId !== 'number') return
+    const input: PointerInput = { pointerId: detail.pointerId, button: detail.button ?? 0, clientX: clientPoint.x, clientY: clientPoint.y,
+      shiftKey: Boolean(detail.shiftKey), altKey: Boolean(detail.altKey), target: viewport.current, visibleInstanceId: detail.instanceId, released: detail.released,
+      preventDefault() {}, stopPropagation() {} }
+    if (detail.phase === 'start') begin(input)
+    else if (detail.phase === 'update') move(input)
+    else if (detail.phase === 'end') finish(input)
+    else if (detail.phase === 'cancel') finishPointer.current(input.pointerId)
+  }
   const selectedTargets = selectedFreeTargets(scopeTargets.map(target => preview[target.instanceId] ? { ...target, frame: preview[target.instanceId]! } : target), props.selectionIds)
   const selected = selectedTargets.filter(target => !isViewportComponent(props.project, target.instanceId)).map(viewportTarget)
   const selectedControllers = selectedTargets.filter(target => isViewportComponent(props.project, target.instanceId))
-  const bounds = freeSelectionBounds(selected)
-  const corners = selected.length === 1 ? frameCorners(selected[0]!.frame, selected[0]!.parentToSurface) : bounds ? [{ x: bounds.left, y: bounds.top }, { x: bounds.right, y: bounds.top }, { x: bounds.right, y: bounds.bottom }, { x: bounds.left, y: bounds.bottom }] : []
-  const screenCorners = corners
-  const [nw, ne, se, sw] = screenCorners
-  const mid = (a: GeometryPoint, b: GeometryPoint) => ({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 })
-  const points = nw && ne && se && sw ? { nw, n: mid(nw, ne), ne, e: mid(ne, se), se, s: mid(sw, se), sw, w: mid(nw, sw) } : null
+  const objectSelectionPhase = !props.contentEdit
+  const selectedTransformable = objectSelectionPhase && selected.length > 0 && selected.every(target => !componentIsLocked(props.project, target.instanceId))
+  const controllerTransformable = objectSelectionPhase && selectedControllers.length > 0 && selectedControllers.every(target => !componentIsLocked(props.project, target.instanceId))
+  const authorTransformable = objectSelectionPhase && Boolean(authorInteraction.authorTarget)
+    && !componentIsLocked(props.project, authorInteraction.selectedSpot?.instanceId ?? authorInteraction.authorTarget?.instanceId ?? '')
+  const authorBounds = authorInteraction.selectedSpot && !authorInteraction.authorTarget ? authorInteraction.authorBounds() : null
+  const instanceBounds = (id: string) => [...(viewport.current?.querySelectorAll<HTMLElement>('[data-component-instance]') ?? [])]
+    .find(element => element.dataset.componentInstance === id)?.getBoundingClientRect() ?? null
+  const framelessBounds = authorInteraction.selectedSpot ? [] : props.selectionIds.filter(id => !scopeTargets.some(target => target.instanceId === id))
+    .flatMap(id => { const bounds = instanceBounds(id); return bounds && bounds.width > 0 && bounds.height > 0 ? [{ id, bounds }] : [] })
   const editTarget = props.contentEdit && scopeTargets.find(target => target.instanceId === props.contentEdit!.instanceId)
   const editorMatrix = editTarget && isGlobalTarget(editTarget) ? hudMatrix : matrix
   const currentFrame = spatial?.frames.find(frame => frame.id === props.view.activeCameraFrameId)
@@ -464,7 +540,7 @@ export function SpatialLocationWorkspace(props: SpatialLocationWorkspaceProps) {
   const zoom = (delta: number) => props.onCamera({ ...props.view.camera, zoom: Math.max(0.01, props.view.camera.zoom + delta) })
   return <main ref={root} className={`workspace workspace--${props.canvasMode} workspace--spatial`} data-testid="spatial-workspace">
     <NativeSelectionContext documentId={props.documentId} revision={props.project.revision} locationId={props.surface.id} itemIds={props.selectionIds} stateId={props.activeStateId} enabled={props.canvasMode === 'edit'} textEditing={Boolean(props.contentEdit)} authorSpot={authorInteraction.selectedSpot} authorBounds={authorInteraction.authorBounds}
-      bounds={id => { const element = [...(viewport.current?.querySelectorAll<HTMLElement>('[data-component-instance]') ?? [])].find(value => value.dataset.componentInstance === id); return element?.getBoundingClientRect() ?? null }} />
+      bounds={instanceBounds} />
     {menu.element}
     {authorInteraction.editor}
     <CourseNavigationControls canvasMode={props.canvasMode} onCanvasModeChange={props.onCanvasModeChange}
@@ -486,38 +562,61 @@ export function SpatialLocationWorkspace(props: SpatialLocationWorkspaceProps) {
         ? { inset: 'auto', left: runFit.left, top: runFit.top, width: design.width * runFit.scale, height: design.height * runFit.scale }
         : { inset: 0 }), overflow: 'hidden', touchAction: 'none', isolation: 'isolate', boxShadow: dragOver ? 'inset 0 0 0 3px #245b46' : undefined }}
       onPointerDownCapture={event => {
-        if (props.canvasMode === 'edit' && event.button === 0 && !spacePan.current && !(event.target instanceof Element && event.target.closest('[data-handle],[data-controller-selection],[data-component-professional-editor],input,textarea,[contenteditable="true"]'))) {
-          event.preventDefault(); event.stopPropagation(); viewport.current!.setPointerCapture(event.pointerId)
+        if (props.canvasMode === 'edit' && event.target instanceof Element && event.target.closest('[data-author-selection]')) {
+          const handle = event.target.closest('[data-handle]')?.getAttribute('data-handle') as FreeResizeHandle | 'rotate' | 'move' | null
+          const gesture = selectionHandleGesture(handle)
+          authorInteraction.beginTransform(event, gesture.mode, gesture.handle)
+          return
+        }
+        if (props.canvasMode === 'edit' && event.button === 0 && !spacePan.current && !inputOwnsPointer(event.target) && !(event.target instanceof Element && event.target.closest('[data-handle],[data-controller-selection],[data-spatial-object-selection]'))) {
+          event.preventDefault(); event.stopPropagation(); capturePointer(event)
           const input = frozenPointer(event), pending = { input, latest: input, ended: false, context: hitContext() }
           visiblePointer.current = pending
           void resolveVisibleAt(pointer(event)).then(hit => {
             if (visiblePointer.current !== pending || hitContext() !== pending.context) return
-            visiblePointer.current = null; input.visibleInstanceId = hit?.instanceId ?? null
-            if (beginNativePointer(input) || hit?.authorKey && authorInteraction.pointerFromElement(input as ReactPointerEvent<HTMLElement>, hit)) return
+            visiblePointer.current = null; input.visibleInstanceId = hit?.instanceId ?? null; input.released = pending.ended
+            input.finalPointer = { clientX: pending.latest.clientX, clientY: pending.latest.clientY, shiftKey: pending.latest.shiftKey, altKey: pending.latest.altKey }
+            if (hit?.authorKey && visibleInstance(input) === hit.instanceId && authorInteraction.pointerFromElement(input as ReactPointerEvent<HTMLElement>, hit)) return
             resumePointer.current(input, 'drag'); resumeMove.current(pending.latest)
             if (pending.ended) resumeFinish.current(input.pointerId)
           }).catch(failure => { visiblePointer.current = null; setError(String(failure)) })
           return
         }
-        if (event.target instanceof Element && event.target.closest('[data-controller-selection]')) {
-        const handle = event.target.closest('[data-handle]')?.getAttribute('data-handle') as FreeResizeHandle | 'rotate' | null
-        begin(event, handle === 'rotate' ? 'rotate' : handle ? 'resize' : 'drag', handle === 'rotate' ? undefined : handle ?? undefined)
+        if (event.target instanceof Element && event.target.closest('[data-controller-selection],[data-spatial-object-selection]')) {
+        const handle = event.target.closest('[data-handle]')?.getAttribute('data-handle') as FreeResizeHandle | 'rotate' | 'move' | null
+        const gesture = selectionHandleGesture(handle)
+        begin(event, gesture.mode, gesture.handle)
       } else if (!(event.target instanceof Element && event.target.closest('[data-handle]'))) begin(event) }} onPointerMove={event => {
         if (visiblePointer.current?.input.pointerId === event.pointerId) { visiblePointer.current.latest = frozenPointer(event); return }
         move(event)
       }} onPointerUp={event => {
         if (visiblePointer.current?.input.pointerId === event.pointerId) { visiblePointer.current.ended = true; visiblePointer.current.latest = frozenPointer(event); return }
         finish(event)
-      }} onPointerCancel={event => { visiblePointer.current = null; finish(event, true) }} onLostPointerCapture={event => finish(event, true)}
-      onDoubleClick={async event => { if (props.canvasMode === 'edit' && !inputOwnsPointer(event.target)) { const context = hitContext(), client = pointer(event), visible = await resolveVisibleAt(client); if (context !== hitContext()) return; const hit = viewportTargets.find(target => target.instanceId === visible?.instanceId); if (hit) { const original = visibleTargets.find(target => target.instanceId === hit.instanceId)!, point = transformPoint(invertMatrix(targetViewportMatrix(original)), viewportPoint(event)); props.onSelect([hit.instanceId]); if (!editor.begin(hit.instanceId, point, pointer(event))) props.onEditContent?.(hit.instanceId) } } }}
+      }} onPointerCancel={event => { visiblePointer.current = null; finishPointer.current(event.pointerId) }} onLostPointerCapture={event => {
+        if (visiblePointer.current?.input.pointerId === event.pointerId) { if (!visiblePointer.current.ended) visiblePointer.current = null; return }
+        finish(event, true)
+      }}
+      onClickCapture={event => { if (props.canvasMode === 'edit' && !inputOwnsPointer(event.target) && event.target instanceof Element && event.target.closest('[data-component-instance]')) { event.preventDefault(); event.stopPropagation() } }}
+      onDoubleClickCapture={async event => {
+        if (props.canvasMode !== 'edit' || inputOwnsPointer(event.target)) return
+        event.preventDefault(); event.stopPropagation()
+        const context = hitContext(), client = pointer(event), visible = await resolveVisibleAt(client)
+        if (context !== hitContext()) return
+        const input = frozenPointer({ pointerId: 0, button: event.button, clientX: event.clientX, clientY: event.clientY,
+          shiftKey: event.shiftKey, altKey: event.altKey, target: event.target, visibleInstanceId: visible?.instanceId, released: true,
+          preventDefault() {}, stopPropagation() {} })
+        if (visibleInstance(input) === visible?.instanceId && visible?.authorKey && authorInteraction.doubleClickFromElement(event, visible)) return
+        if (visible) objectDoubleClick.current(visible.instanceId, client, event.target)
+      }}
       onContextMenu={async event => {
         if (props.canvasMode !== 'edit' || inputOwnsPointer(event.target)) return
         event.preventDefault()
         const context = hitContext(), visible = await resolveVisibleAt(pointer(event))
         if (context !== hitContext()) return
-        if (props.canvasMode === 'edit' && props.contentEditor && !inputOwnsPointer(event.target)) {
+        const selectedId = visibleInstance({ visibleInstanceId: visible?.instanceId })
+        if (selectedId === visible?.instanceId && props.canvasMode === 'edit' && props.contentEditor && !inputOwnsPointer(event.target)) {
           const hit = viewportTargets.find(target => target.instanceId === visible?.instanceId), original = hit && visibleTargets.find(target => target.instanceId === hit.instanceId)
-          const captured = hit && original && editor.capture(hit.instanceId,
+          const captured = hit && original && !locked(hit) && editor.capture(hit.instanceId,
             transformPoint(invertMatrix(targetViewportMatrix(original)), viewportPoint(event)), pointer(event), true)
           if (captured && hit) {
             event.preventDefault(); event.stopPropagation()
@@ -526,10 +625,10 @@ export function SpatialLocationWorkspace(props: SpatialLocationWorkspaceProps) {
             return
           }
         }
-        if (authorInteraction.contextMenuFromElement(event, visible)) return
+        if (selectedId === visible?.instanceId && authorInteraction.contextMenuFromElement(event, visible)) return
         if (props.canvasMode !== 'edit' || inputOwnsPointer(event.target)) return
-        event.preventDefault(); const place = pointer(event), hit = viewportTargets.find(target => target.instanceId === visible?.instanceId)
-        if (hit) { const ids = props.selectionIds.includes(hit.instanceId) ? props.selectionIds : [hit.instanceId]; props.onSelect(ids); setTimeout(() => { if (root.current) requestObjectContextMenu(root.current, { ...place, itemIds: ids }) }, 0); return }
+        event.preventDefault(); const place = pointer(event)
+        if (selectedId) { const ids = props.selectionIds.includes(selectedId) ? props.selectionIds : [selectedId]; props.onSelect(ids); setTimeout(() => { if (root.current) requestObjectContextMenu(root.current, { ...place, itemIds: ids }) }, 0); return }
         menu.open(place, '画布操作', [
           { id: 'canvas.paste', label: '粘贴', shortcut: 'Ctrl+V', group: 'clipboard', run: () => props.onPaste?.(), disabledReason: props.onPaste ? null : '当前界面不支持此操作' },
           { id: 'canvas.select-all', label: '全选', shortcut: 'Ctrl+A', group: 'clipboard', run: () => props.onSelectAll?.() },
@@ -575,7 +674,14 @@ export function SpatialLocationWorkspace(props: SpatialLocationWorkspaceProps) {
       </svg>
       {/* The plane never captures empty-space input; InstanceView owns each actual HUD hit surface. */}
       <div data-spatial-hud-plane="overlay" style={{ position: 'absolute', left: 0, top: 0, width: design.width, height: design.height, transformOrigin: '0 0', transform: `matrix(${hudMatrix.join(',')})`, pointerEvents: 'none' }}>{showGlobals && props.project.global.overlay.map(id => props.renderInstance(id, hudDisplayProject))}</div>
-      {props.canvasMode === 'edit' && <div data-controller-selection="true"><SlideLayerSelectionOverlay targets={selectedControllers.filter(target => !locked(target))} scale={1} surfaceToPointer={controllerPointerMatrix()} /></div>}
+      {props.canvasMode === 'edit' && !authorInteraction.selectedSpot && <div data-controller-selection="true"><SlideLayerSelectionOverlay targets={selectedControllers} scale={1} surfaceToPointer={controllerPointerMatrix()} movable={controllerTransformable} resizable={controllerTransformable} rotatable={controllerTransformable} /></div>}
+      {props.canvasMode === 'edit' && !authorInteraction.selectedSpot && <div data-spatial-object-selection="true" data-spatial-selection="true"><SlideLayerSelectionOverlay targets={selected} scale={1} surfaceToPointer={controllerPointerMatrix()} movable={selectedTransformable} resizable={selectedTransformable} rotatable={selectedTransformable} /></div>}
+      {props.canvasMode === 'edit' && framelessBounds.map(({ id, bounds }) => <div key={id} data-spatial-selection="true" data-spatial-frameless-selection={id} aria-hidden="true"
+        style={{ position: 'fixed', left: bounds.left, top: bounds.top, width: bounds.width, height: bounds.height, border: '1px solid #2563eb', pointerEvents: 'none' }} />)}
+      {props.canvasMode === 'edit' && authorInteraction.authorTarget && <div data-author-selection="true"><SlideLayerSelectionOverlay targets={[authorInteraction.authorTarget]} scale={1} surfaceToPointer={IDENTITY_MATRIX}
+        movable={authorTransformable} resizable={authorTransformable} rotatable={authorTransformable} /></div>}
+      {props.canvasMode === 'edit' && authorBounds && <div data-author-selection="true" aria-hidden="true" style={{ position: 'fixed', left: authorBounds.left, top: authorBounds.top,
+        width: authorBounds.width, height: authorBounds.height, border: '1px solid #2563eb', pointerEvents: 'none' }} />}
       {props.canvasMode === 'edit' && <div style={{ position: 'absolute', left: 0, top: 0, width: 0, height: 0, transformOrigin: '0 0', transform: `matrix(${editorMatrix.join(',')})` }}>{editor.editor}</div>}
       <svg width="100%" height="100%" style={{ position: 'absolute', inset: 0, pointerEvents: 'none', overflow: 'visible' }}>
         {guides.map((guide, index) => {
@@ -593,10 +699,6 @@ export function SpatialLocationWorkspace(props: SpatialLocationWorkspaceProps) {
           const points = cameraFrameCorners(spatialFramePose(frame, design, worldTargets))
           return <g key={frame.id} data-spatial-camera-frame={frame.id}><polygon points={points.map(point => `${point.x},${point.y}`).join(' ')} fill="none" stroke={frame.id === props.view.activeCameraFrameId ? '#2563eb' : '#94a3b8'} strokeDasharray="7 5" /><text x={points[0]!.x + 4} y={points[0]!.y - 6}>{frame.title ?? frame.id}</text></g>
         })}
-        {props.canvasMode === 'edit' && points && <><polygon points={screenCorners.map(point => `${point.x},${point.y}`).join(' ')} fill="none" stroke="#2563eb" strokeWidth={1.5} />
-          {!selected.some(locked) && handles.map(handle => <circle key={handle} data-handle={handle} cx={points[handle].x} cy={points[handle].y} r={5} fill="white" stroke="#2563eb" style={{ pointerEvents: 'auto', cursor: 'nwse-resize' }} onPointerDown={event => { event.stopPropagation(); begin(event, 'resize', handle) }} />)}
-          {!selected.some(locked) && <circle data-handle="rotate" cx={points.n.x} cy={points.n.y - 28} r={6} fill="white" stroke="#2563eb" style={{ pointerEvents: 'auto', cursor: 'grab' }} onPointerDown={event => { event.stopPropagation(); begin(event, 'rotate') }} />}
-        </>}
       </svg>
     </div>
   </main>

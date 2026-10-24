@@ -4,13 +4,13 @@ import { isComponentVisibleAtSurface, type ComponentFrame, type ComponentEdit, t
 import { normalizeElbowLineAuthoring, normalizeStraightLineAuthoring, resolveNativeLinePoints } from '../../shared/nativeLineGeometry'
 import type { NativeLineGeometry } from '../../shared/contracts/native-v1/types'
 import type { CapturedCourseTarget } from '../documents/CourseV10DocumentBridge'
-import { FreeTransformGesture, freeSurfaceTargets, hitFreeObject, marqueeFreeTargets, sameFreeTarget, selectedFreeTargets,
+import { FreeTransformGesture, freeSurfaceTargets, freeTargetAtEditingLevel, hitFreeObject, marqueeFreeTargets, sameFreeTarget, selectedFreeTargets,
   type FreeObjectTarget, type FreeResizeHandle, type FreeSnapGuide } from '../componentPlatform/surfaces/slide'
 
 export interface SlideAuthoringPointer { x: number; y: number; additive?: boolean; altKey?: boolean; shiftKey?: boolean }
 /** The original down intent survives a content ACK without repeating its screen hit. */
-export type SlideWorkspacePointerHit = { kind: 'object'; instanceId: string } | { kind: 'blank' }
-export interface SlideWorkspaceAuthoringState { project: CourseProjectV10; surfaceId: string; documentId: string; selectedInstanceIds: readonly string[]; activeStateId?: string | null; editingScope?: 'scene' | 'global' }
+export type SlideWorkspacePointerHit = ({ kind: 'object'; instanceId: string } | { kind: 'blank' }) & { activeGroupId?: string | null }
+export interface SlideWorkspaceAuthoringState { project: CourseProjectV10; surfaceId: string; documentId: string; selectedInstanceIds: readonly string[]; activeStateId?: string | null; activeGroupId?: string | null; editingScope?: 'scene' | 'global' }
 export interface SlideWorkspaceAuthoringPorts {
   read(): SlideWorkspaceAuthoringState | null
   capture(): CapturedCourseTarget
@@ -43,6 +43,7 @@ export function proposeSlideLineHandle(target: FreeObjectTarget, geometry: Nativ
 export function listSlideWorkspaceHitTargets(state: SlideWorkspaceAuthoringState | null): FreeObjectTarget[] {
   if (!state) return []
   return freeSurfaceTargets(state.project, state.surfaceId).filter(target => {
+    if (state.activeGroupId && !target.ancestors.includes(state.activeGroupId)) return false
     const root = target.ancestors[0] ?? target.instanceId
     const global = state.project.global.underlay.includes(root) || state.project.global.overlay.includes(root)
     if (state.editingScope === 'global' && !global) return false
@@ -59,22 +60,26 @@ const CLICK_SLOP = 3
 /** The mature workspace owns chrome/pan. This service only proposes affine edits. */
 export function createSlideWorkspaceAuthoringController(ports: SlideWorkspaceAuthoringPorts) {
   let gesture: { target: CapturedCourseTarget; value: FreeTransformGesture; edits: ComponentEdit[]; origin: GeometryPoint; moved: boolean } | null = null
-  let marquee: { start: GeometryPoint; extend: readonly string[] } | null = null
+  let marquee: { start: GeometryPoint; extend: readonly string[]; target: CapturedCourseTarget } | null = null
   let output = empty()
   const cancelGesture = () => { gesture = null; marquee = null; output = empty(); return output }
   const captureHit = (pointer: SlideAuthoringPointer, surfaceToPointer: AffineMatrix): SlideWorkspacePointerHit => {
     const state = ports.read(), targets = listSlideWorkspaceHitTargets(state)
     const at = transformPoint(invertMatrix(surfaceToPointer), point(pointer))
-    const leaf = hitFreeObject(targets, at, true, surfaceToPointer)
-    const outer = leaf && (pointer.altKey || leaf.directSelection || !leaf.ancestors.length ? leaf
-      : targets.find(value => value.instanceId === leaf.ancestors[0]) ?? leaf)
-    const selected = hitFreeObject(selectedFreeTargets(targets, state?.selectedInstanceIds ?? []), at, true, surfaceToPointer)
+    const leaf = hitFreeObject(targets, at, true, surfaceToPointer, state?.activeGroupId)
+    const outer = leaf && freeTargetAtEditingLevel(targets, leaf.instanceId, state?.activeGroupId, pointer.altKey)
+    const selected = hitFreeObject(selectedFreeTargets(targets, state?.selectedInstanceIds ?? []), at, true, surfaceToPointer, state?.activeGroupId)
     const hit = !pointer.altKey && leaf && selected && (selected.instanceId === leaf.instanceId || leaf.ancestors.includes(selected.instanceId)) ? selected : outer
-    return hit ? { kind: 'object', instanceId: hit.instanceId } : { kind: 'blank' }
+    return hit ? { kind: 'object', instanceId: hit.instanceId, activeGroupId: state?.activeGroupId ?? null }
+      : { kind: 'blank', activeGroupId: state?.activeGroupId ?? null }
   }
   const pointerDown = (pointer: SlideAuthoringPointer, surfaceToPointer: AffineMatrix, handle?: FreeResizeHandle | 'rotate', capturedHit?: SlideWorkspacePointerHit) => {
     const state = ports.read()
     if (!state) return cancelGesture()
+    if (capturedHit && 'activeGroupId' in capturedHit && (capturedHit.activeGroupId ?? null) !== (state.activeGroupId ?? null)) {
+      ports.report('编辑层级已改变，已取消原来的选择手势')
+      return cancelGesture()
+    }
     const targets = listSlideWorkspaceHitTargets(state)
     const at = transformPoint(invertMatrix(surfaceToPointer), point(pointer))
     let ids = [...state.selectedInstanceIds]
@@ -83,7 +88,7 @@ export function createSlideWorkspaceAuthoringController(ports: SlideWorkspaceAut
       const hit = intent.kind === 'object' ? targets.find(target => target.instanceId === intent.instanceId) : undefined
       if (intent.kind === 'object' && !hit) { ports.report('最初选择的对象已不存在或离开当前编辑范围，未切换到其他对象。'); return cancelGesture() }
       if (!hit) {
-        marquee = { start: at, extend: pointer.additive ? ids : [] }
+        marquee = { start: at, extend: pointer.additive ? ids : [], target: ports.capture() }
         if (!pointer.additive) ports.select([])
         return output = { ...empty(), marquee: { start: at, end: at } }
       }
@@ -122,7 +127,9 @@ export function createSlideWorkspaceAuthoringController(ports: SlideWorkspaceAut
   const pointerUp = async (pointer: SlideAuthoringPointer, surfaceToPointer: AffineMatrix) => {
     if (marquee) {
       const state = ports.read(), at = transformPoint(invertMatrix(surfaceToPointer), point(pointer))
-      ports.select([...new Set([...marquee.extend, ...marqueeFreeTargets(listSlideWorkspaceHitTargets(state), marquee.start, at)])])
+      if (state && state.documentId === marquee.target.documentId && state.surfaceId === marquee.target.surfaceId
+        && (state.activeGroupId ?? null) === (marquee.target.activeGroupId ?? null))
+        ports.select([...new Set([...marquee.extend, ...marqueeFreeTargets(listSlideWorkspaceHitTargets(state), marquee.start, at, state.activeGroupId)])])
       return cancelGesture()
     }
     pointerMove(pointer, surfaceToPointer)
@@ -131,6 +138,7 @@ export function createSlideWorkspaceAuthoringController(ports: SlideWorkspaceAut
     if (!current || !current.moved || !current.edits.length || !state) return output
     const latest = listSlideWorkspaceHitTargets(state)
     if (state.documentId !== current.target.documentId || state.surfaceId !== current.target.surfaceId ||
+      (state.activeGroupId ?? null) !== (current.target.activeGroupId ?? null) ||
       state.activeStateId !== undefined && state.activeStateId !== current.target.activeStateId ||
       !current.value.targets.every(original => {
         const now = latest.find(target => target.instanceId === original.instanceId)
@@ -145,7 +153,7 @@ export function createSlideWorkspaceAuthoringController(ports: SlideWorkspaceAut
   }
   return { captureHit, pointerDown, pointerMove, pointerUp, cancelGesture,
     contextTarget(pointer: GeometryPoint, surfaceToPointer: AffineMatrix) {
-      const state = ports.read(), hit = hitFreeObject(listSlideWorkspaceHitTargets(state), transformPoint(invertMatrix(surfaceToPointer), pointer), false, surfaceToPointer)
+      const state = ports.read(), hit = hitFreeObject(listSlideWorkspaceHitTargets(state), transformPoint(invertMatrix(surfaceToPointer), pointer), false, surfaceToPointer, state?.activeGroupId)
       if (!hit) return null
       if (!state?.selectedInstanceIds.includes(hit.instanceId)) ports.select([hit.instanceId])
       return hit.instanceId

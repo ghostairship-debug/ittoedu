@@ -10,7 +10,8 @@ import type { CourseProjectV10 } from '../../src/shared/contracts/component-plat
 
 const probe = vi.hoisted(() => ({ state: {} as Record<string, unknown>, runtime: {} as Record<string, unknown>,
   rects: [{ blockId: 'paragraph', depth: 0, x: 36, y: 100, width: 728, height: 40 }] }))
-vi.mock('../../src/renderer/store/editorStore', () => ({ useEditorStore: Object.assign((select: (state: typeof probe.state) => unknown) => select(probe.state), { getState: () => probe.state }) }))
+vi.mock('../../src/renderer/components/componentAuthorHit', () => ({ visibleComponentAuthorHit: async () => ({ instanceId: 'floating' }) }))
+vi.mock('../../src/renderer/store/editorStore', () => ({ selectActiveSlideContentEdit: () => null, useEditorStore: Object.assign((select: (state: typeof probe.state) => unknown) => select(probe.state), { getState: () => probe.state }) }))
 vi.mock('../../src/renderer/components/CourseV10RuntimeView', () => ({ useCourseV10Runtime: () => probe.runtime }))
 vi.mock('../../src/renderer/ui/useAssetObjectUrls', () => ({ useAssetObjectUrls: () => ({}) }))
 vi.mock('../../src/renderer/ui/workspaces/useComponentAuthorInteraction', () => ({ useComponentAuthorInteraction: () => ({ editor: null, pointerFromElement: () => false }) }))
@@ -76,7 +77,7 @@ async function mount(initial = project()) {
 it('uses the final Flow resize coordinate once and keeps the stored paragraph frame and anchor through Undo', async () => {
   const initial = project(), { h, ui, dispose } = await mount(initial)
   try {
-    const resize = ui.getByRole('button', { name: '调整浮层大小' })
+    const resize = ui.container.querySelector<HTMLElement>('[data-flow-overlay-id="floating"] [data-handle="se"]')!
     fireEvent.pointerDown(resize, { clientX: 50, clientY: 60, button: 0 })
     fireEvent.pointerMove(resize, { clientX: 60, clientY: 65 })
     await act(async () => fireEvent.pointerUp(resize, { clientX: 90, clientY: 80 }))
@@ -91,7 +92,7 @@ it('uses the final Flow resize coordinate once and keeps the stored paragraph fr
 it('moves a Flow paragraph overlay from down to up without a move event and restores it in one Undo', async () => {
   const initial = project(), { h, ui, dispose } = await mount(initial)
   try {
-    const move = ui.getByRole('button', { name: '移动' })
+    const move = ui.container.querySelector<HTMLElement>('[data-flow-overlay-id="floating"]')!
     fireEvent.pointerDown(move, { clientX: 50, clientY: 60, button: 0 })
     await act(async () => fireEvent.pointerUp(move, { clientX: 70, clientY: 90 }))
     await waitFor(() => expect(h.first.read().undoDepth).toBe(1))
@@ -106,8 +107,8 @@ it('moves a Flow paragraph overlay from down to up without a move event and rest
 it('leaves a small existing Flow overlay clean after zero movement or a cancelled preview', async () => {
   const initial = project(8, 6), { h, ui, dispose } = await mount(initial)
   try {
-    for (const name of ['移动', '调整浮层大小']) {
-      const handle = ui.getByRole('button', { name })
+    for (const selector of ['[data-flow-overlay-id="floating"]', '[data-flow-overlay-id="floating"] [data-handle="se"]']) {
+      const handle = ui.container.querySelector<HTMLElement>(selector)!
       fireEvent.pointerDown(handle, { clientX: 50, clientY: 60, button: 0 })
       await act(async () => fireEvent.pointerUp(handle, { clientX: 50, clientY: 60 }))
       fireEvent.pointerDown(handle, { clientX: 50, clientY: 60, button: 0 })

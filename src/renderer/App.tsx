@@ -920,7 +920,17 @@ export default function App() {
       const state = useEditorStore.getState()
       state.selectNodes(selectEditingNodes(state).map((node) => node.id))
     },
-    clearSelection: () => useEditorStore.getState().selectNodes([]),
+    clearSelection: () => {
+      const state = useEditorStore.getState(), draft = selectActiveSlideContentEdit(state)
+      if (draft) {
+        if (!draft.composing) void state.commitSlideContentEdit().catch(error => state.setError(String(error)))
+        return
+      }
+      if (state.courseView.activeGroupId) {
+        void state.navigateCourseView(documentId => state.courseBridge.leaveGroup(documentId))
+          .catch(error => state.setError(String(error)))
+      } else state.selectNodes([])
+    },
     selectedCount: () => selectSelectedNodeIds(useEditorStore.getState()).length,
     saveProject: (saveAs) => {
       void courseProjectLifecycle.saveProject(saveAs)

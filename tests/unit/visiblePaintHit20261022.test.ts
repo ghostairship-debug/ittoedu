@@ -135,6 +135,6 @@ it('never gives a selected covered sibling priority over the current front leaf'
       back: { id: 'back', definitionId: 'shape', data: {}, frame }, front: { id: 'front', definitionId: 'shape', data: {}, frame } },
     surfaces: [{ id: 'slide', kind: 'slide', title: 'Slide', childIds: ['group'], designSize: { width: 400, height: 300 } }], global: { underlay: [], overlay: [] }, assets: {} } as any)
   const controller = createSlideWorkspaceAuthoringController({ read: () => ({ project, surfaceId: 'slide', documentId: 'lab', selectedInstanceIds: ['back'] }), capture: () => ({} as any), select() {}, async commit() {}, report() {} })
-  expect(controller.captureHit({ x: 50, y: 50 }, [1, 0, 0, 1, 0, 0])).toEqual({ kind: 'object', instanceId: 'group' })
-  expect(controller.captureHit({ x: 50, y: 50, altKey: true }, [1, 0, 0, 1, 0, 0])).toEqual({ kind: 'object', instanceId: 'front' })
+  expect(controller.captureHit({ x: 50, y: 50 }, [1, 0, 0, 1, 0, 0])).toEqual({ kind: 'object', instanceId: 'group', activeGroupId: null })
+  expect(controller.captureHit({ x: 50, y: 50, altKey: true }, [1, 0, 0, 1, 0, 0])).toEqual({ kind: 'object', instanceId: 'front', activeGroupId: null })
 })

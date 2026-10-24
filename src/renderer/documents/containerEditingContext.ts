@@ -1,4 +1,4 @@
-import { owningContainer, type CourseProjectV10 } from '../../shared/contracts/component-platform/project'
+import { componentDefinitionBuiltinKey, owningContainer, type CourseProjectV10 } from '../../shared/contracts/component-platform/project'
 
 export type ContainerEditingProject = Pick<CourseProjectV10, 'rootIds' | 'entry' | 'instances'> & Partial<Pick<CourseProjectV10, 'global'>>
 
@@ -13,6 +13,66 @@ export interface ContainerEditingContext {
   path: readonly string[]
   /** Shared-layer inspection retains its actual owner, independently of the work root. */
   editingPlane?: 'underlay' | 'overlay'
+}
+
+type GroupEditingProject = ContainerEditingProject & Pick<CourseProjectV10, 'definitions'>
+
+/** The selection level is independent of whether its target owns a free frame. */
+export function editingLevelFromAncestry(instanceId: string, ancestors: readonly string[], activeGroupId: string | null = null, deep = false): string | null {
+  const index = activeGroupId ? ancestors.indexOf(activeGroupId) : -1
+  if (activeGroupId && index < 0) return null
+  return deep ? instanceId : ancestors[index + 1] ?? instanceId
+}
+
+/** Resolve a visible leaf to its current selection level using only the formal author tree. */
+export function editingLevelInstanceId(project: Pick<CourseProjectV10, 'instances' | 'rootIds' | 'global'>,
+  scopeId: string | null, instanceId: string, activeGroupId: string | null = null, deep = false): string | null {
+  if (!scopeId || instanceId === scopeId || !project.instances[instanceId]) return null
+  const ancestors: string[] = [], visited = new Set<string>()
+  let id = instanceId
+  while (!visited.has(id)) {
+    visited.add(id)
+    const owner = owningContainer(project, id)
+    if (owner?.kind === 'global' || owner?.kind === 'instance' && owner.instanceId === scopeId)
+      return editingLevelFromAncestry(instanceId, ancestors, activeGroupId, deep)
+    if (owner?.kind !== 'instance' || project.instances[owner.instanceId]?.container) return null
+    ancestors.unshift(owner.instanceId); id = owner.instanceId
+  }
+  return null
+}
+
+export function isOrdinaryEditingGroup(project: GroupEditingProject, instanceId: string): boolean {
+  const instance = project.instances[instanceId]
+  return Boolean(instance && !instance.container
+    && componentDefinitionBuiltinKey(project.definitions[instance.definitionId]) === 'guoling.group')
+}
+
+/** Ordinary groups keep the current real surface and derive their ancestry from the author tree. */
+export function groupEditingPath(project: GroupEditingProject, scopeId: string | null, groupId: string): readonly string[] | null {
+  if (!scopeId || !isOrdinaryEditingGroup(project, groupId)) return null
+  const visited = new Set<string>()
+  const find = (ids: readonly string[], path: readonly string[]): readonly string[] | null => {
+    for (const id of ids) {
+      const instance = project.instances[id]
+      if (!instance || visited.has(id)) continue
+      visited.add(id)
+      const next = isOrdinaryEditingGroup(project, id) ? [...path, id] : path
+      if (id === groupId) return next
+      if (!instance.container) {
+        const result = find(instance.childIds ?? [], next)
+        if (result) return result
+      }
+    }
+    return null
+  }
+  return find(project.instances[scopeId]?.childIds ?? [], [])
+    ?? find(project.global?.underlay ?? [], []) ?? find(project.global?.overlay ?? [], [])
+}
+
+/** Returning from a real container restores its ordinary parent group, when one exists. */
+export function parentEditingGroup(project: GroupEditingProject, scopeId: string | null, instanceId: string): string | null {
+  const owner = owningContainer({ ...project, global: project.global ?? { underlay: [], overlay: [] } }, instanceId)
+  return owner?.kind === 'instance' && groupEditingPath(project, scopeId, owner.instanceId) ? owner.instanceId : null
 }
 
 export function resolveWorkRoot(project: ContainerEditingProject, desiredRootId?: string | null): string | null {

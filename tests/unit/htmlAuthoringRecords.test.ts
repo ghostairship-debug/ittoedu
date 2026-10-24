@@ -346,31 +346,28 @@ it('compiles one real HTML pointer stream through the iframe and parent matrices
     await receive({ event: 'ready', sectionCount: 0, sectionsAmbiguous: false })
     const off = posted.mock.calls.map(call => call[0]).filter(value => value.type === 'html-preview.edit-mode').at(-1)!
     await receive({ event: 'edit-mode-ready', seq: 1, requestId: off.requestId, enabled: false })
-    await act(async () => { fireEvent.click(view.getByRole('button', { name: '编辑' })) })
+    await act(async () => { fireEvent.click(view.getByRole('button', { name: '进入创作' })) })
     const on = posted.mock.calls.map(call => call[0]).filter(value => value.type === 'html-preview.edit-mode').at(-1)!
     await receive({ event: 'edit-mode-ready', seq: 2, requestId: on.requestId, enabled: true })
     await act(async () => window.dispatchEvent(new MessageEvent('message', { source: iframe.contentWindow,
       data: { event: 'targets', protocol: 1, leaseId: 'lease', loadId: 'load', seq: 3, targets: [report] } })))
-    const handle = await view.findByLabelText('移动 HTML 内部对象') as HTMLButtonElement
-    handle.setPointerCapture = () => {}
-    const pointer = (type: string, x: number, y: number) => {
-      const event = new MouseEvent(type, { bubbles: true, cancelable: true, button: 0, clientX: x, clientY: y })
-      Object.defineProperty(event, 'pointerId', { value: 1 }); return event
-    }
-    fireEvent(handle, pointer('pointerdown', 120, 90))
-    fireEvent(handle, pointer('pointermove', 140, 100))
-    fireEvent(handle, pointer('pointermove', 160, 110))
+    expect(await view.findByLabelText('HTML 对象选框')).toBeTruthy()
+    let seq = 3
+    const pointer = (phase: string, x: number, y: number) => receive({ event: 'gesture', seq: ++seq,
+      handle: report.handle, phase, pointerId: 1, x, y, shift: false, alt: false })
+    await pointer('start', 20, 40)
+    await pointer('update', 40, 50)
+    await pointer('update', 60, 60)
     expect(session.read().undoDepth).toBe(0)
-    fireEvent(handle, pointer('pointerup', 160, 110))
+    await pointer('end', 60, 60)
     await waitFor(() => expect(session.read().undoDepth).toBe(1))
     expect(requests.filter(type => type === 'html-preview.edit')).toHaveLength(1)
     const saved = session.read().model
     if (saved.kind !== 'text') throw new Error('text')
     expect(readHtmlAuthoringRecords(saved.source)['title-key'].overrides.geometry).toMatchObject({ translateX: 20, translateY: 10 })
     const previews = posted.mock.calls.map(call => call[0]).filter(item => item.type === 'html-preview.authoring-preview')
-    expect(previews).toHaveLength(2)
-    expect(previews[0].geometry).toMatchObject({ translateX: 20, translateY: 10 })
-    expect(previews[1].geometry).toBeNull()
+    expect(previews.filter(item => item.geometry !== null).at(-1).geometry).toMatchObject({ translateX: 20, translateY: 10 })
+    expect(previews.at(-1).geometry).toBeNull()
   } finally { view.unmount(); posted.mockRestore(); Reflect.set(window, 'desktopAPI', previous); vi.unstubAllGlobals() }
 })
 

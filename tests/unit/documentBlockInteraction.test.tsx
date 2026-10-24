@@ -14,7 +14,7 @@ it.each(['file', 'flow'] as const)('%s retains the handle through synchronous bl
   render(<><SharedDocumentEditor document={parsed.document} revision="0" target={target}
     onDraft={() => {}} onChange={() => true} onUndo={() => {}} onRedo={() => {}} /><button>Outside editor</button></>)
   const editor = factory.mock.results[0].value as ReturnType<typeof sessions.createLayoutEditor>
-  act(() => { editor.view.focus() })
+  act(() => { if (target === 'flow') editor.selectBlock(parsed.document.content.blocks[0].id); else editor.view.focus() })
   const handle = screen.getByRole('button', { name: '段落操作' })
   act(() => {
     fireEvent.blur(editor.view.dom, { relatedTarget: handle })
@@ -30,7 +30,7 @@ it.each(['file', 'flow'] as const)('%s retains the handle through synchronous bl
   expect(screen.getByRole('menuitem', { name: '删除段落' })).toBeTruthy()
   act(() => { screen.getByRole('button', { name: 'Outside editor' }).focus() })
   await waitFor(() => expect(screen.queryByRole('button', { name: '段落操作' })).toBeNull())
-  act(() => { editor.view.focus() })
+  act(() => { if (target === 'flow') editor.selectBlock(parsed.document.content.blocks[0].id); else editor.view.focus() })
   fireEvent.click(screen.getByRole('button', { name: '段落操作' }))
   fireEvent.pointerDown(document.body)
   await waitFor(() => expect(screen.queryByRole('button', { name: '段落操作' })).toBeNull())
