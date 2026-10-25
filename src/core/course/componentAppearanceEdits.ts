@@ -3,8 +3,27 @@ import type { ComponentEdit, CourseProjectV10, JsonValue } from '../../shared/co
 import { componentDefinitionBuiltinKey } from '../../shared/contracts/component-platform/project'
 import { equalComponentValue } from '../../shared/componentValue'
 import { documentTextStyleSchema } from '../../shared/document/content'
-import { textAppearanceSchema } from '../../components/text/data'
-import { componentDataEdits, type ComponentDataTarget } from './componentDataEdits'
+import { formulaComponentDataSchema, textAppearanceSchema, textComponentDataSchema, type FormulaComponentData, type TextComponentData, type TextAppearance } from '../../components/text/data'
+import { componentDataEdits, componentDataPropertyFields, type ComponentDataField, type ComponentDataTarget } from './componentDataEdits'
+
+/** Absolute whole-object size/color keep existing local fields, links and identities. */
+export function wholeTextAppearanceFields(data: TextComponentData | FormulaComponentData,
+  appearance: Partial<Pick<TextAppearance, 'fontSize' | 'color'>>): ComponentDataField[] {
+  const fields: ComponentDataField[] = []
+  for (const field of ['fontSize', 'color'] as const) {
+    const value = appearance[field]
+    if (value === undefined) continue
+    if ('formula' in data) {
+      fields.push({ path: data.formula.style?.[field] !== undefined ? ['formula', 'style', field] : ['appearance', field], value })
+    } else {
+      fields.push({ path: ['appearance', field], value })
+      data.content.inlines.forEach((inline, index) => {
+        if (Object.hasOwn(inline.style ?? {}, field)) fields.push({ path: ['content', 'inlines', String(index), 'style', field], value })
+      })
+    }
+  }
+  return fields
+}
 
 /** Professional appearance rules shared by insertion and existing-object edits. */
 export function componentAppearanceEdits(project: CourseProjectV10, target: ComponentDataTarget,
@@ -22,8 +41,17 @@ export function componentAppearanceEdits(project: CourseProjectV10, target: Comp
       delete fields.shadows
     }
     if (Object.keys(fields).length) {
-      textAppearanceSchema.partial().parse(fields)
-      edits.push(...componentDataEdits(project, target, { kind: 'patch', data: { appearance: fields } }))
+      const appearance = textAppearanceSchema.partial().parse(fields)
+      const data = builtin === 'guoling.text' ? textComponentDataSchema.parse(instance.data) : formulaComponentDataSchema.parse(instance.data)
+      const planned = wholeTextAppearanceFields(data, {
+        fontSize: Object.hasOwn(fields, 'fontSize') ? appearance.fontSize : undefined,
+        color: Object.hasOwn(fields, 'color') ? appearance.color : undefined,
+      })
+      const defaults = { ...fields }; delete defaults.fontSize; delete defaults.color
+      for (const field of planned) if (field.path[0] === 'appearance') defaults[field.path[1]!] = field.value
+      const defaultsFields = Object.keys(defaults).length ? componentDataPropertyFields(instance.data, { appearance: defaults }, builtin) : []
+      const combinedFields = [...defaultsFields, ...planned.filter(field => field.path[0] !== 'appearance')]
+      if (combinedFields.length) edits.push(...componentDataEdits(project, target, { kind: 'fields', fields: combinedFields }))
     }
   } else if (['guoling.table', 'guoling.chart', 'guoling.shape'].includes(builtin ?? '')) {
     edits.push(...componentDataEdits(project, target, { kind: 'patch', data: { style: fields } }))

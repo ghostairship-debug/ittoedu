@@ -18,7 +18,7 @@ import { freeSurfaceTargets, freeTargetAtEditingLevel, marqueeFreeTargets, sameF
 import { spatialWorldTargets } from '../../componentPlatform/surfaces/spatial/targets'
 import { useContextMenu } from '../../editing/commands/CommandMenu'
 import { hiddenObjectCommands } from '../../editing/commands/hiddenObjectCommands'
-import { OBJECT_EDIT_EVENT, requestObjectContextMenu } from '../../editing/commands/objectContextMenu'
+import { OBJECT_EDIT_EVENT, requestImageEdit, requestObjectContextMenu } from '../../editing/commands/objectContextMenu'
 import { NativeSelectionContext } from '../../workbench/NativeSelectionContext'
 import { useWorkspaceMediaSource } from '../../lessonWorkspace/workspaceMediaSourceContext'
 import { deliverWorkspaceMediaDrop, type WorkspaceMediaDropHandler } from '../../lessonWorkspace/workspaceMediaDrop'
@@ -263,6 +263,12 @@ export function SpatialLocationWorkspace(props: SpatialLocationWorkspaceProps) {
     if (!id) return
     const input = frozenPointer({ pointerId: 0, button: 0, clientX: clientPoint.x, clientY: clientPoint.y,
       shiftKey: false, altKey: false, target, visibleInstanceId: instanceId, released: true, preventDefault() {}, stopPropagation() {} })
+    if (!componentIsLocked(props.project, id) && componentDefinitionBuiltinKey(props.project.definitions[props.project.instances[id]?.definitionId]) === 'guoling.image') {
+      props.onSelect([id])
+      const captured = props.captureTarget()
+      requestImageEdit({ documentId: captured.documentId, epoch: captured.epoch, itemId: id })
+      return
+    }
     if (!componentIsLocked(props.project, id) && id === instanceId && beginNativeEdit(input)) return
     void (async () => {
       const contentEdit = props.contentEditor?.read ? props.contentEditor.read() : props.contentEdit

@@ -87,6 +87,7 @@ it('keeps Flow hosts through projection paint while pending DOM input reaches fo
     expect(mounted).toHaveBeenCalledTimes(1); expect(disposed).not.toHaveBeenCalled()
     expect(change).not.toHaveBeenCalled()
 
+    editor.setInputActive(true)
     const textNode = element.querySelector('[data-flow-block-id="first"] [data-flow-idle-rich-text]')!.firstChild!
     textNode.nodeValue = '真实输入'
     paint()

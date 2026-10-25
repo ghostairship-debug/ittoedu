@@ -1,0 +1,10 @@
+.image-edit-panel { position: fixed; z-index: 1500; width: 290px; max-width: calc(100vw - 16px); max-height: calc(100vh - 16px); overflow: auto; box-sizing: border-box; padding: 12px; border: 1px solid #cbd5e1; border-radius: 10px; background: white; color: #172033; box-shadow: 0 6px 24px #17203326; font: 13px/1.5 sans-serif; pointer-events: auto; }
+.image-edit-panel__heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
+.image-edit-panel__buttons { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 8px; }
+.image-edit-panel button, .image-edit-panel input, .image-edit-panel select { font: inherit; }
+.image-edit-panel button { padding: 4px 8px; border: 1px solid #cbd5e1; border-radius: 5px; color: inherit; background: #f8fafc; cursor: pointer; }
+.image-edit-panel button:disabled { opacity: .5; cursor: default; }
+.image-edit-panel button[aria-pressed="true"] { background: #dbeafe; border-color: #60a5fa; }
+.image-edit-panel label { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 7px 0; }
+.image-edit-panel input { width: 78px; }
+.image-edit-panel summary { cursor: pointer; padding: 5px 0; }

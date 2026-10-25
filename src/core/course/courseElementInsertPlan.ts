@@ -35,7 +35,6 @@ export function planCourseElementInsertion(project: CourseProjectV10, request: C
   const target = { project, surfaceId, instanceId: selectedInstanceId }
   let container = options.container ?? insertionContainer(target, options)
   if (container.kind === 'instance') {
-    if (!project.instances[container.instanceId]?.childIds) throw new CourseInsertionError('invalid-target', '所选对象不是容器')
     if (componentIsLocked(project, container.instanceId)) throw new CourseInsertionError('locked-target', '容器已锁定，请先解锁')
   }
   if (request.afterInstanceId) {

@@ -233,6 +233,10 @@ it('applies the first static anchor ACK to the same live handle without rerunnin
   Object.defineProperty(document, 'caretPositionFromPoint', { configurable: true, value: () => ({ offsetNode: target.firstChild, offset: 0 }) })
   const posted = vi.spyOn(window.parent, 'postMessage').mockImplementation(() => {})
   const dispose = mountHtmlPreviewAgent(document)
+  // This unit checks the ACK/input bridge; JSDOM has no browser paint layout.
+  // Real painted pointer selection is covered by htmlPaintAndInputBrowser20261025.
+  const consumer = Reflect.get(window, '__cwHtmlAuthoringConsumer') as ReturnType<typeof createDomAuthoring>
+  const hit = vi.spyOn(consumer, 'hit').mockImplementation(() => consumer.describe(target.firstChild!) ?? undefined)
   const message = (data: object) => window.dispatchEvent(new MessageEvent('message', { source: window.parent, data }))
   try {
     message({ type: 'html-preview.init', leaseId: 'lease', loadId: 'load' })
@@ -264,7 +268,7 @@ it('applies the first static anchor ACK to the same live handle without rerunnin
     target.click()
     expect(action).toHaveBeenCalledOnce()
   } finally {
-    dispose(); posted.mockRestore()
+    dispose(); posted.mockRestore(); hit.mockRestore()
     if (rangeRect) Object.defineProperty(Range.prototype, 'getBoundingClientRect', rangeRect)
     else Reflect.deleteProperty(Range.prototype, 'getBoundingClientRect')
     Reflect.deleteProperty(document, 'caretPositionFromPoint')
@@ -346,7 +350,7 @@ it('compiles one real HTML pointer stream through the iframe and parent matrices
     await receive({ event: 'ready', sectionCount: 0, sectionsAmbiguous: false })
     const off = posted.mock.calls.map(call => call[0]).filter(value => value.type === 'html-preview.edit-mode').at(-1)!
     await receive({ event: 'edit-mode-ready', seq: 1, requestId: off.requestId, enabled: false })
-    await act(async () => { fireEvent.click(view.getByRole('button', { name: '进入创作' })) })
+    await act(async () => { fireEvent.click(view.getByRole('button', { name: '编辑' })) })
     const on = posted.mock.calls.map(call => call[0]).filter(value => value.type === 'html-preview.edit-mode').at(-1)!
     await receive({ event: 'edit-mode-ready', seq: 2, requestId: on.requestId, enabled: true })
     await act(async () => window.dispatchEvent(new MessageEvent('message', { source: iframe.contentWindow,

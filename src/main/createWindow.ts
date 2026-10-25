@@ -4,6 +4,7 @@ import path from 'node:path'
 import { app, BrowserWindow, dialog, session } from 'electron'
 import { APP_NAME } from '../shared/constants'
 import { IPC_CHANNELS } from '../shared/ipcTypes'
+import { editorShortcut } from '../shared/editorShortcuts'
 import type { SaveDirectoryContext } from '../shared/workbench/desktop'
 import type { AppState } from './appState'
 import {
@@ -189,10 +190,9 @@ export async function createMainWindow(
   window.webContents.on('before-input-event', (event, input) => {
     const focusedPreviewUrl = window.webContents.focusedFrame?.url ?? ''
     const focusedPreview = isAllowedHtmlPreviewFrameUrl(focusedPreviewUrl, window.webContents.id)
-    const historyKey = input.type === 'keyDown' && !input.isAutoRepeat && (input.control || input.meta)
-      && !input.alt && focusedPreview ? input.key.toLocaleLowerCase('en-US') : ''
-    const historyDirection = historyKey === 'z' ? input.shift ? 'redo' : 'undo'
-      : historyKey === 'y' && !input.shift ? 'redo' : null
+    const shortcut = input.type === 'keyDown' && !input.isAutoRepeat ? editorShortcut({ key: input.key,
+      ctrlKey: input.control, metaKey: input.meta, shiftKey: input.shift, altKey: input.alt, isComposing: input.isComposing }) : undefined
+    const historyDirection = focusedPreview && (shortcut === 'undo' || shortcut === 'redo') ? shortcut : null
     if (historyDirection) {
       event.preventDefault()
       // The physical shortcut is observed by Main, not reported by untrusted page JS.
@@ -203,13 +203,7 @@ export async function createMainWindow(
       }
       return
     }
-    const saveShortcut =
-      input.type === 'keyDown' &&
-      !input.isAutoRepeat &&
-      (input.control || input.meta) &&
-      !input.alt &&
-      !input.shift &&
-      input.key.toLocaleLowerCase('en-US') === 's'
+    const saveShortcut = shortcut === 'save'
 
     if (!saveShortcut) return
     event.preventDefault()

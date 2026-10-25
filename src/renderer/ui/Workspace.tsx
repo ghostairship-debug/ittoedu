@@ -20,7 +20,7 @@ import { selectedRoots } from '../../core/course/courseObjectEdits'
 import { capturedCourseViewIsCurrent, type CapturedCourseTarget } from '../documents/CourseV10DocumentBridge'
 import { flowContentClientMatrix } from './flow/flowParagraphLayout'
 import { selectionHandleGesture, SlideLayerSelectionOverlay } from './workspaces/SlideLayerSelectionOverlay'
-import { OBJECT_EDIT_EVENT } from '../editing/commands/objectContextMenu'
+import { OBJECT_EDIT_EVENT, requestImageEdit } from '../editing/commands/objectContextMenu'
 import { useSlideNativeTextEditor } from './workspaces/useSlideNativeTextEditor'
 
 interface WorkspaceProps {
@@ -219,6 +219,12 @@ function ProgramWorkspace({ rootInstanceId, onSelectImageAsset }: { rootInstance
   const editObject = (rawId: string, client?: GeometryPoint) => {
     const id = objectId(rawId), instance = id && runtime.project.instances[id]
     if (!id || !instance || componentIsLocked(runtime.project, id)) return
+    if (componentDefinitionBuiltinKey(runtime.project.definitions[instance.definitionId]) === 'guoling.image') {
+      bridge.selectInstances(runtime.documentId, [id], runtime.surfaceId)
+      const epoch = bridge.read().snapshot?.epoch
+      if (epoch) requestImageEdit({ documentId: runtime.documentId, epoch, itemId: id })
+      return
+    }
     const native = id === rawId && client ? captureNative(id, client) : null
     if (native) { void authorInteraction.beginNative(id, native); return }
     void state().navigateCourseView(documentId => {

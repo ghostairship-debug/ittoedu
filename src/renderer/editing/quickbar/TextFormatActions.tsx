@@ -2,6 +2,7 @@ import { Pencil } from 'lucide-react'
 import { QuickBarButton } from './SelectionQuickBar'
 import type { PropertiesItemView, PropertiesPatch } from '../../ui/properties/SlideNativePropertiesPanel'
 import { TextFormatControls, type TextFormatState } from './TextFormatControls'
+import type { TextFormatShortcut } from '../../../shared/editorShortcuts'
 
 type TextView = Extract<PropertiesItemView, { type: 'text' }>
 export type TextFormatView = Pick<TextView, 'text' | 'runs'> & { style: Pick<TextView['style'],
@@ -20,13 +21,17 @@ export function textFormatState(view: TextFormatView): TextFormatState {
     highlightColor: samples.every(style => style.highlightColor === samples[0]!.highlightColor) ? samples[0]!.highlightColor : null }
 }
 
+export function textFormatTogglePatch(view: TextFormatView, key: TextFormatShortcut): PropertiesPatch {
+  return { style: { [key]: textFormatState(view)[key] !== true } }
+}
+
 /** The same object-format controls serve professional text and a bound local text leaf. */
 export function TextFormatActions({ view, patch, editText, alignment = true, highlight = true }: { view: TextFormatView; patch(patch: PropertiesPatch): void; editText?: () => void; alignment?: boolean; highlight?: boolean }) {
   const value = textFormatState(view)
   return <>
     {editText && <QuickBarButton label="编辑文字" icon={<Pencil size={14} />} onClick={editText} />}
     <TextFormatControls value={value} scope="全文" onStyle={style => patch({ style })}
-      onToggle={key => patch({ style: { [key]: value[key] !== true } })} onStep={fontSizeStep => patch({ fontSizeStep })}
+      onToggle={key => patch(textFormatTogglePatch(view, key))} onStep={fontSizeStep => patch({ fontSizeStep })}
       highlight={highlight} alignment={alignment ? { value: view.style.align, set: align => patch({ style: { align } }) } : undefined} />
   </>
 }

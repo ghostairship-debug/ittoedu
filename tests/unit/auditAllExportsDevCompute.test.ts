@@ -24,7 +24,12 @@ vi.mock('electron', () => ({
 import { PyodideComputeBackend } from '../../src/main/workbench/compute/PyodideComputeBackend'
 
 it('CA246: the actual Vite module Worker runs local Python through the backend dev request policy', async () => {
-  const server = await createServer({ configFile: resolve('vite.renderer.config.ts'), server: { port: 0, strictPort: false, open: false }, logLevel: 'error' })
+  const server = await createServer({ configFile: resolve('vite.renderer.config.ts'),
+    plugins: [{ name: 'compute-test-no-file-watch', configResolved(config) {
+      // This one-shot Worker fixture does not exercise hot reload. Inline null is discarded by Vite config merging.
+      config.server.watch = null
+    } }],
+    server: { port: 0, strictPort: false, open: false }, logLevel: 'error' })
   await server.listen()
   const address = server.httpServer!.address()
   if (!address || typeof address === 'string') throw new Error('local Vite port unavailable')

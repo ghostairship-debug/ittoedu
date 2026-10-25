@@ -59,7 +59,8 @@ export const PlainTextDocumentEditor = forwardRef<PlainTextDocumentEditorHandle,
       EditorView.contentAttributes.of({ 'aria-label': '纯文本编辑' }),
       keymap.of([
         { key: 'Mod-z', run: () => { latest.current.onUndo(); return true } },
-        { key: 'Mod-y', mac: 'Mod-Shift-z', run: () => { latest.current.onRedo(); return true } },
+        { key: 'Mod-y', run: () => { latest.current.onRedo(); return true } },
+        { key: 'Mod-Shift-z', run: () => { latest.current.onRedo(); return true } },
       ]),
       EditorView.domEventHandlers({
         compositionstart: () => { composing.current = true },

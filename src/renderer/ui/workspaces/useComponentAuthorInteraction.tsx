@@ -14,7 +14,7 @@ import { selectActiveSlideContentEdit, useEditorStore } from '../../store/editor
 import type { ImportedImageAsset } from '../../project/assetManager'
 import { flowContentClientMatrix } from '../flow/flowParagraphLayout'
 import { ProfessionalContentEditor } from './ProfessionalContentEditor'
-import { AUTHOR_FIELD_ACTION_EVENT, requestObjectContextMenu, type AuthorFieldActionRequest } from '../../editing/commands/objectContextMenu'
+import { AUTHOR_FIELD_ACTION_EVENT, requestImageEdit, requestObjectContextMenu, type AuthorFieldActionRequest } from '../../editing/commands/objectContextMenu'
 import { nativeTextClientRect, nativeTextSpotFromElement } from '../../authoring/professionalContentFields'
 import { authorSpotValue } from '../../../core/components/authoring/componentAuthorEdits'
 import type { PlainTextSelectionIntent } from '../CanvasPlainTextEditor'
@@ -181,6 +181,7 @@ export function useComponentAuthorInteraction({ root, documentId, surfaceId, ena
         ? { documentId: owner.documentId, epoch, surfaceId: owner.surfaceId, rootInstanceId: rootId, editingContainerId: containerId,
           activeStateId: initial.activeStateId, contextKey: owner.contextKey, fieldIdentity: authorFieldIdentity(spot.instanceId, spot), offset: caretOffset }
         : undefined
+      if (edit && spot.kind === 'image' && epoch) requestImageEdit({ documentId: owner.documentId, epoch, itemId: spot.instanceId, selectionIdentity: authorFieldIdentity(spot.instanceId, spot) })
       if (!edit || spot.kind === 'image') return true
       const captured = bridge.captureOwnedTarget(owner.documentId)
       return Boolean(await state.beginSlideSpotEdit(spot, captured, () => currentSpot(spot)))
@@ -420,7 +421,7 @@ export function useComponentAuthorInteraction({ root, documentId, surfaceId, ena
       if (accepted && edit && clientPoint) latest.current.onObjectDoubleClick?.(instanceId, clientPoint)
       return accepted
     }
-    if (edit && hit.spot?.kind === 'image') return replace(hit.spot)
+    if (edit && hit.spot?.kind === 'image') return activate(hit.spot, true, clientPoint)
     return hit.spot ? activate(hit.spot, edit, clientPoint, caretOffset) : false
   }, [activate, findSpot, bridge, replace, selectPaintedObject])
   const nudge = useCallback(async (spot: ComponentAuthorSpot, dx: number, dy: number) => {
@@ -553,7 +554,7 @@ export function useComponentAuthorInteraction({ root, documentId, surfaceId, ena
     const key = implementation?.kind === 'builtin' ? implementation.key : undefined
     // These whole native boxes keep the workspace's one object selection/drag
     // and explicit double-click owner, rather than becoming a second field draft.
-    if (key && ['guoling.text', 'guoling.formula', 'guoling.table', 'guoling.chart'].includes(key)) return undefined
+    if (key && ['guoling.text', 'guoling.formula', 'guoling.table', 'guoling.chart', 'guoling.image'].includes(key)) return undefined
     const content = owner.runtime.world.contentElement?.(id), matrix = content && flowContentClientMatrix(content)
     if (!matrix) return undefined
     const inverse = invertMatrix(matrix), point = { x: event.clientX, y: event.clientY }, localPoint = transformPoint(inverse, point)

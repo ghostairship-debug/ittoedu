@@ -247,8 +247,29 @@ export function usePropertiesAuthoringBinding({ onReplaceImage }: { readonly onR
       if (composing) kernel.bridge.beginComposition(session.instanceId, ['content'], session.target.documentId)
       else return kernel.bridge.endComposition(session.target.documentId)
     }),
-    commitEdit: () => run(() => { const session = textSession.current; if (session?.key !== key || session.composing) return;
-      textSession.current = null; if (session.sharedDraft) return useEditorStore.getState().commitSlideContentEdit() }),
+    commitEdit: text => commit(() => {
+      const session = textSession.current
+      if (!session || session.key !== key || session.composing) throw new Error(STALE)
+      requireLiveSelection()
+      // A field may retain raw after its begin/update was refused. Only the
+      // exact text admitted by this captured owner can acknowledge that raw.
+      if (text !== undefined && propertiesText(session.current) !== text) throw new Error('请先完成当前内容编辑。')
+      const submitted = session.current
+      let pending = session.pending ?? Promise.resolve()
+      if (session.sharedDraft) {
+        const shared = sharedDraftFor(session.target)
+        if (shared && shared.instanceId !== session.instanceId) throw new Error(STALE)
+        if (shared) pending = useEditorStore.getState().commitSlideContentEdit()
+        else {
+          const current = textComponentDataSchema.parse(liveTarget().editingProject.instances[session.instanceId].data)
+          if (propertiesText(current) !== propertiesText(submitted)) throw new Error(STALE)
+        }
+      }
+      return pending.then(() => {
+        // Newer input during the ACK is separate work for this same owner.
+        if (textSession.current === session && session.current === submitted && !session.composing) textSession.current = null
+      })
+    }),
     cancelEdit: () => run(async () => {
       const session = textSession.current
       if (!session || session.key !== key) return

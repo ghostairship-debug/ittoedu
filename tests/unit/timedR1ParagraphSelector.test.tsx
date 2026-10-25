@@ -68,18 +68,26 @@ it('projects the actual heading caret into the paragraph selector, commits body 
         onChange={commit} onDraft={() => {}} onUndo={undo} onRedo={async () => { await bridge.redo(created.documentId) }} />
     }
     const ui = render(<Editor />), editor = factory.mock.results.at(-1)!.value as ReturnType<typeof sessions.createLayoutEditor>
-    const selector = ui.getByRole('combobox', { name: '段落类型' })
+    // Document operations remain available before a Flow object or caret is selected.
+    expect(ui.getByRole('button', { name: /^正文$/ })).toBeInTheDocument()
+    expect(ui.getByRole('button', { name: /^源码$/ })).toBeInTheDocument()
+    expect(ui.getByRole('button', { name: '插入表格' })).toBeInTheDocument()
+    expect(ui.queryByRole('button', { name: '加粗' })).toBeNull()
     await act(async () => {
+      expect(handle.current!.focusBlock('heading')).toBe(true)
       editor.view.dispatch(editor.view.state.tr.setSelection(TextSelection.create(editor.view.state.doc, 2)))
       editor.view.focus()
     })
-    expect(selector).toHaveValue('2')
+    const selector = ui.getByRole('button', { name: '当前段落类型' })
+    expect(ui.getAllByRole('button', { name: '加粗' })).toHaveLength(1)
+    expect(selector).toHaveTextContent('标题 2')
     expect(commit).not.toHaveBeenCalled()
+    await act(async () => { fireEvent.click(selector) })
     await act(async () => {
-      fireEvent.change(selector, { target: { value: 'paragraph' } })
+      fireEvent.click(ui.getByRole('menuitem', { name: '正文' }))
       expect((await handle.current!.drain()).ready).toBe(true)
     })
-    expect(selector).toHaveValue('paragraph')
+    expect(selector).toHaveTextContent('正文')
     expect(editor.view.state.selection.head).toBe(2)
     expect(editor.view.state.selection.$head.parent.attrs.id).toBe('heading')
     expect(commit).toHaveBeenCalledTimes(1)
@@ -88,7 +96,7 @@ it('projects the actual heading caret into the paragraph selector, commits body 
     expect(bridge.read().project!.instances.body).toEqual(originalBody)
     expect((await host.internalAPI.read(created.documentId)).undoDepth).toBe(1)
     await act(async () => { editor.view.dom.dispatchEvent(new KeyboardEvent('keydown', { key: 'z', ctrlKey: true, bubbles: true, cancelable: true })) })
-    await waitFor(() => expect(selector).toHaveValue('2'))
+    await waitFor(() => expect(selector).toHaveTextContent('标题 2'))
     expect(editor.view.state.selection.head).toBe(2)
     expect(editor.view.state.selection.$head.parent.attrs.id).toBe('heading')
     expect(undo).toHaveBeenCalledTimes(1)
@@ -98,6 +106,7 @@ it('projects the actual heading caret into the paragraph selector, commits body 
     expect((await host.internalAPI.read(created.documentId)).undoDepth).toBe(0)
   } finally {
     cleanup(); vi.restoreAllMocks(); bridge.dispose()
+    await host.operate({ type: 'close', documentId: created.documentId, discardDirty: true })
     await rm(directory, { recursive: true, force: true })
   }
 })

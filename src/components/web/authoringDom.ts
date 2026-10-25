@@ -1,6 +1,36 @@
 import type { ComponentAuthorBinding, ComponentAuthorRecord, ComponentAuthorScope, ComponentAuthorGeometryObservation, ComponentAuthorGeometry, ComponentAuthorSpotInput } from '../../shared/contracts/component-platform/runtime'
 import { componentPaintStack } from './paintHit'
 
+/** Author-content invalidation shared by the adapter and the HTML observer.
+ * A synchronous paint read can temporarily override inline pointer-events;
+ * a restored attribute has no authored change for either consumer to rescan.
+ * Self contained for the embedded HTML adapter. Observe attributeOldValue.
+ */
+export function authoringMutationRoots(records: readonly MutationRecord[]): Node[] {
+  const attributes = new Map<Node, Map<string, string | null>>()
+  const key = (record: MutationRecord) => `${record.attributeNamespace ?? ''}\0${record.attributeName}`
+  for (const record of records) if (record.type === 'attributes') {
+    let first = attributes.get(record.target)
+    if (!first) { first = new Map(); attributes.set(record.target, first) }
+    if (!first.has(key(record))) first.set(key(record), record.oldValue)
+  }
+  const hint = (node: Node): boolean => {
+    for (let current: Node | null = node.nodeType === 3 ? node.parentNode : node; current;) {
+      if (current.nodeType === 1 && (current as Element).closest('[data-html-preview-edit-markers]')) return true
+      const tree = current.getRootNode()
+      current = tree.nodeType === 11 && 'host' in tree ? (tree as ShadowRoot).host : null
+    }
+    return false
+  }
+  return records.filter(record => {
+    if (hint(record.target)) return false
+    if (record.type === 'childList') return [...record.addedNodes, ...record.removedNodes].some(node => !hint(node))
+    if (record.type === 'attributes') return (record.target as Element).getAttributeNS(record.attributeNamespace, record.attributeName!)
+      !== attributes.get(record.target)!.get(key(record))
+    return true
+  }).map(record => record.target)
+}
+
 export interface DomAuthorObservation {
   node: Text | HTMLImageElement
   authorKey: string
@@ -29,7 +59,7 @@ export function createDomAuthoring(root: HTMLElement, options: {
   /** Early HTML bootstrap may retain closed roots without changing their mode. */
   shadowRoot?(host: Element): ShadowRoot | null | undefined
   report?(authorKey: string, status: 'bound' | 'unmounted' | 'unresolved'): void
-}, paintStack: typeof componentPaintStack = componentPaintStack) {
+}, paintStack: typeof componentPaintStack = componentPaintStack, mutationRoots = authoringMutationRoots) {
   type Target = Text | HTMLImageElement
   type Container = Element | ShadowRoot
   type Path = ComponentAuthorBinding['path']
@@ -47,6 +77,16 @@ export function createDomAuthoring(root: HTMLElement, options: {
     try { return work() } finally { lookup = undefined }
   }
   const doc = root.ownerDocument, win = doc.defaultView!
+  type PaintScope = NonNullable<Parameters<typeof componentPaintStack>[5]>
+  let paintScope: PaintScope | undefined
+  const withReadScope = <Value,>(read: () => Value): Value => {
+    if (paintScope) return read()
+    const current: PaintScope = { prepared: new Map(), restore: [], paint: new Map(), shown: new Map() }
+    paintScope = current
+    try { return read() } finally {
+      try { for (const restore of current.restore.reverse()) restore() } finally { paintScope = undefined }
+    }
+  }
   const descriptions = new WeakMap<Node, { scope: string; observation: DomAuthorObservation }>()
   const observedNodes = new Map<string, Target>()
   const previews = new Map<string, { node: Target; record: ComponentAuthorRecord; geometry: ComponentAuthorGeometry }>()
@@ -68,6 +108,9 @@ export function createDomAuthoring(root: HTMLElement, options: {
     if (start.nodeType === 1) { const shadow = shadowOf(start as Element); if (shadow) stack.push(shadow) }
     while (stack.length) {
       const node = stack.pop()!
+      // Hint chrome can have an open shadow root; closest() inside that root
+      // does not cross its host. It is never author content or an observed root.
+      if (node.nodeType === 1 && (node as Element).hasAttribute('data-html-preview-edit-markers')) continue
       result.push(node)
       stack.push(...[...node.childNodes].reverse())
       if (node.nodeType === 1) { const shadow = shadowOf(node as Element); if (shadow) stack.push(shadow) }
@@ -90,20 +133,20 @@ export function createDomAuthoring(root: HTMLElement, options: {
     if (start < value.length) result.push(value.slice(start))
     return result
   }
-  const visible = (node: Node) => {
-    if (node.nodeType !== 1 && node.nodeType !== 3) return false
+  const visibleBounds = (node: Node) => {
+    if (node.nodeType !== 1 && node.nodeType !== 3) return null
     const element = elementOf(node as Target), style = win.getComputedStyle(element)
-    if (style.visibility === 'hidden' || style.visibility === 'collapse') return false
+    if (style.visibility === 'hidden' || style.visibility === 'collapse') return null
     const paintedColor = (value: string) => Boolean(value && value !== 'none' && value !== 'transparent'
       && !/^rgba\([^)]*,\s*0(?:\.0+)?\s*\)$/.test(value) && !/\/\s*0(?:\.0+)?\s*\)$/.test(value))
     if (node.nodeType === 3) {
-      if (!node.textContent?.trim()) return false
+      if (!node.textContent?.trim()) return null
       const paint = element.namespaceURI === 'http://www.w3.org/2000/svg'
         ? paintedColor(style.fill) && Number(style.fillOpacity || '1') > 0
           || paintedColor(style.stroke) && Number(style.strokeOpacity || '1') > 0 && parseFloat(style.strokeWidth || '1') > 0
         : paintedColor(style.getPropertyValue('-webkit-text-fill-color') || style.color)
           || Boolean(style.textShadow && style.textShadow !== 'none')
-      if (!paint) return false
+      if (!paint) return null
     }
     const range = node.nodeType === 3 ? doc.createRange() : undefined
     range?.selectNodeContents(node)
@@ -136,7 +179,7 @@ export function createDomAuthoring(root: HTMLElement, options: {
     for (let current: Element | null = element; current; current = parentOf(current)) {
       const css = win.getComputedStyle(current)
       // Match the paint reader: zero-opacity ancestors leave layout boxes but no content.
-      if (css.display === 'none' || css.opacity !== '' && Number(css.opacity) === 0 || css.contentVisibility === 'hidden') return false
+      if (css.display === 'none' || css.opacity !== '' && Number(css.opacity) === 0 || css.contentVisibility === 'hidden') return null
       const box = current.getBoundingClientRect()
       const sx = current instanceof win.HTMLElement && current.offsetWidth ? box.width / current.offsetWidth : 1
       const sy = current instanceof win.HTMLElement && current.offsetHeight ? box.height / current.offsetHeight : 1
@@ -160,10 +203,63 @@ export function createDomAuthoring(root: HTMLElement, options: {
           .map((value, index) => parseFloat(value!) * (value!.endsWith('%') ? (index % 2 ? box.width : box.height) / 100 : index % 2 ? sx : sy))
         if (edges.every(Number.isFinite)) clip(box.left + edges[3]!, box.top + edges[0]!, box.width - edges[1]! - edges[3]!, box.height - edges[0]! - edges[2]!)
       }
-      if (left >= right || top >= bottom) return false
+      if (left >= right || top >= bottom) return null
       if (!overflowContainingBlock && (css.position === 'fixed' || css.position === 'absolute')) overflowContainingBlock = containingBlock(current, css.position === 'fixed')
     }
-    return true
+    return { x: left, y: top, width: right - left, height: bottom - top }
+  }
+  const visible = (node: Node) => Boolean(visibleBounds(node))
+  const paintIgnore = '[data-html-preview-edit-markers]'
+  type PaintRect = { x: number; y: number; width: number; height: number }
+  const intersectRect = (a: PaintRect, b: PaintRect): PaintRect | null => {
+    const x = Math.max(a.x, b.x), y = Math.max(a.y, b.y)
+    const right = Math.min(a.x + a.width, b.x + b.width), bottom = Math.min(a.y + a.height, b.y + b.height)
+    return right > x && bottom > y ? { x, y, width: right - x, height: bottom - y } : null
+  }
+  /** A layout box can survive below another page or modal. Read the same paint
+   * stack as hit(), including pointer-events:none decorations, without letting
+   * the editor's own hint layer become an occluder. */
+  const painted = (node: Node, region?: PaintRect): boolean => {
+    const bounds = visibleBounds(node)
+    if (!bounds) return false
+    if (typeof doc.elementsFromPoint !== 'function') return true
+    const element = elementOf(node as Target), range = node.nodeType === 3 ? doc.createRange() : undefined
+    range?.selectNodeContents(node)
+    const boxes = range ? [...range.getClientRects()] : [element.getBoundingClientRect()]
+    const viewport = { x: 0, y: 0, width: win.innerWidth, height: win.innerHeight }
+    const pending = boxes.flatMap(box => {
+      let clipped = intersectRect(box, bounds)
+      if (clipped) clipped = intersectRect(clipped, viewport)
+      if (clipped && region) clipped = intersectRect(clipped, region)
+      return clipped ? [clipped] : []
+    })
+    const seen = new Set<string>()
+    while (pending.length) {
+      const box = pending.pop()!, key = `${box.x},${box.y},${box.width},${box.height}`
+      if (seen.has(key)) continue
+      seen.add(key)
+      const dx = Math.min(.5, box.width / 4), dy = Math.min(.5, box.height / 4)
+      const points = [[box.x + box.width / 2, box.y + box.height / 2], [box.x + dx, box.y + dy],
+        [box.x + box.width - dx, box.y + dy], [box.x + dx, box.y + box.height - dy], [box.x + box.width - dx, box.y + box.height - dy]]
+      const blockers = new Set<Element>()
+      for (const [x, y] of points) {
+        const top = paintStack(root, x!, y!, paintIgnore, shadowOf, paintScope)[0]
+        if (top === element) return true
+        if (top) blockers.add(top)
+      }
+      // Follow the actual occluder's edges rather than dropping a partially
+      // visible line just because its centre (or a fixed inset) is covered.
+      for (const blocker of blockers) {
+        const overlap = intersectRect(box, blocker.getBoundingClientRect())
+        if (!overlap) continue
+        const right = box.x + box.width, bottom = box.y + box.height, ox = overlap.x + overlap.width, oy = overlap.y + overlap.height
+        if (overlap.x > box.x) pending.push({ x: box.x, y: box.y, width: overlap.x - box.x, height: box.height })
+        if (ox < right) pending.push({ x: ox, y: box.y, width: right - ox, height: box.height })
+        if (overlap.y > box.y) pending.push({ x: box.x, y: box.y, width: box.width, height: overlap.y - box.y })
+        if (oy < bottom) pending.push({ x: box.x, y: oy, width: box.width, height: bottom - oy })
+      }
+    }
+    return false
   }
   const contextValueOf = (element: Container) => {
     if (lookup?.contexts.has(element)) return lookup.contexts.get(element)!
@@ -678,13 +774,17 @@ export function createDomAuthoring(root: HTMLElement, options: {
   win.addEventListener('__runtime.activity', activity)
   const initialActivity = (win as Window & { __guolingRuntimeActivity?: { active: boolean; visible: boolean } }).__guolingRuntimeActivity
   if (initialActivity) { runtimeActive = initialActivity.active && initialActivity.visible; updateActive() }
-  const observer = new win.MutationObserver(enqueue)
+  const observer = new win.MutationObserver(changes => {
+    // Opaque-frame hints are regular DOM children. Their redraw is software
+    // chrome, not an authored change that should trigger scan -> redraw again.
+    if (mutationRoots(changes).length) enqueue()
+  })
   const observedRoots = new Set<HTMLElement | ShadowRoot>()
   function syncObservedRoots(): void {
     const current = new Set(contentRoots())
     if ([...observedRoots].some(value => !current.has(value))) { observer.disconnect(); observedRoots.clear() }
     for (const value of current) if (!observedRoots.has(value)) {
-      observer.observe(value, { subtree: true, childList: true, characterData: true, attributes: true }); observedRoots.add(value)
+      observer.observe(value, { subtree: true, childList: true, characterData: true, attributes: true, attributeOldValue: true }); observedRoots.add(value)
     }
   }
   const inputPaintName = `cw-author-input-${Math.random().toString(36).slice(2)}`
@@ -729,6 +829,8 @@ export function createDomAuthoring(root: HTMLElement, options: {
     roots: contentRoots,
     /** Paint visibility only; hidden source content and its author records remain intact. */
     visible,
+    withReadScope,
+    painted(node: Node, region?: PaintRect) { return withReadScope(() => painted(node, region)) },
     /** Discovery enumerates content only; callers request binding and geometry for consumed targets. */
     targets(scope: Node = root): Array<Text | HTMLImageElement> {
       if (scope === doc) scope = root
@@ -756,22 +858,47 @@ export function createDomAuthoring(root: HTMLElement, options: {
       return [{ ...value, geometry: geometry(node), ...(style ? { textStyle: style } : {}) }]
     })) },
     hit(x: number, y: number): DomAuthorObservation | undefined {
-      const element = paintStack(root, x, y, '', shadowOf)[0]
+      return withReadScope(() => {
+      const element = paintStack(root, x, y, paintIgnore, shadowOf, paintScope)[0]
+      // A transparent paragraph body has no paint at the caret's empty area,
+      // so paintStack may return only its background ancestor. Preserve that
+      // native caret hit, but reject any independent foreground paint first.
+      const position = doc.caretPositionFromPoint?.(x, y)
+      const caret = (doc as Document & { caretRangeFromPoint?(x: number, y: number): Range | null }).caretRangeFromPoint?.(x, y)
+      const text = position?.offsetNode ?? caret?.startContainer
+      if (text?.nodeType === 3 && eligible(text) && within(text) && visible(text)) {
+        const parent = elementOf(text), native = doc.elementFromPoint?.(x, y)
+        if ((!element || element === parent || element.contains(parent)) && native?.contains(text)) {
+          const observation = describe(text); if (observation) return observation
+        }
+      }
       if (!element || !within(element)) return undefined
-      for (const node of targets()) {
+      // The paint owner is already known. Its own image or direct text children
+      // are the only nodes whose elementOf(node) can equal that owner.
+      const shadow = shadowOf(element)
+      const local = [element, ...(shadow ? shadow.childNodes : []), ...element.childNodes].filter(eligible)
+      for (const node of local) {
         if (elementOf(node) !== element || !visible(node)) continue
         const rect = node.nodeType === 3 ? (() => { const range = doc.createRange(); range.selectNodeContents(node); return range.getBoundingClientRect() })() : element.getBoundingClientRect()
-        if (x < rect.left || x > rect.right || y < rect.top || y > rect.bottom) continue
+        if (x < rect.left || x > rect.right || y < rect.top || y > rect.bottom) {
+          if (node.nodeType !== 3) continue
+          // Preserve paragraph-body/caret hits beyond the glyphs, after the
+          // common paint reader has ruled out a covering decoration or modal.
+          const position = doc.caretPositionFromPoint?.(x, y)
+          const caret = (doc as Document & { caretRangeFromPoint?(x: number, y: number): Range | null }).caretRangeFromPoint?.(x, y)
+          if (position?.offsetNode !== node && caret?.startContainer !== node) continue
+        }
         const observation = describe(node); if (observation) return observation
       }
       return undefined
+      })
     },
-    paintedElementAt(x: number, y: number): Element | undefined { return paintStack(root, x, y, '', shadowOf)[0] },
+    paintedElementAt(x: number, y: number): Element | undefined { return withReadScope(() => paintStack(root, x, y, paintIgnore, shadowOf, paintScope)[0]) },
     dispose() { if (disposed) return; disposed = true; highlightRegistry?.delete(inputPaintName); if (inputPaintRoot) inputPaintRoot.adoptedStyleSheets = inputPaintRoot.adoptedStyleSheets.filter(sheet => sheet !== inputPaintStyle); observer.disconnect(); win.removeEventListener('__runtime.activity', activity); for (const state of active.values()) restore(state); active.clear(); previews.clear(); observedNodes.clear() },
   }
 }
 
 /** Keep the embedded and in-process consumers on the same paint reader. */
 export function domAuthoringFactorySource(): string {
-  return `((root,options)=>(${createDomAuthoring.toString()})(root,options,(${componentPaintStack.toString()})))`
+  return `((root,options)=>(${createDomAuthoring.toString()})(root,options,(${componentPaintStack.toString()}),(${authoringMutationRoots.toString()})))`
 }

@@ -2,15 +2,16 @@
 import { setRootContainers } from '../helpers/glxWorkFixture'
 import { componentSurfaces } from '../../src/shared/contracts/component-platform/project'
 import { expect, it } from 'vitest'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { DocumentHostService } from '../../src/main/workbench/DocumentHostService'
 import { createBlankCourseProjectV10 } from '../../src/core/course/createCourseProjectV10'
-import { TEXT_DEFINITION } from '../../src/components/text/adapters'
-import { createTextComponentData } from '../../src/components/text/data'
+import { FORMULA_DEFINITION, TEXT_DEFINITION } from '../../src/components/text/adapters'
+import { createFormulaComponentData, createTextComponentData, formulaComponentDataSchema, textComponentDataSchema } from '../../src/components/text/data'
+import { formulaComponentHtml, textComponentHtml } from '../../src/components/text/render'
 import { defaultShapeData } from '../../src/components/shape/data'
-import { resolveComponentPresentation } from '../../src/shared/contracts/component-platform/project'
+import { resolveComponentPresentation, type CourseProjectV10 } from '../../src/shared/contracts/component-platform/project'
 import type { DocumentSnapshot } from '../../src/shared/workbench/document'
 import type { ToolResult, ToolTarget } from '../../src/shared/workbench/tools'
 
@@ -19,11 +20,11 @@ function course(snapshot: DocumentSnapshot) {
   return snapshot.model
 }
 function applied(result: ToolResult) {
-  expect(result).toMatchObject({ kind: 'document-operation', result: { status: 'applied' } })
+  expect(result, JSON.stringify(result)).toMatchObject({ kind: 'document-operation', result: { status: 'applied' } })
   if (result.kind !== 'document-operation') throw new Error('Expected insertion receipt')
   return result
 }
-async function harness() {
+async function harness(prepare?: (project: CourseProjectV10) => void) {
   const root = await mkdtemp(path.join(tmpdir(), 'guoling-native-insert-appearance-'))
   const host = new DocumentHostService(path.join(root, 'recovery'))
   const project = createBlankCourseProjectV10('初始外观')
@@ -39,6 +40,7 @@ async function harness() {
         { id: 'other', title: 'Other', order: ['slide-old'], overrides: {} }] } },
     { id: 'flow', kind: 'flow', title: '讲义', childIds: ['flow-before', 'flow-after'] },
   ])
+  prepare?.(project)
   const initial = await host.internalAPI.create({ kind: 'course-v10', project, resources: { assets: {}, components: {} } }, 'appearance.glx')
   await host.tools.beginRun({ runId: 'appearance', actor: 'agent', documents: [{ documentId: initial.documentId, writable: [{ kind: 'document' }] }],
     fileAccess: { permission: 'workspace', workspaceRoot: root } })
@@ -60,6 +62,71 @@ async function harness() {
   }
   return { root, host, initial, call, issue, read, history, cleanup }
 }
+
+it('preserves actual whole-text and formula appearance through agent tools, Undo/Redo and a new GLX Host cold-open', async () => {
+  const f = await harness(project => {
+    const text = createTextComponentData({ inlines: [
+      { type: 'text', text: '局部格式😀', rangeIds: ['range-original'], style: { fontSize: 42, color: '#123456', bold: false, italic: true, highlightColor: '#ffeeaa' },
+        link: { href: 'https://example.test/original', title: '保留链接' } },
+      { type: 'math', formulaId: 'inline-formula-original', latex: 'x+1', accessibleText: 'x 加一', style: { fontSize: 36, color: '#345678' } },
+      { type: 'text', text: '继承默认', style: { underline: true } },
+    ] })
+    project.instances['slide-old'].data = JSON.parse(JSON.stringify(text))
+    project.instances['slide-old'].frame = { width: 700, height: 150, transform: [1, 0, 0, 1, 30, 35] }
+    project.definitions[FORMULA_DEFINITION.id] = FORMULA_DEFINITION
+    const formula = createFormulaComponentData('formula-original', '\\frac{x+1}{2}')
+    formula.formula.style = { fontSize: 42, color: '#123456' }
+    project.instances.formula = { id: 'formula', definitionId: FORMULA_DEFINITION.id, data: JSON.parse(JSON.stringify(formula)),
+      frame: { width: 350, height: 150, transform: [1, 0, 0, 1, 40, 240] } }
+    project.instances.neighbor = { id: 'neighbor', definitionId: TEXT_DEFINITION.id, data: JSON.parse(JSON.stringify(createTextComponentData('邻对象保持原样'))),
+      frame: { width: 370, height: 100, transform: [1, 0, 0, 1, 780, 35] } }
+    project.instances.slide.childIds!.push('formula', 'neighbor')
+  })
+  try {
+    const before = await f.read(), original = course(before).project
+    const appearance = { fontSize: 60, color: '#abcdef' }
+    const calls = []
+    for (const instanceId of ['slide-old', 'formula']) {
+      const object: ToolTarget = { kind: 'course-instance', surfaceId: 'slide', instanceId }
+      const target = await f.issue(object)
+      calls.push({ name: 'object.update', target: object, properties: { appearance } })
+      applied(await f.call('object.update', { target, properties: { appearance } }))
+      expect((await f.read()).undoDepth).toBe(calls.length)
+    }
+    const after = await f.read(), actual = course(after).project
+    const expected = textComponentDataSchema.parse(original.instances['slide-old'].data)
+    expected.appearance = { ...expected.appearance, ...appearance }
+    for (const inline of expected.content.inlines.slice(0, 2)) Object.assign(inline.style!, appearance)
+    expect(actual.instances['slide-old']).toEqual({ ...original.instances['slide-old'], data: expected })
+    const formula = formulaComponentDataSchema.parse(original.instances.formula.data)
+    formula.formula.style = appearance
+    expect(actual.instances.formula).toEqual({ ...original.instances.formula, data: formula })
+    expect(actual.instances.neighbor).toEqual(original.instances.neighbor)
+    expect(actual.instances['flow-before']).toEqual(original.instances['flow-before'])
+    expect(textComponentHtml(expected)).toContain('font-size:60px')
+    expect(formulaComponentHtml(formula)).toContain('60px')
+    expect(formulaComponentHtml(formula)).toContain('#abcdef')
+    expect(await f.history('undo')).toMatchObject({ status: 'applied' })
+    const undone = course(await f.read()).project
+    expect(undone.instances.formula).toEqual(original.instances.formula)
+    expect(undone.instances['slide-old']).toEqual(actual.instances['slide-old'])
+    expect(await f.history('redo')).toMatchObject({ status: 'applied' })
+    expect(course(await f.read()).project.instances.formula).toEqual(actual.instances.formula)
+    const saved = await f.read()
+    const filename = path.join(f.root, 'actual-format.glx')
+    await f.host.internalAPI.save(f.initial.documentId, filename)
+    const cold = await new DocumentHostService(path.join(f.root, 'cold-appearance')).internalAPI.open(filename)
+    const directory = path.resolve('output/test-runs/format-core-repair/appearance')
+    await mkdir(directory, { recursive: true })
+    await writeFile(path.join(directory, 'appearance-render-model.json'), JSON.stringify({
+      source: 'Real DocumentHostService.tools, actor agent, observed whole-object handles; two object.update calls, Undo/Redo, GLX save and independent Host cold-open',
+      surfaceId: 'slide', targets: { text: 'slide-old', formula: 'formula', neighbor: 'neighbor' }, operations: calls,
+      before: before.model, after: saved.model, cold: cold.model,
+    }, null, 2), 'utf8')
+    expect(course(cold)).toEqual(course(saved))
+    expect(cold).toMatchObject({ dirty: false, undoDepth: 0 })
+  } finally { await f.cleanup() }
+})
 
 it('inserts native content, frame and initial appearance in one history entry and preserves them through redo and disk cold-open', async () => {
   const f = await harness()
@@ -100,6 +167,23 @@ it('inserts native content, frame and initial appearance in one history entry an
     expect(course(cold).project.instances[shapeId]).toEqual(shape)
     expect(componentSurfaces(course(cold).project)[0].childIds).toEqual(['slide-old', id, shapeId])
     expect(cold.dirty).toBe(false)
+  } finally { await f.cleanup() }
+})
+
+it('keeps formula insertion defaults on the same professional appearance planner without inventing an inline override', async () => {
+  const f = await harness()
+  try {
+    const target = await f.issue({ kind: 'course-surface', surfaceId: 'slide' })
+    applied(await f.call('object.insert', { target, kind: 'formula', text: 'x+1', appearance: { fontSize: 60, color: '#abcdef' } }))
+    const after = await f.read(), project = course(after).project
+    const id = componentSurfaces(project)[0].childIds[1], data = formulaComponentDataSchema.parse(project.instances[id].data)
+    expect(data.appearance).toMatchObject({ fontSize: 60, color: '#abcdef' })
+    expect(data.formula).toMatchObject({ latex: 'x+1' })
+    expect(data.formula.style).toBeUndefined()
+    expect(formulaComponentHtml(data)).toContain('60px')
+    expect(formulaComponentHtml(data)).toContain('#abcdef')
+    expect(project.instances['slide-old']).toEqual(course(f.initial).project.instances['slide-old'])
+    expect(after.undoDepth).toBe(1)
   } finally { await f.cleanup() }
 })
 

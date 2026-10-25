@@ -230,11 +230,12 @@ it('keeps native HTML and owned srcdoc state while publishing cooperative activi
   try {
     await f.page.evaluate(async () => {
       const q = (window as any).__offscreenSandbox, api = (window as any).OffscreenSandbox
-      const nested = `<input value="nested original"><script>window.probe={boot:Math.random(),events:[]};window.addEventListener('__runtime.activity',event=>probe.events.push(event.detail));setTimeout(()=>probe.late=window.__guolingRuntimeActivity,45);<\/script>`
+      const nested = `<input value="nested original"><script>window.probe={boot:Math.random(),initialEvents:[],events:[]};window.addEventListener('__runtime.activity',event=>probe.initialEvents.push(event.detail));window.subscribeLateActivity=()=>{probe.late=window.__guolingRuntimeActivity;window.addEventListener('__runtime.activity',event=>probe.events.push(event.detail))};<\/script>`
       const html = `<!doctype html><html><body><input id="human" value="original"><iframe id="owned" srcdoc="${nested.replace(/&/g, '&amp;').replace(/"/g, '&quot;')}"></iframe><script>
-        window.probe={boot:Math.random(),events:[],ticks:0,blackbox:0};let timer=setInterval(()=>probe.ticks++,15);setInterval(()=>probe.blackbox++,15);
+        window.probe={boot:Math.random(),initialEvents:[],events:[],ticks:0,blackbox:0};let timer=setInterval(()=>probe.ticks++,15);setInterval(()=>probe.blackbox++,15);
+        window.addEventListener('__runtime.activity',event=>probe.initialEvents.push(event.detail));
         const activity=value=>{probe.events.push(value);if(!(value.active&&value.visible&&value.playing)){clearInterval(timer);timer=null}else if(!timer)timer=setInterval(()=>probe.ticks++,15)};
-        window.addEventListener('__runtime.activity',event=>activity(event.detail));setTimeout(()=>{probe.late=window.__guolingRuntimeActivity;if(probe.late)activity(probe.late)},40);
+        window.subscribeLateActivity=()=>{probe.late=window.__guolingRuntimeActivity;activity(probe.late);window.addEventListener('__runtime.activity',event=>activity(event.detail))};
       <\/script></body></html>`
       q.prepared = await api.preparePublishedNativeComponent({ format: 'esm', code: api.webContentRealmSource(), css: '', diagnostics: [] }, q.abort.signal,
         { builtinKey: 'guoling.html-program', nativeDocument: true, state: () => ({}), targets: () => [], instance: async (value: any) => { await new Promise(done => setTimeout(done,30)); return value } })
@@ -243,7 +244,15 @@ it('keeps native HTML and owned srcdoc state while publishing cooperative activi
       q.mounted = await q.mount; q.frame = document.querySelector('iframe'); q.src = q.frame.src
     })
     const child = f.page.frameLocator('#source > iframe'), nested = child.frameLocator('#owned')
-    await f.page.waitForTimeout(70)
+    // A late subscriber starts after the real snapshot is ready in each realm;
+    // parser timers and a host sleep do not establish that ordering.
+    const inactive = { active: false, visible: false, playing: true }
+    await expect.poll(() => child.locator('#human').evaluate(() => (window as any).__guolingRuntimeActivity)).toEqual(inactive)
+    await expect.poll(() => nested.locator('input').evaluate(() => (window as any).__guolingRuntimeActivity)).toEqual(inactive)
+    await expect.poll(() => child.locator('#human').evaluate(() => (window as any).probe.initialEvents)).toContainEqual(inactive)
+    await expect.poll(() => nested.locator('input').evaluate(() => (window as any).probe.initialEvents)).toContainEqual(inactive)
+    await child.locator('#human').evaluate(() => (window as any).subscribeLateActivity())
+    await nested.locator('input').evaluate(() => (window as any).subscribeLateActivity())
     const paused = await child.locator('#human').evaluate(() => ({ ...((window as any).probe), snapshot: (window as any).__guolingRuntimeActivity,
       readonly: !Object.getOwnPropertyDescriptor(window, '__guolingRuntimeActivity')!.set }))
     expect(paused.snapshot).toEqual({ active: false, visible: false, playing: true }); expect(paused.readonly).toBe(true)
@@ -258,6 +267,8 @@ it('keeps native HTML and owned srcdoc state while publishing cooperative activi
     await f.page.evaluate(() => (window as any).__offscreenSandbox.activityChange({ active: true, visible: true, playing: true }))
     await child.locator('#human').fill('human retained')
     await nested.locator('input').fill('nested retained')
+    await expect.poll(() => nested.locator('input').evaluate(() => (window as any).probe.events))
+      .toContainEqual({ active: true, visible: true, playing: true })
     await f.page.waitForTimeout(35)
     expect(await child.locator('#human').evaluate(() => (window as any).probe.ticks)).toBeGreaterThan(paused.ticks)
     await f.page.evaluate(() => (window as any).__offscreenSandbox.activityChange({ active: false, visible: false, playing: true }))

@@ -52,6 +52,8 @@ function shared(blocks:DocumentBlock[],extra:Record<string,any>={}) {
   const factory=vi.spyOn(sessions,'createLayoutEditor'),change=vi.fn(()=>true),ref=createRef<SharedDocumentEditorHandle>()
   const props={document:documentOf(blocks),revision:'1',target:'flow' as const,onChange:change,onDraft(){},onUndo(){},onRedo(){},...extra}
   const ui=render(<SharedDocumentEditor {...props} ref={ref}/>),value=factory.mock.results.at(-1)!.value as ReturnType<typeof sessions.createLayoutEditor>
+  // These owner tests exercise text input after Flow's explicit entry into editing.
+  act(()=>{value.setInputActive(true);value.view.focus()})
   editors.push(value);return {ui,value,change,ref,props}
 }
 function table():Extract<DocumentBlock,{type:'table'}>{return {id:'table',type:'table',headerEnabled:false,columns:[{id:'a',header:text('H1')},{id:'b',header:text('H2')}],rows:[{id:'r1',cells:{a:text('A'),b:text('B')}},{id:'r2',cells:{a:text('C'),b:text('D')}}]}}
@@ -70,7 +72,7 @@ describe('R09 formal text positions',()=>{
   it('CA096 edits the original formula after text is inserted before its dialog target',()=>{
     const {ui,value}=shared([{id:'p',type:'paragraph',content:{inlines:[{type:'text',text:'A'},formula,{type:'text',text:'B'}]}}])
     act(()=>value.view.dispatch(value.view.state.tr.setSelection(NodeSelection.create(value.view.state.doc,2))))
-    fireEvent.click(ui.getByRole('button',{name:'公式'}))
+    fireEvent.click(ui.getByRole('button',{name:'当前选区公式'}))
     act(()=>value.view.dispatch(value.view.state.tr.insertText('prefix',1)))
     const input=ui.getByRole('textbox',{name:'公式 LaTeX'})
     fireEvent.change(input,{target:{value:'y'}});fireEvent.keyDown(input,{key:'Enter'})
@@ -213,7 +215,7 @@ describe('R26 compound slot edits',()=>{
 describe('R06 and R28 structural text editing',()=>{
   it('CA232 inserts below and types into the new paragraph',()=>{
     const {ui,value}=shared([para('a','原段落'),para('b','后文')]);act(()=>select(value,1))
-    fireEvent.click(ui.getByRole('button',{name:'插入段落'}));fireEvent.click(ui.getByRole('menuitem',{name:'下方插入正文'}))
+    fireEvent.click(ui.getByRole('button',{name:'段落操作'}));fireEvent.click(ui.getByRole('menuitem',{name:'下方插入正文'}))
     act(()=>value.view.dispatch(value.view.state.tr.insertText('新输入')))
     expect(current(value).blocks.map(block=>block.type==='paragraph' ? plainDocumentText(block.content):'')).toEqual(['原段落','新输入','后文'])
   })
@@ -223,7 +225,7 @@ describe('R06 and R28 structural text editing',()=>{
     expect(current(value).blocks[0]).toMatchObject({type:'heading',content:text('输入新标题')})
   })
   it.each(['paragraph','2'])('CA091 code conversion to %s removes code-only attributes',type=>{
-    const {ui,value}=shared([{id:'c',type:'code',language:'mermaid',code:'graph TD'}]);act(()=>select(value,1));fireEvent.change(ui.getByRole('combobox',{name:'段落类型'}),{target:{value:type}})
+    const {ui,value}=shared([{id:'c',type:'code',language:'mermaid',code:'graph TD'}]);act(()=>select(value,1));fireEvent.click(ui.getByRole('button',{name:'当前段落类型'}));fireEvent.click(ui.getByRole('menuitem',{name:type==='paragraph' ? '正文':`标题 ${type}`}))
     const block=current(value).blocks[0];expect(block.type).toBe(type==='paragraph' ? 'paragraph':'heading');expect(block).not.toHaveProperty('code');expect(block).not.toHaveProperty('language')
   })
   it('CA092 Enter inserts a newline in a single code block',()=>{
@@ -246,7 +248,7 @@ describe('R06 and R28 structural text editing',()=>{
     expect(current(value).blocks[0]).toMatchObject({type:kind,textAlign:'center',lineSpacing:2.5})
   })
   it('CA281 a Shared-created section contains an editable initial body',()=>{
-    const {ui,value}=shared([para('p','old')]);act(()=>select(value,1));fireEvent.click(ui.getByRole('button',{name:'插入段落'}));fireEvent.click(ui.getByRole('menuitem',{name:'下方插入折叠节'}));act(()=>value.view.dispatch(value.view.state.tr.insertText('节内正文')))
+    const {ui,value}=shared([para('p','old')]);act(()=>select(value,1));fireEvent.click(ui.getByRole('button',{name:'段落操作'}));fireEvent.click(ui.getByRole('menuitem',{name:'下方插入折叠节'}));act(()=>value.view.dispatch(value.view.state.tr.insertText('节内正文')))
     expect(current(value).blocks[1]).toMatchObject({type:'section',title:{inlines:[]},blocks:[{type:'paragraph',content:text('节内正文')}]})
   })
   it('CA348 software-default left alignment keeps list and code conversion enabled',()=>{
@@ -274,8 +276,25 @@ describe('R06 and R28 structural text editing',()=>{
     const reopened=parseDocumentMarkdown(saved,{createId:()=>crypto.randomUUID(),target:'file'});expect(reopened.status).toBe('valid');if(reopened.status==='valid')expect(reopened.document.content.blocks).toEqual([{id:parsed.document.content.blocks[0].id,type:'heading',level:1,content:text('A\nB')}])
   })
   it('CA360 applying an existing link at its caret only changes the mark',()=>{
-    const {ui,value}=shared([{id:'p',type:'paragraph',content:{inlines:[{type:'text',text:'课程',link:{href:'https://old.example'}}]}}]);act(()=>select(value,2));fireEvent.click(ui.getByRole('button',{name:'链接'}));fireEvent.click(ui.getByRole('button',{name:'应用链接'}))
+    const {ui,value}=shared([{id:'p',type:'paragraph',content:{inlines:[{type:'text',text:'课程',link:{href:'https://old.example'}}]}}]);act(()=>select(value,2));fireEvent.click(ui.getByRole('button',{name:'当前选区链接'}));fireEvent.click(ui.getByRole('button',{name:'应用链接'}))
     expect(current(value).blocks[0]).toMatchObject({content:{inlines:[{text:'课程',link:{href:'https://old.example'}}]}})
+  })
+  it('keeps the original link range while its dialog is open and surrounding text changes',()=>{
+    const {ui,value}=shared([para('p','前课程后')]);act(()=>select(value,2,4))
+    fireEvent.click(ui.getByRole('button',{name:'当前选区链接'}))
+    act(()=>{const inserted=value.view.state.tr.insertText('新增',1);value.view.dispatch(inserted.setSelection(TextSelection.create(inserted.doc,inserted.doc.content.size-1)))})
+    fireEvent.change(ui.getByRole('textbox',{name:'链接地址'}),{target:{value:'https://example.com'}})
+    fireEvent.click(ui.getByRole('button',{name:'应用链接'}))
+    expect(current(value).blocks[0]).toMatchObject({content:{inlines:[{text:'新增前'},{text:'课程',link:{href:'https://example.com'}},{text:'后'}]}})
+  })
+  it('keeps quote conversion reachable through the existing block menu without discarding its citation',()=>{
+    const quote:DocumentBlock={id:'q',type:'quote',content:text('引文'),citation:text('出处')}
+    const {ui,value,change}=shared([quote]);act(()=>select(value,2))
+    fireEvent.click(ui.getByRole('button',{name:'段落操作'}))
+    const convert=ui.getByRole('menuitem',{name:'转换为正文'})
+    expect(convert).toHaveAttribute('aria-disabled','true');expect(convert).toHaveAttribute('title','带出处的引用不能直接转换')
+    fireEvent.click(convert)
+    expect(current(value).blocks).toEqual([quote]);expect(change).not.toHaveBeenCalled()
   })
 })
 describe('R29 and R30 math and file presentation',()=>{
@@ -285,13 +304,13 @@ describe('R29 and R30 math and file presentation',()=>{
   })
   it('CA014 changing LaTeX preserves the current 40px red style and link in data and view',()=>{
     const {ui,value}=shared([{id:'p',type:'paragraph',content:{inlines:[formula]}}]);act(()=>{const tr=value.view.state.tr.addMark(1,2,schema.marks.style.create({value:{fontSize:40,color:'#ff0000'}})).addMark(1,2,schema.marks.link.create({href:'https://example.com'}));value.view.dispatch(tr.setSelection(NodeSelection.create(tr.doc,1)))})
-    fireEvent.click(ui.getByRole('button',{name:'公式'}));fireEvent.change(ui.getByRole('textbox',{name:'公式 LaTeX'}),{target:{value:'x^3'}});fireEvent.click(ui.getByRole('button',{name:'应用公式'}))
+    fireEvent.click(ui.getByRole('button',{name:'当前选区公式'}));fireEvent.change(ui.getByRole('textbox',{name:'公式 LaTeX'}),{target:{value:'x^3'}});fireEvent.click(ui.getByRole('button',{name:'应用公式'}))
     expect(current(value).blocks[0]).toMatchObject({content:{inlines:[{latex:'x^3',style:{fontSize:40,color:'#ff0000'},link:{href:'https://example.com'}}]}})
     expect(value.view.dom.querySelector<HTMLElement>('[data-formula-id="math"] [data-formula-id="math"]')?.style.fontSize).toBe('40px')
   })
   it('CA347 table cell defaults appear pressed and the first toolbar click sets bold false',()=>{
     const defaults=vi.fn((_blockId:string,point:any)=>point?.slot.kind==='cell' ? {bold:true}:undefined),{ui,value}=shared([table()],{inlineStyleDefaults:defaults}),pos=at(value,node=>node.type.name==='slot' && node.attrs.key==='cell:["r1","a"]')
-    act(()=>select(value,pos+1,pos+2));expect(ui.getByRole('button',{name:'粗体'})).toHaveAttribute('aria-pressed','true');fireEvent.click(ui.getByRole('button',{name:'粗体'}))
+    act(()=>select(value,pos+1,pos+2));expect(ui.getByRole('button',{name:'加粗'})).toHaveAttribute('aria-pressed','true');fireEvent.click(ui.getByRole('button',{name:'加粗'}))
     expect((current(value).blocks[0] as ReturnType<typeof table>).rows[0].cells.a.inlines[0]).toMatchObject({text:'A',style:{bold:false}});expect(defaults.mock.calls.some(([_id,point])=>point?.slot.kind==='cell' && point.slot.rowId==='r1' && point.slot.columnId==='a')).toBe(true)
   })
   it('CA014 current marks own math style/link, including their removal',()=>{

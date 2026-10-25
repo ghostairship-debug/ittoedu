@@ -2,7 +2,7 @@
 
 本文件保留原研究包的实施规划与逐包验收。正式基线保持 Project 11 / Published 4 / Component API 5；DocumentSession、CAS、History、保存与冷开机制为保全对象。
 
-原架构优化批次已按[§15](IMPLEMENTATION_PLAN.md#architecture-batch-closeout)收口，并提交推送为 `7952cc24`；未选方向仍按原条件暂缓。Claude审查后的本轮实施与当前失败归类见[后续维护结果](../../docs/development-plan/20261024-architecture-review-followup/RESULT.md)。原审计数据及各轮“本次／下一轮／未提交”为历史时点，不回写旧统计；原方案§9—§14保留原位和锚点。Owner本次授权将原有全部未提交成果一并commit并push，发行／Portable／部署仍暂停。
+原架构优化批次已按[§15](IMPLEMENTATION_PLAN.md#architecture-batch-closeout)收口，并提交推送为 `7952cc24`；未选方向仍按原条件暂缓。当前结果入口为[Engine与互动收口](../../docs/development-plan/20261024-engine-interaction-closeout/RESULT.md)及[本次产品边界修复](../../docs/development-plan/20261024-regression-boundary-repair/RESULT.md)，后者按[已确认方案](../../docs/development-plan/20261024-regression-boundary-repair/PLAN.md)执行。原审计数据及各轮“本次／下一轮／未提交”为历史时点，不回写旧统计；原方案§9—§15保留原位和锚点。架构职责调整不自动授权UI／模式／操作路径变更；当前不commit、push、打Portable、发布或部署，新的产品变更须先获Owner确认。
 
 ## 1. 从能力反推最小职责
 

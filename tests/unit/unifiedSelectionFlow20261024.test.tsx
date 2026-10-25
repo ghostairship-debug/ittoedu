@@ -1,5 +1,5 @@
 import { createRef } from 'react'
-import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { NodeSelection, TextSelection } from 'prosemirror-state'
 import * as sessions from '../../src/renderer/document/editorSession'
@@ -42,6 +42,18 @@ function mount(blocks: DocumentBlock[] = [paragraph('a', 'Alpha'), paragraph('b'
   const position = (id: string) => { let result = -1; editor.view.state.doc.descendants((node, at) => { if (node.attrs.id === id) result = at }); return result }
   return { ui, handle, editor, change, selection, block, position }
 }
+function expectFlowDocumentActionsAndOneFormatBar(h: ReturnType<typeof mount>) {
+  const documentActions = h.ui.getByRole('toolbar', { name: '正文工具' })
+  expect(within(documentActions).getByRole('button', { name: /^正文$/ })).toBeVisible()
+  expect(within(documentActions).getByRole('button', { name: /^源码$/ })).toBeVisible()
+  expect(within(documentActions).getByRole('button', { name: '插入表格' })).toBeVisible()
+  expect(within(documentActions).queryByRole('button', { name: '加粗' })).toBeNull()
+  const formatBars = h.ui.getAllByRole('toolbar', { name: '选中内容快捷工具' })
+  expect(formatBars).toHaveLength(1)
+  expect(within(formatBars[0]!).getByRole('button', { name: '加粗' })).toBeVisible()
+  expect(h.ui.getAllByRole('button', { name: '加粗' })).toHaveLength(1)
+  expect(within(formatBars[0]!).queryByRole('button', { name: /^源码$/ })).toBeNull()
+}
 
 describe('Flow unified selection and continuous input', () => {
   it('single-clicks select a paragraph without input or history; double-click edits the same PM and Esc returns to that paragraph', async () => {
@@ -53,13 +65,13 @@ describe('Flow unified selection and continuous input', () => {
     expect(h.editor.view.state.selection).toBeInstanceOf(NodeSelection)
     expect(h.selection).toHaveBeenLastCalledWith({ kind: 'object', blockId: 'a', revision: '0' })
     expect(h.change).not.toHaveBeenCalled()
-    expect(h.ui.getAllByRole('toolbar')).toHaveLength(1)
+    expectFlowDocumentActionsAndOneFormatBar(h)
     vi.spyOn(h.editor.view, 'posAtCoords').mockReturnValue({ pos: h.position('a') + 2, inside: h.position('a') })
     fireEvent.doubleClick(h.block('a'), { clientX: 50, clientY: 50 })
     expect(h.editor.view.dom).toBe(root)
     expect(h.editor.isInputActive()).toBe(true)
     expect(h.editor.view.state.selection).toBeInstanceOf(TextSelection)
-    expect(h.ui.getAllByRole('toolbar')).toHaveLength(1)
+    expectFlowDocumentActionsAndOneFormatBar(h)
     expect(h.ui.getByRole('button', { name: '完成编辑' })).toBeTruthy()
     act(() => h.editor.view.dispatch(h.editor.view.state.tr.setSelection(TextSelection.create(h.editor.view.state.doc, h.position('b') + 1)).insertText('续')))
     expect(h.editor.view.dom).toBe(root)
@@ -129,7 +141,7 @@ describe('Flow unified selection and continuous input', () => {
     expect(fromEditorDocument(h.editor.view.state.doc).blocks[0]).toMatchObject({ content: { inlines: [{ text: 'Alpha', style: { bold: true } }] } })
     expect(fromEditorDocument(h.editor.view.state.doc).blocks[1]).toEqual(paragraph('b', 'Beta'))
     expect(h.editor.isInputActive()).toBe(false)
-    expect(h.ui.getAllByRole('toolbar')).toHaveLength(1)
+    expectFlowDocumentActionsAndOneFormatBar(h)
   })
 
   it('keeps native word selection and IME Escape inside continuous input, then lets an external click settle without reclaiming selection', async () => {

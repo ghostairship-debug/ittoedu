@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react'
+import { editorShortcut } from '../../shared/editorShortcuts'
 import {
   isEditorInteractiveControlEvent,
   isEditorNativeHistoryEvent,
@@ -49,44 +50,41 @@ export function useEditorKeyboardRouter(ports: EditorKeyboardActionPorts): void 
     const onKeyDown = (event: KeyboardEvent) => {
       const current = portsRef.current
       if (current.isReadOnly() || current.ownsKeyboard?.(event) || event.defaultPrevented || event.isComposing || event.keyCode === 229) return
-      const key = event.key.toLowerCase()
-      if ((event.ctrlKey || event.metaKey) && key === 's') {
+      const shortcut = editorShortcut(event)
+      if (shortcut === 'save' || shortcut === 'save-as') {
         event.preventDefault()
         // Save owns the existing draft/ACK flush. It must also receive Ctrl+S
         // from PM, properties and source inputs without moving their focus.
-        current.saveProject(event.shiftKey)
+        current.saveProject(shortcut === 'save-as')
         return
       }
       // PM owns formal undo dispatch; source inputs own their unapplied draft.
-      const historyShortcut = (event.ctrlKey || event.metaKey) && (key === 'z' || key === 'y')
+      const historyShortcut = shortcut === 'undo' || shortcut === 'redo'
       if (historyShortcut ? isEditorNativeHistoryEvent(event) : isEditorTextInputEvent(event)) return
-      if ((event.ctrlKey || event.metaKey) && key === 'z') {
+      if (historyShortcut) {
         event.preventDefault()
-        if (event.shiftKey) current.redo()
+        if (shortcut === 'redo') current.redo()
         else current.undo()
-      } else if ((event.ctrlKey || event.metaKey) && key === 'y') {
-        event.preventDefault()
-        current.redo()
-      } else if ((event.ctrlKey || event.metaKey) && key === 'n') {
+      } else if (shortcut === 'new') {
         event.preventDefault()
         current.newProject()
-      } else if ((event.ctrlKey || event.metaKey) && key === 'o') {
+      } else if (shortcut === 'open') {
         event.preventDefault()
         current.openProject()
-      } else if ((event.ctrlKey || event.metaKey) && key === 'a') {
+      } else if (shortcut === 'select-all') {
         event.preventDefault()
         current.selectAll()
-      } else if ((event.ctrlKey || event.metaKey) && key === 'c') {
+      } else if (shortcut === 'copy') {
         if (window.getSelection()?.toString()) return
         // Native copy emits ClipboardEvent so the current OS clipboard receives
         // either text owned by its editor or the software-owned object marker.
         return
-      } else if ((event.ctrlKey || event.metaKey) && key === 'v') {
+      } else if (shortcut === 'paste') {
         return
-      } else if ((event.ctrlKey || event.metaKey) && key === 'x') {
+      } else if (shortcut === 'cut') {
         if (window.getSelection()?.toString() || !current.cutSelection) return
         return
-      } else if ((event.ctrlKey || event.metaKey) && key === 'd') {
+      } else if (shortcut === 'duplicate') {
         event.preventDefault()
         current.duplicateSelection()
       } else if (event.key === 'Delete' || event.key === 'Backspace') {

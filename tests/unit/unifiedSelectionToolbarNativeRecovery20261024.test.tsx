@@ -98,6 +98,7 @@ it('routes an explicit edit of the currently selected native image to its existi
   const originalCreate = URL.createObjectURL, originalRevoke = URL.revokeObjectURL
   URL.createObjectURL = vi.fn(() => 'blob:image-crop-test'); URL.revokeObjectURL = vi.fn()
   try {
+    vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} })
     const host = await createCourseDocumentHost(), store = () => useEditorStore.getState()
     await store().connectCourseDocuments(host.api); store().setEditingScope('scene')
     await insertCourseMedia(store().courseKernel, store().courseKernel.captureTarget(), [{ meta: { id: 'photo', filename: 'photo.png', mimeType: 'image/png',
@@ -116,12 +117,18 @@ it('routes an explicit edit of the currently selected native image to its existi
     const root = screen.getByTestId('canvas')
     act(() => expect(requestObjectEdit(root, 'some-other-object')).toBe(false))
     act(() => expect(requestObjectEdit(root, id)).toBe(true))
+    expect(screen.getByRole('dialog', { name: '图片简易编辑' })).toBeInTheDocument()
+    expect(screen.queryByRole('dialog', { name: '裁剪图片' })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: '裁剪' }))
     expect(screen.getByRole('dialog', { name: '裁剪图片' })).toBeInTheDocument()
     fireEvent.keyDown(window, { key: 'Escape' })
     expect(screen.queryByRole('dialog', { name: '裁剪图片' })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: '完成' }))
+    expect(screen.queryByRole('dialog', { name: '图片简易编辑' })).toBeNull()
+    expect(store().courseView.selectedInstanceIds).toEqual([id])
     expect(host.registry.get(documentId).read().revision).toBe(before.revision)
     expect(host.registry.get(documentId).read().undoDepth).toBe(before.undoDepth)
     act(() => store().selectNodes([]))
     act(() => expect(requestObjectEdit(root, id)).toBe(false))
-  } finally { URL.createObjectURL = originalCreate; URL.revokeObjectURL = originalRevoke }
+  } finally { URL.createObjectURL = originalCreate; URL.revokeObjectURL = originalRevoke; vi.unstubAllGlobals() }
 })

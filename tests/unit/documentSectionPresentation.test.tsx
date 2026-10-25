@@ -12,6 +12,8 @@ it('opens a collapsed playback chapter in the real author NodeView and retains e
     blocks: [{ id: 'body', type: 'paragraph' as const, content: { inlines: [{ type: 'text' as const, text: '正文内容', style: { bold: true } }] } }] }] }
   const editor = createLayoutEditor(host, { document: { content, resources: emptyDocumentResources() }, revision: '1', presentation: 'flow', change, diagnostic, undo() {}, redo() {} })
   try {
+    expect(editor.isInputActive()).toBe(false)
+    editor.setInputActive(true)
     const details = host.querySelector('details')!
     expect(details.open).toBe(true)
     expect(details.querySelector('summary [data-flow-idle-rich-text]')?.textContent).toBe('章节标题')

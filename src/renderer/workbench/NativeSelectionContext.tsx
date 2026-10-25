@@ -5,7 +5,8 @@ import { useCourseEditorActions } from '../documents/CourseEditorActionsContext'
 import { selectionObjectCommands } from '../composition/selection/selectionObjectCommands'
 import { useContextMenu, type MenuCommand } from '../editing/commands/CommandMenu'
 import { IMAGE_FIT_LABEL, multiObjectCommands, singleObjectCommands, type SingleObjectState } from '../editing/commands/objectCommands'
-import { OBJECT_CONTEXT_MENU_EVENT, OBJECT_EDIT_EVENT, requestAuthorFieldAction, requestObjectEdit, type ObjectContextMenuRequest } from '../editing/commands/objectContextMenu'
+import { OBJECT_CONTEXT_MENU_EVENT, OBJECT_EDIT_EVENT, IMAGE_EDIT_EVENT, requestAuthorFieldAction, requestObjectEdit, type ImageEditRequest, type ObjectContextMenuRequest } from '../editing/commands/objectContextMenu'
+import { ImageEditControls, ImageEditPanel } from '../editing/image/ImageEditPanel'
 import { ImageCropOverlay } from '../editing/crop/ImageCropOverlay'
 import { SlideLightActions, slideLightMenuItems } from '../editing/quickbar/SlideLightActions'
 import type { SlideLightCommand } from '../editing/commands/slideLightCommands'
@@ -30,7 +31,9 @@ import { proEditorRailController } from '../ui/proEditorRailController'
 import { frameCorners, multiplyMatrices, type AffineMatrix } from '../../core/components/geometry'
 import { componentParentMatrix } from '../composition/crossSurfaceCommands'
 import { componentIsLocked, owningContainer } from '../../shared/contracts/component-platform/project'
-import { TextFormatActions } from '../editing/quickbar/TextFormatActions'
+import { TextFormatActions, textFormatTogglePatch } from '../editing/quickbar/TextFormatActions'
+import { editorShortcut, type TextFormatShortcut } from '../../shared/editorShortcuts'
+import { isEditorTextInputEvent } from '../course/editorActionRouting'
 import { authorSpotFormatView, authorSpotStylePatch } from '../componentPlatform/surfaces/slide/authorSpotFormatting'
 import { authorSpotStyleEdits } from '../../core/components/authoring/componentAuthorEdits'
 import { slideLightObjectCommands } from '../editing/commands/slideLightCommands'
@@ -112,7 +115,7 @@ function ObjectActions({ view, patch, replaceImage, editText, extra = {} }: { vi
 const MULTI_ALIGN = [['left', '左对齐'], ['center', '水平居中'], ['right', '右对齐'], ['top', '顶对齐'], ['middle', '垂直居中'], ['bottom', '底对齐']] as const
 const sortedIds = (ids: readonly string[]) => JSON.stringify([...ids].sort())
 
-export function NativeSelectionContext({ documentId, revision, surfaceId, locationId: legacyLocationId, itemIds, stateId, sceneItemIds = [], enabled, bounds, authorBounds, textEditing = false, ownsDocumentSelection = true, authorSpot, children }: {
+export function NativeSelectionContext({ documentId, revision, surfaceId, locationId: legacyLocationId, itemIds, stateId, sceneItemIds = [], enabled, bounds, authorBounds, textEditing = false, ownsDocumentSelection = true, authorSpot, children, extraMenuItems = [], onCropImage, hideQuickBar = false, onImageEditingChange }: {
   documentId?: string | null; revision: number; surfaceId?: string | null; locationId?: string | null; itemIds: readonly string[]; stateId?: string | null; sceneItemIds?: readonly string[]; enabled: boolean
   bounds?(itemId: string): Box | null
   /** Current field geometry, resolved by the owning workspace; never the enclosing object's frame. */
@@ -124,6 +127,10 @@ export function NativeSelectionContext({ documentId, revision, surfaceId, locati
   ownsDocumentSelection?: boolean
   /** Surface-specific actions join the current selection's one bar. */
   children?: ReactNode
+  extraMenuItems?: readonly MenuCommand[]
+  onCropImage?(): void
+  hideQuickBar?: boolean
+  onImageEditingChange?(editing: boolean): void
 }) {
   const locationId = surfaceId ?? legacyLocationId
   const pageText = useRuntimeLightEditView(itemIds.length === 1 ? itemIds[0]! : '')
@@ -157,8 +164,31 @@ export function NativeSelectionContext({ documentId, revision, surfaceId, locati
   const [notice, setNotice] = useState('')
   // The image being cropped in place (M21); any change of selection ends it.
   const [cropping, setCropping] = useState<string | null>(null)
+  const [imageEditing, setImageEditing] = useState(false)
+  useEffect(() => { onImageEditingChange?.(imageEditing); return () => onImageEditingChange?.(false) }, [imageEditing, onImageEditingChange])
   const ids = JSON.stringify(itemIds), sceneIds = JSON.stringify(sceneItemIds)
+  const formatShortcut = useRef<{ identity?: string; toggle(key: TextFormatShortcut, fromInput: boolean): void } | null>(null)
+  formatShortcut.current = null
   useLayoutEffect(() => { setRoot(marker.current?.closest('main') ?? null) }, [])
+  useEffect(() => {
+    if (!root) return
+    const keydown = (event: KeyboardEvent) => {
+      const owner = formatShortcut.current, key = editorShortcut(event)
+      if (!owner || event.defaultPrevented || key !== 'bold' && key !== 'italic' && key !== 'underline') return
+      const target = event.target instanceof Element ? event.target : null
+      const plain = target?.closest('.canvas-plain-text-editor')
+      if (plain) {
+        // Professional inputs can carry the identity on their surrounding
+        // author-field host. A different field never borrows this selection.
+        if (!owner.identity || target?.closest('[data-author-field-identity]')?.getAttribute('data-author-field-identity') !== owner.identity) return
+      } else if (isEditorTextInputEvent(event) || target?.closest('.ProseMirror,[contenteditable="true"]')) return
+      event.preventDefault(); event.stopPropagation(); owner.toggle(key, Boolean(plain))
+    }
+    // The current workspace selection already owns these format actions. Read
+    // its scoped key before the plain input suppresses browser rich formatting.
+    root.addEventListener('keydown', keydown, true)
+    return () => root.removeEventListener('keydown', keydown, true)
+  }, [root])
   // Right-click: the workspace selects what is under the pointer and asks for that selection's menu (M21).
   const contextMenu = useContextMenu()
   const menuRequestState = useRef<{ ids: string; identity: string; items: MenuCommand[] }>({ ids: '[]', identity: '', items: [] })
@@ -179,7 +209,7 @@ export function NativeSelectionContext({ documentId, revision, surfaceId, locati
     // Menu commands belong to the selection that opened them. A keyboard
     // selection change or tab/state switch ends that menu before it can run.
     contextMenu.close()
-    setNotice(''); setCropping(null)
+    setNotice(''); setCropping(null); setImageEditing(false)
   }, [documentId, locationId, ids, stateId, enabled, authorIdentity, contextMenu.close])
   useEffect(() => {
     if (!documentId || !ownsDocumentSelection || !enabled) return
@@ -265,17 +295,24 @@ export function NativeSelectionContext({ documentId, revision, surfaceId, locati
     }
   }
   useEffect(() => {
-    if (!root || !enabled || selectedField || textEditing || single?.view.type !== 'image' || single.disabledReason
-      || single.view.locked || !single.view.visible || !bounds || selection?.kind !== 'slide-native' || selection.spatialMode) return
-    const image = single.view
+    if (!enabled || textEditing) return
+    const available = selectedField?.kind === 'image' ? Boolean(selectedAuthor) && !(project && componentIsLocked(project, selectedField.instanceId))
+      : single?.view.type === 'image' && !single.disabledReason && !single.view.locked && single.view.visible
+    if (!available) return
     const edit = (event: Event) => {
       const requested = (event as CustomEvent<{ itemId: string }>).detail
-      if (requested?.itemId !== image.id || Math.abs(((image.rotation % 360) + 540) % 360 - 180) > 0.000001) return
-      event.preventDefault(); setCropping(image.id)
+      if (selectedField || requested?.itemId !== single?.view.id) return
+      event.preventDefault(); setImageEditing(true)
     }
-    root.addEventListener(OBJECT_EDIT_EVENT, edit)
-    return () => root.removeEventListener(OBJECT_EDIT_EVENT, edit)
-  }, [root, enabled, authorIdentity, textEditing, single?.view, single?.disabledReason, bounds, selection?.kind, selection?.kind === 'slide-native' && selection.spatialMode])
+    const imageEdit = (event: Event) => {
+      const requested = (event as CustomEvent<ImageEditRequest>).detail
+      if (requested?.documentId !== documentId || requested.epoch !== courseView.snapshot?.epoch || requested.itemId !== itemIds[0]
+        || (requested.selectionIdentity ?? '') !== authorIdentity) return
+      setImageEditing(true)
+    }
+    root?.addEventListener(OBJECT_EDIT_EVENT, edit); window.addEventListener(IMAGE_EDIT_EVENT, imageEdit)
+    return () => { root?.removeEventListener(OBJECT_EDIT_EVENT, edit); window.removeEventListener(IMAGE_EDIT_EVENT, imageEdit) }
+  }, [root, enabled, documentId, courseView.snapshot?.epoch, ids, authorIdentity, selectedAuthor, textEditing, single?.view, single?.disabledReason, project])
   // Commands report a failure next to the bar instead of throwing into React.
   const guarded = (items: MenuCommand[]): MenuCommand[] => items.map(item => ({ ...item, run: () => run(item.run, report) }))
   // This render's document and scope stay fixed while preparation drains its pending input.
@@ -303,27 +340,43 @@ export function NativeSelectionContext({ documentId, revision, surfaceId, locati
     const fieldAction = () => run(() => {
       if (disabledReason) throw new Error(disabledReason)
       if (!documentId || !courseView.snapshot || !requestAuthorFieldAction({ documentId, epoch: courseView.snapshot.epoch,
-        selectionIdentity: authorIdentity, action: selectedField.kind === 'text' ? 'edit' : 'replace-image' })) throw new Error('此处字段暂时无法打开，请重新选择')
+        selectionIdentity: authorIdentity, action: 'edit' })) throw new Error('此处字段暂时无法打开，请重新选择')
     }, report)
     const selectWhole = () => {
       if (documentId) useEditorStore.getState().courseBridge.selectInstances(documentId, [selectedField.instanceId], locationId)
     }
     contextItems = guarded([
-      { id: 'author-field.edit', label: selectedField.kind === 'text' ? '编辑此处文字' : '替换此处图片', group: 'content', run: fieldAction, disabledReason },
+      { id: 'author-field.edit', label: selectedField.kind === 'text' ? '编辑此处文字' : '编辑此处图片', group: 'content', run: fieldAction, disabledReason },
       { id: 'author-field.select-owner', label: '选择整个组件', group: 'selection', run: selectWhole },
     ])
     const localView = selectedAuthor?.kind === 'text' && fieldProject ? authorSpotFormatView(fieldProject, selectedAuthor) : null
-    const patchLocal = (patch: PropertiesPatch) => run(async () => {
+    const patchLocal = (patch: PropertiesPatch | TextFormatShortcut, spot = selectedAuthor) => run(async () => {
       const owner = useEditorStore.getState(), target = owner.courseKernel.captureTarget(documentId!)
-      if (!selectedAuthor || target.surfaceId !== locationId || target.activeStateId !== (stateId ?? null) || target.instanceId !== selectedAuthor.instanceId
+      if (!spot || owner.courseView.activeDocumentId !== documentId || target.epoch !== courseView.snapshot?.epoch
+        || target.surfaceId !== locationId || target.activeStateId !== (stateId ?? null) || target.instanceId !== spot.instanceId
         || target.selectionIdentity !== authorIdentity || interactionSelectionIdentity(owner.courseView.interactionSelection) !== authorIdentity)
         throw new Error('当前文字选择已改变，请重新选择')
-      if (componentIsLocked(target.editingProject, selectedAuthor.instanceId)) throw new Error('对象已锁定')
-      const currentView = authorSpotFormatView(target.editingProject, selectedAuthor)
+      if (componentIsLocked(target.editingProject, spot.instanceId)) throw new Error('对象已锁定')
+      const currentView = authorSpotFormatView(target.editingProject, spot)
       if (!currentView) throw new Error('此片段由程序共享排版，请在组件源码中修改格式')
-      const edits = authorSpotStyleEdits(target.editingProject, selectedAuthor, authorSpotStylePatch(selectedAuthor, currentView, patch))
+      const edits = authorSpotStyleEdits(target.editingProject, spot, authorSpotStylePatch(spot, currentView,
+        typeof patch === 'string' ? textFormatTogglePatch(currentView, patch) : patch))
       await owner.courseKernel.editCaptured(owner.courseKernel.capture(edits, target))
     }, report)
+    if (enabled && ownsDocumentSelection && localView && !disabledReason) formatShortcut.current = {
+      identity: authorIdentity, toggle: (key, fromInput) => run(async () => {
+        let spot = selectedAuthor
+        const owner = useEditorStore.getState(), draft = owner.slideContentEdit
+        if (fromInput && draft) {
+          if (draft.target.documentId !== documentId || !draft.authorSpot || authorFieldIdentity(draft.instanceId, draft.authorSpot) !== authorIdentity)
+            throw new Error('当前输入位置已改变，请重新选择')
+          spot = undefined
+          await owner.commitSlideContentEdit(documentId!, accepted => { spot = accepted })
+          if (!spot) throw new Error('此处输入尚未完成，格式未修改')
+        }
+        patchLocal(key, spot)
+      }, report),
+    }
     const localCommands = slideLightObjectCommands({ isText: true, locked, clickBindable: false, sounds: [], locations: [] })
       .filter(command => command.kind === 'line-spacing' && localView?.lineSpacing)
     content = <>
@@ -333,12 +386,14 @@ export function NativeSelectionContext({ documentId, revision, surfaceId, locati
           backgroundColor={null} onRun={command => patchLocal({ style: command.kind === 'font' ? { fontFamily: String(command.value) } : { lineSpacing: Number(command.value) } })} onError={report} />
       </> : <>
         <QuickBarLabel>{disabledReason ?? (selectedField.kind === 'text' ? '所选内部文字' : '所选内部图片')}</QuickBarLabel>
-        <QuickBarButton label={selectedField.kind === 'text' ? '编辑此处文字' : '替换此处图片'} text={selectedField.kind === 'text' ? '编辑' : '替换'} disabled={Boolean(disabledReason)} onClick={fieldAction} />
+        <QuickBarButton label={selectedField.kind === 'text' ? '编辑此处文字' : '编辑此处图片'} text="编辑" disabled={Boolean(disabledReason)} onClick={fieldAction} />
       </>}
       <QuickBarSeparator />{ai}<QuickBarMenu items={contextItems} />
     </>
   } else if (single) {
     const node = single.view, patch = single.patch
+    if (enabled && ownsDocumentSelection && node.type === 'text' && !single.disabledReason && !node.locked && node.visible)
+      formatShortcut.current = { toggle: key => patch(textFormatTogglePatch(node, key)) }
     // Cropping and replacing a video are Slide-page tools for now (M21).
     const slidePage = selection?.kind === 'slide-native' && !selection.spatialMode
     const slideLight = slidePage && !single.disabledReason ? actions?.slideLight : undefined
@@ -407,7 +462,7 @@ export function NativeSelectionContext({ documentId, revision, surfaceId, locati
           {() => <RuntimePageTextList itemId={node.id} onError={report} />}
         </QuickBarPopoverButton>}
         {node.type !== 'table' && node.type !== 'chart' && node.type !== 'input' && node.type !== 'external-component' && <QuickBarSeparator />}
-        {ai}<QuickBarMenu items={guarded([...singleObjectCommands(objectState, ports), ...lightMenu])} />
+        {ai}<QuickBarMenu items={guarded([...extraMenuItems, ...singleObjectCommands(objectState, ports), ...lightMenu])} />
       </>
     }
   } else if (selection?.kind === 'multi-selection') {
@@ -436,11 +491,11 @@ export function NativeSelectionContext({ documentId, revision, surfaceId, locati
       <QuickBarSeparator />{ai}<QuickBarMenu items={items} />
     </>
   }
-  menuRequestState.current = { ids: sortedIds(itemIds), identity: authorIdentity, items: contextItems }
+  menuRequestState.current = { ids: sortedIds(itemIds), identity: authorIdentity, items: [...guarded([...extraMenuItems]), ...contextItems] }
   if (!enabled) return null
   // The in-place crop of the selected image, drawn over the canvas while it runs (M21).
   const cropView = cropping && single?.view.type === 'image' && single.view.id === cropping ? single.view : null
-  const cropScreen = cropView ? bounds?.(cropView.id) ?? null : null
+  const cropScreen = cropView ? bounds?.(cropView.id) ?? anchor : null
   const cropSource = cropView ? selectionObjectCommands.imageSource(cropView.assetId) : null
   const cropPatch = single?.patch
   const cropProject = useEditorStore.getState().courseView.editingProject, cropFrame = cropView && cropProject?.instances[cropView.id]?.frame
@@ -462,7 +517,7 @@ export function NativeSelectionContext({ documentId, revision, surfaceId, locati
   return <span ref={marker} className="native-selection-context" aria-hidden="true">
     {pinnedBoxes.map((box, index) => <span key={index} aria-hidden="true" data-pinned-object="true" className="native-selection-context__pinned"
       style={{ left: box.left, top: box.top, width: box.width, height: box.height, transform: box.rotation ? `rotate(${box.rotation}deg)` : undefined }} />)}
-    {content && !textEditing && <SelectionQuickBar label="选中对象快捷工具" anchor={anchor} bounds={view} suspended={gesture || cropping !== null} selectionKey={`${documentId}:${locationId}:${stateId}:${ids}:${authorIdentity}`} aboveOffset={ROTATION_HANDLE_CLEARANCE}>
+    {content && !textEditing && !hideQuickBar && <SelectionQuickBar label="选中对象快捷工具" anchor={anchor} bounds={view} suspended={gesture || cropping !== null || imageEditing} selectionKey={`${documentId}:${locationId}:${stateId}:${ids}:${authorIdentity}`} aboveOffset={ROTATION_HANDLE_CLEARANCE}>
       {globalNotice && <><QuickBarLabel>{globalNotice}</QuickBarLabel><QuickBarSeparator /></>}
       {content}
       {children}
@@ -474,5 +529,19 @@ export function NativeSelectionContext({ documentId, revision, surfaceId, locati
     </SelectionQuickBar>}
     {contextMenu.element}
     {cropElement}
+    {imageEditing && !cropping && <ImageEditPanel anchor={anchor} bounds={view} close={() => setImageEditing(false)}>
+      {single?.view.type === 'image' ? <ImageEditControls image={single.view} patch={single.patch} replace={single.replaceImage}
+        canRotate={Boolean((editingProject ?? project)?.instances[single.view.id]?.frame) && overlay?.native?.frameEditingEnabled !== false}
+        crop={onCropImage ? () => { setImageEditing(false); onCropImage() } : (bounds || anchor) && (editingProject ?? project)?.instances[single.view.id]?.frame ? () => setCropping(single.view.id) : undefined}
+        cropDisabledReason={!onCropImage && Math.abs(((single.view.rotation % 360) + 540) % 360 - 180) > 0.000001 ? '旋转的图片请先把旋转归零再裁剪' : null}
+        close={() => setImageEditing(false)} /> : selectedField?.kind === 'image' ? <ImageEditControls close={() => setImageEditing(false)}
+          replace={selectedAuthor && !(project && componentIsLocked(project, selectedField.instanceId)) ? () => run(() => {
+            if (!documentId || !courseView.snapshot || !requestAuthorFieldAction({ documentId, epoch: courseView.snapshot.epoch, selectionIdentity: authorIdentity, action: 'replace-image' }))
+              throw new Error('此处图片已变化，请重新选择')
+          }, report) : undefined}>
+          <p>{selectedAuthor ? '此处支持替换图片；其他显示属性由组件源码控制。' : '此处图片尚未显示，请定位到原位置后编辑。'}</p>
+        </ImageEditControls> : null}
+      {notice && <p role="alert">{notice}</p>}
+    </ImageEditPanel>}
   </span>
 }

@@ -952,7 +952,7 @@ export function TextContentTextarea({
   value: string
   onBegin(): boolean | void
   onChange(value: string, edit?: TextRunEdit): void
-  onCommit(): void
+  onCommit(value?: string): void | Promise<void>
   onCancel(): void
   onCompositionChange?(composing: boolean): void
 }) {
@@ -993,9 +993,10 @@ export function TextContentTextarea({
     staleNotified: boolean
     onBegin: () => boolean | void
     onChange: (value: string, edit?: TextRunEdit) => void
-    onCommit: () => void
+    onCommit: (value?: string) => void | Promise<void>
     onCancel: () => void
     onCompositionChange?: (composing: boolean) => void
+    pending?: Promise<boolean>
   }>({
     phase: 'idle',
     bindingKey: currentBindingKey,
@@ -1121,33 +1122,59 @@ export function TextContentTextarea({
     }
   }
 
-  const finishCommit = () => {
-    if (resumeRequired.current) return
+  const finishCommit = (): boolean | Promise<boolean> => {
+    if (resumeRequired.current) return false
     const session = sessionRef.current
-    if (propertyDraftSuspended(session.bindingKey)) return
-    if (rejectStale()) return
-    const commit = session.onCommit
-    session.phase = 'idle'
-    session.baseline = session.draft
-    session.staleNotified = false
-    inputCaptureRef.current = null
-    compositionCaptureRef.current = null
-    commit()
+    if (session.pending) return session.pending
+    if (propertyDraftSuspended(session.bindingKey) || rejectStale()) return false
+    const candidate = session.draft
+    const accepted = () => {
+      session.baseline = candidate
+      session.staleNotified = false
+      if (session.draft === candidate && session.phase !== 'composing' && session.phase !== 'blur-pending') {
+        session.phase = 'idle'
+        inputCaptureRef.current = null
+        compositionCaptureRef.current = null
+      }
+      setSessionEpoch(epoch => epoch + 1)
+      return session.phase === 'idle'
+    }
+    try {
+      // Synchronous local-stage consumers remain valid; a canonical property
+      // owner returns its actual ACK. Rejection never advances the raw baseline.
+      const result = session.onCommit(candidate)
+      if (!result) return accepted()
+      const pending = Promise.resolve(result).then(() => {
+        if (session.pending !== pending) return false
+        session.pending = undefined
+        return accepted()
+      }, () => {
+        if (session.pending === pending) session.pending = undefined
+        setSessionEpoch(epoch => epoch + 1)
+        return false
+      })
+      session.pending = pending
+      setSessionEpoch(epoch => epoch + 1)
+      return pending
+    } catch {
+      setSessionEpoch(epoch => epoch + 1)
+      return false
+    }
   }
   usePropertyDraftFlush(() => {
     if (resumeRequired.current) return false
     const session = sessionRef.current
     if (session.phase === 'idle') return true
     if (session.phase === 'composing' || session.phase === 'blur-pending' || rejectStale()) return false
-    finishCommit()
-    return true
+    return finishCommit()
   }, {
-    hasDirty: () => resumeRequired.current || sessionRef.current.draft !== sessionRef.current.baseline
+    hasDirty: () => resumeRequired.current || Boolean(sessionRef.current.pending) || sessionRef.current.draft !== sessionRef.current.baseline
       || sessionRef.current.phase === 'composing' || sessionRef.current.phase === 'blur-pending',
     isComposing: () => sessionRef.current.phase === 'composing' || sessionRef.current.phase === 'blur-pending',
+    inFlight: () => sessionRef.current.pending,
     readDraft: () => ({ bindingKey: sessionRef.current.bindingKey, label, kind: 'text', raw: sessionRef.current.draft,
       baseline: sessionRef.current.baseline, composing: resumeRequired.current || sessionRef.current.phase === 'composing' || sessionRef.current.phase === 'blur-pending' }),
-    restoreDraft: record => {
+    restoreDraft: (record, resume) => {
       sessionRef.current.phase = 'editing'
       sessionRef.current.bindingKey = record.bindingKey
       sessionRef.current.baseline = record.baseline ?? value
@@ -1155,6 +1182,20 @@ export function TextContentTextarea({
       resumeRequired.current = record.composing
       setDraft(record.raw)
       setSessionEpoch(epoch => epoch + 1)
+      if (resume?.readDraft()?.bindingKey === currentBindingKey && resume.pending) {
+        const pending = resume.pending.then(ready => {
+          if (sessionRef.current.pending !== pending) return ready
+          sessionRef.current.pending = undefined
+          const previous = resume.readDraft()
+          if (previous?.baseline !== undefined) sessionRef.current.baseline = previous.baseline
+          if (ready && sessionRef.current.draft === sessionRef.current.baseline
+            && sessionRef.current.phase !== 'composing' && sessionRef.current.phase !== 'blur-pending') sessionRef.current.phase = 'idle'
+          setSessionEpoch(epoch => epoch + 1)
+          return sessionRef.current.phase === 'idle'
+        })
+        sessionRef.current.pending = pending
+        return
+      }
       sessionRef.current.onBegin()
       sessionRef.current.onChange(record.raw)
     },
@@ -1285,6 +1326,7 @@ export function TextContentTextarea({
           ) return
           if (event.key === 'Escape') {
             event.preventDefault()
+            if (session.pending) return
             if (rejectStale()) {
               session.onCancel()
               rebaseCurrent()

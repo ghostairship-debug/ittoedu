@@ -2,18 +2,27 @@
 
 主执行者先读[当前状态](CURRENT_STATUS.md)和用户指定范围；已注入的 AGENTS 无需重读。合同、历史和证据按相关动作取用，不顺序通读全部资料。
 
-Owner最新授权：按既定四项顺序完成 Engine／互动遗留项收口、必要独审及结果记录后 commit 并 push，不追加其他工作包、不发布。前轮与原有成果已随 `699fc9e9` 及其前序提交推送；各旧结果的未提交描述保留历史时点，发行、Portable与部署继续暂停。
+Owner最新授权：按[架构与统一选中边界回归修复方案](20261024-regression-boundary-repair/PLAN.md)执行，包含图片简易编辑面板、Flow定位方式直接显示及低频操作放“更多”。新的UI、模式或操作路径变更先确认；本轮暂不commit、push、打Portable、发布或部署。前轮授权及各旧结果的提交描述仅保留历史时点。
+
+Owner 10月25日最新HTML修复已完成：[统一控件、就近AI及预览命中](20261025-html-edit-repair/RESULT.md)。第2项已用同一原件、同一Windows原生鼠标路径复现并修正空白命中死循环；共用快捷条／AI和遮挡描框已接通。直接26/26、真实Agent浏览器2/2、Main保存冷开1/1、类型及独审通过；未重启用户窗口，未commit／push／发布。
+
+此前[Python开发载体及属性草稿核实修复](20261025-draft-compute-repair/RESULT.md)已完成。CA246 Root原环境1/1通过；3条旧属性失败已逐项核实，文字两种真实丢稿已修、数值／公式无需改产品，直接44/44、Root实际右侧栏、类型及独审通过。此前[AI格式与核心路径](20261025-format-core-repair/RESULT.md)和[页面卡片与模式纠正](20261025-targeted-followup/RESULT.md)继续有效。新的UI、模式或操作路径仍先确认，未commit／push／发布；历史全量及物理输入法未验边界保留。
 
 | 用途 | 唯一入口或直接依据 |
 |---|---|
-| 当前实现、剩余与交付边界 | [CURRENT_STATUS](CURRENT_STATUS.md)；最新为10月24日资源、运行性能与动画基础修复，软件与作品责任、资源/加载实测及剩余长帧分别记录；前一轮交互成果与旧条件专项、创作质量／效率边界保留 |
+| 当前实现、剩余与交付边界 | [CURRENT_STATUS](CURRENT_STATUS.md)；最新为[HTML统一编辑与命中修复](20261025-html-edit-repair/RESULT.md)。此前[Python及草稿](20261025-draft-compute-repair/RESULT.md)、[格式／核心路径](20261025-format-core-repair/RESULT.md)、[页面卡片／旧模式](20261025-targeted-followup/RESULT.md)及[边界修复](20261024-regression-boundary-repair/RESULT.md)继续有效。其他性能／作品目标各自条件保留 |
+| HTML统一编辑与命中（10月25日，实施完成） | 共用快捷条／格式动作及就近AI已恢复；完全遮挡不画框，部分露出保留。第2项原生鼠标修前／修后确认空白命中死循环，非大小限制；直接26/26、实际Agent浏览器2/2、Main格式保存冷开1/1、三套类型及独审通过。见[结果与证据边界](20261025-html-edit-repair/RESULT.md)。原件／profile保留，未重启用户窗口或commit／push／发布。 |
+| Python开发载体及属性草稿（10月25日，实施完成） | CA246 Root原配置真实Worker／Python完整1/1通过、0skip；文字拒接纳虚报成功及IME失焦丢稿已修。3条旧属性失败逐项核实；直接44/44、Root实际RightSidebar、类型及独审通过。原正确保护及历史失败保留，见[综合结果](20261025-draft-compute-repair/RESULT.md)。未新增UI／模式／路径，未commit、push或发布。 |
+| AI格式与核心编辑路径（10月25日，实施完成） | 高层整对象实际字号／颜色、旧realm ACK抢选及旧鼠标记录吞up已修；完整工具／冷开16/16，实际格式呈现、Source完整浏览器及关闭保稿组合链通过，三套类型及独审完成。Python对照、当时CA246与3条GUI旧失败记录见[原结果](20261025-format-core-repair/RESULT.md)；后续裁定见上行，不回写历史。未commit、push或发布。 |
+| 页面卡片及剩余问题定向后续（10月25日） | 卡片删除布局按Owner标注实施；后台HTML夹具最终4/4，生产activity未改；取消前置模式选择的方向已纠正，Worker未决。AI格式与选中／拖动／关闭保稿仅[定位及方案](20261025-targeted-followup/RESULT.md)，不得当成已实施或全仓通过。未commit、push或发布。 |
 | 已执行批次的原规格 | [软件方案全部 §1—28](../archive/联网搜索解耦与多后端接入方案-2026-10-12.md)、[互动演示创作方案](../archive/互动演示创作方案-2026-10-12.md)、[历史启动提示词](../archive/果铃软件与创作修复-Codex执行提示词-2026-10-12.md)；原批次已于10月13日收口，不再自动执行 |
 | 唯一开发结果与证据 | [软件与创作修复结果](SOFTWARE_AUTHORING_RESULT.md)；最新关闭、Markdown、HTML／GLX 编辑和统一编辑复核结果在前，早期阶段按原日期读取 |
 | 实际接续任务 | [TASK_BOARD](TASK_BOARD.md)及对应卡；queued 不自动启动，未实施候选不计完成 |
+| 架构与统一选中边界回归修复（10月24—25日，本轮已交付） | 已确认入口恢复、图片面板、Flow定位／更多及画布专业控件边界已集成，关键浏览器4/4、必要类型及独审完成。原30条／5条及同次起终点比较见[综合结果](20261024-regression-boundary-repair/RESULT.md)；冻结样本14条新增稳定中12条已审补正后定点通过，2条未决，Worker及全量证据限制保留。未commit、push或发布。 |
 | 架构优化批次（10月24日，已收口） | [原方案§15](../../output/architecture-audit-20261024/IMPLEMENTATION_PLAN.md#architecture-batch-closeout)为原批次逐包状态与重启条件；选中实施、试验和维护已收口，其他广义方向条件性暂缓。架构批次已提交推送为 `7952cc24`；历史红例的新结论见下一行，不回写原统计。 |
 | 架构审查后续维护（10月24日，遗留项已收口） | [最新四项结果](20261024-engine-interaction-closeout/RESULT.md)：暂停复位进入规则修复、教师按钮夹具维护、取消归属错误码补齐与 steer 终态预期维护完成；Engine 57／57、互动 7／7、直接取消消费者及三段类型检查通过。[前轮结果](20261024-architecture-review-followup/RESULT.md)保留回执、规则规划与 Flow 清理及原失败统计。 |
 | 资源、运行性能与动画基础（2026-10-24） | [修复报告](../../output/resource-runtime-repair-20261024/REPORT.md)、[性能对照](../../output/resource-runtime-repair-20261024/PERFORMANCE.md)、[接口变化](../../output/resource-runtime-repair-20261024/SOFTWARE_CHANGES.md)、[创作交接](../../output/resource-runtime-repair-20261024/CREATIVE_HANDOFF.md)；GLX 17.50→8.43MB、正式HTML 29.53→16.39MB。原件只读，本轮独立本地提交，前一轮dirty保留，不push/发布 |
-| 统一选中、整体拖动与双击编辑（2026-10-24，已实施） | [唯一结果](20261024-unified-selection-editing/RESULT.md)及[原方案／同类探索](20261024-unified-selection-editing/PLAN.md)；软件迁移、聚焦验证、类型／构建及独审完成；5项真实浏览器、代表保存冷开与离线运行通过，完整Electron／Owner接受边界保留；实施时未commit，本次纳入整体提交 |
+| 统一选中、整体拖动与双击编辑（2026-10-24，历史实施） | [原结果及纠正说明](20261024-unified-selection-editing/RESULT.md)、[原方案](20261024-unified-selection-editing/PLAN.md)；原5项浏览器、代表保存冷开及离线证据按其范围保留，未确认UI扩改已由最新边界方案纠正。旧整提描述仅属历史，本轮不commit；完整Electron／Owner接受边界保留 |
 | 编辑阻断与体验回退修复（2026-10-23，收口） | [唯一结果及A01–A20／B01–B21覆盖](20261023-editing-regressions/RESULT.md)；P1–P9软件修复与独审完成，指定GLX、大小HTML副本实际编辑／保存／新进程冷开、最终工具栏视觉及相关类型／构建通过。性能与外部条件边界保留；实施时未提交，本地提交沿下文最新授权 |
 | 审计整合与组件／Flow重构（2026-10-23，已完成） | [唯一结果与证据](20261023-audit-refactor/RESULT.md)；审计归并、B1–B8裁决、混排／插入／发现／分栏及恢复／运行／输出已实施并独审，真实模型接力、人工状态保留、保存新进程冷开与正式compiled离线互动通过；无可比基线，不签普遍提速，实施时未提交，本地提交沿下文最新授权 |
 | 关闭、Markdown 与 HTML／GLX 编辑（2026-10-22） | [最新修复结果](20261022-responsiveness-editing/RESULT.md)；同版本准备与恢复稿去重、原位编辑和实际手柄、试运行隔离、保存与冷开均有直接证据，性能数字按各自条件读取 |
@@ -32,6 +41,6 @@ Owner最新授权：按既定四项顺序完成 Engine／互动遗留项收口�
 
 原根目录开发总纲已并入本页，ROADMAP并入当前状态；旧ENTRYPOINTS并入文档导航。10月12日原两份方案及启动提示词已按完成状态归档，结果记录迁入本目录；10月23日本次按Owner卫生整理指令，将组件／Flow方案、编辑回退方案、已执行工作流及启动提示词完整迁入[归档](../archive/README.md#2026-10-23-文档整合与本地提交)，原裁决与授权保留。当前工作从本页／当前状态及Owner指定入口进入，不重复执行历史批次。
 
-Owner 2026-10-24最新直接授权本轮资源、运行性能与动画基础软件修复完成后本地git commit；只提交本轮软件/报告增量，上一轮交互dirty与其他创作工程保留。此前各RESULT的未提交描述仍为当时事实，push／Portable／发布／部署继续暂停。
+10月24日资源、运行性能与动画基础的本地commit授权属于前轮历史时点。当前以本文顶部授权为准：边界回归修复不commit、push、打Portable、发布或部署，保留其他创作工程与已有成果；新的UI、模式或操作路径先确认。
 
 旧 v2／R01—R08／H1—H6 和10月10日 §14.8 等入口已归入历史导航；已执行原规格只供追溯，现有差额按当前状态和用户目标接续。架构目标仍见[统一组件方案](component-platform-refactor/ARCHITECTURE_AND_REFACTOR_PLAN.md)，机器消费的旧规格仍在[roadmap](roadmap/README.md)。原入口完整快照见[归档](../archive/20261017-开发状态与任务交接快照.md#entry-snapshot)。

@@ -2,6 +2,7 @@ import { useEffect, useImperativeHandle, useLayoutEffect, useRef, useState, type
 import { registerAuthoringObservationDraft } from '../authoring/generation/authoringObservation'
 import { componentClientMatrix } from '../../player/components/runtime/componentClientMatrix'
 import { invertMatrix, transformVector } from '../../core/components/geometry'
+import { editorShortcut, type TextFormatShortcut } from '../../shared/editorShortcuts'
 
 export interface CanvasPlainTextBounds {
   x: number
@@ -57,6 +58,8 @@ interface CanvasPlainTextEditorProps {
   escapeBehavior?: 'commit' | 'cancel'
   selectionIdentity?: string
   editorRef?: Ref<CanvasPlainTextEditorHandle>
+  /** Optional existing field-format owner; the input itself stays plain text. */
+  onFormatShortcut?(format: TextFormatShortcut): void
   onDraftChange?(value: string, composing: boolean): void
   onCommit(value: string): void
   onAdvance?(value: string, direction: 1 | -1): void
@@ -84,6 +87,7 @@ export function CanvasPlainTextEditor({
   escapeBehavior = 'commit',
   selectionIdentity,
   editorRef,
+  onFormatShortcut,
   onCommit,
   onAdvance,
   onCancel,
@@ -122,6 +126,10 @@ export function CanvasPlainTextEditor({
   const toolbarTarget = (target: EventTarget | null) => target instanceof Element && Boolean(target.closest('.selection-quick-bar,.text-edit-toolbar,.palette-button__panel,.shared-document-form,.command-menu'))
   const afterBlur = (event: React.FocusEvent<HTMLElement>, inline = false) => {
     if (toolbarTarget(event.relatedTarget)) return
+    // compositionend may arrive in the same event turn, before the deferred
+    // focus check. Record the completion request while composition still owns
+    // the input, then commit its final DOM value in compositionend exactly once.
+    if (composingRef.current) { pendingFinishRef.current = false; return }
     const blurred = event.currentTarget
     queueMicrotask(() => {
       const active = blurred.ownerDocument.activeElement
@@ -239,7 +247,7 @@ export function CanvasPlainTextEditor({
       event: React.KeyboardEvent<HTMLInputElement | HTMLTextAreaElement>,
     ) => {
       if (event.nativeEvent.isComposing || composingRef.current) return
-      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') {
+      if (['save', 'save-as'].includes(editorShortcut(event.nativeEvent) ?? '')) {
         finish(false)
         return
       }
@@ -269,28 +277,37 @@ export function CanvasPlainTextEditor({
       style={{ left: bounds.x, top: bounds.y, width: Math.max(1, bounds.width), minHeight: Math.max(1, bounds.height), transform: `rotate(${rotation}deg)` }}>
       <div ref={inlineRef} className="canvas-plain-text-editor__inline" contentEditable={!readOnly} suppressContentEditableWarning role="textbox" aria-label={label} aria-multiline={multiline}
         style={inlineStyle} onInput={change} onPointerDown={event => { handoff.current = false; event.stopPropagation() }} onDoubleClick={event => event.stopPropagation()}
-        onPaste={event => { event.preventDefault(); elementInsert(event.clipboardData.getData('text/plain')); change() }}
+        onPaste={event => { event.preventDefault(); elementInsert(event.clipboardData.getData('text/plain')) }}
         onCompositionStart={() => { composingRef.current = true; onDraftChange?.(readInline(), true) }}
         onCompositionEnd={() => { composingRef.current = false; change(); const pending = pendingFinishRef.current; pendingFinishRef.current = null; if (pending !== null && !finishedRef.current) { finishedRef.current = true; if (pending) onCancel(); else onCommit(readInline()) } }}
         onBlur={event => afterBlur(event, true)}
         onKeyDown={event => {
           if (event.nativeEvent.isComposing || composingRef.current) return
           const command = event.ctrlKey || event.metaKey
-          if (command && ['b', 'i', 'u'].includes(event.key.toLowerCase())) { event.preventDefault(); return }
+          const shortcut = editorShortcut(event.nativeEvent)
+          if (shortcut === 'bold' || shortcut === 'italic' || shortcut === 'underline') {
+            event.preventDefault(); event.stopPropagation(); onFormatShortcut?.(shortcut); return
+          }
           if (event.key === 'Escape' || event.key === 'Enter' && (command || !multiline)) {
             event.preventDefault(); event.stopPropagation()
             finishedRef.current = true
             if (event.key === 'Escape' && escapeBehavior === 'cancel') onCancel(); else onCommit(readInline())
-          } else if (event.key === 'Enter') { event.preventDefault(); elementInsert('\n'); change() }
+          } else if (event.key === 'Enter') { event.preventDefault(); elementInsert('\n') }
         }} />
     </div>
     function elementInsert(text: string) {
       const element = inlineRef.current, selection = element?.ownerDocument.getSelection()
-      if (!element || !selection?.rangeCount) return
+      if (!element || readOnly || !selection?.rangeCount) return
       const range = selection.getRangeAt(0)
       if (!element.contains(range.commonAncestorContainer)) return
+      // Use the browser's plain-text edit command so paste/newline belong to
+      // the same native undo chain as typing and cut. No second input History.
+      const escaped = text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/\r\n?/g, '\n')
+      if (element.ownerDocument.execCommand?.('insertHTML', false, `<span>${escaped}</span>`)) return
+      // Non-browser projections can lack native edit commands.
       range.deleteContents(); const node = element.ownerDocument.createTextNode(text); range.insertNode(node)
       range.setStartAfter(node); range.collapse(true); selection.removeAllRanges(); selection.addRange(range)
+      change()
     }
   }
   return (

@@ -1,3 +1,4 @@
+import { requestImageEdit } from '../editing/commands/objectContextMenu'
 import { visibleComponentAuthorHit } from '../components/componentAuthorHit'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Hand, Maximize2, Minus, Plus } from 'lucide-react'
@@ -46,7 +47,7 @@ import { EDITOR_PAGE_INSETS, formatPageInsets } from '../../shared/pageFrame'
 import { NativeSelectionContext } from '../workbench/NativeSelectionContext'
 import { proEditorRailController } from './proEditorRailController'
 import { SlideLayerSelectionOverlay } from './workspaces/SlideLayerSelectionOverlay'
-import { QuickBarPopoverButton } from '../editing/quickbar/SelectionQuickBar'
+import type { MenuCommand } from '../editing/commands/CommandMenu'
 import { FreeTransformGesture, freeSurfaceTargets, type FreeResizeHandle } from '../componentPlatform/surfaces/slide'
 import type { WorkspaceMediaDropHandler } from '../lessonWorkspace/workspaceMediaDrop'
 import type { ImportedImageAsset } from '../project/assetManager'
@@ -108,6 +109,7 @@ export function FlowWorkspace({ documentId, project, surfaceId, toolbarContainer
   const layout = surface.flow?.layout ?? { widthMode: 'reading', readingWidth: 860, wideContentWidth: 1100 }
   const editor = useRef<SharedDocumentEditorHandle>(null), paper = useRef<HTMLElement>(null), scroll = useRef<HTMLDivElement>(null)
   const paperPointer = useRef<{ x: number; y: number } | null>(null)
+  const objectPointer = useRef<{ instanceId: string; x: number; y: number } | null>(null)
   const workspace=useRef<HTMLDivElement>(null)
   useEffect(() => {
     if (!workspace.current || globalEditing || surface.flow?.layout.toc === 'hidden') return
@@ -142,6 +144,7 @@ export function FlowWorkspace({ documentId, project, surfaceId, toolbarContainer
     return () => observer.disconnect()
   }, [toolbarContainer, formatHost])
   const [error, setError] = useState<string | null>(null)
+  const [imageEditing, setImageEditing] = useState(false)
   const authorInteraction = useComponentAuthorInteraction({ root: workspace, documentId, surfaceId,
     enabled: !readOnly, contextKey: globalEditing ? 'global' : 'body', selectImage: onSelectImageAsset, report: setError,
     onObjectPointer: (detail, point) => {
@@ -625,6 +628,11 @@ export function FlowWorkspace({ documentId, project, surfaceId, toolbarContainer
       () => latest.current.documentId === documentId && latest.current.mediaSource.directory === mediaSource.directory)
       .then(result => { if (!result.ok) setError(result.reason ?? '媒体未插入') })
   }
+  const selectedImageId = runtime.selectedInstanceIds.length === 1
+    && componentDefinitionBuiltinKey(project.definitions[project.instances[runtime.selectedInstanceIds[0]]?.definitionId]) === 'guoling.image' ? runtime.selectedInstanceIds[0] : null
+  const bodyImageId = selectedImageId && !floating.includes(selectedImageId) && !globals.includes(selectedImageId) ? selectedImageId : null
+  const floatingActions = !selectedAuthorSpot && runtime.selectedInstanceIds.length === 1 && floating.includes(runtime.selectedInstanceIds[0])
+    ? flowFloatingActions({ project, instanceId: runtime.selectedInstanceIds[0], paperWidth: paperLayout.width, paragraphRects: paperLayout.rects, readPaperOffset, onEdits: edit }) : null
   return <div ref={workspace} className="flow-workspace" data-testid="flow-workspace" data-flow-project-id={project.id} data-flow-surface-id={surfaceId}
     data-flow-location-id={surfaceId} data-observation-source="authoring" data-observation-revision={project.revision}
     data-observation-project-id={project.id} data-observation-surface-id={surfaceId} data-observation-ready="true"
@@ -632,6 +640,8 @@ export function FlowWorkspace({ documentId, project, surfaceId, toolbarContainer
     onContextMenuCapture={event => { authorInteraction.contextMenuFromElement(event) }}
     onPointerDownCapture={event => {
       const targetElement = event.target instanceof Element ? event.target : null
+      const instanceId = targetElement?.closest<HTMLElement>('[data-component-instance]')?.dataset.componentInstance
+      objectPointer.current = instanceId ? { instanceId, x: event.clientX, y: event.clientY } : null
       if (!targetElement?.closest('.ProseMirror') && authorInteraction.pointerFromElement(event)) return
       if (!contentDraft || contentDraft.target.documentId !== documentId || contentDraft.composing) return
       const target=event.target instanceof Element ? event.target : null
@@ -639,10 +649,21 @@ export function FlowWorkspace({ documentId, project, surfaceId, toolbarContainer
       void commitContentEdit().catch(failure=>setError(failure instanceof Error ? failure.message:String(failure)))
     }}
     onDoubleClickCapture={async event => {
-      if (event.target instanceof Element && event.target.closest('.ProseMirror') && !event.target.closest('[data-component-render]')) return
       if(readOnly || !(event.target instanceof Element) || event.target.closest('[data-component-professional-editor]'))return
-      const id=event.target.closest<HTMLElement>('[data-component-instance]')?.dataset.componentInstance
+      // PM captures the block gesture on its outer editor; Chromium can retarget
+      // dblclick there. Retain the exact pointer-down object, never the last selection.
+      const pointer = objectPointer.current
+      const pointed = pointer && Math.hypot(event.clientX - pointer.x, event.clientY - pointer.y) < 3 ? pointer.instanceId : undefined
+      const id=event.target.closest<HTMLElement>('[data-component-instance]')?.dataset.componentInstance ?? pointed
       const instance=id && project.instances[id]
+      const kind=instance && componentDefinitionBuiltinKey(project.definitions[instance.definitionId])
+      if (instance && kind === 'guoling.image') {
+        event.preventDefault(); event.stopPropagation(); runtime.selectInstances([instance.id], surfaceId)
+        const epoch = bridge.read().snapshot?.epoch
+        if (epoch) requestImageEdit({ documentId, epoch, itemId: instance.id })
+        return
+      }
+      if (event.target.closest('.ProseMirror') && !event.target.closest('[data-component-render],[data-component-runtime-root]')) return
       if(instance) {
         event.preventDefault(); event.stopPropagation()
         const content=runtime.world.contentElement?.(instance.id), matrix=content && flowContentClientMatrix(content)
@@ -656,15 +677,15 @@ export function FlowWorkspace({ documentId, project, surfaceId, toolbarContainer
       }
       const block=instance && flowDocumentBlock(project,surfaceId,instance.id)
       if(!instance || block && block.type!=='course-instance')return
-      const kind=componentDefinitionBuiltinKey(project.definitions[instance.definitionId])
       if(kind!=='guoling.text' && kind!=='guoling.formula')return
       event.preventDefault();event.stopPropagation();runtime.selectInstances([instance.id],surfaceId)
       beginContentEdit(instance.id,'canvas')
     }}>
-    {!readOnly && runtime.selectedInstanceIds.length > 0 && (Boolean(selectedAuthorSpot) || runtime.selectedInstanceIds.every(id => globals.includes(id) || floating.includes(id)))
-      && <NativeSelectionContext documentId={documentId} revision={project.revision} surfaceId={surfaceId} itemIds={runtime.selectedInstanceIds} enabled textEditing={Boolean(contentDraft)} authorSpot={selectedAuthorSpot} authorBounds={authorInteraction.authorBounds} >
-        {!selectedAuthorSpot && runtime.selectedInstanceIds.length === 1 && floating.includes(runtime.selectedInstanceIds[0]) && <FlowFloatingActions
-          project={project} instanceId={runtime.selectedInstanceIds[0]} paperWidth={paperLayout.width} paragraphRects={paperLayout.rects} readPaperOffset={readPaperOffset} onEdits={edit} />}
+    {!readOnly && runtime.selectedInstanceIds.length > 0 && (Boolean(selectedAuthorSpot) || Boolean(bodyImageId) || runtime.selectedInstanceIds.every(id => globals.includes(id) || floating.includes(id)))
+      && <NativeSelectionContext documentId={documentId} revision={project.revision} surfaceId={surfaceId} itemIds={runtime.selectedInstanceIds} enabled textEditing={Boolean(contentDraft)} authorSpot={selectedAuthorSpot} authorBounds={authorInteraction.authorBounds} extraMenuItems={floatingActions?.menuItems}
+        hideQuickBar={Boolean(bodyImageId) && interactionSelection?.kind === 'document'} ownsDocumentSelection={!bodyImageId} onImageEditingChange={setImageEditing}
+        onCropImage={selectedImageId ? () => actions(selectedImageId)?.mediaTools?.openCrop?.() : undefined} >
+        {floatingActions?.control}
       </NativeSelectionContext>}
     {!readOnly && authorInteraction.authorTarget && <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 9 }} onPointerDown={event => {
       const handle = event.target instanceof Element ? event.target.closest('[data-handle]')?.getAttribute('data-handle') : null
@@ -723,7 +744,7 @@ export function FlowWorkspace({ documentId, project, surfaceId, toolbarContainer
             await bridge.editCaptured(bridge.capture(prepared.edits, target))
             latest.current.runtime.selectInstances([prepared.groupId], surfaceId)
           }}
-          contextualCardSuppressed={interactionSelection?.kind !== 'document'}
+          contextualCardSuppressed={imageEditing || interactionSelection?.kind !== 'document'}
           target="flow" blockMoveDisabledReason={id => flowStructureDisabledReason(project, id)} deferLayoutSource toolbarHost={toolbarContainer ?? formatHost} sourceDraft={draft?.surfaceId === surfaceId ? draft.source : undefined}
           sourceDiagnostics={draft?.surfaceId===surfaceId ? draft.diagnostics:undefined}
           clipboardContext={clipboardContext} clipboardResourcePort={clipboardResourcePort}
@@ -1021,7 +1042,7 @@ function FlowFloatingInstance({ project, instanceId, selected, editing, readOnly
     onPointerUp={event => { if (pendingController.current && pendingController.current.input.pointerId === event.pointerId) { pendingController.current.latest = freezePointer(event); pendingController.current.ended = true } else if (controller) controllerDrag?.finish(event); else finishDrag(event) }}
     onPointerCancel={event => { if (pendingController.current && pendingController.current.input.pointerId === event.pointerId) { pendingController.current.latest = freezePointer(event); pendingController.current.ended = true; pendingController.current.cancel = true } else if (controller) controllerDrag?.finish(event, true); else finishDrag(event, true) }}
     onLostPointerCapture={event => { if (pendingController.current && pendingController.current.input.pointerId === event.pointerId) { if (!pendingController.current.ended) pendingController.current.cancel = true } else if (controller) controllerDrag?.finish(event, true); else finishDrag(event, true) }}
-    onClickCapture={event => { event.preventDefault(); event.stopPropagation() }}>
+    onClickCapture={event => { if (!readOnly) { event.preventDefault(); event.stopPropagation() } }}>
     <div ref={bind} data-component-render={instanceId} style={{ width: '100%', height: '100%' }} />
     {!readOnly && <ImageSafeAreaGuides instance={{ ...instance, frame }} project={project} />}
     {instance.childIds?.map(id=>runtime.renderInstance(id,project,'free'))}
@@ -1032,7 +1053,7 @@ function FlowFloatingInstance({ project, instanceId, selected, editing, readOnly
   </div>
 }
 
-function FlowFloatingActions({ project, instanceId, paperWidth, paragraphRects, readPaperOffset, onEdits }: {
+function flowFloatingActions({ project, instanceId, paperWidth, paragraphRects, readPaperOffset, onEdits }: {
   project: CourseProjectV10; instanceId: string; paperWidth: number; paragraphRects: readonly FlowParagraphBlockRect[];
   readPaperOffset?(): { x: number; y: number }; onEdits(edits: ComponentEdit[]): void
 }) {
@@ -1051,13 +1072,13 @@ function FlowFloatingActions({ project, instanceId, paperWidth, paragraphRects, 
     if (nextFrame?.type === 'frame.set' && nextFrame.frame && nextPlacement?.type === 'instance.flowPlacement.set' && nextPlacement.flowPlacement)
       onEdits(flowPlacementEdits(project, instanceId, { kind: 'overlay', surfaceId: owner.id, frame: nextFrame.frame, placement: nextPlacement.flowPlacement }))
   }
-  return <QuickBarPopoverButton label="浮层定位" text="定位" popoverLabel="浮层定位">
-    {() => <div className="selection-quick-bar__menu">
-      <select aria-label="浮层定位模式" disabled={Boolean(disabled)} title={disabled ?? undefined} value={placement.space === 'viewport' ? 'viewport' : placement.paragraphAnchor ? 'paragraph' : 'fixed'} onChange={event => changeMode(event.target.value as FlowFloatingMode)}>
-        <option value="fixed">固定在纸面</option><option value="paragraph">随段落移动</option><option value="viewport">固定在视口</option>
-      </select>
-      <button type="button" disabled={Boolean(disabled)} title={disabled ?? undefined} onClick={() => update({ ...placement, plane: placement.plane === 'overlay' ? 'underlay' : 'overlay' })}>{placement.plane === 'overlay' ? '移到正文下方' : '移到正文上方'}</button>
-      <button type="button" disabled={Boolean(disabled)} title={disabled ?? undefined} onClick={() => update(null)}>转为正文</button>
-    </div>}
-  </QuickBarPopoverButton>
+  const menuItems: MenuCommand[] = [
+    { id: 'flow-floating.plane', label: placement.plane === 'overlay' ? '移到正文下方' : '移到正文上方', group: 'flow', disabledReason: disabled,
+      run: () => update({ ...placement, plane: placement.plane === 'overlay' ? 'underlay' : 'overlay' }) },
+    { id: 'flow-floating.body', label: '转为正文', group: 'flow', disabledReason: disabled, run: () => update(null) },
+  ]
+  return { menuItems, control: <select aria-label="浮层定位模式" disabled={Boolean(disabled)} title={disabled ?? undefined}
+    value={placement.space === 'viewport' ? 'viewport' : placement.paragraphAnchor ? 'paragraph' : 'fixed'} onChange={event => changeMode(event.target.value as FlowFloatingMode)}>
+    <option value="fixed">固定在纸面</option><option value="paragraph">随段落移动</option><option value="viewport">固定在视口</option>
+  </select> }
 }

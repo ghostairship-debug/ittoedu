@@ -43,6 +43,7 @@ describe('F0 actual draft ACK boundary', () => {
     const typingMarks = [documentEditorSchema.marks.style.create({ value: { bold: true, color: '#123456' } })]
     try {
       await act(async () => {
+        editor.setInputActive(true)
         view.focus()
         fireEvent.compositionStart(view.dom)
         const paragraph = documentEditorSchema.nodes.paragraph.create(null, documentEditorSchema.text('新增中文'))
@@ -60,7 +61,7 @@ describe('F0 actual draft ACK boundary', () => {
       expect(view.state.selection.anchor).toBe(1)
       expect(view.state.storedMarks).toBeNull()
       expect(within(toolbarHost).getByRole('button', { name: '插入表格' })).toBeInTheDocument()
-      expect(within(toolbarHost).getByRole('button', { name: '粗体' })).toBeInTheDocument()
+      expect(ui.getByRole('button', { name: '加粗' })).toBeInTheDocument()
       expect(ui.queryByRole('button', { name: '撤销' })).not.toBeInTheDocument()
       expect(ui.queryByRole('button', { name: '重做' })).not.toBeInTheDocument()
       expect(await handle.current!.drain()).toMatchObject({ ready: false })
@@ -87,7 +88,7 @@ describe('F0 actual draft ACK boundary', () => {
         view.dispatch(appended.setSelection(TextSelection.create(appended.doc, appended.doc.content.size - 1)).setStoredMarks(typingMarks))
       })
       expect(view.state.storedMarks).toEqual(typingMarks)
-      expect(within(toolbarHost).getByRole('button', { name: '粗体' })).toHaveAttribute('aria-pressed', 'true')
+      expect(ui.getByRole('button', { name: '加粗' })).toHaveAttribute('aria-pressed', 'true')
       expect(fromEditorDocument(view.state.doc).blocks.at(-1)!.id).toBeTruthy()
       expect(await handle.current!.drain()).toMatchObject({ ready: true, diagnostics: [] })
       expect(onChange).toHaveBeenCalledTimes(2)

@@ -2,6 +2,8 @@ import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState, 
 import type { FileArtifactBinding, MediaFileDraftInput, MediaFileEditorPort, MediaFileOperation, MediaFileSnapshot, MediaPoint, MediaRectangle } from '../../../shared/workbench/mediaFiles'
 import { MediaFileDraft } from './mediaFileDraft'
 import { PdfPagePreview } from './PdfPagePreview'
+import { editorShortcut } from '../../../shared/editorShortcuts'
+import { isEditorTextInputEvent } from '../../course/editorActionRouting'
 import './mediaFileEditor.css'
 
 export interface MediaFileEditorProps {
@@ -145,9 +147,10 @@ export const MediaFileEditor = forwardRef<MediaFileEditorHandle, MediaFileEditor
   const dimensions = content.kind === 'image' ? content : content.pages[currentPage]
   return <section className="media-file-editor" aria-label={content.kind === 'pdf' ? 'PDF 查看与编辑' : '图片查看与编辑'}
     onKeyDown={event => {
-      if (!(event.ctrlKey || event.metaKey) || (event.target as HTMLElement).matches('input,textarea')) return
-      if (event.key.toLowerCase() === 's') { event.preventDefault(); void save() }
-      if (event.key.toLowerCase() === 'z') { event.preventDefault(); void (event.shiftKey ? draft.redo() : draft.undo()) }
+      if (event.defaultPrevented || isEditorTextInputEvent(event.nativeEvent)) return
+      const shortcut = editorShortcut(event.nativeEvent)
+      if (shortcut === 'save') { event.preventDefault(); void save() }
+      if (shortcut === 'undo' || shortcut === 'redo') { event.preventDefault(); void (shortcut === 'redo' ? draft.redo() : draft.undo()) }
     }}>
     <div className="media-file-editor__toolbar" role="toolbar" aria-label="文件轻编辑">
       <button type="button" disabled={!state.operations.length || state.busy === 'save' || state.busy === 'reload'} onClick={() => void draft.undo()}>撤销</button>

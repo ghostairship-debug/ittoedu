@@ -9,7 +9,7 @@ import { unzipSync } from 'fflate'
 import type { ImageDerivativeDemand } from '../../src/shared/imageDerivative'
 
 let server: ViteDevServer, browser: Browser, page: Page
-const evidence = path.resolve('output/resource-runtime-repair-20261024/images')
+const evidence = path.resolve('output/test-runs/image-derivative-delivery-20261024')
 const comparisons: Array<Record<string, unknown>> = []
 beforeAll(async () => {
   await mkdir(evidence, { recursive: true })

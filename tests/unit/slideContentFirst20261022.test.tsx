@@ -9,14 +9,14 @@ import { authorFieldFromSpot, authorFieldIdentity } from '../../src/renderer/doc
 import { OBJECT_CONTEXT_MENU_EVENT, type ObjectContextMenuRequest } from '../../src/renderer/editing/commands/objectContextMenu'
 import type { ComponentAuthorHitRequest } from '../../src/renderer/components/componentAuthorHit'
 
-const native = vi.hoisted(() => ({ capture: vi.fn(), begin: vi.fn(), placeCaret: vi.fn() }))
+const native = vi.hoisted(() => ({ capture: vi.fn(), begin: vi.fn(), placeCaret: vi.fn(), resolveSelection: vi.fn() }))
 const pointerCaptureDescriptor = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'setPointerCapture')
 const pointerReleaseDescriptor = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'releasePointerCapture')
 vi.mock('../../src/renderer/ui/workspaces/useSlideNativeTextEditor', () => ({ useSlideNativeTextEditor: () => ({ ...native, editor: null }) }))
 vi.mock('../../src/renderer/workbench/NativeSelectionContext', () => ({ NativeSelectionContext: () => null }))
 beforeEach(() => {
-  native.capture.mockReset(); native.begin.mockReset(); native.placeCaret.mockReset()
-  native.capture.mockReturnValue(null)
+  native.capture.mockReset(); native.begin.mockReset(); native.placeCaret.mockReset(); native.resolveSelection.mockReset()
+  native.capture.mockReturnValue(null); native.resolveSelection.mockReturnValue(null)
   vi.stubGlobal('PointerEvent', class extends MouseEvent { pointerId: number; constructor(type: string, init: MouseEventInit & { pointerId?: number } = {}) { super(type, init); this.pointerId = init.pointerId ?? 1 } })
   vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} })
   vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({ x: 0, y: 0, left: 0, top: 0, right: 960, bottom: 640, width: 960, height: 640, toJSON() {} })

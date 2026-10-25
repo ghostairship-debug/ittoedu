@@ -3,7 +3,7 @@ import { act, cleanup, renderHook } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ComponentAuthorPointerEventDetail, ComponentAuthorSpot } from '../../src/shared/contracts/component-platform/runtime'
 import { useComponentAuthorInteraction } from '../../src/renderer/ui/workspaces/useComponentAuthorInteraction'
-import { AUTHOR_FIELD_ACTION_EVENT } from '../../src/renderer/editing/commands/objectContextMenu'
+import { AUTHOR_FIELD_ACTION_EVENT, IMAGE_EDIT_EVENT, requestAuthorFieldAction } from '../../src/renderer/editing/commands/objectContextMenu'
 import { interactionSelectionIdentity } from '../../src/renderer/documents/interactionSelection'
 
 const h = vi.hoisted(() => ({ view: {} as any, state: {} as any, runtime: {} as any, fields: [] as ComponentAuthorSpot[],
@@ -91,6 +91,7 @@ describe('one hook selection and transform owner', () => {
     h.fields = [{ ...field(), kind: 'image', dataPath: ['src'], initialValue: 'old.png' }]
     h.runtime.project.instances.a.data = { src: 'old.png' }
     const selectImage = vi.fn(async () => null), owner = mount(undefined, { selectImage })
+    const panel = vi.fn(); window.addEventListener(IMAGE_EDIT_EVENT, panel, { once: true })
     await owner.phase()
     expect(h.state.courseBridge.selectAuthorSpot).toHaveBeenCalledWith('doc', h.fields[0], 'surface')
     expect(selectImage).not.toHaveBeenCalled()
@@ -102,7 +103,12 @@ describe('one hook selection and transform owner', () => {
     } })) })
     expect(h.state.commitSlideContentEdit).toHaveBeenCalledOnce()
     expect(selectImage).not.toHaveBeenCalled()
+    expect(panel).not.toHaveBeenCalled()
     await act(async () => { ack.resolve() })
+    await vi.waitFor(() => expect(panel).toHaveBeenCalledOnce())
+    expect(selectImage).not.toHaveBeenCalled()
+    // D01: the panel opens after ACK; only an explicit replacement opens the picker.
+    await act(async () => { expect(requestAuthorFieldAction({ documentId: 'doc', epoch: 'epoch', selectionIdentity: interactionSelectionIdentity(h.view.interactionSelection), action: 'replace-image' })).toBe(true) })
     expect(selectImage).toHaveBeenCalledOnce()
     expect(h.state.courseBridge.selectAuthorSpot).toHaveBeenLastCalledWith('doc', h.fields[0], 'surface')
     expect(h.state.beginSlideSpotEdit).not.toHaveBeenCalled()

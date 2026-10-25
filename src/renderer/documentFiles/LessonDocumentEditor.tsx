@@ -1,4 +1,5 @@
 import { documentSaveLabel } from '../lessonWorkspace/view/WorkspaceDocumentStatus'
+import { editorShortcut } from '../../shared/editorShortcuts'
 import type { MarkdownProjection } from '../../shared/document/markdownIdentity'
 import { captureMarkdownSelection, usePinnedSelection, workbenchSelection } from '../workbench/SelectionContextController'
 import { TextAiButton, textCardLabel } from '../workbench/elementCards/ElementTextCards'
@@ -243,7 +244,8 @@ export const LessonDocumentEditor = forwardRef<LessonDocumentEditorHandle, Lesso
     </details>
   </>
   return <section className={isHtml ? 'lesson-document-editor--html' : isMarkdown ? 'lesson-document-editor--markdown' : undefined} aria-label={`教学文档 ${documentRefLabel(currentRef)}`} onCompositionStartCapture={() => session.setComposing(true)} onCompositionEndCapture={() => { queueMicrotask(() => session.setComposing(false)) }} onKeyDownCapture={event => {
-    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') { event.preventDefault(); event.stopPropagation(); void (event.shiftKey ? saveAs() : flush()) }
+    const shortcut = editorShortcut(event.nativeEvent)
+    if (shortcut === 'save' || shortcut === 'save-as') { event.preventDefault(); event.stopPropagation(); void (shortcut === 'save-as' ? saveAs() : flush()) }
   }}>
     {!isHtml && <header><strong>{documentRefLabel(currentRef)}</strong>{documentActions}</header>}
     {(error || state.error) && <div role="alert">{error ?? state.error}<button type="button" onClick={() => { void flush() }}>重试保存</button>{onClosed && <><button type="button" onClick={() => { void preserveAndClose().then(closed => { if (closed) onClosed() }) }}>保留恢复稿后关闭</button><button type="button" onClick={() => { void session.discardAndClose().then(closed => { if (closed) onClosed() }) }}>放弃未保存更改并关闭</button></>}</div>}

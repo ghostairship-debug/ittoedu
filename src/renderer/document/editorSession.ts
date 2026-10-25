@@ -25,6 +25,7 @@ import { documentComponentKey } from './documentClipboardContext'
 import { editorTextChangeBlockIds } from './documentTransactionChanges'
 import { DocumentInsertionTargetError } from '../../shared/document/blockInsertion'
 import { flowSelectionSlice, flowSelectionTransaction, isFlowCompositionPreparation, preserveFlowTextTransaction, withFlowSelection } from './documentFlowEditing'
+import { editorShortcut, type TextFormatShortcut } from '../../shared/editorShortcuts'
 
 /** Sent from a document object (picture, chart, component) that was right-clicked, after selecting it (M21). */
 export const DOCUMENT_OBJECT_CONTEXT_MENU_EVENT = 'document-object-context-menu'
@@ -112,6 +113,8 @@ export interface LayoutEditorOptions {
   contentScope?: DocumentContentScope
   hiddenBlockIds?:readonly string[]
   stateChanged?(state: EditorState): void
+  /** The shell's existing formatting command; PM keeps the actual input/selection owner. */
+  formatShortcut?(format: TextFormatShortcut): boolean
   requestMathDraft?(draft: DocumentFormulaDraftRequest): void
   selection?(selection: DocumentSelection | null, passiveDomSelection?: boolean): void
   undo(): void; redo(): void
@@ -274,7 +277,16 @@ export function createLayoutEditor(element: HTMLElement, initial: LayoutEditorOp
     return true
   }
   const view = new EditorView(element, {
-    state: EditorState.create({ doc: toEditorDocument(initial.document.content), plugins: [...(initial.projectionPlugins ?? []), new Plugin({ view(view) { options.stateChanged?.(view.state); return { update(view) { options.stateChanged?.(view.state) } } } }), keymap({
+    state: EditorState.create({ doc: toEditorDocument(initial.document.content), plugins: [...(initial.projectionPlugins ?? []), new Plugin({
+      props: { handleKeyDown(current, event) {
+        const shortcut = editorShortcut(event)
+        if (shortcut !== 'bold' && shortcut !== 'italic' && shortcut !== 'underline') return false
+        if (!canInput() || composing || current.composing || !options.formatShortcut) return false
+        const owner = event.target instanceof Element ? event.target.closest('input,textarea,select,[contenteditable]') : null
+        if (owner !== current.dom) return false
+        return options.formatShortcut(shortcut)
+      } },
+    }), new Plugin({ view(view) { options.stateChanged?.(view.state); return { update(view) { options.stateChanged?.(view.state) } } } }), keymap({
       'Mod-z': () => { boundary(); void navigateHistory('undo'); return true },
       'Mod-Shift-z': () => { boundary(); void navigateHistory('redo'); return true },
       'Mod-y': () => { boundary(); void navigateHistory('redo'); return true },

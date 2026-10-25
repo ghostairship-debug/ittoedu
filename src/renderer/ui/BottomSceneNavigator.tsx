@@ -196,12 +196,11 @@ export function BottomSceneNavigator({ documentId }: { documentId: string | null
         onContextMenu={event => openMenu(event, card.kind === 'program' ? '程序操作' : '页面操作', cardCommands(card))} {...dragProps(card)}>
         <div className="bottom-scene-card__header"><button type="button" className="bottom-scene-card__main" aria-current={active ? 'page' : undefined} aria-label={(card.kind === 'program' ? '程序 ' : '页面 ') + card.number + '：' + card.page.label} onClick={() => goTo(card.page)}>
           {card.kind === 'slide' ? <SceneThumbnail locationId={card.key} /> : <span className="bottom-scene-card__surface-mark" aria-hidden="true">{card.kind === 'flow' ? '文' : card.kind === 'program' ? '程' : '空'}</span>}
-          <span className="bottom-scene-card__identity"><small>{String(card.number).padStart(2, '0')} · {card.kind === 'slide' ? '演示页' : card.kind === 'flow' ? '流式布局' : card.kind === 'program' ? '程序' : '无限画布'}</small>{!renamingCard && <strong title={card.page.label}>{card.page.label}</strong>}</span>
-        </button><button type="button" className="bottom-scene-card__delete" aria-label={`删除${deleteScopeName(card)}：${card.page.label}`}
+        </button><div className="bottom-scene-card__identity"><div className="bottom-scene-card__meta"><small>{String(card.number).padStart(2, '0')} · {card.kind === 'slide' ? '演示页' : card.kind === 'flow' ? '流式布局' : card.kind === 'program' ? '程序' : '无限画布'}</small><button type="button" className="bottom-scene-card__delete" aria-label={`删除${deleteScopeName(card)}：${card.page.label}`}
           title={project.rootIds.length <= 1 ? LAST_COURSE_PAGE_REASON : `删除${deleteScopeName(card)}及${deleteScopeContents(card)}`}
           disabled={canvasMode === 'run' || project.rootIds.length <= 1} onClick={() => requestDelete(card)}>
-          <Trash2 size={12} aria-hidden="true" /><span>{card.kind === 'program' ? '删除程序' : '删除整页'}</span>
-        </button></div>
+          <Trash2 size={12} aria-hidden="true" />
+        </button></div>{!renamingCard && <strong title={card.page.label}>{card.page.label}</strong>}</div></div>
         {renamingCard && <RenameField label={card.kind === 'program' ? '程序名称' : '页面名称'} value={card.page.label} onCommit={name => { setRenaming(null); renameCard(card, name) }} onCancel={() => setRenaming(null)} />}
         {card.kind === 'slide' ? <SceneStateButtons documentId={documentId} surfaceId={card.key} compact /> : <div className="bottom-scene-card__children" role="group" aria-label={card.page.label + '的' + (card.kind === 'flow' ? '标题与章节' : card.kind === 'program' ? '容器' : '镜头')}>
           {card.kind === 'spatial' && <>

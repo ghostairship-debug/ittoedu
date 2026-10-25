@@ -6,7 +6,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-libra
 import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
-import { BufferedInput, PropertyDraftBoundary, flushPropertiesDrafts } from '../../src/renderer/ui/properties/PropertyControls'
+import { BufferedInput, PropertyDraftBoundary, TextContentTextarea, discardPropertiesDrafts, flushPropertiesDrafts, preservePropertiesDrafts } from '../../src/renderer/ui/properties/PropertyControls'
 import { componentPropertiesEdits, componentPropertiesView, propertiesFeedbackTargets, propertiesFramePatch } from '../../src/renderer/ui/properties/componentProperties'
 import { projectWithBackgroundPreview } from '../../src/renderer/authoring/backgroundPreview'
 import { createTextData, createFormulaData, FORMULA_DEFINITION, TEXT_DEFINITION } from '../../src/components/text'
@@ -313,11 +313,19 @@ it('retains IME input during save and commits its final text after composition',
 })
 it('retains a dirty draft when the captured target changes and refuses to retarget save',async()=>{
   const first=vi.fn(),second=vi.fn(),stale=vi.fn()
+  const key=(id:string)=>JSON.stringify(['property-target-switch','epoch','root','slide',null,[id],false,''])
   const view=(key:string,commit:typeof first,value:string)=><PropertyDraftBoundary bindingKey={key} onStale={stale}><BufferedInput label="名称" value={value} onCommit={commit}/></PropertyDraftBoundary>
-  const {rerender}=render(view('first',first,'原名'));const input=screen.getByLabelText('名称');input.focus();fireEvent.change(input,{target:{value:'尚未提交'}})
-  rerender(view('second',second,'邻居'));expect(screen.getByLabelText('名称')).toBe(input);expect(input).toHaveValue('尚未提交')
-  await act(async()=>expect(await flushPropertiesDrafts()).toBe(false));expect(first).not.toHaveBeenCalled();expect(second).not.toHaveBeenCalled();expect(stale).toHaveBeenCalledTimes(1)
-  fireEvent.keyDown(input,{key:'Escape'});expect(input).toHaveValue('邻居')
+  const {rerender}=render(view(key('first'),first,'原名'));const input=screen.getByLabelText('名称');input.focus();fireEvent.change(input,{target:{value:'尚未提交'}})
+  rerender(view(key('second'),second,'邻居'));expect(screen.getByLabelText('名称')).not.toBe(input);expect(screen.getByLabelText('名称')).toHaveValue('邻居')
+  expect(input.isConnected).toBe(false)
+  await act(async()=>expect(await flushPropertiesDrafts('property-target-switch')).toBe(true))
+  expect(preservePropertiesDrafts('property-target-switch')).toEqual([expect.objectContaining({bindingKey:key('first'),raw:'尚未提交'})])
+  expect(first).not.toHaveBeenCalled();expect(second).not.toHaveBeenCalled();expect(stale).not.toHaveBeenCalled()
+  rerender(view(key('first'),first,'原名'));const restored=screen.getByLabelText('名称');expect(restored).toHaveValue('尚未提交')
+  fireEvent.keyDown(restored,{key:'Escape'});expect(restored).toHaveValue('原名')
+  expect(preservePropertiesDrafts('property-target-switch')).toEqual([])
+  expect(first).not.toHaveBeenCalled();expect(second).not.toHaveBeenCalled()
+  discardPropertiesDrafts('property-target-switch')
 })
 it('commits original text/shape properties and affine frame through one Session, undoes/redoes and reopens',async()=>{
   const directory=await mkdtemp(path.join(tmpdir(),'guoling-properties-'));dispose.push(()=>rm(directory,{recursive:true,force:true}))
@@ -492,6 +500,29 @@ it('edits formal formula source in the original control without flattening matri
   expect(componentPropertiesView(project.instances.formula,project.definitions.formula)).toMatchObject({style:{fontSize:60,color:'#abcdef'},latex:next})
   expect(project.instances.neighbor).toEqual(fixture().instances.neighbor)
 })
+it('keeps whole-text absolute appearance and relative font stepping on their existing professional paths',()=>{
+  let project=fixture()
+  const data=createTextData({inlines:[
+    {type:'text',text:'显式',style:{fontSize:42,color:'#123456',italic:true,bold:false},link:{href:'https://example.test'}},
+    {type:'math',formulaId:'math-original',latex:'x+1',accessibleText:'x 加一',style:{fontSize:36,color:'#345678'}},
+    {type:'text',text:'默认',style:{underline:true}},
+  ]})
+  project.instances.text.data=JSON.parse(JSON.stringify(data))
+  const edits=componentPropertiesEdits(project.instances.text,project.definitions.text,{style:{fontSize:60,color:'#abcdef'}})
+  project=applyComponentOperation(project,captureComponentOperation(project,edits))
+  const expected=structuredClone(data)
+  expected.appearance={...expected.appearance,fontSize:60,color:'#abcdef'}
+  for(const inline of expected.content.inlines.slice(0,2))Object.assign(inline.style!,{fontSize:60,color:'#abcdef'})
+  expect(project.instances.text).toEqual({...fixture().instances.text,data:expected})
+  expect(project.instances.neighbor).toEqual(fixture().instances.neighbor)
+  const original=fixture();original.instances.text.data=JSON.parse(JSON.stringify(data))
+  const step=componentPropertiesEdits(original.instances.text,original.definitions.text,{fontSizeStep:1})
+  expect(step).toEqual([
+    {type:'data.set',instanceId:'text',path:['appearance','fontSize'],value:28},
+    {type:'data.set',instanceId:'text',path:['content','inlines','0','style','fontSize'],value:46},
+    {type:'data.set',instanceId:'text',path:['content','inlines','1','style','fontSize'],value:40},
+  ])
+})
 it('preserves a dirty formula source on target change and refuses to save it into the neighbor',async()=>{
   const project=fixture()
   project.definitions.formula={...FORMULA_DEFINITION,id:'formula'}
@@ -508,14 +539,20 @@ it('preserves a dirty formula source on target change and refuses to save it int
   render(<PropertiesTab onReplaceImage={()=>{}}/>)
   const input=screen.getByLabelText('公式 LaTeX');input.focus();fireEvent.change(input,{target:{value:'x+1'}})
   act(()=>useEditorStore.getState().selectNode('otherFormula'))
-  expect(input).toHaveValue('x+1')
-  await act(async()=>expect(await flushPropertiesDrafts(first.documentId)).toBe(false))
-  expect(screen.getByRole('alert')).toHaveTextContent('目标或源文已改变')
+  expect(input.isConnected).toBe(false)
+  expect(screen.getByLabelText('公式 LaTeX')).toHaveValue('x')
+  await act(async()=>expect(await flushPropertiesDrafts(first.documentId)).toBe(true))
+  expect(preservePropertiesDrafts(first.documentId)).toEqual([expect.objectContaining({label:'公式 LaTeX',raw:'x+1'})])
+  await useEditorStore.getState().courseInputs.persist([first.documentId])
+  expect((await service.internalAPI.readAuthoringDrafts(first.documentId))?.properties).toEqual([expect.objectContaining({raw:'x+1'})])
   expect((await service.internalAPI.read(first.documentId)).undoDepth).toBe(0)
   expect(useEditorStore.getState().courseKernel.readDocument().instances).toEqual(project.instances)
-  fireEvent.keyDown(input,{key:'Escape'})
+  act(()=>useEditorStore.getState().selectNode('formula'))
+  const restored=screen.getByLabelText('公式 LaTeX');expect(restored).toHaveValue('x+1')
+  fireEvent.keyDown(restored,{key:'Escape'})
   await act(async()=>expect(await flushPropertiesDrafts(first.documentId)).toBe(true))
-  expect(input).toHaveValue('x')
+  expect(restored).toHaveValue('x')
+  expect(preservePropertiesDrafts(first.documentId)).toEqual([])
   expect((await service.internalAPI.read(first.documentId)).undoDepth).toBe(0)
 })
 it('offers mounted feedback targets from the current surface and global subtrees',()=>{
@@ -541,18 +578,135 @@ it('keeps an IME property draft on target change and cancels its original canvas
   useEditorStore.getState().selectNode('text')
   render(<PropertiesTab onReplaceImage={()=>{}}/>)
   const input=screen.getByLabelText('文字内容');input.focus();fireEvent.compositionStart(input);fireEvent.change(input,{target:{value:'原目标的中文草稿'}})
+  fireEvent.blur(input)
   await act(async()=>{useEditorStore.getState().selectNode('neighbor')})
   expect(screen.getByLabelText('文字内容')).toBe(input)
-  fireEvent.compositionEnd(input)
-  expect(input).toHaveValue('原目标的中文草稿')
-  await act(async()=>expect(await flushPropertiesDrafts()).toBe(false))
+  await act(async()=>{fireEvent.compositionEnd(input,{target:{value:'原目标的中文完成'}})})
+  await waitFor(()=>expect(screen.getByLabelText('文字内容')).not.toBe(input))
+  expect(input.isConnected).toBe(false)
+  expect(screen.getByLabelText('文字内容')).toHaveValue('邻居')
+  expect(preservePropertiesDrafts(first.documentId)).toEqual([expect.objectContaining({raw:'原目标的中文完成',composing:false})])
+  await act(async()=>expect(await flushPropertiesDrafts(first.documentId)).toBe(true))
   expect(useEditorStore.getState().slideContentEdit).toMatchObject({instanceId:'text',composing:false})
-  fireEvent.keyDown(input,{key:'Escape'})
-  expect(input).toHaveValue('邻居');expect(useEditorStore.getState().slideContentEdit).toBeNull()
+  act(()=>useEditorStore.getState().selectNode('text'))
+  const restored=screen.getByLabelText('文字内容');expect(restored).toHaveValue('原目标的中文完成')
+  fireEvent.keyDown(restored,{key:'Escape'})
+  expect(restored).toHaveValue('原文');expect(useEditorStore.getState().slideContentEdit).toBeNull()
+  expect(preservePropertiesDrafts(first.documentId)).toEqual([])
   await act(async()=>{await useEditorStore.getState().drainCourseDocument(first.documentId)})
   const saved=await service.internalAPI.read(first.documentId)
   expect(saved.undoDepth).toBe(0)
   expect(saved.model).toMatchObject({kind:'course-v10',project:{instances:fixture().instances}})
+})
+it('does not acknowledge a new target text draft while the original captured text owner still blocks admission',async()=>{
+  const directory=await mkdtemp(path.join(tmpdir(),'guoling-properties-admission-'))
+  dispose.push(()=>rm(directory,{recursive:true,force:true}))
+  const service=new DocumentHostService(path.join(directory,'recovery'))
+  const first=await service.internalAPI.create({kind:'course-v10',project:fixture(),resources:{assets:{},components:{}}},'两个属性目标.glx')
+  const unavailable=async():Promise<never>=>{throw new Error('fixture no dialog')}
+  const api:DocumentHostAPI={...service.internalAPI,bootstrapCourse:()=>service.bootstrapCourse(),saveWithDialog:unavailable,close:unavailable,closeWithDialog:unavailable,discardRecovery:unavailable,subscribe:listener=>service.subscribeEvents(listener)}
+  await useEditorStore.getState().connectCourseDocuments(api)
+  try {
+    useEditorStore.getState().selectNode('text')
+    render(<PropertiesTab onReplaceImage={()=>{}}/>)
+    const a=screen.getByLabelText('文字内容');a.focus();fireEvent.change(a,{target:{value:'A 原草稿'}})
+    act(()=>useEditorStore.getState().selectNode('neighbor'))
+    const b=screen.getByLabelText('文字内容');expect(b).not.toBe(a);expect(b).toHaveValue('邻居')
+    b.focus();fireEvent.change(b,{target:{value:'B 必须保留的新草稿'}})
+    await act(async()=>{
+      const completed=await flushPropertiesDrafts(first.documentId),snapshot=await service.internalAPI.read(first.documentId)
+      expect(completed,JSON.stringify({completed,records:preservePropertiesDrafts(first.documentId),undoDepth:snapshot.undoDepth,
+        neighbor:snapshot.model.kind==='course-v10'?snapshot.model.project.instances.neighbor.data:null})).toBe(false)
+    })
+    expect(b).toHaveValue('B 必须保留的新草稿')
+    expect(preservePropertiesDrafts(first.documentId)).toEqual(expect.arrayContaining([
+      expect.objectContaining({raw:'A 原草稿'}),expect.objectContaining({raw:'B 必须保留的新草稿'}),
+    ]))
+    expect((await service.internalAPI.read(first.documentId)).undoDepth).toBe(0)
+    act(()=>useEditorStore.getState().selectNode('text'))
+    const restoredA=screen.getByLabelText('文字内容');expect(restoredA).toHaveValue('A 原草稿')
+    fireEvent.keyDown(restoredA,{key:'Escape'})
+    expect(useEditorStore.getState().slideContentEdit).toBeNull()
+    act(()=>useEditorStore.getState().selectNode('neighbor'))
+    const restoredB=screen.getByLabelText('文字内容');expect(restoredB).toHaveValue('B 必须保留的新草稿')
+    await act(async()=>expect(await flushPropertiesDrafts(first.documentId)).toBe(true))
+    const filename=path.join(directory,'两个属性目标.glx')
+    await useEditorStore.getState().drainCourseDocument(first.documentId)
+    await service.internalAPI.save(first.documentId,filename)
+    const saved=await service.internalAPI.read(first.documentId)
+    expect(saved.undoDepth).toBe(1)
+    expect(saved.model).toMatchObject({kind:'course-v10',project:{instances:{
+      text:fixture().instances.text,neighbor:{data:{content:{inlines:[{type:'text',text:'B 必须保留的新草稿'}]}}},
+    }}})
+    const cold=await new DocumentHostService(path.join(directory,'cold')).internalAPI.open(filename)
+    expect(cold.model).toEqual(saved.model)
+  } finally { discardPropertiesDrafts(first.documentId) }
+})
+it('waits for the actual property text ACK and retains raw and its original owner through rejection and retry',async()=>{
+  const host=await createV10StoreHost(fixture()),gate=deferred()
+  await useEditorStore.getState().connectCourseDocuments(host.api)
+  useEditorStore.getState().selectNode('text')
+  render(<PropertiesTab onReplaceImage={()=>{}}/>)
+  const kernel=useEditorStore.getState().courseKernel
+  const write=vi.spyOn(kernel,'editCaptured').mockImplementationOnce(async()=>{await gate.promise;throw new Error('text ACK rejected')})
+  try {
+    const input=screen.getByLabelText('文字内容');input.focus();fireEvent.change(input,{target:{value:'等待正式回执的草稿'}})
+    let done=false,flushing!:Promise<boolean>
+    await act(async()=>{flushing=flushPropertiesDrafts(host.first.documentId);void flushing.then(()=>{done=true});await Promise.resolve()})
+    expect(write).toHaveBeenCalledOnce();expect(done).toBe(false)
+    expect(preservePropertiesDrafts(host.first.documentId)).toEqual([expect.objectContaining({raw:'等待正式回执的草稿',baseline:'原文'})])
+    await act(async()=>{gate.resolve();expect(await flushing).toBe(false)})
+    expect(input).toHaveValue('等待正式回执的草稿')
+    expect(preservePropertiesDrafts(host.first.documentId)).toEqual([expect.objectContaining({raw:'等待正式回执的草稿',baseline:'原文'})])
+    expect(host.first.read().undoDepth).toBe(0)
+    expect(useEditorStore.getState().slideContentEdit?.instanceId).toBe('text')
+    await act(async()=>expect(await flushPropertiesDrafts(host.first.documentId)).toBe(true))
+    expect(write).toHaveBeenCalledTimes(2)
+    expect(host.first.read().undoDepth).toBe(1)
+    expect(host.model().project.instances.text.data).toMatchObject({content:{inlines:[{type:'text',text:'等待正式回执的草稿'}]}})
+    expect(host.model().project.instances.neighbor).toEqual(fixture().instances.neighbor)
+    expect(preservePropertiesDrafts(host.first.documentId)).toEqual([])
+  } finally {write.mockRestore();discardPropertiesDrafts(host.first.documentId);host.bridge.dispose()}
+})
+it('still accepts synchronous text staging before a composition editor applies its outer operation',async()=>{
+  const key=JSON.stringify(['local-text-stage','epoch','composition']),begin=vi.fn(),stage=vi.fn()
+  let text='原片段'
+  render(<PropertyDraftBoundary bindingKey={key} onStale={()=>{}}>
+    <TextContentTextarea label="局部文字" value={text} onBegin={begin} onChange={next=>{text=next}} onCommit={()=>stage(text)} onCancel={()=>{}}/>
+  </PropertyDraftBoundary>)
+  const input=screen.getByLabelText('局部文字');input.focus();fireEvent.change(input,{target:{value:'仅暂存的新片段'}})
+  await act(async()=>expect(await flushPropertiesDrafts('local-text-stage')).toBe(true))
+  expect(begin).toHaveBeenCalledOnce();expect(stage).toHaveBeenCalledExactlyOnceWith('仅暂存的新片段')
+  expect(preservePropertiesDrafts('local-text-stage')).toEqual([])
+  discardPropertiesDrafts('local-text-stage')
+})
+it('keeps a resumed text owner composing when its older parked ACK arrives before the next IME change',async()=>{
+  const documentId='resumed-text-ime',gate=deferred(),commitA=vi.fn(()=>gate.promise),cancelA=vi.fn(),cancelB=vi.fn(),compositionA=vi.fn()
+  const key=(id:string)=>JSON.stringify([documentId,'epoch','root','slide',null,[id],false,''])
+  const view=(id:'a'|'b')=><PropertyDraftBoundary bindingKey={key(id)} onStale={()=>{}}>
+    <TextContentTextarea label="恢复文字" value={id==='a'?'A 原文':'B 原文'} onBegin={()=>{}} onChange={()=>{}}
+      onCommit={id==='a'?commitA:()=>{}} onCancel={id==='a'?cancelA:cancelB} onCompositionChange={id==='a'?compositionA:()=>{}}/>
+  </PropertyDraftBoundary>
+  const ui=render(view('a'))
+  const first=screen.getByLabelText('恢复文字');first.focus();fireEvent.change(first,{target:{value:'A pending'}})
+  let flushing!:Promise<boolean>
+  await act(async()=>{flushing=flushPropertiesDrafts(documentId);await Promise.resolve()})
+  ui.rerender(view('b'));ui.rerender(view('a'))
+  const resumed=screen.getByLabelText('恢复文字');expect(resumed).not.toBe(first);expect(resumed).toHaveValue('A pending')
+  fireEvent.compositionStart(resumed)
+  await act(async()=>{gate.resolve();expect(await flushing).toBe(true)})
+  expect(preservePropertiesDrafts(documentId)).toEqual([expect.objectContaining({raw:'A pending',baseline:'A pending',composing:true})])
+  await act(async()=>expect(await flushPropertiesDrafts(documentId)).toBe(false))
+  ui.rerender(view('b'));expect(screen.getByLabelText('恢复文字')).toBe(resumed)
+  await act(async()=>{fireEvent.compositionEnd(resumed,{target:{value:'A 中文完成'}})})
+  await waitFor(()=>expect(screen.getByLabelText('恢复文字')).not.toBe(resumed))
+  ui.rerender(view('a'));const final=screen.getByLabelText('恢复文字');expect(final).toHaveValue('A 中文完成')
+  fireEvent.keyDown(final,{key:'Escape'})
+  expect(cancelA).toHaveBeenCalledOnce();expect(cancelB).not.toHaveBeenCalled()
+  expect(compositionA.mock.calls.map(call=>call[0])).toEqual([true,false])
+  expect(commitA).toHaveBeenCalledExactlyOnceWith('A pending')
+  expect(preservePropertiesDrafts(documentId)).toEqual([])
+  discardPropertiesDrafts(documentId)
 })
 it('previews a Flow caption range through the shared planner while retaining formula atoms and formal content',()=>{
   const project=fixture()

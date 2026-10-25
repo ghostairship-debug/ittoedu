@@ -25,7 +25,9 @@
 .html-preview-pane__toolbar .html-preview-pane__edit { transition:none; }
 .html-preview-pane__edit[aria-pressed=true] { background:#245b46!important; color:white!important; border-color:#245b46!important; }
 .html-preview-pane__edit-hint { font-size:11px; color:#68756f; }
-.html-preview-pane__selection-toolbar { position:absolute; z-index:25; display:flex; align-items:center; gap:8px; max-width:calc(100% - 16px); padding:5px 8px; border:1px solid #aab5c2; border-radius:6px; background:#fff; box-shadow:0 3px 10px #173e3120; font-size:12px; }
+.html-preview-extra-style { display:grid; gap:8px; padding:8px; min-width:220px; }
+.html-preview-extra-style label { display:grid; grid-template-columns:auto 1fr; gap:8px; align-items:center; }
+.html-preview-extra-style input { min-width:0; width:140px; }
 .html-preview-pane__more { position:relative; margin-left:auto; }
 .html-preview-pane__more>summary { cursor:pointer; padding:5px 8px; list-style:none; }
 .html-preview-pane__more[open]>button { position:absolute; right:0; top:100%; z-index:15; white-space:nowrap; box-shadow:0 6px 18px #173e311c; }

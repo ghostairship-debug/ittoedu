@@ -17,6 +17,8 @@
     "test": "vitest run",
     "test:authoring-regressions": "vitest run tests/unit/cursorThemeBackground20261017.test.ts tests/unit/backgroundFirstWrite20261017.test.ts tests/unit/sandboxStateEcho20261017.test.ts tests/integration/g20HtmlActions.test.ts tests/integration/publishedViewActions20261017.test.ts tests/unit/publishedViewToolIntegration20261017.test.ts tests/integration/g20S05ContextRecovery.test.ts tests/integration/observationTransportModelBoundary20261017.test.ts tests/unit/htmlActionObservationOrder20261017.test.ts tests/unit/nestedDocumentAuthoring20261017.test.ts tests/unit/ownedDocumentIdentityHost20261017.test.ts tests/unit/ownedDocumentAuthorFieldMapping20261017.test.ts tests/unit/textFormatControls20261017.test.ts tests/unit/authorSpotPaintHit20261017.test.ts tests/unit/componentAuthorHitMount20261017.test.ts tests/unit/g20M22CommandDefinitions.test.ts tests/unit/g20M22LightActions.test.tsx tests/unit/g20InlineSelectionProperties.test.tsx && npm run build:player && npm run build:renderer && npm run build:electron && playwright test tests/e2e/publishedViewActions20261017.spec.ts",
     "test:product": "vitest run --exclude=tests/unit/taskBoardGenerator.test.ts --exclude=tests/unit/aiCapabilities.test.ts",
+    "test:baseline:record": "tsx scripts/test-failure-baseline.ts --record",
+    "test:baseline:check": "tsx scripts/test-failure-baseline.ts --check",
     "test:governance": "vitest run tests/unit/taskBoardGenerator.test.ts",
     "test:capabilities": "vitest run tests/unit/aiCapabilities.test.ts",
     "pretest:e2e": "npm run build:player && npm run check:examples && npm run prepare:lesson-demo:fixture && npm run build:component-catalog-matrix:fixture && npm run build:renderer && npm run build:electron",

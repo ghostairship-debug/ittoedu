@@ -11,7 +11,10 @@ import { mountHtmlPreviewAgent } from '../../src/player/htmlPreview/htmlPreviewA
 import { HtmlPreviewController } from '../../src/renderer/documentFiles/html/htmlPreviewController'
 import { installHtmlFrameAuthoring } from '../../src/shared/html/htmlFrameAuthoring'
 import { createDomAuthoring } from '../../src/components/web/authoringDom'
+import { createNestedDomAuthoring } from '../../src/components/web/nestedAuthoringDom'
 import { createAuthoringFrameGeometry } from '../../src/components/web/authoringFrame'
+import { workbenchSelection } from '../../src/renderer/workbench/SelectionContextController'
+import { elementCards } from '../../src/renderer/workbench/elementCards/elementCardController'
 
 afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); document.body.replaceChildren() })
 
@@ -21,7 +24,7 @@ const report = { handle: 'title', kind: 'text' as const, domPath: [{ name: 'html
   geometry: { frame: { width: 100, height: 20, transform: [1, 0, 0, 1, 10, 20] as [number, number, number, number, number, number] },
     parentToInstance: [2, 0, 0, 2, 0, 0] as [number, number, number, number, number, number], author: {}, boxInsets: { width: 0, height: 0 } } }
 
-async function pane() {
+async function pane(commitDuringStyleResolve = false) {
   vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} })
   const source = '<html><body><p id="title">Hello</p></body></html>', driver = new TextDriver()
   const session = await DocumentSession.create({ documentId: 'doc', epoch: 'epoch', model: driver.load(new TextEncoder().encode(source)),
@@ -31,11 +34,19 @@ async function pane() {
   const service = new HtmlSourceEditService({ async readDocument() { return session.read() }, execute: op => session.execute(op), withFileAccess: work => work() })
   const context = () => ({ lease, tabId: 'tab', entryRealPath: 'sample.html', rootRealPath: '.', bindingPath: 'sample.html', snapshot: session.read() })
   const previous = window.desktopAPI, requests: string[] = []
+  let styleApplied = false
   Reflect.set(window, 'desktopAPI', { workspaceFiles: async (request: Parameters<typeof service.edit>[0] | Parameters<typeof service.resolveTarget>[0]) => {
     requests.push(request.type)
-    return request.type === 'html-preview.resolve-target' ? service.resolveTarget(request, context()) : service.edit(request, context())
+    const response = request.type === 'html-preview.resolve-target' ? await service.resolveTarget(request, context()) : await service.edit(request, context())
+    if (request.type === 'html-preview.edit' && request.change.kind === 'style') styleApplied = true
+    else if (styleApplied && commitDuringStyleResolve) {
+      styleApplied = false
+      view.rerender(createElement(HtmlPreviewPane, { ...props, committed: session.read() }))
+    }
+    return response
   } })
-  const view = render(createElement(HtmlPreviewPane, { lease, committed: session.read(), tabId: 'tab', textDrafts: new HtmlTextDrafts(), onUndo() {}, onRedo() {} }))
+  const props = { lease, committed: session.read(), tabId: 'tab', textDrafts: new HtmlTextDrafts(), onUndo() {}, onRedo() {} }
+  const view = render(createElement(HtmlPreviewPane, props))
   const iframe = view.getByTitle('HTML 预览') as HTMLIFrameElement
   Object.defineProperty(iframe, 'offsetWidth', { configurable: true, value: 400 }); Object.defineProperty(iframe, 'offsetHeight', { configurable: true, value: 200 })
   iframe.getBoundingClientRect = () => new DOMRect(100, 50, 400, 200)
@@ -46,9 +57,10 @@ async function pane() {
   await receive({ event: 'ready', sectionCount: 0, sectionsAmbiguous: false })
   const mode = () => posted.mock.calls.map(call => call[0]).filter(value => value.type === 'html-preview.edit-mode').at(-1)!
   await receive({ event: 'edit-mode-ready', requestId: mode().requestId, enabled: false })
-  fireEvent.click(view.getByRole('button', { name: '进入创作' }))
+  fireEvent.click(view.getByRole('button', { name: '编辑' }))
   await receive({ event: 'edit-mode-ready', requestId: mode().requestId, enabled: true })
-  return { view, session, requests, posted, receive, restore() { view.unmount(); Reflect.set(window, 'desktopAPI', previous) } }
+  return { view, session, requests, posted, receive, updateCommitted() { view.rerender(createElement(HtmlPreviewPane, { ...props, committed: session.read() })) },
+    restore() { view.unmount(); Reflect.set(window, 'desktopAPI', previous) } }
 }
 
 it('selects without input, edits only on explicit edit intent and Escape retains its frame and target', async () => {
@@ -68,6 +80,44 @@ it('selects without input, edits only on explicit edit intent and Escape retains
     expect(test.view.getByLabelText('HTML 对象选框')).toBeTruthy()
     expect(test.posted.mock.calls.map(call => call[0]).at(-1)).toMatchObject({ type: 'html-preview.selection', handle: 'title', editing: false })
     expect(test.session.read().undoDepth).toBe(0)
+  } finally { test.restore() }
+})
+
+it('uses the shared HTML quick bar and opens AI on the current text after pending input is committed', async () => {
+  const test = await pane()
+  const unregister = workbenchSelection.register('doc', async () => test.session.read())
+  const opened = vi.spyOn(elementCards, 'openText').mockReturnValue('html-entry-ai')
+  try {
+    await test.receive({ event: 'targets', intent: 'edit', targets: [report] })
+    const toolbar = test.view.getByRole('toolbar', { name: 'HTML 对象快捷工具条' })
+    expect(toolbar.closest('[data-selection-quick-bar]')).toBeTruthy()
+    expect(test.view.getByRole('button', { name: '加粗' })).toBeTruthy()
+    const input = test.view.getByRole('textbox', { name: '编辑此处文字' })
+    input.textContent = 'Current human text'
+    fireEvent.input(input)
+    fireEvent.click(test.view.getByRole('button', { name: 'AI 修改' }))
+    await waitFor(() => expect(opened).toHaveBeenCalledTimes(1))
+    expect(opened.mock.calls[0]![0]).toMatchObject({ documentId: 'doc', content: 'Current human text',
+      target: { kind: 'html-author-field', authorKey: 'title-key', field: 'text' } })
+    expect(test.session.read().undoDepth).toBe(1)
+    expect(test.view.getByLabelText('HTML 对象选框')).toBeTruthy()
+  } finally { unregister(); test.restore() }
+})
+
+it('formats an independent HTML text box and retains its selected handle when committed props arrive after the style ACK', async () => {
+  const test = await pane(true)
+  try {
+    await test.receive({ event: 'targets', intent: 'select', targets: [report] })
+    fireEvent.change(test.view.getByRole('spinbutton', { name: '字号' }), { target: { value: '32' } })
+    await waitFor(() => expect(test.session.read().undoDepth).toBe(1))
+    const saved = test.session.read()
+    if (saved.model.kind !== 'text') throw new Error('text')
+    expect(readHtmlAuthoringRecords(saved.model.source)['title-key']!.overrides.style).toMatchObject({ 'font-size': '32px' })
+    await act(async () => { test.updateCommitted() })
+    expect(test.view.getByRole('button', { name: '编辑文字' })).toBeTruthy()
+    fireEvent.click(test.view.getByRole('button', { name: '编辑文字' }))
+    await waitFor(() => expect(test.view.getByRole('textbox', { name: '编辑此处文字' })).toBeTruthy())
+    expect(test.session.read().undoDepth).toBe(1)
   } finally { test.restore() }
 })
 
@@ -166,6 +216,8 @@ it('keeps author clicks inert, suppresses source text only during content input,
   Object.defineProperty(document, 'caretPositionFromPoint', { configurable: true, value: () => ({ offsetNode: text, offset: 1 }) })
   const sent = vi.spyOn(window, 'postMessage').mockImplementation(() => {}), business = vi.fn()
   const release = mountHtmlPreviewAgent(document), command = (data: object) => window.dispatchEvent(new MessageEvent('message', { source: window, data }))
+  const consumer = Reflect.get(window, '__cwHtmlAuthoringConsumer') as ReturnType<typeof createDomAuthoring>
+  vi.spyOn(consumer, 'hit').mockImplementation(() => consumer.describe(text) ?? undefined)
   const suppress = vi.spyOn(Reflect.get(window, '__cwHtmlAuthoringConsumer') as { suppressText(node?: Node): void }, 'suppressText')
   document.querySelector('button')!.addEventListener('click', business)
   try {
@@ -186,6 +238,32 @@ it('keeps author clicks inert, suppresses source text only during content input,
     command({ type: 'html-preview.edit-mode', loadId: 'load', enabled: false, requestId: 'run' })
     document.querySelector('button')!.click(); expect(business).toHaveBeenCalledOnce()
   } finally { release(); Reflect.deleteProperty(document, 'caretPositionFromPoint') }
+})
+
+it.each([false, true])('terminates an empty paint hit without re-entering the root document (nested=%s)', nested => {
+  if (nested) document.body.append(document.createElement('iframe'))
+  const frame = document.querySelector('iframe')
+  if (frame) frame.getBoundingClientRect = () => new DOMRect(0, 0, 800, 600)
+  let rootReads = 0, childReads = 0
+  const factory: typeof createDomAuthoring = (root, options) => ({ ...createDomAuthoring(root, options, () => []),
+    paintedElementAt() {
+      if (root.ownerDocument === document) {
+        if (++rootReads > 1) throw new Error('An empty hit re-entered the root')
+        return frame ?? undefined
+      }
+      if (++childReads > 1) throw new Error('An empty hit revisited the child')
+      return undefined
+    },
+    hit() { return undefined },
+  })
+  const adapter = createNestedDomAuthoring(document.documentElement, factory, { records: () => ({}) },
+    () => ({ ...createAuthoringFrameGeometry(), frameMatrix: () => [1, 0, 0, 1, 0, 0] }))
+  try {
+    expect(adapter.documents()).toHaveLength(nested ? 2 : 1)
+    expect(adapter.hit(20, 30)).toBeUndefined()
+    expect(rootReads).toBe(1)
+    expect(childReads).toBe(nested ? 1 : 0)
+  } finally { adapter.dispose() }
 })
 
 it('edits the painted image when pointer capture retargets the second click and double click to the root', () => {

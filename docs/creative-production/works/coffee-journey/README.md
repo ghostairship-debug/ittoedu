@@ -1,8 +1,10 @@
 # 《一杯咖啡的远行》｜当前正式作品入口
 
-**最新已保存工作候选：v08，Project 11／revision 247（2026-10-23）。** [当前作品与证据入口](design/v08/README.md)包含[正式GLX](design/v08/native/coffee-journey-v08.glx)、[离线HTML](design/v08/native/coffee-journey-v08-offline.html)及原独立冷开／导出、身份保留收据。验收交接与Owner艺术判断按实际证据接续，不因本次卫生整理签收。
+**唯一当前正式版本：v08 Runtime-first / Project 11 / r264（2026-10-25本地日期）。** [最终交付与证据](design/v08-runtime-first/final-20261025/README.md)包含[最终GLX](design/v08-runtime-first/final-20261025/coffee-journey-v08-runtime-first-final.glx)、[离线HTML](design/v08-runtime-first/final-20261025/coffee-journey-v08-runtime-first-final.html)、真实桌面/移动端交互、原生编辑、独立冷开及导出记录。r263原件保留在design/v08-runtime-first/native；旧design/v08、r247及以下历史不再作为主基线。
 
-上一代完整交付基线为v07/r215：完成摄影级材料背景、六段连续转场、U03结构材料精修并接入正式Flow导航运动；原生图文、三个局部互动程序与唯一Global Underlay保留。以下说明和证据仍对应v07，不能替代v08的新增验证。
+[Runtime-first体系与独立创作验证](runtime-first-system-20261025/README.md)在独立目录开展，不继续修改冻结咖啡样本。
+
+以下是历史v07资料，保留追溯用途。
 
 ## v07既有交付基线
 

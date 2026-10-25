@@ -6,7 +6,9 @@ import type { ComponentAuthorPointerEventDetail, ComponentAuthorSpot, ComponentF
 import { createInitialSlideOwnedState, createSlideAuthoringSlice } from '../../src/renderer/store/slices/slideAuthoringSlice'
 import { SlideLocationWorkspace, type SlideWorkspacePorts } from '../../src/renderer/ui/workspaces/SlideLocationWorkspace'
 import { createTestProjectFromLegacy } from '../helpers/glxWorkFixture'
-import { createV10StoreHost } from '../helpers/courseV10StoreHost'
+import { createV10StoreHost, deferred } from '../helpers/courseV10StoreHost'
+import { COMPONENT_AUTHOR_HIT, type ComponentAuthorHitRequest } from '../../src/renderer/components/componentAuthorHit'
+import { OBJECT_CONTEXT_MENU_EVENT, type ObjectContextMenuRequest } from '../../src/renderer/editing/commands/objectContextMenu'
 
 // Keep the real workspace, native input, quick bar and canonical writer. The fixture
 // provides the application store's subscription and unrelated properties-panel slot.
@@ -211,6 +213,179 @@ it('retains the double-click edit intention for a second field while the first i
   expect(f.h.model().project.instances.text.data).toEqual(JSON.parse(JSON.stringify(createTextData('A 的待确认修改'))))
   expect(f.h.first.read().undoDepth).toBe(1)
   expect(document.querySelectorAll('.selection-quick-bar')).toHaveLength(1)
+  expect(f.report).not.toHaveBeenCalled()
+})
+
+it('discards a realm field start after a later Nodes selection while the formal input ACK is pending', async () => {
+  const initial = project()
+  initial.instances.neighbor = { ...structuredClone(initial.instances.text), id: 'neighbor', frame: frame(100, 220) }
+  initial.instances[initial.rootIds[0]].childIds!.push('neighbor')
+  const f = await mount(initial, [spot(false)]), ack = deferred(), entered = deferred()
+  f.h.controls.before = async () => { entered.resolve(); await ack.promise }
+  await act(async () => { f.ports.select(['text']); f.ports.beginTextEdit('text'); f.ports.updateDataDraft(createTextData('A 已确认的输入')) })
+  await act(async () => { realm(f, 'component-author-pointer', { authorKey: 'label', phase: 'start', pointerId: 21 }) })
+  await entered.promise
+  await act(async () => {
+    // NodesTab's selectNode reaches this same kernel selection owner without
+    // waiting for the surface's pending input acknowledgement.
+    f.h.kernel.selectInstances(['neighbor'])
+    realm(f, 'component-author-pointer', { authorKey: 'label', phase: 'end', pointerId: 21 })
+  })
+  expect(f.owned().slideContentEdit?.instanceId).toBe('text')
+  await act(async () => { ack.resolve() })
+  await waitFor(() => expect(f.owned().slideContentEdit).toBeNull())
+  expect(f.h.bridge.read().selectedInstanceIds).toEqual(['neighbor'])
+  expect(f.h.model().project.instances.text.data).toEqual(JSON.parse(JSON.stringify(createTextData('A 已确认的输入'))))
+  expect(f.h.model().project.instances.neighbor).toEqual(initial.instances.neighbor)
+  expect(f.h.model().project.instances.source).toEqual(initial.instances.source)
+  expect(f.h.first.read().undoDepth).toBe(1)
+  expect(f.h.operations).toHaveLength(1)
+  expect(f.commit).not.toHaveBeenCalled(); expect(f.beginSpot).not.toHaveBeenCalled(); expect(f.report).not.toHaveBeenCalled()
+})
+
+it('discards an old realm continuation when a new input opens on the same selected object after the real commit', async () => {
+  const f = await mount(project(), [spot(false)]), continuation = deferred(), committed = deferred()
+  const finish = f.ports.commitTextEdit
+  let pending: Promise<void> | undefined
+  f.ports.commitTextEdit = () => pending ??= finish().then(async () => { committed.resolve(); await continuation.promise })
+  await act(async () => { f.ports.select(['text']); f.ports.beginTextEdit('text'); f.ports.updateDataDraft(createTextData('A 的正式稿')) })
+  await act(async () => { realm(f, 'component-author-pointer', { authorKey: 'label', phase: 'start', pointerId: 22 }) })
+  await act(async () => { await committed.promise })
+  await act(async () => { f.ports.beginTextEdit('text'); f.ports.updateDataDraft(createTextData('B 的新输入')) })
+  const input = f.owned().slideContentEdit
+  await act(async () => {
+    realm(f, 'component-author-pointer', { authorKey: 'label', phase: 'end', pointerId: 22 })
+    continuation.resolve(); await pending
+  })
+  expect(f.h.bridge.read().selectedInstanceIds).toEqual(['text'])
+  expect(f.owned().slideContentEdit).toBe(input)
+  expect(f.owned().slideContentEdit?.data).toEqual(JSON.parse(JSON.stringify(createTextData('B 的新输入'))))
+  expect(f.h.model().project.instances.text.data).toEqual(JSON.parse(JSON.stringify(createTextData('A 的正式稿'))))
+  expect(f.h.model().project.instances.source).toEqual(project().instances.source)
+  expect(f.h.first.read().undoDepth).toBe(1); expect(f.h.operations).toHaveLength(1)
+  expect(f.commit).not.toHaveBeenCalled(); expect(f.beginSpot).not.toHaveBeenCalled(); expect(f.report).not.toHaveBeenCalled()
+})
+
+it('continues a valid realm body start through its own selection and queued end after the formal input ACK', async () => {
+  const f = await mount(), ack = deferred(), entered = deferred()
+  f.h.controls.before = async () => { entered.resolve(); await ack.promise }
+  await act(async () => { f.ports.select(['text']); f.ports.beginTextEdit('text'); f.ports.updateDataDraft(createTextData('原输入')) })
+  await act(async () => { realm(f, 'component-author-pointer', { phase: 'start', pointerId: 23 }) })
+  await entered.promise
+  await act(async () => { realm(f, 'component-author-pointer', { phase: 'end', pointerId: 23, localPoint: { x: 70, y: 50 } }); ack.resolve() })
+  await waitFor(() => expect(f.commit).toHaveBeenCalledOnce())
+  expect(f.h.bridge.read().selectedInstanceIds).toEqual(['source'])
+  expect(f.h.model().project.instances.source.frame).toEqual(frame(470, 120, 300, 180))
+  expect(f.h.model().project.instances.text.frame).toEqual(frame(100, 60))
+  expect(f.owned().slideContentEdit).toBeNull()
+  expect(f.h.first.read().undoDepth).toBe(2)
+  expect(f.beginSpot).not.toHaveBeenCalled(); expect(f.report).not.toHaveBeenCalled()
+})
+
+it('keeps the original Source body target when paint returns after pointer up and a neighbour moves into the old coordinate', async () => {
+  const initial = project()
+  initial.instances[initial.rootIds[0]].childIds = ['source', 'text']
+  const f = await mount(initial), held = deferred()
+  let hit: ComponentAuthorHitRequest | undefined
+  f.ui.container.querySelector('[data-component-render="source"]')!.addEventListener(COMPONENT_AUTHOR_HIT, event => {
+    event.preventDefault(); hit = (event as CustomEvent<ComponentAuthorHitRequest>).detail; held.resolve()
+  }, { once: true })
+  await act(async () => { fireEvent.pointerDown(f.workspace, { pointerId: 24, button: 0, clientX: 650, clientY: 220 }) })
+  await held.promise
+  await act(async () => {
+    // Keep the final center outside the existing neighbour snap radius; this
+    // case proves the frozen target and actual up point, not snap policy.
+    fireEvent.pointerUp(f.workspace, { pointerId: 24, button: 0, clientX: 690, clientY: 250 })
+    await f.h.kernel.edit([{ type: 'frame.set', instanceId: 'text', frame: frame(630, 200) }])
+  })
+  await act(async () => { hit!.resolve({ authorKey: null, painted: true }) })
+  await waitFor(() => expect(f.h.first.read().undoDepth).toBe(2))
+  expect(f.h.model().project.instances.source.frame).toEqual(frame(470, 120, 300, 180))
+  expect(f.h.model().project.instances.text.frame).toEqual(frame(630, 200))
+  expect(f.h.model().project.instances.source.data).toEqual(initial.instances.source.data)
+  expect(f.h.model().project.instances.text.data).toEqual(initial.instances.text.data)
+  expect(f.commit).toHaveBeenCalledOnce(); expect(f.beginSpot).not.toHaveBeenCalled(); expect(f.owned().slideContentEdit).toBeNull()
+  await act(async () => { await f.h.kernel.navigateHistory('undo') })
+  expect(f.h.model().project.instances.source.frame).toEqual(frame(430, 90, 300, 180))
+  expect(f.h.model().project.instances.text.frame).toEqual(frame(630, 200))
+  expect(f.report).not.toHaveBeenCalled()
+})
+
+it('ignores an older Source hover reply after a Nodes selection without reviving its author-field affordance', async () => {
+  const f = await mount(project(), [spot(false)]), held = deferred()
+  let hit: ComponentAuthorHitRequest | undefined
+  f.ui.container.querySelector('[data-component-render="source"]')!.addEventListener(COMPONENT_AUTHOR_HIT, event => {
+    event.preventDefault(); hit = (event as CustomEvent<ComponentAuthorHitRequest>).detail; held.resolve()
+  }, { once: true })
+  await act(async () => { fireEvent.pointerMove(f.workspace, { pointerId: 25, clientX: 470, clientY: 120 }) })
+  await held.promise
+  await act(async () => { f.h.kernel.selectInstances(['text']); hit!.resolve({ authorKey: 'label', painted: true }) })
+  expect(f.h.bridge.read().selectedInstanceIds).toEqual(['text'])
+  expect(f.ui.container.querySelector('.canvas-authoring-target--hovered')).toBeNull()
+  expect(f.h.first.read().undoDepth).toBe(0); expect(f.owned().slideContentEdit).toBeNull()
+  expect(f.beginSpot).not.toHaveBeenCalled(); expect(f.report).not.toHaveBeenCalled()
+})
+
+it('keeps a newer native input when an old exact field menu action is invoked after Nodes selection', async () => {
+  const f = await mount(project(), [spot(false)]), opened = deferred()
+  let menu: ObjectContextMenuRequest | undefined
+  f.workspace.addEventListener(OBJECT_CONTEXT_MENU_EVENT, event => { menu = (event as CustomEvent<ObjectContextMenuRequest>).detail; opened.resolve() })
+  f.ui.container.querySelector('[data-component-render="source"]')!.addEventListener(COMPONENT_AUTHOR_HIT, event => {
+    event.preventDefault(); (event as CustomEvent<ComponentAuthorHitRequest>).detail.resolve({ authorKey: 'label', painted: true })
+  }, { once: true })
+  await act(async () => { fireEvent.contextMenu(f.workspace, { clientX: 470, clientY: 120 }) })
+  await opened.promise
+  expect(menu?.selectionIdentity).toBeTruthy(); expect(menu?.extra?.[0].label).toBe('编辑此处文字')
+  await act(async () => { f.h.kernel.selectInstances(['text']); f.ports.beginTextEdit('text'); f.ports.updateDataDraft(createTextData('新输入尚未完成')) })
+  const input = f.owned().slideContentEdit
+  await act(async () => { await menu!.extra![0].run() })
+  expect(f.h.bridge.read().selectedInstanceIds).toEqual(['text'])
+  expect(f.owned().slideContentEdit).toBe(input)
+  expect(f.h.model().project).toEqual(project()); expect(f.h.first.read().undoDepth).toBe(0)
+  expect(f.beginSpot).not.toHaveBeenCalled(); expect(f.report).not.toHaveBeenCalled()
+})
+
+it('retires an invalidated host ACK pointer before the same physical mouse id selects and drags again', async () => {
+  const initial = project()
+  initial.instances.neighbor = { ...structuredClone(initial.instances.text), id: 'neighbor', frame: frame(100, 250) }
+  initial.instances[initial.rootIds[0]].childIds!.push('neighbor')
+  const f = await mount(initial), ack = deferred(), entered = deferred()
+  f.h.controls.before = async () => { entered.resolve(); await ack.promise }
+  await act(async () => { f.ports.select(['text']); f.ports.beginTextEdit('text'); f.ports.updateDataDraft(createTextData('A 的已确认输入')) })
+  // A physical mouse retains its id across presses, including a press whose
+  // old input acknowledgement arrives after a Nodes selection.
+  await pointer(f, 1, [650, 220])
+  await entered.promise
+  await act(async () => { f.h.kernel.selectInstances(['neighbor']); ack.resolve() })
+  await waitFor(() => expect(f.owned().slideContentEdit).toBeNull())
+  expect(f.h.bridge.read().selectedInstanceIds).toEqual(['neighbor'])
+  await pointer(f, 1, [650, 220])
+  expect(f.h.bridge.read().selectedInstanceIds).toEqual(['source'])
+  await pointer(f, 1, [650, 220], [690, 250])
+  await waitFor(() => expect(f.h.first.read().undoDepth).toBe(2))
+  expect(f.commit).toHaveBeenCalledOnce()
+  expect(f.h.model().project.instances.source.frame).toEqual(frame(470, 120, 300, 180))
+  expect(f.h.model().project.instances.neighbor).toEqual(initial.instances.neighbor)
+  expect(f.h.model().project.instances.text.data).toEqual(JSON.parse(JSON.stringify(createTextData('A 的已确认输入'))))
+  await act(async () => { await f.h.kernel.navigateHistory('undo') })
+  expect(f.h.model().project.instances.source).toEqual(initial.instances.source)
+  expect(f.h.model().project.instances.neighbor).toEqual(initial.instances.neighbor)
+  expect(f.report).not.toHaveBeenCalled()
+})
+
+it('lets the later host intent with the same mouse id finish when an older ACK continuation returns', async () => {
+  const f = await mount(), ack = deferred(), entered = deferred()
+  f.h.controls.before = async () => { entered.resolve(); await ack.promise }
+  await act(async () => { f.ports.select(['text']); f.ports.beginTextEdit('text'); f.ports.updateDataDraft(createTextData('同一正式输入')) })
+  await pointer(f, 1, [650, 220])
+  await entered.promise
+  await pointer(f, 1, [650, 220], [690, 250])
+  await act(async () => { ack.resolve() })
+  await waitFor(() => expect(f.h.first.read().undoDepth).toBe(2))
+  expect(f.h.bridge.read().selectedInstanceIds).toEqual(['source'])
+  expect(f.commit).toHaveBeenCalledOnce()
+  expect(f.h.model().project.instances.source.frame).toEqual(frame(470, 120, 300, 180))
+  expect(f.h.model().project.instances.text.data).toEqual(JSON.parse(JSON.stringify(createTextData('同一正式输入'))))
   expect(f.report).not.toHaveBeenCalled()
 })
 

@@ -54,6 +54,7 @@ it('uses actual editor copy/cut/paste events for a partial range and inline atom
   const values = new Map<string,string>(), clipboardData = { setData: (type:string,value:string) => values.set(type,value), getData: (type:string) => values.get(type) ?? '', types: [] }
   const event = (type:string) => { const value = new Event(type,{bubbles:true,cancelable:true}); Object.defineProperty(value,'clipboardData',{value:clipboardData}); editor.view.dom.dispatchEvent(value); return value }
   try {
+    editor.setInputActive(true)
     editor.view.dispatch(editor.view.state.tr.setSelection(TextSelection.create(editor.view.state.doc,2,5)))
     expect(event('copy').defaultPrevented).toBe(true)
     expect(JSON.parse(values.get('application/x-cw-document-slice')!).context.kind).toBe('cw-course-v10-resources')

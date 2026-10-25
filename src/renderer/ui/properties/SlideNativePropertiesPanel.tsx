@@ -154,7 +154,7 @@ export type PropertiesPatch = DeepPartial<PropertiesItemView> & { fontSizeStep?:
 export interface SlideNativeTextCommands {
   /** Returns true when the control must rebind after a canonical source transition. */
   readonly beginEdit: (source: 'properties' | 'canvas') => boolean | void
-  readonly commitEdit: () => void
+  readonly commitEdit: (text?: string) => void | Promise<void>
   readonly cancelEdit: () => void
   readonly setComposing?: (composing: boolean) => void
   readonly updateDraft: (text: string, edit?: TextRunEdit) => void

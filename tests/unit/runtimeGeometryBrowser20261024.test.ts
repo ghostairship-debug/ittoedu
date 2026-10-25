@@ -31,7 +31,7 @@ it('measures compiled Flow and isolated iframe consumers against real browser sc
   const bundled = await build({ stdin: { contents: "export {mountCompiledCourse} from './src/player/componentPlatform/compiledPlayer';export {ComponentRuntimeWorld} from './src/player/components/ComponentRuntimeWorld';export {preparePublishedNativeComponent} from './src/player/components/runtime/SandboxComponentRuntime'", resolveDir: process.cwd(), loader: 'ts' },
     bundle: true, write: false, format: 'iife', globalName: 'GeometryProbe', platform: 'browser', target: 'es2022' })
   const browser = await chromium.launch({ headless: true }), page = await browser.newPage({ viewport: { width: 1100, height: 700 } }), errors: string[] = []
-  const evidence: Record<string, unknown> = {}, output = resolve('output/resource-runtime-repair-20261024/geometry')
+  const evidence: Record<string, unknown> = {}, output = resolve('output/test-runs/runtime-geometry-20261024')
   page.on('pageerror', error => errors.push(error.message))
   try {
     await page.setContent('<!doctype html><style>html,body,#root{width:100%;height:100%;margin:0}</style><main id="root"></main>')

@@ -293,8 +293,10 @@ export function createSlideAuthoringSlice(kernel: EditorStoreKernel, ports: Slid
     if (authorSpot) {
       const before = sourceSpotText(accepted.target, accepted.authorSpot), after = sourceSpotText(target, accepted.authorSpot)
       const record = authorSpot.authorKey && target.editingProject.instances[accepted.instanceId].authoring?.records?.[authorSpot.authorKey]
-      authorSpot = { ...authorSpot, initialValue: accepted.spotValue ?? accepted.spotText ?? authorSpot.initialValue,
-        ...(record ? { binding: structuredClone(record.binding) } : {}),
+      const acceptedValue = accepted.spotValue ?? accepted.spotText ?? authorSpot.initialValue
+      authorSpot = { ...authorSpot, initialValue: acceptedValue,
+        ...(record ? { binding: structuredClone(record.binding) } : authorSpot.sourceRegion && authorSpot.binding && typeof acceptedValue === 'string'
+          ? { binding: { ...authorSpot.binding, baseline: acceptedValue } } : {}),
         ...(authorSpot.sourceRegion && before !== undefined && after !== undefined
           ? { sourceRegion: { ...authorSpot.sourceRegion, end: authorSpot.sourceRegion.end + after.length - before.length } } : {}) }
     }
@@ -430,7 +432,8 @@ export function createSlideAuthoringSlice(kernel: EditorStoreKernel, ports: Slid
     void pending.then(clear, clear)
     return pending
   }
-  const commitTextEdit = async (documentId = kernel.readView().activeDocumentId ?? undefined): Promise<void> => {
+  const commitTextEdit = async (documentId = kernel.readView().activeDocumentId ?? undefined,
+    afterAccepted?: (spot: ComponentAuthorSpot | undefined) => void): Promise<void> => {
     const first = ports.read().slideContentEdit, session = contentSession
     if (first && documentId && first.target.documentId !== documentId) return
     if (inputCommit?.session === session) await inputCommit.pending
@@ -438,7 +441,16 @@ export function createSlideAuthoringSlice(kernel: EditorStoreKernel, ports: Slid
       const current = ports.read().slideContentEdit
       if (!current || current.instanceId !== first.instanceId || current.target.documentId !== first.target.documentId
         || current.target.epoch !== first.target.epoch || current.authorSpot?.id !== first.authorSpot?.id) break
+      if (afterAccepted && (hasSlideContentDraftChanges(current) || layoutPreparations.has(current))) {
+        // A following field action needs the input owner's accepted address,
+        // including a source range rebased by the actual text commit. Advance
+        // through the existing writer before closing this same input below.
+        await applyContentDraft(true)
+        continue
+      }
+      const acceptedSpot = afterAccepted && current.authorSpot ? structuredClone(current.authorSpot) : undefined
       await applyContentDraft()
+      if (afterAccepted && contentSession === session && !ports.read().slideContentEdit) { afterAccepted(acceptedSpot); break }
     }
     if (contentSession === session) plainGroup = undefined
   }

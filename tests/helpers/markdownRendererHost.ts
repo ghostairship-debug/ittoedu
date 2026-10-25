@@ -62,10 +62,11 @@ export function attachMarkdownRendererHost(port: RecoverableDocumentFilePort, fi
     saveWithDialog: async () => { throw new Error('Dialog is outside this fixture') },
     closeWithDialog: async () => { throw new Error('Dialog is outside this fixture') },
     observeFile: async id => {
-      const current = registry.get(id).read()
+      const session = registry.get(id), current = session.read(), baseSource = session.readSavedSource()
       if (current.binding.kind !== 'file') throw new Error('Expected bound document')
       const disk = await port.openDocument(refFor(current.binding.path))
-      return { bindingVersion: current.binding.bindingVersion, version: disk.version.contentVersion, model: model(disk.source) }
+      return { bindingVersion: current.binding.bindingVersion, ...(baseSource === undefined ? {} : { baseSource }),
+        version: disk.version.contentVersion, model: model(disk.source) }
     },
     reconcileFile: input => registry.get(input.documentId).reconcileFile(input, async current => {
       const disk = await documents.observeFile(input.documentId)

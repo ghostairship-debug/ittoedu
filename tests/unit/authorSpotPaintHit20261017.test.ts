@@ -30,3 +30,18 @@ it('keeps actual HTML backgrounds and foreground controls blocking while transpa
   expect(await painted('<button style="width:100px;height:100px">Foreground</button>', 40, 40)).toBe(true)
   expect(await painted('<div style="visibility:hidden"><div style="visibility:visible;width:100px;height:100px;background:red"></div></div>', 40, 40)).toBe(true)
 })
+
+it('keeps a hollow border and visible descendants coordinate-correct within one synchronous paint read', async () => {
+  await page.setContent(`<style>html,body{margin:0}#border{position:absolute;left:10px;top:10px;width:100px;height:100px;border:10px solid red;pointer-events:none!important}
+    #hidden{position:absolute;top:160px;visibility:hidden}#visible{visibility:visible;width:100px;height:80px;background:red}</style>
+    <div id="border"></div><div id="hidden"><div id="visible"></div></div>`)
+  const result = await page.evaluate(source => {
+    const paintAt = new Function(`return (${source})`)() as typeof componentPaintStack
+    const scope = { prepared: new Map(), restore: [] as Array<() => void>, paint: new Map(), shown: new Map() }
+    try {
+      const has = (id: string, x: number, y: number) => paintAt(document.documentElement, x, y, '', undefined, scope).some(element => element.id === id)
+      return { edge: has('border', 15, 50), empty: has('border', 60, 60), otherEdge: has('border', 125, 50), visible: has('visible', 40, 180) }
+    } finally { for (const restore of scope.restore.reverse()) restore() }
+  }, componentPaintStack.toString())
+  expect(result).toEqual({ edge: true, empty: false, otherEdge: true, visible: true })
+})

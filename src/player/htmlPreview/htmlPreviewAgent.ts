@@ -3,7 +3,7 @@ import { mountPagination, type HtmlPreviewPagination } from './htmlPreviewPagina
 import { mountPlaceholders } from './htmlPreviewPlaceholders'
 import { HTML_PREVIEW_TARGET_MAX, htmlPreviewTargetReportSchema } from '../../shared/workbench/htmlPreview'
 import type { z } from 'zod'
-import { createDomAuthoring } from '../../components/web/authoringDom'
+import { authoringMutationRoots, createDomAuthoring } from '../../components/web/authoringDom'
 import { createNestedDomAuthoring } from '../../components/web/nestedAuthoringDom'
 import { installHtmlFrameAuthoring } from '../../shared/html/htmlFrameAuthoring'
 import type { ComponentAuthorRecord, ComponentAuthorGeometry } from '../../shared/contracts/component-platform/runtime'
@@ -139,14 +139,6 @@ const isNode = (node: unknown): node is Node => Boolean(node && typeof node === 
 function editableText(node: Text): boolean {
   const parent = node.parentElement
   return Boolean(parent && node.data.trim() && !parent.closest('script,style,noscript,template,textarea,title,option,[contenteditable]'))
-}
-
-function textAtPoint(doc: Document, x: number, y: number): Text | null {
-  const position = doc.caretPositionFromPoint?.(x, y)
-  if (position?.offsetNode.nodeType === Node.TEXT_NODE) return position.offsetNode as Text
-  const range = (doc as Document & { caretRangeFromPoint?(x: number, y: number): Range | null }).caretRangeFromPoint?.(x, y)
-  if (range?.startContainer.nodeType === Node.TEXT_NODE) return range.startContainer as Text
-  return null
 }
 
 /** Runs inside the sandboxed HTML document. It reports observations only and never writes project files. */
@@ -343,6 +335,7 @@ export function mountHtmlPreviewAgent(doc: Document, inheritedTracking?: Runtime
         const rect = authoring.rect(node)
         if (!rect.width || !rect.height || rect.x + rect.width <= 0 || rect.y + rect.height <= 0
           || rect.x >= win.innerWidth || rect.y >= win.innerHeight) return []
+        if (!authoring.painted(node)) return []
         const editable = confirmed.has(handle)
         if (!editable && handle !== selected) return []
         if (handle === selected) return [] // The host owns the one selected frame and its handles.
@@ -368,7 +361,8 @@ export function mountHtmlPreviewAgent(doc: Document, inheritedTracking?: Runtime
         mark.dataset.htmlPreviewEditTarget = handle
         mark.dataset.state = state
         mark.dataset.editable = String(editable)
-        mark.textContent = state === 'hovered' ? isImage(nodes.get(handle)) ? '图片 · 点此选中' : '文字 · 点此编辑' : ''
+        const label = state === 'hovered' ? isImage(nodes.get(handle)) ? '图片 · 点此选中' : '文字 · 点此编辑' : ''
+        if (mark.textContent !== label) mark.textContent = label
         const style = `position:fixed;box-sizing:border-box;pointer-events:none;left:${rect.x - 2}px;top:${rect.y - 2}px;width:${rect.width + 4}px;height:${rect.height + 4}px;border:1px ${editable && !active ? 'dashed' : 'solid'} ${editable ? active ? '#2563eb' : 'rgba(37,99,235,.22)' : '#b45309'};background:transparent;color:#174b8b;font:11px/1.3 sans-serif;text-shadow:0 0 3px white,0 0 3px white;`
         if (mark.getAttribute('style') !== style) mark.setAttribute('style', style)
       }
@@ -443,8 +437,7 @@ export function mountHtmlPreviewAgent(doc: Document, inheritedTracking?: Runtime
       send({ event: 'edit-targets', scanId, targets: message.targets })
     }
   })
-  const mutationRoots = (records: readonly MutationRecord[]) => records.filter(record => record.target !== markers && !markers?.contains(record.target)
-    && !(record.type === 'childList' && [...record.addedNodes, ...record.removedNodes].every(node => node === markers))).map(record => record.target)
+  const mutationRoots = authoringMutationRoots
   const pruneDisconnected = () => {
     // A node stays isConnected inside an old Document after frame navigation.
     // Retire only registered realms whose live parent chain no longer reaches
@@ -474,7 +467,7 @@ export function mountHtmlPreviewAgent(doc: Document, inheritedTracking?: Runtime
     const roots = mutationRoots(records)
     if (roots.length) { pruneDisconnected(); scheduleDiscovery(true, roots) }
   })
-  observer.observe(doc.body, { subtree: true, childList: true, characterData: true, attributes: true })
+  observer.observe(doc.body, { subtree: true, childList: true, characterData: true, attributes: true, attributeOldValue: true })
   const onViewportChange = () => scheduleDiscovery(false)
   win.addEventListener('scroll', onViewportChange, true)
   win.addEventListener('resize', onViewportChange)
@@ -510,16 +503,11 @@ export function mountHtmlPreviewAgent(doc: Document, inheritedTracking?: Runtime
   type PointerLocation = Pick<MouseEvent, 'target' | 'clientX' | 'clientY'>
   const pickTarget = (event: PointerLocation): Text | HTMLImageElement | null => {
     const document = isNode(event.target) ? event.target.ownerDocument ?? doc : doc
-    const capturedAtRoot = event.target === document.documentElement || event.target === document.body || event.target === document
-    const rootPoint = capturedAtRoot && pointInRoot(document, { x: event.clientX, y: event.clientY })
+    const rootPoint = pointInRoot(document, { x: event.clientX, y: event.clientY })
     const observed = rootPoint && authoring.hit(rootPoint.x, rootPoint.y)?.node
-    if (isText(observed) || isImage(observed)) return observed
-    // Pointer capture can retarget click/dblclick to documentElement. The
-    // painted point remains authoritative, including the image under it.
-    const painted = document.elementFromPoint?.(event.clientX, event.clientY) ?? event.target
-    if (isImage(painted)) return painted
-    const text = textAtPoint(document, event.clientX, event.clientY)
-    return text && editableText(text) && isNode(painted) && painted.contains(text) ? text : null
+    // Hover, first press and capture-retargeted double clicks all consume the
+    // same painted target, including decorations with pointer-events:none.
+    return isText(observed) || isImage(observed) ? observed : null
   }
   const targetReportAt = (event: MouseEvent) => {
     const target = pickTarget(event)
@@ -640,7 +628,7 @@ export function mountHtmlPreviewAgent(doc: Document, inheritedTracking?: Runtime
         const roots = mutationRoots(records)
         if (roots.length) { pruneDisconnected(); scheduleDiscovery(true, roots) }
       })
-      observer.observe(document.documentElement, { subtree: true, childList: true, characterData: true, attributes: true })
+      observer.observe(document.documentElement, { subtree: true, childList: true, characterData: true, attributes: true, attributeOldValue: true })
       const inputOwner: PreviewInputOwner['options'] = { editing: () => !disposed && visible && editMode,
         select: (_point, event) => onClick(event as MouseEvent), edit: (_point, event) => onDoubleClick(event as MouseEvent),
         contentEditing, extend: extendSelection, gesture }
@@ -792,7 +780,12 @@ export function mountHtmlPreviewAgent(doc: Document, inheritedTracking?: Runtime
       }
       const current = node?.nodeType === Node.TEXT_NODE ? (node as Text).data
         : isImage(node) ? node.getAttribute('src') ?? '' : null
-      if (!node?.isConnected || current === null || current !== message.expected) {
+      // Canonical author records can arrive before the edit receipt and have
+      // already projected this exact text. Accept that idempotent completion;
+      // a different live value still rejects the stale patch. Images retain
+      // their responsive-attribute checks below.
+      const textAlreadyApplied = message.kind === 'text' && node?.nodeType === Node.TEXT_NODE && current === message.value
+      if (!node?.isConnected || current === null || current !== message.expected && !textAlreadyApplied) {
         win.parent.postMessage({ event: 'html-preview.patch-result', protocol: 1, leaseId, loadId,
           handle: message.handle, ok: false }, '*')
         return
@@ -824,9 +817,9 @@ export function mountHtmlPreviewAgent(doc: Document, inheritedTracking?: Runtime
       tracking.withoutTracking(() => {
       if (typeof message.authoringAnchor === 'string' && message.authoringAnchor) {
         const element = node.nodeType === Node.TEXT_NODE ? node.parentElement : node as Element
-        element?.setAttribute('data-cw-author-key', message.authoringAnchor)
+        if (element && element.getAttribute('data-cw-author-key') !== message.authoringAnchor) element.setAttribute('data-cw-author-key', message.authoringAnchor)
       }
-      if (message.kind === 'text' && node.nodeType === Node.TEXT_NODE) (node as Text).data = message.value
+      if (message.kind === 'text' && node.nodeType === Node.TEXT_NODE && !textAlreadyApplied) (node as Text).data = message.value
       if (message.kind === 'image' && isImage(node)) {
         let original = imageOriginals.get(node)
         if (!original) {

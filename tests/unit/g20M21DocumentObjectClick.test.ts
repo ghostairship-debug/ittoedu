@@ -59,6 +59,7 @@ it('publishes the current same caret on native click without a document or selec
     change, diagnostic: vi.fn(), undo: vi.fn(), redo: vi.fn(), selection,
   })
   try {
+    editor.setInputActive(true)
     editor.view.dispatch(editor.view.state.tr.setSelection(TextSelection.create(editor.view.state.doc, 2)))
     const state = editor.view.state, current = editor.readSelection()
     selection.mockClear()
@@ -83,6 +84,7 @@ it('refreshes the existing editor read-only state without replacing its document
   }
   const editor = createLayoutEditor(element, options), view = editor.view
   try {
+    editor.setInputActive(true)
     view.dispatch(view.state.tr.insertText('未提交', 1))
     const state = view.state, host = element.querySelector('figure')
     const commits = change.mock.calls.length
@@ -119,6 +121,7 @@ it('keeps a rendered image field owner on its click and lets ordinary text recla
     },
   })
   try {
+    editor.setInputActive(true)
     editor.view.dispatch(editor.view.state.tr.setSelection(TextSelection.create(editor.view.state.doc, 2)))
     const state = editor.view.state, caret = editor.readSelection()
     selection.mockClear()

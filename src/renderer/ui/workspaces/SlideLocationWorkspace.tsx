@@ -10,7 +10,7 @@ import type { CapturedCourseTarget } from '../../documents/CourseV10DocumentBrid
 import type { SlideContentEdit, SlideContentLayoutReady } from '../../store/slices/slideAuthoringSlice'
 import { NativeSelectionContext } from '../../workbench/NativeSelectionContext'
 import { useContextMenu } from '../../editing/commands/CommandMenu'
-import { AUTHOR_FIELD_ACTION_EVENT, OBJECT_EDIT_EVENT, requestObjectContextMenu, requestObjectEdit, type AuthorFieldActionRequest } from '../../editing/commands/objectContextMenu'
+import { AUTHOR_FIELD_ACTION_EVENT, OBJECT_EDIT_EVENT, requestImageEdit, requestObjectContextMenu, requestObjectEdit, type AuthorFieldActionRequest } from '../../editing/commands/objectContextMenu'
 import { componentPaintStyle } from '../../../player/components/componentPlacementStyle'
 import { componentIsLocked } from '../../composition/crossSurfaceCommands'
 import { componentDefinitionPresentation } from '../properties/componentDefinitionPresentation'
@@ -568,6 +568,7 @@ export function SlideLocationWorkspace({ snapshot, ports, onAddImage, onAddVideo
         return true
       }
       owner.selectAuthorSpot?.(spot)
+      if (edit && spot.kind === 'image' && current.documentId && current.epoch) requestImageEdit({ documentId: current.documentId, epoch: current.epoch, itemId: spot.instanceId, selectionIdentity: authorFieldIdentity(spot.instanceId, spot) })
       if (!edit || spot.kind === 'image') return true
       nativeText.placeCaret(spot.instanceId, client, pending.caretOffset === undefined ? undefined
         : Math.max(0, Math.min(typeof spot.initialValue === 'string' ? spot.initialValue.length : 0, pending.caretOffset)))
@@ -610,20 +611,23 @@ export function SlideLocationWorkspace({ snapshot, ports, onAddImage, onAddVideo
       const candidate = id === request.instanceId && request.authorKey ? latest.current.ports.authorSpots?.().find(spot => spot.instanceId === id
         && spot.authorKey === request.authorKey && (request.mountGeneration === undefined || spot.mountGeneration === request.mountGeneration)) : undefined
       const builtin = componentDefinitionBuiltinKey(current.project.definitions[current.project.instances[id]?.definitionId])
-      const wholeNative = ['guoling.text', 'guoling.formula', 'guoling.table', 'guoling.chart'].includes(builtin ?? '')
+      const wholeNative = ['guoling.text', 'guoling.formula', 'guoling.table', 'guoling.chart', 'guoling.image'].includes(builtin ?? '')
       if (event.type === 'component-author-double-click') {
         if (componentIsLocked(current.project, id)) return
         if (builtin === 'guoling.group') { void latest.current.ports.enterGroup?.(id); return }
         if (current.project.instances[id]?.container) { void latest.current.ports.enterContainer?.(id); return }
+        if (builtin === 'guoling.image') {
+          latest.current.ports.select([id])
+          if (current.documentId && current.epoch) requestImageEdit({ documentId: current.documentId, epoch: current.epoch, itemId: id })
+          return
+        }
         if (wholeNative) {
           latest.current.ports.select([id])
           if (nativeText.begin(id, at, client)) return
         }
         if (candidate) {
           const pending = { ...captureInputIntent(), caretOffset: request.caretOffset }
-          void activateSpot(candidate, at, client, candidate.kind === 'text', undefined, pending).then(ok => {
-            if (ok && candidate.kind === 'image') void replaceSpot(candidate)
-          })
+          void activateSpot(candidate, at, client, true, undefined, pending)
         } else {
           latest.current.ports.select([id])
           const context = pointerContext(current)
@@ -648,12 +652,17 @@ export function SlideLocationWorkspace({ snapshot, ports, onAddImage, onAddVideo
         return
       }
       if (current.contentEdit?.composing) return
+      const intended = captureInputIntent()
       const start = { ...client, additive: Boolean(request.shiftKey || request.ctrlKey || request.metaKey), altKey: Boolean(request.altKey) }
-      const next = { id: pointerId, context: pointerContext(current), ended: !phase,
+      const next = { id: pointerId, context: intended.context, ended: !phase,
         latest: { ...client, shiftKey: Boolean(request.shiftKey), altKey: Boolean(request.altKey) } } as NonNullable<typeof realmPointer.current>
       realmPointer.current = next
       const begin = () => {
-        if (realmPointer.current !== next || pointerContext(latest.current.ports.read()) !== next.context) return
+        if (realmPointer.current !== next) return
+        // Only start the frozen gesture after its input ACK if the same intent
+        // and selection still own it. A newer input can share that selection.
+        // Once started, update/end follow the gesture's own selection normally.
+        if (!sameInputContext(intended) || latest.current.ports.read().contentEdit) { realmPointer.current = null; return }
         if (request.button === 2) {
           realmPointer.current = null; authoring.current?.cancelGesture(); setPreview(emptyPreview())
           if (internalGesture.current) internalGesture.current.preview?.(internalGesture.current.value.spot.id, null)
@@ -715,7 +724,7 @@ export function SlideLocationWorkspace({ snapshot, ports, onAddImage, onAddVideo
       const frame = spotTargets.find(value => authorFieldIdentity(value.spot.instanceId, value.spot) === authorFieldIdentity(spot.instanceId, spot))?.frame
       if (!frame) return
       const at = transformPoint(frame.transform, { x: frame.width / 2, y: frame.height / 2 })
-      void activateSpot(spot, at, transformPoint(mapping(), at), request.action !== 'replace-image').then(ok => {
+      void activateSpot(spot, at, transformPoint(mapping(), at), request.action === 'edit').then(ok => {
         const selected = ok && currentSpot(spot)
         if (selected && request.action === 'replace-image') void replaceSpot(selected)
       })
@@ -878,7 +887,7 @@ export function SlideLocationWorkspace({ snapshot, ports, onAddImage, onAddVideo
             const levelId = visible && editingLevelInstanceId(project, surface.id, visible.instanceId, snapshot.activeGroupId, start.altKey)
             if (levelId && !target) { plainSpotPointer.current = null; ports.select([levelId]); return }
             const builtin = leaf && componentDefinitionBuiltinKey(project.definitions[project.instances[leaf.instanceId]?.definitionId])
-            const wholeNative = builtin === 'guoling.text' || builtin === 'guoling.formula' || builtin === 'guoling.table' || builtin === 'guoling.chart'
+            const wholeNative = builtin === 'guoling.text' || builtin === 'guoling.formula' || builtin === 'guoling.table' || builtin === 'guoling.chart' || builtin === 'guoling.image'
             if (spot && !wholeNative && target?.instanceId === leaf?.instanceId && !start.additive && !start.altKey && ports.selectAuthorSpot) {
               ports.selectAuthorSpot?.(spot)
               if (spot.geometry && !componentIsLocked(project, spot.instanceId)) {
@@ -947,14 +956,18 @@ export function SlideLocationWorkspace({ snapshot, ports, onAddImage, onAddVideo
           const original = latest.current.ports.read(), id = visible && original.project
             ? editingLevelInstanceId(original.project, original.surfaceId, visible.instanceId, original.activeGroupId, start.altKey) : null
           const candidate = id === visible?.instanceId && visible?.authorKey ? latest.current.ports.authorSpots?.().find(spot => spot.instanceId === id && spot.authorKey === visible.authorKey) : undefined
-          if (deferredPointer.current !== pending || !sameInputContext(pending)) return
+          if (deferredPointer.current !== pending) return
+          if (!sameInputContext(pending)) { deferredPointer.current = null; return }
           const active = document.activeElement
           if (active instanceof HTMLElement && active.matches('input,textarea,[contenteditable="true"]')) active.blur()
           await ports.commitTextEdit()
-          if (deferredPointer.current !== pending || !sameInputContext(pending) || latest.current.ports.read().contentEdit) return
+          if (deferredPointer.current !== pending) return
+          // A mouse reuses its pointer id. Retire this invalidated record so it
+          // cannot consume a later gesture's move/up; never clear a new record.
+          if (!sameInputContext(pending) || latest.current.ports.read().contentEdit) { deferredPointer.current = null; return }
           deferredPointer.current = null
           const builtin = id && componentDefinitionBuiltinKey(original.project!.definitions[original.project!.instances[id]?.definitionId])
-          if (candidate && !['guoling.text', 'guoling.formula', 'guoling.table', 'guoling.chart'].includes(builtin || '') && !start.additive && !start.altKey) {
+          if (candidate && !['guoling.text', 'guoling.formula', 'guoling.table', 'guoling.chart', 'guoling.image'].includes(builtin || '') && !start.additive && !start.altKey) {
             pointer.current = null; ports.selectAuthorSpot?.(candidate)
             const owner = listSlideWorkspaceHitTargets(state()).find(value => value.instanceId === id)
             if (candidate.geometry && owner && !componentIsLocked(original.project!, id!)) {
@@ -1142,7 +1155,8 @@ export function SlideLocationWorkspace({ snapshot, ports, onAddImage, onAddVideo
       }
       const at = surfacePoint(point.x, point.y)
       const objectHit = visible ? { kind: 'object' as const, instanceId: visible.instanceId } : { kind: 'blank' as const }
-      const candidate = visible?.authorKey ? latest.current.ports.authorSpots?.().find(spot => spot.instanceId === visible.instanceId && spot.authorKey === visible.authorKey) : visible?.authorKey === undefined && visible ? ownerSpotAt(visible.instanceId, at)?.spot : undefined
+      const nativeImage = visible && componentDefinitionBuiltinKey(project.definitions[project.instances[visible.instanceId]?.definitionId]) === 'guoling.image'
+      const candidate = nativeImage ? undefined : visible?.authorKey ? latest.current.ports.authorSpots?.().find(spot => spot.instanceId === visible.instanceId && spot.authorKey === visible.authorKey) : visible?.authorKey === undefined && visible ? ownerSpotAt(visible.instanceId, at)?.spot : undefined
       if (candidate) {
         void Promise.resolve(candidate).then(spot => {
         if (!sameInputContext(pending)) return
@@ -1217,7 +1231,7 @@ export function SlideLocationWorkspace({ snapshot, ports, onAddImage, onAddVideo
         ports.select([id])
         window.setTimeout(() => {
           const current = latest.current.ports.read()
-          if (pointerContext(current) === pending.context && current.selectedInstanceIds.length === 1 && current.selectedInstanceIds[0] === id) requestObjectEdit(owner, id)
+          if (pointerContext(current) === pending.context && current.selectedInstanceIds.length === 1 && current.selectedInstanceIds[0] === id && current.documentId && current.epoch) requestImageEdit({ documentId: current.documentId, epoch: current.epoch, itemId: id })
         }, 0)
         return
       }
@@ -1226,14 +1240,7 @@ export function SlideLocationWorkspace({ snapshot, ports, onAddImage, onAddVideo
         event.preventDefault(); event.stopPropagation()
         void Promise.resolve(candidate).then(async spot => {
         if (!spot || !sameInputContext(pending)) return
-        if (spot.kind === 'image') {
-          if (await activateSpot(spot, at, client, false, undefined, pending) && inputIntent.current === pending.intent
-            && pointerContext(latest.current.ports.read()) === pending.context
-            && interactionSelectionIdentity(latest.current.ports.read().interactionSelection) === authorFieldIdentity(spot.instanceId, spot)) {
-            const current = currentSpot(spot)
-            if (current) void replaceSpot(current)
-          }
-        } else await activateSpot(spot, at, client, true, undefined, pending)
+        await activateSpot(spot, at, client, true, undefined, pending)
         }).catch(error => ports.report(String(error)))
         return
       }
@@ -1297,7 +1304,7 @@ export function SlideLocationWorkspace({ snapshot, ports, onAddImage, onAddVideo
             && !(snapshot.interactionSelection?.kind === 'objects' && snapshot.interactionSelection.instanceIds.includes(spot.instanceId)
               && ['guoling.text', 'guoling.formula', 'guoling.table', 'guoling.chart', 'guoling.image'].includes(componentDefinitionBuiltinKey(project.definitions[project.instances[spot.instanceId]?.definitionId]) ?? '')))
             .map(({ spot, frame }) => <button key={spot.id} type="button" className={'canvas-authoring-target canvas-authoring-target--' + (spot.kind === 'image' ? 'asset' : 'text') + (hoveredSpot === spot.id ? ' canvas-authoring-target--hovered' : '')}
-            aria-label={spot.kind === 'image' ? '选择此处图片；双击或菜单替换' : '选择此处文字；双击编辑'} disabled={spot.id === replacingSpot}
+            aria-label={spot.kind === 'image' ? '选择此处图片；双击编辑' : '选择此处文字；双击编辑'} disabled={spot.id === replacingSpot}
             data-author-spot={spotKey(spot)} onFocus={() => setHoveredSpot(spot.id)} onBlur={() => setHoveredSpot(null)} onClick={() => {
               if (suppressSpotClick.current) { suppressSpotClick.current = false; return }
               const at = transformPoint(frame.transform, { x: frame.width / 2, y: frame.height / 2 })

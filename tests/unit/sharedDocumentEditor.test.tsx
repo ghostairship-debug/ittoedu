@@ -110,7 +110,7 @@ describe('sharedDocumentEditor', () => {
       { type: 'text' as const, text: '丙丁', style: { fontFamily: 'Arial', fontSize: 30 } },
     ] } }] }, resources: emptyDocumentResources() }
     const onChange = vi.fn(); const onDraft = vi.fn()
-    const props = { document: initial, revision: '1', onChange, onDraft, onUndo() {}, onRedo() {} }
+    const props = { document: initial, revision: '1', target: 'file' as const, onChange, onDraft, onUndo() {}, onRedo() {} }
     const rendered = render(<SharedDocumentEditor {...props} />)
     const editor = factory.mock.results.at(-1)!.value as ReturnType<typeof createLayoutEditor>
     try {
@@ -120,7 +120,7 @@ describe('sharedDocumentEditor', () => {
       act(() => editor.view.dispatch(editor.view.state.tr.setSelection(TextSelection.create(editor.view.state.doc, 1, 5))))
       expect(family.value).toBe('__mixed')
       expect(rendered.getByLabelText('字号').getAttribute('placeholder')).toBe('混合')
-      expect(rendered.getByRole('button', { name: '加粗' }).getAttribute('aria-pressed')).toBe('mixed')
+      expect(rendered.getByRole('button', { name: '粗体' }).getAttribute('aria-pressed')).toBe('mixed')
       fireEvent.change(family, { target: { value: 'KaiTi' } })
       expect(family.value).toBe('KaiTi')
       const changed = fromEditorDocument(editor.view.state.doc).blocks[0]
@@ -139,7 +139,7 @@ describe('sharedDocumentEditor', () => {
       expect(fromEditorDocument(editor.view.state.doc)).toEqual(initial.content)
       expect(family.value).toBe('Arial')
       expect((rendered.getByLabelText('字号') as HTMLInputElement).value).toBe('30')
-      expect(rendered.getByRole('button', { name: '加粗' }).getAttribute('aria-pressed')).toBe('false')
+      expect(rendered.getByRole('button', { name: '粗体' }).getAttribute('aria-pressed')).toBe('false')
     } finally { cleanup(); factory.mockRestore() }
   })
   it('captures a clicked DOM caret before toolbar focus changes and preserves subsequent stored marks', () => {
@@ -148,11 +148,11 @@ describe('sharedDocumentEditor', () => {
       { type: 'text' as const, text: '甲乙', style: { bold: true } }, { type: 'text' as const, text: '丙丁' },
     ] } }] }, resources: emptyDocumentResources() }
     const onChange = vi.fn()
-    const rendered = render(<SharedDocumentEditor document={initial} revision="1" onChange={onChange} onDraft={() => {}} onUndo={() => {}} onRedo={() => {}} />)
+    const rendered = render(<SharedDocumentEditor document={initial} revision="1" target="file" onChange={onChange} onDraft={() => {}} onUndo={() => {}} onRedo={() => {}} />)
     const editor = factory.mock.results.at(-1)!.value as ReturnType<typeof createLayoutEditor>
     try {
       act(() => { editor.view.focus(); editor.view.dispatch(editor.view.state.tr.setSelection(TextSelection.create(editor.view.state.doc, 1, 5))) })
-      expect(rendered.getByRole('button', { name: '加粗' })).toHaveAttribute('aria-pressed', 'mixed')
+      expect(rendered.getByRole('button', { name: '粗体' })).toHaveAttribute('aria-pressed', 'mixed')
       // Browser caret changes before its asynchronous selectionchange reaches PM.
       const end = editor.view.domAtPos(5)
       document.getSelection()!.collapse(end.node, end.offset)
@@ -161,7 +161,7 @@ describe('sharedDocumentEditor', () => {
       fireEvent.change(rendered.getByLabelText('字体'), { target: { value: 'KaiTi' } })
       fireEvent.change(rendered.getByLabelText('字号'), { target: { value: '32' } })
       expect(editor.view.state.selection.empty).toBe(true)
-      expect(rendered.getByRole('button', { name: '加粗' })).toHaveAttribute('aria-pressed', 'false')
+      expect(rendered.getByRole('button', { name: '粗体' })).toHaveAttribute('aria-pressed', 'false')
       expect(onChange).not.toHaveBeenCalled()
       act(() => editor.view.dispatch(editor.view.state.tr.insertText('新')))
       const block = fromEditorDocument(editor.view.state.doc).blocks[0]

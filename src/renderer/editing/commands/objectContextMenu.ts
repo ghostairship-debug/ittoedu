@@ -27,6 +27,12 @@ export function requestObjectContextMenu(root: Element, request: ObjectContextMe
  * editor for a formula).
  */
 export const OBJECT_EDIT_EVENT = 'course-object-edit'
+export const IMAGE_EDIT_EVENT = 'course-image-edit'
+export interface ImageEditRequest { documentId: string; epoch: string; itemId: string; selectionIdentity?: string }
+/** Allow the selecting workspace's render to mount its exact selection UI first. */
+export function requestImageEdit(request: ImageEditRequest): void {
+  window.setTimeout(() => window.dispatchEvent(new CustomEvent<ImageEditRequest>(IMAGE_EDIT_EVENT, { detail: request })), 0)
+}
 
 /** Returns true when the workspace opened an editor for the object. */
 export function requestObjectEdit(root: Element, itemId: string): boolean {

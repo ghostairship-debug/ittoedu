@@ -1,0 +1,31 @@
+{
+  "status": "frozen",
+  "revision": 264,
+  "basedOnRevision": 263,
+  "files": [
+    {
+      "path": "docs/creative-production/works/coffee-journey/design/v08-runtime-first/native/coffee-journey-v08-runtime-first.glx",
+      "bytes": 1432248,
+      "sha256": "8250d760ba3dfd50503952d99680974ae99067dd1053a2125a445d53ddf606d0"
+    },
+    {
+      "path": "docs/creative-production/works/coffee-journey/design/v08-runtime-first/final-20261025/coffee-journey-v08-runtime-first-final.glx",
+      "bytes": 1433538,
+      "sha256": "326a2f313155e0ed3fcd4f9e34d5ff6be7acced9d02d002732789aeb5a04eade"
+    },
+    {
+      "path": "docs/creative-production/works/coffee-journey/design/v08-runtime-first/final-20261025/coffee-journey-v08-runtime-first-final.html",
+      "bytes": 5140777,
+      "sha256": "4f964e1bcec1fb930b5cccd5e09d25a7ec002ca690326ebf3cf70bf46d9ced57"
+    }
+  ],
+  "verification": [
+    "output/coffee-final-20261025/formal-pass2.json",
+    "output/coffee-final-20261025/final/results.json",
+    "output/coffee-final-20261025/focused/interactions.json",
+    "output/coffee-final-20261025/coldcheck.json",
+    "output/coffee-final-20261025/editor-lifecycle.json"
+  ],
+  "freezeRecordedAt": "2026-10-24T19:06:15Z",
+  "note": "候选pass1/pass2与validation-editability只为过程及验证，不是正式交付入口。"
+}

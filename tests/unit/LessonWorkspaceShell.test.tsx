@@ -1,5 +1,5 @@
 import { attachMarkdownRendererHost } from '../helpers/markdownRendererHost'
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createRef } from 'react'
 import { LessonWorkspaceHost } from '../../src/renderer/app/LessonWorkspaceHost'
@@ -48,8 +48,11 @@ describe('2.0 workspace shell', () => {
     render(<LessonWorkspaceHost projectPath={null} onOpenProject={async () => true} onNewProject={async () => true}><div data-testid="course">课程宿主</div></LessonWorkspaceHost>)
     expect(screen.getByRole('alert')).toHaveTextContent('创作助手服务不可用')
     expect(screen.getByTestId('course')).toBeInTheDocument()
-    fireEvent.change(screen.getByLabelText('Markdown 文档名'), { target: { value: '未命名教学稿' } })
-    fireEvent.click(screen.getByRole('button', { name: '创建文档' }))
+    const newTab = screen.getByLabelText('新建标签页')
+    fireEvent.click(newTab)
+    const createDocument = within(newTab.closest('details')!)
+    fireEvent.change(createDocument.getByLabelText('文档名'), { target: { value: '未命名教学稿' } })
+    fireEvent.click(createDocument.getByRole('button', { name: '新建 MD 文档' }))
     await screen.findByRole('tab', { name: /未命名教学稿.md/ })
     const documents = await h.canonical.documents.list()
     expect(documents).toHaveLength(1)
@@ -69,7 +72,7 @@ describe('2.0 workspace shell', () => {
     render(<LessonWorkspaceShell ref={handle} lessonOperation={h.operation} documentPort={h.port} projectPath={null}
       onOpenProject={async () => true} onNewProject={async () => true} renderAssistant={() => <p>统一助手</p>}>课程宿主</LessonWorkspaceShell>)
     await act(async () => { await handle.current!.openFile('/workspace/a.md') })
-    await screen.findByRole('button', { name: '此处保留当前稿' })
+    expect(await screen.findAllByRole('button', { name: '此处保留当前稿' })).not.toHaveLength(0)
     const editor = document.querySelector('.ProseMirror')
     await act(async () => { expect(await handle.current!.closeAll()).toBe(false) })
     expect(screen.getByRole('tab', { name: /a.md/ })).toBeInTheDocument()

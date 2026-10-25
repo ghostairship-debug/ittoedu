@@ -227,7 +227,7 @@ describe('G20 canonical model execution loop', () => {
     await expect(h.artifacts!.lookup(operationId, originalRun)).rejects.toThrow('不属于当前运行')
     expect(await fs.readFile(path.join(h.workspaceRoot, 'exports/continued.txt'), 'utf8')).toBe('owner verified result\n')
     expect(final.tools.find(tool => tool.call.name === 'job.cancel')?.result).toMatchObject({ kind: 'error', code: 'job-not-authorized',
-      message: '接续任务可读取原任务成果，但不能取消原任务的作业' })
+      message: '当前任务只能读取其他任务的作业（包括只读和接续访问），不能取消；取消须由原所属任务发起' })
     expect(cancel).not.toHaveBeenCalled()
     await expect(h.engine.start({ ...h.input, taskId: 'foreign', workspaceRoot: path.join(h.workspaceRoot, 'foreign') },
       { runId: initial.runId, facts: '', sameTask: true })).rejects.toThrow('工作空间')
@@ -1555,5 +1555,59 @@ it('archives whole OAuth rounds on actual wire and never resurrects old native p
     const input = JSON.parse(wire).input
     const calls = new Set(input.filter((item: { type: string }) => item.type === 'function_call').map((item: { call_id: string }) => item.call_id))
     for (const result of input.filter((item: { type: string }) => item.type === 'function_call_output')) expect(calls.has(result.call_id)).toBe(true)
+  }
+})
+
+it('compacts OAuth requests against their actual serialized budget without resurrecting native rounds or detaching tool outputs', async () => {
+  const oauth: ModelSelection = { ...selection, contextWindow: 150_000, connection: { ...selection.connection,
+    provider: 'openai', protocol: 'chatgpt-responses', baseURL: CHATGPT_RESPONSES_BASE_URL,
+    auth: { kind: 'oauth', credentialRef: 'fixture-only' } } }
+  const inputBudget = modelContextBudget(oauth).inputTokens
+  const wires: string[] = []
+  let turns = 0, nativeLength = 0
+  const provider: ModelProvider = { async *stream(request) {
+    const wire = serializeChatGPTResponsesRequest(request)
+    wires.push(wire); turns++
+    // One native round fits, but retaining two exceeds the real adapter's budget.
+    // Derive fixture data from the initial payload so tool-catalog changes do not
+    // turn this into a projection-only test or an oversized-newest-round error.
+    nativeLength ||= Math.floor((inputBudget - estimateSerializedTokens(wire)) * .65) * 3
+    expect(nativeLength).toBeGreaterThan(8000)
+    if (turns > 4) { yield complete(request); return }
+    const call = { id: `budget-call-${turns}`, name: turns % 2 ? 'read' : 'inspect',
+      argumentsText: JSON.stringify({ target: refsOf(request)[0]!.target }) }
+    const event = complete(request, [call], `budget-turn-${turns}`)
+    event.assistant.nativeResponses = { protocol: 'chatgpt-responses', responseId: `budget-response-${turns}`, output: [
+      { type: 'reasoning', id: `budget-reasoning-${turns}`, encrypted_content: `BUDGET-MARKER-${turns}-` + 'x'.repeat(nativeLength) },
+      { type: 'function_call', id: `budget-item-${turns}`, call_id: call.id,
+        name: modelToolWireName(call.name), arguments: call.argumentsText },
+    ] }
+    yield event
+  } }
+  const h = await fixture(provider)
+  const engine = new ExecutionEngine({ registry: h.registry, gateway: h.gateway, edits: h.edits, runs: h.runs,
+    events: h.events, provider, serializePayload: serializeChatGPTResponsesRequest })
+  const started = await engine.start({ ...h.input, selection: oauth }), final = await engine.wait(started.runId)
+  expect(final.status, JSON.stringify(final.failure)).toBe('completed')
+  expect(wires).toHaveLength(5)
+  expect(final.compacted?.fromMessage).toBeGreaterThan(final.initialMessageCount)
+  expect(final.compacted?.atRequest).toBeGreaterThanOrEqual(2)
+  expect(JSON.parse(final.compacted!.facts).originalGoal).toBe(h.input.instruction)
+  expect(wires[1]).toContain('BUDGET-MARKER-1-')
+  expect(wires.slice(2).every(wire => !wire.includes('BUDGET-MARKER-1-'))).toBe(true)
+  expect(JSON.stringify(final.messages)).toContain('BUDGET-MARKER-1-' + 'x'.repeat(nativeLength))
+  expect(final.tools).toHaveLength(4)
+  expect(final.tools.every(tool => tool.state === 'returned' && tool.result?.kind !== 'error')).toBe(true)
+  for (let index = 0; index < wires.length; index++) {
+    const input = JSON.parse(wires[index]!).input as { type?: string; call_id?: string }[]
+    const calls = input.filter(item => item.type === 'function_call').map(item => item.call_id)
+    const outputs = input.filter(item => item.type === 'function_call_output').map(item => item.call_id)
+    expect(outputs.slice().sort()).toEqual(calls.slice().sort())
+    expect(new Set(calls).size).toBe(calls.length)
+    if (index > 0) {
+      expect(calls).toContain(`budget-call-${index}`)
+      expect(wires[index]).toContain(`BUDGET-MARKER-${index}-`)
+    }
+    expect(estimateSerializedTokens(wires[index]!)).toBeLessThanOrEqual(inputBudget)
   }
 })

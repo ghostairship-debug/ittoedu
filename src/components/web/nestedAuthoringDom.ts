@@ -141,7 +141,8 @@ export function createNestedDomAuthoring(root: HTMLElement, factory: typeof crea
     if (readScope) return read()
     sync()
     readScope = { frames: new Map(), documents: new Map() }
-    try { return read() } finally { readScope = undefined }
+    const scoped = [...entries.values()].reduceRight<() => Value>((work, entry) => () => entry.adapter.withReadScope(work), read)
+    try { return scoped() } finally { readScope = undefined }
   }
   const contains = (scope: Node, node: Node): boolean => {
     if (scope === node || scope.contains(node)) return true
@@ -204,6 +205,21 @@ export function createNestedDomAuthoring(root: HTMLElement, factory: typeof crea
     documents() { sync(); return [...entries.keys()] },
     roots() { sync(); return [...entries.values()].flatMap(entry => entry.adapter.roots()) },
     visible(node) { return withReadScope(() => Boolean(node.ownerDocument && toEntry(node.ownerDocument) && entries.get(node.ownerDocument)?.adapter.visible(node))) },
+    painted(node, region) { return withReadScope(() => {
+      let entry = node.ownerDocument && entries.get(node.ownerDocument)
+      if (!entry || !entry.adapter.painted(node, region)) return false
+      const range = node.nodeType === 3 ? node.ownerDocument!.createRange() : undefined
+      range?.selectNodeContents(node)
+      let bounds = region ?? (range ? range.getBoundingClientRect() : (node as Element).getBoundingClientRect())
+      while (entry.frame) {
+        const frame = entry.frame, matrix = frameMatrix(frame), parent = entries.get(frame.ownerDocument)
+        if (!matrix || !parent) return false
+        bounds = frameFacts.transformRect(bounds, matrix)
+        if (!parent.adapter.painted(frame, bounds)) return false
+        entry = parent
+      }
+      return true
+    }) },
     refresh() { sync(); for (const entry of entries.values()) entry.adapter.refresh() },
     describe(node) { return withReadScope(() => observation(entries.get(node.ownerDocument!)?.adapter.describe(node))) },
     geometry(node) { return withReadScope(() => geometry(node)) },
@@ -217,7 +233,7 @@ export function createNestedDomAuthoring(root: HTMLElement, factory: typeof crea
     previewGeometry(authorKey, value) { sync(); for (const entry of entries.values()) entry.adapter.previewGeometry(authorKey, value) },
     paintedElementAt(x, y) { sync(); return entries.get(entryDocument)?.adapter.paintedElementAt(x, y) },
     hit(x, y) {
-      sync()
+      return withReadScope(() => {
       let entry = entries.get(entryDocument)
       while (entry) {
         const matrix = toEntry(entry.document)
@@ -227,11 +243,14 @@ export function createNestedDomAuthoring(root: HTMLElement, factory: typeof crea
         const px = x - matrix[4], py = y - matrix[5]
         const local = { x: (matrix[3] * px - matrix[2] * py) / determinant, y: (-matrix[1] * px + matrix[0] * py) / determinant }
         const top = entry.adapter.paintedElementAt(local.x, local.y)
-        const child = [...entries.values()].find(candidate => candidate.frame === top)
+        // No paint hit is not a frame. The root entry has no frame; matching
+        // undefined to it would loop forever on transparent viewport space.
+        const child = top && [...entries.values()].find(candidate => candidate.frame === top)
         if (child) { entry = child; continue }
         return observation(entry.adapter.hit(local.x, local.y)) ?? undefined
       }
       return undefined
+      })
     },
     dispose() {
       if (disposed) return

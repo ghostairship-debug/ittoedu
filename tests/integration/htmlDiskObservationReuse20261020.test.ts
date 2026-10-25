@@ -66,10 +66,53 @@ it('keeps discovering new images when a program depends on directory membership'
   const { root, filename, host } = await setup('<script>const P="pictures/";target.innerHTML=`<img src="${P+file}">`;</script>')
   await fs.mkdir(path.join(root, 'pictures'))
   await fs.writeFile(path.join(root, 'pictures', 'one.png'), new Uint8Array([1, 2, 3]))
+  const capture = vi.spyOn(sourceResources, 'prepareDocumentSave')
   const opened = await host.open(filename)
+  // The new member arrives before the first strong observation establishes its
+  // metadata baseline; it must be compared with the captured membership too.
   await fs.writeFile(path.join(root, 'pictures', 'two.png'), new Uint8Array([4, 5, 6]))
   const observed = await host.observeFile(opened.documentId)
   expect(Object.keys(observed.model?.resources.assets ?? {}).sort()).toEqual(['pictures/one.png', 'pictures/two.png'])
+  expect(capture).toHaveBeenCalledTimes(2)
+})
+
+it('reuses a stable captured image directory and invalidates edited bytes and renamed or removed members', async () => {
+  const { root, filename, host } = await setup('<script>const P="pictures/";target.innerHTML=`<img src="${P+file}">`;</script>')
+  await fs.mkdir(path.join(root, 'pictures'))
+  const one = path.join(root, 'pictures', 'one.png')
+  await fs.writeFile(one, new Uint8Array([1, 2, 3]))
+  const capture = vi.spyOn(sourceResources, 'prepareDocumentSave')
+  const opened = await host.open(filename), version = opened.binding.kind === 'file' ? opened.binding.version : null
+  await host.observeFile(opened.documentId, version)
+  await host.observeFile(opened.documentId, version)
+  expect(capture).toHaveBeenCalledTimes(1)
+  await fs.writeFile(one, new Uint8Array([9, 8, 7, 6]))
+  const edited = await host.observeFile(opened.documentId, version)
+  expect(Array.from(edited.model?.resources.assets['pictures/one.png'] ?? [])).toEqual([9, 8, 7, 6])
+  expect(capture).toHaveBeenCalledTimes(2)
+  await fs.rename(one, path.join(root, 'pictures', 'renamed.png'))
+  const renamed = await host.observeFile(opened.documentId, version)
+  expect(Object.keys(renamed.model?.resources.assets ?? {})).toEqual(['pictures/renamed.png'])
+  expect(capture).toHaveBeenCalledTimes(3)
+  await fs.unlink(path.join(root, 'pictures', 'renamed.png'))
+  expect(Object.keys((await host.observeFile(opened.documentId, version)).model?.resources.assets ?? {})).toEqual([])
+  expect(capture).toHaveBeenCalledTimes(4)
+  await host.observeFile(opened.documentId, version)
+  expect(capture).toHaveBeenCalledTimes(4)
+})
+
+it('discovers a previously missing media directory after stable polling', async () => {
+  const { root, filename, host } = await setup('<script>const P="pictures/";target.innerHTML=`<img src="${P+file}">`;</script>')
+  const capture = vi.spyOn(sourceResources, 'prepareDocumentSave')
+  const opened = await host.open(filename), version = opened.binding.kind === 'file' ? opened.binding.version : null
+  await host.observeFile(opened.documentId, version)
+  await host.observeFile(opened.documentId, version)
+  expect(capture).toHaveBeenCalledTimes(1)
+  await fs.mkdir(path.join(root, 'pictures'))
+  await fs.writeFile(path.join(root, 'pictures', 'arrived.png'), new Uint8Array([5, 4, 3]))
+  const appeared = await host.observeFile(opened.documentId, version)
+  expect(Array.from(appeared.model?.resources.assets['pictures/arrived.png'] ?? [])).toEqual([5, 4, 3])
+  expect(capture).toHaveBeenCalledTimes(2)
 })
 
 it('uses the same Session preparation for first preview and rejects its grants after a dependency changes', async () => {

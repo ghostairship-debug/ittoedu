@@ -1,12 +1,13 @@
 import { createRef } from 'react'
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { afterEach, expect, it, vi } from 'vitest'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { HtmlDocumentEditor, type HtmlDocumentEditorHandle } from '../../src/renderer/documentFiles/html/HtmlDocumentEditor'
 import { CanvasPlainTextEditor } from '../../src/renderer/ui/CanvasPlainTextEditor'
 import type { DocumentSnapshot } from '../../src/shared/workbench/document'
 import { EditorView } from '@codemirror/view'
 
-afterEach(() => { cleanup(); vi.restoreAllMocks() })
+beforeEach(() => { vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} }) })
+afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
 const source = '<p>old</p>'
 const snapshot: DocumentSnapshot = { documentId: 'doc', epoch: 'epoch', revision: 1, model: { kind: 'text', source, resources: { assets: {}, components: {} } },
   binding: { kind: 'file', path: '/lesson.html', version: 'v1', bindingVersion: 1 }, dirty: false, saving: false, recoverable: true, undoDepth: 0, redoDepth: 0 }
@@ -22,7 +23,8 @@ async function preview(initialSource = source) {
     return { released: true }
   })
   const documents = { readAuthoringDrafts: vi.fn(async () => null), writeAuthoringDrafts: vi.fn(async () => {}) }
-  Object.defineProperty(window, 'desktopAPI', { configurable: true, value: { workspaceFiles, documents } })
+  const selectImage = vi.fn(async (): Promise<{ name: string; mimeType: string; bytes: Uint8Array } | null> => null)
+  Object.defineProperty(window, 'desktopAPI', { configurable: true, value: { workspaceFiles, documents, selectImage } })
   const ref = createRef<HtmlDocumentEditorHandle>()
   const props = { ref, tabId: 'tab', committed: { ...snapshot, model: { kind: 'text' as const, source: initialSource, resources: { assets: {}, components: {} } } },
     source: initialSource, onDraft: vi.fn(), onUndo: vi.fn(), onRedo: vi.fn() }
@@ -38,7 +40,7 @@ async function preview(initialSource = source) {
   const request = () => messages.mock.calls.map(([message]) => message as { type?: string; requestId?: string; enabled?: boolean }).filter(message => message.type === 'html-preview.edit-mode').at(-1)!
   const acknowledge = () => { const value = request(); send({ event: 'edit-mode-ready', requestId: value.requestId, enabled: value.enabled }) }
   send({ event: 'ready', sectionCount: 0, sectionsAmbiguous: false }); acknowledge()
-  return { ref, iframe, send, request, acknowledge, documents, workspaceFiles, mounted, props, messages }
+  return { ref, iframe, send, request, acknowledge, documents, workspaceFiles, mounted, props, messages, selectImage }
 }
 
 it('finishes editing after a rejected field while retaining its input, and keeps business interaction blocked until the mode ACK', async () => {
@@ -46,13 +48,13 @@ it('finishes editing after a rejected field while retaining its input, and keeps
   expect(screen.getByRole('button', { name: '编辑' })).toBeEnabled()
   fireEvent.click(screen.getByRole('button', { name: '编辑' }))
   await waitFor(() => expect(view.request().enabled).toBe(true)); view.acknowledge()
-  view.send({ event: 'targets', targets: [{ handle: 'field', kind: 'text', domPath: [], sectionOrder: null,
+  view.send({ event: 'targets', intent: 'edit', targets: [{ handle: 'field', kind: 'text', domPath: [], sectionOrder: null,
     rawText: 'old', attributeName: null, rect: { x: 20, y: 20, width: 80, height: 20 }, scriptCreated: false,
     selection: { anchor: 1, focus: 1 }, textStyle: { 'font-family': 'Georgia', 'white-space': 'normal' } }] })
   const input = await screen.findByRole('textbox', { name: '编辑此处文字' })
   expect(input.style.fontFamily).toBe('Georgia'); expect(input.style.whiteSpace).toBe('normal')
   input.textContent = 'retained input'; fireEvent.input(input)
-  fireEvent.click(screen.getByRole('button', { name: '完成编辑' }))
+  fireEvent.click(within(screen.getByRole('toolbar', { name: 'HTML 分页' })).getByRole('button', { name: '完成编辑' }))
   await waitFor(() => expect(view.request().enabled).toBe(false))
   expect(view.iframe.style.pointerEvents).toBe('none')
   view.acknowledge()
@@ -90,7 +92,7 @@ it('patches an exact selected text change despite an unrelated malformed tail, w
   const original = '<p>old</p><!--unfinished', view = await preview(original)
   fireEvent.click(screen.getByRole('button', { name: '编辑' }))
   await waitFor(() => expect(view.request().enabled).toBe(true)); view.acknowledge()
-  view.send({ event: 'targets', targets: [{ handle: 'field', kind: 'text', domPath: [], sectionOrder: null,
+  view.send({ event: 'targets', intent: 'edit', targets: [{ handle: 'field', kind: 'text', domPath: [], sectionOrder: null,
     rawText: 'old', attributeName: null, rect: { x: 20, y: 20, width: 80, height: 20 }, scriptCreated: false }] })
   await screen.findByRole('textbox', { name: '编辑此处文字' })
   const changed = original.replace('old', 'new')
@@ -106,7 +108,7 @@ it('prepares source typed during the recovery ACK instead of returning the captu
   const view = await preview()
   fireEvent.click(screen.getByRole('button', { name: '编辑' }))
   await waitFor(() => expect(view.request().enabled).toBe(true)); view.acknowledge()
-  view.send({ event: 'targets', targets: [{ handle: 'field', kind: 'text', domPath: [], sectionOrder: null,
+  view.send({ event: 'targets', intent: 'edit', targets: [{ handle: 'field', kind: 'text', domPath: [], sectionOrder: null,
     rawText: 'old', attributeName: null, rect: { x: 20, y: 20, width: 80, height: 20 }, scriptCreated: false }] })
   const input = await screen.findByRole('textbox', { name: '编辑此处文字' })
   input.textContent = 'unapplied field'; fireEvent.input(input)
@@ -138,10 +140,67 @@ it.each([
     rawText: 'old', attributeName: null, rect: { x, y: 20, width, height: 60 }, scriptCreated: false,
     authoring: { authorKey: 'wide-paragraph', record }, geometry: { frame: { width, height: 60, transform: [1, 0, 0, 1, x, 20] },
       parentToInstance: [1, 0, 0, 1, 0, 0], author: {}, boxInsets: { width: 0, height: 0 } } }] })
-  const control = await screen.findByRole('button', { name: '移动 HTML 内部对象' })
-  expect(screen.getByRole('toolbar', { name: 'HTML 分页' })).toContainElement(control)
-  expect(control).toBeEnabled()
-  expect(control.style.position).not.toBe('absolute')
-  expect(document.querySelector('.html-preview-pane__body')).not.toContainElement(control)
-  expect(screen.getByRole('textbox', { name: '编辑此处文字' }).textContent).toBe('old')
+  // The approved unified selection path moves the selected body itself; it
+  // does not put an extra drag control over full-width or split text runs.
+  const controls = await screen.findByRole('toolbar', { name: 'HTML 对象快捷工具条' })
+  expect(document.querySelector('.html-preview-pane__body')).not.toContainElement(controls)
+  expect(screen.queryByRole('button', { name: '移动 HTML 内部对象' })).toBeNull()
+  expect(screen.queryByRole('textbox', { name: '编辑此处文字' })).toBeNull()
+  for (const [phase, dx, dy] of [['start', 0, 0], ['move', 15, 8], ['end', 30, 12]] as const) {
+    view.send({ event: 'gesture', phase, handle: 'full-width', pointerId: 1, x: x + 10 + dx, y: 30 + dy, shift: false, alt: false })
+  }
+  await waitFor(() => expect(view.workspaceFiles.mock.calls.filter(([request]) => request.type === 'html-preview.edit')).toHaveLength(1))
+  expect(view.workspaceFiles.mock.calls.find(([request]) => request.type === 'html-preview.edit')?.[0]).toMatchObject({
+    target: 'full-width', change: { kind: 'geometry', geometry: { translateX: 30, translateY: 12 } },
+  })
+  expect(screen.getByRole('button', { name: '编辑文字' })).toBeEnabled()
+  fireEvent.click(screen.getByRole('button', { name: '编辑文字' }))
+  expect((await screen.findByRole('textbox', { name: '编辑此处文字' })).textContent).toBe('old')
+})
+
+it('keeps the HTML image panel open after supported edits and returns to the same selected image on completion', async () => {
+  const view = await preview()
+  fireEvent.click(screen.getByRole('button', { name: '编辑' }))
+  await waitFor(() => expect(view.request().enabled).toBe(true)); view.acknowledge()
+  view.send({ event: 'targets', intent: 'edit', targets: [{ handle: 'image-a', kind: 'image', domPath: [], sectionOrder: null,
+    rawText: 'old.png', attributeName: 'src', rect: { x: 20, y: 20, width: 80, height: 60 }, scriptCreated: false }] })
+  const panel = await screen.findByRole('dialog', { name: '图片简易编辑' })
+  expect(screen.queryByRole('toolbar', { name: 'HTML 对象快捷工具条' })).toBeNull()
+  view.selectImage.mockResolvedValueOnce({ name: 'next.png', mimeType: 'image/png', bytes: new Uint8Array([1, 2]) })
+  view.workspaceFiles.mockResolvedValueOnce({ status: 'unchanged' } as never)
+  fireEvent.click(within(panel).getByRole('button', { name: '替换图片' }))
+  await waitFor(() => expect(view.workspaceFiles.mock.calls.filter(([request]) => request.type === 'html-preview.edit')).toHaveLength(1))
+  expect(screen.getByRole('dialog', { name: '图片简易编辑' })).toBe(panel)
+  fireEvent.change(within(panel).getByRole('textbox', { name: 'HTML 内容盒宽度' }), { target: { value: '240px' } })
+  view.workspaceFiles.mockResolvedValueOnce({ status: 'unchanged' } as never)
+  fireEvent.click(within(panel).getByRole('button', { name: '应用属性' }))
+  await waitFor(() => expect(view.workspaceFiles.mock.calls.filter(([request]) => request.type === 'html-preview.edit')).toHaveLength(2))
+  expect(screen.getByRole('dialog', { name: '图片简易编辑' })).toBe(panel)
+  await waitFor(() => expect(within(panel).getByRole('button', { name: '应用属性' })).toBeEnabled())
+  fireEvent.click(within(panel).getByRole('button', { name: '完成' }))
+  expect(screen.queryByRole('dialog', { name: '图片简易编辑' })).toBeNull()
+  expect(screen.getByRole('button', { name: '编辑图片' })).toBeEnabled()
+  expect(view.messages.mock.calls.map(([message]) => message).at(-1)).toMatchObject({
+    type: 'html-preview.selection', handle: 'image-a', editing: false,
+  })
+})
+
+it('keeps replacement bound to its captured HTML image while the file chooser is pending', async () => {
+  const view = await preview()
+  fireEvent.click(screen.getByRole('button', { name: '编辑' }))
+  await waitFor(() => expect(view.request().enabled).toBe(true)); view.acknowledge()
+  const report = { kind: 'image', domPath: [], sectionOrder: null, rawText: 'old.png', attributeName: 'src',
+    rect: { x: 20, y: 20, width: 80, height: 60 }, scriptCreated: false }
+  view.send({ event: 'targets', intent: 'edit', targets: [{ ...report, handle: 'image-a' }] })
+  const panel = await screen.findByRole('dialog', { name: '图片简易编辑' })
+  let choose!: (image: { name: string; mimeType: string; bytes: Uint8Array }) => void
+  view.selectImage.mockImplementationOnce(() => new Promise(resolve => { choose = resolve }))
+  fireEvent.click(within(panel).getByRole('button', { name: '替换图片' }))
+  view.send({ event: 'targets', intent: 'select', targets: [{ ...report, handle: 'image-b' }] })
+  await waitFor(() => expect(screen.queryByRole('dialog', { name: '图片简易编辑' })).toBeNull())
+  await act(async () => { choose({ name: 'next.png', mimeType: 'image/png', bytes: new Uint8Array([1, 2]) }) })
+  expect(view.workspaceFiles.mock.calls.filter(([request]) => request.type === 'html-preview.edit')).toHaveLength(1)
+  expect(view.workspaceFiles.mock.calls.find(([request]) => request.type === 'html-preview.edit')?.[0]).toMatchObject({
+    target: 'image-a', change: { kind: 'image', name: 'next.png' },
+  })
 })

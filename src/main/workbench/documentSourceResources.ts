@@ -116,8 +116,9 @@ export interface CaptureDocumentSourceOptions {
   currentSource?(filename: string): Promise<string | undefined>
   /** The caller selects the source format once, before any temporary path exists. */
   format?: DocumentSourcePublication['format']
-  /** The disk observer cannot reuse a closure that discovers files by directory membership. */
-  onDependencyDirectory?(relative: string): void
+  /** First report the read attempt (including missing directories), then the
+   * actual captured members so the same disk owner can observe their changes. */
+  onDependencyDirectory?(relative: string, files?: ReadonlyMap<string, Uint8Array>): void
   /** Passive consumers proven by this same source/dependency analysis. */
   onHtmlResourceSources?(sources: HtmlResourceSource[]): void
 }
@@ -172,7 +173,9 @@ export async function prepareDocumentSave(model: DocumentModel, binding: Documen
       readRelativeDirectory: binding.kind === 'file' ? async relative => {
         options.onDependencyDirectory?.(relative)
         const root = await fs.realpath(path.dirname(binding.path))
-        return readHtmlMediaDirectory(root, root, relative)
+        const files = await readHtmlMediaDirectory(root, root, relative)
+        options.onDependencyDirectory?.(relative, files)
+        return files
       } : undefined,
       readRelative: async relative => {
         const resource = await read(relative)

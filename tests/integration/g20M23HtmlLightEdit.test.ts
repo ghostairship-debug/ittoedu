@@ -16,6 +16,8 @@ import { mountHtmlPreviewAgent } from '../../src/player/htmlPreview/htmlPreviewA
 import { HtmlPreviewController } from '../../src/renderer/documentFiles/html/htmlPreviewController'
 import { HtmlLightEditOverlay } from '../../src/renderer/documentFiles/html/HtmlLightEditOverlay'
 import { HtmlTextDrafts } from '../../src/renderer/documentFiles/html/htmlTextDrafts'
+import { createDomAuthoring } from '../../src/components/web/authoringDom'
+import { HTML_AUTHORING_CONSUMER_ID, extractHtmlAuthoringRecords, readHtmlAuthoringRecords } from '../../src/shared/html/htmlAuthoringRecords'
 
 const imageUrl = (bytes: Uint8Array, mimeType = 'image/png') => `data:${mimeType};base64,${Buffer.from(bytes).toString('base64')}`
 const roots: string[] = []
@@ -37,6 +39,57 @@ async function setup(source: string, entryName = 'lesson.html') {
     execute: operation => host.internalAPI.dispatch(operation), withFileAccess: work => host.fileCoordinator.withFileAccess(work) })
   return { root, filename, host, snapshot, lease, context, service }
 }
+
+it('saves an independent HTML text format through Main, undo/redo and a cold saved consumer without changing its neighbor', async () => {
+  const source = '<html><head><style>p{font-size:12px}</style></head><body><p id="title">Title</p><p id="neighbor">Keep</p><button onclick="window.clicked=true">Run</button></body></html>'
+  const f = await setup(source)
+  const frame = document.createElement('iframe'); document.body.append(frame)
+  const doc = frame.contentDocument!
+  doc.open(); doc.write(source); doc.close()
+  const adapter = createDomAuthoring(doc.documentElement, { records: () => ({}) })
+  const authoring = adapter.describe(doc.getElementById('title')!.firstChild!)!
+  adapter.dispose()
+  const report = { handle: 'title', kind: 'text' as const, domPath: [{ name: 'html', index: 0 }, { name: 'body', index: 1 }, { name: 'p', index: 0 }],
+    sectionOrder: null, rawText: 'Title', attributeName: null, rect: { x: 0, y: 0, width: 120, height: 20 }, scriptCreated: false,
+    authoring, bindingStatus: 'bound' as const,
+    geometry: { frame: { width: 120, height: 20, transform: [1, 0, 0, 1, 0, 0] as [number, number, number, number, number, number] },
+      parentToInstance: [1, 0, 0, 1, 0, 0] as [number, number, number, number, number, number], author: {}, boxInsets: { width: 0, height: 0 } } }
+  try {
+    expect((await f.service.resolveTarget({ type: 'html-preview.resolve-target', leaseId: 'lease', loadId: 'load', revision: f.snapshot.revision,
+      targets: [report] }, f.context)).targets[0].status).toBe('editable')
+    const patch = { 'font-size': '24px', color: '#123456' }
+    expect(await f.service.edit({ type: 'html-preview.edit', operationId: 'format-title', documentId: f.snapshot.documentId, epoch: f.snapshot.epoch,
+      baseRevision: f.snapshot.revision, bindingVersion: f.lease.bindingVersion, leaseId: 'lease', loadId: 'load', target: 'title',
+      change: { kind: 'style', patch } }, f.context)).toMatchObject({ status: 'applied', patch: { authoringRecords: {
+        [authoring.authorKey]: { overrides: { style: patch } },
+      } } })
+    const after = await f.host.internalAPI.read(f.snapshot.documentId)
+    expect(after.undoDepth).toBe(f.snapshot.undoDepth + 1)
+    expect(after.model.kind).toBe('text')
+    if (after.model.kind !== 'text') throw new Error('text')
+    expect(extractHtmlAuthoringRecords(after.model.source).source).toBe(source)
+    const undo = await f.host.internalAPI.dispatch({ documentId: after.documentId, epoch: after.epoch, baseRevision: after.revision,
+      operationId: 'undo-format', actor: 'human', mutation: { type: 'undo' } })
+    expect(undo.status).toBe('applied')
+    const undone = await f.host.internalAPI.read(after.documentId)
+    expect(undone.model).toMatchObject({ source })
+    expect((await f.host.internalAPI.dispatch({ documentId: undone.documentId, epoch: undone.epoch, baseRevision: undone.revision,
+      operationId: 'redo-format', actor: 'human', mutation: { type: 'redo' } })).status).toBe('applied')
+    await f.host.internalAPI.save(after.documentId)
+    const cold = await new DocumentHostService(path.join(f.root, 'reopen-format')).open(f.filename)
+    if (cold.model.kind !== 'text') throw new Error('text')
+    expect(readHtmlAuthoringRecords(cold.model.source)[authoring.authorKey].overrides.style).toEqual(patch)
+    doc.open(); doc.write(cold.model.source); doc.close()
+    new Function('window', 'document', doc.getElementById(HTML_AUTHORING_CONSUMER_ID)!.textContent!)(doc.defaultView!, doc)
+    expect(doc.defaultView!.getComputedStyle(doc.getElementById('title')!).fontSize).toBe('24px')
+    expect(doc.defaultView!.getComputedStyle(doc.getElementById('title')!).color).toBe('rgb(18, 52, 86)')
+    expect(doc.defaultView!.getComputedStyle(doc.getElementById('neighbor')!).fontSize).toBe('12px')
+    expect(doc.getElementById('neighbor')!.textContent).toBe('Keep')
+    doc.querySelector('button')!.click()
+    expect(Reflect.get(doc.defaultView!, 'clicked')).toBe(true)
+    Reflect.get(doc.defaultView!, '__cwHtmlAuthoringConsumer').dispose()
+  } finally { frame.remove() }
+})
 
 it('saves a text edit beyond 64 KiB after more than 4096 target reports without losing the original selection', async () => {
   const f = await setup('<html><body><p>old</p><button>keep</button></body></html>')
@@ -278,7 +331,7 @@ it('shows the source AI card for a no-src placeholder and disables an unbound dy
     attributeName: 'src', expectedRaw: '' } } }
   const props = { committed, position: { left: 4, top: 4 }, value: '', onValue: vi.fn(), onText: vi.fn(), onImage: vi.fn(), onClose: vi.fn() }
   const mounted = render(createElement(HtmlLightEditOverlay, { ...props, target: image }))
-  expect(screen.getByRole('button', { name: '选择图片' })).toBeTruthy()
+  expect(screen.getByRole('button', { name: '替换图片' })).toBeTruthy()
   expect(screen.getByRole('button', { name: 'AI 修改' })).toBeTruthy()
   mounted.rerender(createElement(HtmlLightEditOverlay, { ...props, target: { report: { ...image.report,
     handle: 'dynamic', kind: 'text', rawText: '计数 1', attributeName: null, scriptCreated: true },

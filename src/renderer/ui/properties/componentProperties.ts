@@ -17,6 +17,7 @@ import type { PropertiesItemBase, PropertiesItemView, PropertiesPatch } from './
 import { componentDefinitionPresentation } from './componentDefinitionPresentation'
 import { stepFontSize } from '../../../shared/fontSizeStep'
 import { isNativeFlowLayoutGroup } from '../../../shared/flowNativeLayout'
+import { wholeTextAppearanceFields } from '../../../core/course/componentAppearanceEdits'
 import type { ContainerPropertiesPatch } from './ContainerProperties'
 
 const json = (value: unknown): JsonValue => JSON.parse(JSON.stringify(value)) as JsonValue
@@ -188,12 +189,14 @@ export function componentPropertiesEdits(instance: ComponentInstance, definition
     const style = content.style as Partial<TextNode['style']> | undefined
     if (style) {
       const { overflow, ...appearance } = style
-      edits.push(...leafEdits(instance.id, appearance, ['appearance']))
+      const { fontSize, color, ...otherAppearance } = appearance
+      edits.push(...leafEdits(instance.id, otherAppearance, ['appearance']))
       // Whole-object formatting also replaces the same explicit inline field.
       // Other range formatting, links, formulas and identities stay untouched.
       const data = textComponentDataSchema.parse(instance.data)
+      edits.push(...wholeTextAppearanceFields(data, { fontSize, color }).map(field => ({ type: 'data.set' as const, instanceId: instance.id, ...field })))
       data.content.inlines.forEach((inline, index) => {
-        for (const [field, value] of Object.entries(appearance)) {
+        for (const [field, value] of Object.entries(otherAppearance)) {
           if (value !== undefined && Object.hasOwn(inline.style ?? {}, field))
             edits.push(...leafEdits(instance.id, value, ['content', 'inlines', String(index), 'style', field]))
         }
@@ -204,7 +207,7 @@ export function componentPropertiesEdits(instance: ComponentInstance, definition
     }
     for (const key of ['flipX', 'flipY']) if (key in content) edits.push(...leafEdits(instance.id, content[key], ['appearance', key]))
   } else if (view.type === 'formula') {
-    const formula = formulaComponentDataSchema.parse(instance.data).formula
+    const data = formulaComponentDataSchema.parse(instance.data)
     if (typeof content.latex === 'string') {
       parseDocumentMath(content.latex)
       edits.push({ type: 'data.set', instanceId: instance.id, path: ['formula', 'latex'], value: content.latex })
@@ -215,11 +218,10 @@ export function componentPropertiesEdits(instance: ComponentInstance, definition
       edits.push({ type: 'data.set', instanceId: instance.id, path: ['formula', 'latex'], value: latex })
     }
     if (typeof content.accessibleText === 'string') edits.push({ type: 'data.set', instanceId: instance.id, path: ['formula', 'accessibleText'], value: content.accessibleText })
-    if (content.style) for (const [field, value] of Object.entries(content.style)) {
-      // Inline formula size/color override the block appearance in the shared renderer.
-      const owner = (field === 'fontSize' || field === 'color') && formula.style?.[field] !== undefined
-        ? ['formula', 'style', field] : ['appearance', field]
-      if (value !== undefined) edits.push(...leafEdits(instance.id, value, owner))
+    if (content.style) {
+      const { fontSize, color, ...otherAppearance } = content.style as Partial<TextNode['style']>
+      edits.push(...wholeTextAppearanceFields(data, { fontSize, color }).map(field => ({ type: 'data.set' as const, instanceId: instance.id, ...field })))
+      edits.push(...leafEdits(instance.id, otherAppearance, ['appearance']))
     }
   } else if (view.type === 'shape' && content.shapeType) {
     edits.push(switchShapeType({ ...instance, data: shapeDataSchema.parse(instance.data) }, content.shapeType as typeof view.shapeType))

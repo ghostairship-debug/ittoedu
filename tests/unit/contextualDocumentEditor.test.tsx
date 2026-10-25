@@ -22,7 +22,7 @@ function fixture() {
   const port: RecoverableDocumentFilePort = {
     openDocument: async () => disk, watchDocument: () => () => {},
     saveDocument: vi.fn(async request => { disk = { ...disk, source: request.source, version: { contentVersion: crypto.randomUUID(), attachments: [] } }; return { status: 'saved' as const, operationId: request.operationId, version: disk.version } }),
-    
+
   }
   attachMarkdownRendererHost(port, ref)
   return { ref, port, read: () => disk }
@@ -34,12 +34,14 @@ describe('file contextual editing in mounted UI', () => {
     render(<><LessonDocumentEditor ref={handle} documentRef={f.ref} port={f.port} /><ElementTextCardLayer /></>)
     await screen.findByText('加粗')
     const editor = factory.mock.results.at(-1)!.value as ReturnType<typeof editorSession.createLayoutEditor>
+    expect(editor.isInputActive()).toBe(true)
+    expect(editor.view.dom).toHaveAttribute('contenteditable', 'true')
     act(() => editor.view.dispatch(editor.view.state.tr.setSelection(TextSelection.create(editor.view.state.doc, 5, 7))))
     expect(handle.current?.getContextualEditTarget()?.ranges).toEqual([{ from: 6, to: 8, before: '加粗' }])
     // M15: selected text gets its own card on the frozen Markdown range, which stays until it is closed.
     fireEvent.click(screen.getByRole('button', { name: 'AI 修改' }))
     const card = await screen.findByRole('dialog', { name: 'AI 修改：“加粗”' })
-    expect(card).toHaveTextContent('这里的 AI 只改选中的文字')
+    expect(within(card).getByRole('checkbox', { name: '仅修改此选区' })).toBeInTheDocument()
     expect(elementCards.texts()).toMatchObject([{ kind: 'text', target: { kind: 'text-selection', fragments: [{ target: { kind: 'markdown-range', from: 6, to: 8 } }] } }])
     fireEvent.click(within(card).getByRole('button', { name: '关闭 AI 卡' }))
     await waitFor(() => expect(elementCards.texts()).toEqual([]))

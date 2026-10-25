@@ -234,26 +234,42 @@ export class HtmlSourceEditService implements HtmlPreviewEditPort {
       const ownsValue = existing && (request.change.kind === 'text' ? existing.overrides.text !== undefined
         : request.change.kind === 'image' ? existing.overrides.src !== undefined
           : request.change.kind === 'style' ? Boolean(existing.overrides.style) : true)
-      let authoring = resolvedRecord.locator.authoring ?? ((request.change.kind === 'geometry' || ownsValue) ? described : undefined)
+      // The DOM geometry owner only exposes an independently styled text box.
+      // Keep its style in the same author record so formatting does not reload
+      // the page or turn a shared-parent text run into a whole-parent edit.
+      const independentTextStyle = request.change.kind === 'style' && record.report.kind === 'text'
+        && Boolean(record.report.geometry) && record.report.bindingStatus === 'bound'
+      // Keep an emptied field's source text node for subsequent paste and cold
+      // rebind. The existing author record owns the empty displayed value.
+      const emptyText = request.change.kind === 'text' && request.change.value === '' && Boolean(described)
+      let authoring = resolvedRecord.locator.authoring ?? ((request.change.kind === 'geometry' || ownsValue || independentTextStyle || emptyText) ? described : undefined)
       if (authoring) {
         let authorSource = source
+        let anchoredBinding = false
         const changes: Array<{ from: number; to: number; inserted: number }> = []
-        if (request.change.kind === 'geometry' && !resolvedRecord.locator.authoring) {
+        if ((request.change.kind === 'geometry' || emptyText) && !resolvedRecord.locator.authoring) {
           const path = authoring.record.binding.path.map(step => ({ tag: step.tag, index: step.index, attributes: undefined as Record<string, string> | undefined }))
           const last = path.at(-1)
           if (!last) return { status: 'rejected', reason: 'not-editable' }
-          last.attributes = { 'data-cw-author-key': authoring.authorKey }
           const locator = resolvedRecord.locator
-          const patch = applyHtmlSourceEdit(source, { type: 'attributes', target: { kind: 'element', from: locator.elementSpan.start,
-            to: locator.elementSpan.end }, patch: { 'data-cw-author-key': authoring.authorKey } })
-          if (!patch.ok) return { status: 'rejected', reason: patch.reason }
-          authorSource = patch.source
-          changes.push(...patch.changes)
+          const element = sourceTokens().find(token => token.kind === 'start-tag' && token.span.start === locator.elementSpan.start)
+          // Several text leaves can share one source element. Its existing
+          // software anchor belongs to that element, not the last edited leaf.
+          const anchor = element?.attributes?.find(attribute => attribute.name === 'data-cw-author-key')?.decodedValue || authoring.authorKey
+          last.attributes = { 'data-cw-author-key': anchor }
+          if (anchor === authoring.authorKey && !element?.attributes?.some(attribute => attribute.name === 'data-cw-author-key' && attribute.decodedValue === anchor)) {
+            const patch = applyHtmlSourceEdit(source, { type: 'attributes', target: { kind: 'element', from: locator.elementSpan.start,
+              to: locator.elementSpan.end }, patch: { 'data-cw-author-key': anchor } })
+            if (!patch.ok) return { status: 'rejected', reason: patch.reason }
+            authorSource = patch.source
+            changes.push(...patch.changes)
+          }
+          anchoredBinding = true
           authoring = { ...authoring, record: { ...authoring.record, binding: { ...authoring.record.binding, path } } }
         }
         const records = readHtmlAuthoringRecords(source)
         const previous = records[authoring.authorKey]
-        const current = previous ? { ...previous, ...(authorSource !== source ? { binding: authoring.record.binding } : {}) } : authoring.record
+        const current = previous ? { ...previous, ...(anchoredBinding ? { binding: authoring.record.binding } : {}) } : authoring.record
         const overrides = { ...current.overrides }
         let patchValue = record.report.rawText
         if (request.change.kind === 'text') { overrides.text = request.change.value; patchValue = request.change.value }

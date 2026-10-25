@@ -248,14 +248,14 @@ export function installHtmlFrameAuthoring(factory: typeof createDomAuthoring, ta
     if (!editMode || !visible) return
     const root = doc.createElement('div'); root.dataset.htmlPreviewEditMarkers = ''
     root.style.cssText = 'position:fixed!important;inset:0!important;pointer-events:none!important;z-index:2147483647!important;'
-    for (const handle of new Set([...confirmed, ...(selected ? [selected] : [])])) {
+    adapter?.withReadScope(() => { for (const handle of new Set([...confirmed, ...(selected ? [selected] : [])])) {
       if (handle === selected) continue // Selected chrome is drawn once by the workbench host.
       const node = nodes.get(handle)
-      if (!node?.isConnected || !adapter?.visible(node)) continue
+      if (!node?.isConnected || !adapter?.painted(node)) continue
       const bounds = localRect(node), element = doc.createElement('div'), active = handle === selected
       element.style.cssText = `position:absolute!important;pointer-events:none!important;box-sizing:border-box!important;left:${bounds.x}px!important;top:${bounds.y}px!important;width:${bounds.width}px!important;height:${bounds.height}px!important;border:${active ? '2px solid #2563eb' : '1px dashed rgba(37,99,235,.55)'}!important;`
       root.append(element)
-    }
+    } })
     if (root.childElementCount) { doc.documentElement.append(root); marker = root }
   }
   const scan = () => {
@@ -274,20 +274,7 @@ export function installHtmlFrameAuthoring(factory: typeof createDomAuthoring, ta
     const pointer = event as MouseEvent
     if (!adapter || !editMode || !visible || pointer.button !== 0) return
     const x = point?.x ?? pointer.clientX, y = point?.y ?? pointer.clientY
-    const target = pointer.composedPath()[0] as Node | undefined
-    let node: Node | undefined = isImage(target) ? target : undefined
-    if (!node) {
-      const position = doc.caretPositionFromPoint?.(x, y)
-      const range = (doc as Document & { caretRangeFromPoint?(x: number, y: number): Range | null }).caretRangeFromPoint?.(x, y)
-      const text = position?.offsetNode ?? range?.startContainer
-      if (text?.nodeType === 3 && target?.contains(text)) node = text
-    }
-    if (!node) for (const value of adapter.scan()) {
-      if (value.record.kind !== 'text' || !target?.contains(value.node)) continue
-      const bounds = localRect(value.node)
-      if (x >= bounds.x && x <= bounds.x + bounds.width && y >= bounds.y && y <= bounds.y + bounds.height) { node = value.node; break }
-    }
-    if (!node) node = adapter.hit?.(x, y)?.node
+    const node = adapter.hit(x, y)?.node
     const value = node && report(node)
     if (!value) { selected = null; emit('targets', [], 'select'); return }
     const offset = node && caretFactory(doc, node, x, y)

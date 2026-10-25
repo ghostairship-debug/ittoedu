@@ -26,7 +26,7 @@ import { documentDigest } from '../documents/documentDigest'
 import { batchInputSchema, batchInputSchemaFor, canonicalToolRegistration, describeToolFamily, describeTools, familyOfTool, gatewayToolRegistration, mutationCallSchema, mutationNamesIn, selectRunToolNames, toolCatalog, toolEffectTargets, toolFamilies, toolRegistration, visibleRunToolNames, type BatchMutationCall, type InitialToolProfile, type RunToolScope, type ToolFamily } from './ToolCatalog'
 import { viewObserveInputSchema } from '../../shared/workbench/viewObservation'
 import { childTargets, containsTarget, courseAuthorFieldReadPaths, replaceCourseAuthorField, courseInstanceContext, courseInstanceScopeId, instanceWithinScope, courseInstanceTextTarget, mapMarkdownRange, readTarget, readSemanticTarget, targetFootprint, replaceCourseInstanceText, readCourseInstanceText, sliceCourseInstanceText, isCourseInstanceRange, readEditableTargetContent, recoverEditableTargetAfterReplacement, prepareHtmlAuthorFieldEdit, mapHtmlAuthorFieldTarget, planTextSelectionReplacement, mapExternalCourseTextTarget } from './ToolTargets'
-import { courseInstancePropertyEdits, courseInstanceConversionEdits, courseInstanceAppearanceEdits, readCourseInstanceAppearance } from './courseInstanceEdits'
+import { courseInstancePropertyEdits, courseInstanceConversionEdits, courseInstanceDataAppearancePlan, readCourseInstanceAppearance } from './courseInstanceEdits'
 import { formatCourseInstanceText } from './ToolTargets'
 import { formatMarkdownSource } from './textFormatting'
 import { courseSettingsEdits, surfaceSettingsEdits } from '../course/courseSemanticEdits'
@@ -985,10 +985,11 @@ export class DocumentToolGateway implements ToolGateway {
           const snapshot = await this.registry.get(handle.documentId).drain()
           const { project, instance } = courseInstanceContext(snapshot.model, target)
           const properties = await this.resolvedObjectProperties(runId, snapshot.model, handle.documentId, mutation.input.properties)
+          const dataAppearance = properties.appearance === undefined ? undefined : courseInstanceDataAppearancePlan(snapshot.model, target, properties)
           paths = Object.entries(properties).flatMap(([key, value]) => {
             if (key === 'data') return componentDataPropertyPaths(instance.data, value as import('../../shared/contracts/component-platform').JsonValue,
               componentDefinitionBuiltinKey(project.definitions[instance.definitionId])).map(path => [...root, 'data', ...path])
-            if (key === 'appearance') return courseInstanceAppearanceEdits(snapshot.model, target, value as Record<string, import('../../shared/contracts/component-platform').JsonValue>)
+            if (key === 'appearance') return dataAppearance!.appearanceEdits
               .flatMap(edit => edit.type === 'data.set' ? [[...root, 'data', ...edit.path]] : edit.type === 'style.set' ? [[...root, 'style', ...edit.path]] : [])
             if (key === 'style') return Object.keys(value as object).map(field => [...root, 'style', field])
             if (key === 'frame') return Object.keys(value as object).map(field => [...root, 'frame',
@@ -2664,6 +2665,10 @@ export class DocumentToolGateway implements ToolGateway {
             throw new ToolError('invalid-target', '专业插入需要已观察页面或容器，当前目标不是插入容器。可对文档使用 listChildren 取得页面 target，再把返回的页面 target 用于 object.insert；未修改原文档。')
           if (mutation.name === 'teacher.ensure' && target.kind !== 'course-surface') throw new ToolError('invalid-target', '教师控制台需要已观察页面')
           const project = resolveComponentPresentation(model.project, target.surfaceId, target.stateId ?? null)
+          // An observed whole-instance handle retains the Gateway's original container acceptance.
+          // GUI insertion also supports a legitimate empty program root without childIds.
+          if (target.kind === 'course-instance' && !project.instances[target.instanceId]?.childIds)
+            throw new ToolError('invalid-target', '所选对象不是容器')
           const container: ComponentContainer = target.kind === 'course-instance' ? { kind: 'instance', instanceId: target.instanceId } : { kind: 'surface', surfaceId: target.surfaceId }
           let afterInstanceId: string | undefined, flowSelection: import('../../shared/document/ports').DocumentSelection | undefined
           if (mutation.name === 'object.insert' && mutation.input.after) {

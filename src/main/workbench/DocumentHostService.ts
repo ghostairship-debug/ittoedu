@@ -19,6 +19,7 @@ import { authoringDraftRecoverySchema, documentHostRequestSchema, type Authoring
 import { createDocumentJournal, readDocumentFileVersion, type PublishedSourceObservation } from './documentJournal'
 import { captureDocumentSaveModel, prepareDocumentSave, readSourceResource } from './documentSourceResources'
 import type { HtmlResourceSource } from './htmlImport/types'
+import { readHtmlMediaDirectory } from './htmlImport/readHtmlClosure'
 import { DocumentToolGateway } from '../../core/tools/DocumentToolGateway'
 import { WorkspaceFiles, type WorkspaceFilesDependencies } from './WorkspaceFiles'
 import { DocumentFileCoordinator } from './DocumentFileCoordinator'
@@ -59,7 +60,8 @@ async function loadDocumentModel(driver: DocumentDriver, bytes: Uint8Array, iden
 
 export type { DocumentSaveFact } from '../../shared/workbench/documentSave'
 
-type HtmlDiskObservation = { path: string; version: string; model: DocumentModel; dependencies: ReadonlyMap<string, string>; sources: HtmlResourceSource[]; physical?: ReadonlyMap<string, string> }
+type HtmlDiskObservation = { path: string; version: string; model: DocumentModel; dependencies: ReadonlyMap<string, string>; sources: HtmlResourceSource[];
+  directories?: ReadonlyMap<string, readonly string[] | null>; physical?: ReadonlyMap<string, string> }
 
 /** App-owned singleton, independent of renderer lifetime and active surface. */
 export class DocumentHostService {
@@ -372,19 +374,21 @@ export class DocumentHostService {
   private async captureDiskModel(model: DocumentModel, binding: Extract<DocumentSnapshot['binding'], { kind: 'file' }>): Promise<{ model: DocumentModel; observation?: HtmlDiskObservation }> {
     if (!isSourceDocumentModel(model) || binding.version === null)
       return { model: await captureDocumentSaveModel(model, binding) }
-    let directoryDependency = false
+    const directories = new Map<string, readonly string[] | null>()
     let sources: HtmlResourceSource[] = []
-    const captured = await prepareDocumentSave(model, binding, { onDependencyDirectory: () => { directoryDependency = true },
+    const captured = await prepareDocumentSave(model, binding, { onDependencyDirectory: (relative, files) => {
+      directories.set(relative, files ? [...files.keys()].sort() : null)
+    },
       onHtmlResourceSources: value => { sources = value } })
-    return { model: captured.model, observation: this.sourceDiskObservation(captured.model, binding, captured.sourcePublication, sources, directoryDependency) }
+    return { model: captured.model, observation: this.sourceDiskObservation(captured.model, binding, captured.sourcePublication, sources, directories.size > 0, directories) }
   }
   private sourceDiskObservation(model: DocumentModel, binding: DocumentSnapshot['binding'], publication: DocumentSourcePublication | undefined,
-    sources: HtmlResourceSource[], directoryDependency: boolean): HtmlDiskObservation | undefined {
+    sources: HtmlResourceSource[], directoryDependency: boolean, directories?: ReadonlyMap<string, readonly string[] | null>): HtmlDiskObservation | undefined {
     if (!isSourceDocumentModel(model) || binding.kind !== 'file' || binding.version === null
-      || directoryDependency || publication?.componentDirectories.length) return
+      || (directoryDependency && !directories) || publication?.componentDirectories.length) return
     const dependencies = new Map((publication?.references ?? []).map(reference => [reference, 'missing']))
     for (const file of publication?.files ?? []) dependencies.set(file.path, file.version)
-    return { path: binding.path, version: binding.version, model, dependencies, sources }
+    return { path: binding.path, version: binding.version, model, dependencies, sources, directories }
   }
   private async unchangedHtmlDependencies(observation: HtmlDiskObservation): Promise<boolean> {
     const root = path.dirname(observation.path)
@@ -394,10 +398,18 @@ export class DocumentHostService {
       catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') return false; actual = 'missing' }
       if (actual !== expected) return false
     }
+    for (const [relative, expected] of observation.directories ?? []) {
+      let actual: string[] | null
+      try { actual = [...(await readHtmlMediaDirectory(root, root, relative)).keys()].sort() }
+      catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') return false; actual = null }
+      if (actual === null || expected === null) { if (actual !== expected) return false }
+      else if (actual.length !== expected.length || actual.some((name, index) => name !== expected[index])) return false
+    }
     return true
   }
   private async diskPhysicalFacts(observation: HtmlDiskObservation): Promise<ReadonlyMap<string, string>> {
-    const filenames = [observation.path, ...[...observation.dependencies.keys()].map(relative => path.resolve(path.dirname(observation.path), relative))]
+    const filenames = [observation.path, ...[...observation.dependencies.keys(), ...(observation.directories?.keys() ?? [])]
+      .map(relative => path.resolve(path.dirname(observation.path), relative))]
     const facts = new Map<string, string>()
     for (const filename of filenames) {
       try {

@@ -1,7 +1,9 @@
-import { lazy, Suspense, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode, type PointerEvent as ReactPointerEvent } from 'react'
+import { lazy, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode, type PointerEvent as ReactPointerEvent, type ClipboardEvent as ReactClipboardEvent } from 'react'
+import { editorShortcut } from '../../../shared/editorShortcuts'
+import { isEditorTextInputEvent, isEditorTextInputTarget } from '../../course/editorActionRouting'
 import { decodeHtmlEntities } from '../../../shared/html/htmlSourceScanner'
 import type { DocumentSnapshot } from '../../../shared/workbench/document'
-import type { HtmlPreviewLease } from '../../../shared/workbench/htmlPreview'
+import type { HtmlPreviewEditOutcome, HtmlPreviewLease } from '../../../shared/workbench/htmlPreview'
 import { HtmlLightEditOverlay } from './HtmlLightEditOverlay'
 import { HtmlPreviewController, type HtmlPreviewGesture, type HtmlSelectedTarget } from './htmlPreviewController'
 import type { HtmlTextDrafts } from './htmlTextDrafts'
@@ -13,11 +15,12 @@ import type { ComponentFrame } from '../../../shared/contracts/component-platfor
 import type { ComponentAuthorGeometry } from '../../../shared/contracts/component-platform/runtime'
 import { workbenchSelection } from '../../workbench/SelectionContextController'
 import { htmlNodePath, htmlTargetFromPreview, htmlTargetNode, type HtmlEditingTarget } from './htmlEditingTarget'
-import { CanvasPlainTextEditor, type PlainTextSelectionIntent } from '../../ui/CanvasPlainTextEditor'
+import { CanvasPlainTextEditor, type CanvasPlainTextEditorHandle, type PlainTextSelectionIntent } from '../../ui/CanvasPlainTextEditor'
+import { HtmlSelectionToolbar, type HtmlSelectionToolbarHandle } from './HtmlSelectionToolbar'
 
 const HtmlStructureEditor = lazy(() => import('./HtmlStructureEditor').then(module => ({ default: module.HtmlStructureEditor })))
 
-type Patch = { handle: string; kind: 'text' | 'image'; value: string }
+type Patch = Extract<HtmlPreviewEditOutcome, { status: 'applied' }>['patch']
 type ChangeRecord = { revision: number; beforeSource: string; afterSource?: string; beforeValue: string; patch: Patch }
 const targetStamp = (target: HtmlEditingTarget, loadId: string) => `${loadId}:${target.revision}:${target.source?.kind ?? ''}:${target.source?.from ?? ''}:${target.source?.to ?? ''}:${target.authorKey ?? ''}`
 
@@ -103,7 +106,18 @@ export function HtmlPreviewPane({ lease, committed, analysis: providedAnalysis, 
   const handleGestureRef = useRef<(gesture: HtmlPreviewGesture, target: HtmlSelectedTarget) => void>(() => {})
   const [inlineSelection, setInlineSelection] = useState<PlainTextSelectionIntent | undefined>(undefined)
   const inlineSubmitting = useRef<Promise<boolean> | null>(null)
+  const clipboardWrite = useRef<Promise<void> | null>(null)
+  const clipboardScope = useRef({})
   const [inlineComposing, setInlineComposing] = useState(false)
+  const inlineEditor = useRef<CanvasPlainTextEditorHandle>(null)
+  const selectionCommands = useRef<HtmlSelectionToolbarHandle>(null)
+  const selectAllOnEdit = useRef(false)
+  useLayoutEffect(() => {
+    if (contentEditing && selectAllOnEdit.current && inlineEditor.current) {
+      selectAllOnEdit.current = false
+      inlineEditor.current.selectAll()
+    }
+  }, [contentEditing])
   useEffect(() => {
     if (!active) return
     const clear = workbenchSelection.registerSelectionClearer(committed.documentId, () => controller.current?.clearSelection())
@@ -244,6 +258,8 @@ export function HtmlPreviewPane({ lease, committed, analysis: providedAnalysis, 
     restoreAfterLoad.current = { ...view.current }
     history.current = []
     pendingEdit.current = null
+    clipboardWrite.current = null
+    clipboardScope.current = {}
     setSelected(null)
     controller.current?.beginReload()
     if (onReloadRequest) onReloadRequest()
@@ -262,8 +278,12 @@ export function HtmlPreviewPane({ lease, committed, analysis: providedAnalysis, 
     latestAnalysis.current = analysis
     history.current = []
     pendingEdit.current = null
+    clipboardWrite.current = null
+    clipboardScope.current = {}
     const instance = new HtmlPreviewController(iframe, lease, {
       onTarget(target, message) {
+        const changed = target?.report.handle !== selectedTarget.current?.report.handle
+        if (changed || target?.resolved.status !== 'editable') selectAllOnEdit.current = false
         if (!synchronizingTarget.current) {
           if (target) {
             const value = htmlTargetFromPreview(target, target.resolved.status === 'editable' ? target.resolved.locator.revision : currentRevision.current)
@@ -275,6 +295,10 @@ export function HtmlPreviewPane({ lease, committed, analysis: providedAnalysis, 
         setInlineSelection(target?.report.selection)
         setSelected(target)
         setIssue(message ?? null)
+        // A selected HTML field has a keyboard owner too. Repeated target
+        // refreshes must not pull focus out of a toolbar or another input.
+        const focused = iframe.ownerDocument.activeElement
+        if (target && changed && (focused === iframe || !isEditorTextInputTarget(focused))) container.current?.focus({ preventScroll: true })
         if (target && container.current) {
           const outer = container.current.getBoundingClientRect()
           const inner = iframe.getBoundingClientRect()
@@ -312,11 +336,22 @@ export function HtmlPreviewPane({ lease, committed, analysis: providedAnalysis, 
       onEditSettled() {
         const pending = pendingEdit.current
         pendingEdit.current = null
+        // A committed prop can arrive while the applied receipt is refreshing
+        // its handle. It still belongs to that exact revision, not an unrelated
+        // source change requiring a page reload and loss of the selected field.
+        const applied = pending?.observedRevision === undefined ? undefined : history.current.find(item =>
+          item.revision === pending.observedRevision && item.beforeSource === pending.beforeSource)
+        if (applied && pending?.observedSource && !applied.afterSource) applied.afterSource = pending.observedSource
         if (pending?.observedSource && !history.current.some(item => item.beforeSource === pending.beforeSource && item.afterSource === pending.observedSource)) setStale(true)
       },
       onPatchMismatch() { setStale(true) },
       onSelection(handle, selection) { if (selectedTarget.current?.report.handle === handle) setInlineSelection(selection) },
-      onContentEditing(editing) { contentEditingRef.current = editing; setContentEditing(editing) },
+      onContentEditing(editing) {
+        const wasEditing = contentEditingRef.current
+        contentEditingRef.current = editing; setContentEditing(editing)
+        const focused = document.activeElement, input = container.current?.querySelector('.canvas-plain-text-editor__inline')
+        if (wasEditing && !editing && (focused === input || document.activeElement === document.body)) container.current?.focus({ preventScroll: true })
+      },
       async beforeTargetChange() {
         const previous = selectedTarget.current
         if (!contentEditingRef.current || previous?.report.kind !== 'text') return true
@@ -353,8 +388,8 @@ export function HtmlPreviewPane({ lease, committed, analysis: providedAnalysis, 
     else {
       const reverse = [...history.current].reverse().find(item => item.afterSource === previous && item.beforeSource === source)
       const forward = [...history.current].reverse().find(item => item.beforeSource === previous && item.afterSource === source)
-      if (reverse) { instance.patch({ ...reverse.patch, value: reverse.beforeValue, expected: reverse.patch.value }); setResponsiveNotice(null) }
-      else if (forward) instance.patch({ ...forward.patch, expected: forward.beforeValue })
+      if (reverse) { instance.patch({ ...reverse.patch, value: reverse.beforeValue, expected: reverse.patch.value, authoringRecords: analysis.authoring.authoringRecords }); setResponsiveNotice(null) }
+      else if (forward) instance.patch({ ...forward.patch, expected: forward.beforeValue, authoringRecords: analysis.authoring.authoringRecords })
       else {
         const exact = selectedTextChange(previous, source, selectedTarget.current, committed.revision, analysis)
         if (exact) {
@@ -445,12 +480,93 @@ export function HtmlPreviewPane({ lease, committed, analysis: providedAnalysis, 
     if (target?.report.kind === 'text') void finishInline(textDrafts.find(target, source)?.value ?? target.report.rawText)
     else controller.current?.setContentEditing(false)
   }
-  return <div ref={container} className="html-preview-pane" onPointerMove={updateTransform} onPointerUp={event => void finishTransform(event)}
-    onPointerCancel={cancelTransform} onKeyDown={event => { if (event.key === 'Escape' && transform.current) cancelTransform() }}>
+  const prepareSelectedTarget = async () => {
+    const captured = selectedTarget.current
+    if (!captured) throw new Error('对象已变化，请重新选择。')
+    const value = textDrafts.find(captured, latestSource.current)?.value ?? captured.report.rawText
+    if (contentEditingRef.current && captured.report.kind === 'text' && !await finishInline(value)) throw new Error('文字尚未应用，输入已保留。')
+    const current = selectedTarget.current
+    if (!current || current.report.handle !== captured.report.handle) throw new Error('对象已变化，请重新选择；输入已保留。')
+    if (current.report.rawText !== value || current.resolved.status === 'editable' && current.resolved.locator.revision !== currentRevision.current) {
+      const refreshed = await controller.current?.refreshSelectedTarget({ ...current.report, rawText: value })
+      if (!refreshed || refreshed.resolved.status !== 'editable') throw new Error('源码已变化，请重新选择；输入已保留。')
+      return refreshed
+    }
+    return current
+  }
+  const quickBar = (() => {
+    if (!selectedBox || !container.current) return null
+    const rect = container.current.getBoundingClientRect()
+    return { anchor: { left: rect.left + selectedBox.left, top: rect.top + selectedBox.top, width: selectedBox.width, height: selectedBox.height },
+      bounds: { left: Math.max(0, rect.left), top: Math.max(0, rect.top), right: Math.min(window.innerWidth, rect.right), bottom: Math.min(window.innerHeight, rect.bottom) } }
+  })()
+  const ownsSelectedClipboard = (event: ReactClipboardEvent<HTMLDivElement>) => {
+    const range = window.getSelection()
+    const nativeRange = range?.toString() && container.current?.contains(range.anchorNode) && container.current.contains(range.focusNode)
+    return active && editMode && !contentEditing && !inlineComposing && !event.defaultPrevented && !isEditorTextInputEvent(event.nativeEvent)
+      && !nativeRange && selectedTarget.current?.report.kind === 'text'
+  }
+  const applySelectedText = (value: string) => {
+    const captured = selectedTarget.current, broker = controller.current
+    const scope = clipboardScope.current
+    if (!captured || !broker || captured.resolved.status !== 'editable') return
+    const perform = async () => {
+      if (controller.current !== broker || !activeRef.current || clipboardScope.current !== scope) return
+      const current = selectedTarget.current
+      if (!editModeRef.current || contentEditingRef.current || current?.report.handle !== captured.report.handle || current.resolved.status !== 'editable') {
+        setIssue('文字位置已变化，修改未应用；请重新选择。'); return
+      }
+      const result = await broker.editText(value, current)
+      if (result.status === 'rejected' && clipboardScope.current === scope) setIssue('文字位置已变化，修改未应用；请重新选择。')
+    }
+    // A cut receipt refreshes this same handle's formal revision. Preserve a
+    // following paste until that existing controller handoff has completed.
+    const pending = (clipboardWrite.current ? clipboardWrite.current.then(perform) : perform())
+      .catch(error => { if (controller.current === broker && clipboardScope.current === scope) setIssue(error instanceof Error ? error.message : '文字修改未应用，请重试。') })
+      .finally(() => { if (clipboardWrite.current === pending) clipboardWrite.current = null })
+    clipboardWrite.current = pending
+  }
+  const copySelected = (event: ReactClipboardEvent<HTMLDivElement>, cut = false) => {
+    if (!ownsSelectedClipboard(event)) return
+    const captured = selectedTarget.current!
+    if (cut && captured.resolved.status !== 'editable') return
+    // Clipboard storage must succeed before the canonical cut can remove text.
+    try { event.clipboardData.setData('text/plain', captured.report.rawText) }
+    catch (error) { setIssue(error instanceof Error ? error.message : '未能写入剪贴板，文字保持不变。'); return }
+    event.preventDefault(); event.stopPropagation()
+    if (cut) applySelectedText('')
+  }
+  return <div ref={container} className="html-preview-pane" tabIndex={-1} onPointerMove={updateTransform} onPointerUp={event => void finishTransform(event)}
+    onCopy={event => copySelected(event)} onCut={event => copySelected(event, true)} onPaste={event => {
+      if (!ownsSelectedClipboard(event) || selectedTarget.current?.resolved.status !== 'editable') return
+      const text = event.clipboardData.getData('text/plain')
+      if (!text) return
+      event.preventDefault(); event.stopPropagation(); applySelectedText(text)
+    }} onPointerCancel={cancelTransform} onKeyDown={event => {
+      if (event.key === 'Escape' && transform.current) cancelTransform()
+      if (!active || !editMode || event.defaultPrevented || inlineComposing || event.nativeEvent.isComposing || event.keyCode === 229 || isEditorTextInputEvent(event.nativeEvent)) return
+      if (event.key === 'Escape') {
+        event.preventDefault(); event.stopPropagation(); controller.current?.clearSelection(); return
+      }
+      if ((event.key === 'Delete' || event.key === 'Backspace') && selectedTarget.current?.report.kind === 'text' && selectedTarget.current.resolved.status === 'editable') {
+        event.preventDefault(); event.stopPropagation(); applySelectedText(''); return
+      }
+      const shortcut = editorShortcut(event)
+      if (shortcut === 'undo' || shortcut === 'redo') {
+        event.preventDefault(); event.stopPropagation()
+        if (shortcut === 'undo') onUndo(); else onRedo()
+      } else if (shortcut === 'bold' || shortcut === 'italic' || shortcut === 'underline') {
+        if (selectedTarget.current?.report.geometry) { event.preventDefault(); event.stopPropagation(); selectionCommands.current?.toggleFormat(shortcut) }
+      } else if (shortcut === 'select-all' && selectedTarget.current?.report.kind === 'text' && selectedTarget.current.resolved.status === 'editable') {
+        event.preventDefault(); event.stopPropagation()
+        if (inlineEditor.current) inlineEditor.current.selectAll()
+        else { selectAllOnEdit.current = true; controller.current?.beginContentEditing() }
+      }
+    }}>
     <div className="html-preview-pane__toolbar" role="toolbar" aria-label="HTML 分页">
       {toolbarLeading}
       <button type="button" className="html-preview-pane__edit" aria-pressed={editMode} disabled={!frameReady || modePending || inlineComposing || Boolean(modeIssue)}
-        onClick={() => void setEditing(!editModeRef.current)}>{editMode ? '试运行' : '进入创作'}</button>
+        onClick={() => void setEditing(!editModeRef.current)}>{editMode ? '完成编辑' : '编辑'}</button>
       {editMode && <span role="status" className="html-preview-pane__edit-hint">单击选中，拖动对象，双击编辑；Esc 完成编辑</span>}
       {pageCount > 1 && <div className="html-preview-pane__pages" role="group" aria-label="页面导航">
         <button type="button" disabled={page === 0} onClick={() => controller.current?.navigate(page - 1)}>上一页</button>
@@ -500,27 +616,27 @@ export function HtmlPreviewPane({ lease, committed, analysis: providedAnalysis, 
           width: 10, height: 10, padding: 0, border: '1px solid #1677ff', background: '#fff', pointerEvents: 'auto',
           cursor: handleCursor(handle), touchAction: 'none' }} />)}
     </div>}
-    {selected && active && editMode && !(contentEditing && selected.report.kind === 'image') && <div role="toolbar" aria-label="HTML 对象快捷工具条" className="html-preview-pane__selection-toolbar"
-      onPointerDown={event => event.preventDefault()} style={{ left: position.left, top: position.top }}>
-      <span>{contentEditing ? '内容编辑' : selected.report.kind === 'text' ? '文字对象' : '图片对象'}</span>
-      {selected.resolved.status === 'editable' && <button type="button" disabled={inlineComposing}
-        onClick={() => contentEditing ? finishContentEditing() : controller.current?.beginContentEditing()}>
-        {contentEditing ? '完成编辑' : selected.report.kind === 'text' ? '编辑文字' : '替换图片'}</button>}
-    </div>}
+    {selected && quickBar && active && editMode && !(contentEditing && selected.report.kind === 'image') && <HtmlSelectionToolbar
+      key={selected.report.handle} commands={selectionCommands} target={selected} committed={committed} lease={lease} {...quickBar} editing={contentEditing} composing={inlineComposing}
+      style={{ ...selected.report.textStyle, ...selected.report.authoring?.record.overrides.style,
+        ...analysis.authoring.authoringRecords[selected.report.authoring?.authorKey ?? '']?.overrides.style }}
+      onEdit={() => contentEditing ? finishContentEditing() : controller.current?.beginContentEditing()} prepareTarget={prepareSelectedTarget}
+      onStyle={async patch => { const target = await prepareSelectedTarget(); return controller.current!.editStyle(patch, target) }} />}
     {selected?.report.kind === 'text' && selected.resolved.status === 'editable' && inlineBox && active && editMode && contentEditing && <div data-component-professional-editor="" style={{ ...inlineBox, position: 'absolute', zIndex: 20, pointerEvents: 'auto' }}>
-      <CanvasPlainTextEditor key={selected.report.handle} presentation="inline" bounds={{ x: 0, y: 0, width: selected.report.rect.width, height: selected.report.rect.height }}
+      <CanvasPlainTextEditor key={selected.report.handle} editorRef={inlineEditor} presentation="inline" bounds={{ x: 0, y: 0, width: selected.report.rect.width, height: selected.report.rect.height }}
+        onFormatShortcut={selected.report.geometry ? format => selectionCommands.current?.toggleFormat(format) : undefined}
         multiline label="编辑此处文字" textStyle={selected.report.textStyle} selectionIntent={inlineSelection} initialCaret={selected.report.selection?.anchor}
         value={textDrafts.find(selected, source)?.value ?? selected.report.rawText}
         onDraftChange={(value, composing) => { setInlineComposing(composing); textDrafts.change(selected, source, value) }} onCommit={value => { void finishInline(value) }} onCancel={finishContentEditing} />
     </div>}
-    {selected && selected.report.kind !== 'text' && editMode && contentEditing && <HtmlLightEditOverlay target={selected} committed={committed} position={position}
+    {selected && selected.report.kind !== 'text' && editMode && contentEditing && <HtmlLightEditOverlay target={selected} committed={committed} lease={lease} position={position}
       value={textDrafts.find(selected, source)?.value ?? selected.report.rawText}
       onValue={value => textDrafts.change(selected, source, value)}
       onText={async value => {
         const result = await controller.current!.editText(value)
         if (result.status === 'applied' || result.status === 'unchanged') textDrafts.applied(selected, source, value)
         return result
-      }} onImage={image => controller.current!.editImage(image)} onStyle={patch => controller.current!.editStyle(patch)}
+      }} onImage={image => controller.current!.editImage(image, selected)} onStyle={patch => controller.current!.editStyle(patch)}
       onClose={() => controller.current?.setContentEditing(false)} />}
     {issue && <p role="alert" className="html-preview-pane__notice">{issue}</p>}
   </div>

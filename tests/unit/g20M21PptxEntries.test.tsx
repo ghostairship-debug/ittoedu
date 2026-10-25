@@ -1,7 +1,7 @@
 import { promises as fs } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { WorkspaceFilesDesktopService } from '../../src/main/workbench/workspaceFilesDesktopService'
 import { LessonDirectoryTree } from '../../src/renderer/lessonWorkspace/view/LessonDirectoryTree'
@@ -11,17 +11,21 @@ import type { LessonDesktopRequest } from '../../src/shared/lessonDesktopContrac
 import type { RegisteredWorkspaceRoot, WorkspaceListItem } from '../../src/shared/workbench/workspaceFiles'
 import { createMarkdownTestHost } from '../helpers/markdownDocumentHost'
 import { pptxImportFixture } from '../fixtures/pptxImport'
-import { createCourseFromPptx } from '../../src/renderer/project/pptxCourseCreation'
+import { createCourseFromPptx, type PptxCourse } from '../../src/renderer/project/pptxCourseCreation'
 import { confirmPptxLosses } from '../../src/renderer/project/confirmPptxLosses'
+import { plainDocumentText } from '../../src/shared/document/content'
+import { textComponentDataSchema } from '../../src/components/text/data'
+import { shapeDataSchema } from '../../src/components/shape/data'
 
 beforeEach(() => { vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} }) })
 const roots: string[] = []
 const services: WorkspaceFilesDesktopService[] = []
 afterEach(async () => {
-  cleanup(); vi.unstubAllGlobals()
+  cleanup(); localStorage.clear(); vi.unstubAllGlobals()
   for (const service of services.splice(0)) service.dispose()
   for (const root of roots.splice(0)) {
-    if (!root.startsWith(os.tmpdir())) throw new Error('Invalid temp root')
+    if (!path.resolve(root).startsWith(path.resolve(os.tmpdir()) + path.sep) || !path.basename(root).startsWith('g20-m21-pptx-'))
+      throw new Error('Invalid temp root')
     await fs.rm(root, { recursive: true, force: true })
   }
 })
@@ -36,19 +40,22 @@ async function workspace() {
   return { directory, service, root }
 }
 
-function contentImports() {
+function contentImports(prepared?: Promise<void>) {
   const operation = vi.fn(async (request: LessonDesktopRequest) => {
     switch (request.operation) {
       case 'recent-workspaces': return { recent: [] }
       case 'list-lessons': return { lessons: [] }
       case 'list-projects': return { projects: [] }
+      case 'choose-workspace': return { directory: '/workspace/later' }
+      case 'list-directory': return { entries: [] }
       default: throw new Error(`Unexpected ${request.operation}`)
     }
   })
   const port: RecoverableDocumentFilePort = { openDocument: async () => { throw new Error('ENOENT') }, watchDocument: () => () => {}, saveDocument: vi.fn() }
-  const onNewProject = vi.fn(async () => true), completed = vi.fn(), flow = vi.fn(), html = vi.fn()
-  const onNewProjectFromPptx = vi.fn(async ({ name, bytes }: { name: string; bytes: Uint8Array }) => {
+  const onNewProject = vi.fn(async () => true), completed = vi.fn<(course: PptxCourse) => void>(), flow = vi.fn(), html = vi.fn()
+  const onNewProjectFromPptx = vi.fn(async ({ name, bytes }: { name: string; bytes: Uint8Array }, _signal?: AbortSignal, _foreground?: () => boolean) => {
     const course = await createCourseFromPptx(bytes, name.replace(/\.pptx$/i, ''))
+    await prepared
     if (!await confirmPptxLosses(name, course.issues)) return false
     completed(course)
     return true
@@ -61,7 +68,7 @@ function contentImports() {
     const file = Object.assign(new File([bytes.slice().buffer], name), { arrayBuffer: async () => bytes.slice().buffer })
     fireEvent.change(screen.getByLabelText('选择要导入的 PPT'), { target: { files: [file] } })
   }
-  return { onNewProject, onNewProjectFromPptx, completed, flow, html, choosePptx }
+  return { operation, onNewProject, onNewProjectFromPptx, completed, flow, html, choosePptx }
 }
 
 it('keeps creation in folder/MD/TXT/course order and removes the explorer-only PPT writer', async () => {
@@ -88,9 +95,19 @@ it('imports PPT through the empty content import menu, preserving actual parsing
   expect(screen.queryByRole('button', { name: /从 PPT 新建/ })).toBeNull()
   fixture.choosePptx(bytes)
   await waitFor(() => expect(fixture.completed).toHaveBeenCalledOnce())
-  expect(fixture.onNewProjectFromPptx).toHaveBeenCalledWith({ name: '第一课.pptx', bytes })
-  expect(fixture.completed.mock.calls[0][0].project.surfaces).toHaveLength(1)
-  expect(fixture.completed.mock.calls[0][0].project.surfaces[0].kind).toBe('slide')
+  expect(fixture.onNewProjectFromPptx).toHaveBeenCalledExactlyOnceWith({ name: '第一课.pptx', bytes }, expect.any(AbortSignal), expect.any(Function))
+  const [, signal, foreground] = fixture.onNewProjectFromPptx.mock.calls[0]!
+  expect(signal?.aborted).toBe(false)
+  expect(foreground?.()).toBe(true)
+  const project = fixture.completed.mock.calls[0][0].project
+  expect(project.rootIds).toHaveLength(1)
+  const slide = project.instances[project.rootIds[0]!]!
+  expect(slide).toMatchObject({ name: '导入演示', container: { kind: 'slide', designSize: { width: 1280, height: 720 } } })
+  expect(slide.childIds).toHaveLength(2)
+  const children = slide.childIds!.map(id => project.instances[id]!)
+  expect(children.map(instance => instance.name)).toEqual(['课题 文字', '基础图形'])
+  expect(plainDocumentText(textComponentDataSchema.parse(children[0]!.data).content)).toBe('知识 😀')
+  expect(shapeDataSchema.parse(children[1]!.data).shapeType).toBe('ellipse')
   expect(fixture.onNewProject).not.toHaveBeenCalled()
   fireEvent.click(screen.getByLabelText('导入'))
   fireEvent.click(screen.getByRole('menuitem', { name: /Word、MD、TXT/ }))
@@ -111,6 +128,36 @@ it('content import retains the existing PPT loss confirmation and cancelling mak
   fixture.choosePptx(bytes, '带损失.pptx')
   fireEvent.click(within(await screen.findByRole('alertdialog', { name: '确认 PPT 转换结果' })).getByRole('button', { name: '确认并新建' }))
   await waitFor(() => expect(fixture.completed).toHaveBeenCalledOnce())
+})
+
+it('cancels a pending content import and ignores its late success after later workspace navigation', async () => {
+  let release!: () => void
+  const prepared = new Promise<void>(resolve => { release = resolve })
+  const fixture = contentImports(prepared)
+  fixture.choosePptx(pptxImportFixture())
+  await waitFor(() => expect(fixture.onNewProjectFromPptx).toHaveBeenCalledOnce())
+  const [, signal, foreground] = fixture.onNewProjectFromPptx.mock.calls[0]!
+  expect(signal?.aborted).toBe(false)
+  expect(foreground?.()).toBe(true)
+  fireEvent.click(screen.getByRole('button', { name: '取消导入' }))
+  expect(signal?.aborted).toBe(true)
+  fireEvent.click(screen.getByLabelText('切换工作空间'))
+  fireEvent.click(screen.getByRole('button', { name: '选择其他工作空间文件夹…' }))
+  await waitFor(() => expect(screen.getByLabelText('切换工作空间')).toHaveAttribute('title', '/workspace/later'))
+  const resources = within(screen.getByRole('tablist', { name: '工作台区域' })).getByRole('tab', { name: '资源管理器与会话列表' })
+  fireEvent.click(resources)
+  expect(resources).toHaveAttribute('aria-selected', 'true')
+  expect(foreground?.()).toBe(false)
+  // Deliberately deliver success despite cancellation. The real controller must
+  // retain later navigation rather than relying on a guard in this callback.
+  await act(async () => { release(); expect(await fixture.onNewProjectFromPptx.mock.results[0]!.value).toBe(true) })
+  expect(fixture.completed).toHaveBeenCalledOnce()
+  expect(fixture.onNewProject).not.toHaveBeenCalled()
+  expect(screen.getByLabelText('切换工作空间')).toHaveAttribute('title', '/workspace/later')
+  expect(resources).toHaveAttribute('aria-selected', 'true')
+  expect(screen.getByRole('region', { name: '没有打开的文件' })).toBeInTheDocument()
+  expect(screen.queryByText('正在导入 PPT…')).toBeNull()
+  expect(document.querySelector('.lesson-workspace-error')).toBeNull()
 })
 
 it('main still writes only a valid native course archive and reads actual PPTX bytes', async () => {

@@ -12,7 +12,8 @@ import { createChartData } from '../../components/chart/data'
 import { changeChartType, replaceChartTableData } from '../../components/chart/contentOperations'
 import { chartDataEdit } from '../../components/chart/edit'
 import { plainDocumentText } from '../../shared/document/content'
-import { componentDataEdits } from '../course/componentDataEdits'
+import { componentDataEdits, componentDataWithFields } from '../course/componentDataEdits'
+import { formulaComponentDataSchema } from '../../components/text/data'
 import { z } from 'zod'
 export { componentDataPropertyFields } from '../course/componentDataEdits'
 
@@ -28,6 +29,7 @@ export function readCourseInstanceAppearance(model: DocumentModel, target: Cours
     : ['guoling.table', 'guoling.chart', 'guoling.shape'].includes(builtin ?? '') ? data.style : undefined
   if (!properties || typeof properties !== 'object' || Array.isArray(properties)) throw new Error('来源对象没有可复制的专业外观')
   const appearance: Record<string, JsonValue> = {}, style: Record<string, JsonValue> = {}
+  const formula = builtin === 'guoling.formula' ? formulaComponentDataSchema.parse(instance.data).formula : undefined
   for (const field of fields) {
     if (field === 'shadows' && (builtin === 'guoling.text' || builtin === 'guoling.formula')) {
       const shadow = instance.style?.textShadow ?? instance.style?.['text-shadow'] ?? 'none'
@@ -35,7 +37,8 @@ export function readCourseInstanceAppearance(model: DocumentModel, target: Cours
       style.textShadow = shadow
     } else {
       if (!Object.hasOwn(properties, field)) throw new Error(`来源对象没有外观属性：${field}`)
-      appearance[field] = structuredClone(properties[field]!)
+      const override = field === 'fontSize' || field === 'color' ? formula?.style?.[field] : undefined
+      appearance[field] = structuredClone(override ?? properties[field]!)
     }
   }
   return { appearance, style }
@@ -46,6 +49,20 @@ export function courseInstanceAppearanceEdits(model: DocumentModel, target: Cour
   appearance: Record<string, JsonValue>): ComponentEdit[] {
   const { project } = courseInstanceContext(model, target)
   return componentAppearanceEdits(project, target, appearance)
+}
+
+/** Both execution and effect scopes plan appearance against the actual post-data value. */
+export function courseInstanceDataAppearancePlan(model: DocumentModel, target: CourseInstanceTarget,
+  properties: Pick<z.infer<typeof objectUpdatePropertiesInputSchema>, 'data' | 'appearance'>) {
+  const { project, instance } = courseInstanceContext(model, target)
+  // The context already resolved the captured presentation; do not reapply its old override.
+  const local = { surfaceId: target.surfaceId, instanceId: target.instanceId, stateId: null }
+  const dataEdits = properties.data === undefined ? [] : componentDataEdits(project, local, { kind: 'patch', data: properties.data })
+  const dataFields = dataEdits.flatMap(edit => edit.type === 'data.set' && edit.instanceId === instance.id ? [{ path: edit.path, value: edit.value }] : [])
+  const working = dataFields.length ? { ...project, instances: { ...project.instances,
+    [instance.id]: { ...instance, data: componentDataWithFields(instance.data, dataFields) } } } : project
+  const appearanceEdits = properties.appearance === undefined ? [] : componentAppearanceEdits(working, local, properties.appearance)
+  return { dataEdits, appearanceEdits }
 }
 
 /** Selected instance properties use the same public operations as the inspector. */
@@ -69,7 +86,8 @@ export function courseInstancePropertyEdits(model: DocumentModel, target: Course
     }
     edits.push({ type: 'frame.set', instanceId: instance.id, frame })
   }
-  if (properties.data !== undefined) edits.push(...componentDataEdits(project, target, { kind: 'patch', data: properties.data }))
+  const dataAppearance = courseInstanceDataAppearancePlan(model, target, properties)
+  edits.push(...dataAppearance.dataEdits)
   if (properties.stateBindings !== undefined) {
     const bindings = { ...instance.stateBindings }
     for (const [alias, key] of Object.entries(properties.stateBindings ?? {})) {
@@ -82,7 +100,7 @@ export function courseInstancePropertyEdits(model: DocumentModel, target: Course
     const next = properties.stateBindings === null || !Object.keys(bindings).length ? null : bindings
     if (!equalComponentValue(instance.stateBindings ?? null, next)) edits.push({ type: 'instance.patch', instanceId: instance.id, patch: { stateBindings: next } })
   }
-  if (properties.appearance !== undefined) edits.push(...courseInstanceAppearanceEdits(model, target, properties.appearance))
+  edits.push(...dataAppearance.appearanceEdits)
   // CSS null remains an explicit cleared value under the existing style contract.
   const style = { ...properties.style, ...(properties.opacity !== undefined ? { opacity: properties.opacity } : {}) }
   for (const [name, value] of Object.entries(style)) if (!equalComponentValue(instance.style?.[name], value))

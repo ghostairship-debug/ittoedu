@@ -148,6 +148,11 @@ export class HtmlPreviewController {
     this.events.onContentEditing?.(this.contentEditing)
   }
   beginContentEditing(): void { if (this.selected) void this.resolve([this.selected.report], 'edit') }
+  async refreshSelectedTarget(report: HtmlTargetReport): Promise<HtmlSelectedTarget | null> {
+    if (this.selected?.report.handle !== report.handle) return null
+    await this.resolve([report])
+    return this.selected?.report.handle === report.handle ? this.selected : null
+  }
   selectSource(domPath: HtmlTargetReport['domPath'], kind: HtmlTargetReport['kind'] | null, expectedText?: string): void {
     if (!this.active || !this.visible) return
     this.iframe.contentWindow?.postMessage({ type: 'html-preview.select-source', loadId: this.lease.loadId, domPath, kind,
@@ -196,7 +201,7 @@ export class HtmlPreviewController {
     this.iframe.contentWindow?.postMessage({ type: 'html-preview.edit-mode', loadId: this.lease.loadId, requestId, enabled }, '*')
   }
 
-  patch(patch: { handle: string; kind: 'text' | 'image'; value: string; expected: string }): void {
+  patch(patch: Extract<HtmlPreviewEditOutcome, { status: 'applied' }>['patch'] & { expected: string }): void {
     this.iframe.contentWindow?.postMessage({ type: 'html-preview.patch', loadId: this.lease.loadId, ...patch }, '*')
   }
 
@@ -297,7 +302,7 @@ export class HtmlPreviewController {
   }
 
   async editText(value: string, target?: HtmlSelectedTarget): Promise<HtmlPreviewEditOutcome> { return this.edit({ kind: 'text', value }, target) }
-  async editStyle(patch: Record<string, string | null>): Promise<HtmlPreviewEditOutcome> { return this.edit({ kind: 'style', patch }) }
+  async editStyle(patch: Record<string, string | null>, target?: HtmlSelectedTarget): Promise<HtmlPreviewEditOutcome> { return this.edit({ kind: 'style', patch }, target) }
   async editGeometry(geometry: NonNullable<NonNullable<HtmlTargetReport['authoring']>['record']['overrides']['geometry']>, target?: HtmlSelectedTarget,
     frame?: NonNullable<HtmlTargetReport['geometry']>['frame']): Promise<HtmlPreviewEditOutcome> {
     return this.edit({ kind: 'geometry', geometry }, target, frame)
@@ -306,8 +311,8 @@ export class HtmlPreviewController {
     if (!this.active) return
     this.iframe.contentWindow?.postMessage({ type: 'html-preview.authoring-preview', loadId: this.lease.loadId, authorKey, geometry }, '*')
   }
-  async editImage(image: { name: string; mimeType: string; bytes: Uint8Array }): Promise<HtmlPreviewEditOutcome> {
-    return this.edit({ kind: 'image', ...image })
+  async editImage(image: { name: string; mimeType: string; bytes: Uint8Array }, target?: HtmlSelectedTarget): Promise<HtmlPreviewEditOutcome> {
+    return this.edit({ kind: 'image', ...image }, target)
   }
 
   private async edit(change: HtmlEditIntent, captured?: HtmlSelectedTarget, frame?: NonNullable<HtmlTargetReport['geometry']>['frame']): Promise<HtmlPreviewEditOutcome> {

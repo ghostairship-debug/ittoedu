@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { ComponentInstance } from '../../../shared/contracts/component-platform/project'
 import type { ImageData } from '../../../components/image/data'
 import { clampCrop, cropGeometry } from '../../../shared/imageCrop'
@@ -14,6 +14,12 @@ export function FlowMediaCropEditor({ instance, imageData, url, onConfirm, onCan
   const [draft, setDraft] = useState<FlowImageCropPatch>({ crop: imageData.crop, cropX: imageData.cropX, cropY: imageData.cropY })
   const [natural, setNatural] = useState({ width: 1, height: 1 })
   const [confirming, setConfirming] = useState(false), [error, setError] = useState<string | null>(null)
+  const dialog = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null
+    dialog.current?.focus()
+    return () => { if (previous?.isConnected && document.activeElement === document.body) previous.focus() }
+  }, [])
   useEffect(() => { setDraft({ crop: imageData.crop, cropX: imageData.cropX, cropY: imageData.cropY }) },
     [instance.id, imageData.assetId, imageData.crop, imageData.cropX, imageData.cropY])
   const width = instance.frame?.width ?? 480, height = instance.frame?.height ?? width * natural.height / natural.width
@@ -26,7 +32,7 @@ export function FlowMediaCropEditor({ instance, imageData, url, onConfirm, onCan
     catch (failure) { setError(failure instanceof Error ? failure.message : String(failure)) }
     finally { setConfirming(false) }
   }
-  return <div role="dialog" aria-label="裁剪正文图片" onKeyDown={event => { if (event.key === 'Escape' && !confirming) { event.stopPropagation(); onCancel() } }}>
+  return <div ref={dialog} role="dialog" aria-label="裁剪正文图片" tabIndex={-1} onKeyDown={event => { if (event.key === 'Escape' && !event.nativeEvent.isComposing && !confirming) { event.preventDefault(); event.stopPropagation(); onCancel() } }}>
     <div style={{ width: '100%', aspectRatio: `${width}/${height}`, overflow: 'hidden', position: 'relative', borderRadius: imageData.cornerRadius,
       filter: `brightness(${filters.brightness}) contrast(${filters.contrast}) saturate(${filters.saturation}) grayscale(${filters.grayscale}) blur(${filters.blur}px)` }}>
       <img src={url} alt={imageData.alt} draggable={false} onLoad={event => setNatural({ width: event.currentTarget.naturalWidth, height: event.currentTarget.naturalHeight })}

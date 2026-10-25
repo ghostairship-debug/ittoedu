@@ -38,7 +38,7 @@ it('binds the actual editor Flow container basis and releases it across close an
   ` }, bundle: true, write: false, outfile: 'editor-geometry.js', format: 'iife', platform: 'browser',
     loader: { '.woff2': 'dataurl', '.woff': 'dataurl', '.ttf': 'dataurl', '.svg': 'dataurl', '.png': 'dataurl' }, logLevel: 'silent' })
   const browser = await chromium.launch({ headless: true }), page = await browser.newPage({ viewport: { width: 1100, height: 800 } }), errors: string[] = []
-  const evidence: Record<string, unknown> = {}, output = resolve('output/resource-runtime-repair-20261024/geometry')
+  const evidence: Record<string, unknown> = {}, output = resolve('output/test-runs/runtime-geometry-20261024')
   page.on('pageerror', error => errors.push(error.message))
   try {
     await page.route('http://localhost/editor-geometry', route => route.fulfill({ contentType: 'text/html', body: '<!doctype html><style>html,body{margin:0;width:100%;height:100%}</style><body></body>' }))

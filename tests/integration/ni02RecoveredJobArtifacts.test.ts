@@ -125,7 +125,7 @@ it('reads original ready computation through verified continuation, then saves w
   expect(await f.deliveries.lookup('continued:report.csv', 'continued')).toEqual(receipt)
   expect(await fs.readFile(receipt.path, 'utf8')).toBe('label,value\n正确,42\n')
   await expect(f.call('continued', 'job.cancel', { job: created.job })).rejects.toMatchObject({ code: 'job-not-authorized',
-    message: '接续任务可读取原任务成果，但不能取消原任务的作业' })
+    message: '当前任务只能读取其他任务的作业（包括只读和接续访问），不能取消；取消须由原所属任务发起' })
   await f.begin('unrelated')
   await expect(f.call('unrelated', 'job.cancel', { job: created.job })).rejects.toMatchObject({ code: 'job-not-authorized' })
   await expect(f.save('unrelated', status.snapshot.artifacts[0].source, 'foreign.csv')).rejects.toMatchObject({ code: 'job-not-authorized' })
@@ -134,7 +134,7 @@ it('reads original ready computation through verified continuation, then saves w
   f.coordinator.authorizeContinuationReads('reader', ['original'])
   expect(await f.call('reader', 'job.status', { job: created.job })).toMatchObject({ status: 'ready' })
   await expect(f.call('reader', 'job.cancel', { job: created.job })).rejects.toMatchObject({ code: 'job-not-authorized',
-    message: '接续任务可读取原任务成果，但不能取消原任务的作业' })
+    message: '当前任务只能读取其他任务的作业（包括只读和接续访问），不能取消；取消须由原所属任务发起' })
   expect(cancelled).not.toHaveBeenCalled()
   await expect(f.save('reader', status.snapshot.artifacts[0].source, 'denied.csv')).rejects.toThrow('只读')
   await f.coordinator.stop('continued')

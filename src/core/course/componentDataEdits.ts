@@ -58,7 +58,7 @@ export function componentDataPropertyFields(before: JsonValue, patch: JsonValue,
 }
 
 /** Materialize the requested fields only; the canonical writer still owns validation/CAS. */
-function changedData(before: JsonValue, fields: readonly ComponentDataField[]): JsonValue {
+export function componentDataWithFields(before: JsonValue, fields: readonly ComponentDataField[]): JsonValue {
   let result = structuredClone(before)
   for (const { path, value } of fields) {
     if (!path.length) { result = structuredClone(value); continue }
@@ -86,14 +86,14 @@ export function componentDataEdits(project: CourseProjectV10, target: ComponentD
   const builtinKey = componentDefinitionBuiltinKey(effective.definitions[instance.definitionId])
   let fields = change.kind === 'fields' ? [...change.fields] : change.kind === 'patch'
     ? componentDataPropertyFields(instance.data, change.data, builtinKey) : [{ path: [], value: change.data }]
-  let next = changedData(instance.data, fields)
+  let next = componentDataWithFields(instance.data, fields)
   if (builtinKey === 'guoling.table' && record(next) && Array.isArray(next.rows) && next.rows.some(Array.isArray)) {
     const headerSupplied = change.kind === 'fields'
       ? change.fields.some(field => !field.path.length && record(field.value) && Object.hasOwn(field.value, 'headerRowCount') || field.path.length === 1 && field.path[0] === 'headerRowCount')
       : record(change.data) && Object.hasOwn(change.data, 'headerRowCount')
     const content = tableContentInputSchema.parse({ rows: next.rows, ...(headerSupplied ? { headerRowCount: next.headerRowCount } : {}) })
     const prepared = replaceTableContentData(parseTableData(instance.data), content)
-    next = json(parseTableData(changedData(json(prepared), componentDataPropertyFields(instance.data, next, builtinKey)
+    next = json(parseTableData(componentDataWithFields(json(prepared), componentDataPropertyFields(instance.data, next, builtinKey)
       .filter(field => field.path[0] !== 'rows' && field.path[0] !== 'headerRowCount'))))
     fields = [{ path: [], value: next }]
   }
@@ -114,7 +114,7 @@ export function componentDataEdits(project: CourseProjectV10, target: ComponentD
       if (!requested?.success) throw new Error('图表类型无效')
       // Match identities against the complete old chart; validate and convert the final values.
       const prepared = replaceChartTableData(before, candidate.data, undefined, requested.data)
-      next = json(chartDataSchema.parse(changedData(json(prepared), componentDataPropertyFields(instance.data, next, builtinKey)
+      next = json(chartDataSchema.parse(componentDataWithFields(json(prepared), componentDataPropertyFields(instance.data, next, builtinKey)
         .filter(field => field.path[0] !== 'categories' && field.path[0] !== 'series'))))
       fields = [{ path: [], value: next }]
     }
@@ -129,14 +129,14 @@ export function componentDataEdits(project: CourseProjectV10, target: ComponentD
     if (!requested?.success) throw new Error('图表类型无效')
     const converted = changeChartType(before, requested.data, typeof selectedSeries === 'string' ? selectedSeries : undefined)
     // The unchanged old style in a full JSON draft must not undo type conversion.
-    next = json(chartDataSchema.parse(changedData(json(converted), componentDataPropertyFields(instance.data, next, builtinKey))))
+    next = json(chartDataSchema.parse(componentDataWithFields(json(converted), componentDataPropertyFields(instance.data, next, builtinKey))))
     fields = [{ path: [], value: next }]
   }
   if (builtinKey === 'guoling.shape' && record(next) && record(instance.data) && next.shapeType !== instance.data.shapeType) {
     const requested = shapeDataSchema.shape.shapeType.parse(next.shapeType)
     const converted = switchShapeType({ ...instance, data: shapeDataSchema.parse(instance.data) }, requested)
     if (converted.type === 'data.set') {
-      next = changedData(converted.value, componentDataPropertyFields(instance.data, next, builtinKey))
+      next = componentDataWithFields(converted.value, componentDataPropertyFields(instance.data, next, builtinKey))
       fields = [{ path: [], value: next }]
     }
   }
