@@ -8,7 +8,6 @@
   "private": true,
   "scripts": {
     "install:courseware-skills": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File ./scripts/install-courseware-skills.ps1",
-    "prestart": "npm run install:courseware-skills",
     "predev": "npm run build:player && npm run build:electron",
     "dev": "concurrently -k \"npm:dev:renderer\" \"npm:dev:electron\"",
     "dev:renderer": "vite --config vite.renderer.config.ts",

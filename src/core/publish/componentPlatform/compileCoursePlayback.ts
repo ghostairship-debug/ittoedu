@@ -6,7 +6,7 @@ import type { PublishedCourseV3, PublishedInstance, PublishedImplementation } fr
 import type { ComponentSurface, CourseProjectV10 } from '../../../shared/contracts/component-platform'
 import { resolveComponentPresentation, componentSurface, componentContainers } from '../../../shared/contracts/component-platform'
 import { resolveComponentOuterPresentation, isGlobalFramedWebDocument } from '../../../shared/componentPresentation'
-import { componentPaintStyle } from '../../../player/components/componentPlacementStyle'
+import { componentPaintStyle } from '../../../shared/componentPaintStyle'
 import { flowPaperPadding, flowScrollPadding, FLOW_BODY_FONT_FAMILY, flowPaperMaxWidth } from '../../../shared/flowBodyPresentation'
 import { renderDocumentText } from '../../../shared/document/render'
 import { loadBuiltinComponentSource } from '../../components/source/builtinSources'

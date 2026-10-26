@@ -165,7 +165,9 @@ export class StreamingEditArguments {
   private failure: StreamingEditArgumentsError | undefined
   private final: TextReplaceArguments | undefined
 
-  constructor(identity: StreamingEditArgumentsIdentity, firstSequence = 0) {
+  constructor(identity: StreamingEditArgumentsIdentity, firstSequence = 0,
+    /** Host-owned semantic comparison; model strings never establish target equivalence. */
+    private readonly sameTarget?: (original: string, candidate: string) => boolean) {
     this.identity = Object.freeze({ ...identity })
     if (typeof identity.toolCallId !== 'string' || !identity.toolCallId || identity.toolName !== 'text.replace') throw new StreamingEditArgumentsError(identity.toolCallId, 'invalid-tool', '正文参数解析器只接受具有稳定调用身份的 text.replace')
     if (!Number.isSafeInteger(firstSequence) || firstSequence < 0) throw new StreamingEditArgumentsError(identity.toolCallId, 'invalid-sequence', '工具分片起始序号必须为非负整数')
@@ -198,7 +200,8 @@ export class StreamingEditArguments {
   }
   private fixedTarget(parser: ArgumentParser): void {
     if (parser.target === undefined) return
-    if (this.target !== undefined && parser.target !== this.target) this.reject('target-changed', '工具调用的编辑目标已改变')
+    if (this.target !== undefined && parser.target !== this.target && !this.sameTarget?.(this.target, parser.target))
+      this.reject('target-changed', '工具调用的编辑目标已改变')
     this.target = parser.target
   }
   private sequence(seq: number, fragment: Fragment): boolean {

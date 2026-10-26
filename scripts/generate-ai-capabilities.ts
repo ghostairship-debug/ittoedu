@@ -8,6 +8,7 @@ import { describeTools } from '../src/core/tools/ToolCatalog'
 import { agentFileTools } from '../src/core/tools/AgentFileTools'
 import { programmaticTools } from '../src/core/tools/ProgrammaticTools'
 import { skillReadTool } from '../src/core/tools/SkillTools'
+import { createCourseFromHtmlInputSchema, createCourseFromHtmlTool } from '../src/core/tools/HtmlImportTools'
 import { builtinComponentSourceKeys } from '../src/core/components/source/builtinSources'
 import { courseAgentBundledSkills } from '../src/shared/courseAgentSkills'
 import { courseAgentCapabilityDiskIndex, courseAgentCapabilityQueryHelp, type CourseAgentCapabilityData, type CourseAgentCapabilityEntry } from '../src/shared/courseAgentCapabilities'
@@ -129,6 +130,9 @@ export async function generateAiCapabilityArtifacts(
       inputSchema: tool.schema, manual: tool.manual })),
     ...agentFileTools,
     ...programmaticTools,
+    // ExecutionEngine exposes this host composite directly from its canonical
+    // definition rather than the document-scoped ToolCatalog.
+    { ...createCourseFromHtmlTool, inputSchema: z.toJSONSchema(createCourseFromHtmlInputSchema) },
   ]
   for (const tool of registeredTools) {
     const location = `tools/${tool.name}.json`

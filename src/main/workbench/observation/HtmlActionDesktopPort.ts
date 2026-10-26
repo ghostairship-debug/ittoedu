@@ -187,7 +187,7 @@ async function visibleChildFrames(root: WebFrameMain, rootClip?: { x: number; y:
     for (const { child, geometry } of sampled) {
       if (child.detached || child.isDestroyed()) continue
       if (!geometry?.visible) {
-        excluded.push({ frame: child, reason: geometry?.reason ?? 'owner-unavailable' }); continue
+        excluded.push({ frame: child, reason: geometry?.reason ?? (geometry ? 'not-visible' : 'owner-unavailable') }); continue
       }
       const next = [geometry, ...chain]
       const clip = visibleLocalRect({ frame: child, chain: next })

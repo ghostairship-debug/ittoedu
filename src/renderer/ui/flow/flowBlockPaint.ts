@@ -1,5 +1,6 @@
 import type { ComponentInstance, CourseProjectV10 } from '../../../shared/contracts/component-platform'
-import { componentPaintStyle, applyComponentPaintStyle } from '../../../player/components/componentPlacementStyle'
+import { componentPaintStyle } from '../../../shared/componentPaintStyle'
+import { applyComponentPaintStyle } from '../../../player/components/componentPlacementStyle'
 import { isNativeFlowLayoutGroup, nativeFlowItemStyle, flowStickyStyle } from '../../../shared/flowNativeLayout'
 import { equalComponentValue } from '../../../shared/componentValue'
 import { textAppearanceSchema, textSizingSchema } from '../../../components/text/data'

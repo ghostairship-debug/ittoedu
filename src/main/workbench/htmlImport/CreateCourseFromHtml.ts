@@ -91,9 +91,12 @@ export async function createCourseFromHtml(
     sourceHtml += value.text
     cursor = captured.kind === 'read' ? captured.nextCursor : undefined
   } while (cursor)
-  // A shared program can couple sections through state or navigation. Keep that
-  // program once; ordinary independent pages use the existing host surfaces.
-  const sections: HtmlSectionPage[] = prepareMeasurementDocument({ html: sourceHtml }).documentProgramReason
+  // Full authored programs own their responsive viewport and navigation. Use
+  // the existing program entry instead of shrinking them inside a Slide.
+  // Dynamic fragments and independent pages retain the existing surface path.
+  const prepared = prepareMeasurementDocument({ html: sourceHtml })
+  const programEntry = prepared.documentKind === 'document' && Boolean(prepared.documentProgramReason)
+  const sections: HtmlSectionPage[] = prepared.documentProgramReason
     ? [{ order: 0, id: null, html: sourceHtml }] : splitHtmlSections(sourceHtml).sections
 
   const requestedName = input.name ?? (path.parse(source.path).name || '课件')
@@ -120,12 +123,16 @@ export async function createCourseFromHtml(
   }
   const targetDocumentId = documentId
   const project = await ports.documentTarget(targetDocumentId, 'write')
-  const listed = await child('list-target', 'project.list', () => ({ project }))
-  if (listed.kind === 'error') return listed
-  const files = data(listed)?.files
-  const targetPath = Array.isArray(files) ? files.find(file => file && typeof file === 'object'
-    && file.type === 'structure' && typeof file.path === 'string' && file.path.startsWith('pages/'))?.path : undefined
-  if (typeof targetPath !== 'string') return failure('course-target-missing', `课件文件已创建，但没有可导入的页面：${created.path}`)
+  let targetPath = 'entry.html'
+  if (!programEntry) {
+    const listed = await child('list-target', 'project.list', () => ({ project }))
+    if (listed.kind === 'error') return listed
+    const files = data(listed)?.files
+    const page = Array.isArray(files) ? files.find(file => file && typeof file === 'object'
+      && file.type === 'structure' && typeof file.path === 'string' && file.path.startsWith('pages/'))?.path : undefined
+    if (typeof page !== 'string') return failure('course-target-missing', `课件文件已创建，但没有可导入的页面：${created.path}`)
+    targetPath = page
+  }
   let receipt!: Extract<DocumentOperationResult, { status: 'applied' | 'unchanged' }>
   const affected: string[] = [], warnings: NonNullable<Extract<ToolResult, { kind: 'document-operation' }>['advisories']>[number][] = []
   for (const section of sections) {
@@ -146,7 +153,7 @@ export async function createCourseFromHtml(
       if (titled.kind === 'error') return titled
     }
     const applied = await child(section.order ? `import-${section.order}` : 'import', 'project.apply', () => ({
-      project, path: pagePath, from: source.path, content: section.html, intent: 'insert',
+      project, path: pagePath, from: source.path, content: section.html, intent: programEntry ? 'program.set' : 'insert',
     }))
     const result = data(applied)
     if (applied.kind === 'error') return { ...applied, message: `${applied.message}；课件文件：${created.path}` }

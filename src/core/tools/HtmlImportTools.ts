@@ -2,12 +2,12 @@ import { z } from 'zod'
 import type { HtmlImportDestination, HtmlImportReceipt, HtmlImportServicePort } from '../../shared/workbench/toolPorts'
 import type { ToolResult } from '../../shared/workbench/tools'
 
-export const createCourseFromHtmlInputSchema = z.object({ sourcePath: z.string().min(1), name: z.string().min(1).optional(), path: z.string().min(1).optional() }).strict()
+export const createCourseFromHtmlInputSchema = z.object({ sourcePath: z.string().min(1), name: z.string().min(1).optional(), path: z.string().min(1).describe('输出目录，不是 .glx 文件路径；文件名由 name 生成。省略时使用宿主默认目录。').optional() }).strict()
 export const createCourseFromHtmlTool = {
   name: 'course.createFromHtml',
-  description: '从已有 HTML 文件创建可编辑课件并保存。只提供源文件路径和可选作品名、目标文件夹；软件负责新建、保真导入、保存及恢复，不需已有课件或内部句柄。',
+  description: '从已有 HTML 文件创建可编辑作品并保存。只提供源文件路径和可选作品名、目标文件夹；软件负责新建、保真导入、保存及恢复，不需已有课件或内部句柄。',
   inputSchema: createCourseFromHtmlInputSchema,
-  manual: { label: '从 HTML 创建课件', group: 'edit' as const, targetKinds: [] as const },
+  manual: { label: '从 HTML 创建作品', group: 'edit' as const, targetKinds: [] as const },
 }
 
 export const htmlImportDestinationSchema = z.discriminatedUnion('kind', [
@@ -35,7 +35,7 @@ export function htmlImportReceiptResult(receipt: HtmlImportReceipt): ToolResult 
 /** Single canonical tool schema projected by both the built-in gateway and external MCP. */
 export const htmlImportTool = {
   name: 'html.import' as const,
-  description: '将已授权 HTML text 文档按页拆分或整份导入 Course V9，执行页内脚本并保留公共样式。source、target 使用当前任务的 t... 文档句柄；destinations 的位置字段可填同一课件本轮 listChildren 返回的当前 t... 目标句柄，或 read(课件文档句柄) 返回的稳定 id。省略 destinations 时，宿主在唯一 Slide 表面按页顺序导入，复用空白初始页且不覆盖已有内容；有多个 Slide 表面时需明确目标。一次准入和提交，支持单次撤销。',
+  description: '将已授权 HTML text 文档按页拆分或整份导入正式工程（Project V11），执行页内脚本并保留公共样式。source、target 使用当前任务的 t... 文档句柄；destinations 的位置字段可填同一课件本轮 listChildren 返回的当前 t... 目标句柄，或 read(课件文档句柄) 返回的稳定 id。省略 destinations 时，宿主在唯一 Slide 表面按页顺序导入，复用空白初始页且不覆盖已有内容；有多个 Slide 表面时需明确目标。一次准入和提交，支持单次撤销。',
   inputSchema: htmlImportInputSchema,
   manual: { label: '导入 HTML 页面', group: 'edit' as const, targetKinds: ['document'] as const },
 }

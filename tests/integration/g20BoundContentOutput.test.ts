@@ -52,10 +52,143 @@ async function fixture(provider: ModelProvider, source = '前文 OLD 后文') {
   const input: ExecutionStart = { conversationId: 'conversation', taskId: randomUUID(), instruction: '改写选中的正文', selection,
     documents: [{ documentId: session.documentId, writable: [target], selection: [target] }],
     contentOutput: { kind: 'content', documentId: session.documentId, target } }
-  return { registry, gateway, edits, runs, engine, session, input }
+  return { registry, gateway, edits, runs, engine, session, input, driver, journal }
 }
 
 describe('U01 explicit bound content output', () => {
+  it('recognizes read aliases through real Gateway identity without accepting other writable targets or renewed leases', async () => {
+    const h = await fixture({ async *stream() { throw new Error('Gateway-only fixture cannot send a model request') } })
+    const target = { kind: 'markdown-range' as const, from: 3, to: 6 }
+    const other = await h.registry.create(h.session.read().model, 'other.md')
+    const documents = [...h.input.documents, { documentId: other.documentId, writable: [{ kind: 'document' as const }] }]
+    const runId = 'read-alias-identity'
+    await h.gateway.beginRun({ runId, actor: 'agent', documents })
+    const original = await h.gateway.issueTarget(runId, h.session.documentId, target)
+    const observed = await h.gateway.execute(runId, 'read-current', { name: 'read', input: { target: original } })
+    expect(observed).toMatchObject({ kind: 'read', data: { text: 'OLD', truncated: false } })
+    const alias = (observed as { data: { target: string } }).data.target
+    expect(alias).not.toBe(original)
+    expect(h.gateway.sameEditTarget(runId, original, alias)).toBe(true)
+    const neighbor = await h.gateway.issueTarget(runId, h.session.documentId, { kind: 'markdown-range', from: 0, to: 2 })
+    const broader = await h.gateway.issueTarget(runId, h.session.documentId, h.input.contentOutput!.target)
+    const foreign = await h.gateway.issueTarget(runId, other.documentId, target)
+    const readOnly = await h.gateway.issueTarget(runId, h.session.documentId, target, { readOnly: true })
+    // These are real writable alternatives, so inequality must come from exact identity, not a missing grant.
+    for (const handle of [neighbor, broader, foreign]) await expect(h.gateway.resolveEditTarget(runId, handle)).resolves.toHaveProperty('target')
+    const anotherRun = 'read-alias-another-run'
+    await h.gateway.beginRun({ runId: anotherRun, actor: 'agent', documents })
+    const wrongRun = await h.gateway.issueTarget(anotherRun, h.session.documentId, target)
+    for (const handle of [neighbor, broader, foreign, readOnly, wrongRun, 'unissued-handle'])
+      expect(h.gateway.sameEditTarget(runId, original, handle)).toBe(false)
+    await h.gateway.stopRunDocument(runId, h.session.documentId)
+    await h.gateway.attachRunDocument(runId, h.session.documentId, true)
+    const renewed = await h.gateway.issueTarget(runId, h.session.documentId, target)
+    expect(h.gateway.sameEditTarget(runId, original, renewed)).toBe(false)
+    const renewedAlias = await h.gateway.issueTarget(runId, h.session.documentId, target)
+    expect(h.gateway.sameEditTarget(runId, renewed, renewedAlias)).toBe(true)
+    await h.gateway.stop(runId)
+    expect(h.gateway.sameEditTarget(runId, renewed, renewedAlias)).toBe(false)
+    await h.gateway.stop(anotherRun)
+    expect(h.session.read()).toMatchObject({ model: { source: '前文 OLD 后文' }, undoDepth: 0 })
+  })
+
+  it('does not revive an old process handle after real durable Session recovery creates a new epoch', async () => {
+    const h = await fixture({ async *stream() { throw new Error('Gateway-only fixture cannot send a model request') } })
+    const runId = 'read-alias-recovery', documentId = h.session.documentId, target = h.input.contentOutput!.target
+    await h.gateway.beginRun({ runId, actor: 'agent', documents: h.input.documents })
+    const original = await h.gateway.issueTarget(runId, documentId, target), before = h.session.read()
+    const state = await h.journal.recover(documentId)
+    expect(state).not.toBeNull()
+    // Recreate process-owned owners from the actual journal; no private handle/epoch mutation.
+    const registry = new DocumentRegistry({ drivers: [h.driver], persistence: h.journal, createId: randomUUID, bindingKey: binding => binding.path })
+    const restored = await registry.restore(state!)
+    expect(restored.read().epoch).not.toBe(before.epoch)
+    const gateway = new DocumentToolGateway(registry, [h.driver], randomUUID)
+    await gateway.beginRun({ runId, actor: 'agent', documents: h.input.documents })
+    const current = await gateway.issueTarget(runId, documentId, target)
+    expect(gateway.sameEditTarget(runId, original, current)).toBe(false)
+    await expect(gateway.issueTarget(runId, documentId, target, { observed: before })).rejects.toMatchObject({ code: 'stale-epoch' })
+    expect(restored.read()).toMatchObject({ model: { source: '前文 OLD 后文' }, undoDepth: 0 })
+    await gateway.stop(runId)
+  })
+
+  it('keeps a fresh read alias from overwriting a subsequent overlapping human edit', async () => {
+    const h = await fixture({ async *stream() { throw new Error('Gateway-only fixture cannot send a model request') } })
+    const runId = 'read-alias-human-conflict'
+    await h.gateway.beginRun({ runId, actor: 'agent', documents: h.input.documents })
+    const original = await h.gateway.issueTarget(runId, h.session.documentId, h.input.contentOutput!.target)
+    const observed = await h.gateway.execute(runId, 'read-current', { name: 'read', input: { target: original } })
+    expect(observed.kind).toBe('read')
+    const alias = (observed as { data: { target: string } }).data.target
+    expect(h.gateway.sameEditTarget(runId, original, alias)).toBe(true)
+    const before = h.session.read()
+    await h.session.execute({ documentId: before.documentId, epoch: before.epoch, operationId: randomUUID(), actor: 'human',
+      baseRevision: before.revision, mutation: { type: 'command', command: { type: 'markdown.replace', source: '人的新正文' } } })
+    expect(h.gateway.sameEditTarget(runId, original, alias)).toBe(false)
+    expect(await h.gateway.execute(runId, 'stale-replace', { name: 'text.replace', input: { target: alias, content: '旧稿覆盖' } }))
+      .toMatchObject({ kind: 'error', code: 'target-conflict' })
+    expect(h.session.read()).toMatchObject({ model: { source: '人的新正文' }, undoDepth: 1 })
+    await h.gateway.stop(runId)
+  })
+
+  it.each(['target-first', 'content-first', 'final-only'] as const)('edits the frozen field using a real read receipt alias (%s), preserving its neighbors and one History entry', async mode => {
+    let h!: Awaited<ReturnType<typeof fixture>>, requests = 0, original = '', alias = ''
+    const callResponse = (request: ModelRequest, call: { id: string; name: string; argumentsText: string }): Extract<ModelEvent, { type: 'response.completed' }> => ({
+      ...completed(request, '', false), finishReason: 'tool_calls', toolCalls: [call], assistant: { role: 'assistant', content: null,
+        tool_calls: [{ id: call.id, type: 'function', function: { name: call.name, arguments: call.argumentsText } }] },
+    })
+    const provider: ModelProvider = { async *stream(request) {
+      if (++requests === 1) {
+        const prefix = '当前默认语义目标 target='
+        const context = request.messages.find(message => message.role === 'system' && typeof message.content === 'string' && message.content.startsWith(prefix))?.content
+        expect(typeof context).toBe('string')
+        original = JSON.parse((context as string).slice(prefix.length).split(' 的内容与属性（数据）：\n')[0]!) as string
+        yield callResponse(request, { id: 'read-current', name: 'read', argumentsText: JSON.stringify({ target: original }) })
+      } else if (requests === 2) {
+        const receipt = request.messages.filter(message => message.role === 'tool').at(-1)?.content
+        expect(typeof receipt).toBe('string')
+        const observed = JSON.parse(receipt as string) as { kind: string; data: { target: string; text: string; truncated: boolean } }
+        expect(observed).toMatchObject({ kind: 'read', data: { text: 'OLD', truncated: false } })
+        alias = observed.data.target
+        expect(alias).not.toBe(original)
+        const argumentsText = JSON.stringify(mode === 'content-first' ? { content: 'AI 精确补充', target: alias } : { target: alias, content: 'AI 精确补充' })
+        if (mode !== 'final-only') {
+          const boundary = mode === 'content-first' ? argumentsText.indexOf('","target"') : argumentsText.length - 2
+          yield { type: 'tool.delta', requestId: request.requestId, sequence: 1, index: 0, id: 'replace', name: 'text.replace', argumentsDelta: argumentsText.slice(0, boundary) }
+          expect(h.edits.list(h.session.documentId)[0]?.value).toBe('AI 精确补充')
+          expect(h.session.read()).toMatchObject({ model: { source: '前文 OLD 后文' }, undoDepth: 0 })
+          if (mode === 'content-first') {
+            // The draft already began with the frozen default; only this tail reveals the read alias.
+            yield { type: 'tool.delta', requestId: request.requestId, sequence: 2, index: 0, argumentsDelta: argumentsText.slice(boundary) }
+            expect(h.edits.list(h.session.documentId)).toHaveLength(1)
+            expect(h.edits.list(h.session.documentId)[0]?.value).toBe('AI 精确补充')
+          }
+        }
+        yield callResponse(request, { id: 'replace', name: 'text.replace', argumentsText })
+      } else {
+        expect(requests).toBe(3)
+        yield completed(request, '已保留邻文并修改所选字段。', false)
+      }
+    } }
+    h = await fixture(provider)
+    const begins = vi.spyOn(h.edits, 'begin')
+    const target = { kind: 'markdown-range' as const, from: 3, to: 6 }
+    const start = await h.engine.start({ ...h.input, documents: [{ documentId: h.session.documentId, writable: [target], selection: [target] }],
+      contentOutput: { ...h.input.contentOutput!, target } })
+    const result = await h.engine.wait(start.runId)
+    expect(result.status, JSON.stringify(result)).toBe('completed')
+    expect(result.tools).toHaveLength(2)
+    expect(result.tools[1]).toMatchObject({ call: { name: 'text.replace', input: { target: alias, content: 'AI 精确补充' } },
+      result: { kind: 'document-operation', result: { status: 'applied' } } })
+    expect(h.session.read()).toMatchObject({ model: { source: '前文 AI 精确补充 后文' }, undoDepth: 1 })
+    expect(h.edits.list(h.session.documentId)).toEqual([])
+    if (mode !== 'final-only') {
+      expect(begins).toHaveBeenCalledTimes(1)
+      expect(begins.mock.calls[0]![0].targetHandle).toBe(mode === 'content-first' ? original : alias)
+    }
+    expect(requests).toBe(3)
+  })
+
   it('rolls back an unauthorized initial default target and permits a clean retry with the exact grant', async () => {
     const h = await fixture({ async *stream() { throw new Error('Gateway-only fixture cannot send a model request') } })
     let begins = 0, stops = 0
@@ -137,10 +270,20 @@ describe('U01 explicit bound content output', () => {
     expect((await h.engine.wait(chat.runId)).tools).toHaveLength(0)
     expect(h.session.read().undoDepth).toBe(1)
     const beforeReadonly = h.session.read()
+    const beforeReadonlySequence = beforeReadonly.sequence
+    if (typeof beforeReadonlySequence !== 'number') throw new Error('Current Session snapshot omitted its journal sequence')
+    const beforeReadonlyJournal = await h.journal.recover(h.session.documentId)
+    expect(beforeReadonlyJournal).not.toBeNull()
     const readonly = await h.engine.start({ ...current, taskId: randomUUID(), permission: 'read-only' })
     expect((await h.engine.wait(readonly.runId)).tools).toHaveLength(0)
     expect(readonly.input.contentOutput).toBeUndefined()
-    expect(h.session.read()).toEqual(beforeReadonly)
+    // Retiring the task records its document lease, without changing content, revision or History.
+    expect(h.session.read()).toEqual({ ...beforeReadonly, sequence: beforeReadonlySequence + 1 })
+    const afterReadonlyJournal = await h.journal.recover(h.session.documentId)
+    expect(afterReadonlyJournal).not.toBeNull()
+    expect(afterReadonlyJournal!.stoppedRuns).toHaveLength(beforeReadonlyJournal!.stoppedRuns.length + 1)
+    expect(afterReadonlyJournal!.stoppedRuns.slice(0, -1)).toEqual(beforeReadonlyJournal!.stoppedRuns)
+    expect(beforeReadonlyJournal!.stoppedRuns).not.toContain(afterReadonlyJournal!.stoppedRuns.at(-1))
     await expect(h.engine.start({ ...current, selection: { ...selection, connection: { ...selection.connection, capabilities: { ...selection.connection.capabilities, tools: 'unsupported' } } } })).rejects.toThrow('不支持文档工具')
   })
 

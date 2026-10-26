@@ -7,6 +7,9 @@ import { domAuthoringFactorySource, createDomAuthoring } from '../../src/compone
 import { authoredDocumentBootstrap, authoredDocumentProgramsSource } from '../../src/components/web/authoredDocumentBootstrap'
 import { installOwnedDocumentAuthoring } from '../../src/components/web/ownedDocumentAuthoring'
 import { createAuthoringFrameGeometry } from '../../src/components/web/authoringFrame'
+import { resolveWebResourceBindings } from '../../src/components/web/resources'
+import { webRuntimeResourceAddress } from '../../src/components/web/resourceUrlLease'
+import { webDataSchema } from '../../src/components/web/data'
 import { createBlankCourseProjectV10 } from '../../src/core/course/createCourseProjectV10'
 import { authorSpotEdits } from '../../src/core/components/authoring/componentAuthorEdits'
 import { DocumentSession } from '../../src/core/documents/DocumentSession'
@@ -28,7 +31,7 @@ function documentHtml(extra = '') {
     body{margin:0;font:16px/24px sans-serif;perspective:1000px}p{position:absolute;left:10px;top:8px;width:230px;height:26px;margin:0}
     img{position:absolute;left:10px;top:48px;width:40px;height:24px}button{position:absolute;left:100px;top:48px}
     iframe{position:absolute;box-sizing:content-box}
-    </style></head><body><p id="title">${sameTitle}</p><img id="photo" src="${resourceUrls.original}">
+    </style></head><body><p id="title">${sameTitle}</p><img id="photo" src="cw-resource:original">
     <button id="counter">Count 0</button>${extra}<script>
       window.__boots=(window.__boots||0)+1;let count=0;
       document.getElementById('counter').addEventListener('click',event=>event.currentTarget.textContent='Count '+ ++count);
@@ -54,8 +57,9 @@ function modelFixture() {
 }
 
 async function mount(page: Page, html: string, records: Record<string, ComponentAuthorRecord> = {}) {
-  const prepared = authoredDocumentBootstrap({ html, resourceBindings: bindings,
-    textOverrides: [{ original: sameTitle, text: pageCopyTitle }] }, {
+  const projected = resolveWebResourceBindings({ id: 'web', definitionId: 'web', data: { html, resourceBindings: bindings,
+    textOverrides: [{ original: sameTitle, text: pageCopyTitle }] } }, id => resourceUrls[id] ? webRuntimeResourceAddress(id) : undefined)
+  const prepared = authoredDocumentBootstrap(webDataSchema.parse(projected.data), {
     nonce: 'nested-authoring', instanceId: 'web', resources: resourceUrls,
     bridge: programs => `${authoredDocumentProgramsSource(programs)};
       const q=window.__nestedFixture={records:${JSON.stringify(records)},resources:${JSON.stringify(resourceUrls)},bindings:${JSON.stringify(bindings)},doubleClicks:[]};
@@ -192,7 +196,9 @@ it('edits a newly observed opaque grandchild through the document writer and col
     expect(await frames.grandchild.locator('body').evaluate(() => (window as any).__boots)).toBe(1)
     for (const peer of [frames.root, frames.child, frames.sibling]) {
       expect(await peer.locator('#title').textContent()).toBe(pageCopyTitle)
-      expect(await peer.locator('#photo').getAttribute('src')).toBe(resourceUrls.original)
+      expect(await peer.locator('#photo').evaluate(async (node: HTMLImageElement) => ({
+        width: node.naturalWidth, height: node.naturalHeight, source: await (await fetch(node.currentSrc)).text(),
+      }))).toEqual({ width: 20, height: 12, source: media.original })
     }
 
     await frames.root.locator('body').evaluate((_body, key) => (window as any).__nestedFixture.owner.preview(key, { translateX: 12 }), nestedTitle.authoring.authorKey)

@@ -109,7 +109,7 @@ jobs:
                 ;;
             esac
             case "$file" in
-              artifacts/ai-capabilities/*|scripts/generate-ai-capabilities.ts|tests/unit/aiCapabilities.test.ts|scripts/validate-project.ts|package.json|package-lock.json|src/shared/*|src/player/*|src/renderer/components/*|src/renderer/export/*|src/renderer/project/*)
+              artifacts/ai-capabilities/*|.agents/skills/*|scripts/generate-ai-capabilities.ts|tests/unit/aiCapabilities.test.ts|scripts/validate-project.ts|package.json|package-lock.json|src/core/tools/*|src/core/components/source/builtinSources.ts|src/components/builtin-source/entries.ts|src/shared/*|src/player/*|src/renderer/components/*|src/renderer/export/*|src/renderer/project/*|.github/workflows/check-contracts.yml)
                 capability_check=true
                 ;;
             esac

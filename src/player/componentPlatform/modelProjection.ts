@@ -223,7 +223,13 @@ export function createComponentModelProjection(context: {
     // The existing display API exposes geometry/observation synchronously. Realm
     // readiness remains owned by the caller's normal ModelPlayer update queue.
     if (!surfaces.has(id) && !programs.has(id) && currentModel) sync(currentModel)
-    for (const [surfaceId, surface] of surfaces) if (surface.topLevel) surface.root.hidden = surfaceId !== id
+    for (const [surfaceId, surface] of surfaces) if (surface.topLevel) {
+      const visible = surfaceId === id
+      surface.root.hidden = !visible
+      // Runtime also owns author visibility on this target. Keep page navigation
+      // out of that field so a later visibility sync cannot put old pages in flow.
+      surface.root.style.display = visible ? '' : 'none'
+    }
     for (const [programId, program] of programs) program.hidden = programId !== id
     resize()
     return true
@@ -395,6 +401,7 @@ export function createComponentModelProjection(context: {
       view.runtimeSlot?.remove(); view.runtimeSlot = undefined
       runtime.bindTarget(surface.id, view.root)
     }
+    if (view.topLevel && !topLevel) view.root.style.display = ''
     view.topLevel = topLevel
     view.naturalHeight = naturalHeight
     if (!naturalHeight) view.root.style.height = '100%'

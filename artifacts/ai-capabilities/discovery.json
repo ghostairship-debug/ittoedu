@@ -23,7 +23,7 @@
   ],
   "query": "query.mjs",
   "scope": "静态目录只说明已登记接口；当前运行是否可调用、文档范围、写权限、短句柄和服务配置，以宿主本轮发现与实际回执为准。",
-  "semanticVersion": "fcd1d86f7978fc31dd55917ee686f73675c02cadbcb62a892ef38f8cc4179f9a",
+  "semanticVersion": "bf5acd4c92d1d6386a411e324941368cc24a052a681936d174cbe87739dc5785",
   "tools": [
     {
       "id": "artifact.save",
@@ -64,6 +64,10 @@
     {
       "id": "course.configure",
       "path": "tools/course.configure.json"
+    },
+    {
+      "id": "course.createFromHtml",
+      "path": "tools/course.createFromHtml.json"
     },
     {
       "id": "course.importPptx",

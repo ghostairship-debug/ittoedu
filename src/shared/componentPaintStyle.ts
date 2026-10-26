@@ -1,0 +1,57 @@
+import type { ComponentDefinition, ComponentInstance } from './contracts/component-platform/project'
+import { documentColorChannels } from './document/color'
+import { htmlDocumentKind } from './html/documentKind'
+import { isMeasuredWebFragmentBox } from '../components/web/measuredFragmentBox'
+import { isNativeFlowLayoutGroup, isNativeFlowContainerStyle } from './flowNativeLayout'
+
+/** Visual CSS may paint the wrapper; affine placement remains the frame owner's field. */
+export function componentPaintStyle(instance: ComponentInstance, definition?: ComponentDefinition): Record<string, string | number> {
+  const data = instance.data
+  if (data && typeof data === 'object' && !Array.isArray(data)
+    && typeof data.html === 'string' && isMeasuredWebFragmentBox(instance, htmlDocumentKind(data.html), undefined, definition)) {
+    // Web CSS paints once in the content realm. Detached children still need their formal group clip.
+    const clip: Record<string, string | number> = {}
+    // Input passthrough belongs to the outer hit surface even when paint stays in Web CSS.
+    const pointerEvents = instance.style?.pointerEvents ?? instance.style?.['pointer-events']
+    if (typeof pointerEvents === 'string') clip.pointerEvents = pointerEvents
+    if (instance.childIds?.length) {
+      const style = instance.style ?? {}
+      const x = style['overflow-x'] ?? style.overflowX ?? style.overflow
+      const y = style['overflow-y'] ?? style.overflowY ?? style.overflow
+      if (typeof x === 'string' && /^(?:hidden|clip)$/.test(x)) clip.overflowX = x
+      if (typeof y === 'string' && /^(?:hidden|clip)$/.test(y)) clip.overflowY = y
+      if (Object.keys(clip).length) {
+        for (const [key, value] of Object.entries(style)) {
+          if (/^border-(?:radius|(?:top|bottom)-(?:left|right)-radius)$/.test(key)
+            && (typeof value === 'string' || typeof value === 'number')) {
+            clip[key.replace(/-([a-z])/g, (_match, letter: string) => letter.toUpperCase())] = value
+          }
+        }
+      }
+    }
+    return clip
+  }
+  const geometry = /^(?:transform(?:-.+)?|translate|rotate|scale|zoom|position|inset(?:-.+)?|left|top|right|bottom|(?:min-|max-)?(?:width|height|inline-size|block-size)|margin(?:-.+)?|z-index|float|clear|order|flex(?:-.+)?|grid(?:-.+)?|align-self|justify-self)$/
+  const implementation = instance.implementationOverride ?? definition?.implementation
+  const professionalTextPaint = implementation?.kind === 'builtin' && (implementation.key === 'guoling.text' || implementation.key === 'guoling.group')
+  const sourceColor = professionalTextPaint && typeof instance.style?.color === 'string' ? documentColorChannels(instance.style.color) : undefined
+  const result: Record<string, string | number> = {}
+  for (const [key, value] of Object.entries(instance.style ?? {})) {
+    const cssKey = key.startsWith('--') ? key : key.replace(/[A-Z]/g, letter => `-${letter.toLowerCase()}`)
+    if (geometry.test(cssKey) || isNativeFlowLayoutGroup(instance, definition) && isNativeFlowContainerStyle(key)
+      || typeof value !== 'string' && typeof value !== 'number') continue
+    // Captured text and group fills equal to captured color are derived. Keeping one
+    // on a group would override every descendant's professional colors and ranges.
+    // Preserve an authored distinct fill and other content implementations.
+    if (sourceColor && cssKey === '-webkit-text-fill-color' && typeof value === 'string') {
+      const fill = documentColorChannels(value)
+      if (fill && fill.red === sourceColor.red && fill.green === sourceColor.green
+        && fill.blue === sourceColor.blue && fill.alpha === sourceColor.alpha) continue
+    }
+    const reactKey = cssKey.startsWith('--') ? cssKey : cssKey === 'float' ? 'cssFloat'
+      : cssKey.replace(/-([a-z])/g, (_match, letter: string) => letter.toUpperCase()).replace(/^Ms/, 'ms')
+    result[reactKey] = value
+  }
+  if (instance.frame || isNativeFlowLayoutGroup(instance, definition)) result.boxSizing = 'border-box'
+  return result
+}

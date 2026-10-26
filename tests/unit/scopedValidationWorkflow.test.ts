@@ -45,6 +45,36 @@ function consumedFlags(): Set<string> {
 }
 
 describe('Scoped Validation 的作用域标志接线', () => {
+  it('selects capability validation for every maintained source family and the shipped bundles', () => {
+    const branches = [...workflow.matchAll(/^ {14}([^\n]+)\)\r?\n {16}capability_check=true/gmu)]
+    expect(branches).toHaveLength(1)
+    // Bash case uses * across path separators; test the actual selected branch,
+    // not whether a path happens to be mentioned elsewhere in this workflow.
+    const patterns = branches[0]![1]!.split('|')
+    const selected = (filename: string) => patterns.some(pattern => new RegExp(
+      '^' + pattern.split('*').map(part => part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('.*') + '$',
+    ).test(filename))
+    for (const filename of [
+      'scripts/generate-ai-capabilities.ts',
+      'src/core/tools/ToolCatalog.ts',
+      'src/core/tools/HtmlImportTools.ts',
+      'src/core/tools/toolSchemas.ts',
+      'src/core/components/source/builtinSources.ts',
+      'src/components/builtin-source/entries.ts',
+      'src/shared/courseAgentSkills.ts',
+      'src/shared/contracts/component-platform/runtime.ts',
+      '.agents/skills/orchestrate-courseware/SKILL.md',
+      '.agents/skills/orchestrate-courseware/references/creation-method.md',
+      '.agents/skills/orchestrate-courseware/scripts/assemble-html.mjs',
+      'src/shared/generated/bundledSkills.json',
+      'src/shared/generated/courseAgentCapabilities.json',
+      'artifacts/ai-capabilities/tools/course.createFromHtml.json',
+      '.github/workflows/check-contracts.yml',
+    ]) expect(selected(filename), `${filename} 必须触发 capability_check`).toBe(true)
+    expect(selected('docs/archive/old-plan.md')).toBe(false)
+    expect(selected('output/private-preview.html')).toBe(false)
+  })
+
   it('finds flags on all three sides, so the checks below are not vacuous', () => {
     expect(declaredJobOutputs().size).toBeGreaterThan(0)
     expect(emittedFlags().size).toBeGreaterThan(0)

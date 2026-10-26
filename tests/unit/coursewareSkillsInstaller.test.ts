@@ -127,6 +127,7 @@ async function readManifest(): Promise<InstallerManifest> {
 async function runInstaller(options: {
   env?: Record<string, string>
   expectFailure?: boolean
+  uninstall?: boolean
 } = {}): Promise<{ stdout: string; stderr: string; failure?: InstallerFailure }> {
   try {
     const result = await execFileAsync(
@@ -141,6 +142,7 @@ async function runInstaller(options: {
         sourceRoot,
         '-DestinationRoot',
         destinationRoot,
+        ...(options.uninstall ? ['-Uninstall'] : []),
       ],
       {
         encoding: 'utf8',
@@ -179,6 +181,42 @@ afterEach(async () => {
 })
 
 windowsDescribe('courseware Skill installer', { timeout: 20_000 }, () => {
+  it('explicitly uninstalls only unchanged managed copies while retaining user edits and unrelated Skills', async () => {
+    await createSkill(destinationRoot, 'edit-content', '# User-owned same-name Skill\n')
+    await createSkill(destinationRoot, 'my-writing', '# Unrelated custom Skill\n')
+    await runInstaller()
+    const modified = path.join(destinationRoot, 'orchestrate-courseware', 'user-notes.md')
+    await writeFile(modified, '# Preserve my changes\n', 'utf8')
+
+    const result = await runInstaller({ uninstall: true })
+    expect(result.stdout).toContain('Retired managed legacy Skill:')
+    expect(await exists(path.join(destinationRoot, 'build-courseware-project'))).toBe(false)
+    expect(await readFile(modified, 'utf8')).toBe('# Preserve my changes\n')
+    expect(await readFile(path.join(destinationRoot, 'edit-content', 'SKILL.md'), 'utf8')).toContain('User-owned same-name Skill')
+    expect(await exists(path.join(destinationRoot, 'my-writing', 'SKILL.md'))).toBe(true)
+    const manifest = await readManifest()
+    expect(manifest.skills).toEqual({})
+    expect(manifest.retiredSkills['orchestrate-courseware']?.status).toBe('preserved-modified')
+    expect(manifest.retiredSkills['edit-content']?.status).toBe('preserved-unmanaged')
+    expect(manifest.retiredSkills['build-courseware-project']?.status).toBe('removed')
+    expect(await exists(path.join(sourceRoot, 'build-courseware-project', 'SKILL.md'))).toBe(true)
+  })
+
+  it('recovers an interrupted explicit uninstall before a later explicit installation', async () => {
+    await runInstaller()
+    const interrupted = await runInstaller({ uninstall: true, expectFailure: true, env: {
+      COURSEWARE_SKILLS_TEST_MODE: '1', COURSEWARE_SKILLS_TEST_INTERRUPT_AFTER_DIRECTORIES: '1',
+    } })
+    expect(`${interrupted.stdout}\n${interrupted.stderr}`).toContain('Simulated installer interruption')
+    const recovered = await runInstaller()
+    expect(recovered.stdout).toContain('Rolled back an interrupted installer transaction')
+    const manifest = await readManifest()
+    for (const name of Object.keys(manifest.skills)) {
+      expect(await treeSignature(path.join(destinationRoot, name))).toBe(manifest.skills[name]!.installedTreeSignature)
+    }
+    expect(Object.keys(manifest.skills)).toHaveLength(7)
+  })
+
   it('publishes complete references while preserving a local root stamp across managed updates', async () => {
     const sourceSkill = path.join(sourceRoot, 'build-courseware-project')
     const installedSkill = path.join(destinationRoot, 'build-courseware-project')

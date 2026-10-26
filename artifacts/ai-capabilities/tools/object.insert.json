@@ -1,15 +1,24 @@
 {
-  "description": "向已观察页面或容器的目标句柄插入文字、公式、图形、表格、图表或填空；也可提供 project.list/read 返回的已观察页面 path（project可选），target也接受该页面路径。提供类型、正文及所需位置尺寸，可用 appearance 同次设置文字/公式/图形/表格/图表的初始专业外观，语义同 object.update；省略时保留人工插入默认，input 当前不支持 appearance。可用 click:{action,value} 同次绑定正式点击规则；location-go 的 value 沿用已观察目的页句柄或路径，scene.next/scene.previous无需value，audio-play 沿用声音引用，无需先取新对象句柄再设置。软件准备容器、专业数据和身份，并续接本任务已回执的同一目标，无需每个对象重新遍历页面。正式事务可撤销。Flow destination=document 为正文，paper 为纸张浮层。",
+  "description": "向已观察页面或容器插入文字、公式、图形、表格、图表或填空。target用句柄，也可用project.list/read的页面path。软件准备专业默认、身份和正式事务；table/chart接受业务数据，显式width/height保留。index指定同容器顺序，after用已观察整对象句柄，at用Flow已观察正文光标/选区句柄，三者择一；at保留原文并在逻辑末端拆段插入，一次撤销。Flow destination=document为正文，paper为浮层。appearance同object.update，填空暂不支持；click:{action,value}可同次绑定点击规则，目的页/声音用已观察引用。可续接本任务已回执目标，无需逐个遍历页面。",
   "inputSchema": {
     "$defs": {
       "__schema0": {
         "additionalProperties": false,
         "properties": {
+          "after": {
+            "$ref": "#/$defs/__schema31"
+          },
           "appearance": {
-            "$ref": "#/$defs/__schema16"
+            "$ref": "#/$defs/__schema22"
+          },
+          "at": {
+            "$ref": "#/$defs/__schema32"
           },
           "center": {
-            "$ref": "#/$defs/__schema23"
+            "$ref": "#/$defs/__schema29"
+          },
+          "chart": {
+            "$ref": "#/$defs/__schema16"
           },
           "chartType": {
             "$ref": "#/$defs/__schema9"
@@ -18,13 +27,13 @@
             "$ref": "#/$defs/__schema2"
           },
           "destination": {
-            "$ref": "#/$defs/__schema25"
+            "$ref": "#/$defs/__schema33"
           },
           "height": {
-            "$ref": "#/$defs/__schema22"
+            "$ref": "#/$defs/__schema28"
           },
           "index": {
-            "$ref": "#/$defs/__schema24"
+            "$ref": "#/$defs/__schema30"
           },
           "kind": {
             "$ref": "#/$defs/__schema1"
@@ -42,13 +51,13 @@
             "$ref": "#/$defs/__schema7"
           },
           "width": {
-            "$ref": "#/$defs/__schema21"
+            "$ref": "#/$defs/__schema27"
           },
           "x": {
-            "$ref": "#/$defs/__schema19"
+            "$ref": "#/$defs/__schema25"
           },
           "y": {
-            "$ref": "#/$defs/__schema20"
+            "$ref": "#/$defs/__schema26"
           }
         },
         "required": [
@@ -114,18 +123,98 @@
       },
       "__schema16": {
         "$ref": "#/$defs/__schema17",
-        "description": "可选初始专业外观，和 object.update 的 appearance 同义；只覆盖提供字段，省略时保留人工插入默认。文字/公式支持 fontSize、color、bold、lineHeight、shadows 等；图形、表格、图表使用其公开专业 style 字段，图形使用 fillColor、borderColor 等实际字段。input 当前不支持 appearance。"
+        "description": "图表分类与系列数值；软件分配分类、系列和点身份，仅 kind=chart 使用。"
       },
       "__schema17": {
+        "additionalProperties": false,
+        "properties": {
+          "categories": {
+            "items": {
+              "$ref": "#/$defs/__schema18"
+            },
+            "minItems": 1,
+            "type": "array"
+          },
+          "series": {
+            "items": {
+              "$ref": "#/$defs/__schema20"
+            },
+            "minItems": 1,
+            "type": "array"
+          }
+        },
+        "required": [
+          "categories",
+          "series"
+        ],
+        "type": "object"
+      },
+      "__schema18": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "$ref": "#/$defs/__schema19"
+          },
+          "label": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "label"
+        ],
+        "type": "object"
+      },
+      "__schema19": {
+        "minLength": 1,
+        "type": "string"
+      },
+      "__schema2": {
+        "$ref": "#/$defs/__schema3",
+        "description": "同次绑定正式点击规则；location-go 的 value 使用已观察目的页面句柄或路径；scene.next/scene.previous无需value，audio-play 使用已配置声音。"
+      },
+      "__schema20": {
+        "additionalProperties": false,
+        "properties": {
+          "color": {
+            "type": "string"
+          },
+          "id": {
+            "$ref": "#/$defs/__schema19"
+          },
+          "name": {
+            "type": "string"
+          },
+          "values": {
+            "items": {
+              "$ref": "#/$defs/__schema21"
+            },
+            "minItems": 1,
+            "type": "array"
+          }
+        },
+        "required": [
+          "name",
+          "values"
+        ],
+        "type": "object"
+      },
+      "__schema21": {
+        "type": "number"
+      },
+      "__schema22": {
+        "$ref": "#/$defs/__schema23",
+        "description": "可选初始专业外观，和 object.update 的 appearance 同义；只覆盖提供字段，省略时保留人工插入默认。文字/公式支持 fontSize、color、bold、lineHeight、shadows 等；图形、表格、图表使用其公开专业 style 字段，图形使用 fillColor、borderColor 等实际字段。input 当前不支持 appearance。"
+      },
+      "__schema23": {
         "additionalProperties": {
-          "$ref": "#/$defs/__schema18"
+          "$ref": "#/$defs/__schema24"
         },
         "propertyNames": {
           "type": "string"
         },
         "type": "object"
       },
-      "__schema18": {
+      "__schema24": {
         "anyOf": [
           {
             "type": "null"
@@ -141,13 +230,13 @@
           },
           {
             "items": {
-              "$ref": "#/$defs/__schema18"
+              "$ref": "#/$defs/__schema24"
             },
             "type": "array"
           },
           {
             "additionalProperties": {
-              "$ref": "#/$defs/__schema18"
+              "$ref": "#/$defs/__schema24"
             },
             "propertyNames": {
               "type": "string"
@@ -156,25 +245,21 @@
           }
         ]
       },
-      "__schema19": {
+      "__schema25": {
         "type": "number"
       },
-      "__schema2": {
-        "$ref": "#/$defs/__schema3",
-        "description": "同次绑定正式点击规则；location-go 的 value 使用已观察目的页面句柄或路径；scene.next/scene.previous无需value，audio-play 使用已配置声音。"
-      },
-      "__schema20": {
+      "__schema26": {
         "type": "number"
       },
-      "__schema21": {
+      "__schema27": {
         "exclusiveMinimum": 0,
         "type": "number"
       },
-      "__schema22": {
+      "__schema28": {
         "exclusiveMinimum": 0,
         "type": "number"
       },
-      "__schema23": {
+      "__schema29": {
         "additionalProperties": false,
         "properties": {
           "x": {
@@ -190,26 +275,58 @@
         ],
         "type": "object"
       },
-      "__schema24": {
+      "__schema3": {
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "$ref": "#/$defs/__schema4"
+          },
+          "value": {
+            "$ref": "#/$defs/__schema5"
+          }
+        },
+        "required": [
+          "action"
+        ],
+        "type": "object"
+      },
+      "__schema30": {
         "maximum": 9007199254740991,
         "minimum": 0,
         "type": "integer"
       },
-      "__schema25": {
+      "__schema31": {
+        "$ref": "#/$defs/__schema6",
+        "description": "同一插入容器内已观察的整对象句柄，在该对象之后插入。"
+      },
+      "__schema32": {
+        "$ref": "#/$defs/__schema6",
+        "description": "已观察的Flow正文光标或文字选区句柄；保所选内容，在逻辑末端拆段插入。"
+      },
+      "__schema33": {
         "enum": [
           "document",
           "paper"
         ],
         "type": "string"
       },
-      "__schema26": {
+      "__schema34": {
         "additionalProperties": false,
         "properties": {
+          "after": {
+            "$ref": "#/$defs/__schema31"
+          },
           "appearance": {
-            "$ref": "#/$defs/__schema16"
+            "$ref": "#/$defs/__schema22"
+          },
+          "at": {
+            "$ref": "#/$defs/__schema32"
           },
           "center": {
-            "$ref": "#/$defs/__schema23"
+            "$ref": "#/$defs/__schema29"
+          },
+          "chart": {
+            "$ref": "#/$defs/__schema16"
           },
           "chartType": {
             "$ref": "#/$defs/__schema9"
@@ -218,13 +335,13 @@
             "$ref": "#/$defs/__schema2"
           },
           "destination": {
-            "$ref": "#/$defs/__schema25"
+            "$ref": "#/$defs/__schema33"
           },
           "height": {
-            "$ref": "#/$defs/__schema22"
+            "$ref": "#/$defs/__schema28"
           },
           "index": {
-            "$ref": "#/$defs/__schema24"
+            "$ref": "#/$defs/__schema30"
           },
           "kind": {
             "$ref": "#/$defs/__schema1"
@@ -245,33 +362,18 @@
             "$ref": "#/$defs/__schema7"
           },
           "width": {
-            "$ref": "#/$defs/__schema21"
+            "$ref": "#/$defs/__schema27"
           },
           "x": {
-            "$ref": "#/$defs/__schema19"
+            "$ref": "#/$defs/__schema25"
           },
           "y": {
-            "$ref": "#/$defs/__schema20"
+            "$ref": "#/$defs/__schema26"
           }
         },
         "required": [
           "kind",
           "path"
-        ],
-        "type": "object"
-      },
-      "__schema3": {
-        "additionalProperties": false,
-        "properties": {
-          "action": {
-            "$ref": "#/$defs/__schema4"
-          },
-          "value": {
-            "$ref": "#/$defs/__schema5"
-          }
-        },
-        "required": [
-          "action"
         ],
         "type": "object"
       },
@@ -338,7 +440,7 @@
         "$ref": "#/$defs/__schema0"
       },
       {
-        "$ref": "#/$defs/__schema26"
+        "$ref": "#/$defs/__schema34"
       }
     ],
     "type": "object"

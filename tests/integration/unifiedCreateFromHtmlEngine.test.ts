@@ -15,6 +15,7 @@ import type { ModelEvent, ModelProvider, ModelRequest } from '../../src/shared/w
 import type { CreatedCourseFromHtml } from '../../src/main/workbench/htmlImport/CreateCourseFromHtml'
 import type { HtmlDesignMeasurementRequest } from '../../src/main/workbench/contentApply/measurement/ElectronHtmlDesignMeasurement'
 import { webDataSchema } from '../../src/components/web/data'
+import { componentDefinitionBuiltinKey } from '../../src/shared/contracts/component-platform/project'
 
 vi.mock('../../src/main/workbench/contentApply/measurement/ElectronHtmlDesignMeasurement.js', async () => {
   const { sourceProgramAssembly } = await import('../../src/core/contentApply/assembly/htmlAssembly')
@@ -88,15 +89,20 @@ it('creates, imports and saves an external HTML from an actual document-free Eng
     const delivered = outer.result.data as CreatedCourseFromHtml
     expect(delivered).toMatchObject({ status: 'saved', saved: true, path: path.join(workspaceRoot, 'external.glx') })
     const hostTools = final.tools.filter(tool => tool.origin === 'host')
-    expect(hostTools.map(tool => tool.call.name)).toEqual(['file.open', 'read', 'file.create', 'project.list', 'project.apply', 'file.save'])
+    expect(hostTools.map(tool => tool.call.name)).toEqual(['file.open', 'read', 'file.create', 'project.apply', 'file.save'])
+    expect(hostTools.find(tool => tool.call.name === 'project.apply')!.call.input).toMatchObject({ path: 'entry.html', intent: 'program.set' })
     expect(hostTools.every(tool => tool.state === 'returned')).toBe(true)
     expect(final.messages.filter(message => message.role === 'tool')).toHaveLength(1)
-    expect((await runs.read(final.runId))?.tools.filter(tool => tool.origin === 'host')).toHaveLength(6)
+    expect((await runs.read(final.runId))?.tools.filter(tool => tool.origin === 'host')).toHaveLength(5)
     expect(host.registry.get(delivered.documentId).read()).toMatchObject({ undoDepth: 1, dirty: false })
     const reopened = await new DocumentHostService(path.join(root, 'reopened-journal')).open(delivered.path)
     if (reopened.model.kind !== 'course-v10') throw new Error('Saved file is not a current V10 course')
-    const instances = Object.values(reopened.model.project.instances).filter(instance => instance.definitionId === 'guoling.html-program')
+    const project = reopened.model.project
+    const instances = Object.values(project.instances).filter(instance =>
+      componentDefinitionBuiltinKey(project.definitions[instance.definitionId]) === 'guoling.html-program')
     expect(instances).toHaveLength(1)
+    expect(project.rootIds).toEqual([instances[0]!.id])
+    expect(project.entry).toEqual({ rootInstanceId: instances[0]!.id })
     expect(webDataSchema.parse(instances[0]!.data).html).toBe(html)
     expect(await fs.readFile(sourcePath, 'utf8')).toBe(html)
   } finally { vi.restoreAllMocks(); await fs.rm(root, { recursive: true, force: true, maxRetries: 8, retryDelay: 25 }) }

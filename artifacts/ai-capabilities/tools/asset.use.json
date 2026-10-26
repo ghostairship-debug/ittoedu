@@ -29,6 +29,10 @@
         "minItems": 1,
         "type": "array"
       },
+      "sourceId": {
+        "minLength": 1,
+        "type": "string"
+      },
       "version": {
         "minLength": 1,
         "type": "string"

@@ -817,6 +817,22 @@ export class DocumentToolGateway implements ToolGateway {
     return structuredClone({ documentId: snapshot.documentId, epoch: snapshot.epoch, revision: snapshot.revision, target, model: snapshot.model })
   }
 
+  /** Host-only identity check for streamed argument aliases. Reads issue fresh handles;
+   *  both must still resolve to the exact same writable target in the current Session.
+   *  This neither renews authority nor replaces prepareInput/drain and final commit checks. */
+  sameEditTarget(runId: string, originalId: string, candidateId: string): boolean {
+    try {
+      const run = this.run(runId)
+      if (run.stopped) return false
+      const original = this.handle(runId, originalId), candidate = this.handle(runId, candidateId)
+      if (original.documentId !== candidate.documentId || original.epoch !== candidate.epoch
+        || original.lease !== candidate.lease || original.lease !== run.documentLeases.get(original.documentId)
+        || original.readOnly || candidate.readOnly) return false
+      const snapshot = this.registry.get(original.documentId).read()
+      return equalComponentValue(this.resolve(original, snapshot, true), this.resolve(candidate, snapshot, true))
+    } catch { return false }
+  }
+
   /** Host-only current-draft view. Only an exact renderer ACK renews its original logical write scope. */
   async prepareQuestionDraft(runId: string, handleId: string, acknowledged?: { epoch: string; revision: number }): Promise<{
     documentId: string; epoch: string; revision: number; target: ToolTarget; handle: string; content: string

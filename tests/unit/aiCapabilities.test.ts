@@ -10,10 +10,14 @@ import { AI_CAPABILITY_INDEX_RECOMMENDED_BYTES, checkAiCapabilityArtifacts, gene
 import { describeTools } from '../../src/core/tools/ToolCatalog'
 import { agentFileTools } from '../../src/core/tools/AgentFileTools'
 import { programmaticTools } from '../../src/core/tools/ProgrammaticTools'
+import { createCourseFromHtmlInputSchema, createCourseFromHtmlTool } from '../../src/core/tools/HtmlImportTools'
 import { courseProjectV10Schema } from '../../src/shared/contracts/component-platform/schema'
 import { publishedCourseV3Schema } from '../../src/shared/contracts/component-platform/published'
 import { builtinComponentSourceKeys } from '../../src/core/components/source/builtinSources'
 import { queryCourseAgentCapabilities, type CourseAgentCapabilityData } from '../../src/shared/courseAgentCapabilities'
+import { BundledSkillService } from '../../src/main/workbench/skills/BundledSkillService'
+import { ScopedSkillService } from '../../src/main/workbench/skills/ScopedSkillService'
+import { executeSkillList, executeSkillRead } from '../../src/core/tools/SkillTools'
 
 const directories: string[] = []
 afterEach(async () => { await Promise.all(directories.splice(0).map(directory => fs.rm(directory, { recursive: true, force: true }))) })
@@ -25,7 +29,10 @@ const nativeRead = (source: string) => source.split(/\r?\n/).map(line => line.le
 it('publishes complete current public tool schemas and V11/V4/API5 contracts readable through native line limits', async () => {
   const generated = await generateAiCapabilityArtifacts()
   const read = (location: string): unknown => JSON.parse(nativeRead(generated.files.get(location)!))
-  const tools = [...describeTools().map(tool => ({ name: tool.name, inputSchema: tool.schema })), ...agentFileTools, ...programmaticTools]
+  const tools = [
+    ...describeTools().map(tool => ({ name: tool.name, inputSchema: tool.schema })), ...agentFileTools, ...programmaticTools,
+    { ...createCourseFromHtmlTool, inputSchema: z.toJSONSchema(createCourseFromHtmlInputSchema) },
+  ]
   for (const tool of tools) expect(read(`tools/${tool.name}.json`)).toMatchObject({ name: tool.name, inputSchema: tool.inputSchema })
   const discovery = read('discovery.json') as { tools: { id: string }[]; protocols: { id: string }[] }
   expect(discovery.tools.map(tool => tool.id).sort()).toEqual(tools.map(tool => tool.name).sort())
@@ -77,4 +84,48 @@ it('detects missing, stale and extra persisted capabilities without altering the
   await writeAiCapabilityArtifacts(root, generated)
   await expect(checkAiCapabilityArtifacts(root, generated)).resolves.toBeUndefined()
   await expect(fs.stat(path.join(root, 'obsolete.json'))).rejects.toThrow()
+})
+
+// These are the shipped consumer inputs, not a second generated copy in a temporary directory.
+it('keeps persisted discovery and bundled GUI/Agent Skill consumers aligned with the current sources', async () => {
+  const generated = await generateAiCapabilityArtifacts()
+  await checkAiCapabilityArtifacts(path.resolve('artifacts/ai-capabilities'), generated)
+  const capabilitySource = await fs.readFile('src/shared/generated/courseAgentCapabilities.json', 'utf8')
+  const skillSource = await fs.readFile('src/shared/generated/bundledSkills.json', 'utf8')
+  expect(capabilitySource).toBe(generated.capabilityBundle)
+  expect(skillSource).toBe(generated.bundledSkillBundle)
+
+  const bundle = JSON.parse(skillSource)
+  const service = new ScopedSkillService(new BundledSkillService(bundle), async () => [])
+  const catalog = bundle.manifest.skills.map(({ name, description }: { name: string; description: string }) => ({ name, description }))
+  // The desktop menu asks this same service for roots, without creating a model run.
+  expect(await service.catalogForRoots([])).toEqual({ entries: catalog, warnings: [] })
+  expect(await executeSkillList(service, 's1-consumer-check', {})).toMatchObject({ kind: 'read', data: { entries: catalog, warnings: [] } })
+  for (const resource of ['SKILL.md', 'references/creation-method.md']) {
+    expect(await executeSkillRead(service, { skill: 'orchestrate-courseware', path: resource, limit: 64_000 }, 's1-consumer-check'))
+      .toMatchObject({ kind: 'read', data: { status: 'read', content: await fs.readFile(`.agents/skills/orchestrate-courseware/${resource}`, 'utf8'), truncated: false } })
+  }
+  // The host composite is exposed by ExecutionEngine from HtmlImportTools;
+  // it is not in the file/programmatic or document-scoped Gateway catalogs.
+  const selectedNames = new Set(['course.createFromHtml', 'skills.read'])
+  const live = [
+    ...describeTools().map(tool => ({ name: tool.name, description: tool.description, inputSchema: tool.schema })),
+    ...agentFileTools,
+    ...programmaticTools,
+    { ...createCourseFromHtmlTool, inputSchema: z.toJSONSchema(createCourseFromHtmlInputSchema) },
+  ].filter(tool => selectedNames.has(tool.name))
+  expect(live.map(tool => tool.name).sort()).toEqual([...selectedNames].sort())
+  const persisted = JSON.parse(capabilitySource) as CourseAgentCapabilityData
+  for (const tool of live) {
+    const query = queryCourseAgentCapabilities(persisted, { ids: [tool.name], detail: 'full' })
+    expect(query.total).toBe(1)
+    expect(query.cards).toHaveLength(1)
+    expect(query.cards![0]!.content).toMatchObject({ description: tool.description, inputSchema: tool.inputSchema })
+  }
+  const definition = live.find(tool => tool.name === 'course.createFromHtml')!
+  expect(definition.inputSchema).toMatchObject({ properties: { path: { description: expect.stringContaining('输出目录') } } })
+  const source = await fs.readFile('.agents/skills/build-courseware-project/SKILL.md', 'utf8')
+  const example = JSON.parse(/```json\r?\n([^`]+)```/.exec(source)![1]!)
+  expect(example.path).toBe('D:/课例')
+  expect(example.name).toBe('斜抛运动')
 })

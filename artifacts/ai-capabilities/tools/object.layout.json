@@ -1,10 +1,20 @@
 {
-  "description": "对同页同展示状态的已观察对象做对齐或等距分布。targets 使用对象句柄；软件复用人工世界坐标、父级逆变换与锁定规则，不需计算每个 frame，一次事务可撤销。",
+  "description": "对同页同展示状态的已观察对象做对齐、等距分布或Flow正文分栏。targets用对象句柄；intent.kind=columns将同一正文父级内对象编入分栏，可用columns按这些句柄分列、ratios设列宽、gap设间距。软件保留对象身份、内容和人工样式，准备布局及正式事务，一次撤销。对齐与分布复用世界坐标、父级逆变换和锁定规则，无需逐个计算frame。",
   "inputSchema": {
     "$defs": {
       "__schema0": {
         "minLength": 1,
         "type": "string"
+      },
+      "__schema1": {
+        "items": {
+          "$ref": "#/$defs/__schema0"
+        },
+        "type": "array"
+      },
+      "__schema2": {
+        "exclusiveMinimum": 0,
+        "type": "number"
       }
     },
     "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -55,6 +65,37 @@
             "required": [
               "kind",
               "axis"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "columns": {
+                "items": {
+                  "$ref": "#/$defs/__schema1"
+                },
+                "minItems": 2,
+                "type": "array"
+              },
+              "gap": {
+                "minimum": 0,
+                "type": "number"
+              },
+              "kind": {
+                "const": "columns",
+                "type": "string"
+              },
+              "ratios": {
+                "items": {
+                  "$ref": "#/$defs/__schema2"
+                },
+                "minItems": 2,
+                "type": "array"
+              }
+            },
+            "required": [
+              "kind"
             ],
             "type": "object"
           }

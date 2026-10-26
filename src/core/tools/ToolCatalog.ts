@@ -143,8 +143,8 @@ export const canonicalMutationTools = [
   { capability: 'write', effect: 'document-edit', exposure: 'direct', family: 'layout', supports: context => hasRunWrite(context, ['course-instance'], 'course-v10'),
     targets: (input, resolver) => { const resolved = input.targets.map(target => resolver.resolveHandle(target)); return resolved.every(value => value !== undefined) ? resolved : undefined },
     handler: (context, input) => context.mutate({ name: 'object.layout', input }) }),
-  registerCanonical({ name: 'teacher.ensure', description: '为已观察演示页准备教师控制台；复用已有控制台，否则使用人工插入默认、共享层和软件身份创建。涉及全局层时需要整课授权，一次事务可撤销。',
-    inputSchema: teacherEnsureInputSchema, manual: { label: '准备教师控制台', group: 'edit', targetKinds: ['course-surface'] } },
+  registerCanonical({ name: 'teacher.ensure', description: '为已观察演示页准备全局控制台；复用已有控制台，否则使用人工插入默认、共享层和软件身份创建。涉及全局层时需要整课授权，一次事务可撤销。',
+    inputSchema: teacherEnsureInputSchema, manual: { label: '准备全局控制台', group: 'edit', targetKinds: ['course-surface'] } },
   { capability: 'write', effect: 'document-edit', family: 'navigation', supports: context => hasRunWrite(context, ['course-surface'], 'course-v10'), targets: handleToolTarget,
     handler: (context, input) => context.mutate({ name: 'teacher.ensure', input }) }),
 ] as const

@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { componentSurfaces } from '../../src/shared/contracts/component-platform/project'
+import { componentDefinitionBuiltinKey, componentSurfaces } from '../../src/shared/contracts/component-platform/project'
 import { testContainerInstance } from '../helpers/glxWorkFixture'
 import { promises as fs } from 'node:fs'
 import os from 'node:os'
@@ -23,7 +23,7 @@ import { HtmlImportDesktopService } from '../../src/main/workbench/htmlImport/Ht
 import { chromium } from 'playwright'
 import { buildPublishedCourseV3 } from '../../src/core/publish/componentPlatform/buildPublishedCourseV3'
 import { resolveWebResourceBindings } from '../../src/components/web/resources'
-import { authoredDocumentBootstrap, installAuthoredDocumentPrograms } from '../../src/components/web/authoredDocumentBootstrap'
+import { authoredDocumentBootstrap, authoredDocumentProgramsSource } from '../../src/components/web/authoredDocumentBootstrap'
 import { webDataSchema } from '../../src/components/web/data'
 
 // The disposable measurement window is unrelated to source capture, pagination
@@ -66,8 +66,11 @@ async function fixture(html: string) {
   return { root, host, sourcePath, ports, children, context: { callId: 'create', permission: 'workspace' as const, assertActive() {} } }
 }
 
-it('continues an acknowledged V10 import without replay and keeps rejected saves and unknown import outcomes honest', async () => {
-  const f = await fixture('<p>恢复导入正文</p>')
+it.each([
+  ['fragment surface', '<p>恢复导入正文</p>'],
+  ['responsive program entry', '<!doctype html><html><body><button onclick="this.textContent=\'changed\'">恢复导入正文</button></body></html>'],
+])('continues an acknowledged %s import without replay and keeps rejected saves and unknown import outcomes honest', async (_kind, html) => {
+  const f = await fixture(html)
   const execute = f.ports.executeChild
   let loseAck = true
   const tracked = vi.fn<CreateCourseFromHtmlPorts['executeChild']>(async (id, call) => {
@@ -229,15 +232,20 @@ it('creates independent host pages from current unsaved HTML, saves/reopens and 
   expect(manualHtml).toContain('当前未落盘第一课'); expect(manualHtml).not.toContain('旧第一课')
 })
 
-it('retains one coupled program and accepts ordinary content into its explicitly empty surface', async () => {
+it('retains a full coupled program as the responsive work entry and accepts ordinary content into an explicitly empty surface', async () => {
   const html = '<!doctype html><html><body><main><section><h1>A</h1></section><section><h1>B</h1></section></main><script>window.shared={count:0};document.querySelector("h1").onclick=()=>++window.shared.count</script></body></html>'
   const f = await fixture(html)
   const result = await createCourseFromHtml({ sourcePath: f.sourcePath }, f.context, f.ports)
   const value = (result as { data: { path: string } }).data
   const reopened = await f.host.open(value.path)
   if (reopened.model.kind !== 'course-v10') throw new Error('Expected current course format')
-  expect(componentSurfaces(reopened.model.project)).toHaveLength(1)
-  const content = componentSurfaces(reopened.model.project)[0]!.childIds.map(id => reopened.model.kind === 'course-v10' ? (reopened.model.project.instances[id]!.data as { html: string }).html : '').join('')
+  expect(componentSurfaces(reopened.model.project)).toHaveLength(0)
+  expect(reopened.model.project.rootIds).toHaveLength(1)
+  expect(reopened.model.project.entry).toEqual({ rootInstanceId: reopened.model.project.rootIds[0] })
+  const program = reopened.model.project.instances[reopened.model.project.rootIds[0]!]!
+  expect(componentDefinitionBuiltinKey(reopened.model.project.definitions[program.definitionId])).toBe('guoling.html-program')
+  const content = (program.data as { html: string }).html
+  expect(content).toBe(html)
   expect(content.match(/window.shared=\{count:0\}/g)).toHaveLength(1)
   const blank = await f.host.registry.create({ kind: 'course-v10', project: createBlankCourseProjectV10(), resources: { assets: {}, components: {} } }, 'blank.h5lesson')
   await f.host.tools.attachRunDocument('import', blank.documentId, true)
@@ -252,6 +260,21 @@ it('retains one coupled program and accepts ordinary content into its explicitly
     source: { kind: 'html', html: '<p>无需模型补身份的第一段</p>' },
   })
   expect(file).toBeTruthy(); expect(applied.commit).toBe('committed'); expect(applied.insertedIds.length).toBeGreaterThan(0)
+})
+
+it('keeps a dynamic HTML fragment inside the existing Slide instead of promoting it to a work entry', async () => {
+  const html = '<button onclick="this.textContent=\'changed\'">片段互动</button>'
+  const f = await fixture(html)
+  const result = await createCourseFromHtml({ sourcePath: f.sourcePath }, f.context, f.ports)
+  expect(result).toMatchObject({ kind: 'read', data: { saved: true } })
+  const reopened = await new DocumentHostService(path.join(f.root, 'fragment-reopened')).open((result as { data: { path: string } }).data.path)
+  if (reopened.model.kind !== 'course-v10') throw new Error('Expected current course format')
+  const surfaces = componentSurfaces(reopened.model.project)
+  expect(surfaces).toHaveLength(1)
+  expect(surfaces[0]!.kind).toBe('slide')
+  const child = reopened.model.project.instances[surfaces[0]!.childIds[0]!]!
+  expect((child.data as { html: string }).html).toBe(html)
+  expect(reopened.model.project.rootIds).not.toContain(child.id)
 })
 
 it('passes CSS from siblings into the existing source owner/compiler/cache without corrupting image bytes', async () => {
@@ -299,7 +322,8 @@ it('adopts HTML author records into the single H5 consumer with image override r
   expect(result).toMatchObject({ kind: 'read', data: { saved: true } })
   const reopened = await new DocumentHostService(path.join(f.root, 'authored-reopened')).open((result as { data: { path: string } }).data.path)
   if (reopened.model.kind !== 'course-v10') throw new Error('Expected current course format')
-  const instance = reopened.model.project.instances[componentSurfaces(reopened.model.project)[0]!.childIds[0]!]!
+  const instance = reopened.model.project.instances[reopened.model.project.entry!.rootInstanceId]!
+  expect(componentDefinitionBuiltinKey(reopened.model.project.definitions[instance.definitionId])).toBe('guoling.html-program')
   const data = instance.data as { html: string; resourceBindings: Record<string, string> }
   const imported = instance.authoring!.records!
   expect(data.html).not.toContain('cw-html-authoring-consumer'); expect(data.html).not.toContain('cw-html-authoring-records')
@@ -345,7 +369,8 @@ it('runs saved nested iframe/srcdoc modules, CSS and images through the real nat
   const compilation = new InMemoryComponentCompilation(createEsbuildComponentCompiler())
   const published = await buildPublishedCourseV3({ project: reopened.model.project, assetBytes: reopened.model.resources.assets }, { compilation })
   expect(published.diagnostics).toEqual([])
-  const instance = published.payload.instances[componentSurfaces(published.payload)[0]!.childIds[0]!]!
+  const instance = published.payload.instances[published.payload.entry!.rootInstanceId]!
+  expect(componentDefinitionBuiltinKey(published.payload.definitions[instance.definitionId])).toBe('guoling.html-program')
   const resources = Object.fromEntries(Object.entries(reopened.model.resources.assets).map(([id, bytes]) => [id,
     `data:${reopened.model.kind === 'course-v10' ? reopened.model.project.assets[id]!.mimeType : ''};base64,${Buffer.from(bytes).toString('base64')}`]))
   const projected = resolveWebResourceBindings(instance, id => resources[id])
@@ -355,7 +380,7 @@ it('runs saved nested iframe/srcdoc modules, CSS and images through the real nat
     entries: z.record(z.string(), z.string()),
   }).optional() }).parse(projected.data)
   const source = authoredDocumentBootstrap(runtimeData, { instanceId: instance.id, nonce: 'nested-test', resources,
-    bridge: programs => `(${installAuthoredDocumentPrograms.toString()})(${JSON.stringify(programs)})` })
+    bridge: authoredDocumentProgramsSource })
   const browser = await chromium.launch({ headless: true, executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH })
   try {
     const page = await browser.newPage()

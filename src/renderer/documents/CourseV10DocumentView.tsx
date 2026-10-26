@@ -1,7 +1,7 @@
 import { allDocumentTextSlots, inlineComponentIds, documentInlineChildIds } from '../../shared/document/textInteraction'
 import { useCallback, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { componentSurface, componentSurfaces, isComponentVisibleAtSurface, type ComponentInstance, type CourseProjectV10 } from '../../shared/contracts/component-platform/project'
-import { componentPaintStyle } from '../../player/components/componentPlacementStyle'
+import { componentPaintStyle } from '../../shared/componentPaintStyle'
 import { resolveComponentOuterPresentation } from '../../shared/componentPresentation'
 import { ImageSafeAreaGuides } from '../ui/workspaces/ImageSafeAreaGuides'
 import type { CourseInteractionSelection } from './interactionSelection'

@@ -1,6 +1,7 @@
 import { expect, it } from 'vitest'
 import { componentLayoutInput, isMeasuredWebFragmentBox } from '../../src/components/web/measuredFragmentBox'
-import { applyComponentPaintStyle, componentPaintStyle } from '../../src/player/components/componentPlacementStyle'
+import { componentPaintStyle } from '../../src/shared/componentPaintStyle'
+import { applyComponentPaintStyle } from '../../src/player/components/componentPlacementStyle'
 import type { ComponentDefinition, ComponentInstance } from '../../src/shared/contracts/component-platform'
 
 const definition: ComponentDefinition = {

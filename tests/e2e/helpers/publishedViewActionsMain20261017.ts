@@ -40,6 +40,13 @@ export default { document: 'web', mount({ root }) {
 } };` } }
   project.instances.lab = { id: 'lab', definitionId: 'lab', data: {}, frame: { width: 730, height: 430, transform: [1, 0, 0, 1, 25, 25] } }
   testContainerInstance(project, 0).childIds = ['lab']
+  project.definitions.secondMarker = { id: 'secondMarker', role: 'content', implementation: { kind: 'source', language: 'javascript', source: `
+export default { document: 'web', mount({root}) {
+  root.innerHTML='<h1>Second page active</h1><span aria-label="Second page paint" style="display:block;width:64px;height:64px;background:#0000ff"></span>';
+  return {update(){},dispose(){root.replaceChildren()}};
+}};` } }
+  project.instances.secondMarker = { id: 'secondMarker', definitionId: 'secondMarker', data: {}, frame: { width: 360, height: 180, transform: [1, 0, 0, 1, 25, 25] } }
+  testContainerInstance(project, 1).childIds = ['secondMarker']
   const snapshot: ViewObservationSnapshot = { documentId: 'fixture', epoch: 'fixture-epoch', revision: 0,
     model: { kind: 'course-v10', project, resources: { assets: {}, components: {} } }, binding: { kind: 'untitled', suggestedName: 'fixture.h5lesson' },
     dirty: true, saving: false, recoverable: true, undoDepth: 0, redoDepth: 0 }
@@ -62,9 +69,10 @@ export default { document: 'web', mount({ root }) {
     await fs.writeFile(filename, (await actions.readResource('fixture-run', observation.image.resourceId)).bytes)
     return filename
   }
-  const paintedColor = async (observation: PublishedActionObservation) => {
+  const paintedColor = async (observation: PublishedActionObservation, label = 'Paint state') => {
     const painted = nativeImage.createFromBuffer(Buffer.from((await actions.readResource('fixture-run', observation.image.resourceId)).bytes))
-    const swatch = observation.elements.find(element => element.tag === 'span' && element.label === 'Paint state')!
+    const swatch = observation.elements.find(element => element.tag === 'span' && element.label === label)
+    if (!swatch) return []
     const size = painted.getSize(), scale = size.width / observation.observationScope!.viewport!.width
     const pixel = (Math.floor((swatch.rect.y + swatch.rect.height / 2) * scale) * size.width
       + Math.floor((swatch.rect.x + swatch.rect.width / 2) * scale)) * 4
@@ -94,6 +102,21 @@ export default { document: 'web', mount({ root }) {
     const second = await actions.observePublished('fixture-run', target('second'))
     trace({ type: 'observe.second.end' })
     const secondViewport = await viewport(second)
+    const secondImage = await save('second.png', second)
+    const secondMarkerVisible = second.elements.some(element => element.label === 'Second page paint')
+    const firstControlsHidden = state(second) === undefined && !second.elements.some(element => ['Add', 'Answer', 'Power'].includes(element.label))
+    const secondColor = await paintedColor(second, 'Second page paint')
+    const secondPaintedBlue = secondColor[0] === 255 && secondColor[1] === 0 && secondColor[2] === 0 && secondColor[3] === 255
+    type SurfaceRect = { display: string; x: number; y: number; width: number; height: number; parentTop: number }
+    const surfaceLayout = await BrowserWindow.getAllWindows().find(window => !window.isDestroyed())!.webContents.mainFrame.executeJavaScript(`(() => {
+      const read=id=>{const element=document.querySelector('[data-component-surface="'+id+'"]');if(!element)return null;
+        const rect=element.getBoundingClientRect();return {display:getComputedStyle(element).display,x:rect.x,y:rect.y,width:rect.width,height:rect.height,parentTop:element.parentElement.getBoundingClientRect().top};};
+      return {first:read('first'),second:read('second')};
+    })()`) as Record<'first' | 'second', SurfaceRect | null>
+    const firstSurfaceOutOfLayout = surfaceLayout.first?.display === 'none' && surfaceLayout.first.width === 0 && surfaceLayout.first.height === 0
+    const secondSurfaceInViewport = !!surfaceLayout.second && surfaceLayout.second.display !== 'none' && surfaceLayout.second.width > 0
+      && Math.abs(surfaceLayout.second.y - surfaceLayout.second.parentTop) <= 1
+    const knownFrameOwners = !second.observationScope?.frames.some(frame => frame.reason === 'owner-unavailable')
     const returned = await actions.observePublished('fixture-run', target())
     trace({ type: 'observe.returned.end' })
     const returnedViewport = await viewport(returned)
@@ -117,6 +140,7 @@ export default { document: 'web', mount({ root }) {
     try { await actions.observePublished('fixture-run', target()) } catch { stopRejected = true }
     return { source: first.source, first: state(first), clicked: state(clicked), adjusted: state(adjusted), returned: state(returned), reopened: state(reopened),
       secondLocation: second.identity.locationId, returnedLocation: returned.identity.locationId,
+      secondMarkerVisible, firstControlsHidden, secondPaintedBlue, secondColor, surfaceLayout, firstSurfaceOutOfLayout, secondSurfaceInViewport, knownFrameOwners,
       sameWorker, oneWindowForPages, paintedPower7, paintedColor: color, returnedPaintedPower7, returnedColor,
       firstImage: first.coverage, secondImage: second.coverage, returnedImageSize: returned.coverage,
       viewports: { first: firstViewport, second: secondViewport, returned: returnedViewport },
@@ -127,7 +151,7 @@ export default { document: 'web', mount({ root }) {
         .flatMap(observation => observation.observationScope?.frames.map(frame => frame.url) ?? []),
       closedTargetRejected, spentRejected, stopRejected, emptyFrameSkipped, windowsRestored: BrowserWindow.getAllWindows().length === baselineWindows,
       document: { revision: snapshot.revision, undoDepth: snapshot.undoDepth, data: snapshot.model.project.instances.lab.data },
-      screenshots: { beforeImage, afterImage, returnedImage } }
+      screenshots: { beforeImage, afterImage, secondImage, returnedImage } }
   } catch (error) {
     const windows = await Promise.all(BrowserWindow.getAllWindows().map(async window => {
       const focused = window.webContents.focusedFrame

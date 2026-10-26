@@ -11,7 +11,7 @@ import type { SlideContentEdit, SlideContentLayoutReady } from '../../store/slic
 import { NativeSelectionContext } from '../../workbench/NativeSelectionContext'
 import { useContextMenu } from '../../editing/commands/CommandMenu'
 import { AUTHOR_FIELD_ACTION_EVENT, OBJECT_EDIT_EVENT, requestImageEdit, requestObjectContextMenu, requestObjectEdit, type AuthorFieldActionRequest } from '../../editing/commands/objectContextMenu'
-import { componentPaintStyle } from '../../../player/components/componentPlacementStyle'
+import { componentPaintStyle } from '../../../shared/componentPaintStyle'
 import { componentIsLocked } from '../../composition/crossSurfaceCommands'
 import { componentDefinitionPresentation } from '../properties/componentDefinitionPresentation'
 import { frameContainsPoint, frameCorners, frameToSpaceMatrix, invertMatrix, multiplyMatrices, transformPoint, type AffineMatrix, type GeometryPoint } from '../../../core/components/geometry'

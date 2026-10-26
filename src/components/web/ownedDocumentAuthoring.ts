@@ -238,6 +238,8 @@ export function installOwnedDocumentAuthoring(token: string, documentPath: strin
   type Child = { reports: OwnedAuthorReport[]; width: number; height: number }
   const frameFacts = frameFactory()
   let state: State = { records: {}, resources: {}, bindings: {}, observe: options.observe === true }
+  // Until the owner supplies a state, parser-projected resource identities remain authoritative.
+  let stateReady = false
   const resourceUrls = () => options.runtimeResources?.(state.resources) ?? state.resources
   let ended = false, queued = false, consumer: ReturnType<typeof factory> | undefined, sequence = 0
   let selectingText: { node: Node; authorKey: string; anchor: number } | undefined
@@ -344,6 +346,7 @@ export function installOwnedDocumentAuthoring(token: string, documentPath: strin
     queued = true; queueMicrotask(() => { queued = false; publish() })
   }
   const sendState = (frame: HTMLIFrameElement) => {
+    if (!stateReady) return
     post(frame, { type: 'guoling.authoring.update', state })
     // Fragment carriers have no root parser bridge. Child parser bridges keep
     // this activity and propagate it through their existing load lifecycle.
@@ -352,14 +355,17 @@ export function installOwnedDocumentAuthoring(token: string, documentPath: strin
   }
   const update = () => {
     if (ended) return
-    if (!documentPath) state = { records: options.records?.() ?? {}, resources: options.resources?.() ?? {}, bindings: options.bindings?.() ?? {}, observe: options.observe === true }
+    if (!documentPath) {
+      state = { records: options.records?.() ?? {}, resources: options.resources?.() ?? {}, bindings: options.bindings?.() ?? {}, observe: options.observe === true }
+      stateReady = true
+    }
     if (initialPendingPath) {
       const anchoredPath = initialPendingPath.replace(/(^|\/)pending:\d+:([^/]+)/g, '$1key:$2')
       documentPath = Object.values(state.records).some(record => record.scope?.['document:path'] === anchoredPath
         || record.scope?.['document:path']?.startsWith(anchoredPath + '/')) ? anchoredPath : initialPendingPath
       if (scope) scope['document:path'] = documentPath
     }
-    if (documentPath) options.refreshResources?.(document, resourceUrls(), state.bindings)
+    if (documentPath && stateReady) options.refreshResources?.(document, resourceUrls(), state.bindings)
     consumer?.refresh()
     for (const frame of frames()) sendState(frame)
     enqueue()
@@ -405,7 +411,7 @@ export function installOwnedDocumentAuthoring(token: string, documentPath: strin
     if (ended || data?.token !== token) return
     if (documentPath && event.source === parent) {
       if (options.channel && data.channel !== options.channel) return
-      if (data.type === 'guoling.authoring.update' && data.state) { state = data.state; update() }
+      if (data.type === 'guoling.authoring.update' && data.state) { state = data.state; stateReady = true; update() }
       else if (data.type === 'guoling.authoring.hit') void hit(Number(data.x), Number(data.y)).then(authorKey => {
         if (!ended) parentMessage({ type: 'guoling.authoring.hit-result', requestId: data.requestId, authorKey })
       })

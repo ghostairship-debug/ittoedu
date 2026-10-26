@@ -158,6 +158,50 @@ it('retains the same nested world and restores its target when the container bec
   expect(targets.get('a')?.hidden).toBe(false)
 })
 
+it('clears navigation hiding when a retained work root becomes a nested container', () => {
+  const current = project({
+    first: { id: 'first', definitionId: 'container', data: {}, childIds: [], container: { kind: 'slide', designSize: { width: 960, height: 540 } } },
+    second: { id: 'second', definitionId: 'container', data: {}, childIds: ['counter'], frame: frame(320, 180), container: { kind: 'slide', designSize: { width: 320, height: 180 } } },
+    counter: { id: 'counter', definitionId: 'program', data: {}, frame: frame(160, 80) },
+  }, ['first', 'second'])
+  const { root, projection, bound, runtime } = mount(model(current))
+  expect(projection.revealSurface('second')).toBe(true)
+  const secondSurface = root.querySelector<HTMLElement>('[data-component-container="second"]')!
+  const childContent = bound.get('counter')!
+  // Runtime owns this live content. Placement changes must leave it intact.
+  const button = document.createElement('button')
+  let count = 0
+  button.textContent = 'Count 0'
+  button.addEventListener('click', () => { button.textContent = 'Count ' + ++count })
+  childContent.append(button)
+  button.click()
+  expect(button.textContent).toBe('Count 1')
+  expect(projection.revealSurface('first')).toBe(true)
+  expect(getComputedStyle(secondSurface).display).toBe('none')
+
+  const nested = structuredClone(current)
+  nested.rootIds = ['first']
+  nested.instances.first!.childIds = ['second']
+  projection.sync(model(nested))
+  projection.sync(model(nested))
+
+  const firstSurface = root.querySelector<HTMLElement>('[data-component-container="first"]')!
+  expect(root.querySelectorAll('[data-component-container="second"]')).toHaveLength(1)
+  expect(root.querySelector('[data-component-container="second"]')).toBe(secondSurface)
+  expect(firstSurface.contains(secondSurface)).toBe(true)
+  for (let element: HTMLElement | null = secondSurface; element && element !== root; element = element.parentElement) {
+    expect(element.hidden).toBe(false)
+    expect(getComputedStyle(element).display).not.toBe('none')
+  }
+  expect(bound.get('counter')).toBe(childContent)
+  expect(childContent.querySelector('button')).toBe(button)
+  expect(button.isConnected).toBe(true)
+  expect(button.textContent).toBe('Count 1')
+  button.click()
+  expect(button.textContent).toBe('Count 2')
+  expect(runtime.bind.mock.calls.filter(([id, element]) => id === 'counter' && element)).toHaveLength(1)
+})
+
 it('commits one effective native data and frame projection to DOM and World for each container state', async () => {
   const value = mixed(), source = model(value)
   value.definitions.text = { ...TEXT_DEFINITION, id: 'text' }

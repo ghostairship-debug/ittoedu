@@ -169,3 +169,25 @@ it('projects content-only tool arguments using the host frozen default without a
   const changed = new StreamingEditArguments({ toolCallId: 'call-1', toolName: 'text.replace', defaultTarget: 'original-target' })
   rejects(() => changed.push(0, '{"target":"another-target","content":"错写"}'), 'target-changed')
 })
+
+it('accepts an explicit alias only through the host comparison, retaining the actual model handle and fixed target guard', () => {
+  const comparisons: string[][] = []
+  const sameTarget = (original: string, candidate: string) => {
+    comparisons.push([original, candidate])
+    return original === 'frozen-target' && candidate === 'read-target'
+  }
+  const identity = { toolCallId: 'call-1', toolName: 'text.replace' as const, defaultTarget: 'frozen-target' }
+  const raw = '{"content":"当前稿补充","target":"read-target"}'
+  const stream = new StreamingEditArguments(identity, 0, sameTarget)
+  expect(stream.push(0, '{"content":"当前稿')).toEqual({ target: 'frozen-target', content: '当前稿', complete: false })
+  expect(stream.push(1, '补充","target":"read-target"}')).toEqual({ target: 'read-target', content: '当前稿补充', complete: true })
+  expect(stream.finish(raw)).toEqual({ target: 'read-target', content: '当前稿补充' })
+  expect(comparisons).toEqual([['frozen-target', 'read-target']])
+  const finalOnly = new StreamingEditArguments(identity, 0, sameTarget)
+  expect(finalOnly.finish(raw)).toEqual({ target: 'read-target', content: '当前稿补充' })
+  const changed = new StreamingEditArguments(identity, 0, sameTarget)
+  changed.push(0, '{"target":"read-target","content":"当前稿')
+  rejects(() => changed.snapshot(2, '{"target":"neighbor-target","content":"错写"}'), 'target-changed')
+  const invalidFinal = new StreamingEditArguments(identity, 0, sameTarget)
+  rejects(() => invalidFinal.finish('{"target":"neighbor-target","content":"错写"}'), 'target-changed')
+})

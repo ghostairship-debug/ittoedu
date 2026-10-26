@@ -2195,6 +2195,12 @@ export class ExecutionEngine {
     return true
   }
 
+  private editArguments(active: ActiveRun, toolCallId: string): StreamingEditArguments {
+    return new StreamingEditArguments({ toolCallId, toolName: 'text.replace',
+      ...(active.contentOutput ? { defaultTarget: active.contentOutput.targetHandle } : {}) }, 0,
+    active.contentOutput ? (original, candidate) => this.options.gateway.sameEditTarget(active.record.runId, original, candidate) : undefined)
+  }
+
   private async preview(active: ActiveRun, requestId: string, event: Extract<ModelEvent, { type: 'tool.delta' }>): Promise<void> {
     const stream: StreamingCall = active.streams.get(event.index) ?? { callId: `${requestId}:${event.index}`, raw: '', sequence: 0, progressCount: 0, seenDeltas: new Map(), editing: false }
     active.streams.set(event.index, stream)
@@ -2230,7 +2236,7 @@ export class ExecutionEngine {
     try {
       let decoded: ReturnType<StreamingEditArguments['push']>
       if (!stream.parser) {
-        stream.parser = new StreamingEditArguments({ toolCallId: stream.callId, toolName: 'text.replace', ...(active.contentOutput ? { defaultTarget: active.contentOutput.targetHandle } : {}) })
+        stream.parser = this.editArguments(active, stream.callId)
         // The tool name can arrive after its first argument fragments. Initialize
         // once with the accumulated prefix, then feed only newly received units.
         decoded = stream.parser.snapshot(stream.sequence++, stream.raw)
@@ -3319,7 +3325,7 @@ export class ExecutionEngine {
             if (streamed?.id && streamed.id !== call.id || streamed?.name && streamed.name !== call.name) throw new Error('完整调用与已展示的编辑身份不同')
             if (invalid) throw new Error(invalid)
             input = call.name === 'text.replace'
-              ? (streamed?.parser ?? new StreamingEditArguments({ toolCallId: callId, toolName: 'text.replace', ...(active.contentOutput ? { defaultTarget: active.contentOutput.targetHandle } : {}) })).finish(call.argumentsText)
+              ? (streamed?.parser ?? this.editArguments(active, callId)).finish(call.argumentsText)
               : JSON.parse(call.argumentsText)
           } catch (error) { invalid = error instanceof Error ? error.message : '工具参数无效'; input = null }
           return { callId, providerCallId: call.id, requestId, call: { name: call.name, input }, state: invalid ? 'returned' : 'pending',

@@ -1,5 +1,5 @@
 {
-  "description": "query 检索与组件库面板相同的 Component API 5 条目，返回 packageId/版本/来源/信任；或传已找到的 packageId 与可选 version，读取该条目的真实 rootIds、对象子树、页面及可改输入，用于选择全部或子集。两种输入择一；asset.use插入，不自行猜对象身份或裁剪任意程序内部视图。",
+  "description": "query 按用途检索同源内置元素、互动配方、作品资产、当前可读工程实例和组件目录，entries 返回来源、真实动作及限制。基础元素用 object.insert，配方用 surface.recipe，库条目用 asset.use；工程复用需选择现有来源再复制。旧 HTML 如实标不可插入。或传已找到的 packageId、可选 version/sourceId，读取真实 rootIds、对象子树、页面、适用条件及可改输入。内置查询不依赖资产目录服务，真实目录读取沿当前授权。",
   "inputSchema": {
     "$schema": "https://json-schema.org/draft/2020-12/schema",
     "anyOf": [
@@ -25,6 +25,10 @@
         "additionalProperties": false,
         "properties": {
           "packageId": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "sourceId": {
             "minLength": 1,
             "type": "string"
           },

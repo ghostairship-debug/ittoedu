@@ -71,7 +71,12 @@ import { parse } from 'acorn'
 
 export type JsNode = { type: string; start: number; end: number; [key: string]: unknown }
 export function children(node: JsNode): JsNode[] {
-  return Object.values(node).flatMap(value => Array.isArray(value) ? value.filter(isNode) : isNode(value) ? [value] : [])
+  const result: JsNode[] = []
+  for (const value of Object.values(node)) {
+    if (Array.isArray(value)) { for (const child of value) if (isNode(child)) result.push(child) }
+    else if (isNode(value)) result.push(value)
+  }
+  return result
 }
 function isNode(value: unknown): value is JsNode { return !!value && typeof value === 'object' && typeof (value as JsNode).type === 'string' }
 export function propertyName(node: JsNode): string | undefined {

@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "semanticVersion": "fcd1d86f7978fc31dd55917ee686f73675c02cadbcb62a892ef38f8cc4179f9a",
+  "semanticVersion": "bf5acd4c92d1d6386a411e324941368cc24a052a681936d174cbe87739dc5785",
   "entries": [
     {
       "id": "artifact.save",
@@ -115,7 +115,7 @@
       "carriers": [
         "component"
       ],
-      "summary": "query 检索与组件库面板相同的 Component API 5 条目，返回 packageId/版本/来源/信任；或传已找到的 packageId 与可选 version，读取该条目的真实 rootIds、对象子树、页面及可改输入，用于选择全部或子集。两种输入择一；asset.use插入，不自行猜对象身份或裁剪任意程序内部视图。"
+      "summary": "query 按用途检索同源内置元素、互动配方、作品资产、当前可读工程实例和组件目录，entries 返回来源、真实动作及限制。基础元素用 object.insert，配方用 surface.recipe，库条目用 asset.use；工程复用需选择现有来源再复制。旧 HTML 如实标不可插入。或传已找到的 packageId、可选 version/sourceId，读取真实 rootIds、对象子树、页面、适用条件及可改输入。内置查询不依赖资产目录服务，真实目录读取沿当前授权。"
     },
     {
       "id": "asset.update",
@@ -308,6 +308,29 @@
         "component"
       ],
       "summary": "修改整课名称、背景、设计主题参数或播放与翻页笔设置。target 使用整文档句柄，settings 只更改提供的字段；背景和播放可用 null 恢复默认。人工设置与此工具使用同一语义规划和一次可撤销事务。"
+    },
+    {
+      "id": "course.createFromHtml",
+      "kind": "tool",
+      "label": "course.createFromHtml",
+      "path": "tools/course.createFromHtml.json",
+      "scopes": [
+        "slide:surface",
+        "slide:global",
+        "slide:instance",
+        "flow:surface",
+        "flow:global",
+        "flow:instance",
+        "spatial:surface",
+        "spatial:global",
+        "spatial:instance",
+        "program:global",
+        "program:instance"
+      ],
+      "carriers": [
+        "component"
+      ],
+      "summary": "从已有 HTML 文件创建可编辑作品并保存。只提供源文件路径和可选作品名、目标文件夹；软件负责新建、保真导入、保存及恢复，不需已有课件或内部句柄。"
     },
     {
       "id": "course.importPptx",
@@ -1733,7 +1756,7 @@
       "carriers": [
         "component"
       ],
-      "summary": "向已观察页面或容器的目标句柄插入文字、公式、图形、表格、图表或填空；也可提供 project.list/read 返回的已观察页面 path（project可选），target也接受该页面路径。提供类型、正文及所需位置尺寸，可用 appearance 同次设置文字/公式/图形/表格/图表的初始专业外观，语义同 object.update；省略时保留人工插入默认，input 当前不支持 appearance。可用 click:{action,value} 同次绑定正式点击规则；location-go 的 value 沿用已观察目的页句柄或路径，scene.next/scene.previous无需value，audio-play 沿用声音引用，无需先取新对象句柄再设置。软件准备容器、专业数据和身份，并续接本任务已回执的同一目标，无需每个对象重新遍历页面。正式事务可撤销。Flow destination=document 为正文，paper 为纸张浮层。"
+      "summary": "向已观察页面或容器插入文字、公式、图形、表格、图表或填空。target用句柄，也可用project.list/read的页面path。软件准备专业默认、身份和正式事务；table/chart接受业务数据，显式width/height保留。index指定同容器顺序，after用已观察整对象句柄，at用Flow已观察正文光标/选区句柄，三者择一；at保留原文并在逻辑末端拆段插入，一次撤销。Flow destination=document为正文，paper为浮层。appearance同object.update，填空暂不支持；click:{action,value}可同次绑定点击规则，目的页/声音用已观察引用。可续接本任务已回执目标，无需逐个遍历页面。"
     },
     {
       "id": "object.layout",
@@ -1756,7 +1779,7 @@
       "carriers": [
         "component"
       ],
-      "summary": "对同页同展示状态的已观察对象做对齐或等距分布。targets 使用对象句柄；软件复用人工世界坐标、父级逆变换与锁定规则，不需计算每个 frame，一次事务可撤销。"
+      "summary": "对同页同展示状态的已观察对象做对齐、等距分布或Flow正文分栏。targets用对象句柄；intent.kind=columns将同一正文父级内对象编入分栏，可用columns按这些句柄分列、ratios设列宽、gap设间距。软件保留对象身份、内容和人工样式，准备布局及正式事务，一次撤销。对齐与分布复用世界坐标、父级逆变换和锁定规则，无需逐个计算frame。"
     },
     {
       "id": "object.place",
@@ -1986,7 +2009,7 @@
       "carriers": [
         "component"
       ],
-      "summary": "修改实际工程路径并交由唯一正式事务提交，可撤销、进恢复稿，不自动存盘。完整程序作品用 path:\"entry.html\",intent:\"program.set\",content 或 from 建立或更新真实 Source 根入口，使用运行视口，保留已有作品根；不要求页表面。后续可沿 entry.html 或返回的 roots 对象文件修改同一实例。已有目标直接使用已知路径；content/from/edits三选一，edits的old须在当前已读源文唯一命中，全部成功才提交。普通content保原对象frame/顺序与邻居；style改结构外观或HTML内CSS。insert向页面或容器结构路径添加普通HTML/CSS/SVG，也接受既有对象草稿JSON {kind:\"objects\",objects:[{definitionId,name?,data,style?,frame?,flowLayout?,viewportPinned?,implementationOverride?,children?}]}：definitionId沿工程已有定义，子实例身份由软件分配；无frame原生guoling.group可用style.display:grid/flex及普通CSS模板/gap，直接子项可用尺寸、margin、gridArea、alignSelf，文字随列宽自然增高；已有素材assetId直接复用。一次插入后沿返回的原生对象路径增量修改。redo明确重做所选范围；可用region给局部视口及父坐标transform，正式frame持有采用结果。operations成批准备同一工程已有路径并一次提交；pages+surface.add支持pages数组及各页首稿，软件分配身份。source/from可直接用计算或子任务成果来源，软件收齐同组依赖与资源。源码/依赖可直接完整读取后修改；实例源码只改实例，共享定义作用全部引用，主Source可用enhance追加普通JS/TS业务模块，具体API按引用读取。project.json仅改作品设置，theme.css改主题，body修改连续正文，spatial.json改空间旅程，container.json修改该实例的容器结构；Flow layout.edgeToEdge:true配widthMode:fluid可由作品原生组自定全宽背景和阅读边距。失败给具体操作/目标/期望形状及局部修复入口，原输入保留；staleSnapshot需读当前稿，unknown先查原操作。成功files保路径/frame/viewport与提交版本；正文不默认回显，短软件入口有content时以complete标识实际全文交付，纯目录不代替正文。普通图文可与同目录iframe/srcdoc局部活动沿from同组采用；正式Next沿对象click动作，局部stage声明见按需布局示例。 project省略时使用本任务当前课件；明确file.create/file.open后接续该课件。显式project可参考或修改另一课，不改变当前课件。"
+      "summary": "修改已读工程路径，由唯一正式事务提交，可撤销并进入恢复稿，不自动存盘。content/from/edits三选一；edits.old须在当前已读源文唯一命中，全部成功才提交。普通content保留原对象frame、顺序及邻居；style改外观/CSS，redo重做明确范围。insert向页面或容器添加HTML/CSS/SVG，或对象草稿JSON {kind:\"objects\",objects:[{definitionId,data,...}或{builtinKey,data?,...}]}；builtinKey支持guoling.text/formula/shape/table/chart/input并由软件提供专业默认，已有definitionId须配data；身份由软件维护。children为子稿，无frame原生group可用grid/flex及普通CSS，文字随列宽增高。完整程序用entry.html + intent:program.set，后续仍沿同一根实例增改；主Source enhance可追加JS/TS模块。operations在同工程成批准备已有路径并一次提交；pages+surface.add支持各页首稿。from可直接采用计算或子任务同组来源，软件收齐依赖、资源和已有assetId；局部region/frame/viewport保人工定位。源码实例覆盖只作用当前实例，共享定义作用全部引用。project.json改作品设置，theme.css改主题，body改连续正文，spatial.json改旅程，container.json改容器；按需读取references中的布局/API示例。成功files给后续路径与提交版本，complete区分实际全文和目录；失败保留输入并给局部修复入口，staleSnapshot重读当前稿，unknown先查原操作。 project省略时使用本任务当前课件；明确file.create/file.open后接续该课件。显式project可参考或修改另一课，不改变当前课件。"
     },
     {
       "id": "project.list",
@@ -2321,6 +2344,30 @@
       "keywords": "# 与任务结果对应的检查"
     },
     {
+      "id": "reference:orchestrate-courseware/creation-method",
+      "kind": "reference",
+      "label": "创作方法与质量判断",
+      "path": "skills/orchestrate-courseware/references/creation-method.md",
+      "scopes": [
+        "slide:surface",
+        "slide:global",
+        "slide:instance",
+        "flow:surface",
+        "flow:global",
+        "flow:instance",
+        "spatial:surface",
+        "spatial:global",
+        "spatial:instance",
+        "program:global",
+        "program:instance"
+      ],
+      "carriers": [
+        "component"
+      ],
+      "summary": "创作方法与质量判断",
+      "keywords": "# 创作方法与质量判断\r ## 整作主线与场景\r ## 内容、动效与推进\r ## 素材和参考复用\r ## 推进与协作\r ## 质量与交付\r"
+    },
+    {
       "id": "reference:orchestrate-courseware/creation-plan",
       "kind": "reference",
       "label": "把整作主线写成观众经历",
@@ -2443,7 +2490,7 @@
     {
       "id": "reference:orchestrate-courseware/teacher-controller",
       "kind": "reference",
-      "label": "教学导航、正式控制与可选教师台",
+      "label": "内容导航、正式控制与可选全局控制台",
       "path": "skills/orchestrate-courseware/references/teacher-controller.md",
       "scopes": [
         "slide:surface",
@@ -2461,8 +2508,8 @@
       "carriers": [
         "component"
       ],
-      "summary": "教学导航、正式控制与可选教师台",
-      "keywords": "# 教学导航、正式控制与可选教师台\r ## 当前实际接口的使用边界\r"
+      "summary": "内容导航、正式控制与可选全局控制台",
+      "keywords": "# 内容导航、正式控制与可选全局控制台\r ## 当前实际接口的使用边界\r"
     },
     {
       "id": "reference:orchestrate-courseware/teaching-design-quality",
@@ -2851,7 +2898,7 @@
     {
       "id": "skill:orchestrate-courseware",
       "kind": "skill",
-      "label": "创作互动演示",
+      "label": "创建与续写正式作品",
       "path": "skills/orchestrate-courseware/SKILL.md",
       "scopes": [
         "slide:surface",
@@ -2869,8 +2916,8 @@
       "carriers": [
         "component"
       ],
-      "summary": "根据主题、材料或目标创作可持续编辑的互动演示；共同设计整作主线、可直接创作的场景稿、视觉与导航，主动补足必要媒体，合理协作并沿同一正式工程完成正文和主要互动，交付完整可用、可继续编辑的首版。未知关键机制按需局部试验；第三方 HTML 导入和已有作品局部修改走对应 Skill。",
-      "keywords": "# 创作互动演示\r"
+      "summary": "使用果铃正式工程创建和续写可编辑作品；说明内容采用、组件与 Runtime 组合、局部修改、保存和交付的已有能力与边界。创作方法、视觉和素材参考按任务需要读取，外来 HTML 导入与已有作品短修改走对应入口。",
+      "keywords": "# 创建与续写正式作品\r"
     },
     {
       "id": "skill:research-and-report",
@@ -2964,7 +3011,7 @@
       "carriers": [
         "component"
       ],
-      "summary": "按需读取随附或已授权用户/工作区 Skill 的 SKILL.md、references/assets/scripts 文本；不执行脚本，读取不扩大权限，也不撤下已有授权能力。skills.list 可刷新目录；拼接同一文件的分页时带返回的 version，该文件变化时重新读取。其他资料变更不使当前文件失效。不自动加载正文。可用 Skill：orchestrate-courseware：根据主题、材料或目标创作可持续编辑的互动演示；共同设计整作主线、可直接创作的场景稿、视觉与导航，主动补足必要媒体，合理协作并沿同一正式工程完成正文和主要互动，交付完整可用、可继续编辑的首版。；build-courseware-project：将已有第三方或外来 HTML 保真导入可编辑课件；适用于 HTML 转课件，不承担新课创作与已有工程续改。；edit-content：修改已有课件、文档或 HTML 的局部文字、图表、布局与互动；保留未选内容、人工调整和既有设计。；office-content：新建或局部修改 Word、Excel、PowerPoint 原格式文件；适用于 DOCX 报告与表格、XLSX 数据与公式、PPTX 幻灯片文字，不用于课件导入或软件代码开发。；research-and-report：多来源研究并创作有可追溯引用的报告，支持材料阅读、网页核实和已有报告续写。；data-and-report：读取数据、受限计算并交付真实图表与报告，保证数值可核查、结果资源实际保存。；workbench-usage：果铃工作台的共享操作指南；在需要理解当前编辑、来源、资源、保存或观察语义时按主题读取，不替代内容方法或实际工具目录。"
+      "summary": "按需读取随附或已授权用户/工作区 Skill 的 SKILL.md、references/assets/scripts 文本；不执行脚本，读取不扩大权限，也不撤下已有授权能力。skills.list 可刷新目录；拼接同一文件的分页时带返回的 version，该文件变化时重新读取。其他资料变更不使当前文件失效。不自动加载正文。可用 Skill：orchestrate-courseware：使用果铃正式工程创建和续写可编辑作品；说明内容采用、组件与 Runtime 组合、局部修改、保存和交付的已有能力与边界。；build-courseware-project：将已有第三方或外来 HTML 保真导入可编辑课件；适用于 HTML 转课件，不承担新课创作与已有工程续改。；edit-content：修改已有课件、文档或 HTML 的局部文字、图表、布局与互动；保留未选内容、人工调整和既有设计。；office-content：新建或局部修改 Word、Excel、PowerPoint 原格式文件；适用于 DOCX 报告与表格、XLSX 数据与公式、PPTX 幻灯片文字，不用于课件导入或软件代码开发。；research-and-report：多来源研究并创作有可追溯引用的报告，支持材料阅读、网页核实和已有报告续写。；data-and-report：读取数据、受限计算并交付真实图表与报告，保证数值可核查、结果资源实际保存。；workbench-usage：果铃工作台的共享操作指南；在需要理解当前编辑、来源、资源、保存或观察语义时按主题读取，不替代内容方法或实际工具目录。"
     },
     {
       "id": "surface.configure",
@@ -3102,7 +3149,7 @@
       "carriers": [
         "component"
       ],
-      "summary": "为已观察演示页准备教师控制台；复用已有控制台，否则使用人工插入默认、共享层和软件身份创建。涉及全局层时需要整课授权，一次事务可撤销。"
+      "summary": "为已观察演示页准备全局控制台；复用已有控制台，否则使用人工插入默认、共享层和软件身份创建。涉及全局层时需要整课授权，一次事务可撤销。"
     },
     {
       "id": "text.format",
@@ -3290,6 +3337,7 @@
     "skills/manifest.json",
     "skills/office-content/SKILL.md",
     "skills/orchestrate-courseware/SKILL.md",
+    "skills/orchestrate-courseware/references/creation-method.md",
     "skills/orchestrate-courseware/references/creation-plan.md",
     "skills/orchestrate-courseware/references/examples/text-evidence.html",
     "skills/orchestrate-courseware/references/examples/variable-relation.html",
@@ -3320,6 +3368,7 @@
     "tools/batch.json",
     "tools/compute.run.json",
     "tools/course.configure.json",
+    "tools/course.createFromHtml.json",
     "tools/course.importPptx.json",
     "tools/course.logic.json",
     "tools/course.media.json",

@@ -1,7 +1,8 @@
 [CmdletBinding()]
 param(
   [string]$SourceRoot,
-  [string]$DestinationRoot
+  [string]$DestinationRoot,
+  [switch]$Uninstall
 )
 
 Set-StrictMode -Version Latest
@@ -37,6 +38,13 @@ $retiredSkillNames = @(
   'build-project-v7-courseware',
   'build-project-v8-courseware'
 )
+# Reuse the existing signed, transactional retirement path for explicit cleanup.
+# Normal startup never invokes this script; explicit installation remains supported.
+$managedSkillNames = @($currentSkillNames) + @($retiredSkillNames)
+if ($Uninstall) {
+  $retiredSkillNames = $managedSkillNames
+  $currentSkillNames = @()
+}
 $manifestFileName = '.ittoedu-courseware-editor-managed-skills.json'
 $sourceId = 'ittoedu-courseware-editor'
 
@@ -408,7 +416,8 @@ function Assert-ValidTransactionJournal {
         throw "Install transaction has an invalid old tree signature: $name"
       }
     } elseif ($kind -eq 'retire') {
-      if ($retiredSkillNames -notcontains $name -or -not (Test-ValidTreeSignature -Value $oldSignature)) {
+      # Recovery may follow an interrupted explicit cleanup with a normal install.
+      if ($managedSkillNames -notcontains $name -or -not (Test-ValidTreeSignature -Value $oldSignature)) {
         throw "Retire transaction has an invalid Skill or tree signature: $name"
       }
     } else {
