@@ -8,4 +8,4 @@
 
 检查范围服从交付目标：初稿复用宿主机械检查与保存重开；用户要求完整互动检查时，验证其真实主路径与必要恢复；局部修订只检查受影响范围。控制器是否隐藏不再作为普通演示初稿的完成门。
 
-自主学习确需状态时，按正式能力使用 `course-state.exists` / `course-state.compare` 和同步 `course-state.set`。已声明状态有默认值，不要把 `exists` 误当“已完成”；条件使用实际比较。目标 Surface 没有通用作者命令时使用受支持的 Component／Runtime，或说明具体缺口，不直接改 document 绕过正式命令。
+自主学习确需状态时，状态声明走 `course.logic`；`course-state.exists` / `course-state.compare` 是 `interaction.update` 输入 `change.rule.conditions` 中的条件 `type`，`course-state.set` 是 `change.rule.actions` 内步骤的 `action.type`，它们不是工具名或 `change.kind`。已声明状态有默认值，不要把 `exists` 误当“已完成”；条件使用实际比较。规则完整字段沿当前工具定义和已读实例，不凭这些类型名猜结构。目标 Surface 没有通用作者命令时使用受支持的 Component／Runtime，或说明具体缺口，不直接改 document 绕过正式命令。

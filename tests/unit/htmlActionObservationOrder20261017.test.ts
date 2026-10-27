@@ -11,6 +11,50 @@ import { HtmlActionDesktopPort } from '../../src/main/workbench/observation/Html
 
 beforeEach(() => { current.painted = false; current.order = [] })
 
+it.each(['root-ready', 'dom-root', 'capture'] as const)('bounds a stalled %s and does not resume it after a later observation', async stage => {
+  let blocked = true, release!: (value?: unknown) => void, captures = 0
+  const pending = new Promise<unknown>(resolve => { release = resolve })
+  const state = { url: 'courseware-editor://app/observation.html', title: 'current', readyState: 'complete',
+    pageIndex: 0, pageCount: 1, viewport: { width: 640, height: 480 }, structure: [], diagnostics: [], elements: [] }
+  const frame = { processId: 1, frameToken: 'root', url: state.url, detached: false,
+    isDestroyed: () => false, frames: [], framesInSubtree: [], async executeJavaScript(script: string) {
+      if (script === '({width:innerWidth,height:innerHeight})') return { width: 640, height: 480 }
+      if (script.includes('"type":"observe"')) return blocked && stage === 'dom-root' ? pending : structuredClone(state)
+      if (blocked && stage === 'root-ready') return pending
+      return undefined
+    } }
+  const bitmap = { getSize: () => ({ width: 640, height: 480 }), isEmpty: () => false, toPNG: () => new Uint8Array([1]) }
+  current.contents = { mainFrame: frame, isDestroyed: () => false, capturePage: async () => {
+    captures++
+    return blocked && stage === 'capture' ? pending : bitmap
+  } }
+  const context: PublishedActionAutomationContext = { kind: 'published', runId: 'run', webContentsId: 1,
+    frameProcessId: 1, frameToken: 'root', url: frame.url,
+    identity: { documentId: 'doc', epoch: 'epoch', revision: 1, projectId: 'project', locationId: 'page', stateId: null, viewGeneration: 'view' } }
+  const port = new HtmlActionDesktopPort(40)
+  await expect(port.observeAndCapture(context, 'root')).rejects.toMatchObject({ code: 'observation-timeout', observationStage: stage })
+  blocked = false
+  expect((await port.observeAndCapture(context, 'root')).state.title).toBe('current')
+  const count = captures
+  release(stage === 'capture' ? bitmap : stage === 'dom-root' ? structuredClone(state) : undefined)
+  await Promise.resolve(); await Promise.resolve()
+  expect(captures).toBe(count)
+})
+
+it('aborts an in-flight root readiness wait without waiting for its browser acknowledgement', async () => {
+  const frame = { processId: 1, frameToken: 'root', url: 'courseware-editor://app/observation.html', detached: false,
+    isDestroyed: () => false, frames: [], framesInSubtree: [], executeJavaScript: () => new Promise(() => {}) }
+  current.contents = { mainFrame: frame, isDestroyed: () => false }
+  const context: PublishedActionAutomationContext = { kind: 'published', runId: 'run', webContentsId: 1,
+    frameProcessId: 1, frameToken: 'root', url: frame.url,
+    identity: { documentId: 'doc', epoch: 'epoch', revision: 1, projectId: 'project', locationId: 'page', stateId: null, viewGeneration: 'view' } }
+  const controller = new AbortController()
+  const observed = new HtmlActionDesktopPort().observeAndCapture(context, 'root', controller.signal)
+  controller.abort()
+  await expect(observed).rejects.toThrow()
+  expect(current.order).toEqual([])
+})
+
 it('prepares frame paint before sampling the returned DOM, rather than only before PNG capture', async () => {
   const frame = { processId: 1, frameToken: 'root', url: 'courseware-editor://app/observation.html', detached: false,
     isDestroyed: () => false, frames: [], framesInSubtree: [], async executeJavaScript(script: string) {

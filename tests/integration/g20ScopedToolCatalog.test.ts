@@ -152,6 +152,7 @@ it('defers only library maintenance definitions and loads them through the real 
   expect(observed[0].names).toEqual(expect.arrayContaining(['asset.search', 'asset.use', 'asset.update']))
   for (const name of maintenance) expect(observed[0].names).not.toContain(name)
   expect(observed[1].names.filter(name => !observed[0].names.includes(name)).sort()).toEqual([...maintenance].sort())
+  expect(observed[1].names.slice(0, observed[0].names.length)).toEqual(observed[0].names)
   expect(observed.slice(1).map(value => value.names)).toEqual(Array(5).fill(observed[1].names))
   expect(new Set(observed[1].names).size).toBe(observed[1].names.length)
   expect(observed[1].definitionBytes).toBeGreaterThan(observed[0].definitionBytes)
@@ -164,6 +165,12 @@ it('defers only library maintenance definitions and loads them through the real 
   for (const tool of result.tools.filter(tool => tool.call.name === 'tools.load')) expect(tool.result).toMatchObject({ kind: 'read', data: {
     unavailable: [{ name: 'not.a.tool', code: 'unknown-tool' }], tools: expect.arrayContaining(maintenance.map(name => expect.objectContaining({ name }))),
   } })
+  for (const tool of result.tools.filter(tool => tool.call.name === 'tools.load')) {
+    if (tool.result?.kind !== 'read') throw new Error('Missing discovery receipt')
+    const receipt = tool.result.data as { tools: Array<{ name: string }> }
+    expect(receipt.tools).toEqual([...maintenance].sort().map(name => ({ name })))
+    expect(JSON.stringify(receipt)).not.toContain('inputSchema')
+  }
   await host.tools.beginRun({ runId: 'library-readonly', actor: 'agent', documents: [{ documentId: initial.documentId, writable: [] }],
     fileAccess: { workspaceRoot: directory, permission: 'read-only' } })
   await host.tools.loadToolFamilies('library-readonly', [], maintenance)
@@ -258,6 +265,7 @@ it('discovers a deferred tool, sends its real schema on the next turn and execut
   expect(observed[0].names).not.toContain('task.finish')
   expect(observed[0].names).not.toContain('course.configure')
   expect(observed[1].names).toEqual(expect.arrayContaining(['course.configure', 'object.author']))
+  expect(observed[1].names.slice(0, observed[0].names.length)).toEqual(observed[0].names)
   expect(observed.slice(1).map(value => value.names)).toEqual(Array(3).fill(observed[1].names))
   expect(observed[1].bytes).toBeGreaterThan(observed[0].bytes)
   expect(observed.slice(1).map(value => value.bytes)).toEqual(Array(3).fill(observed[1].bytes))

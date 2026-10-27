@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { componentSurfaces } from '../../src/shared/contracts/component-platform/project'
 import { testContainerInstance } from '../helpers/glxWorkFixture'
-import { act, cleanup, renderHook } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, renderHook, screen, waitFor } from '@testing-library/react'
 import { afterEach, expect, it } from 'vitest'
 import { createV10StoreHost, deferred } from '../helpers/courseV10StoreHost'
 import { createBlankCourseProjectV10 } from '../../src/core/course/createCourseProjectV10'
@@ -11,7 +11,10 @@ import { INPUT_DEFINITION, createInputData } from '../../src/components/input/da
 import { componentInputRuleEdits, inspectComponentInputRules } from '../../src/components/input/authoring'
 import { useEditorStore } from '../../src/renderer/store/editorStore'
 import { usePropertiesAuthoringBinding } from '../../src/renderer/composition/properties/usePropertiesAuthoringBinding'
-import { discardPropertiesDrafts } from '../../src/renderer/ui/properties/PropertyControls'
+import { discardPropertiesDrafts, PropertyDraftBoundary } from '../../src/renderer/ui/properties/PropertyControls'
+import { NativeTableProperties } from '../../src/renderer/ui/properties/NativeTableProperties'
+import { createTableData, TABLE_DEFINITION } from '../../src/components/table'
+import { parseTableData, tableCellContent } from '../../src/components/table/data'
 
 afterEach(() => { cleanup(); const store = useEditorStore.getState(); if (store.courseView.activeDocumentId) discardPropertiesDrafts(store.courseView.activeDocumentId); useEditorStore.setState({ slideContentEdit: null }); store.courseBridge.dispose() })
 function textProject(flow = false) {
@@ -82,6 +85,75 @@ it('CA097 uses the selected effective inline style when the same local range is 
   expect(textDataSchema.parse(h.model().project.instances.text.data).content.inlines.some(inline => inline.type === 'text' && inline.style?.bold)).toBe(true)
   await act(async () => { commands().toggleStyle('bold', { start: 1, end: 3 }); await store().drainCourseDocument() })
   expect(textDataSchema.parse(h.model().project.instances.text.data).content.inlines.some(inline => inline.type === 'text' && inline.style?.bold)).toBe(false)
+})
+
+it('commits property table navigation after live updates instead of cancelling the edited cell baseline', async () => {
+  const project = createBlankCourseProjectV10()
+  project.definitions[TABLE_DEFINITION.id] = TABLE_DEFINITION
+  project.instances.table = { id: 'table', definitionId: TABLE_DEFINITION.id,
+    data: JSON.parse(JSON.stringify(createTableData({ rows: 2, columns: 2 }))),
+    frame: { width: 400, height: 160, transform: [1, 0, 0, 1, 0, 0] } }
+  testContainerInstance(project, 0).childIds.push('table')
+  const h = await createV10StoreHost(project, undefined, false)
+  const store = () => useEditorStore.getState()
+  await store().connectCourseDocuments(h.api); store().selectNode('table')
+  function TablePanel() {
+    const context = usePropertiesAuthoringBinding({ onReplaceImage() {} })
+    if (context.kind !== 'slide-native' || context.view.type !== 'table' || !context.commands.table)
+      throw new Error('Expected real table properties binding')
+    return <PropertyDraftBoundary bindingKey={context.draftBindingKey} onStale={() => {}}>
+      <NativeTableProperties node={context.view} bindingKey={context.draftBindingKey} commands={context.commands.table}/>
+    </PropertyDraftBoundary>
+  }
+  render(<TablePanel/>)
+  const table = () => parseTableData(h.model().project.instances.table.data)
+  const originalRows = table().rows.map(row => row.id), originalColumns = table().columns.map(column => column.id)
+  const cellText = (row: number, column: number) => tableCellContent(table().rows[row]!.cells[column]!).inlines
+    .map(inline => inline.type === 'text' ? inline.text : '\uFFFC').join('')
+  const input = (row: number, column: number) => screen.getByLabelText(`单元格 第 ${row + 1} 行，第 ${column + 1} 列`)
+  const edit = async (row: number, column: number, value: string, key: string, shiftKey = false) => {
+    const field = input(row, column)
+    act(() => field.focus())
+    await act(async () => {
+      fireEvent.change(field, { target: { value } })
+    })
+    // The formal/live projection already equals the draft before navigation.
+    await waitFor(() => expect(cellText(row, column)).toBe(value))
+    await act(async () => {
+      fireEvent.keyDown(field, { key, shiftKey })
+      await store().drainCourseDocument()
+    })
+    expect(cellText(row, column)).toBe(value)
+    expect(input(row, column)).toHaveValue(value)
+  }
+  await edit(0, 0, '测试123', 'Tab')
+  expect(input(0, 1)).toHaveFocus()
+  await edit(0, 1, '保留450', 'Enter')
+  expect(input(1, 0)).toHaveFocus()
+  await edit(1, 0, '第二行内容', 'Tab', true)
+  expect(input(0, 1)).toHaveFocus()
+  await edit(1, 1, '末格内容', 'Tab')
+  expect(table().rows).toHaveLength(3)
+  await edit(2, 0, '追加行文字', 'Tab')
+  expect(table().rows.slice(0, 2).map(row => row.id)).toEqual(originalRows)
+  expect(table().columns.map(column => column.id)).toEqual(originalColumns)
+
+  const first = input(0, 0)
+  act(() => first.focus())
+  await act(async () => {
+    fireEvent.change(first, { target: { value: '应放弃的输入' } })
+  })
+  await waitFor(() => expect(cellText(0, 0)).toBe('应放弃的输入'))
+  await act(async () => {
+    fireEvent.keyDown(first, { key: 'Escape' })
+    await store().drainCourseDocument()
+  })
+  await waitFor(() => {
+    expect(cellText(0, 0)).toBe('测试123')
+    expect(input(0, 0)).toHaveValue('测试123')
+  })
+  expect(cellText(0, 1)).toBe('保留450')
+  expect(cellText(2, 0)).toBe('追加行文字')
 })
 
 it('CA338 plans repeated grading changes against the effective named state and preserves untouched state fields', async () => {

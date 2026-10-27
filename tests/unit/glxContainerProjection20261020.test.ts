@@ -306,18 +306,23 @@ it('runs a container Source layout and interactive child slot once while retaini
   const root = document.createElement('div'); document.body.append(root)
   Object.defineProperties(root, { clientWidth: { value: 960 }, clientHeight: { value: 540 } })
   let sourceRoot!: HTMLElement, childSlot!: HTMLElement
+  const disposeSource = vi.fn()
   const mountSource = vi.fn((context: ComponentRuntimeContext) => {
     sourceRoot = context.root!
     sourceRoot.dataset.customContainerLayout = ''
     Object.assign(sourceRoot.style, { display: 'grid', gridTemplateColumns: '1fr 2fr' })
     const button = document.createElement('button'); button.textContent = 'Source interaction'
     button.style.pointerEvents = 'auto'
-    button.onclick = () => context.scope.state.set('container-source-clicked', true)
+    let clicks = 0
+    button.onclick = () => {
+      button.dataset.clicks = String(++clicks)
+      context.scope.state.set('container-source-clicked', true)
+    }
     childSlot = document.createElement('div'); childSlot.dataset.sourceChildSlot = 'a-text'
     childSlot.style.gridColumn = '2'
     sourceRoot.append(button, childSlot)
     context.inline!.mount('a-text', childSlot)
-    return { update() {}, dispose() { button.onclick = null } }
+    return { update() {}, dispose() { disposeSource(); button.onclick = null } }
   })
   const player = mountV10Model({ root, model: model(value), runScopeId: 'container-source-layout',
     resolveSource: async () => ({ implementation: { mount: mountSource } }),
@@ -335,6 +340,8 @@ it('runs a container Source layout and interactive child slot once while retaini
     expect(root.textContent?.match(/Source placed native child/g)).toHaveLength(1)
     sourceRoot.querySelector('button')!.click()
     expect(player.runtime.getState('container-source-clicked')).toBe(true)
+    const originalSourceRoot = sourceRoot, originalSlot = childSlot
+    expect(sourceRoot.querySelector('button')!.dataset.clicks).toBe('1')
     const camera = player.camera('a'), generation = player.runtime.authorSpots().find(spot => spot.instanceId === 'a-text')!.mountGeneration
     const changed = structuredClone(value)
     changed.instances['a-text']!.data = JSON.parse(JSON.stringify(createTextComponentData('updated native child')))
@@ -343,6 +350,23 @@ it('runs a container Source layout and interactive child slot once while retaini
     expect(player.camera('a')).toBe(camera)
     expect(player.runtime.authorSpots().find(spot => spot.instanceId === 'a-text')?.mountGeneration).toBe(generation)
     expect(mountSource).toHaveBeenCalledTimes(1)
+    expect(disposeSource).not.toHaveBeenCalled()
+    expect(sourceRoot).toBe(originalSourceRoot)
+    expect(childSlot).toBe(originalSlot)
+    expect(sourceRoot.querySelector('button')!.dataset.clicks).toBe('1')
+    sourceRoot.querySelector('button')!.click()
+    expect(sourceRoot.querySelector('button')!.dataset.clicks).toBe('2')
+
+    // Actual implementation changes still retire the old Source generation.
+    // Preserving child-only updates must not freeze the program's author source.
+    const rewritten = structuredClone(changed)
+    rewritten.instances.a!.implementationOverride = { kind: 'source', language: 'javascript', source: 'export default replacementContainerLayout' }
+    await player.update(model(rewritten))
+    expect(mountSource).toHaveBeenCalledTimes(2)
+    expect(disposeSource).toHaveBeenCalledTimes(1)
+    expect(childSlot.textContent).toContain('updated native child')
+    expect(player.camera('a')).toBe(camera)
+    expect(player.runtime.authorSpots().find(spot => spot.instanceId === 'a-text')?.mountGeneration).toBe(generation)
   } finally { await player.dispose() }
 })
 

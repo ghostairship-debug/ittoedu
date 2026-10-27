@@ -7,6 +7,7 @@ import type { HtmlActionCapture, HtmlActionDiagnostic, HtmlActionFramePort } fro
 import type { PublishedActionAutomationContext } from './HtmlActionDesktopPort'
 import type { ViewObservationIdentity, ViewObservationSnapshot } from '../../../shared/workbench/viewObservation'
 import { sameHtmlPreviewDocumentUrl, type HtmlPageElement, type HtmlPageState } from './HtmlActionPageScript'
+import { ObservationDeadline } from './observationDeadline'
 
 /** Bootstrap query bytes belong to the host transport, not the observed content report. */
 function reportUrl(value: string): string {
@@ -124,7 +125,7 @@ export class HtmlActionService {
   private readonly usedActionIds = new Map<string, Set<string>>()
 
   constructor(private readonly options: { preview: HtmlActionPreviewPort; frames: HtmlActionFramePort;
-    images: ObservationImageStore; published?: PublishedActionPreviewPort }) {}
+    images: ObservationImageStore; published?: PublishedActionPreviewPort; observationTimeoutMs?: number }) {}
 
   /** The browser transport may never acknowledge a destroyed or hung frame. Stop
    * ends our wait, while frame validity checks prevent late input dispatch. An
@@ -286,19 +287,20 @@ export class HtmlActionService {
     return session
   }
 
-  private async assertCurrent(session: ActionSession): Promise<void> {
+  private async assertCurrent(session: ActionSession, deadline?: ObservationDeadline): Promise<void> {
+    const wait = <T>(work: () => Promise<T>) => deadline ? deadline.wait('identity', work) : this.waitForRun(session.runId, work)
     if (session.stopped || this.runs.get(session.runId) !== session) throw new Error('HTML 观察已停止')
     if (session.kind === 'published') {
-      const current = await this.waitForRun(session.runId, () => this.options.published!.currentContext(session.context))
+      const current = await wait(() => this.options.published!.currentContext(session.context))
       if (current.webContentsId !== session.context.webContentsId || current.frameProcessId !== session.context.frameProcessId
-        || await this.waitForRun(session.runId, () => this.options.frames.frameToken(current)) !== session.frameToken) throw new Error('课件观察载体已切换，请重新观察')
+        || await wait(() => this.options.frames.frameToken(current)) !== session.frameToken) throw new Error('课件观察载体已切换，请重新观察')
       if (session.stopped || this.runs.get(session.context.runId) !== session) throw new Error('课件观察已停止')
       return
     }
-    const current = await this.waitForRun(session.runId, () => this.options.preview.automationContext(session.identity.leaseId,
+    const current = await wait(() => this.options.preview.automationContext(session.identity.leaseId,
       session.identity.loadId, session.identity.revision))
     if (current.webContentsId !== session.context.webContentsId || current.bindingPath !== session.context.bindingPath
-      || await this.waitForRun(session.runId, () => this.options.frames.frameToken(current)) !== session.frameToken)
+      || await wait(() => this.options.frames.frameToken(current)) !== session.frameToken)
       throw new Error('HTML 预览页面已切换，请重新开始观察')
     if (session.stopped || this.runs.get(session.runId) !== session) throw new Error('HTML 观察已停止')
   }
@@ -334,20 +336,32 @@ export class HtmlActionService {
   /** Capture every candidate once; the HTML response window is applied only
    * after all handles exist. Published consumers receive the complete result. */
   private observeCurrent(session: Extract<ActionSession, { kind: 'html' }>, input?: HtmlObservationInput): Promise<HtmlActionObservation>
-  private observeCurrent(session: Extract<ActionSession, { kind: 'published' }>): Promise<PublishedActionObservation>
+  private observeCurrent(session: Extract<ActionSession, { kind: 'published' }>, input?: undefined, signal?: AbortSignal): Promise<PublishedActionObservation>
   private observeCurrent(session: ActionSession): Promise<PageActionObservation>
-  private async observeCurrent(session: ActionSession, input?: HtmlObservationInput): Promise<PageActionObservation> {
+  private async observeCurrent(session: ActionSession, input?: HtmlObservationInput, observationSignal?: AbortSignal): Promise<PageActionObservation> {
+    return this.waitForRun(session.runId, async signal => {
+    const deadline = new ObservationDeadline(observationSignal ? AbortSignal.any([signal, observationSignal]) : signal,
+      this.options.observationTimeoutMs)
+    let storedImage: ObservationImageResource | undefined
+    try {
     session.lastObservation = undefined
-    await this.assertCurrent(session)
+    session.handles.clear()
+    await this.assertCurrent(session, deadline)
     const combined = this.options.frames.observeAndCapture
-      ? await this.waitForRun(session.runId, signal => this.options.frames.observeAndCapture!(session.context, session.frameToken, signal)) : undefined
-    const state: HtmlPageState = combined?.state ?? await this.waitForRun(session.runId, () => this.options.frames.observe(session.context, session.frameToken))
-    const capture: HtmlActionCapture = combined?.capture ?? await this.waitForRun(session.runId, () => this.options.frames.capture(session.context, session.frameToken))
-    await this.assertCurrent(session)
+      ? await deadline.wait('dom-and-capture', () => this.options.frames.observeAndCapture!(session.context, session.frameToken, deadline.signal)) : undefined
+    const state: HtmlPageState = combined?.state ?? await deadline.wait('dom', () => this.options.frames.observe(session.context, session.frameToken, deadline.signal))
+    const capture: HtmlActionCapture = combined?.capture ?? await deadline.wait('capture', () => this.options.frames.capture(session.context, session.frameToken, deadline.signal))
+    await this.assertCurrent(session, deadline)
     if (!sameHtmlPreviewDocumentUrl(state.url, session.kind === 'html' ? session.identity.url : session.context.url))
       throw new Error('HTML 页面来源已变化，请重新打开预览')
-    const image = await this.options.images.put(session.kind === 'html' ? session.runId : session.context.runId, capture.png, capture.width, capture.height)
-    await this.assertCurrent(session)
+    const runtime = session.kind === 'published'
+      ? await deadline.wait('runtime-state', () => this.options.published!.readState(session.context)) : undefined
+    const image = storedImage = await deadline.wait('image-store', () => this.options.images.put(session.runId, capture.png, capture.width, capture.height),
+      late => this.options.images.discard(session.runId, late.resourceId))
+    await this.assertCurrent(session, deadline)
+    // No awaited work follows this check. A timed-out attempt cannot publish
+    // handles, advance generation or overwrite a newer same-revision observation.
+    deadline.check('publish')
     session.generation += 1
     session.handles.clear()
     const frameElements = new Map<string, HtmlPageElement[]>()
@@ -382,13 +396,16 @@ export class HtmlActionService {
       session.lastObservation = snapshot
       return this.observationPage(session, snapshot, input)
     }
-    const runtime = await this.waitForRun(session.runId, () => this.options.published!.readState(session.context))
-    await this.assertCurrent(session)
-    session.identity = { ...session.identity, locationId: runtime.locationId, stateId: runtime.stateId }
+    session.identity = { ...session.identity, locationId: runtime!.locationId, stateId: runtime!.stateId }
     return { ...common, source: 'isolated-published', identity: session.identity,
-      structure: [...new Set([...runtime.structure, ...common.structure])],
-      diagnostics: [...new Set([...runtime.diagnostics, ...common.diagnostics])], coverage: { width: capture.width, height: capture.height,
+      structure: [...new Set([...runtime!.structure, ...common.structure])],
+      diagnostics: [...new Set([...runtime!.diagnostics, ...common.diagnostics])], coverage: { width: capture.width, height: capture.height,
         ...((state.observationScope?.viewport ?? state.viewport) ? { viewport: state.observationScope?.viewport ?? state.viewport } : {}) } }
+    } catch (error) {
+      if (storedImage) void this.options.images.discard(session.runId, storedImage.resourceId)
+      throw error
+    } finally { deadline.dispose() }
+    })
   }
 
   async observe(runId: string, value: HtmlObservationInput = {}): Promise<HtmlActionObservation> {
@@ -510,7 +527,6 @@ export class HtmlActionService {
         // The trusted input port measures retention before returning its ACK.
         if (input.type === 'input') facts.goal = 'achieved'
         facts.observation = 'failed'
-        await this.assertCurrent(session)
         const observation = await this.observeCurrent(session)
         facts.observation = 'complete'
         return { ...observation, actionReceipt: { ...facts } }
@@ -578,7 +594,7 @@ export class HtmlActionService {
         this.runs.set(runId, session)
       }
       session.busy = true
-      try { return await this.observeCurrent(session) } finally { session.busy = false }
+      try { return await this.observeCurrent(session, undefined, input.signal) } finally { session.busy = false }
     } finally { this.opening.delete(runId) }
   }
 

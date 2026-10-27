@@ -3,12 +3,12 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { JSDOM } from 'jsdom'
-import { HtmlActionService } from '../../src/main/workbench/observation/HtmlActionService'
+import { HtmlActionService, type PublishedActionPreviewPort, type PublishedActionTarget } from '../../src/main/workbench/observation/HtmlActionService'
 import { htmlActionModelMessage } from '../../src/main/workbench/observation/HtmlActionModelInput'
 import { htmlActionScript, htmlCourseNavigateScript, sameHtmlPreviewDocumentUrl,
   type HtmlPageState } from '../../src/main/workbench/observation/HtmlActionPageScript'
 import { ObservationImageStore } from '../../src/main/workbench/observation/ObservationImageStore'
-import type { HtmlActionFramePort } from '../../src/main/workbench/observation/HtmlActionDesktopPort'
+import type { HtmlActionFramePort, PublishedActionAutomationContext } from '../../src/main/workbench/observation/HtmlActionDesktopPort'
 import type { HtmlPreviewAutomationContext, HtmlPreviewService } from '../../src/main/workbench/htmlPreview/HtmlPreviewService'
 import { HtmlPreviewService as RealHtmlPreviewService } from '../../src/main/workbench/htmlPreview/HtmlPreviewService'
 import { PreviewNetworkPolicy } from '../../src/main/previewNetworkPolicy'
@@ -17,7 +17,7 @@ import { modelToolResult } from '../../src/core/tools/modelToolResult'
 
 const PNG = new Uint8Array(Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/vS8AAAAASUVORK5CYII=', 'base64'))
 
-function fixture() {
+function fixture(options: { images?: ObservationImageStore; observationTimeoutMs?: number; published?: PublishedActionPreviewPort } = {}) {
   let revision = 2, frameToken = 'frame-a', clicks = 0, inputValue = '', stopped = 0
   let unknownAfterAction = false
   let frameWait: Promise<void> = Promise.resolve()
@@ -61,7 +61,8 @@ function fixture() {
     onDiagnostic: (_context, _token, receive) => { receive({ level: 'warning', message: 'page warning', source: lease.url, line: 1 });
       return () => { stopped += 1 } },
   }
-  const service = new HtmlActionService({ preview, frames, images: new ObservationImageStore() })
+  const service = new HtmlActionService({ preview, frames, images: options.images ?? new ObservationImageStore(),
+    observationTimeoutMs: options.observationTimeoutMs, published: options.published })
   return { service, frames, setRevision: (next: number) => { revision = next },
     freshPreviewRevision: (next: number) => {
       revision = next
@@ -80,6 +81,107 @@ function fixture() {
 }
 
 describe('M28 HTML action sessions', () => {
+  it('a timed-out identity wait cannot block or publish over the next observation', async () => {
+    const f = fixture({ observationTimeoutMs: 80 })
+    await f.service.beginDocumentRun('identity-timeout', { documentId: 'doc', epoch: 'epoch', revision: 2 })
+    let release!: () => void
+    f.holdFrame(new Promise<void>(resolve => { release = resolve }))
+    try {
+      await expect(f.service.observe('identity-timeout')).rejects.toMatchObject({
+        code: 'observation-timeout', observationStage: 'identity',
+      })
+      f.holdFrame(Promise.resolve())
+      const current = await f.service.observe('identity-timeout')
+      expect(current.generation).toBe(1)
+      release(); await Promise.resolve(); await Promise.resolve()
+      await f.service.click('identity-timeout', { operationId: 'fresh-handle', handle: current.elements[0]!.handle })
+      expect(f.clicks()).toBe(1)
+    } finally { release(); f.service.stopRun('identity-timeout') }
+  })
+
+  it('cancels only the current Published observation signal and allows a fresh observation in the same run', async () => {
+    const identity = { documentId: 'doc', epoch: 'epoch', revision: 2, projectId: 'project',
+      locationId: 'page', stateId: null, viewGeneration: 'worker' }
+    const context: PublishedActionAutomationContext = { kind: 'published', runId: 'single-observation', identity,
+      webContentsId: 7, frameProcessId: 1, frameToken: 'frame-a', url: 'courseware-preview://preview.app/file/demo.html' }
+    const published: PublishedActionPreviewPort = { contextForTarget: async () => context, currentContext: async () => context,
+      readState: async () => ({ locationId: 'page', stateId: null, structure: [], diagnostics: [] }) }
+    const f = fixture({ published }), controller = new AbortController()
+    let started!: () => void, aborted = false
+    const entered = new Promise<void>(resolve => { started = resolve })
+    f.frames.observeAndCapture = async (_context, _token, signal) => {
+      signal!.addEventListener('abort', () => { aborted = true }, { once: true })
+      started()
+      return new Promise(() => {})
+    }
+    const target = { identity, snapshot: {} as PublishedActionTarget['snapshot'], signal: controller.signal }
+    const pending = f.service.observePublished('single-observation', target)
+    const stopped = expect(pending).rejects.toThrow()
+    try {
+      await entered; controller.abort(); await stopped
+      expect(aborted).toBe(true)
+      f.frames.observeAndCapture = async (context, token, signal) => ({
+        state: await f.frames.observe(context, token, signal), capture: await f.frames.capture(context, token, signal),
+      })
+      const next = await f.service.observePublished('single-observation', { ...target, signal: undefined })
+      expect(next.generation).toBe(1)
+      expect(next.identity).toMatchObject(identity)
+    } finally { f.service.stopRun('single-observation') }
+  })
+
+  it('bounds follow-up observation, aborts its transport and preserves an applied click without replay', async () => {
+    const f = fixture({ observationTimeoutMs: 60 }), observe = f.frames.observe
+    await f.service.beginDocumentRun('deadline', { documentId: 'doc', epoch: 'epoch', revision: 2 })
+    const first = await f.service.observe('deadline')
+    let aborted = false
+    f.frames.observe = async (_context, _token, signal) => {
+      signal!.addEventListener('abort', () => { aborted = true }, { once: true })
+      return new Promise(() => {})
+    }
+    const input = { operationId: 'once-only', handle: first.elements[0]!.handle }
+    const expected = { code: 'html-action-observation-failed', actionReceipt: {
+      application: 'applied', dispatch: 'dispatched', goal: 'unverified', observation: 'failed',
+    } }
+    try {
+      await expect(f.service.click('deadline', input)).rejects.toMatchObject(expected)
+      expect(aborted).toBe(true)
+      await expect(f.service.click('deadline', input)).rejects.toMatchObject(expected)
+      expect(f.clicks()).toBe(1)
+      f.frames.observe = observe
+      const next = await f.service.observe('deadline')
+      expect(next.generation).toBe(first.generation + 1)
+      expect(next.structure).toContain('clicked 1; input ')
+    } finally { f.service.stopRun('deadline') }
+  })
+
+  it('discards a late image from an expired attempt without clearing the newer same-revision result', async () => {
+    const images = new ObservationImageStore(), put = images.put.bind(images)
+    let release!: () => void, entered!: () => void, lateId = '', hold = true
+    const waiting = new Promise<void>(resolve => { entered = resolve })
+    const pending = new Promise<void>(resolve => { release = resolve })
+    images.put = async (...args) => {
+      const image = await put(...args)
+      if (hold) { hold = false; lateId = image.resourceId; entered(); await pending }
+      return image
+    }
+    const f = fixture({ images, observationTimeoutMs: 80 })
+    await f.service.beginDocumentRun('late-image', { documentId: 'doc', epoch: 'epoch', revision: 2 })
+    const first = f.service.observe('late-image')
+    const rejected = expect(first).rejects.toMatchObject({ code: 'observation-timeout', observationStage: 'image-store' })
+    try {
+      await waiting; await rejected
+      const second = await f.service.observe('late-image')
+      expect(second.generation).toBe(1)
+      release()
+      // Resolving put runs the attempt-scoped discard before this next turn.
+      await new Promise(resolve => setTimeout(resolve, 0))
+      await expect(images.read('late-image', lateId)).rejects.toThrow('不存在')
+      expect((await f.service.readResource('late-image', second.image.resourceId)).bytes).toEqual(PNG)
+      await f.service.click('late-image', { operationId: 'current-handle', handle: second.elements[0]!.handle })
+      expect(f.clicks()).toBe(1)
+    } finally { release(); f.service.stopRun('late-image') }
+  })
+
   it('preserves an applied ACK when the follow-up observation fails and never dispatches it again', async () => {
     const f = fixture(), observe = f.frames.observe
     await f.service.beginDocumentRun('ack', { documentId: 'doc', epoch: 'epoch', revision: 2 })

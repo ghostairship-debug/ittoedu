@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "semanticVersion": "bf5acd4c92d1d6386a411e324941368cc24a052a681936d174cbe87739dc5785",
+  "semanticVersion": "5f3900ddda3e2b0e1f456b23f4086310f260f01ea91bc2e19e694b5d4e5a581a",
   "entries": [
     {
       "id": "artifact.save",
@@ -2461,7 +2461,7 @@
         "component"
       ],
       "summary": "从材料到正式对象",
-      "keywords": "# 从材料到正式对象 ## 普通内容直接装配 ## 专业表格与图表数据 ## 图示、图片与局部程序"
+      "keywords": "# 从材料到正式对象 ## 普通内容直接装配 ## 专业表格与图表数据 ### 专业数据接入局部计算 ## 图示、图片与局部程序"
     },
     {
       "id": "reference:orchestrate-courseware/script-assemble-html",

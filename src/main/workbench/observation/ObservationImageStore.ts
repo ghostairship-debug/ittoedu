@@ -47,6 +47,14 @@ export class ObservationImageStore {
     return { mimeType: 'image/png', bytes: new Uint8Array(bytes.buffer, bytes.byteOffset, bytes.byteLength) }
   }
 
+  /** Retire only the image produced by an abandoned observation attempt. */
+  async discard(runId: string, resourceId: string): Promise<void> {
+    const run = this.runs.get(runId)
+    if (!run?.resources.delete(resourceId)) return
+    const directory = await run.directory.catch(() => null)
+    if (directory) await fs.rm(path.join(directory, resourceId), { force: true }).catch(() => undefined)
+  }
+
   async clearRun(runId: string): Promise<void> {
     const run = this.runs.get(runId)
     this.runs.delete(runId)

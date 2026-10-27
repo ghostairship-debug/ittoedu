@@ -5,6 +5,7 @@ import type { ViewObservationIdentity } from '../../../shared/workbench/viewObse
 import { htmlActionScript, htmlCourseNavigateScript, sameHtmlPreviewDocumentUrl,
   type HtmlFrameObservationScope, type HtmlPageActionResult, type HtmlPageOperation, type HtmlPageState } from './HtmlActionPageScript'
 import { waitForCaptureFramePaint } from './captureFramePaint'
+import { ObservationDeadline, OBSERVATION_TIMEOUT_MS } from './observationDeadline'
 
 export interface HtmlActionCapture { png: Uint8Array; width: number; height: number }
 export interface HtmlActionDiagnostic { level: 'error' | 'warning'; message: string; source: string; line: number }
@@ -24,12 +25,12 @@ export const isPublishedActionContext = (context: PageActionAutomationContext): 
 
 export interface HtmlActionFramePort {
   frameToken(context: PageActionAutomationContext): Promise<string>
-  observe(context: PageActionAutomationContext, frameToken: string): Promise<HtmlPageState>
+  observe(context: PageActionAutomationContext, frameToken: string, signal?: AbortSignal): Promise<HtmlPageState>
   /** A single invocation owns readiness, DOM sampling and the immediately following pixels. */
   observeAndCapture?(context: PageActionAutomationContext, frameToken: string, signal?: AbortSignal): Promise<{ state: HtmlPageState; capture: HtmlActionCapture }>
   act(context: PageActionAutomationContext, frameToken: string, input: Extract<HtmlPageOperation, { type: 'click' | 'input' }>, isCurrent?: () => boolean): Promise<HtmlPageActionResult>
   navigate(context: PageActionAutomationContext, frameToken: string, index: number): Promise<void>
-  capture(context: PageActionAutomationContext, frameToken: string): Promise<HtmlActionCapture>
+  capture(context: PageActionAutomationContext, frameToken: string, signal?: AbortSignal): Promise<HtmlActionCapture>
   onDiagnostic(context: PageActionAutomationContext, frameToken: string, receive: (diagnostic: HtmlActionDiagnostic) => void): () => void
 }
 
@@ -93,22 +94,34 @@ interface FrameGeometry {
 }
 interface VisibleFrame { frame: WebFrameMain; chain: FrameGeometry[] }
 
-async function actionRootGeometry(frame: WebFrameMain): Promise<FrameGeometry | null> {
-  if (frame.parent) return ownerGeometry(frame)
-  const viewport = await frame.executeJavaScript('({width:innerWidth,height:innerHeight})') as { width: number; height: number }
+async function actionRootGeometry(frame: WebFrameMain, deadline?: ObservationDeadline): Promise<FrameGeometry | null> {
+  if (frame.parent) return ownerGeometry(frame, undefined, deadline)
+  const read = () => frame.executeJavaScript('({width:innerWidth,height:innerHeight})') as Promise<{ width: number; height: number }>
+  const viewport = await (deadline ? deadline.wait('root-geometry', read) : read())
   return { x: 0, y: 0, scaleX: 1, scaleY: 1, clip: { x: 0, y: 0, ...viewport }, visible: viewport.width > 0 && viewport.height > 0,
     viewportWidth: viewport.width, viewportHeight: viewport.height }
 }
 
 /** event.source identifies the actual owner, including repeated anonymous srcdoc/opaque frames. */
-async function ownerGeometry(child: WebFrameMain, point?: { x: number; y: number }): Promise<FrameGeometry | null> {
+async function ownerGeometry(child: WebFrameMain, point?: { x: number; y: number }, deadline?: ObservationDeadline): Promise<FrameGeometry | null> {
   const parent = child.parent
   if (!parent || child.detached || parent.detached) return null
   const key = `__htmlOwner_${randomUUID().replaceAll('-', '')}`
-  await parent.executeJavaScript(`(()=>{
+  const read = <T>(stage: string, work: () => Promise<T>, discard?: () => Promise<void>) =>
+    deadline ? deadline.wait(stage, work, discard) : work()
+  const cleanup = async () => {
+    try {
+      if (!parent.detached && !parent.isDestroyed()) await parent.executeJavaScript(
+        `window[${JSON.stringify(key)}]?.cancel?.();delete window[${JSON.stringify(key)}]`)
+    } catch { /* Closing a parent can throw before an IPC promise is returned. */ }
+  }
+  try {
+  await read('frame-owner-install', () => parent.executeJavaScript(`(()=>{
     const key=${JSON.stringify(key)};
+    let cancel;
     window[key]=new Promise(resolve=>{
       const finish=value=>{clearTimeout(timer);removeEventListener('message',receive);resolve(value)};
+      cancel=()=>finish(null);
       const timer=setTimeout(()=>finish(null),1500);
       const receive=event=>{
         if(event.data!==key)return;
@@ -144,12 +157,14 @@ async function ownerGeometry(child: WebFrameMain, point?: { x: number; y: number
           clip:{x:left,y:top,width:Math.max(0,right-left),height:Math.max(0,bottom-top)},
           visible:!reason&&right>left&&bottom>top&&scaleX>0&&scaleY>0,...(reason?{reason}:{})});
       };addEventListener('message',receive);
-    });return true;
-  })()`)
-  try {
-    await child.executeJavaScript(`parent.postMessage(${JSON.stringify(key)},'*')`)
-    return await parent.executeJavaScript(`window[${JSON.stringify(key)}]`) as FrameGeometry | null
-  } finally { if (!parent.detached && !parent.isDestroyed()) await parent.executeJavaScript(`delete window[${JSON.stringify(key)}]`).catch(() => undefined) }
+    });window[key].cancel=cancel;return true;
+  })()`), cleanup)
+    await read('frame-owner-handshake', () => child.executeJavaScript(`parent.postMessage(${JSON.stringify(key)},'*')`))
+    return await read('frame-owner-geometry', () => parent.executeJavaScript(`window[${JSON.stringify(key)}]`)) as FrameGeometry | null
+  } finally {
+    if (deadline?.signal.aborted) void cleanup()
+    else await read('frame-owner-cleanup', cleanup)
+  }
 }
 
 function mapRect(rect: { x: number; y: number; width: number; height: number }, chain: FrameGeometry[]) {
@@ -173,13 +188,14 @@ function visibleLocalRect(entry: VisibleFrame) {
   return rect
 }
 
-async function visibleChildFrames(root: WebFrameMain, rootClip?: { x: number; y: number; width: number; height: number }): Promise<{ visible: VisibleFrame[]; excluded: Array<{ frame: WebFrameMain; reason: string }> }> {
+async function visibleChildFrames(root: WebFrameMain, rootClip?: { x: number; y: number; width: number; height: number }, deadline?: ObservationDeadline): Promise<{ visible: VisibleFrame[]; excluded: Array<{ frame: WebFrameMain; reason: string }> }> {
   const visible: VisibleFrame[] = [], excluded: Array<{ frame: WebFrameMain; reason: string }> = []
   const visit = async (parent: WebFrameMain, chain: FrameGeometry[]) => {
     const children = parent.frames.filter(child => !child.detached && !child.isDestroyed())
     const sampled = await Promise.all(children.map(async child => {
       let geometry: FrameGeometry | null = null
-      try { geometry = await ownerGeometry(child) } catch { /* Report inaccessible frames below. */ }
+      try { geometry = await ownerGeometry(child, undefined, deadline) }
+      catch (error) { if (deadline?.signal.aborted) throw error /* Other inaccessible frames are reported below. */ }
       return { child, geometry }
     }))
     // Sibling geometry reads are independent. Keep the original tree order for
@@ -201,37 +217,44 @@ async function visibleChildFrames(root: WebFrameMain, rootClip?: { x: number; y:
 }
 
 /** DOM sampling and bitmap capture consume the same completed visible frame tree. */
-async function prepareVisibleFramePaint(contents: WebContents, frame: WebFrameMain): Promise<void> {
-  const descendants = await visibleChildFrames(frame)
+async function prepareVisibleFramePaint(contents: WebContents, frame: WebFrameMain, deadline: ObservationDeadline): Promise<void> {
+  const descendants = await visibleChildFrames(frame, undefined, deadline)
   await waitForCaptureFramePaint(contents.mainFrame, randomUUID(),
-    [...new Set([contents.mainFrame, frame, ...descendants.visible.map(entry => entry.frame)])])
+    [...new Set([contents.mainFrame, frame, ...descendants.visible.map(entry => entry.frame)])], deadline)
 }
 
 /** Uses the existing sandboxed preview iframe. No page API gains host privileges. */
 export class HtmlActionDesktopPort implements HtmlActionFramePort {
+  constructor(private readonly observationTimeoutMs = OBSERVATION_TIMEOUT_MS) {}
   async frameToken(context: PageActionAutomationContext): Promise<string> { return frameFor(context).frame.frameToken }
 
   async observeAndCapture(context: PageActionAutomationContext, frameToken: string, signal?: AbortSignal): Promise<{ state: HtmlPageState; capture: HtmlActionCapture }> {
-    if (signal?.aborted) throw new Error('页面观察已停止')
-    const state = await this.observe(context, frameToken)
-    if (signal?.aborted) throw new Error('页面观察已停止')
-    // observe already completed frame readiness and paint immediately before
-    // its read-only DOM sample. Do not rediscover and repaint that tree again.
-    const capture = await this.captureReady(context, frameToken)
-    if (signal?.aborted) throw new Error('页面观察已停止')
-    return { state, capture }
+    const deadline = new ObservationDeadline(signal, this.observationTimeoutMs)
+    try {
+      const state = await this.readObservation(context, frameToken, deadline)
+      // The immediately preceding DOM sample already completed frame paint.
+      const capture = await this.captureReady(context, frameToken, deadline)
+      deadline.check('complete')
+      return { state, capture }
+    } finally { deadline.dispose() }
   }
 
-  async observe(context: PageActionAutomationContext, frameToken: string): Promise<HtmlPageState> {
+  async observe(context: PageActionAutomationContext, frameToken: string, signal?: AbortSignal): Promise<HtmlPageState> {
+    const deadline = new ObservationDeadline(signal, this.observationTimeoutMs)
+    try { return await this.readObservation(context, frameToken, deadline) }
+    finally { deadline.dispose() }
+  }
+
+  private async readObservation(context: PageActionAutomationContext, frameToken: string, deadline: ObservationDeadline): Promise<HtmlPageState> {
     const { contents, frame } = frameFor(context, frameToken)
-    await frame.executeJavaScript(htmlObservationReadyScript())
+    await deadline.wait('root-ready', () => frame.executeJavaScript(htmlObservationReadyScript()))
     frameFor(context, frameToken)
-    await prepareVisibleFramePaint(contents, frame)
+    await prepareVisibleFramePaint(contents, frame, deadline)
     frameFor(context, frameToken)
-    const geometry = await actionRootGeometry(frame)
+    const geometry = await actionRootGeometry(frame, deadline)
     if (!geometry?.visible) throw new Error('HTML 预览当前没有可见画面')
     const rootClip = visibleLocalRect({ frame, chain: [geometry] })
-    const observed = await frame.executeJavaScript(htmlActionScript({ type: 'observe', clip: rootClip })) as HtmlPageState
+    const observed = await deadline.wait('dom-root', () => frame.executeJavaScript(htmlActionScript({ type: 'observe', clip: rootClip }))) as HtmlPageState
     const scope = observed.observationScope = { kind: 'visible-preview-frames' as const,
       coordinateSpace: 'preview-viewport-css-pixels' as const, viewport: observed.viewport,
       limitations: ['按当前几何可见 frame 与视口内元素观察；遮挡在动作前另做命中检查，隐藏或不可达 frame 的后代未遍历', '捕获全部可见候选；HTML 详情按当前 generation 的可续读窗口返回',
@@ -239,17 +262,18 @@ export class HtmlActionDesktopPort implements HtmlActionFramePort {
       frames: [{ frameId: frame.frameTreeNodeId,
       url: frame.url, status: 'observed' as const, matchedElements: observed.matchedElements ?? observed.elements.length,
       returnedElements: observed.elements.length, truncatedElements: Math.max(0, (observed.matchedElements ?? observed.elements.length) - observed.elements.length) }] as HtmlFrameObservationScope[] }
-    const descendants = await visibleChildFrames(frame, rootClip)
+    const descendants = await visibleChildFrames(frame, rootClip, deadline)
     const samples = await Promise.all(descendants.visible.map(async entry => {
       const child = entry.frame
       try {
-        const state = await child.executeJavaScript(htmlActionScript({ type: 'observe', clip: visibleLocalRect(entry) })) as HtmlPageState
+        const state = await deadline.wait('dom-frame', () => child.executeJavaScript(htmlActionScript({ type: 'observe', clip: visibleLocalRect(entry) }))) as HtmlPageState
         const elements = state.elements.map(element => ({ ...element, frameToken: child.frameToken, frameProcessId: child.processId, rect: mapRect(element.rect, entry.chain) }))
           .filter(element => element.rect.width > 0 && element.rect.height > 0)
         return { state, elements, scope: { frameId: child.frameTreeNodeId, url: child.url, status: 'observed' as const,
           matchedElements: state.matchedElements ?? state.elements.length, returnedElements: elements.length,
           truncatedElements: Math.max(0, (state.matchedElements ?? state.elements.length) - state.elements.length) } }
       } catch (error) {
+        if (deadline.signal.aborted) throw error
         return { scope: { frameId: child.frameTreeNodeId, url: child.url, status: 'unavailable' as const, matchedElements: 0,
           returnedElements: 0, truncatedElements: 0, reason: error instanceof Error ? error.message : String(error) } }
       }
@@ -266,6 +290,7 @@ export class HtmlActionDesktopPort implements HtmlActionFramePort {
     for (const entry of descendants.excluded) scope.frames.push({ frameId: entry.frame.frameTreeNodeId, url: entry.frame.url,
       status: ['not-visible', 'empty-paint'].includes(entry.reason) ? 'not-visible' : 'unavailable', matchedElements: 0,
       returnedElements: 0, truncatedElements: 0, reason: entry.reason })
+    deadline.check('dom-complete')
     frameFor(context, frameToken)
     if (!observed || !sameHtmlPreviewDocumentUrl(observed.url, isPublishedActionContext(context) ? context.url : context.lease.url) || !Array.isArray(observed.elements))
       throw new Error('HTML 页面观察来源不匹配')
@@ -385,21 +410,24 @@ export class HtmlActionDesktopPort implements HtmlActionFramePort {
     frameFor(context, frameToken)
   }
 
-  async capture(context: PageActionAutomationContext, frameToken: string): Promise<HtmlActionCapture> {
-    const { contents, frame } = frameFor(context, frameToken)
-    await prepareVisibleFramePaint(contents, frame)
-    return this.captureReady(context, frameToken)
+  async capture(context: PageActionAutomationContext, frameToken: string, signal?: AbortSignal): Promise<HtmlActionCapture> {
+    const deadline = new ObservationDeadline(signal, this.observationTimeoutMs)
+    try {
+      const { contents, frame } = frameFor(context, frameToken)
+      await prepareVisibleFramePaint(contents, frame, deadline)
+      return await this.captureReady(context, frameToken, deadline)
+    } finally { deadline.dispose() }
   }
 
-  private async captureReady(context: PageActionAutomationContext, frameToken: string): Promise<HtmlActionCapture> {
+  private async captureReady(context: PageActionAutomationContext, frameToken: string, deadline: ObservationDeadline): Promise<HtmlActionCapture> {
     const { contents } = frameFor(context, frameToken)
     if (isPublishedActionContext(context)) {
-      const bitmap = await contents.capturePage(), size = bitmap.getSize()
+      const bitmap = await deadline.wait('capture', () => contents.capturePage()), size = bitmap.getSize()
       frameFor(context, frameToken)
       if (bitmap.isEmpty() || size.width < 1 || size.height < 1) throw new Error('课件页面没有生成真实截图')
       return { png: new Uint8Array(bitmap.toPNG()), width: size.width, height: size.height }
     }
-    const rect = await contents.mainFrame.executeJavaScript(iframeScript(context.lease.url, 'rect')) as {
+    const rect = await deadline.wait('capture-geometry', () => contents.mainFrame.executeJavaScript(iframeScript(context.lease.url, 'rect'))) as {
       x: number; y: number; width: number; height: number; viewportWidth: number; viewportHeight: number
     } | null
     if (!rect) throw new Error('HTML 预览不可见，请打开该文档的预览')
@@ -408,7 +436,7 @@ export class HtmlActionDesktopPort implements HtmlActionFramePort {
     const fullHeight = Math.ceil(Math.min(rect.y + rect.height, rect.viewportHeight) - y)
     const minimum = 8, width = Math.min(2048, fullWidth), height = Math.min(2048, fullHeight)
     if (width < minimum || height < minimum) throw new Error('HTML 预览没有可见画面')
-    const bitmap = await contents.capturePage({ x, y, width, height })
+    const bitmap = await deadline.wait('capture', () => contents.capturePage({ x, y, width, height }))
     frameFor(context, frameToken)
     const size = bitmap.getSize()
     if (bitmap.isEmpty() || size.width < minimum || size.height < minimum) throw new Error('HTML 预览没有生成真实截图')

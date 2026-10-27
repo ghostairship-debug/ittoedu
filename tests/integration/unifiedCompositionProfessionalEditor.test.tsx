@@ -126,7 +126,7 @@ it('uses the real document, text, chart and table editors, commits once per appl
   mounted.rerender(<Harness nodeId={tableNode.id} />)
   if (tableNode.kind !== 'native' || tableNode.content.nativeType !== 'table') throw new Error('Table required')
   const cell = tableNode.content.data.rows[0]!.cells[0]!
-  const cellInput = screen.getByLabelText(`单元格 ${tableNode.content.data.rows[0]!.id} / ${cell.columnId}`)
+  const cellInput = screen.getByLabelText('单元格 第 1 行，第 1 列')
   fireEvent.focus(cellInput); fireEvent.change(cellInput, { target: { value: '专业表格保留' } }); fireEvent.blur(cellInput)
   fireEvent.click(screen.getByRole('button', { name: '应用到作品' }))
   await waitFor(() => expect(commands).toHaveLength(4))

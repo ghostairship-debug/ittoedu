@@ -22,6 +22,7 @@ import { flowContentClientMatrix } from './flow/flowParagraphLayout'
 import { selectionHandleGesture, SlideLayerSelectionOverlay } from './workspaces/SlideLayerSelectionOverlay'
 import { OBJECT_EDIT_EVENT, requestImageEdit } from '../editing/commands/objectContextMenu'
 import { useSlideNativeTextEditor } from './workspaces/useSlideNativeTextEditor'
+import { componentInstanceDisplayName } from './properties/componentDefinitionPresentation'
 
 interface WorkspaceProps {
   onAddImage(x?: number, y?: number): void
@@ -58,6 +59,11 @@ export function Workspace({
     : view.project.global.overlay.includes(groupRoot) ? 'overlay' : null : null
   const editingPlane = view.editingPlane ?? groupPlane
   const editingPath = groupPlane && !view.editingPlane ? groupPath ?? [] : [...(view.editingPath ?? []), ...(groupPath ?? [])]
+  const editingLabels = editingPath.map(id => {
+    const instance = view.project?.instances[id]
+    if (instance?.name == null && id === view.rootInstanceId && view.project?.title != null) return view.project.title
+    return componentInstanceDisplayName(instance, instance ? view.project?.definitions[instance.definitionId] : undefined)
+  })
   const scopeControls = view.activeDocumentId && (view.activeGroupId || view.editingContainerId || canEnterSelected || canEnterGroup) ? <nav aria-label="容器编辑位置"
     style={{ display: 'flex', gap: 8, alignItems: 'center', padding: '6px 10px', flex: '0 0 auto' }}>
     {(view.activeGroupId || view.editingContainerId) && <button type="button" data-testid={view.activeGroupId ? 'group-edit-return' : 'container-edit-return'} onClick={() => {
@@ -70,7 +76,7 @@ export function Workspace({
         if (returnShared) bridge.selectInstances(documentId, [view.editingContainerId!])
       })
     }}>返回上层</button>}
-    <span>{editingPlane ? editingPlane === 'underlay' ? '共享底层 / ' : '共享浮层 / ' : ''}{editingPath.map(id => view.project?.instances[id]?.name ?? (id === view.rootInstanceId ? view.project?.title : id) ?? id).join(' / ')}</span>
+    <span>{editingPlane ? editingPlane === 'underlay' ? '共享底层 / ' : '共享浮层 / ' : ''}{editingLabels.join(' / ')}</span>
     {canEnterGroup && selected && <button type="button" data-testid="group-edit-enter" onClick={() => {
       const documentId = view.activeDocumentId!, groupId = selected.id
       void useEditorStore.getState().navigateCourseView(() => bridge.enterGroup(documentId, groupId))

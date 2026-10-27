@@ -216,7 +216,7 @@ it('keeps the real table cell composition DOM while its raw input remains with t
   const view = (id: string) => <PropertyDraftBoundary bindingKey={binding(id)} onStale={() => {}}>
     <NativeTableProperties node={node} bindingKey={binding(id)} commands={commands}/>
   </PropertyDraftBoundary>
-  const label = `单元格 ${node.rows[0].id} / ${node.columns[0].id}`
+  const label = '单元格 第 1 行，第 1 列'
   const ui = render(view('closed-a')), input = screen.getByLabelText(label)
   fireEvent.focus(input); fireEvent.compositionStart(input)
   fireEvent.change(input, { target: { value: '表格中文' } })

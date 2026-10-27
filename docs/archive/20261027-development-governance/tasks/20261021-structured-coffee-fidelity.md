@@ -1,3 +1,5 @@
+> 历史协调卡：2026-10-27退出当前任务集合。未达目标与原证据保留，本卡不再占用当前写锁或自动授权开工；现行安排见 [执行方案](../../../development-plan/NEXT_EXECUTION.md)。
+
 # 结构化创作与咖啡高保真验证
 
 - Status / Owner: queued / ChatGPT Root

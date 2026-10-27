@@ -403,7 +403,8 @@ export class ComponentProjectFileCoordinator {
     const end = Math.min(captured.files.length, offset + Math.min(limit, 1000))
     const files = captured.files.slice(offset, end)
     this.remember(runId, captured.snapshot, files, true, scope)
-    return { files: listedFiles(files), offset, total: captured.files.length, revision: captured.snapshot.revision,
+    return { files: listedFiles(files), offset, total: captured.files.length, revision: captured.snapshot.revision, currentRevision: current.revision,
+      ...(captured.snapshot.revision !== current.revision ? { staleSnapshot: true } : {}),
       ...(end < captured.files.length ? { nextOffset: end } : {}),
       basis: scope.state ? 'state-data-style-and-base-source' : 'base',
       note: `${scope.state ? 'data/style 为所选展示状态的有效内容；组件源码仍是基态。HTML/页面结构的状态修改使用该状态目标的 object.update、presentation.update。' : '这些工程文件是基础作者内容。'}目录续页把 nextOffset 传给 project.list 的 offset，并沿用 project。` }
@@ -414,7 +415,14 @@ export class ComponentProjectFileCoordinator {
     // Session reads clone the same immutable version. Share that capture inside this observation owner.
     if (captured) snapshot = [...reads.values()].find(seen => seen.captured && seen.snapshot.documentId === snapshot.documentId
       && seen.snapshot.epoch === snapshot.epoch && seen.snapshot.revision === snapshot.revision)?.snapshot ?? snapshot
-    for (const file of files) reads.set(fileKey(snapshot.documentId, file.path, scope), { snapshot, file, captured })
+    for (const file of files) {
+      const savedKey = fileKey(snapshot.documentId, file.path, scope), seen = reads.get(savedKey)
+      // Browsing an unchanged directory is not a new content read. Keep the
+      // immutable continuation, but never carry it across an identity/version change.
+      const pagination = seen && seen.snapshot.epoch === snapshot.epoch && seen.snapshot.revision === snapshot.revision
+        && sameFile(seen.file, file) ? seen.pagination : undefined
+      reads.set(savedKey, { snapshot, file, captured, ...(pagination ? { pagination } : {}) })
+    }
     this.reads.set(runId, reads)
   }
 
@@ -857,7 +865,8 @@ export class ComponentProjectFileCoordinator {
         const scope = this.host.scope?.(runId, input.project, snapshot) ?? { kind: 'document' }
         if (!input.offset && scope.kind === 'document') {
           const reads = this.reads.get(runId), prefix = fileKey(snapshot.documentId, '', scope)
-          for (const savedKey of reads?.keys() ?? []) if (savedKey.startsWith(prefix)) reads!.delete(savedKey)
+          for (const [savedKey, seen] of reads ?? []) if (savedKey.startsWith(prefix)
+            && (seen.snapshot.epoch !== snapshot.epoch || seen.snapshot.revision !== snapshot.revision)) reads!.delete(savedKey)
         }
         return { kind: 'read', data: this.listScope(runId, snapshot, scope, input.offset, input.limit) }
       }

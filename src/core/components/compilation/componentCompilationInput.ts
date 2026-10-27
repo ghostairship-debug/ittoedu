@@ -63,10 +63,38 @@ export function componentCompilationInput(
  * The general componentCompilationInput entry point remains a fresh snapshot. */
 export function createComponentCompilationInputReader() {
   type Entry = { input: ComponentCompilationInput; implementation: string; source?: string; rootDefinitionId?: string;
-    rootDefinitions?: WeakRef<CourseProjectV10['definitions']>; owners: Array<{ id: string; definition: CourseProjectV10['definitions'][string] | undefined;
+    rootDefinitions?: WeakRef<CourseProjectV10['definitions']>; owners: Array<{ id: string;
       version?: string; implementation: string; source?: string;
       files: Readonly<Record<string, Uint8Array>> | undefined; entries: Array<[string, Uint8Array]> }> }
   const cached = new WeakMap<SourceImplementation, Entry>()
+  type SourceOwner = { key: string; rootDefinitionId?: string; instanceId?: string }
+  let indexedProject: WeakRef<CourseProjectV10> | undefined, indexedProjectId: string | undefined
+  let sourceOwners = new WeakMap<SourceImplementation, SourceOwner>()
+  let ownerInputs = new Map<string, Entry>()
+  const ownerOf = (project: CourseProjectV10, implementation: SourceImplementation): SourceOwner | undefined => {
+    if (indexedProject?.deref() !== project) {
+      const nextOwners = new WeakMap<SourceImplementation, SourceOwner>(), retained = new Map<string, Entry>()
+      const remember = (value: ComponentImplementation | undefined, owner: SourceOwner) => {
+        if (value?.kind !== 'source' || nextOwners.has(value)) return
+        nextOwners.set(value, owner)
+        const previous = indexedProjectId === project.id ? ownerInputs.get(owner.key) : undefined
+        if (previous) retained.set(owner.key, previous)
+      }
+      // Formal owners survive immutable project snapshots. Object allocation is
+      // not a source edit, and must not force another compilation/preparation.
+      // Definitions come first, matching componentCompilationInput's root identity.
+      for (const definition of Object.values(project.definitions)) remember(definition.implementation,
+        { key: `definition:${definition.id}`, rootDefinitionId: definition.id })
+      for (const instance of Object.values(project.instances)) remember(instance.implementationOverride, { key: `instance:${instance.id}`, instanceId: instance.id })
+      sourceOwners = nextOwners; ownerInputs = retained
+      indexedProject = new WeakRef(project); indexedProjectId = project.id
+    }
+    const owner = sourceOwners.get(implementation)
+    // Keep the existing detached/in-place edit path honest as well: an index
+    // entry cannot preserve shared-root identity after its owner was replaced.
+    return owner && (owner.rootDefinitionId ? project.definitions[owner.rootDefinitionId]?.implementation === implementation
+      : owner.instanceId && project.instances[owner.instanceId]?.implementationOverride === implementation) ? owner : undefined
+  }
   const definitionAt = (project: CourseProjectV10, id: string) => Object.hasOwn(project.definitions, id) ? project.definitions[id] : undefined
   const ownerFiles = (implementation: ComponentImplementation | undefined, resources: DocumentResources | undefined) =>
     implementation?.kind === 'source' && implementation.workspace ? resources?.components[implementation.workspace.ownerId] : undefined
@@ -80,16 +108,22 @@ export function createComponentCompilationInputReader() {
     // Source text is already a string; keep it out of the repeatedly serialized
     // metadata, while observing edits to maps or the declared workspace.
     const metadata = metadataFor(implementation)
-    const previous = cached.get(implementation)
+    const owner = ownerOf(project, implementation)
+    const previous = (owner ? ownerInputs.get(owner.key) : undefined) ?? cached.get(implementation)
     if (previous?.implementation === metadata && previous.source === implementation.source
-      && (previous.rootDefinitionId ? definitionAt(project, previous.rootDefinitionId)?.implementation === implementation : previous.rootDefinitions?.deref() === project.definitions)
+      && (owner ? previous.rootDefinitionId === owner.rootDefinitionId
+        : previous.rootDefinitionId ? definitionAt(project, previous.rootDefinitionId)?.implementation === implementation : previous.rootDefinitions?.deref() === project.definitions)
       && previous.owners.every(owner => {
         const definition = owner.id === '' ? undefined : definitionAt(project, owner.id)
         const value = owner.id === '' ? implementation : definition?.implementation
-        return definition === owner.definition && definition?.version === owner.version
+        return definition?.version === owner.version
           && metadataFor(value) === owner.implementation && (value?.kind === 'source' ? value.source : undefined) === owner.source
           && sameFiles(owner, ownerFiles(value, resources))
-      })) return previous.input
+      })) {
+      cached.set(implementation, previous)
+      if (owner) ownerInputs.set(owner.key, previous)
+      return previous.input
+    }
     const input = componentCompilationInput(project, implementation, resources)
     const ids = new Set(['', ...Object.keys(input.dependencies ?? {}), ...Object.values(input.moduleBindings ?? {})])
     for (const dependency of Object.values(input.dependencies ?? {})) for (const id of Object.values(dependency.moduleBindings ?? {})) ids.add(id)
@@ -97,11 +131,13 @@ export function createComponentCompilationInputReader() {
       const definition = id === '' ? undefined : definitionAt(project, id)
       const value = id === '' ? implementation : definition?.implementation
       const files = ownerFiles(value, resources)
-      return { id, definition, version: definition?.version, implementation: metadataFor(value), source: value?.kind === 'source' ? value.source : undefined,
+      return { id, version: definition?.version, implementation: metadataFor(value), source: value?.kind === 'source' ? value.source : undefined,
         files, entries: Object.entries(files ?? {}) }
     })
-    cached.set(implementation, { input, implementation: metadata, source: implementation.source,
-      rootDefinitionId: input.rootDefinitionId, rootDefinitions: input.rootDefinitionId ? undefined : new WeakRef(project.definitions), owners })
+    const entry = { input, implementation: metadata, source: implementation.source,
+      rootDefinitionId: input.rootDefinitionId, rootDefinitions: input.rootDefinitionId ? undefined : new WeakRef(project.definitions), owners }
+    cached.set(implementation, entry)
+    if (owner) ownerInputs.set(owner.key, entry)
     return input
   }
 }

@@ -25,6 +25,7 @@
 | 入口 | 用途 |
 |---|---|
 | `read()` | 共享场景列表及状态/镜头/标题目标、进度、缩放、静音、全屏；`collapsed` 属于当前实例，`camera` 有则为当前会话镜头 |
+| `readLocation()` | 返回当前正式位置的 `string \| null`，不是包含 `sceneId` 的对象；与 `read().scenes` 及其真实 `targets` 对应，不从字符串猜内部字段 |
 | `subscribe(render)` | 状态变化时刷新；返回取消订阅函数，销毁时调用 |
 | `canExecute(action)` | 按当前状态决定按钮可用性 |
 | `execute(action, signal?)` | 执行正式动作，返回 `Promise<boolean>`；可用 `AbortSignal` 取消本次请求 |
@@ -33,6 +34,8 @@
 | `setZoom(value)` / `resetView()` | 调整或恢复视图 |
 
 动作使用现有对象，例如 `{type:"step.next"}`、`{type:"step.previous"}`、`{type:"scene.next"}`、`{type:"scene.previous"}`、`{type:"scene.replay"}`、`{type:"course.restart"}`、`{type:"audio.toggle-mute"}`、`{type:"player.fullscreen.toggle"}`。跳指定场景时，把 `read().scenes` 中实际的 `id` 交给 `{type:"scene.go",sceneId}`；这些身份来自软件，无需写进课件内容。
+
+当前位置高亮应首次读取并订阅同一个端口，例如 `const sync = () => renderNavigation(navigation.read(), navigation.readLocation()); sync(); const unsubscribe = navigation.subscribe(sync);`。`renderNavigation` 是本作品自己的绘制函数；销毁时调用 `unsubscribe()`。正文与全局导航都以这份当前事实更新，不用局部按钮点击次数维护第二套页码。
 
 设计细分目录时，读取场景的 `targets`；每项包含显示名称、类型与宿主提供的 `action`，用 `execute(target.action)` 跳到实际状态、镜头或标题。直接点击场景使用不带细分目标的 `scene.go` 回到该页正式播放起点，包括 Spatial 默认路线。将这些实际目标按本课的章节、问题或实验步骤组织，保留宿主给出的动作对象，不凭标题文字拼接身份，也不自行维护第二份播放顺序。
 

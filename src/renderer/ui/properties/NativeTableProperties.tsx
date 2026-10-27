@@ -57,6 +57,8 @@ function cellKey(rowId: string, columnId: string): string {
 function TableCellInput({
   rowId,
   columnId,
+  rowIndex,
+  columnIndex,
   value,
   onNavigate,
   onActivate,
@@ -67,6 +69,8 @@ function TableCellInput({
   commands: NativeTablePropertiesCommands
   rowId: string
   columnId: string
+  rowIndex: number
+  columnIndex: number
   value: string
   onNavigate: (from: CellRef, direction: 1 | -1, text: string) => void
   onActivate: (ref: CellRef) => void
@@ -102,7 +106,7 @@ function TableCellInput({
     <input
       className="form-input table-cell-input"
       data-cell-key={cellKey(rowId, columnId)}
-      aria-label={`单元格 ${rowId} / ${columnId}`}
+      aria-label={`单元格 第 ${rowIndex + 1} 行，第 ${columnIndex + 1} 列`}
       value={draft}
       onFocus={() => {
         if (stale()) return
@@ -225,8 +229,9 @@ export function NativeTableProperties({
     const editable = rows.flatMap(row => columns.filter(column => !tableCellSpan(node, row.id, column.id).covered).map(column => ({ rowId: row.id, columnId: column.id })))
     const flatIndex = editable.findIndex(entry => entry.rowId === from.rowId && entry.columnId === from.columnId) + direction
     if (flatIndex < editable.length) {
-      if (cell.text === text) commands.cancelCellEdit(cell.id)
-      else commands.commitCellText(cell.id, text)
+      // The live projection can already contain this draft. Equality here does
+      // not mean the edit was cancelled; the cell owner settles same-value commits.
+      commands.commitCellText(cell.id, text)
     }
     if (flatIndex < 0) {
       focusCell(rows[0]!.id, columns[0]!.id)
@@ -266,8 +271,8 @@ export function NativeTableProperties({
         aria-label="表格单元格"
         style={{ display: 'grid', gridTemplateColumns: `repeat(${columns.length}, minmax(0, 1fr))`, gap: 4 }}
       >
-        {rows.map((row) => (
-          columns.map((column) => {
+        {rows.map((row, rowIndex) => (
+          columns.map((column, columnIndex) => {
             const cell = row.cells.find((candidate) => candidate.columnId === column.id)
             if (!cell) return null
             const span = tableCellSpan(node, row.id, column.id)
@@ -279,6 +284,8 @@ export function NativeTableProperties({
                 commands={commands}
                 rowId={row.id}
                 columnId={column.id}
+                rowIndex={rowIndex}
+                columnIndex={columnIndex}
                 value={cell.text}
                 onNavigate={navigate}
                 onActivate={setActiveCell}

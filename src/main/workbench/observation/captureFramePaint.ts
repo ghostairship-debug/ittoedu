@@ -1,7 +1,8 @@
 import type { WebFrameMain } from 'electron'
+import { ObservationDeadline, OBSERVATION_TIMEOUT_MS } from './observationDeadline'
 
 /** Serialized into each current frame; no host API or persistent bridge is exposed. */
-export function captureFramePaintInRealm(token: string, action: 'install' | 'start' | 'wait' | 'dispose'): void | Promise<void> {
+export function captureFramePaintInRealm(token: string, action: 'install' | 'start' | 'wait' | 'dispose', lifetimeMs = 20_000): void | Promise<void> {
   const property = `__guoling_capture_paint_${token.replaceAll('-', '_')}`
   type State = { start(): void; wait(): Promise<void>; dispose(): void }
   const states = window as unknown as Record<string, State | undefined>
@@ -13,6 +14,9 @@ export function captureFramePaintInRealm(token: string, action: 'install' | 'sta
   }
   let resolveVisible!: (visible: boolean) => void
   const visible = new Promise<boolean>(resolve => { resolveVisible = resolve })
+  let disposed = false, animationFrame = 0
+  let resolveDisposed!: () => void
+  const disposal = new Promise<void>(resolve => { resolveDisposed = resolve })
   const receive = (event: MessageEvent) => {
     if (event.source !== parent || event.data?.type !== 'guoling.capture.paint' || event.data.token !== token) return
     resolveVisible(event.data.visible === true)
@@ -20,6 +24,7 @@ export function captureFramePaintInRealm(token: string, action: 'install' | 'sta
   }
   window.addEventListener('message', receive)
   const visibility = visible.then(visible => {
+    if (disposed) return false
     // The parent owns its iframe's actual CSS box. A hidden child document can
     // still report a full viewport and visible document while its rAF is paused.
     const frames: Array<HTMLIFrameElement | HTMLFrameElement> = []
@@ -40,25 +45,43 @@ export function captureFramePaintInRealm(token: string, action: 'install' | 'sta
     return visible
   })
   let painted: Promise<void> | undefined
-  const wait = () => painted ??= visibility.then(async visible => {
-    if (!visible) return
-    await document.fonts.ready
-    await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve())))
-  })
+  const wait = () => painted ??= Promise.race([disposal, visibility.then(async visible => {
+    if (!visible || disposed) return
+    await Promise.race([document.fonts.ready, disposal])
+    if (disposed) return
+    await new Promise<void>(resolve => {
+      animationFrame = requestAnimationFrame(() => {
+        if (disposed) { resolve(); return }
+        animationFrame = requestAnimationFrame(() => { animationFrame = 0; resolve() })
+      })
+    })
+  })])
   const dispose = () => {
+    disposed = true
+    clearTimeout(expiry)
+    if (animationFrame) cancelAnimationFrame(animationFrame)
     window.removeEventListener('message', receive)
     resolveVisible(false)
+    resolveDisposed()
     Reflect.deleteProperty(states, property)
   }
+  const expiry = setTimeout(dispose, lifetimeMs)
   Object.defineProperty(states, property, { configurable: true, value: { start: () => resolveVisible(true), wait, dispose } satisfies State })
 }
 
 /** Only frames with pixels in their ancestor's viewport acknowledge a painted frame. */
 export async function waitForCaptureFramePaint(mainFrame: WebFrameMain, token: string,
-  observedFrames?: readonly WebFrameMain[]): Promise<void> {
+  observedFrames?: readonly WebFrameMain[], observation?: ObservationDeadline): Promise<void> {
+  const deadline = observation ?? new ObservationDeadline()
   const frames = (observedFrames ?? mainFrame.framesInSubtree).filter(frame => !frame.detached)
+  const raw = (frame: WebFrameMain, action: Parameters<typeof captureFramePaintInRealm>[1]) =>
+    frame.executeJavaScript(`(${captureFramePaintInRealm.toString()})(${JSON.stringify(token)},${JSON.stringify(action)},${OBSERVATION_TIMEOUT_MS})`)
+  const dispose = async (frame: WebFrameMain) => {
+    try { if (!frame.detached) await raw(frame, 'dispose') }
+    catch { /* A frame can close between the detached check and native IPC. */ }
+  }
   const run = (frame: WebFrameMain, action: Parameters<typeof captureFramePaintInRealm>[1]) =>
-    frame.executeJavaScript(`(${captureFramePaintInRealm.toString()})(${JSON.stringify(token)},${JSON.stringify(action)})`)
+    deadline.wait(`paint-${action}`, () => raw(frame, action), action === 'install' ? () => dispose(frame) : undefined)
   try {
     await Promise.all(frames.map(frame => run(frame, 'install')))
     await run(mainFrame, 'start')
@@ -73,12 +96,15 @@ export async function waitForCaptureFramePaint(mainFrame: WebFrameMain, token: s
     }
     for (const [, level] of [...levels].sort(([a], [b]) => b - a)) await Promise.all(level.map(async frame => {
       try { if (!frame.detached) await run(frame, 'wait') }
-      catch (error) { if (!frame.detached) throw error }
+      catch (error) { if (!frame.detached || deadline.signal.aborted) throw error }
     }))
   } finally {
-    await Promise.all(frames.map(async frame => {
-      try { if (!frame.detached) await run(frame, 'dispose') }
-      catch { /* Destroying the capture window also releases its frame contexts. */ }
-    }))
+    // Cleanup must not turn a bounded cancellation back into an unbounded IPC
+    // wait. Realm expiry and late-install cleanup also own their exact token.
+    const cleanup = Promise.all(frames.map(dispose))
+    try {
+      if (!deadline.signal.aborted) await deadline.wait('paint-cleanup', () => cleanup)
+      else void cleanup.catch(() => undefined)
+    } finally { if (!observation) deadline.dispose() }
   }
 }

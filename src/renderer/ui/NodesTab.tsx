@@ -52,7 +52,7 @@ import {
 } from 'lucide-react'
 import { containerChildIds, owningContainer, type ComponentFlowPlacement } from '../../shared/contracts/component-platform/project'
 import { componentIsLocked } from '../composition/crossSurfaceCommands'
-import { componentDefinitionPresentation } from './properties/componentDefinitionPresentation'
+import { componentDefinitionPresentation, componentInstanceDisplayName } from './properties/componentDefinitionPresentation'
 import { flowBodyIds } from '../componentPlatform/surfaces/flow/documentProjection'
 import {
   selectEditingScope,
@@ -87,7 +87,9 @@ const nodeIcon = {
 
 interface NodesTabRowNode {
   id: string
+  /** Keep the original rename seed separate from a derived content preview. */
   name: string
+  displayName: string
   type: string
   typeLabel: string
   visible: boolean
@@ -161,7 +163,7 @@ function SortableNode({
         type="button"
         className="drag-handle"
         title="拖动调整前后层级"
-        aria-label={`调整“${node.name}”层级`}
+        aria-label={`调整“${node.displayName}”层级`}
         {...attributes}
         {...listeners}
       >
@@ -176,7 +178,7 @@ function SortableNode({
           className="node-name-input"
           value={draftName}
           maxLength={80}
-          aria-label={`重命名“${node.name}”`}
+          aria-label={`重命名“${node.displayName}”`}
           onChange={(event) => setDraftName(event.target.value)}
           onBlur={commitName}
           onClick={(event) => event.stopPropagation()}
@@ -192,7 +194,7 @@ function SortableNode({
         <div className={`node-label${sourceLabel ? ' node-label--with-source' : ''}`}>
           <span
             className="node-name"
-            title={`${node.name}（双击改名，Ctrl / Shift 单击可多选）`}
+            title={`${node.displayName}（双击改名，Ctrl / Shift 单击可多选）`}
             onClick={(event) => {
               const additive = event.ctrlKey || event.metaKey || event.shiftKey
               // Synthetic/keyboard activation and additive selection cannot be
@@ -221,7 +223,7 @@ function SortableNode({
               setEditing(true)
             }}
           >
-            {node.name}
+            {node.displayName}
           </span>
           {sourceLabel ? (
             <small className="node-source" data-testid={`node-source-${node.id}`}>
@@ -235,7 +237,7 @@ function SortableNode({
         type="button"
         className="icon-button"
         title={node.visible ? '隐藏图层' : '显示图层'}
-        aria-label={`${node.visible ? '隐藏' : '显示'}“${node.name}”`}
+        aria-label={`${node.visible ? '隐藏' : '显示'}“${node.displayName}”`}
         onClick={onToggleVisible}
       >
         {node.visible ? <Eye size={14} /> : <EyeOff size={14} />}
@@ -244,7 +246,7 @@ function SortableNode({
         type="button"
         className="icon-button"
         title={node.locked ? '解锁图层' : '锁定图层'}
-        aria-label={`${node.locked ? '解锁' : '锁定'}“${node.name}”`}
+        aria-label={`${node.locked ? '解锁' : '锁定'}“${node.displayName}”`}
         onClick={onToggleLocked}
       >
         {node.locked ? <Lock size={14} /> : <Unlock size={14} />}
@@ -255,7 +257,7 @@ function SortableNode({
           className="icon-button"
           data-testid={`flow-move-across-body-${node.id}`}
           title={bodyPlane === 'overlay' ? '移到正文下方' : '移到正文上方'}
-          aria-label={`${bodyPlane === 'overlay' ? '移到正文下方' : '移到正文上方'}“${node.name}”`}
+          aria-label={`${bodyPlane === 'overlay' ? '移到正文下方' : '移到正文上方'}“${node.displayName}”`}
           onClick={onMoveAcrossBody}
         >
           {bodyPlane === 'overlay' ? <ArrowDown size={14} /> : <ArrowUp size={14} />}
@@ -265,7 +267,7 @@ function SortableNode({
         type="button"
         className="icon-button"
         title="复制图层"
-        aria-label={`复制“${node.name}”`}
+        aria-label={`复制“${node.displayName}”`}
         onClick={onDuplicate}
       >
         <Copy size={14} />
@@ -274,7 +276,7 @@ function SortableNode({
         type="button"
         className="icon-button icon-button--danger"
         title="删除节点"
-        aria-label={`删除“${node.name}”`}
+        aria-label={`删除“${node.displayName}”`}
         onClick={onDelete}
       >
         <Trash2 size={14} />
@@ -357,7 +359,7 @@ export function NodesTab() {
     if(!item) return null
     const definition=project.definitions[item.definitionId]
     const presentation=componentDefinitionPresentation(definition)
-    const node={id,name:item.name??presentation.title,type:presentation.iconType,
+    const node={id,name:item.name??presentation.title,displayName:componentInstanceDisplayName(item,definition),type:presentation.iconType,
       typeLabel:`${presentation.title} · ${presentation.category}`,visible:item.visible!==false,locked:item.locked===true}
     return <div key={id} style={depth?{paddingLeft:depth*16}:undefined}>
       <SortableNode node={node} dragDisabled={componentIsLocked(project,id)} selected={view.interactionSelection?.kind!=='author-field'&&view.selectedInstanceIds.includes(id)} sourceLabel={depth?'编组内对象':item.flowPlacement?.space==='viewport'?'钉在视口':item.flowPlacement?'跟随稿纸':undefined}
@@ -381,7 +383,7 @@ export function NodesTab() {
     if(!item||project.definitions[item.definitionId]?.role==='behavior')return null
     const presentation=componentDefinitionPresentation(project.definitions[item.definitionId])
     const Icon=presentation.iconType in nodeIcon?nodeIcon[presentation.iconType as keyof typeof nodeIcon]:Box
-    const name=item.name??presentation.title
+    const name=componentInstanceDisplayName(item,project.definitions[item.definitionId])
     return <div key={id} role="none">
       <button type="button" role="treeitem" className={'node-item node-item--flow-content'+(view.interactionSelection?.kind!=='author-field'&&view.selectedInstanceIds.includes(id)?' node-item--selected':'')}
         aria-label={name} aria-level={depth+1} aria-selected={view.interactionSelection?.kind!=='author-field'&&view.selectedInstanceIds.includes(id)}
@@ -408,7 +410,3 @@ export function NodesTab() {
     <div className="tree-order-note">{flowPage?'正文内部顺序在稿纸中编辑；浮层可移到正文上方或下方，同一定位和平面内可拖动排序。':'列表最上方就是同一归属的最上层；隐藏对象仍可从这里显示，锁定对象仍可选择。'}</div>
   </div>
 }
-
-
-
-

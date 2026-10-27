@@ -4,6 +4,10 @@
 
 ## 普通内容直接装配
 
+连续阅读且需要独立编辑正文、图片、表格时，优先用 Flow 专业正文和独立内容块组织，复杂互动保留为边界明确的局部组件。整段 HTML 若包含需要保源的局部程序，或被判定为耦合的并排、定位等布局，当前 Flow 采用会把本次输入整体保留为 Web；不能假设整篇复杂 HTML 会自动拆成所需对象。在首个正式片段中核对实际编辑边界，再沿同一路径扩写。以固定构图和多个场景展示为主、同时需要深度编辑的作品可以选用 Slide；连续阅读需求仍应保留。
+
+HTML 引用相对图片、样式等文件时，先在已授权目录中用正式 `file.write` 写出 HTML，保留资源及原相对目录关系，再用 `project.apply.from` 采用，让既有资源服务按来源文件和授权范围摄取依赖。没有文件来源的 `content` 字符串不代表相对资源已闭包；已有工程资源继续使用正式引用，不让模型以内联大图 Base64 绕过资源接入。
+
 两条已验证组合：把 `lesson.html` 的普通标题/图片和 `<iframe src="activity.html" title="局部活动"></iframe>` 一起交 `project.apply {path:已观察页面结构路径,intent:"insert",from:"lesson.html"}`；或用同批 `operations` 分别插入普通 HTML 与局部程序，区域沿已观察 frame/布局。`srcdoc` 也支持。局部程序保自己的状态和资源，外层没有公共脚本时可独立装配；真正跨块 DOM 程序继续保源。普通 `content` 改字保既有身份，即使删 script 也不暗拆；明确 `redo` 才重装配，作者记录无法可靠对应时保原程序并给具体诊断。正常导航沿正式 `click` 动作，不为 Next 包整页程序。
 
 完整新作先在同一工程形成整作布局框架，独立主场景从首批就进入正式页面，场景内翻卡、揭示和反馈保局部状态，再沿当前框架接力素材和互动；不把整课封成一页大程序再另加导航。已确定的页面、原生内容和布局以跨页批次提交；框架含真实标题、关键正文、关系与所需素材/操作空间。连续模拟按共享状态保适当持续程序，不为分页拆坏机制。批量是减少机械往返，不是让所有页面套同一种卡片。未知机制按需局部试验，已确定结构不等待它反复精修。
@@ -49,6 +53,55 @@
 局部改格仍沿现专业入口，例如 `object.author {target:当前表格句柄,change:{kind:"table",edit:{kind:"cell-text",cellId:实际读回的单元格身份,text:"新内容"}}}`；富文本格按实际 `content` 修改。已有显式身份的专业数据格式继续有效，普通整表矩阵不要求模型搬运内部编号。
 
 表格与图表的源数据持续可编辑，仍要在实际页面看尺寸、边界及标签。当前图表的 `appearance.fontSize` 只改变标题字号，不能以此判断轴、分类和数据标签已经达到课堂可读尺度；发现具体限制时，按材料需要调整表达，不能把写入成功当作视觉通过。
+### 专业数据接入局部计算
+
+需要“人工改表格→计算→图表响应”时，使用有关表格、图表的当前 `.data.json` 和短 `.view.*` 入口；回执已给出的当前内容直接续用，缺少或过期才精确读取。这类接线通常不需要展开 `.dependencies/implementation.view.js`。专业表格的 `rows[].cells[]` 用 `columnId` 对应列，单元格正文是 `text` 或 `content.inlines`；富文本中 `type:"text"` 读 `text`，公式及内嵌组件读 `accessibleText`。取值不改写富文。图表的正式运行数据是 `categories` 与 `series[].points[]`，已有点的 `id/categoryId` 必须保留；前述工具入口的 `values` 简写不能直接传给运行器。
+
+以下以一个数值格驱动已有柱状图的一个数据点说明合同，不规定作品结构或业务公式。两段分别替换当前原生表格、柱状图短入口的 `mount`，保留实际 `import implementation ...`、`...implementation` 及已有业务；将示意身份替换为本次数据中读回的真实身份，共享键按本次业务命名。
+
+表格挂载及作者数据更新后发布输入；空白或非数字发布 `null`，示例图表恢复其作者值，实际作品还应给出相应输入反馈：
+
+```js
+async mount(context) {
+  const mounted = await implementation.mount(context);
+  const publish = instance => {
+    const cell = instance.data.rows.flatMap(row => row.cells).find(cell => cell.id === '已读的单元格ID');
+    const text = cell?.content
+      ? cell.content.inlines.map(i => i.type === 'text' ? i.text : i.accessibleText).join('')
+      : cell?.text ?? '';
+    const value = text.trim() === '' ? NaN : Number(text);
+    context.scope.state.set('demo.measure', Number.isFinite(value) ? value : null);
+  };
+  publish(context.instance);
+  return { ...mounted, async update(next) { await mounted.update(next); publish(next); } };
+}
+```
+
+图表读取首值并订阅后续变化，保留其余数据、身份、外观及最新人工外框。`mounted.update(next)` 的参数是完整 **ComponentInstance**，不是 `next.data`；原生图表的更新同步完成：
+
+```js
+async mount(context) {
+  let current = context.instance;
+  const mounted = await implementation.mount(context);
+  const paint = value => {
+    const data = typeof value === 'number' && Number.isFinite(value)
+      ? { ...current.data, series: current.data.series.map(series => ({ ...series,
+          points: series.points.map(point => point.id === '已读的数据点ID' ? { ...point, value } : point)
+        })) }
+      : current.data;
+    return mounted.update({ ...current, data });
+  };
+  context.scope.state.subscribe('demo.measure', paint);
+  paint(context.scope.state.get('demo.measure'));
+  return { ...mounted,
+    update(next) { current = next; return paint(context.scope.state.get('demo.measure')); },
+    updatePlacement(frame) { current = { ...current, frame }; mounted.updatePlacement?.(frame); }
+  };
+}
+```
+
+`scope.state` 在同一运行会话共享，`set` 同步通知订阅者；`subscribe` 不回放首值，且随挂载自动清理，勿另建轮询或互相回写同一键。上述 `...mounted` 保留原 `dispose` 及其他生命周期；自行新增的 DOM 监听、定时器或 Observer 才按需交给 `scope.cleanup`。运行态不写作者工程，保存后重开由表格作者数据重新发布输入。确认真实人工改格、富文改格、图表移动后再计算及保存重开均正确，再扩展业务计算。
+
 
 ## 图示、图片与局部程序
 

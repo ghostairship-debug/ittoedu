@@ -477,8 +477,15 @@ export class ExecutionEngine {
       .sort((a, b) => a.name.localeCompare(b.name))
   }
   private async refreshTools(active: ActiveRun): Promise<void> {
-    active.tools.splice(0, active.tools.length, ...await this.runTools(active.record.runId, active.permission, active.record.input.workspaceRoot,
-      !!active.record.input.contentOutput, active.loadedHostFamilies, active.loadedHostNames))
+    const next = await this.runTools(active.record.runId, active.permission, active.record.input.workspaceRoot,
+      !!active.record.input.contentOutput, active.loadedHostFamilies, active.loadedHostNames)
+    const current = new Map(next.map(tool => [tool.name, tool]))
+    const previousNames = new Set(active.tools.map(tool => tool.name))
+    // Refresh definitions and authorization from the current catalog while keeping
+    // already disclosed tools in order. Newly discovered tools append deterministically.
+    active.tools.splice(0, active.tools.length,
+      ...active.tools.flatMap(tool => current.has(tool.name) ? [current.get(tool.name)!] : []),
+      ...next.filter(tool => !previousNames.has(tool.name)))
   }
   private timing(identity: { runId: string; input: Pick<ExecutionStart, 'conversationId' | 'taskId'> },
     markId: string, stage: ExecutionTimingStage,
@@ -2567,7 +2574,7 @@ export class ExecutionEngine {
                 .map(name => ({ name, code: toolRegistration(name) ? 'service-unavailable' : 'unknown-tool',
                   message: toolRegistration(name) ? '当前宿主服务未接通；有效工具已展开' : '未注册此工具名；有效工具已展开' }))
               tool.result = { kind: 'read', data: { loaded: requested.filter(family => active.tools.some(item => familyOfTool(item.name) === family)),
-                ...(input.names ? { tools: active.tools.filter(item => input.names!.includes(item.name)), unavailable } : {}), available } }
+                ...(input.names ? { tools: active.tools.filter(item => input.names!.includes(item.name)).map(({ name }) => ({ name })), unavailable } : {}), available } }
             } else if (tool.call.name === 'course.createFromHtml' && this.options.files && record.input.workspaceRoot) {
               tool.result = await createCourseFromHtml(createCourseFromHtmlInputSchema.parse(tool.call.input), {
                 callId: tool.callId, permission: active.permission,

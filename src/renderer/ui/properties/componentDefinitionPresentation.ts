@@ -1,8 +1,10 @@
-import type { ComponentDefinition, JsonObject, JsonValue } from '../../../shared/contracts/component-platform/project'
+import type { ComponentDefinition, ComponentInstance, JsonObject, JsonValue } from '../../../shared/contracts/component-platform/project'
 import { componentDefinitionBuiltinKey } from '../../../shared/contracts/component-platform/project'
 import { TEACHER_CONTROLLER_DEFINITION } from '../../../components/teacher-controller/data'
 import { AUDIO_DEFINITION, VIDEO_DEFINITION } from '../../../components/media/adapters'
 import { WEB_DEFINITION, HTML_PROGRAM_DEFINITION } from '../../../components/web/data'
+import { textComponentDataSchema } from '../../../components/text/data'
+import { plainDocumentText } from '../../../shared/document/content'
 
 function object(value: JsonValue | undefined): JsonObject {
   return value && typeof value === 'object' && !Array.isArray(value) ? value : {}
@@ -57,6 +59,20 @@ export function componentDefinitionPresentation(definition: ComponentDefinition 
     iconType: componentDefinitionBuiltinKey(definition)
       ?? (definition?.role === 'behavior' ? 'behavior' : definition?.implementation.kind === 'source' ? 'source' : 'component'),
   }
+}
+
+/** Derived labels never become instance names or rename-field defaults. */
+export function componentInstanceDisplayName(instance: ComponentInstance | undefined, definition: ComponentDefinition | undefined): string {
+  if (instance?.name != null) return instance.name
+  const presentation = componentDefinitionPresentation(definition)
+  if (instance && presentation.builtinKey === 'guoling.text') {
+    const parsed = textComponentDataSchema.safeParse(instance.data)
+    if (parsed.success) {
+      const preview = Array.from(plainDocumentText(parsed.data.content).replace(/\s+/gu, ' ').trim())
+      if (preview.length) return preview.length > 32 ? `${preview.slice(0, 32).join('')}…` : preview.join('')
+    }
+  }
+  return presentation.title
 }
 
 function fieldSchema(schema: JsonObject | undefined, path: readonly string[]): JsonObject {
