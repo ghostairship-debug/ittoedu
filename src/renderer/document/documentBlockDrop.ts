@@ -9,11 +9,11 @@ export interface DocumentBlockDropTarget {
 }
 
 /** The shared pointer target for block moves and media insertion. */
-export function documentBlockContainerAt(content: DocumentContent, root: HTMLElement, point: { x: number; y: number }, excluded: ReadonlySet<string> = new Set()) {
+export function documentBlockContainerAt(content: DocumentContent, root: HTMLElement, point: { x: number; y: number }, excluded: ReadonlySet<string> = new Set(), cachedRects?: ReadonlyMap<string,DOMRect>) {
   const elements = new Map([...root.querySelectorAll<HTMLElement>('[data-flow-block-id]')]
     .map(element => [element.dataset.flowBlockId!, element]))
   const rect = (block: DocumentBlock) => {
-    const bounds = elements.get(block.id)?.getBoundingClientRect()
+    const bounds = cachedRects?.get(block.id) ?? elements.get(block.id)?.getBoundingClientRect()
     return bounds && bounds.height > 0 && bounds.width > 0 ? bounds : null
   }
   const horizontal = (bounds: DOMRect) => point.x >= bounds.left && point.x <= bounds.right
@@ -38,7 +38,7 @@ export function documentBlockContainerAt(content: DocumentContent, root: HTMLEle
 /** Resolve the reading container in two dimensions, then its logical insertion edge.
  * The document tree supplies order; DOM rectangles supply only the user's column. */
 export function documentBlockDropTarget(content: DocumentContent, root: HTMLElement, sourceId: string,
-  point: { x: number; y: number }): DocumentBlockDropTarget | null {
+  point: { x: number; y: number }, cachedRects?: ReadonlyMap<string,DOMRect>): DocumentBlockDropTarget | null {
   const excluded = new Set<string>()
   const exclude = (blocks: readonly DocumentBlock[]) => {
     for (const block of blocks) { excluded.add(block.id); const children = documentBlockChildren(block); if (children) exclude(children) }
@@ -52,7 +52,7 @@ export function documentBlockDropTarget(content: DocumentContent, root: HTMLElem
   }
   find(content.blocks)
   if (!found) return null
-  const destination = documentBlockContainerAt(content, root, point, excluded), { rect } = destination
+  const destination = documentBlockContainerAt(content, root, point, excluded,cachedRects), { rect } = destination
   const candidates = destination.blocks.filter(block => !excluded.has(block.id) && rect(block))
   if (!candidates.length) {
     const bounds = destination.parent && rect(destination.parent)

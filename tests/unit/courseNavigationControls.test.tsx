@@ -1,5 +1,5 @@
 import { componentSurfaces } from '../../src/shared/contracts/component-platform/project'
-import { appendRootContainers, testContainerInstance } from '../helpers/glxWorkFixture'
+import { appendRootContainers, setRootContainers, testContainerInstance } from '../helpers/glxWorkFixture'
 import { afterEach, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { useState } from 'react'
@@ -104,8 +104,12 @@ it('leaves the current author location unchanged when its draft cannot be applie
 
 it('propagates a Flow owner refusal through the public command adapter before changing playback mode', async () => {
   const project = createBlankCourseProjectV10('保留未完成 Flow 草稿')
-  testContainerInstance(project, 0).container!.kind = 'flow'
-  testContainerInstance(project, 0).container!.presentation = { states: [{ id: 'next', title: '下一步', overrides: {} }] }
+  const headingIds = ['flow-draft-current', 'flow-draft-next']
+  project.definitions.heading = { id: 'heading', role: 'content', implementation: { kind: 'builtin', key: 'guoling.document-block' } }
+  for (const [index, id] of headingIds.entries()) project.instances[id] = { id, definitionId: 'heading',
+    data: { type: 'heading', level: 2, content: { inlines: [{ type: 'text', text: '章节 ' + (index + 1) }] } } }
+  setRootContainers(project, [{ id: 'flow-draft', kind: 'flow', title: '未完成草稿', childIds: headingIds,
+    flow: { layout: { readingWidth: 860, wideContentWidth: 1100 } } }])
   const patch = vi.fn(), feedback = vi.fn()
   const ports = {
     kernel: { readEditingDocument: () => project, readView: () => ({ activeDocumentId: 'doc', surfaceId: componentSurfaces(project)[0].id }), setFeedback: feedback },
@@ -118,13 +122,20 @@ it('propagates a Flow owner refusal through the public command adapter before ch
   commands.setCanvasMode('run')
   await waitFor(() => expect(feedback).toHaveBeenCalledWith(expect.objectContaining({ errorMessage: '当前编辑未能应用，请完成编辑后重试' })))
   expect(patch).not.toHaveBeenCalled()
-  const report = vi.fn(), owner = new ComponentNavigationOwner({ project: () => project, surfaceId: () => componentSurfaces(project)[0].id,
+  const report = vi.fn(), goToInstance = vi.fn(async () => true)
+  const owner = new ComponentNavigationOwner({ project: () => project, surfaceId: () => componentSurfaces(project)[0].id,
     interactive: () => false, select: () => {} })
+  owner.registerObservation('flow-draft', { readZoom: () => 1, setZoom() {}, reset() {}, goToInstance,
+    readReading: () => ({ activeInstanceId: headingIds[0], progress: 0 }) })
   try {
     render(<CourseNavigationControls canvasMode="edit" navigation={owner.editorPort()} beforeNavigate={commands.commitTextEdit}
       onCanvasModeChange={() => {}} report={report} />)
-    fireEvent.click(screen.getByRole('button', { name: '下一步' }))
+    const next = screen.getByRole('button', { name: '下一步' })
+    expect(next).not.toBeDisabled()
+    fireEvent.click(next)
     await waitFor(() => expect(report).toHaveBeenCalledWith('当前编辑未能应用，请完成编辑后重试'))
+    expect(goToInstance).not.toHaveBeenCalled()
+    expect(owner.read().reading?.activeInstanceId).toBe(headingIds[0])
     expect(owner.currentStateId()).toBe(null)
   } finally { owner.dispose() }
 })

@@ -4,10 +4,11 @@ import type { TeacherControllerData } from './types'
 
 /** Pure author data shared by blank/PPT creation and the authoring UI. */
 export const TEACHER_CONTROLLER_DEFINITION: ComponentDefinition = {
-  id: 'guoling.navigation', version: '1.0.0', title: '教师控制台', role: 'mixed',
+  id: 'guoling.navigation', version: '1.0.0', title: '全局控制台与导航', role: 'mixed',
   implementation: { kind: 'builtin', key: 'guoling.navigation' },
   dataSchema: { type: 'object', properties: {
     title: { type: 'string', title: '标题' },
+    presentation:{type:'string',title:'导航形式',enum:['console','directory','top','side','progress'],enumNames:['全局控制台','内容目录','顶部导航','侧边导航','进度导航']},
     enabled: { type: 'boolean', title: '启用控制台' },
     showSceneProgress: { type: 'boolean', title: '显示页面进度' },
     compact: { type: 'boolean', title: '紧凑布局' },

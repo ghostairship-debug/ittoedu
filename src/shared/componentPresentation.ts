@@ -2,7 +2,7 @@ import type { ComponentInstance, ComponentLayoutInput, CourseProjectV10 } from '
 import { componentDefinitionBuiltinKey, owningContainer } from './contracts/component-platform'
 import { componentLayoutInput } from '../components/web/measuredFragmentBox'
 import { flowObjectExtent } from '../core/components/geometry/flowObjectExtent'
-import { resolveFlowMediaLayoutProjection, type FlowMediaLayoutWidths } from './flowMediaLayout'
+import { resolveFlowMediaLayoutProjection, resolveFlowObjectWidth, type FlowMediaLayoutWidths } from './flowMediaLayout'
 import { isNativeFlowLayoutGroup, nativeFlowContainerStyle, nativeFlowItemStyle, nativeFlowMediaBlockSize, flowStickyStyle } from './flowNativeLayout'
 import { isContentProgramImplementation } from './contentProgramImplementation'
 
@@ -10,6 +10,8 @@ export interface ComponentOuterPresentationInput {
   placement: 'free' | 'flow'
   purpose: 'author' | 'playback'
   inlineSize: number
+  /** Parent reading lane; inlineSize itself may already be a wrapped allocation. */
+  availableInlineSize?: number
   viewport?: { width: number; height: number }
   flowLayout?: FlowMediaLayoutWidths
 }
@@ -108,11 +110,13 @@ export function resolveComponentOuterPresentation(project: CourseProjectV10, ins
     ? 'none' : String(instance.style?.pointerEvents ?? instance.style?.['pointer-events'] ?? 'auto')
   if (flow && !nativeItem && (media || instance.flowLayout)) {
     const presentation = resolveFlowMediaLayoutProjection(instance.flowLayout?.width ?? 'content-width', input.flowLayout ?? { readingWidth: 860, wideContentWidth: 1100 })
-    const wrap = instance.flowLayout?.wrap
-    const wrapped = wrap === 'left' || wrap === 'right'
-    Object.assign(outerStyle, { width: wrapped ? presentation.wrappedOuterInlineSize : presentation.inlineSize,
-      maxWidth: wrapped ? presentation.wrappedOuterInlineSize : presentation.maxInlineSize, float: wrapped ? wrap : 'none',
-      margin: wrap === 'left' ? '8px 20px 8px 0' : wrap === 'right' ? '8px 0 8px 20px' : `16px calc((100% - ${presentation.inlineSize}) / 2)` })
+    const allocation=resolveFlowObjectWidth(instance.flowLayout,input.availableInlineSize??input.flowLayout?.readingWidth??0)
+    const wrap=allocation.wrap
+    const wrapped=wrap==='left'||wrap==='right'
+    const explicit=instance.flowLayout?.widthPercent!==undefined||instance.flowLayout?.wrap!==undefined&&instance.flowLayout.wrap!=='none'
+    Object.assign(outerStyle, { width: explicit ? allocation.inlineSize : presentation.inlineSize,
+      maxWidth: explicit ? allocation.inlineSize : presentation.maxInlineSize, float: wrapped ? wrap : 'none',
+      margin: wrap === 'left' ? '8px 20px 8px 0' : wrap === 'right' ? '8px 0 8px 20px' : explicit ? '16px auto' : `16px calc((100% - ${presentation.inlineSize}) / 2)` })
   }
   if (nativeLayout || nativeItem) Object.assign(outerStyle, { display: 'block', minWidth: '0px', boxSizing: 'border-box',
     ...(nativeItem ? { margin: '0px' } : {}), ...nativeFlowItemStyle(instance) })

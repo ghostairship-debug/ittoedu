@@ -241,10 +241,10 @@ export function CourseV10RuntimeView(props: CourseV10RuntimeViewProps) {
   useEffect(() => host.retain(), [host])
   useEffect(() => {
     const root = wrapper.current, content = playbackContent.current
-    // Author workspaces expose CourseNavigationControls; only older projects need the standalone fallback.
+    // Author workspaces keep their controls; preview uses live authored coverage rather than presence of settings.
     if (!player || !root || !content) return
     const chrome = mountPlaybackNavigationChrome(root, navigation, { content, playback: model.project.playback, active: () => callbacks.current.active !== false,
-      report: message => callbacks.current.report(message) })
+      report: message => callbacks.current.report(message),onAuthoredCommand:command=>world.dispatchPresenterCommand(command),authoredCommands:()=>world.readPresenterCommands(),canAuthoredCommand:command=>world.canDispatchPresenterCommand(command) })
     return () => chrome.destroy()
   }, [player, navigation, model.project.playback])
   useEffect(() => {

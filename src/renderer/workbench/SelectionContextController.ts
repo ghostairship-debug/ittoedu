@@ -252,5 +252,11 @@ export async function captureCourseDocumentReference(focus: { documentId: string
   const { documentId, surfaceId } = focus, manual = workbenchSelection.getManual(documentId)
   const snapshot = await prepare(documentId)
   if (snapshot.documentId !== documentId) throw new Error('捕获的文档已改变，请重新发送。')
+  // Draining human input can advance the revision. Keep the original focus and
+  // its original coordinates so Main's existing Session history maps them; a
+  // fresh page target would silently discard the user's selected text/object.
+  if (manual && manual.documentId === documentId && manual.epoch === snapshot.epoch && manual.revision < snapshot.revision)
+    return { documentId, epoch: manual.epoch, revision: manual.revision, selection: structuredClone(manual.targets),
+      writable: writable ? [{ kind: 'document' }] : [] }
   return captureDocumentReference(snapshot, writable, surfaceId, manual)
 }

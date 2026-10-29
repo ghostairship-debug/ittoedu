@@ -58,6 +58,7 @@ export function SlideWorkspaceConnector(props: SlideWorkspaceConnectorProps) {
       commit: (edits, target, group) => state().courseBridge.editCaptured(state().courseBridge.capture(edits, target), group),
       edit: (edits, group) => runtime.edit(edits, group),
       select: ids => runtime.selectInstances(ids),
+      selectCanvas: (ids, groupId) => state().courseBridge.selectInstances(runtime.documentId, ids, undefined, groupId),
       selectAuthorSpot: spot => state().courseBridge.selectAuthorSpot(runtime.documentId, spot),
       selectSurface: id => state().courseBridge.selectSurface(runtime.documentId, id),
       enterGroup: id => state().navigateCourseView(documentId => state().courseBridge.enterGroup(documentId, id)),

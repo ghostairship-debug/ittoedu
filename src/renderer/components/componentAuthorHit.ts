@@ -2,6 +2,7 @@ import type { GeometryPoint } from '../../core/components/geometry'
 import { invertMatrix, transformPoint } from '../../core/components/geometry'
 import { componentClientMatrix } from '../../player/components/runtime/componentClientMatrix'
 import { componentPaintStack } from '../../components/web/paintHit'
+import { componentInlineChildAt, type ComponentInlineChildHit } from '../authoring/nativeInlineAuthoring'
 
 export const COMPONENT_AUTHOR_HIT = 'component-author-hit-test'
 export interface ComponentAuthorHitResult {
@@ -34,7 +35,7 @@ export function requestComponentAuthorHit(root: HTMLElement | null, point: Geome
 }
 
 const authorChrome = '[data-slide-authoring-hit-plane],.canvas-authoring-targets,.author-field-affordances,.canvas-line-overlay,[data-handle],[data-line-handle],.teacher-controller-overlay,.selection-quick-bar,.text-edit-toolbar,[data-component-professional-editor],.text-edit-overlay,.image-safe-area-guides'
-export interface VisibleComponentAuthorHit { instanceId: string; authorKey?: string | null }
+export interface VisibleComponentAuthorHit { instanceId: string; authorKey?: string | null; inlineChild?: ComponentInlineChildHit }
 
 /** Resolve outer paint first, then ask that same Source realm about its content.
  * A Surface background can stop the search without becoming a selectable object.
@@ -45,6 +46,8 @@ export async function visibleComponentAuthorHit(root: HTMLElement | null, point:
   const elements = componentPaintStack(root, point.x, point.y, authorChrome), realmHits = new Map<string, ComponentAuthorHitResult | undefined>()
   for (const element of elements) {
     const owner = element.closest<HTMLElement>('[data-component-instance]'), id = owner?.dataset.componentInstance
+    const inlineChild = componentInlineChildAt(element)
+    if (inlineChild) return { instanceId: id ?? inlineChild.ownerId, authorKey: null, inlineChild }
     if (!id) return null
     const content = contentElement(id), matrix = content && componentClientMatrix(content)
     if (!content?.contains(element)) return { instanceId: id, authorKey: null }

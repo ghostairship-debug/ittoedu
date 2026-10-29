@@ -55,6 +55,8 @@ export interface TeacherControllerSnapshot {
   interactive?: boolean
   scenes: readonly { id: string; name: string; targets?: readonly {
     id: string; name: string; kind: 'state' | 'camera' | 'heading'; depth?: number
+    /** Authored heading level (1..6), independent of the directory nesting depth. */
+    headingLevel?: number
     action: Extract<TeacherControllerAction, { type: 'scene.go' }>
   }[] }[]
   progress: { sceneIndex: number; sceneCount: number; stepIndex: number; stepCount: number; sceneName: string; stepName: string } | null
@@ -72,6 +74,13 @@ export interface TeacherControllerSnapshot {
 }
 /** One navigation/view owner is shared by the builtin and source proxy. */
 export interface TeacherControllerPort {
+  /** Host-only live binding facts. Source realms receive bindControl, not arbitrary registration access. */
+  registerControl?(binding: { actions: readonly TeacherControllerAction[]; present(): boolean }): () => void
+  readControls?(): { actions: readonly TeacherControllerAction[] }
+  subscribeControls?(listener: () => void): () => void
+  /** Binds the actual click handler and returns its teardown; the target must belong to this component. */
+  bindControl?(element: HTMLElement, action: TeacherControllerAction): () => void
+
   /** Host binds view state to the mounted instance; course navigation stays shared. */
   forInstance?(instanceId: string): TeacherControllerPort
   /** Bound views delegate to this same owner; they do not own another state store. */

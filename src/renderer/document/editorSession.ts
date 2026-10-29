@@ -188,9 +188,11 @@ export function createLayoutEditor(element: HTMLElement, initial: LayoutEditorOp
   let plainPastePending = false
   const preparations = new Set<Promise<void>>()
   let plainPasteTimer: ReturnType<typeof setTimeout> | null = null
+  let publishTimer: ReturnType<typeof setTimeout> | null = null
+  const clearPublishTimer=()=>{if(publishTimer!==null)clearTimeout(publishTimer);publishTimer=null}
   const clearPlainPaste = () => { plainPastePending = false; if (plainPasteTimer) clearTimeout(plainPasteTimer); plainPasteTimer = null }
   const clipboardType = 'application/x-cw-document-slice'
-  const boundary = () => { group = crypto.randomUUID(); lastInput = 0 }
+  const boundary = () => { if(publishTimer!==null&&!composing)publish();group = crypto.randomUUID(); lastInput = 0 }
   const tablePlugin=tableEditing()
   const bookmarks=new Set<{bookmark:import('prosemirror-state').SelectionBookmark; insertion?: boolean; valid?: boolean}>()
   const objectRefreshers = new Map<string, Set<() => void>>()
@@ -573,7 +575,13 @@ export function createLayoutEditor(element: HTMLElement, initial: LayoutEditorOp
         else if (pendingTextBlocks) textBlocks.forEach(id => pendingTextBlocks!.add(id))
       }
       mapBookmarks(applied.transactions); applyState(state)
-      if (transaction.docChanged && !composing) publish(transaction.getMeta('preparedResources'))
+      if (transaction.docChanged && !composing) {
+         const prepared=transaction.getMeta('preparedResources')
+         if(initial.presentation==='flow'&&textBlocks!==undefined&&!prepared&&view.hasFocus()){
+           // Paint stays synchronous; coalesce only ordinary typing's mechanical author commits.
+           if(publishTimer===null)publishTimer=setTimeout(()=>{publishTimer=null;if(!view.isDestroyed&&!composing)publish()},50)
+         }else publish(prepared)
+       }
       else if (transaction.selectionSet && !transaction.docChanged) boundary()
       // Decoration refreshes and preview-owned caret relocation must not become
       // manual AI context. Inspect appended transactions too: applyTransaction
@@ -812,6 +820,7 @@ export function createLayoutEditor(element: HTMLElement, initial: LayoutEditorOp
     return true
   }
   function publish(prepared?: { value: unknown; discard(): Promise<void> }) {
+    clearPublishTimer()
     if (prepared) draftSession.prepare(prepared)
     try {
       if (!prepared && view.state.doc === publishedDocument) return
@@ -931,6 +940,7 @@ export function createLayoutEditor(element: HTMLElement, initial: LayoutEditorOp
   }
   function update(next: LayoutEditorOptions) {
     if (composing) { deferred = next; return }
+    if(publishTimer!==null&&JSON.stringify(next.document.content)!==JSON.stringify(draftSession.document.content))publish()
     // An older ACK or external update may refresh view options, but cannot replace pending/rejected input.
     if (!draftSession.receive(next.document)) next = { ...next, document: draftSession.document }
     const changed = JSON.stringify(next.document.content) !== JSON.stringify(options.document.content)
@@ -1019,7 +1029,7 @@ export function createLayoutEditor(element: HTMLElement, initial: LayoutEditorOp
     flush: () => { if (composing || view.composing || preparations.size) return false; publish(); boundary(); return !draftSession.rejected },
     drain,
     discardDraft: async (next: LayoutEditorOptions) => { if (!await draftSession.discard(next.document)) return false; update(next); return true },
-    destroy: () => { clearPlainPaste(); for (const target of bookmarks) if (!target.insertion) bookmarks.delete(target); projectionMutation(()=>view.destroy()) },
+    destroy: () => { if(publishTimer!==null&&!composing&&!view.isDestroyed)publish();clearPublishTimer();clearPlainPaste(); for (const target of bookmarks) if (!target.insertion) bookmarks.delete(target); projectionMutation(()=>view.destroy()) },
     /** Current selection at the current revision, for re-reporting it after a committed edit such as formatting. */
     readSelection: () => describeSelection(view.state) ?? null }
 }

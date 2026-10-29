@@ -1,3 +1,5 @@
+import {installExistingLayoutSlots} from './measureExistingLayoutSlots'
+import type {ExistingLayoutSlot} from '../../../../core/course/existingObjectLayout'
 import { app, BrowserWindow, session } from 'electron'
 import { randomUUID } from 'node:crypto'
 import { configureRestrictedSession, hardenWebContents } from '../../../security'
@@ -10,6 +12,7 @@ import type { HtmlResourceSource } from '../../htmlImport/types'
 
 export interface HtmlDesignMeasurementRequest {
   html: string
+  layoutSlots?:readonly ExistingLayoutSlot[]
   viewport: { width: number; height: number }
   /** Software operation context may preserve an explicit whole-page redo. */
   framing?: 'viewport' | 'content'
@@ -86,6 +89,7 @@ export async function measureHtmlAtDesignViewport(request: HtmlDesignMeasurement
       // a missing native view; logical CSS sizing must still be independent of window/DPI rounding.
       worker.webContents.enableDeviceEmulation({ screenPosition: 'desktop', screenSize: { width, height },
         viewPosition: { x: 0, y: 0 }, deviceScaleFactor: 1, viewSize: { width, height }, scale: 1 })
+      if(request.layoutSlots)await worker.webContents.executeJavaScript('('+installExistingLayoutSlots.toString()+')('+JSON.stringify(request.layoutSlots)+','+JSON.stringify(request.resourceUrls??{})+')')
       return await worker.webContents.executeJavaScript(`(${captureHtmlDesignViewport.toString()})(${JSON.stringify(resourceWaitMs)},(${cssUsesViewport.toString()}),(${measuredHtmlKind.toString()}))`) as HtmlDesignCapture
     })()])
     if (capture.viewport.width !== width || capture.viewport.height !== height) capture.diagnostics.push({
@@ -132,6 +136,14 @@ export async function measureHtmlAtDesignViewport(request: HtmlDesignMeasurement
     }
     capture.diagnostics.unshift(...diagnostics)
     capture.diagnostics.forEach(item => { if (item.reference) item.reference = restoreReference(item.reference) })
+    if(request.layoutSlots){
+      const layoutMeasurements=request.layoutSlots.map(slot=>{const item=capture.elements.find(element=>element.attributes['data-layout-ref']===slot.key)
+        if(!item?.frame||item.geometryIssue)throw new Error('布局引用未产生稳定二维几何：'+slot.key)
+        // The capture frame is in viewport space; assembly alone later changes parent coordinates.
+        return {key:slot.key,order:capture.elements.indexOf(item),frame:item.frame}
+      })
+      return {...sourceProgramAssembly(capture.viewport,source,'layout-only',capture.diagnostics),layoutMeasurements}
+    }
     return prepared.documentProgramReason
       ? sourceProgramAssembly(capture.viewport, source, prepared.documentProgramReason, capture.diagnostics, capture)
       : assembleMeasuredHtml(capture, source, framing)

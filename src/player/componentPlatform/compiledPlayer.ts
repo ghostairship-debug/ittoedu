@@ -1,3 +1,4 @@
+import {hostNavigationExplicitlyHidden} from '../../shared/contracts/playback-v1'
 import {allDocumentTextSlots,inlineComponentIds,documentInlineChildIds} from '../../shared/document/textInteraction'
 import {isMeasuredWebFragmentBox,measuredFragmentRootCss} from '../../components/web/measuredFragmentBox'
 import {restorePublishedWebMarkup} from '../../core/publish/componentPlatform/compactWebStyles'
@@ -22,6 +23,7 @@ import {createFlowReadingNavigation,observeFlowReading} from '../../shared/flowR
 import {resolveFlowChapterEntry} from '../../shared/flowChapterEntry'
 import {flowPaperMaxWidth,flowPaperPadding,flowScrollPadding} from '../../shared/flowBodyPresentation'
 import {mountComponentFlowToc} from './flowToc'
+import {flowRuntimeTocShellLayout} from '../surfaces/flow/flowRuntimeToc'
 import {attachComponentPlatformNavigationKeys} from '../behaviors/navigation/shortcuts'
 import {preparePublishedNativeComponent,type SandboxRuntimeSnapshots} from '../components/runtime/SandboxComponentRuntime'
 import {webContentRealmSource} from '../../components/web/contentRealmImplementation'
@@ -207,7 +209,7 @@ export async function mountCompiledCourse(artifact:CompiledCoursePlayback,root:H
   const content=roots.get(id)!,stage=node.querySelector<HTMLElement>(':scope > [data-compiled-stage]')!,children=stage.querySelector<HTMLElement>(':scope > [data-compiled-children]')!,flow=node.dataset.compiledPlacement==='flow',surface=componentSurface(project,surfaceId??'')
   // The flow outer is the available reading lane. Content may retain the
   // authored width of a fixed local composition and cannot size its own fit.
-  const presentation=resolveComponentOuterPresentation(project,instance,{placement:flow?'flow':'free',purpose:'playback',inlineSize:node.clientWidth||instance.frame?.width||surface?.flow?.layout.readingWidth||860,flowLayout:surface?.flow?.layout})
+  const presentation=resolveComponentOuterPresentation(project,instance,{placement:flow?'flow':'free',purpose:'playback',availableInlineSize:node.parentElement?.clientWidth||surface?.flow?.layout.readingWidth||860,inlineSize:node.clientWidth||instance.frame?.width||surface?.flow?.layout.readingWidth||860,flowLayout:surface?.flow?.layout})
   applyComponentPaintStyle(node,instance,project.definitions[instance.definitionId]);applyComponentPresentationStyle(node,presentation.outerStyle);applyComponentPresentationStyle(stage,presentation.stageStyle);applyComponentPresentationStyle(content,presentation.contentStyle);applyComponentPresentationStyle(children,presentation.childrenStyle)
   if(original.rootIds.includes(id)&&!instance.container){Object.assign(node.style,{position:'absolute',inset:'0',width:'100%',height:'100%',transform:'none'});Object.assign(stage.style,{position:'absolute',inset:'0',height:'100%'});Object.assign(content.style,{position:'absolute',inset:'0',height:'100%'})}
   return presentation
@@ -225,7 +227,11 @@ export async function mountCompiledCourse(artifact:CompiledCoursePlayback,root:H
   for(const id of surface.childIds){const instance=project.instances[id],anchor=instance?.flowPlacement?.paragraphAnchor,node=targets.get(id);if(!anchor||!node||!instance.frame)continue;const ancestors:string[]=[];let owner=owningContainer(project,anchor.blockId);while(owner?.kind==='instance'){ancestors.push(owner.instanceId);owner=owningContainer(project,owner.instanceId)}const frame=instance.frame,placed=flowParagraphAnchoredFrame(anchor,{x:frame.transform[4],y:frame.transform[5],width:frame.width,height:frame.height},paper.clientWidth,blocks,ancestors);if(placed)node.style.transform=`matrix(${frame.transform.slice(0,4).join(',')},${placed.x},${placed.y})`}
  }
   const relayout=()=>{if(stopped)return
-   for(const [id,view]of views)if(rootOwner(id)===activeRootId)view.view.resize()
+   for(const [id,view]of views)if(rootOwner(id)===activeRootId){
+    const scroll=view.toc&&view.content.querySelector<HTMLElement>('[data-flow-paper-scroll]')
+    if(scroll)scroll.style.marginLeft=`${flowRuntimeTocShellLayout(view.toc!.open).articleInsetPx}px`
+    view.view.resize()
+   }
    for(const [id,node]of targets)if(node.dataset.compiledPlacement==='flow'&&node.style.display!=='none'&&rootOwner(id)===activeRootId&&project.instances[id])placeNode(id,node,project.instances[id])
    for(const [id,view]of views){if(rootOwner(id)!==activeRootId)continue;
     const instance=project.instances[id],flow=targets.get(id)?.dataset.compiledPlacement==='flow',natural=instance&&resolveComponentContainerSizing(instance,flow?'flow':'free')?.naturalHeight
@@ -233,7 +239,7 @@ export async function mountCompiledCourse(artifact:CompiledCoursePlayback,root:H
     const paper=view.content.querySelector<HTMLElement>('[data-compiled-flow-paper]'),scroll=paper?.parentElement
     if(paper&&scroll){Object.assign(scroll.style,{position:natural?'relative':'absolute',inset:natural?'auto':'0px',overflow:natural?'visible':'auto'});paper.style.minHeight=natural?'0px':'100%';if(natural){const css=browser.getComputedStyle(scroll),height=Math.ceil(paper.scrollHeight+(parseFloat(css.paddingTop)||0)+(parseFloat(css.paddingBottom)||0));view.root.style.height=`${height}px`}else view.root.style.height='100%'}
     view.view.resize();if(view.camera){const size=viewport(id);const worldNode=view.content.querySelector<HTMLElement>('[data-component-spatial-world]');if(worldNode)worldNode.style.transform=`matrix(${componentSpatialCameraMatrix(view.camera.read(),{x:0,y:0,...size}).join(',')})`;const graph=view.content.querySelector<SVGSVGElement>('[data-compiled-spatial-graph]');if(graph)paintComponentSpatialGraph(dom,project,id,graph,view.camera.read(),size)}paintFlowAnchors(view,id)}paintGlobals()}
-  for(const surface of componentContainers(original)){const section=shell.querySelector<HTMLElement>(`[data-compiled-surface="${CSS.escape(surface.id)}"]`);if(!section)continue;const content=section.querySelector<HTMLElement>(':scope > [data-compiled-surface-content]')!,view=new PlaybackViewSession(),viewportElement=(section.dataset.pageBackdrop='transparent',view.mount(section)),host=dom.createElement('div');viewportElement.append(host);host.append(content);section.dataset.pageBackdrop='transparent';if(surface.designSize){host.dataset.canvasWidth=String(surface.designSize.width);host.dataset.canvasHeight=String(surface.designSize.height)}view.register({id:surface.id,kind:surface.kind,root:host,content,onObservationChange:paintGlobals});view.activate(surface.id)
+  for(const surface of componentContainers(original)){const section=shell.querySelector<HTMLElement>(`[data-compiled-surface="${CSS.escape(surface.id)}"]`);if(!section)continue;const content=section.querySelector<HTMLElement>(':scope > [data-compiled-surface-content]')!,view=new PlaybackViewSession({chrome:!hostNavigationExplicitlyHidden(artifact.course.playback)}),viewportElement=(section.dataset.pageBackdrop='transparent',view.mount(section)),host=dom.createElement('div');viewportElement.append(host);host.append(content);section.dataset.pageBackdrop='transparent';if(surface.designSize){host.dataset.canvasWidth=String(surface.designSize.width);host.dataset.canvasHeight=String(surface.designSize.height)}view.register({id:surface.id,kind:surface.kind,root:host,content,onObservationChange:paintGlobals});view.activate(surface.id)
   const releases:Array<()=>void>=[],entry:SurfaceView={root:section,host,content,view,off:()=>releases.forEach(off=>off())};views.set(surface.id,entry)
   const flowScroll=content.querySelector<HTMLElement>('[data-flow-paper-scroll]'),flowBody=content.querySelector<HTMLElement>('[data-compiled-flow-body]')
   const reading=createFlowReadingNavigation(()=>flowScroll&&flowBody?{scroll:flowScroll,body:flowBody}:null,(id,kind)=>targets.get(kind==='chapter'?resolveFlowChapterEntry(project,surface.id,id):id))
@@ -244,7 +250,7 @@ export async function mountCompiledCourse(artifact:CompiledCoursePlayback,root:H
   releases.push(reading.dispose)
   if(flowScroll&&flowBody)releases.push(observeFlowReading(flowScroll,flowBody,navigation.changed))
   if(surface.kind==='spatial'){const camera=createComponentSpatialCameraPort(surface.spatial?.home??{x:0,y:0,zoom:1}),session={frameId:null as string|null,stepIndex:null as number|null};entry.camera=camera;releases.push(camera.subscribe(relayout),bindSpatialInput(content,camera),navigation.registerCamera(surface.id,camera,{frameId:()=>session.frameId,selectFrame:value=>{session.frameId=value},stepIndex:()=>session.stepIndex,selectStep:index=>{session.stepIndex=index},viewport:()=>viewport(surface.id)}))}
-   if(surface.kind==='flow'&&surface.flow?.layout.toc!=='hidden')entry.toc=mountComponentFlowToc(section,surface.id,teacher.forContainer?.(surface.id)??teacher)
+   if(surface.kind==='flow'&&surface.flow?.layout.toc!=='hidden'&&!hostNavigationExplicitlyHidden(artifact.course.playback))entry.toc=mountComponentFlowToc(section,surface.id,teacher.forContainer?.(surface.id)??teacher,{onOpenChange:relayout})
  }
  for(const [id,element]of roots)world.bind(id,element)
  for(const [id,element]of targets)world.bindTarget(id,element)
@@ -277,7 +283,7 @@ export async function mountCompiledCourse(artifact:CompiledCoursePlayback,root:H
  }
  ready=update();await ready
  await navigation.initializeSpatialPlayback(controller.signal)
-  pointerChrome=hasPresentation?mountPlaybackNavigationChrome(hostRoot,navigation,{content:root,playback:artifact.course.playback,report}):undefined
+  pointerChrome=mountPlaybackNavigationChrome(hostRoot,navigation,{content:root,playback:artifact.course.playback,report,onAuthoredCommand:command=>world.dispatchPresenterCommand(command),authoredCommands:()=>world.readPresenterCommands(),canAuthoredCommand:command=>world.canDispatchPresenterCommand(command)})
   navigationTasks=navigation.createKeyTasks();keys=!hasPresentation||options.keyboardNavigation===false?undefined:attachComponentPlatformNavigationKeys({root,navigation:navigationTasks,keyboardNavigation:artifact.course.playback?.keyboardNavigation??true,presenter:artifact.course.playback?.presenter??{enabled:true,strategy:'scene-navigation',additionalBindings:[]},onAuthoredCommand:command=>world.dispatchPresenterCommand(command),onError:error=>report(String(error))})
   observer=typeof browser.ResizeObserver==='function'?new browser.ResizeObserver(relayout):undefined;observer?.observe(root);for(const view of views.values()){observer?.observe(view.root);const body=view.content.querySelector('[data-compiled-flow-body]');if(body)observer?.observe(body)}root.addEventListener('load',relayout,true);root.addEventListener('toggle',relayout,true);removeLayoutListeners=()=>{root.removeEventListener('load',relayout,true);root.removeEventListener('toggle',relayout,true)};void dom.fonts?.ready.then(relayout)
  offPlacement=teacher.subscribePlacement?.(paintGlobals);offNavigation=teacher.subscribe(paintGlobals)

@@ -614,6 +614,16 @@ function CourseGlobalEmptyPanel({
           </div>
         )}
         <ToggleRow
+          label="有意不显示宿主导航"
+          checked={empty.playback?.hostNavigation === 'intentionally-hidden'}
+          onChange={(hidden) => commands.updatePlayback({ hostNavigation: hidden ? 'intentionally-hidden' : 'auto' })}
+        />
+        <p className="property-hint" data-testid="host-navigation-intent-notice">
+          {empty.playback?.hostNavigation === 'intentionally-hidden'
+            ? '已明确选择无宿主导航：预览和交付不显示软件目录或兜底控制。请确保作品自身可退出或恢复；内容内导航和编辑工具保留。'
+            : '保留软件导航策略。“不显示控制器”只改变作者控件，不等于显式选择无宿主导航。'}
+        </p>
+        <ToggleRow
           label="键盘翻页"
           checked={empty.playback?.keyboardNavigation ?? true}
           onChange={(keyboardNavigation) => commands.updatePlayback({ keyboardNavigation })}
@@ -683,14 +693,14 @@ export function CourseGlobalPropertiesPanel({
       <div className="properties-scroll" data-testid="properties-tab">
       {selected.controllerComponent && node.type === 'external-component' ? <>
         <section className="property-section teacher-controller-properties" data-testid="teacher-controller-properties">
-          <h3 className="property-title">教师控制台</h3>
+          <h3 className="property-title">全局控制台</h3>
           <p className="property-hint">全课共用，固定在内容上方。适应窗口大小，播放时不随内容缩放和移动。</p>
           <button type="button" className="secondary-button" onClick={context.commands.editControllerSource}>编辑控制台源码</button>
         </section>
         {selected.component && <ComponentPropertiesEditor
           title="控制台设置"
           groups={[
-            { title: '显示与收展', matches: key => ['title', 'showSceneProgress', 'compact', 'collapsible', 'defaultCollapsed'].includes(key) },
+            { title: '显示与收展', matches: key => ['presentation','title', 'showSceneProgress', 'compact', 'collapsible', 'defaultCollapsed'].includes(key) },
             { title: '背景与外观', matches: key => key.startsWith('style.') || key === 'backgroundAssetId' },
             { title: '导出', matches: key => key === 'includeInStaticExports' },
             { title: '自定义参数', matches: () => true },

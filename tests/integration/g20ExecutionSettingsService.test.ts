@@ -4,14 +4,17 @@ import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto'
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import os from 'node:os'
-import { afterEach, expect, it } from 'vitest'
+import { afterEach, expect, it, vi } from 'vitest'
 import { ExecutionSettingsDesktopService } from '../../src/main/workbench/providers/executionSettingsService'
 import { ExecutionSettingsStore } from '../../src/main/workbench/providers/ExecutionSettingsStore'
+import { OAuthDesktopService } from '../../src/main/workbench/providers/OAuthDesktopService'
+import { ChatGPTOAuthError } from '../../src/main/workbench/providers/ChatGPTOAuthClient'
 import type { ExecutionConnectionView, ExecutionSettingsView } from '../../src/shared/workbench/executionSettings'
 import type { DiscoveredModels } from '../../src/shared/workbench/executionSettingsDesktop'
 
 const directories: string[] = [], servers: Server[] = []
 afterEach(async () => {
+  vi.restoreAllMocks()
   for (const server of servers.splice(0)) await new Promise<void>(resolve => { server.closeAllConnections(); server.close(() => resolve()) })
   for (const directory of directories.splice(0)) {
     const relative = path.relative(os.tmpdir(), path.resolve(directory))
@@ -33,6 +36,69 @@ async function setup(modelKnowledge?: ConstructorParameters<typeof ExecutionSett
   return { directory, encryption, store, service: new ExecutionSettingsDesktopService(store) }
 }
 const configuration = (baseURL: string) => ({ provider: 'fixture', protocol: 'openai-chat', baseURL, accountId: 'test-account', authKind: 'api-key', billing: { kind: 'unknown' } } as const)
+
+it.each([
+  { kind: 'rejected', code: 'oauth-http-401', detail: 'HTTP 401', recovery: '重新登录' },
+  { kind: 'unavailable', code: 'oauth-http-503', detail: 'HTTP 503', recovery: '稍后重试' },
+  { kind: 'network', code: 'oauth-request-failed', detail: '更新请求未完成', recovery: '检查网络' },
+  { kind: 'unknown', code: 'oauth-operation-failed', detail: '登录操作未完成', recovery: '重试' },
+] as const)('reports $kind OAuth refresh failures through the real credential owner without changing settings or leaking tokens', async scenario => {
+  const { store, directory } = await setup()
+  const saved = await store.saveConnection({ connection: { provider: 'openai', protocol: 'chatgpt-responses',
+    baseURL: 'https://chatgpt.com/backend-api/codex', accountId: 'pending-login', authKind: 'oauth', billing: { kind: 'subscription' },
+    capabilities: { tools: 'unknown', vision: 'unknown', stream: 'unknown', reasoning: 'unknown' } } })
+  const target = await store.reserveOAuthLogin(saved.connection.id, saved.connection.revision)
+  const accessToken = 'fixture-private-oauth-access', refreshToken = 'fixture-private-oauth-refresh', now = 1_000_000
+  expect(await store.compareAndSetOAuthCredential(target.credentialRef, 0, { connectionId: target.connectionId,
+    revision: target.revision, accountId: 'fixture-account', accessToken, refreshToken, expiresAt: now - 1 })).toBe(true)
+  const connected = (await store.read()).connections[0]!
+  const profile = (await store.read()).profile
+  await store.saveProfile({ expectedRevision: profile.revision, roles: { ...profile.roles,
+    conversation: { connectionId: connected.connection.id, model: 'preserve-user-model' } } })
+  const before = await store.read(), file = path.join(directory, 'execution-settings-v1.json')
+  const storedBefore = await fs.readFile(file, 'utf8')
+  let refreshRequests = 0
+  const openExternal = vi.fn(async () => { throw new Error('This settings read must not open a login browser') })
+  const oauth = new OAuthDesktopService({ store, now: () => now, openExternal, fetch: async (url, init) => {
+    refreshRequests++
+    expect(String(url)).toBe('https://auth.openai.com/oauth/token')
+    const fields = new URLSearchParams(String(init?.body))
+    expect(fields.get('grant_type')).toBe('refresh_token')
+    expect(fields.get('refresh_token')).toBe(refreshToken)
+    if (scenario.kind === 'network') throw new Error(`transport detail ${accessToken} ${refreshToken}`)
+    if (scenario.kind === 'unknown') {
+      const error = new ChatGPTOAuthError(`untrusted-${accessToken}-${refreshToken}`)
+      error.message = `untrusted response ${accessToken} ${refreshToken}`
+      throw error
+    }
+    return new Response(`response body ${accessToken} ${refreshToken}`, { status: scenario.kind === 'rejected' ? 401 : 503 })
+  } })
+  const catalog = vi.fn(async () => Response.json({ models: [{ slug: 'must-not-select-this-model' }] }))
+  const service = new ExecutionSettingsDesktopService(store, catalog, oauth)
+  const failure = await service.operate({ type: 'discover-models', id: connected.connection.id, revision: connected.connection.revision })
+    .then(() => { throw new Error('Expected refresh failure before catalog discovery') }, error => error)
+  expect(failure).toMatchObject({ code: scenario.code, message: expect.stringContaining(scenario.detail), suggestion: expect.stringContaining(scenario.recovery) })
+  expect(String(failure)).not.toContain('系统安全存储')
+  expect(refreshRequests).toBe(1)
+  expect(catalog).not.toHaveBeenCalled()
+  expect(openExternal).not.toHaveBeenCalled()
+
+  // A completed login's optional directory read uses the same safe diagnostic;
+  // a refresh failure must not apply model defaults or discard the login status.
+  vi.spyOn(oauth, 'status').mockReturnValue({ loginId: 'connected-fixture', status: 'connected', connection: connected })
+  const status = await service.operate({ type: 'oauth-login-status', loginId: 'connected-fixture' })
+  expect(status).toMatchObject({ status: 'connected', modelDirectoryError: expect.stringContaining(scenario.detail) })
+  expect((status as { modelDirectoryError: string }).modelDirectoryError).toContain(scenario.recovery)
+  expect(refreshRequests).toBe(2)
+  expect(catalog).not.toHaveBeenCalled()
+  const after = await store.read(), storedAfter = await fs.readFile(file, 'utf8')
+  expect(after).toEqual(before)
+  expect(storedAfter).toBe(storedBefore)
+  for (const exposed of [String(failure), JSON.stringify(failure), JSON.stringify(status), JSON.stringify(after), storedAfter]) {
+    expect(exposed).not.toContain(accessToken)
+    expect(exposed).not.toContain(refreshToken)
+  }
+})
 
 it('admits only strict settings operations, exposes no credential read and never accepts a UI capability success claim', async () => {
   const { service } = await setup()

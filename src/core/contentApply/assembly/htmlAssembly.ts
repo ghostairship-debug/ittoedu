@@ -97,6 +97,8 @@ export interface HtmlAssemblyObject {
 }
 
 export interface HtmlAssembly {
+  /** Transient current-object layout results, never an authoring format or Source record. */
+  layoutMeasurements?: import('../../course/existingObjectLayout').ExistingLayoutMeasurement[]
   viewport: { width: number; height: number }
   root: HtmlAssemblyObject
   diagnostics: HtmlAssemblyDiagnostic[]

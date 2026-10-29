@@ -6,6 +6,13 @@
         "maxLength": 100,
         "minLength": 1,
         "type": "string"
+      },
+      "__schema1": {
+        "enum": [
+          "text",
+          "html"
+        ],
+        "type": "string"
       }
     },
     "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -15,11 +22,8 @@
         "type": "string"
       },
       "format": {
-        "enum": [
-          "text",
-          "html"
-        ],
-        "type": "string"
+        "$ref": "#/$defs/__schema1",
+        "description": "原生富文本省略时，普通正文沿用选区文字格式，HTML 标记或实体按 HTML 替换；text 将内容视为纯文字并沿用选区格式，html 按内容所带格式替换。"
       },
       "target": {
         "$ref": "#/$defs/__schema0",

@@ -45,16 +45,17 @@ export function InstanceView({ instance, project, authorProject = project, surfa
   }, [instance.id, onTargetElement])
   const definition = project.definitions[instance.definitionId]
   const [inlineSize, setInlineSize] = useState(instance.frame?.width ?? 1)
-  const presentation = resolveComponentOuterPresentation(project, instance, { placement: placement === 'program' ? 'free' : placement, purpose: player ? 'playback' : 'author', inlineSize,
+  const [availableInlineSize,setAvailableInlineSize]=useState<number|undefined>(undefined)
+  const presentation = resolveComponentOuterPresentation(project, instance, { placement: placement === 'program' ? 'free' : placement, purpose: player ? 'playback' : 'author', inlineSize, availableInlineSize,
     flowLayout: surfaceId ? componentSurface(project, surfaceId)?.flow?.layout : undefined })
   useLayoutEffect(() => {
     const element = outer.current
     if (!element || placement !== 'flow') return
-    const resize = () => { if (element.clientWidth > 0) setInlineSize(element.clientWidth) }
+    const resize = () => { if (element.clientWidth > 0) setInlineSize(element.clientWidth);if(element.parentElement?.clientWidth)setAvailableInlineSize(element.parentElement.clientWidth) }
     resize()
     const Observer = element.ownerDocument.defaultView?.ResizeObserver
     const observer = Observer ? new Observer(resize) : undefined
-    observer?.observe(element)
+    observer?.observe(element);if(element.parentElement)observer?.observe(element.parentElement)
     return () => observer?.disconnect()
   }, [placement])
   const authoredStyle = componentPaintStyle(instance, definition) as CSSProperties

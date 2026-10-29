@@ -2,7 +2,7 @@
 
 这些是正式课件内容的工程虚拟文件视图，不是磁盘里的同名文件。用 `project.list/read/apply` 读取和修改；普通策划、HTML 源文件等磁盘/工作区文件用 `file.*`。读取包含教师的当前修改，软件负责身份、资源、事务和撤销；页面顺序变化后路径也可能变化，使用本次 `project.list/read` 返回的路径。
 
-已有精确目标或实际路径时直接读取；需要内容地图时再 `project.list`。目录给正文摘要、类型入口和frame，共享API按单独reference读取，不逐组件重复展开。新作品用 `file.create {name:"四季的成因.glx",kind:"course-v10"}` 新建一次，软件建立空工程，AI新作不默认插入可见完整教师台。已有用户指定课件则继续使用，不创建同名文件重做。仅有一个课件时省略 `project`；多个课件时填写实际文件名或路径。
+已有精确目标或实际路径时直接读取；需要内容地图时再 `project.list`。目录给正文摘要、类型入口和frame，共享API按单独reference读取，不逐组件重复展开。`project.list` 的 `limit` 是最多记录数，回包还受 24KB 预算约束，可能提前分页；有 `nextOffset` 时将它原样传给下一次的 `offset`，直至没有后续页，不用请求的 `limit` 推算偏移。新作品用 `file.create {name:"四季的成因.glx",kind:"course-v10"}` 新建一次，软件建立空工程，AI新作不默认插入可见完整教师台。已有用户指定课件则继续使用，不创建同名文件重做。仅有一个课件时省略 `project`；多个课件时填写实际文件名或路径。
 
 外部 MCP 使用软件提供的连接配置或可运行样例。相对文件名从宿主工作空间解析；用户指定已有课件时，`file.open` 可使用已授权的绝对路径。源 HTML 或素材所在目录不决定课件的保存位置，以工具返回的实际路径为准。
 
@@ -68,17 +68,25 @@
 
 这段参数传给 `object.update`；多个课件时另填实际 `project`。`frame` 可只改 `x`、`y`、`width`、`height`，保留未改的属性与其他对象；需要旋转时用同层 `rotation`。正文中没有自由 frame 的对象不能这样移动，锁定对象按实际锁定回执处理。正式身份由软件从已观察路径解析，不填写内部编号。
 
+普通组的组合/解除一层用 `object.layout {targets:[已观察对象句柄],intent:{kind:"group"}}` 或 `intent:{kind:"ungroup"}`。在母版下操作同一父级的自由对象并具备父级结构修改权限；保留成员ID、正文、资源及画面几何，返回实际结果句柄。复杂组件、共同裁剪/合成和仍被引用的组会返回具体保全原因；旧Flow持续布局不因本操作暗中转换。AI直接使用成员句柄，不需先选父组或调用UI。
+
 多对象对齐或等距分布用 `object.layout`，`targets` 沿用已观察对象句柄，`intent` 表达对齐方向或水平/垂直分布，例如 `{kind:"align",alignment:"left"}`。对象须在同页同展示状态；软件复用人工布局算法，计算世界坐标、父变换和 frame，并保留锁定对象，一次事务可撤销，不手算每个对象的坐标。
 
-Flow 正文使用其 `.body.html` 或 `.body.md`，保留源文中软件生成的专业对象引用。两者是同一正式正文的不同表示，选一种完成本次修改即可，不再向另一表示重复提交同一改动；还要继续修改时读取当前内容。Spatial 用 `.spatial.json` 修改镜头与路径：`stops` 表示顺序停靠点，`target`、`objects` 引用已观察对象路径；保留已读 `ref` 可重排现项，新项省略 `ref`。`paths.stops` 使用已读镜头 `ref`，新镜头也可用本文件从 1 开始的镜头序号；对象路径用 `objects` 表达成员并置 `stops:[]`，镜头路径不填 `objects`。`defaultRoute:"frames"` 按镜头顺序播放，也可填已读路径 `ref` 或本文件从 1 开始的新路径序号。省略 `defaultRoute` 保留既有默认；尚无正式默认时按镜头顺序，读取不会补写。删除默认路径会明确提示并回到镜头顺序。编辑时临时选中的路径不改变正式默认；试运行与 Published 消费同一默认路线，明确指定镜头的跳转仍尊重目标。软件维护稳定身份，修改镜头不重排世界对象。
+保留现有内容、仅重新构图时，使用 `object.layout {targets:[当前对象句柄],intent:{kind:"reflow",html:"临时HTML/CSS",viewport:{width:1280,height:720}}}`；viewport可省略。临时布局按targets顺序放置空的 `<div data-layout-ref="0"></div>`、`"1"`等，每个对象恰好一次。软件注入当前正文和资源、测量并只应用几何，保留ID、内容、Source、资源、堆叠顺序及未涉及的人改，不把临时包装保存成持续布局组。适用范围由回执校验，不能把`redo`当作保身份重排；正文或资源改变影响测量时软件重测，同布局/归属冲突则重读相应目标后调整。
+
+Flow人工编辑中，图片和一般组件可直接拖到段落左右侧，拖动时显示真实绕排预览；正文占宽手柄或属性中的占宽可连续改宽。放开后一次History提交，Esc取消不写稿；前文增删后对象随段落移动，窄窗口沿现有响应式规则让出正文宽度。页面浮层与正文绕排不同；不把自由frame的修改套用到没有自由frame的正文对象，也不声称已经支持中央双侧绕排。
+
+Flow 连续正文首稿及续改使用实际 `.body.html` 或 `.body.md`，保留标题、段落及专业对象引用。新 Flow 建空后沿回执或一次 `project.list` 取正文路径，再用 `project.apply {path,content}` 或 `{path,from}` 一次采用。`surface.add` 附普通片段产生的原生文字不含正文标题语义，不能据此推定章节目录可用。正文采用不迁入 `head` 样式，共用外观与正文、对象样式沿现有主题及专业入口设置。两种正文视图指向同一正式内容，一次修改选一种提交，续改读当前稿。Spatial 用 `.spatial.json` 修改镜头与路径：`stops` 表示顺序停靠点，`target`、`objects` 引用已观察对象路径；保留已读 `ref` 可重排现项，新项省略 `ref`。`paths.stops` 使用已读镜头 `ref`，新镜头也可用本文件从 1 开始的镜头序号；对象路径用 `objects` 表达成员并置 `stops:[]`，镜头路径不填 `objects`。`defaultRoute:"frames"` 按镜头顺序播放，也可填已读路径 `ref` 或本文件从 1 开始的新路径序号。省略 `defaultRoute` 保留既有默认；尚无正式默认时按镜头顺序，读取不会补写。删除默认路径会明确提示并回到镜头顺序。编辑时临时选中的路径不改变正式默认；试运行与 Published 消费同一默认路线，明确指定镜头的跳转仍尊重目标。软件维护稳定身份，修改镜头不重排世界对象。
 
 复杂实验、模拟和游戏可以作为独立内容程序插入；需要继续改源码时读取对象实际的源码文件。共享定义源码与实例独立源码是两种明确范围，按用户意图选择。默认实现、专业数据与外部资源保持可编辑；局部无法处理的内容保留原文并报告诊断，不把静态截图当成功。
 
 内置组件默认给出短作者入口，通过普通 import 引用工程内的真实 Source 依赖；读取不会把内置对象改成源码，首次应用时软件一并保存所需实现。局部增强可向当前实例主 `.view.js/.view.ts` 或 workspace 入口用 `project.apply {path,intent:"enhance",content}`，也可沿授权 `from` 提供业务模块。模块导出 default 函数或具名 `enhance(context)`；软件等待原实现挂载并组合其更新、销毁生命周期。回执 `enhancementPath` 给实际业务模块，后续沿该路径以普通 `content` 或局部 `edits` 修改业务。确需完整深改时，主入口的普通 `content` 编辑与 `.dependencies/` 继续有效。实例入口的依赖修改只影响当前实例；`components/` 共享定义入口影响使用该定义的实例。HTML、专业数据、作者记录和资源仍沿原文件继续修改。
 
+工程内已保存的 Source 共享依赖是快照，不随软件升级静默替换。发现仍使用旧共享实现而需要更新时，先读取对应定义与当前 Source，确认目标及作用范围，再沿已观察的定义路径用 `project.apply` 显式更新。使用 `{path,from}` 导入实现会形成显式 workspace Source；后续沿回执给出的实际文件续改。
+
 增强的 `context` 提供当前 `root/instance/scope`，`listen(type,selector,listener)` 在局部根委托监听并自动清理；`observe(key,render)` 以同一函数呈现首值及后续运行状态。显式别名通过 `object.update.properties.stateBindings` 映射到已声明的标量 `courseState.key`：仅合并提供项，单个 `null` 删除该别名，整体 `null` 清空。增强的 `bindings.get/set/observe(alias)` 消费这些映射，`bindings.observe` 同样立即给首值并自动清理订阅。同课普通复制保持共享；已有托管输入键复制映射时同步重绑，任意 JS 字符串不扫描改写。需要 JSON 结构的运行状态仍由业务显式使用 `scope.state`，不自动写入作者工程。
 
-`scope.state/events.subscribe` 与 `teacherController.subscribe` 已自动随挂载清理，无需重复登记 `scope.cleanup`；原始 state/tc 订阅不回放首值，首次显示另读 `get/read`，或对状态使用增强的 `observe`。`listen` 管理局部 DOM 监听，自行建立的其他监听、定时器或 Observer 等资源按需交给 `scope.cleanup`。普通暂停、跨页保留挂载，销毁、取消或重置时清理。完整 `.view.*` 仍是 API5 实现入口；独立替换完整 `mount` 需返回含 `update/dispose` 的有效实例。普通正文、样式和页内脚本继续修改 `.content.html`，由成熟 Web 实现负责更新与清理。
+`scope.state/events.subscribe` 与 `teacherController.subscribe` 已自动随挂载清理，无需重复登记 `scope.cleanup`；原始 state/tc 订阅不回放首值，首次显示另读 `get/read`，或对状态使用增强的 `observe`。`listen` 管理局部 DOM 监听，自行建立的其他监听、定时器或 Observer 等资源按需交给 `scope.cleanup`。普通暂停、跨页保留挂载，销毁、取消或重置时清理。完整 `.view.*` 仍是 API5 实现入口；独立替换完整 `mount` 须返回 `update(nextInstance)` 和 `dispose()`。更新依赖数据时消费完整实例并保留无关运行状态，纯静态绘制可用空 `update`。普通正文、样式和页内脚本继续修改 `.content.html`，由成熟 Web 实现负责更新与清理。
 
 跨对象、跨 iframe 的位置用 `await context.scope.measure?.([{kind:'instance',instanceId:实际目标ID}, ...])` 一次批量读取；`sampleTime` 是宿主 `performance.timeOrigin + performance.now()` 毫秒，同批条目来自同一次同步布局观测。每项 `viewportFrame` 将目标边框内像素映射到调用者视口，未挂载或不可测为 `null`，已挂载离屏目标仍可测。Flow 的 `contentFrame` 位于实际滚动 owner 的未缩放内容坐标，`contentToViewport` 把该内容坐标映射到同一调用者视口；`flow.viewport` 是内容空间内的可见滚动窗口，其 `x/y` 为同批 `scrollLeft/scrollTop`。矩阵 `[a,b,c,d,e,f]` 作用于点是 `{x:a*x+c*y+e,y:b*x+d*y+f}`。一次动画计算只用同一批样本，不能混用历史视口坐标与后来读取的阅读进度；布局变化后重测，挂载退出后不再采用旧样本。高频视觉更新复用 `scope.target(...).motion.replace` 的 `write/nextFrame/animate` 或程序自己的 Canvas 绘制；这是暂态呈现，不把每帧几何写入工程或全局 `scope.state` 广播。
 
@@ -86,10 +94,14 @@ Flow 正文使用其 `.body.html` 或 `.body.md`，保留源文中软件生成�
 
 正式导航、快捷键和可选教师控制台复用同一运行状态。AI 新作不自动插入可见完整教师台。独立对象点击跳页可用 `interaction.update {target:"已观察的独立对象句柄",change:{kind:"click",action:"location-go",value:"已观察的目的页面句柄"}}`，无需为此读取完整实现或改为 Source；一个 HTML 实例内部多个按钮的不同动作及程序共享状态，可按实际源码入口添加局部增强并使用宿主端口。按需读取创作方法的导航与控制参考。旧工程已有界面按用户要求保留或修改。程序自己处理的按键应阻止重复处理；未处理的翻页键交给宿主。
 
-新作沿自身内容提供导航和非键盘推进入口，不依赖宿主外底栏。需要明确关闭外底栏时，`course.configure {target:整文档句柄,settings:{playback:{controls:"none"}}}` 使用已有播放设置，保留作品内导航与其他播放设置。局部程序的完成动作需要跨页时，通过实际Source入口的 `context.teacherController.execute` 执行正式动作；普通HTML脚本没有这个全局变量，不能自造全局桥。`project.read`与内容应用回执的`frame/viewport`直接给出当前对象的正式几何和内部可用尺寸，素材按此接力；替换沿当前对象进行，软件保持未修改的外框，不为换内容另建同位置对象或重复补尺寸。
+新作沿自身内容提供导航和非键盘推进入口。软件依据真实绑定、目标与挂载情况自动补齐缺失入口；完整作者导航就绪后不重复显示宿主控件。`playback.controls:"none"`只是已有控制台呈现设置，不能证明作者导航完整，也不能禁用自动补缺；只有作者明确选择无宿主导航时才使用文末的`hostNavigation`设置。局部程序的完成动作需要跨页时，通过实际Source入口的 `context.teacherController.execute` 执行正式动作；普通HTML脚本没有这个全局变量，不能自造全局桥。`project.read`与内容应用回执的`frame/viewport`直接给出当前对象的正式几何和内部可用尺寸，素材按此接力；替换沿当前对象进行，软件保持未修改的外框，不为换内容另建同位置对象或重复补尺寸。
+
+内置 `guoling.navigation` 的外观使用已读数据中的 `style`，例如 `{"backgroundColor":"#f3f0e8","backgroundOpacity":1,"textColor":"#17392f","accentColor":"#174f3d","cornerRadius":10}`；合并修改并保留其他数据和位置。`panelColor`、`borderRadius`、`theme:"light"` 不控制该内置组件，字段以其实际 schema 为准。自定配色时在实际导航上核对背景、普通文字和当前项。
 
 需要准备教师控制台时用 `teacher.ensure {target:"已观察的演示页句柄"}`，已有控制台直接复用；缺失时软件按人工插入默认创建全局控制台，真实插入需要整课授权。普通使用不要求模型查内部控制器身份或预先组装它。
 
 检查关键页用 `view.observe {path:"本次读取的页面路径"}`，多个课件时另填 `project`。观察不改变教师当前页面或文档；需要确认互动时执行对应操作并查看结果。观察失败、超时或没有返回图片时，报告该回执和缺少的证据，不把代码、应用成功或保存成功当成已看见画面；按具体诊断处理，不重复同因调用。
 
 修改进入正式工程与恢复稿。用户要求保存或交付已保存文件时使用本任务引用或 `file.open` 返回的整文档 target 调用 `file.save`，依据保存回执的实际路径与状态，再说明已保存；恢复稿提交本身不表示正式文件已更新。策划 MD 是普通工作区文件，通过 `file.write` 保存；策划与工程的保存状态分别说明。
+
+成品设置中的 `playback.hostNavigation` 只在作者明确要求时使用 `"intentionally-hidden"`，表示预览/交付不显示宿主目录和兜底控制；恢复为 `"auto"`。它不删除内容内导航，不关闭编辑工具，也不由 `controls:"none"` 或未生成导航自动推导。未明确要求时保留当前设置。

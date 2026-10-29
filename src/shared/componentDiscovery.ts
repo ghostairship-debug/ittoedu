@@ -48,7 +48,7 @@ const ALIASES: Readonly<Record<string, readonly string[]>> = {
   'chart:bar': ['柱状图', '柱形图', '柱图', '条形图', 'bar', '比较数据'],
   'chart:line': ['折线图', '线图', '趋势图', 'line', '趋势'], 'chart:area': ['面积图', '区域图', 'area'],
   'chart:pie': ['饼图', '饼状图', '占比图', '比例图', 'pie'], 'chart:donut': ['环形图', '甜甜圈图', '环状图', 'donut'],
-  input: ['填空题', '输入', '答案', 'input'], navigation: ['教师控制器', '教师控制台', '教师台', '控制台', '翻页', '导航', 'navigation'],
+  input: ['填空题', '输入', '答案', 'input'], navigation: ['全局控制台', '目录', '顶部导航','侧边导航','进度导航','教师控制器', '教师控制台', '控制台', '翻页', '导航', 'navigation'],
   heading: ['标题', 'heading'], quote: ['引用', 'quote'], list: ['列表', 'list'], code: ['代码', 'code'],
   divider: ['分隔线', 'divider'], callout: ['提示框', 'callout'], section: ['折叠节', '章节', 'section'],
   layout_group: ['两列', '双列', '分栏', '图文并排', '并排', 'columns', 'two columns'],
@@ -79,7 +79,7 @@ export const BUILTIN_DISCOVERY_ENTRIES: readonly ComponentDiscoveryEntry[] = [
     { kind: 'create', label: '新建图表', tool: 'object.insert', input: { kind: 'chart', chartType } })),
   ...(['image', 'video', 'audio'] as const).map(kind => facts(kind, discoveryAliases(kind)[0]!, '选择工程已有素材；图片也可通过 image.search/fetch 获取。',
     { kind: 'create', label: '插入媒体', tool: 'media.insert', requires: ['source：所需媒体的已有素材或来源引用', 'target 或 path：已观察页面'] })),
-  { ...facts('navigation', '教师控制台', '添加整课教师控制台；已有时复用，保留现有外观与人工修改。', { kind: 'create', label: '添加教师控制台', tool: 'teacher.ensure' }),
+  { ...facts('navigation', '全局控制台与导航', '整课控制台或内容内目录/顶部/侧边/进度导航；共用正式导航状态与动作。已有全局控制台复用，不占用内容导航实例。', { kind: 'create', label: '添加导航', tool: 'teacher.ensure' }),
     library: { category: 'interaction', itemType: 'component', subjects: ['通用'], schoolStages: ['通用'], editable: ['parameters', 'structure'], version: '1.0.0' } },
   ...([
     ['heading', '<h2>标题</h2>', '标题层级由 h1 至 h6 表达。'],

@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { componentSurfaces, resolveComponentPresentation } from '../../src/shared/contracts/component-platform/project'
-import { testContainerInstance } from '../helpers/glxWorkFixture'
+import { setRootContainers, testContainerInstance } from '../helpers/glxWorkFixture'
 import { expect, it } from 'vitest'
 import { randomUUID } from 'node:crypto'
 import { DocumentRegistry } from '../../src/core/documents/DocumentRegistry'
@@ -305,4 +305,103 @@ it('keeps explicit style precedence over copied appearance and rejects an unobse
   const after = f.session.read(); if (after.model.kind !== 'course-v10') throw new Error('course expected')
   expect(after.model.project.instances.b.style).toMatchObject({ textShadow: '3px 3px 0px #00ff00', opacity: .5 })
   expect(textComponentDataSchema.parse(after.model.project.instances.b.data).appearance.color).toBe('#ffff00')
+})
+
+it.each(['whole-field range', 'partial range', 'bound content'] as const)(
+  'preserves native rich styles for implicit plain text in a %s', async mode => {
+    const p = project(), surfaceId = componentSurfaces(p)[0].id
+    setRootContainers(p, [{ ...componentSurfaces(p)[0], kind: 'flow' }])
+    const style = { color: '#224334', fontFamily: 'Georgia,Microsoft YaHei,serif', fontSize: 35 }
+    const original = createTextComponentData({ inlines: [
+      ...(mode === 'partial range' ? [{ type: 'text' as const, text: '左😀', style: { italic: true } }] : []),
+      { type: 'text', text: '12:00 候车厅档案', style },
+      ...(mode === 'partial range' ? [{ type: 'text' as const, text: '右', style: { underline: true } }] : []),
+    ] })
+    p.instances.b.data = JSON.parse(JSON.stringify(original))
+    const from = mode === 'partial range' ? 2 : 0
+    const range: ToolTarget = { kind: 'course-instance', surfaceId, instanceId: 'b', dataPath: ['content'],
+      from, to: from + Array.from('12:00 候车厅档案').length }
+    const driver = new CourseV10Driver()
+    const f = await fixture(driver, { kind: 'course-v10', project: p, resources: { assets: {}, components: {} } }, [range])
+    const before = f.session.read(); if (before.model.kind !== 'course-v10') throw new Error('course expected')
+    const target = await f.gateway.issueTarget('format', f.session.documentId, range)
+    const content = mode === 'partial range' ? '记忆厅' : '12:00 记忆候车厅'
+    const call = mode === 'bound content' ? await f.gateway.boundContentCall('format', target, content)
+      : { name: 'text.replace', input: { target, content } }
+    const result = await f.gateway.execute('format', 'plain-title', call)
+    expect(result, JSON.stringify(result)).toMatchObject({ kind: 'document-operation', result: { status: 'applied' } })
+    const after = f.session.read(); if (after.model.kind !== 'course-v10') throw new Error('course expected')
+    const expected = structuredClone(before.model)
+    expected.project.revision = after.model.project.revision
+    const expectedData = structuredClone(original)
+    const selected = expectedData.content.inlines[mode === 'partial range' ? 1 : 0]
+    if (selected.type !== 'text') throw new Error('text expected')
+    selected.text = content
+    expected.project.instances.b.data = JSON.parse(JSON.stringify(expectedData))
+    expect(after.model).toEqual(expected)
+    expect(after.revision).toBe(before.revision + 1)
+    expect(after.undoDepth).toBe(before.undoDepth + 1)
+    expect(await f.gateway.recoverBoundContentOutput('format', 'plain-title', call,
+      { kind: 'content', documentId: f.session.documentId, target: range }))
+      .toEqual({ kind: 'content', documentId: f.session.documentId,
+        target: { ...range, to: from + Array.from(content).length } })
+    if (mode === 'whole-field range') {
+      await f.registry.save(f.session.documentId, { kind: 'file', path: 'plain-title.glx', version: null, bindingVersion: 0 })
+      expect(driver.load(f.saved())).toEqual(after.model)
+      const current = f.session.read()
+      expect(await f.session.execute({ documentId: current.documentId, epoch: current.epoch, baseRevision: current.revision,
+        operationId: 'undo-plain-title', actor: 'human', mutation: { type: 'undo' } })).toMatchObject({ status: 'applied' })
+      const undone = f.session.read(); if (undone.model.kind !== 'course-v10') throw new Error('course expected')
+      expect(undone.model.project.instances).toEqual(before.model.project.instances)
+      expect(await f.session.execute({ documentId: undone.documentId, epoch: undone.epoch, baseRevision: undone.revision,
+        operationId: 'redo-plain-title', actor: 'human', mutation: { type: 'redo' } })).toMatchObject({ status: 'applied' })
+      const redone = f.session.read(); if (redone.model.kind !== 'course-v10') throw new Error('course expected')
+      expect(redone.model.project.instances).toEqual(after.model.project.instances)
+    }
+  })
+
+it('preserves native rich styles across an implicit plain text selection spanning Flow fields', async () => {
+  const p = project(), surfaceId = componentSurfaces(p)[0].id
+  setRootContainers(p, [{ ...componentSurfaces(p)[0], kind: 'flow' }])
+  const a = createTextComponentData({ inlines: [{ type: 'text', text: '主标题A', style: { color: '#224334', fontSize: 35 } }] })
+  const b = createTextComponentData({ inlines: [{ type: 'text', text: '次标题B', style: { italic: true, fontSize: 23 } }] })
+  p.instances.a.data = JSON.parse(JSON.stringify(a)); p.instances.b.data = JSON.parse(JSON.stringify(b))
+  const ranges: ToolTarget[] = ['a', 'b'].map(instanceId => ({ kind: 'course-instance', surfaceId, instanceId,
+    dataPath: ['content'], from: 0, to: 4 }))
+  const model: DocumentModel = { kind: 'course-v10', project: p, resources: { assets: {}, components: {} } }
+  const aggregate = textSelectionTarget(model, ranges)
+  const f = await fixture(new CourseV10Driver(), model, [aggregate])
+  const target = await f.gateway.issueTarget('format', f.session.documentId, aggregate)
+  const result = await f.gateway.execute('format', 'plain-fields', { name: 'text.replace', input: { target, content: '主标题甲\n次标题乙' } })
+  expect(result, JSON.stringify(result)).toMatchObject({ kind: 'document-operation', result: { status: 'applied' } })
+  const after = f.session.read(); if (after.model.kind !== 'course-v10') throw new Error('course expected')
+  for (const [id, previous, text] of [['a', a, '主标题甲'], ['b', b, '次标题乙']] as const) {
+    expect(after.model.project.instances[id]).toEqual({ ...p.instances[id], data: { ...previous,
+      content: { inlines: [{ ...previous.content.inlines[0], text }] } } })
+  }
+  expect(after.undoDepth).toBe(1)
+})
+
+it.each([
+  { label: 'implicit HTML tags', content: '<strong>新标题</strong>', format: undefined, text: '新标题', style: { bold: true } },
+  { label: 'implicit HTML entities', content: '标题 &amp; 档案', format: undefined, text: '标题 & 档案', style: undefined },
+  { label: 'explicit plain markup', content: '<strong>新标题</strong>', format: 'text' as const, text: '<strong>新标题</strong>', style: { color: '#224334', fontSize: 35 } },
+  { label: 'explicit unstyled HTML', content: '新标题', format: 'html' as const, text: '新标题', style: undefined },
+])('retains replacement representation semantics for $label', async ({ content, format, text, style }) => {
+  const p = project(), surfaceId = componentSurfaces(p)[0].id
+  p.instances.b.data = JSON.parse(JSON.stringify(createTextComponentData({ inlines: [
+    { type: 'text', text: '旧标题', style: { color: '#224334', fontSize: 35 } },
+  ] })))
+  const range: ToolTarget = { kind: 'course-instance', surfaceId, instanceId: 'b', dataPath: ['content'], from: 0, to: 3 }
+  const f = await fixture(new CourseV10Driver(), { kind: 'course-v10', project: p, resources: { assets: {}, components: {} } }, [range])
+  const target = await f.gateway.issueTarget('format', f.session.documentId, range)
+  const call = { name: 'text.replace', input: { target, content, ...(format ? { format } : {}) } }
+  const result = await f.gateway.execute('format', 'representation', call)
+  expect(result, JSON.stringify(result)).toMatchObject({ kind: 'document-operation', result: { status: 'applied' } })
+  const after = f.session.read(); if (after.model.kind !== 'course-v10') throw new Error('course expected')
+  expect(textComponentDataSchema.parse(after.model.project.instances.b.data).content.inlines)
+    .toEqual([{ type: 'text', text, ...(style ? { style } : {}) }])
+  expect(await f.gateway.recoverBoundContentOutput('format', 'representation', call,
+    { kind: 'content', documentId: f.session.documentId, target: range }))
+    .toEqual({ kind: 'content', documentId: f.session.documentId, target: { ...range, to: Array.from(text).length } })
 })

@@ -20,6 +20,8 @@ export interface ProjectPresenterSettings {
 export interface ProjectPlaybackSettings {
   /** `canvas` uses authorable controller nodes; V8 removed the legacy outer footer. */
   controls: 'canvas' | 'none'
+  /** Explicit author intent only. Omitted/auto retains automatic host navigation; independent from authored controls. */
+  hostNavigation?: 'auto' | 'intentionally-hidden'
   keyboardNavigation: boolean
   presenter: ProjectPresenterSettings
 }

@@ -1,3 +1,5 @@
+import {flowObjectDropPreviewPlugin,showFlowObjectDropPreview,type FlowObjectDropPreview} from './documentFlowObjectPreview'
+import type {FlowObjectDrop} from '../../core/course/courseFlowObjectDrop'
 import { bindMarkdownIdentities, type MarkdownProjection } from '../../shared/document/markdownIdentity'
 import { editMarkdownSource, sameMarkdownContent } from '../../shared/document/markdownSourceEdit'
 import { editorPositionToPoint } from './documentAdapter'
@@ -182,6 +184,10 @@ export interface SharedDocumentEditorProps {
   deferLayoutSource?: boolean
   readOnly?: boolean
   blockMoveDisabledReason?(blockId: string): string | null
+  objectLayout?: {
+    read(id:string):{wrap:'none'|'left'|'right';widthPercent?:number}|null
+    begin(id:string):Promise<(drop:FlowObjectDrop)=>Promise<void>>
+  }
   renderTextActions?(selection: DocumentSelection | null): ReactNode
   renderInline?(instanceId: string, container: HTMLElement): (() => void) | void
   renderObject?(block: DocumentBlock, container: HTMLElement): (() => void) | void
@@ -281,6 +287,8 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
   const flowObjectSelection = props.target === 'flow' && (!props.contentScope || props.contentScope === 'document')
   const inputGeneration = useRef(0)
   const bodyDrag = useRef<{ pointerId: number; blockId: string; start: { x: number; y: number }; moved: boolean; capture: HTMLElement | null; ready: boolean; latest: { x: number; y: number }; ended: boolean; canceled: boolean } | null>(null)
+  const flowDrag=useRef<{sourceId:string;rects:Map<string,DOMRect>;widthPercent?:number;height:number;commit:Promise<((drop:FlowObjectDrop)=>Promise<void>)|null>;preview:FlowObjectDropPreview|null}|null>(null)
+  const objectPreviewPlugin=useMemo(()=>flowObjectDropPreviewPlugin(),[])
   const documentScope = (props.contentScope ?? 'document') === 'document'
   const [format, setFormat] = useState<ReturnType<typeof readDocumentFormatting>>({ color: undefined, highlightColor: undefined, paragraphType: '', fontFamily: undefined, fontSize: undefined, flags: { bold: false, italic: false, underline: false, strike: false, emphasis: false } })
   const [mode, setMode] = useState<'layout' | 'source'>(documentScope ? props.initialMode ?? (props.sourceDraft === undefined ? 'layout' : 'source') : 'layout')
@@ -682,7 +690,7 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
       disabledReason: previewSelection() ? '正在生成的范围暂时只读' : null, run: () => run('delete-table') }]
   }
   const options = () => ({ draftSession, contentScope: latest.current.contentScope,hiddenBlockIds:latest.current.hiddenBlockIds, presentation: latest.current.target === 'flow' ? 'flow' as const : undefined, stateChanged: (state: EditorState) => { const next = readDocumentFormatting(state, latest.current.inlineStyleDefaults); setFormat(previous => JSON.stringify(previous) === JSON.stringify(next) ? previous : next); updateActiveBlock(state) }, requestMathDraft: (request: { from: number; to: number; display: true; latex: ''; formulaId: string }) => {const editor=layout.current;if(editor){mathTarget.current?.release();mathTarget.current=editor.trackSelection(TextSelection.create(editor.view.state.doc,request.from,request.to))}setMathDraft({ ...request, accessibleText: '' })}, document: projection.current.document, sourceMap: mapRef.current, revision: latest.current.revision,
-    projectionPlugins: [...(latest.current.target === 'flow' ? [flowEditingPlugin] : []), previewPlugin, pinPlugin, inlineDefaultsPlugin], projectionClipboard: (view: Parameters<typeof layoutPreviewClipboard>[0], event: ClipboardEvent, cut: boolean) => {
+    projectionPlugins: [...(latest.current.target === 'flow' ? [flowEditingPlugin,objectPreviewPlugin] : []), previewPlugin, pinPlugin, inlineDefaultsPlugin], projectionClipboard: (view: Parameters<typeof layoutPreviewClipboard>[0], event: ClipboardEvent, cut: boolean) => {
       const handled = layoutPreviewClipboard(view, event, cut)
       if (handled && cut) previewBlocked()
       return handled
@@ -1480,6 +1488,38 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
     if (!point || !(await editor.drain()) || layout.current !== editor || generation !== inputGeneration.current || !editor.isInputActive()) return
     editor.selectBlock(point.blockId)
   }
+  function startFlowObjectDrag(id:string) {
+    const editor=layout.current,owner=latest.current.objectLayout,info=owner?.read(id)
+    if(!editor||!owner||!info){flowDrag.current=null;return}
+    const nodes=[...editor.view.dom.querySelectorAll<HTMLElement>('[data-flow-block-id]')]
+    const source=nodes.find(node=>node.dataset.flowBlockId===id),rect=source?.getBoundingClientRect()
+    if(!source||!rect)return
+    const scale=source.offsetWidth>0?rect.width/source.offsetWidth:1
+    flowDrag.current={sourceId:id,rects:new Map(nodes.map(node=>[node.dataset.flowBlockId!,node.getBoundingClientRect()])),widthPercent:info.widthPercent,
+      height:rect.height/Math.max(.001,scale),commit:owner.begin(id).catch(error=>{fail(String(error));return null}),preview:null}
+  }
+  function clearFlowObjectPreview(){if(layout.current)showFlowObjectDropPreview(layout.current.view,null)}
+  function previewFlowObjectDrop(sourceId:string,target:DocumentBlockDropTarget|null,point:{x:number;y:number}):DocumentBlockDropTarget|null {
+    const drag=flowDrag.current,editor=layout.current
+    if(!drag||drag.sourceId!==sourceId||!editor||!target)return target
+    const element=editor.view.dom.querySelector<HTMLElement>('[data-flow-block-id="'+CSS.escape(target.targetId)+'"]'),bounds=drag.rects.get(target.targetId)
+    let wrap:'none'|'left'|'right'='none',side=target.side
+    if(element&&bounds&&element.matches('p,h1,h2,h3,h4,h5,h6,blockquote')&&point.y>=bounds.top-12&&point.y<=bounds.bottom+12){
+      const relative=(point.x-bounds.left)/Math.max(1,bounds.width)
+      if(relative<.32)wrap='left';else if(relative>.68)wrap='right'
+      if(wrap!=='none')side='before'
+    }
+    const widthPercent=drag.widthPercent??(wrap==='none'?100:48)
+    // A narrow lane uses the same standalone-row rule as the final projection.
+    const laneWidth=(bounds?.width??target.width)/(element?.offsetWidth&&bounds?bounds.width/element.offsetWidth:1)
+    if(wrap!=='none'&&laneWidth*(1-widthPercent/100)-20<160)wrap='none'
+    const preview:FlowObjectDropPreview={sourceId,targetId:target.targetId,side,wrap,widthPercent:wrap==='none'&&drag.widthPercent===undefined?100:widthPercent,height:drag.height}
+    drag.preview=preview;showFlowObjectDropPreview(editor.view,preview)
+    return {...target,side}
+  }
+  function commitFlowObjectDrop(drag:NonNullable<typeof flowDrag.current>,preview:FlowObjectDropPreview):void {
+    void drag.commit.then(async commit=>{if(commit)await commit({sourceId:drag.sourceId,targetId:preview.targetId,side:preview.side,wrap:preview.wrap,...(drag.widthPercent===undefined?{}:{widthPercent:drag.widthPercent})})}).catch(error=>fail(String(error)))
+  }
   function beginBodyDrag(event: React.PointerEvent<HTMLDivElement>) {
     const editor = layout.current, target = event.target instanceof Element ? event.target : null
     if (!flowObjectSelection || mode !== 'layout' || props.active === false || props.readOnly || !editor || event.button !== 0
@@ -1487,10 +1527,10 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
     const blockElement = target.closest<HTMLElement>('[data-flow-block-id]')
     const blockId = blockElement?.dataset.flowBlockId
     if (editor.isInputActive()) {
-      if (!blockId || !target.closest('[data-component-render]')) return
+      if (!blockId || !target.closest('[data-component-render],[data-component-runtime-root],[data-component-instance]') || !latest.current.objectLayout?.read(blockId)) return
       event.preventDefault(); event.stopPropagation()
       acceptObjectPointer({ blockId, phase: 'start', pointerId: event.pointerId, point: { x: event.clientX, y: event.clientY }, button: event.button, modifiers: { shift: event.shiftKey, ctrl: event.ctrlKey, meta: event.metaKey, alt: event.altKey } })
-      if (bodyDrag.current && blockElement) { bodyDrag.current.capture = blockElement; blockElement.setPointerCapture?.(event.pointerId) }
+      if (bodyDrag.current && blockElement) { bodyDrag.current.capture = latest.current.objectLayout?.read(blockId)?editor.view.dom:blockElement; bodyDrag.current.capture.setPointerCapture?.(event.pointerId) }
       return
     }
     if (!blockId || !editor.selectBlock(blockId)) return
@@ -1498,7 +1538,8 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
     event.preventDefault(); event.stopPropagation()
     if (event.ctrlKey || event.metaKey || event.shiftKey || previewSelection() || props.blockMoveDisabledReason?.(blockId)) return
     // Capture the selected block itself, so click/double-click stays inside this PM.
-    const capture = blockElement!
+    startFlowObjectDrag(blockId)
+    const capture = flowDrag.current?editor.view.dom:blockElement!
     capture.setPointerCapture?.(event.pointerId)
     bodyDrag.current = { pointerId: event.pointerId, blockId, start: { x: event.clientX, y: event.clientY }, latest: { x: event.clientX, y: event.clientY }, moved: false, capture, ready: true, ended: false, canceled: false }
     draggedBlockContent.current = fromEditorDocument(editor.view.state.doc)
@@ -1509,7 +1550,8 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
     drag.latest = point
     if (!drag.ready || drag.canceled || !drag.moved && Math.hypot(point.x - drag.start.x, point.y - drag.start.y) < 3) return
     drag.moved = true; draggingBlock.current = true
-    setBlockDrop(resolveBlockDrop(drag.blockId, point))
+    const target=resolveBlockDrop(drag.blockId,point)
+    setBlockDrop(previewFlowObjectDrop(drag.blockId,target,point))
   }
   function moveBodyDrag(event: React.PointerEvent<HTMLDivElement>) {
     if (bodyDrag.current?.pointerId !== event.pointerId) return
@@ -1523,9 +1565,12 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
     if (!drag.ready) return
     if (!drag.canceled) updateBodyPointer(pointerId, point)
     const destination = !drag.canceled && drag.moved ? resolveBlockDrop(drag.blockId, point) : null
+    const flow=flowDrag.current,flowPreview=flow?.preview
+    clearFlowObjectPreview();flowDrag.current=null
     bodyDrag.current = null; draggingBlock.current = false; draggedBlockContent.current = null; setBlockDrop(null)
     if (drag.capture?.hasPointerCapture?.(drag.pointerId)) drag.capture.releasePointerCapture(drag.pointerId)
     if (!destination || !layout.current) return
+    if(flow&&flowPreview&&!drag.canceled){commitFlowObjectDrop(flow,flowPreview);return}
     try {
       const content = fromEditorDocument(layout.current.view.state.doc)
       applyDocumentContent(applyDocumentBlockCommand(content, { action: 'move', blockId: drag.blockId, targetId: destination.targetId, side: destination.side }))
@@ -1553,6 +1598,7 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
       if (bodyDrag.current !== drag || layout.current !== editor) return
       if (!ready || drag.canceled || !editor.selectBlock(input.blockId)) { bodyDrag.current = null; return }
       drag.ready = true
+      startFlowObjectDrag(input.blockId)
       draggedBlockContent.current = fromEditorDocument(editor.view.state.doc)
       if (input.modifiers?.ctrl || input.modifiers?.meta || input.modifiers?.shift || previewSelection() || props.blockMoveDisabledReason?.(input.blockId)) { bodyDrag.current = null; return }
       updateBodyPointer(drag.pointerId, drag.latest)
@@ -1584,7 +1630,7 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
     if (!view || props.readOnly || mode !== 'layout') return null
     const paper = view.dom.closest('.flow-paper') ?? view.dom
     if (point.y < paper.getBoundingClientRect().top) return null
-    return documentBlockDropTarget(draggedBlockContent.current ?? fromEditorDocument(view.state.doc), view.dom, sourceId, point)
+    return documentBlockDropTarget(draggedBlockContent.current ?? fromEditorDocument(view.state.doc), view.dom, sourceId, point,flowDrag.current?.sourceId===sourceId?flowDrag.current.rects:undefined)
   }
   type BlockDragEvent = Pick<DragEvent, 'dataTransfer' | 'clientX' | 'clientY' | 'preventDefault' | 'stopPropagation'>
   function overBlock(event: BlockDragEvent) {
@@ -1594,18 +1640,22 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
     event.dataTransfer.dropEffect = 'move'
     // Chromium protects transfer data until drop; retain the source at dragstart.
     const sourceId = draggedBlockId.current
-    const next = sourceId ? resolveBlockDrop(sourceId, { x: event.clientX, y: event.clientY }) : null
+    const point={x:event.clientX,y:event.clientY}
+    const next = sourceId ? previewFlowObjectDrop(sourceId,resolveBlockDrop(sourceId,point),point) : null
     setBlockDrop(previous => previous && next && previous.targetId === next.targetId && previous.side === next.side
       && previous.left === next.left && previous.top === next.top && previous.width === next.width ? previous : next)
   }
   function dropBlock(event: BlockDragEvent) {
     if (props.active === false || !documentScope || !event.dataTransfer?.types.includes(DOCUMENT_BLOCK_DRAG_MIME)) return
     event.preventDefault(); event.stopPropagation()
+    const flow=flowDrag.current,flowPreview=flow?.preview
+    clearFlowObjectPreview();flowDrag.current=null
     setBlockDrop(null); draggingBlock.current = false; draggedBlockId.current = null; draggedBlockContent.current = null
     if (props.readOnly || mode !== 'layout') return
     const sourceId = documentBlockDragId(event.dataTransfer)
     const target = sourceId ? resolveBlockDrop(sourceId, { x: event.clientX, y: event.clientY }) : null
     if (!sourceId || !target || !layout.current) return
+    if(flow&&flowPreview){commitFlowObjectDrop(flow,flowPreview);return}
     try {
       const content = fromEditorDocument(layout.current.view.state.doc)
       applyDocumentContent(applyDocumentBlockCommand(content, { action: 'move', blockId: sourceId, targetId: target.targetId, side: target.side }))
@@ -1645,7 +1695,7 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
     }}
     onDragOverCapture={overBlock}
     onDragLeave={event => { if (!(event.relatedTarget instanceof Node) || !event.currentTarget.contains(event.relatedTarget)) setBlockDrop(null) }}
-    onDragEndCapture={() => { draggingBlock.current = false; draggedBlockId.current = null; draggedBlockContent.current = null; setBlockDrop(null); if (layout.current) updateActiveBlock(layout.current.view.state) }}
+    onDragEndCapture={() => { clearFlowObjectPreview();flowDrag.current=null;draggingBlock.current = false; draggedBlockId.current = null; draggedBlockContent.current = null; setBlockDrop(null); if (layout.current) updateActiveBlock(layout.current.view.state) }}
     onDropCapture={dropBlock}
     onContextMenu={event => {
       if (props.active === false || props.readOnly || mode !== 'layout') return
@@ -1671,6 +1721,7 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
     }}
     className={`shared-document-editor${props.target === 'flow' ? ' shared-document-editor--flow' : props.target === 'file' && documentScope ? ' shared-document-editor--file' : ''}`} onKeyDown={event => {
     if (props.active === false) return
+    if (event.key === 'Escape' && flowDrag.current && !bodyDrag.current){event.preventDefault();event.stopPropagation();clearFlowObjectPreview();flowDrag.current=null;setBlockDrop(null);return}
     if (flowObjectSelection && event.key === 'Escape' && bodyDrag.current) { event.preventDefault(); event.stopPropagation(); finishBodyDrag(undefined, true); return }
     if (flowObjectSelection && (event.key === 'Escape' || event.key === 'Enter' && (event.ctrlKey || event.metaKey)) && layout.current?.isInputActive() && !event.nativeEvent.isComposing) { event.preventDefault(); event.stopPropagation(); void completeFlowInput(); return }
     if (documentScope && event.key === 'Escape' && contextualTarget) { event.preventDefault(); setDismissedGeneration(targetGeneration) }
@@ -1695,8 +1746,8 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
        <button type="button" onMouseDown={event => event.preventDefault()} onClick={() => insertAtSelection(insertionFallback.kind, insertionFallback.blockId)}>在所在块下方插入</button>
        <button type="button" onClick={() => setInsertionFallback(null)}>取消</button>
      </div>}
-     {props.active !== false && blockDrop && createPortal(<div className="document-block-drop-indicator" style={{ left: blockDrop.left, top: blockDrop.top, width: blockDrop.width }} />, window.document.body)}
-      {props.active !== false && documentScope && mode === 'layout' && !props.readOnly && activeBlock && <DocumentBlockHandle blockId={activeBlock.id} rect={activeBlock.rect} commands={activeBlockMenu(activeBlock.id)} disabledReason={previewSelection() ? '正在生成的范围暂时只读' : props.blockMoveDisabledReason?.(activeBlock.id) ?? null} onDragStart={id => { draggingBlock.current = true; draggedBlockId.current = id; if (layout.current) draggedBlockContent.current = fromEditorDocument(layout.current.view.state.doc) }} />}
+     {props.active !== false && blockDrop && !flowDrag.current?.preview && createPortal(<div className="document-block-drop-indicator" style={{ left: blockDrop.left, top: blockDrop.top, width: blockDrop.width }} />, window.document.body)}
+      {props.active !== false && documentScope && mode === 'layout' && !props.readOnly && activeBlock && <DocumentBlockHandle blockId={activeBlock.id} rect={activeBlock.rect} commands={activeBlockMenu(activeBlock.id)} disabledReason={previewSelection() ? '正在生成的范围暂时只读' : props.blockMoveDisabledReason?.(activeBlock.id) ?? null} onDragStart={id => { startFlowObjectDrag(id);draggingBlock.current = true; draggedBlockId.current = id; if (layout.current) draggedBlockContent.current = fromEditorDocument(layout.current.view.state.doc) }} />}
      {props.active !== false && allPreviews.length > 0 && <div className="document-generation-status" role="status">{allPreviews.length} 处正文正在生成，生成部分尚未保存。{allPreviews.map((preview, index) => <button key={preview.editId} type="button" aria-label={`停止生成第 ${index + 1} 处`} onClick={preview.cancel}>停止生成 {index + 1}</button>)}{commandError && <span role="alert">{commandError}</span>}</div>}
     {diagnostics.length > 0 && <ul role="alert" aria-label="源文问题">{diagnostics.map((diagnostic, index) => <li key={index}><button type="button" onMouseDown={event => event.preventDefault()} onClick={() => locateDiagnostic(diagnostic)}>第 {diagnostic.line} 行，第 {diagnostic.column} 列：{diagnostic.message}</button></li>)}</ul>}
      {mode === 'layout' ? <div ref={layoutHost} /> : <div ref={sourceHost} />}

@@ -53,7 +53,7 @@ async function main(): Promise<void> {
       if (!('data' in applied) || !applied.data || typeof applied.data !== 'object' || !('commit' in applied.data)
         || !['committed', 'unchanged'].includes(String(applied.data.commit))) throw new Error('project.apply 未确认提交；请保留源码、诊断与恢复事实')
     }
-    if (save) requireCurrentProjectSave(await call('project.save', { project }), filename)
+    if (save) requireCurrentProjectSave(await call('file.save', { target: project }), filename)
   } finally {
     await sdk.detach()
     process.stdout.write(`${JSON.stringify({ stage: 'client.detach', status: 'completed', hostStopped: false })}\n`)

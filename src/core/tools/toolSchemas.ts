@@ -25,10 +25,13 @@ export const textFormatInputSchema = z.object({ target: semanticId, style: docum
 export const objectLayoutInputSchema = z.object({ targets: z.array(semanticId).min(1), intent: z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('align'), alignment: z.enum(['left', 'center', 'right', 'top', 'middle', 'bottom']) }).strict(),
   z.object({ kind: z.literal('distribute'), axis: z.enum(['horizontal', 'vertical']) }).strict(),
+  z.object({ kind: z.literal('group') }).strict(),
+  z.object({ kind: z.literal('ungroup') }).strict(),
+  z.object({kind:z.literal('reflow'),html:z.string().min(1).describe('临时HTML/CSS构图，按targets顺序使用空div data-layout-ref="0"、"1"等，每个恰好一次。软件注入当前内容，只应用几何，不保存包装、不改正文。'),viewport:z.object({width:z.number().int().positive(),height:z.number().int().positive()}).strict().optional()}).strict(),
   z.object({ kind: z.literal('columns'), columns: z.array(z.array(semanticId)).min(2).optional(),
     ratios: z.array(z.number().positive()).min(2).optional(), gap: z.number().nonnegative().optional() }).strict(),
 ]) }).strict()
-export const teacherEnsureInputSchema = z.object({ target: semanticId }).strict()
+export const teacherEnsureInputSchema = z.object({target:semanticId,placement:z.enum(['global','content']).optional(),presentation:z.enum(['console','directory','top','side','progress']).optional()}).strict()
 export const surfaceRecipeInputSchema = z.object({ target: semanticId, recipeId: z.enum(RECIPE_CATALOG.map(recipe => recipe.id)),
   slots: z.record(z.string(), z.string()), accentTokenId: semanticId.optional() }).strict()
 export const courseProductivityInputSchema = z.object({ target: semanticId, request: z.discriminatedUnion('kind', [

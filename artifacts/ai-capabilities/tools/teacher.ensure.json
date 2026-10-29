@@ -1,9 +1,26 @@
 {
-  "description": "为已观察演示页准备全局控制台；复用已有控制台，否则使用人工插入默认、共享层和软件身份创建。涉及全局层时需要整课授权，一次事务可撤销。",
+  "description": "为已观察页面创建同源导航组件。placement=content可插入directory/top/side/progress内容导航；默认placement=global复用或创建整课控制台。presentation选择呈现，位置/当前章节/动作沿同一正式服务，绑定和合法禁用由软件处理。全局层需要整课授权，内容导航只需要页面插入权限。一次事务可撤销，参数可编辑。",
   "inputSchema": {
     "$schema": "https://json-schema.org/draft/2020-12/schema",
     "additionalProperties": false,
     "properties": {
+      "placement": {
+        "enum": [
+          "global",
+          "content"
+        ],
+        "type": "string"
+      },
+      "presentation": {
+        "enum": [
+          "console",
+          "directory",
+          "top",
+          "side",
+          "progress"
+        ],
+        "type": "string"
+      },
       "target": {
         "minLength": 1,
         "type": "string"

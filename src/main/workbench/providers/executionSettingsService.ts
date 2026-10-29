@@ -9,6 +9,7 @@ import { ExecutionSettingsError, ExecutionSettingsStore } from './ExecutionSetti
 import { createElectronCredentialEncryption } from './providerCredentials'
 import { DesktopOperationError } from '../../errors'
 import { OAuthDesktopService } from './OAuthDesktopService'
+import { ChatGPTOAuthError } from './ChatGPTOAuthClient'
 import type { ModelConnectionSnapshot } from '../../../shared/workbench/modelProvider'
 import type { ModelProvider } from '../../../shared/workbench/modelProvider'
 import { OpenAIChatProvider } from './OpenAIChatProvider'
@@ -66,6 +67,55 @@ const probeMessages: Readonly<Record<string, string>> = {
   'probe-tool-missing': '模型未返回参数完整的指定工具调用；工具能力仍为未知。',
 }
 
+/** OAuth codes are host-owned, but response text and arbitrary error messages
+ * never cross this settings boundary. Keep recovery specific without exposing credentials. */
+function oauthSettingsFailure(error: ChatGPTOAuthError): { code: string; message: string; suggestion: string } {
+  const retained = '原连接和模型设置已保留。'
+  const http = /^http-([45][0-9]{2})$/.exec(error.code)
+  if (http && (error.httpStatus === undefined || error.httpStatus === Number(http[1]))) {
+    const status = Number(http[1])
+    const machine=error.machineError
+    if(error.phase==='refresh'&&machine&&machine!=='unknown_oauth_error'){
+      const revoked=['invalid_grant','refresh_token_reused','refresh_token_expired','refresh_token_invalidated'].includes(machine)
+      const client=['invalid_client','unauthorized_client','unsupported_grant_type','invalid_request'].includes(machine)
+      return {code:'oauth-'+machine,message:'既有 ChatGPT 授权刷新失败（HTTP '+status+'，'+machine+'）；'+retained,
+        suggestion:revoked?'服务端已拒绝这份刷新凭据。请由作者在原连接中重新授权；软件未重置或切换账号。':client?'请先核对客户端配置、授权合同与实际凭据所属连接；不要仅凭状态码要求用户重新登录。':'请保留当前授权，按服务端错误类型检查后重试。'}
+    }
+    const rejected = [400, 401, 403].includes(status)
+    return { code: `oauth-http-${status}`, message: `${rejected ? 'ChatGPT 登录凭据刷新被服务拒绝' : status === 429
+      ? 'ChatGPT 登录服务当前限流' : 'ChatGPT 登录服务暂时无法完成请求'}（HTTP ${status}）；${retained}`,
+      suggestion: rejected ? '本次未取得足够的服务端错误分类，请先核对凭据所属连接与刷新配置，再决定是否重新授权。' : '请检查网络连接并稍后重试读取模型目录。' }
+  }
+  let message: string, suggestion: string
+  switch (error.code) {
+    case 'credential-revoked-or-mismatched':
+      message = '此 ChatGPT 连接的登录凭据不可用或与当前账号不匹配。'; suggestion = '请在该连接中重新登录 ChatGPT。'; break
+    case 'account-mismatch':
+    case 'account-identity-missing':
+      message = 'ChatGPT 返回的账号身份无法与当前连接核对。'; suggestion = '请使用该连接对应的账号重新登录 ChatGPT。'; break
+    case 'credential-changed-during-refresh':
+    case 'credential-changed-during-login':
+    case 'concurrent-credential-update':
+      message = 'ChatGPT 登录凭据在处理期间已改变，本次操作未继续。'; suggestion = '请刷新连接设置后重试读取模型目录。'; break
+    case 'request-failed':
+      message = 'ChatGPT 登录凭据更新请求未完成。'; suggestion = '请检查网络连接后重试读取模型目录。'; break
+    case 'cancelled-or-timeout':
+      message = 'ChatGPT 登录凭据更新被取消或等待超时。'; suggestion = '请检查网络连接后重试读取模型目录。'; break
+    case 'invalid-token-response':
+    case 'empty-token-response':
+    case 'token-response-too-large':
+      message = 'ChatGPT 登录服务返回的凭据响应无效。'; suggestion = '请稍后重试；如持续失败，请在该连接中重新登录 ChatGPT。'; break
+    case 'wrong-connection-protocol':
+    case 'invalid-configuration':
+    case 'invalid-target':
+      message = '当前连接的 ChatGPT 登录配置无效。'; suggestion = '请在连接设置中检查 ChatGPT 登录连接后重试。'; break
+    default:
+      return { code: 'oauth-operation-failed', message: `ChatGPT 登录操作未完成。${retained}`,
+        suggestion: '请重试；如持续失败，请在该连接中重新登录 ChatGPT。' }
+  }
+  return { code: `oauth-${error.code}`, message: `${message}${retained}`, suggestion }
+}
+
 /** No credential reads or arbitrary provider request endpoint are exposed to the renderer. */
 export class ExecutionSettingsDesktopService {
   constructor(private readonly store: ExecutionSettingsStore, private readonly transport: typeof fetch = fetch,
@@ -113,13 +163,19 @@ export class ExecutionSettingsDesktopService {
             await this.store.applyOAuthModelDefaults(catalog.connectionId, catalog.connectionRevision, catalog.models)
             return status
           } catch (error) {
+            const oauthFailure = error instanceof ChatGPTOAuthError ? oauthSettingsFailure(error) : undefined
             return { ...status, modelDirectoryError: error instanceof ExecutionSettingsError ? error.message
-              : '模型目录暂不可读取，请检查网络连接后重试目录。账号登录已保留。' }
+              : oauthFailure ? `${oauthFailure.message}${oauthFailure.suggestion}`
+                : '模型目录暂不可读取，请检查网络连接后重试目录。账号登录已保留。' }
           }
         }
         case 'oauth-login-cancel': return await this.requireOAuth().cancel(input.loginId)
       }
     } catch (error) {
+      if (error instanceof ChatGPTOAuthError) {
+        const failure = oauthSettingsFailure(error)
+        throw new DesktopOperationError(failure.code, 'ChatGPT 登录状态未就绪', failure.message, failure.suggestion)
+      }
       const known = error instanceof ExecutionSettingsError
       throw new DesktopOperationError(known ? error.code : 'execution-settings-failed', '模型连接设置未完成',
         known ? error.message : '无法完成模型连接设置，已保留原配置。', '请检查当前连接或系统安全存储后重试。')

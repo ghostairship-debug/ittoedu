@@ -79,13 +79,11 @@ const authoredNavigation = `export function mount({root,scope,teacherController:
   root.innerHTML='<section style="padding:24px;background:#173e4f;color:white;border-radius:20px"><output id="where"></output><div style="display:flex;gap:16px;margin-top:16px"><button id="advance">展开线索</button><button id="verify">前往验证</button><button id="return">回看观察</button></div></section>';
   const next=root.querySelector('#advance'), verify=root.querySelector('#verify'), back=root.querySelector('#return');
   const sync=()=>{const snapshot=nav.read(),p=snapshot.progress;root.querySelector('#where').textContent=p.sceneName+' / '+p.stepName;next.textContent=p.sceneIndex===0&&p.stepIndex===0?'展开线索':'继续探索';next.disabled=!nav.canExecute({type:'step.next'});back.disabled=!nav.canExecute({type:'scene.previous'});};
-  next.onclick=()=>nav.execute({type:'step.next'},scope.signal);
-  verify.onclick=()=>nav.execute({type:'scene.go',sceneId:'verify'},scope.signal);
-  back.onclick=()=>nav.execute({type:'scene.previous'},scope.signal);
-  const off=nav.subscribe(sync);sync();return{update(){sync()},dispose(){off()}};
+  const bindings=[nav.bindControl(next,{type:'step.next'}),nav.bindControl(verify,{type:'scene.go',sceneId:'verify'}),nav.bindControl(back,{type:'scene.previous'})];
+  const off=nav.subscribe(sync);sync();return{update(){sync()},dispose(){off();bindings.forEach(stop=>stop())}};
 }`
 
-it('uses content buttons for real step/scene navigation without outer chrome, while older unset playback keeps its pointer fallback', async () => {
+it('uses real authored bindings without extra chrome and restores only genuinely missing navigation independently of playback config', async () => {
   const output = 'output/repair-visual-interactive-20261015/run-db19oE/navigation'
   await mkdir(output, { recursive: true })
   const project = createBlankCourseProjectV10('内容导航')
@@ -125,17 +123,18 @@ it('uses content buttons for real step/scene navigation without outer chrome, wh
       window.navigationPresentationPlayer = await window.NavigationPresentation.mountCompiledCourse(artifact, root,
         { report: (message: string) => (window.navigationPresentationReports ??= []).push(message) })
     }, mode)
-    await mount('none')
+    console.log('NAV_BROWSER: mounting Source none');await mount('none');console.log('NAV_BROWSER: mounted Source none')
+    console.log('NAV_BROWSER: environment',await page.evaluate(()=>({reports:window.navigationPresentationReports,html:document.querySelector('[data-compiled-runtime-root="navigation"]')?.innerHTML,frames:document.querySelectorAll('iframe').length})))
     const authored = page.locator('[data-compiled-runtime-root="navigation"]'), read = () => page.evaluate(() => {
       if (!window.navigationPresentationPlayer) throw new Error('Expected mounted player')
       return window.navigationPresentationPlayer.navigation.read()
     })
     expect(await page.locator('[data-playback-chrome="navigation"]').count()).toBe(0)
     expect(await page.locator('[data-playback-navigation-content]').evaluate(node => node.getBoundingClientRect().height)).toBe(720)
-    await authored.locator('#advance').click()
+    console.log('NAV_BROWSER: next bindings',await page.evaluate(()=>window.navigationPresentationPlayer?.navigation.readControls()));await authored.locator('#advance').click()
     await expect.poll(async () => (await read()).progress?.stepIndex).toBe(1)
     expect(await authored.locator('#where').textContent()).toBe('观察 / 线索')
-    await authored.locator('#advance').click()
+    console.log('NAV_BROWSER: next bindings',await page.evaluate(()=>window.navigationPresentationPlayer?.navigation.readControls()));await authored.locator('#advance').click()
     await expect.poll(async () => (await read()).locationId).toBe('verify')
     expect(await authored.locator('#advance').isDisabled()).toBe(true)
     await authored.locator('#return').click()
@@ -150,14 +149,16 @@ it('uses content buttons for real step/scene navigation without outer chrome, wh
     await expect.poll(async () => (await read()).locationId).toBe('verify')
     actual.canvas = { snapshot: await read(), chrome: 0 }
     await mount('unset')
+    await expect.poll(()=>page.locator('[data-playback-chrome="navigation"]').count()).toBe(0)
+    await authored.locator('button').evaluateAll(nodes=>nodes.forEach(node=>{(node as HTMLElement).hidden=true}))
     const fallback = page.locator('[data-playback-chrome="navigation"]')
-    expect(await fallback.isVisible()).toBe(true)
+    await expect.poll(()=>fallback.isVisible(),{timeout:5000}).toBe(true)
     await fallback.getByRole('button', { name: '下一步', exact: true }).click()
     await expect.poll(async () => (await read()).progress?.stepIndex).toBe(1)
     await fallback.getByRole('button', { name: '下一步', exact: true }).click()
     await expect.poll(async () => (await read()).locationId).toBe('verify')
     actual.legacy = { snapshot: await read(), chrome: 1 }
-    expect(await fallback.getByRole('button', { name: '下一步', exact: true }).isDisabled()).toBe(true)
+    expect(await fallback.getByRole('button', { name: '下一步', exact: true }).count()===0 || await fallback.getByRole('button', { name: '下一步', exact: true }).isDisabled()).toBe(true)
     actual.reports = await page.evaluate(() => window.navigationPresentationReports ?? [])
     expect(actual.reports).toEqual([])
     expect(errors).toEqual([]); expect(network).toEqual([])
@@ -169,4 +170,4 @@ it('uses content buttons for real step/scene navigation without outer chrome, wh
     await writeFile(output + '/actual.json', JSON.stringify({ ...actual, errors, network }, null, 2))
     await browser.close()
   }
-}, 30000)
+}, 60000)

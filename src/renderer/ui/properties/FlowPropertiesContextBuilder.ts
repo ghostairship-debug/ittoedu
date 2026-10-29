@@ -119,8 +119,8 @@ export function buildFlowPropertiesOwner(input: {
         const layoutPatch: Partial<ComponentFlowBodyLayout> = {}
         const edits: ComponentEdit[] = Object.entries(patch).flatMap(([key, value]): ComponentEdit[] => {
           if (value === undefined) return []
-          if (key === 'wrap' || key === 'layout' || (key === 'caption' && ['guoling.image', 'guoling.video', 'guoling.audio'].includes(builtinKey ?? ''))) {
-            Object.assign(layoutPatch, key === 'wrap' ? { wrap: value } : key === 'layout' ? { width: value } : { caption: value })
+          if (key === 'widthPercent' || key === 'wrap' || key === 'layout' || (key === 'caption' && ['guoling.image', 'guoling.video', 'guoling.audio'].includes(builtinKey ?? ''))) {
+            Object.assign(layoutPatch, key === 'widthPercent' ? {widthPercent:value} : key === 'wrap' ? { wrap: value } : key === 'layout' ? { width: value } : { caption: value })
             return []
           }
           return [{ type: 'data.set', instanceId: instance.id, path: isText && (key === 'textAlign' || key === 'lineSpacing') ? ['appearance', key === 'textAlign' ? 'align' : key]

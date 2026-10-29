@@ -2121,6 +2121,11 @@
                 ],
                 "type": "string"
               },
+              "widthPercent": {
+                "exclusiveMinimum": 0,
+                "maximum": 100,
+                "type": "number"
+              },
               "wrap": {
                 "enum": [
                   "none",
@@ -2791,6 +2796,13 @@
           "enum": [
             "canvas",
             "none"
+          ],
+          "type": "string"
+        },
+        "hostNavigation": {
+          "enum": [
+            "auto",
+            "intentionally-hidden"
           ],
           "type": "string"
         },

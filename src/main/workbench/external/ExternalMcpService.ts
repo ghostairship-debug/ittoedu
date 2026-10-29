@@ -19,6 +19,8 @@ import type { ModelToolCall, ToolResult } from '../../../shared/workbench/tools'
 import type { LocalToolRunIntent, LocalToolRunPreview } from '../../../shared/workbench/toolPorts'
 import type { ConversationStore } from '../conversations/ConversationStore'
 import { loadToolsDefinition, loadToolsSchema } from '../execution/ExecutionEngine'
+import { executionContextToolProfile } from '../execution/ExecutionContextProjection'
+import { continueDocumentTargets } from '../execution/continuationTargets'
 import { createCourseFromHtml } from '../htmlImport/CreateCourseFromHtml'
 import { McpProtocolError, ResidentMcpServer, type ResidentMcpCall, type ResidentMcpClientInfo, type ResidentMcpHandler } from './ResidentMcpServer'
 import type { ResidentMcpSettingsStore } from './ResidentMcpSettings'
@@ -80,6 +82,8 @@ interface Session {
   /** Child receipts of composite calls (course.createFromHtml), keyed by their host-assigned call id. */
   children: Map<string, ToolResult>
   notices: string[]; listChanged: boolean
+  /** Non-authoritative disclosure hint, frozen by the first precise workbench.state in this run; never a grant. */
+  toolProfileFrozen: boolean
   authority: Promise<void>; transitioning: boolean; boundDocumentIds: readonly string[]
 }
 
@@ -291,7 +295,7 @@ export class ExternalMcpService implements ResidentMcpHandler {
       if (session.stopped || previous && !this.sessions.has(session.sessionId)) { await this.stopRun(runId); throw new Error('外部会话已停止') }
       session.conversation = undefined; session.conversationId = undefined
       Object.assign(session, { runId, taskId: randomUUID(), workspaceId, workspaceRoot: root, permission,
-        workspaceName: workspaceName(root), listChanged: true, boundDocumentIds, children: new Map<string, ToolResult>() })
+        workspaceName: workspaceName(root), listChanged: true, toolProfileFrozen: false, boundDocumentIds, children: new Map<string, ToolResult>() })
       this.lastWorkspaceId = workspaceId
     } catch (cause) {
       if (previous) session.stopped = true
@@ -311,7 +315,7 @@ export class ExternalMcpService implements ResidentMcpHandler {
     const settings = await this.options.settings.read()
     const session: Session = { sessionId: randomUUID(), clientName: client.title ?? client.name, permission: settings.permission,
       connectedAt: this.now(), pending: 0, stopped: false, workspaceId: '', workspaceName: '', workspaceRoot: '', runId: '', taskId: randomUUID(),
-      operations: [], children: new Map(), notices: [], listChanged: false, authority: Promise.resolve(), transitioning: false, boundDocumentIds: [] }
+      operations: [], children: new Map(), notices: [], listChanged: false, toolProfileFrozen: false, authority: Promise.resolve(), transitioning: false, boundDocumentIds: [] }
     await this.bind(session, await this.currentWorkspace())
     // Revocation while initialization awaits disk/workspace facts must not leave a late, live run behind.
     if (generation !== this.sessionGeneration || this.state !== 'running') {
@@ -407,7 +411,13 @@ export class ExternalMcpService implements ResidentMcpHandler {
         read: definition.manual.group === 'read', label: definition.manual.label, kind: 'gateway' }
     }
     this.assertActive(session, scope.runId)
-    if (!tool) return this.reply(session, failure('unknown-tool', '工具不存在，或在本会话的权限与已打开的文档下不可用。可先打开文档，或用 tools.load 展开工具族。'))
+    if (!tool) {
+      const tools = await this.catalog(scope)
+      this.assertActive(session, scope.runId)
+      session.listChanged = true
+      return this.reply(session, failure('unknown-tool', '未执行未知或当前不可用的工具。请使用回执中的实际工具名和参数，或通过 MCP tools/list 刷新本会话目录。',
+        { requestedName: name, recovery: this.toolRecovery([name], tools) }))
+    }
     const registration = toolRegistration(tool.name)
     let effectful = !tool.read
     if (registration) {
@@ -486,6 +496,15 @@ export class ExternalMcpService implements ResidentMcpHandler {
   private assertActive(session: Session, runId: string): void {
     if (session.stopped || session.transitioning || session.runId !== runId || !this.sessions.has(session.sessionId)) throw new Error('外部会话已停止或已切换，操作未提交')
   }
+  /** Recovery is a view of the current authorized catalog, never an alias or a
+   * second registry. Return concrete schemas so clients which do not refresh
+   * list_changed notifications can still make their next call correctly. */
+  private toolRecovery(names: readonly string[], tools: readonly HostTool[]) {
+    const actions = new Set(names.map(name => name.split('.').at(-1)).filter(Boolean))
+    return { catalog: { method: 'tools/list' }, tools: tools.filter(tool => tool.name === loadToolsDefinition.name
+      || actions.has(tool.name) || actions.has(tool.name.split('.').at(-1)))
+      .map(tool => ({ name: tool.name, description: tool.description, inputSchema: tool.schema })) }
+  }
   private async execute(session: Session, scope: CallScope, tool: HostTool, ticket: string, input: unknown): Promise<ToolResult> {
     const { runId } = scope
     try {
@@ -518,7 +537,8 @@ export class ExternalMcpService implements ResidentMcpHandler {
         session.listChanged = true
         return { kind: 'read', data: { loaded: families.filter(family => tools.some(item => familyOfTool(item.name) === family)),
           ...(request.names ? { tools: tools.filter(item => request.names!.includes(item.name))
-            .map(item => ({ name: item.name, description: item.description, inputSchema: item.schema })), unavailable } : {}), available } }
+            .map(item => ({ name: item.name, description: item.description, inputSchema: item.schema })), unavailable,
+          ...(unavailable.length ? { recovery: this.toolRecovery(unavailable.map(item => item.name), tools) } : {}) } : {}), available } }
       }
       const localIntent = tool.name === 'local.run' ? workbenchServiceSchemas['local.run'].parse(input) : undefined
       const local = localIntent ? await this.options.gateway.prepareLocalRun(runId, ticket, localIntent) : undefined
@@ -632,13 +652,43 @@ export class ExternalMcpService implements ResidentMcpHandler {
     }
     const active = ui?.activeDocumentId ? await handles(ui.activeDocumentId) : null
     let selection: unknown = null
+    let toolProfile: ReturnType<typeof executionContextToolProfile> | undefined
+    let selectionUnavailable: { code: 'selection-version-missing' | 'selection-changed'; message: string } | undefined
     if (ui?.selection) {
-      const owner = ui.selection.documentId === ui.activeDocumentId ? active : await handles(ui.selection.documentId)
-      if (owner) selection = { documentId: ui.selection.documentId, targets: await Promise.all(ui.selection.targets.map(async target => ({ kind: target.kind,
-        target: await this.options.gateway.issueTarget(runId, ui.selection!.documentId, target, { readOnly: !owner.writable }) }))) }
+      const captured = ui.selection
+      const owner = captured.documentId === ui.activeDocumentId ? active : await handles(captured.documentId)
+      if (owner) {
+        const versioned = captured.epoch !== undefined && captured.revision !== undefined
+        // A legacy whole-object/page identity can be read in the current model.
+        // Offsets and internal field addresses need the original Session version.
+        const stableLegacy = captured.epoch === undefined && captured.revision === undefined && captured.targets.every(target =>
+          target.kind === 'course-surface' || target.kind === 'course-instance' && !target.authorField && target.dataPath === undefined
+            && target.from === undefined && target.to === undefined)
+        if (!versioned && !stableLegacy) selectionUnavailable = { code: 'selection-version-missing', message: '当前文字或内部字段选区缺少会话版本，请在果铃中重新选择后再读取；未返回替代选区。' }
+        else try {
+          const document = this.options.registry.get(captured.documentId), current = document.read()
+          const mapped = await continueDocumentTargets(document, { documentId: captured.documentId,
+            epoch: captured.epoch ?? current.epoch, revision: captured.revision ?? current.revision,
+            writable: [], selection: captured.targets }, new Set<string>())
+          const observed = document.read()
+          if (observed.epoch !== mapped.epoch || observed.revision !== mapped.revision) throw new Error('选区准备期间文档已改变')
+          const targets = await Promise.all(mapped.selection.map(async target => ({ kind: target.kind,
+            target: await this.options.gateway.issueTarget(runId, captured.documentId, target, { readOnly: !owner.writable, observed }) })))
+          selection = { documentId: captured.documentId, epoch: mapped.epoch, revision: mapped.revision, targets }
+          toolProfile = executionContextToolProfile({ documents: [mapped] })
+        } catch {
+          selectionUnavailable = { code: 'selection-changed', message: '原选区已改变或文档会话已更新，请在果铃中重新选择后再读取；未返回替代选区。' }
+        }
+      }
+    }
+    this.assertActive(session, runId)
+    if (!session.toolProfileFrozen && toolProfile && toolProfile !== 'general') {
+      this.options.gateway.setInitialToolProfile(runId, toolProfile)
+      session.toolProfileFrozen = true
     }
     return { workspace: { workspaceId: scope.workspaceId, name: session.workspaceName, rootPath: scope.workspaceRoot,
       appWorkspaceId: ui?.workspaceId ?? null }, documents, activeDocument: ui?.activeDocumentId && active ? { documentId: ui.activeDocumentId, ...active } : null, selection,
+      ...(selectionUnavailable ? { selectionUnavailable } : {}),
       ...(ui ? {} : { note: '果铃窗口暂未回报前台状态；文档列表来自主进程。' }) }
   }
 

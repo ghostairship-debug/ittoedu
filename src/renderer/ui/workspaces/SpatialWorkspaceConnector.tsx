@@ -80,6 +80,11 @@ export function SpatialWorkspaceConnector({ onDropWorkspaceMedia, onSelectImageA
     captureTarget={() => state().courseKernel.captureTarget(runtime.documentId)}
     onEdits={(edits, captured = state().courseKernel.captureTarget(runtime.documentId)) => state().courseKernel.editCaptured(state().courseKernel.capture(edits, captured))}
     onSelect={ids => runtime.selectInstances(ids, surface.id)}
+    onSelectCanvas={(ids,groupId,authorKey)=>{
+      state().courseBridge.selectInstances(runtime.documentId,ids,surface.id,groupId)
+      const spot=authorKey && ids.length===1 ? runtime.world.authorSpots().find(value=>value.instanceId===ids[0] && value.authorKey===authorKey) : undefined
+      if(spot)state().courseBridge.selectAuthorSpot(runtime.documentId,spot,surface.id)
+    }}
     onCamera={pose => state().setSpatialSessionCamera(pose, surface.id, runtime.documentId)}
     onActivateFrame={id => state().activateSpatialCameraFrame(surface.id, id)}
     onGraphSelect={selection => {

@@ -10,6 +10,7 @@ export function teacherControllerButtonWidth(button: TeacherControllerButton): n
 }
 
 export function teacherControllerLayout(config: TeacherControllerConfig) {
+  if(config.presentation&&config.presentation!=='console')return {identityWidth:0,width:config.presentation==='directory'||config.presentation==='side'?320:720}
   const steps = config.buttons.filter(button => button.visible && button.action.type.startsWith('step.'))
   const tools = config.buttons.filter(button => button.visible && !button.action.type.startsWith('step.'))
   const group = (values: TeacherControllerButton[]) => values.reduce((width, button) => width + teacherControllerButtonWidth(button), 0) + Math.max(0, values.length - 1) * 4

@@ -31,7 +31,7 @@ import type { ModelToolCall, ToolResult, ToolTarget } from '../../../shared/work
 import { isCourseInstanceRange, readEditableTargetContent, readTarget } from '../../../core/tools/ToolTargets'
 import { executionContentOutputSchema } from '../../../shared/workbench/executionDesktop'
 import type { AttachmentService } from '../attachments/AttachmentService'
-import { projectExecutionContext, contextMessageId, contextSourceIndex, projectImagesForTextModel, initialHistorySources, ContextProjectionMetadata, projectCurrentToolResult } from './ExecutionContextProjection'
+import { projectExecutionContext, contextMessageId, contextSourceIndex, projectImagesForTextModel, initialHistorySources, ContextProjectionMetadata, projectCurrentToolResult, executionContextToolProfile } from './ExecutionContextProjection'
 import { contextReadSchema, contextReadTool, readContextMessage } from './ContextReadTool'
 import { DisplayEventBuffer } from './DisplayEventBuffer'
 import { appendObservationModelMessages, type ObservationModelInput } from './observationModelInput'
@@ -478,7 +478,7 @@ export class ExecutionEngine {
   }
   private async refreshTools(active: ActiveRun): Promise<void> {
     const next = await this.runTools(active.record.runId, active.permission, active.record.input.workspaceRoot,
-      !!active.record.input.contentOutput, active.loadedHostFamilies, active.loadedHostNames)
+      executionContextToolProfile(active.record.input) !== 'general', active.loadedHostFamilies, active.loadedHostNames)
     const current = new Map(next.map(tool => [tool.name, tool]))
     const previousNames = new Set(active.tools.map(tool => tool.name))
     // Refresh definitions and authorization from the current catalog while keeping
@@ -934,9 +934,8 @@ export class ExecutionEngine {
           ...(frozen.conversationHome ? { conversationHome: frozen.conversationHome } : {}) },
         ...(frozen.disclosedSettings ? { disclosedSettings: frozen.disclosedSettings } : {}) })
       runBegun = true
-      this.options.gateway.setInitialToolProfile(runId, frozen.contentOutput
-        ? frozen.contentOutput.target.kind === 'markdown-range' || frozen.contentOutput.target.kind === 'text-selection' ? 'text' : 'content-edit'
-        : 'general')
+      const toolProfile = executionContextToolProfile(frozen)
+      this.options.gateway.setInitialToolProfile(runId, toolProfile)
       options?.signal?.throwIfAborted()
       if (continuationReads.length) await this.options.gateway.authorizeContinuationReads(runId, continuationReads)
       // DocumentSession.drain above includes unsaved human edits. No disk snapshot or active-tab lookup is used.
@@ -1068,7 +1067,7 @@ export class ExecutionEngine {
       if (!frozen.contentOutput) automatic.push({ role: 'system', content: '本次冻结授权内可用能力族与结果用途（不是新增权限，缺少具体工具时按需展开）：\n'
         + JSON.stringify(await this.options.gateway.availableToolFamilies(runId)) })
       // The question tool belongs to this loop, not to the shared document catalog that external MCP also sees.
-      const tools = await this.runTools(runId, permission, frozen.workspaceRoot, !!frozen.contentOutput)
+      const tools = await this.runTools(runId, permission, frozen.workspaceRoot, toolProfile !== 'general')
       if (frozen.inputContext?.attachments.length && !this.options.initialCompiler) throw new Error('附件输入编译器尚未配置')
       let compiled: Awaited<ReturnType<PayloadCompiler['compile']>> | undefined
       if (this.options.initialCompiler) {

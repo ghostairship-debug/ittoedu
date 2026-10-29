@@ -1,3 +1,4 @@
+import { NavigationControlBindings } from '../../player/behaviors/navigation/navigationControls'
 import type { CourseProjectV10, TeacherControllerAction, TeacherControllerPort, TeacherControllerSnapshot, ComponentFlowReading, ComponentFlowNavigationMotion } from '../../shared/contracts/component-platform'
 import type { FlowNavigationOptions } from '../../shared/flowReading'
 import { navigationGuardHasSource } from '../../shared/courseNavigationGuards'
@@ -60,6 +61,10 @@ interface NavigationPorts {
 
 /** Surface and camera view state are supplied by their owner; no author data is changed here. */
 export class ComponentNavigationOwner implements TeacherControllerPort {
+  private readonly controlBindings = new NavigationControlBindings()
+  registerControl = (binding: Parameters<NavigationControlBindings['register']>[0]) => this.controlBindings.register(binding)
+  readControls = () => this.controlBindings.read(this.ports.surfaceId() ?? undefined)
+  subscribeControls = (listener: () => void) => this.controlBindings.subscribe(listener)
   private readonly listeners = new Set<() => void>()
   private readonly replayListeners = new Set<(surfaceId: string) => void>()
   /** Playback overrides the authored default; the editor always follows its formal quick-bar value. */
@@ -424,7 +429,10 @@ export class ComponentNavigationOwner implements TeacherControllerPort {
       const type = data.type, block = componentDefinitionBuiltinKey(project.definitions[instance.definitionId]) === 'guoling.document-block'
       if (block && (type === 'heading' || type === 'section')) {
         const text = documentTextContentSchema.safeParse(type === 'heading' ? data.content : data.title)
+        const headingLevel = type === 'heading' && typeof data.level === 'number' && Number.isInteger(data.level)
+          && data.level >= 1 && data.level <= 6 ? data.level : undefined
         targets.push({ id, name: (text.success ? plainDocumentText(text.data).trim() : '') || instance.name || '标题', kind: 'heading', depth,
+          ...(headingLevel === undefined ? {} : { headingLevel }),
           action: { type: 'scene.go', sceneId: surfaceId, targetInstanceId: id, targetKind: 'chapter' } })
       }
       if (!instance.container) for (const child of instance.childIds ?? []) visit(child, depth + (type === 'section' ? 1 : 0))
@@ -501,6 +509,7 @@ export class ComponentNavigationOwner implements TeacherControllerPort {
   }
   /** Only the teacher directory receives forced scene.go; authored/student navigation keeps guards. */
   teacherPort = (): TeacherControllerPort & Pick<ComponentNavigationOwner, 'subscribeSceneReplay' | 'placement'> => this.teacherNavigation ??= {
+    registerControl:this.registerControl,readControls:this.readControls,subscribeControls:this.subscribeControls,
     read: this.read, readLocation: this.readLocation, subscribe: this.subscribe, subscribeSceneReplay: this.subscribeSceneReplay,
     forContainer: this.forContainer, currentStateId: this.currentStateId, isContainerActive: this.isContainerActive, readVisibility: this.readVisibility,
     viewportBounds: this.viewportBounds, placement: this.placement, subscribePlacement: this.subscribePlacement,
@@ -510,6 +519,7 @@ export class ComponentNavigationOwner implements TeacherControllerPort {
   }
   /** The host's editor chrome navigates the same paused scene; authored controls stay paused. */
   editorPort = (): TeacherControllerPort & Pick<ComponentNavigationOwner, 'placement'> => this.editorNavigation ??= {
+    registerControl:this.registerControl,readControls:this.readControls,subscribeControls:this.subscribeControls,
     read: this.read, readLocation: this.readLocation, subscribe: this.subscribe, viewportBounds: this.viewportBounds, placement: this.placement, subscribePlacement: this.subscribePlacement,
     forContainer: id => this.containerPort(id, true), currentStateId: this.currentStateId, isContainerActive: this.isContainerActive, readVisibility: this.readVisibility,
     forInstance: this.forInstance,
@@ -595,7 +605,7 @@ export class ComponentNavigationOwner implements TeacherControllerPort {
   }
   dispose = () => {
     if (this.retired) return
-    this.retired = true; this.cancel()
+    this.retired = true; this.cancel(); this.controlBindings.dispose()
     for (const release of this.observationReleases.values()) release()
     for (const entry of this.cameras.values()) entry.off()
     this.views.clear(); this.instancePorts.clear(); this.containerPorts.clear(); this.placementListeners.clear(); this.cameras.clear(); this.observations.clear(); this.listeners.clear(); this.replayListeners.clear(); this.states.clear(); this.fragmentCache.clear(); this.surfaceFragments.clear(); this.fragmentProject = undefined; this.cursorSteps.clear(); this.runtime = undefined
@@ -670,6 +680,8 @@ export class ComponentNavigationOwner implements TeacherControllerPort {
     const key = `${editor}:${containerId}`, existing = this.containerPorts.get(key)
     if (existing) return existing
     const port: TeacherControllerPort = {
+      registerControl: binding=>this.controlBindings.register(binding,()=>containerId),
+      readControls:()=>this.controlBindings.read(containerId),subscribeControls:this.subscribeControls,
       forContainer: id => this.containerPort(id, editor), forInstance: this.forInstance,
       currentStateId: () => this.currentStateId(containerId), isContainerActive: this.isContainerActive,
       readVisibility: () => this.readVisibility(containerId),
@@ -702,6 +714,8 @@ export class ComponentNavigationOwner implements TeacherControllerPort {
     const state = view
     const privileged = () => teacher && isGlobalTeacherController(this.ports.project(), id)
     const port: TeacherControllerPort = {
+      registerControl:binding=>this.controlBindings.register(binding,()=>this.instanceRange(id)),
+      readControls:()=>this.controlBindings.read(this.instanceRange(id) ?? this.ports.surfaceId() ?? undefined),subscribeControls:this.subscribeControls,
       forContainer: this.forContainer, isContainerActive: this.isContainerActive,
       currentStateId: () => { const range = this.instanceRange(id); return range === null ? null : this.currentStateId(range) },
       readVisibility: () => { const range = this.instanceRange(id); return range === null ? { zoom: 1, stateId: null } : this.readVisibility(range) },

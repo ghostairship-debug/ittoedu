@@ -1,3 +1,5 @@
+import {navigationControlOwnedBy} from '../behaviors/navigation/navigationControls'
+import { createNavigationControlBinder } from '../behaviors/navigation/bindNavigationControl'
 import { hasWebContentData } from '../../components/web/sourcePreparation'
 import { ComponentRuntimeHost, type PreparedComponentRuntime, type ComponentRuntimeHandle, type ComponentRuntimeNavigationPort } from './runtime/ComponentRuntimeHost'
 import { nanoid } from 'nanoid'
@@ -212,7 +214,7 @@ export class ComponentRuntimeWorld {
         const originalController = navigation?.forInstance?.(instance.id) ?? navigation
         const canAct = () => this.instanceActive(instance.id) && this.playing
         const canView = () => this.instanceActive(instance.id) && (this.playing || this.mode === 'edit')
-        const controllerForScope = (scope: import('../../shared/contracts/component-platform').ComponentRuntimeScope): TeacherControllerPort | undefined => {
+        const controllerForScope = (scope: import('../../shared/contracts/component-platform').ComponentRuntimeScope, mountedRoot: HTMLElement | undefined): TeacherControllerPort | undefined => {
           if (!originalController) return undefined
           const wrappers = new WeakMap<TeacherControllerPort, TeacherControllerPort>()
           const alive = () => scope.isActive() && !scope.signal.aborted
@@ -227,10 +229,29 @@ export class ComponentRuntimeWorld {
               scope.cleanup(off)
               return off
             }
+            let binder: ReturnType<typeof createNavigationControlBinder> | undefined
+            const controlReports=new Map<number,{visible:boolean;off():void}>()
             const guarded: TeacherControllerPort = { ...port,
               readLocation: () => alive() ? port.readLocation() : null,
               read: () => alive() ? port.read() : { locationId: null, interactive: false, scenes: [], progress: null, zoom: 1, muted: false, fullscreen: false },
               subscribe: listener => subscribe(port.subscribe, listener),
+              ...(port.subscribeControls ? { subscribeControls: (listener: () => void) => subscribe(port.subscribeControls!, listener) } : {}),
+              ...(port.registerControl ? { registerControl: binding => {
+                if(!alive())return ()=>{}
+                const off=port.registerControl!({get actions(){return binding.actions},present:()=>alive()&&canView()&&binding.present()})
+                scope.cleanup(off);return off
+              } } : {}),
+              bindControl: (element,action)=>{
+                const ownRoot=mountedRoot
+                if(!alive()||!ownRoot||!navigationControlOwnedBy(ownRoot,element))throw new Error('导航控件不属于当前组件挂载')
+                if(!binder){
+                  binder=createNavigationControlBinder({root:ownRoot,live:()=>alive()&&canView(),read:guarded.read,canExecute:guarded.canExecute,execute:guarded.execute,
+                    report:(id,action,visible)=>{controlReports.get(id)?.off();const entry={visible,off:()=>{}};controlReports.set(id,entry);entry.off=port.registerControl?.({actions:[action],present:()=>alive()&&canView()&&entry.visible})??(()=>{})},
+                    remove:id=>{controlReports.get(id)?.off();controlReports.delete(id)},error:message=>this.report(message)})
+                  scope.cleanup(()=>{binder?.dispose();binder=undefined});subscribe(port.subscribe,()=>binder?.refresh())
+                }
+                return binder.bind(element,action)
+              },
               ...(port.subscribePlacement ? { subscribePlacement: (listener: () => void) => subscribe(port.subscribePlacement!, listener) } : {}),
               ...(port.forContainer ? { forContainer: (id: string) => alive() ? wrap(port.forContainer!(id)) : guarded } : {}),
               ...(port.forInstance ? { forInstance: (id: string) => alive() ? wrap(port.forInstance!(id)) : guarded } : {}),
@@ -259,7 +280,7 @@ export class ComponentRuntimeWorld {
         }
         const connectNavigation = async (prepared: PreparedComponentRuntime | Promise<PreparedComponentRuntime>): Promise<PreparedComponentRuntime> => {
           const loaded = await prepared
-          return { ...loaded, implementation: { ...loaded.implementation, mount: context => loaded.implementation.mount({ ...context, teacherController: controllerForScope(context.scope),
+          return { ...loaded, implementation: { ...loaded.implementation, mount: context => loaded.implementation.mount({ ...context, teacherController: controllerForScope(context.scope,context.root),
             resources: { url: name => {
               const binding = this.project?.instances[context.instance.id]?.authoring?.resourceBindings?.[name]
               return binding ? this.contentAssetUrl(binding) : context.resources?.url(name)
@@ -274,7 +295,7 @@ export class ComponentRuntimeWorld {
         const resolved = this.implementations.get(implementation.key)
         if (!resolved) throw new Error(`组件实现尚未接入：${implementation.key}`)
         return { ...resolved, mount: async context => {
-          const mounted = await resolved.mount({ ...context, teacherController: controllerForScope(context.scope) })
+          const mounted = await resolved.mount({ ...context, teacherController: controllerForScope(context.scope,context.root) })
           if (implementation.key !== 'guoling.navigation') return mounted
           let current = context.instance
           context.scope.events.subscribe('__runtime.resources', () => {
@@ -1091,6 +1112,8 @@ export class ComponentRuntimeWorld {
   }
   audio(): AudioManager | undefined { return this.audioManager }
   isPlaying(): boolean { return this.playing }
+  readPresenterCommands = () => this.interactions.readPresenterCommands()
+  canDispatchPresenterCommand = (command:'next'|'previous') => this.interactions.canDispatchPresenterCommand(command)
   dispatchPresenterCommand(command: 'next' | 'previous'): Promise<boolean> {
     return this.interactions.dispatchPresenterCommand(command)
   }

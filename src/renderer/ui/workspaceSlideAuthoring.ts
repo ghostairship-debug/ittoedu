@@ -4,17 +4,19 @@ import { isComponentVisibleAtSurface, type ComponentFrame, type ComponentEdit, t
 import { normalizeElbowLineAuthoring, normalizeStraightLineAuthoring, resolveNativeLinePoints } from '../../shared/nativeLineGeometry'
 import type { NativeLineGeometry } from '../../shared/contracts/native-v1/types'
 import type { CapturedCourseTarget } from '../documents/CourseV10DocumentBridge'
-import { FreeTransformGesture, freeSurfaceTargets, freeTargetAtEditingLevel, hitFreeObject, marqueeFreeTargets, sameFreeTarget, selectedFreeTargets,
+import { resolveGroupSelectionIntent, type GroupSelectionIntent } from '../documents/containerEditingContext'
+import { FreeTransformGesture, freeSurfaceTargets, hitFreeObject, marqueeFreeTargets, sameFreeTarget, selectedFreeTargets,
   type FreeObjectTarget, type FreeResizeHandle, type FreeSnapGuide } from '../componentPlatform/surfaces/slide'
 
 export interface SlideAuthoringPointer { x: number; y: number; additive?: boolean; altKey?: boolean; shiftKey?: boolean }
 /** The original down intent survives a content ACK without repeating its screen hit. */
-export type SlideWorkspacePointerHit = ({ kind: 'object'; instanceId: string } | { kind: 'blank' }) & { activeGroupId?: string | null }
+export type SlideWorkspacePointerHit = ({ kind: 'object'; instanceId: string; visibleInstanceId?: string; authorKey?: string } | { kind: 'blank' }) & { activeGroupId?: string | null }
 export interface SlideWorkspaceAuthoringState { project: CourseProjectV10; surfaceId: string; documentId: string; selectedInstanceIds: readonly string[]; activeStateId?: string | null; activeGroupId?: string | null; editingScope?: 'scene' | 'global' }
 export interface SlideWorkspaceAuthoringPorts {
   read(): SlideWorkspaceAuthoringState | null
   capture(): CapturedCourseTarget
   select(ids: readonly string[]): void
+  selectCanvas?(ids: readonly string[], groupId: string | null, authorKey?: string): void
   commit(edits: ComponentEdit[], target: CapturedCourseTarget, historyGroup: string): Promise<unknown>
   report(message: string): void
 }
@@ -43,7 +45,6 @@ export function proposeSlideLineHandle(target: FreeObjectTarget, geometry: Nativ
 export function listSlideWorkspaceHitTargets(state: SlideWorkspaceAuthoringState | null): FreeObjectTarget[] {
   if (!state) return []
   return freeSurfaceTargets(state.project, state.surfaceId).filter(target => {
-    if (state.activeGroupId && !target.ancestors.includes(state.activeGroupId)) return false
     const root = target.ancestors[0] ?? target.instanceId
     const global = state.project.global.underlay.includes(root) || state.project.global.overlay.includes(root)
     if (state.editingScope === 'global' && !global) return false
@@ -59,18 +60,17 @@ const CLICK_SLOP = 3
 
 /** The mature workspace owns chrome/pan. This service only proposes affine edits. */
 export function createSlideWorkspaceAuthoringController(ports: SlideWorkspaceAuthoringPorts) {
-  let gesture: { target: CapturedCourseTarget; value: FreeTransformGesture; edits: ComponentEdit[]; origin: GeometryPoint; moved: boolean } | null = null
+  let gesture: { target: CapturedCourseTarget; value: FreeTransformGesture; edits: ComponentEdit[]; origin: GeometryPoint; moved: boolean; click?: GroupSelectionIntent; authorKey?: string } | null = null
   let marquee: { start: GeometryPoint; extend: readonly string[]; target: CapturedCourseTarget } | null = null
   let output = empty()
   const cancelGesture = () => { gesture = null; marquee = null; output = empty(); return output }
   const captureHit = (pointer: SlideAuthoringPointer, surfaceToPointer: AffineMatrix): SlideWorkspacePointerHit => {
     const state = ports.read(), targets = listSlideWorkspaceHitTargets(state)
     const at = transformPoint(invertMatrix(surfaceToPointer), point(pointer))
-    const leaf = hitFreeObject(targets, at, true, surfaceToPointer, state?.activeGroupId)
-    const outer = leaf && freeTargetAtEditingLevel(targets, leaf.instanceId, state?.activeGroupId, pointer.altKey)
-    const selected = hitFreeObject(selectedFreeTargets(targets, state?.selectedInstanceIds ?? []), at, true, surfaceToPointer, state?.activeGroupId)
-    const hit = !pointer.altKey && leaf && selected && (selected.instanceId === leaf.instanceId || leaf.ancestors.includes(selected.instanceId)) ? selected : outer
-    return hit ? { kind: 'object', instanceId: hit.instanceId, activeGroupId: state?.activeGroupId ?? null }
+    const leaf = hitFreeObject(targets, at, true, surfaceToPointer)
+    const intent = state && leaf && resolveGroupSelectionIntent(state.project, state.surfaceId, leaf.instanceId,
+      state.selectedInstanceIds, state.activeGroupId, pointer.altKey, pointer.additive)
+    return intent ? { kind: 'object', instanceId: intent.pressId, visibleInstanceId: leaf!.instanceId, activeGroupId: state?.activeGroupId ?? null }
       : { kind: 'blank', activeGroupId: state?.activeGroupId ?? null }
   }
   const pointerDown = (pointer: SlideAuthoringPointer, surfaceToPointer: AffineMatrix, handle?: FreeResizeHandle | 'rotate', capturedHit?: SlideWorkspacePointerHit) => {
@@ -83,9 +83,13 @@ export function createSlideWorkspaceAuthoringController(ports: SlideWorkspaceAut
     const targets = listSlideWorkspaceHitTargets(state)
     const at = transformPoint(invertMatrix(surfaceToPointer), point(pointer))
     let ids = [...state.selectedInstanceIds]
+    let click: GroupSelectionIntent | undefined, authorKey: string | undefined
     if (!handle) {
       const intent = capturedHit ?? captureHit(pointer, surfaceToPointer)
-      const hit = intent.kind === 'object' ? targets.find(target => target.instanceId === intent.instanceId) : undefined
+      const resolved = intent.kind === 'object' && resolveGroupSelectionIntent(state.project, state.surfaceId,
+        intent.visibleInstanceId ?? intent.instanceId, state.selectedInstanceIds, state.activeGroupId, pointer.altKey, pointer.additive)
+      if (resolved && !pointer.additive) { click = resolved; authorKey = intent.kind === 'object' ? intent.authorKey : undefined }
+      const hit = resolved ? targets.find(target => target.instanceId === resolved.pressId) : undefined
       if (intent.kind === 'object' && !hit) { ports.report('最初选择的对象已不存在或离开当前编辑范围，未切换到其他对象。'); return cancelGesture() }
       if (!hit) {
         marquee = { start: at, extend: pointer.additive ? ids : [], target: ports.capture() }
@@ -97,13 +101,13 @@ export function createSlideWorkspaceAuthoringController(ports: SlideWorkspaceAut
         ports.select(ids)
         return output = empty()
       }
-      if (!ids.includes(hit.instanceId)) { ids = [hit.instanceId]; ports.select(ids) }
+      if (!ids.includes(hit.instanceId)) { ids = [hit.instanceId]; if (ports.selectCanvas) ports.selectCanvas(ids, resolved && resolved.pressId === resolved.clickId ? resolved.groupId : state.activeGroupId ?? null); else ports.select(ids) }
       else if (capturedHit) ports.select(ids) // This resumed intent explicitly chose objects, including an old field's owner.
     }
     const selected = selectedFreeTargets(targets, ids).filter(target =>
       [target.instanceId, ...target.ancestors].every(id => !state.project.instances[id]?.locked))
     if (!selected.length) return cancelGesture()
-    gesture = { target: ports.capture(), origin: point(pointer), moved: false, edits: [], value: new FreeTransformGesture({
+    gesture = { target: ports.capture(), origin: point(pointer), moved: false, edits: [], click, authorKey, value: new FreeTransformGesture({
       mode: handle === 'rotate' ? 'rotate' : handle ? 'resize' : 'drag', handle: handle === 'rotate' ? undefined : handle,
       targets: selected, pointer: point(pointer), surfaceToPointer, snapTargets: targets,
       designSize: componentContainers(state.project).find(surface => surface.id === state.surfaceId)?.designSize,
@@ -129,13 +133,28 @@ export function createSlideWorkspaceAuthoringController(ports: SlideWorkspaceAut
       const state = ports.read(), at = transformPoint(invertMatrix(surfaceToPointer), point(pointer))
       if (state && state.documentId === marquee.target.documentId && state.surfaceId === marquee.target.surfaceId
         && (state.activeGroupId ?? null) === (marquee.target.activeGroupId ?? null))
-        ports.select([...new Set([...marquee.extend, ...marqueeFreeTargets(listSlideWorkspaceHitTargets(state), marquee.start, at, state.activeGroupId)])])
+        {
+          const ids = [...new Set([...marquee.extend, ...marqueeFreeTargets(listSlideWorkspaceHitTargets(state), marquee.start, at, state.activeGroupId)])]
+          const isClick = Math.hypot(at.x - marquee.start.x, at.y - marquee.start.y) < CLICK_SLOP
+          if (ports.selectCanvas) ports.selectCanvas(ids, isClick && !ids.length ? null : state.activeGroupId ?? null)
+          else ports.select(ids)
+        }
       return cancelGesture()
     }
     pointerMove(pointer, surfaceToPointer)
     const current = gesture, state = ports.read()
     cancelGesture()
-    if (!current || !current.moved || !current.edits.length || !state) return output
+    if (!current || !state) return output
+    if (!current.moved) {
+      if (current.click && state.documentId === current.target.documentId && state.surfaceId === current.target.surfaceId
+        && (state.activeGroupId ?? null) === (current.target.activeGroupId ?? null)
+        && state.project.instances[current.click.clickId]) {
+        if (ports.selectCanvas) ports.selectCanvas([current.click.clickId], current.click.groupId, current.authorKey)
+        else ports.select([current.click.clickId])
+      }
+      return output
+    }
+    if (!current.edits.length) return output
     const latest = listSlideWorkspaceHitTargets(state)
     if (state.documentId !== current.target.documentId || state.surfaceId !== current.target.surfaceId ||
       (state.activeGroupId ?? null) !== (current.target.activeGroupId ?? null) ||
@@ -152,11 +171,15 @@ export function createSlideWorkspaceAuthoringController(ports: SlideWorkspaceAut
     return output
   }
   return { captureHit, pointerDown, pointerMove, pointerUp, cancelGesture,
+    ownsCurrentGesture() { const current=ports.read();return Boolean(gesture && current && current.documentId===gesture.target.documentId && current.surfaceId===gesture.target.surfaceId && (current.activeGroupId ?? null)===(gesture.target.activeGroupId ?? null)) },
     contextTarget(pointer: GeometryPoint, surfaceToPointer: AffineMatrix) {
-      const state = ports.read(), hit = hitFreeObject(listSlideWorkspaceHitTargets(state), transformPoint(invertMatrix(surfaceToPointer), pointer), false, surfaceToPointer, state?.activeGroupId)
-      if (!hit) return null
-      if (!state?.selectedInstanceIds.includes(hit.instanceId)) ports.select([hit.instanceId])
-      return hit.instanceId
+      const state=ports.read(),leaf=hitFreeObject(listSlideWorkspaceHitTargets(state),transformPoint(invertMatrix(surfaceToPointer),pointer),true,surfaceToPointer)
+      const intent=state && leaf && resolveGroupSelectionIntent(state.project,state.surfaceId,leaf.instanceId,state.selectedInstanceIds,state.activeGroupId)
+      if(!intent)return null
+      if(!state!.selectedInstanceIds.includes(intent.pressId)){
+        if(ports.selectCanvas)ports.selectCanvas([intent.pressId],intent.groupId);else ports.select([intent.pressId])
+      }
+      return intent.pressId
     },
   }
 }

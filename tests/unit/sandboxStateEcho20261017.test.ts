@@ -157,3 +157,107 @@ it('retains three ordinary Source get+set increments when an earlier host echo a
     await rm(directory, { recursive: true, force: true, maxRetries: 8, retryDelay: 50 })
   }
 }, 20_000)
+it('delivers shared state during remote subscription setup without initial replay or duplicate mirrors', async () => {
+  const bundle = await build({ stdin: { contents: await readFile(resolve('src/player/components/runtime/SandboxComponentRuntime.ts'), 'utf8'),
+    resolveDir: resolve('src/player/components/runtime'), loader: 'ts' },
+    bundle: true, write: false, platform: 'browser', format: 'iife', globalName: 'StateProbe', target: 'es2022',
+    plugins: [{ name: 'existing-raw-import', setup(plugin) {
+      plugin.onResolve({ filter: /\?raw$/ }, args => ({ path: resolve(args.resolveDir, args.path.slice(0, -4)), namespace: 'raw' }))
+      plugin.onLoad({ filter: /.*/, namespace: 'raw' }, async args => ({ contents: await readFile(args.path, 'utf8'), loader: 'text', resolveDir: dirname(args.path) }))
+    } }] })
+  const server = createServer((request, response) => {
+    response.setHeader('Content-Type', request.url === '/probe.js' ? 'text/javascript; charset=utf-8' : 'text/html; charset=utf-8')
+    response.end(request.url === '/probe.js' ? bundle.outputFiles[0]!.text
+      : '<!doctype html><div id="source" style="width:320px;height:160px"></div><script src="/probe.js"></script>')
+  })
+  await new Promise<void>(done => server.listen(0, '127.0.0.1', done))
+  const address = server.address(); if (!address || typeof address === 'string') throw new Error('Fixture address unavailable')
+  const directory = await mkdtemp(join(tmpdir(), 'sandbox-state-coldstart-'))
+  let app: Awaited<ReturnType<typeof electron.launch>> | undefined
+  try {
+    const entry = join(directory, 'main.cjs')
+    await writeFile(entry, `const {app,BrowserWindow}=require('electron');app.setPath('userData',${JSON.stringify(join(directory, 'profile'))});app.whenReady().then(()=>new BrowserWindow({show:false,webPreferences:{backgroundThrottling:false}}).loadURL(${JSON.stringify(`http://127.0.0.1:${address.port}/`)}));`)
+    app = await electron.launch({ cwd: process.cwd(), args: [entry], timeout: 8000,
+      env: { ...Object.fromEntries(Object.entries(process.env).filter(([key, value]) => key !== 'ELECTRON_RUN_AS_NODE' && value !== undefined)), ELECTRON_DISABLE_SECURITY_WARNINGS: 'true' } })
+    const page = await app.firstWindow(), errors: string[] = []
+    page.setDefaultTimeout(5000); page.on('pageerror', error => errors.push(error.message))
+    await page.waitForFunction(() => Boolean((window as any).StateProbe))
+    await page.evaluate(async () => {
+      const q: any = { value: { total: 1 }, holdSubscriptions: true, inbox: [], replies: new Map(), sequence: 0 }
+      const NativeChannel = MessageChannel
+      // Only delay child-to-host named subscription registration. A mounted
+      // Source has already subscribed locally, while other Source components
+      // can publish through the normal permanent world-state bridge.
+      ;(window as any).MessageChannel = class {
+        port1: MessagePort; port2: MessagePort
+        constructor() {
+          const channel = new NativeChannel(); this.port1 = channel.port1; this.port2 = channel.port2
+          let handler: ((event: { data: any }) => void) | null = null
+          Object.defineProperty(this.port1, 'onmessage', { configurable: true, get: () => handler, set: value => { handler = value } })
+          this.port1.addEventListener('message', event => {
+            const deliver = () => handler?.({ data: event.data })
+            if (q.holdSubscriptions && event.data.type === 'subscribe' && event.data.kind === 'state') q.inbox.push(deliver)
+            else deliver()
+          })
+        }
+      }
+      const events = new Map<string, Set<(value: any) => void>>(), stateListeners = new Set<(value: any) => void>()
+      const emit = (name: string, value: any) => { for (const listener of events.get(name) ?? []) listener(structuredClone(value)) }
+      q.abort = new AbortController()
+      q.scope = { instanceId: 'subscriber', runScopeId: 'state-coldstart', generation: 1, signal: q.abort.signal,
+        isActive: () => !q.abort.signal.aborted, cleanup() {}, target: () => null,
+        state: { get: () => structuredClone(q.value), set: (name: string, value: any) => {
+          q.value = structuredClone(value)
+          for (const listener of stateListeners) listener(structuredClone(value))
+          emit('__runtime.state', { name, value })
+        }, subscribe: (_name: string, listener: (value: any) => void) => { stateListeners.add(listener); return () => stateListeners.delete(listener) } },
+        events: { emit, subscribe(name: string, listener: (value: any) => void) {
+          const listeners = events.get(name) ?? new Set(); events.set(name, listeners); listeners.add(listener)
+          return () => listeners.delete(listener)
+        } },
+      }
+      q.releaseSubscriptions = () => { q.holdSubscriptions = false; while (q.inbox.length) q.inbox.shift()() }
+      window.addEventListener('message', event => {
+        if (event.data?.type === 'state-coldstart.barrier') { q.replies.get(event.data.token)?.(event.data); q.replies.delete(event.data.token) }
+      })
+      q.barrier = () => new Promise(done => { const token = ++q.sequence; q.replies.set(token, done); emit('state-coldstart.barrier', token) })
+      const code = `export default {mount({root,scope}){
+        const output=document.createElement('output');root.append(output);
+        const read=()=>scope.state.get('result')?.total,render=()=>output.textContent=String(read());
+        const probe=window.coldProbe={stateNotifications:0,eventNotifications:0,laterNotifications:0};
+        probe.unsubscribe=scope.state.subscribe('result',()=>{probe.stateNotifications++;render()});
+        probe.subscribeLater=()=>scope.state.subscribe('result',()=>{probe.laterNotifications++});
+        scope.events.subscribe('__runtime.state',value=>{if(value.name==='result')probe.eventNotifications++});render();
+        scope.events.subscribe('state-coldstart.barrier',token=>parent.postMessage({type:'state-coldstart.barrier',token,
+          value:read(),render:output.textContent,stateNotifications:probe.stateNotifications,eventNotifications:probe.eventNotifications,laterNotifications:probe.laterNotifications},'*'));
+        return{update(){},dispose(){}}}}`
+      q.prepared = await (window as any).StateProbe.preparePublishedNativeComponent({ format: 'esm', code, css: '', diagnostics: [] }, q.abort.signal,
+        { state: () => ({ result: structuredClone(q.value) }), targets: () => [] })
+      q.mounted = await q.prepared.implementation.mount({ root: document.getElementById('source'),
+        instance: { id: 'subscriber', definitionId: 'subscriber', data: {} }, scope: q.scope })
+      ;(window as any).__stateColdstart = q
+    })
+    const barrier = () => page.evaluate(() => (window as any).__stateColdstart.barrier())
+    expect(await barrier()).toMatchObject({ value: 1, render: '1', stateNotifications: 0, eventNotifications: 0 })
+    await page.evaluate(() => (window as any).__stateColdstart.scope.state.set('result', { total: 42 }))
+    // This assertion fails on the old bridge: get() becomes 42 but the view
+    // remains 1, with no named callback and two __runtime.state callbacks.
+    expect(await barrier()).toMatchObject({ value: 42, render: '42', stateNotifications: 1, eventNotifications: 1 })
+    await page.evaluate(() => (window as any).__stateColdstart.releaseSubscriptions())
+    expect(await barrier()).toMatchObject({ value: 42, render: '42', stateNotifications: 1, eventNotifications: 1 })
+    await page.evaluate(() => (window as any).__stateColdstart.scope.state.set('result', { total: 43 }))
+    expect(await barrier()).toMatchObject({ value: 43, render: '43', stateNotifications: 2, eventNotifications: 2 })
+    const output = page.frameLocator('#source iframe').locator('output')
+    await output.evaluate(() => { (window as any).coldProbe.unsubscribe(); (window as any).coldProbe.subscribeLater() })
+    expect(await barrier()).toMatchObject({ value: 43, render: '43', stateNotifications: 2, eventNotifications: 2, laterNotifications: 0 })
+    await page.evaluate(() => (window as any).__stateColdstart.scope.state.set('result', { total: 44 }))
+    expect(await barrier()).toMatchObject({ value: 44, render: '43', stateNotifications: 2, eventNotifications: 3, laterNotifications: 1 })
+    expect(errors).toEqual([])
+    await page.evaluate(() => (window as any).__stateColdstart.abort.abort())
+  } finally {
+    await app?.close().catch(() => undefined)
+    await new Promise<void>(done => server.close(() => done()))
+    if (!resolve(directory).startsWith(resolve(tmpdir()) + sep)) throw new Error('Unsafe fixture cleanup')
+    await rm(directory, { recursive: true, force: true, maxRetries: 8, retryDelay: 50 })
+  }
+}, 20_000)

@@ -102,7 +102,7 @@ function currentProject() {
   return project
 }
 
-it('defers only library maintenance definitions and loads them through the real Engine without granting new authority', async () => {
+it('loads library maintenance from a focused catalog through the real Engine without granting new authority', async () => {
   const { directory, host } = await workspace(), calls: string[] = []
   const maintenance = ['asset.save', 'asset.import', 'asset.delete']
   const initial = await host.internalAPI.create({ kind: 'course-v10', project: currentProject(), resources: { assets: {}, components: {} } }, 'library.h5lesson')
@@ -149,7 +149,8 @@ it('defers only library maintenance definitions and loads them through the real 
   expect(result.input.documents).toEqual(documents)
   expect(result.input.permission).toBe('workspace')
   expect(observed).toHaveLength(6)
-  expect(observed[0].names).toEqual(expect.arrayContaining(['asset.search', 'asset.use', 'asset.update']))
+  expect(observed[0].names).toEqual(expect.arrayContaining(['read', 'inspect', 'text.replace', 'project.apply', 'tools.load']))
+  expect(observed[0].names).not.toContain('object.update')
   for (const name of maintenance) expect(observed[0].names).not.toContain(name)
   expect(observed[1].names.filter(name => !observed[0].names.includes(name)).sort()).toEqual([...maintenance].sort())
   expect(observed[1].names.slice(0, observed[0].names.length)).toEqual(observed[0].names)

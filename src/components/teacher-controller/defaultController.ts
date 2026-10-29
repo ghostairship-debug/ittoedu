@@ -1,3 +1,4 @@
+import { navigationControlVisible } from '../../player/behaviors/navigation/navigationControls'
 import type { ComponentInstance, MountedComponent } from '../../shared/contracts/component-platform'
 import type { TeacherControllerAction } from '../../shared/teacherControllerConfig'
 import type { TeacherControllerData, TeacherControllerRuntimeContext } from './types'
@@ -5,13 +6,23 @@ import { teacherControllerButtonWidth, teacherControllerLayout } from '../../sha
 
 /** The mature editable UI and the preloaded implementation share this module. */
 export function mount(context: TeacherControllerRuntimeContext): MountedComponent<TeacherControllerData> {
-  if (!context.root) throw new Error('教师控制台需要全局 Overlay 容器')
+  if (!context.root) throw new Error('全局控制台需要全局 Overlay 容器')
   const root = context.root
   const doc = root.ownerDocument, host = context.teacherController
   const pointerHost = host as typeof host & { movePointer?(phase: 'start' | 'move' | 'end', x: number, y: number): void }
   let current = context.instance, disposed = false, open: 'directory' | 'zoom' | null = null
+  let boundControls:(()=>void)[]=[],renderedActions:TeacherControllerAction[]=[],renderSignature=''
+  const registration=host?.registerControl?.({
+    get actions(){
+      const state=host.read(),variant=current.data.sceneStyles?.[state.locationId??'']??{}
+      if((variant.presentation??current.data.presentation??'console')==='console')
+        return (variant.buttons??current.data.buttons).filter(button=>button.visible).map(button=>button.action)
+      // Content navigation reports the presence of each real control through bindControl.
+      return host.bindControl ? [] : renderedActions
+    },present:()=>live()&&navigationControlVisible(panel),
+  })
   const css = doc.createElement('style'), panel = doc.createElement('nav')
-  panel.setAttribute('aria-label', '教师控制台')
+  panel.setAttribute('aria-label', '全局控制台')
   css.textContent = `
     .guoling-controller{position:absolute;right:0;bottom:0;display:flex;align-items:center;gap:12px;width:100%;min-height:64px;padding:8px;border:1px solid color-mix(in srgb,var(--ink) 15%,transparent);border-radius:var(--radius);background:var(--paper);color:var(--ink);box-shadow:0 12px 36px #0f172a26,0 2px 6px #0f172a14;font:500 13px/1.4 system-ui,"Microsoft YaHei",sans-serif;pointer-events:auto;cursor:grab;touch-action:none;isolation:isolate;box-sizing:border-box}
     .guoling-controller[hidden]{display:none}.guoling-controller *{box-sizing:border-box}.guoling-controller button{display:inline-flex;align-items:center;justify-content:center;gap:7px;min-width:40px;height:40px;flex-shrink:0;padding:0 11px;border:1px solid transparent;border-radius:11px;background:transparent;color:inherit;font:inherit;cursor:pointer;pointer-events:auto;white-space:nowrap;transition:background .15s,box-shadow .15s}
@@ -26,6 +37,14 @@ export function mount(context: TeacherControllerRuntimeContext): MountedComponen
     @container controller (max-width:760px){.guoling-controller{gap:6px}.guoling-controller .identity{max-width:110px}.guoling-controller .steps{padding-left:6px;margin-left:0}.guoling-controller .tools{gap:0}.guoling-controller button{padding:0 8px;min-width:36px}.guoling-controller .primary{padding:0 12px}}
     .guoling-controller .scene-children{display:flex;flex-direction:column;gap:2px;margin:2px 0 6px 28px;padding-left:8px;border-left:2px solid color-mix(in srgb,var(--accent) 30%,transparent)}.guoling-controller .scene-children[hidden]{display:none}.guoling-controller .scene-target{width:100%;height:auto;min-height:34px;justify-content:flex-start;white-space:normal;text-align:left;font-size:12px;padding:6px 10px}.guoling-controller .scene-row .scene-expand{margin-left:auto;opacity:.6;flex-shrink:0}
     @container controller (max-width:560px){.guoling-controller:not(.collapsed):not(.fits){flex-wrap:wrap}.guoling-controller:not(.fits) .identity{max-width:none;flex:1}.guoling-controller:not(.fits) .steps{border-left:0;margin-left:auto}.guoling-controller:not(.fits) .tools{width:calc(100% - 58px);margin-left:0;justify-content:center;border-top:1px solid color-mix(in srgb,var(--ink) 12%,transparent);padding-top:5px}}
+    .guoling-controller.content-navigation{position:relative;inset:auto;width:100%;height:auto;min-height:0;display:flex;flex-direction:column;align-items:stretch;overflow:auto;cursor:default;touch-action:auto;padding:14px}
+    .content-navigation .navigation-heading{font-size:14px;letter-spacing:.04em;margin:0 0 8px;opacity:.7}
+    .content-navigation .navigation-links{display:flex;flex-direction:column;gap:6px;min-width:0}
+    .content-navigation .navigation-entry{justify-content:flex-start;width:100%;height:auto;min-height:38px;white-space:normal;text-align:left;padding:9px 12px;flex-shrink:0}
+    .content-navigation .navigation-entry[aria-current]{background:color-mix(in srgb,var(--accent) 20%,transparent);color:var(--accent);font-weight:700}
+    .content-navigation.top-navigation{padding:8px 12px;flex-direction:row;align-items:center;gap:14px}
+    .top-navigation .navigation-heading{margin:0;white-space:nowrap}.top-navigation .navigation-links{flex-direction:row;overflow:auto;flex:1}.top-navigation .navigation-entry{width:auto;white-space:nowrap}
+    .content-navigation.progress-navigation{padding:10px 12px;flex-direction:row;align-items:center;gap:14px}.progress-navigation .progress-description{flex:1;min-width:0}.progress-navigation .progress-bar{height:4px;background:color-mix(in srgb,var(--ink) 15%,transparent);border-radius:8px;overflow:hidden}.progress-navigation .progress-bar i{height:100%;display:block;background:var(--accent)}
     @media(prefers-reduced-motion:reduce){.guoling-controller button{transition:none}}
   `
   root.append(css, panel)
@@ -76,7 +95,7 @@ export function mount(context: TeacherControllerRuntimeContext): MountedComponen
   let drag: { pointerId: number; x: number; y: number; startX: number; startY: number; moved: boolean } | null = null, suppressClick = false
   const endDrag = () => { if (drag) pointerHost?.movePointer?.('end', drag.x, drag.y); drag = null }
   const down = (event: PointerEvent) => {
-    if (!interactive() || event.button !== 0 || (event.target as Element | null)?.closest('.popover')) return
+    if ((current.data.presentation??'console')!=='console'||!interactive() || event.button !== 0 || (event.target as Element | null)?.closest('.popover')) return
     suppressClick = false
     ;((event.target as Element | null)?.closest('button') ?? panel).setPointerCapture?.(event.pointerId)
     drag = { pointerId: event.pointerId, x: event.clientX, y: event.clientY, startX: event.clientX, startY: event.clientY, moved: false }
@@ -98,12 +117,16 @@ export function mount(context: TeacherControllerRuntimeContext): MountedComponen
   function render() {
     if (!live()) return
     const props = current.data, state = host?.read()
+    const nextSignature=JSON.stringify([props,state,open,root.clientWidth,props.buttons.map(button=>host?.canExecute(button.action))])
+    if(nextSignature===renderSignature)return
+    renderSignature=nextSignature
     panel.hidden = props.enabled === false
     if (panel.hidden) { open = null; endDrag(); panel.replaceChildren(); return }
     if (!interactive()) { open = null; endDrag() }
     const active = doc.activeElement?.shadowRoot?.activeElement ?? doc.activeElement, focus = panel.contains(active) ? (active as HTMLElement).dataset.control : undefined
     const variant = props.sceneStyles?.[state?.locationId ?? ''] ?? {}, data = { ...props, ...variant }, style = { ...props.style, ...variant.style }
-    const collapsed = Boolean(data.collapsible && (state?.collapsed ?? data.defaultCollapsed))
+    const presentation=data.presentation??'console'
+    const collapsed = presentation==='console'&&Boolean(data.collapsible && (state?.collapsed ?? data.defaultCollapsed))
     const layout = teacherControllerLayout(data)
     if (collapsed) open = null
     panel.className = `guoling-controller${collapsed ? ' collapsed' : ''}${data.compact ? ' compact' : ''}${layout.width <= (root.clientWidth || current.frame?.width || layout.width) + .5 ? ' fits' : ''}`
@@ -115,14 +138,50 @@ export function mount(context: TeacherControllerRuntimeContext): MountedComponen
     panel.style.setProperty('--radius', `${Math.max(0, style.cornerRadius ?? 16)}px`)
     const image = data.backgroundAssetId ? context.resources?.url(data.backgroundAssetId) : undefined
     panel.style.backgroundImage = image ? `url(${JSON.stringify(image)})` : 'none'; panel.style.backgroundSize = 'cover'
-    panel.replaceChildren()
-    const launcher = button(collapsed ? '展开教师控制器' : '收起教师控制器', null, () => { open = null; host!.setCollapsed(!collapsed); render() }, collapsed ? '展' : '收', 'collapse')
+    for(const release of boundControls)release();boundControls=[]
+    panel.replaceChildren();renderedActions=[]
+    if(presentation!=='console'){
+      root.style.height='auto'
+      panel.className='guoling-controller content-navigation '+(presentation==='top'?'top-navigation':presentation==='progress'?'progress-navigation':'')
+      panel.setAttribute('aria-label',data.title||'作品导航')
+      const bind=(node:HTMLButtonElement,action:TeacherControllerAction)=>{
+        renderedActions.push(action);node.disabled||=!host?.canExecute(action)
+        if(host?.bindControl){node.onclick=null;boundControls.push(host.bindControl(node,action))}
+      }
+      const location=state?.scenes.find(scene=>scene.id===state.locationId),local=Boolean(state?.reading&&state.reading.containerId===state.locationId)
+      const targets=local?location?.targets??[]:(state?.scenes??[]).map(scene=>({id:scene.id,name:scene.name,depth:0,action:{type:'scene.go' as const,sceneId:scene.id}}))
+      if(presentation==='progress'){
+        const previousAction:TeacherControllerAction={type:'step.previous'},nextAction:TeacherControllerAction={type:'step.next'}
+        const previous=button('上一步','left',()=>perform(previousAction)),next=button('下一步','right',()=>perform(nextAction));next.className='primary'
+        const description=doc.createElement('div');description.className='progress-description'
+        const text=doc.createElement('div');text.className='navigation-heading';text.textContent=location?.name??data.title
+        const bar=doc.createElement('div'),fill=doc.createElement('i');bar.className='progress-bar';bar.setAttribute('role','progressbar')
+        const value=state?.reading?.progress??((state?.progress?.sceneIndex??0)+((state?.progress?.stepIndex??0)+1)/Math.max(1,state?.progress?.stepCount??1))/Math.max(1,state?.progress?.sceneCount??1)
+        fill.style.width=Math.max(0,Math.min(1,value))*100+'%';bar.setAttribute('aria-valuenow',String(Math.round(value*100)));bar.setAttribute('aria-valuemin','0');bar.setAttribute('aria-valuemax','100');bar.append(fill)
+        description.append(text,bar);panel.append(previous,description,next);bind(previous,previousAction);bind(next,nextAction)
+      }else{
+        const title=doc.createElement('div');title.className='navigation-heading';title.textContent=data.title||'内容目录'
+        const links=doc.createElement('div');links.className='navigation-links';panel.append(title,links)
+        for(const target of targets){
+          const node=button(target.name,null,()=>perform(target.action),target.name,'target-'+target.id);node.className='navigation-entry';node.dataset.navigationTarget=target.id
+          if(presentation!=='top')node.style.paddingLeft=12+('depth'in target?(target.depth??0)*12:0)+'px'
+          const active=local?state?.reading?.activeInstanceId===target.id:state?.locationId===target.id
+          if(active)node.setAttribute('aria-current',local?'location':'page')
+          links.append(node);bind(node,target.action)
+        }
+        if(!targets.length){const empty=doc.createElement('p');empty.textContent='当前没有可导航的章节';links.append(empty)}
+      }
+      return
+    }
+    root.style.height='100%'
+    panel.setAttribute('aria-label','全局控制台')
+    const launcher = button(collapsed ? '展开全局控制台' : '收起全局控制台', null, () => { open = null; host!.setCollapsed(!collapsed); render() }, collapsed ? '展' : '收', 'collapse')
     launcher.className = 'launcher'; launcher.setAttribute('aria-expanded', String(!collapsed))
     if (data.collapsible || collapsed) panel.append(launcher)
     if (collapsed) return
-    const identity = doc.createElement('div'); identity.className = 'identity'; identity.title = '拖动教师控制台'
+    const identity = doc.createElement('div'); identity.className = 'identity'; identity.title = '拖动全局控制台'
     identity.style.width = `${layout.identityWidth}px`; identity.style.flexShrink = '1'
-    const title = doc.createElement('strong'); title.textContent = data.title || '教师控制台'; identity.append(title)
+    const title = doc.createElement('strong'); title.textContent = data.title || '全局控制台'; identity.append(title)
     if (data.showSceneProgress && state?.progress) {
       const value = state.progress, progress = doc.createElement('span'); progress.className = 'progress'
       progress.textContent = `${value.sceneIndex + 1} / ${value.sceneCount} 页 · ${value.stepIndex + 1} / ${value.stepCount} 步`
@@ -135,7 +194,7 @@ export function mount(context: TeacherControllerRuntimeContext): MountedComponen
     for (const spec of specs) {
       if (!spec.visible) continue
       const type = spec.action.type, picker = type === 'scene.open-picker'
-      const node = button(spec.label, glyphs[type] ?? null, () => picker ? toggle('directory') : perform(spec.action), type.startsWith('step.') ? spec.label : picker ? '目录' : !glyphs[type] ? spec.label : undefined, spec.id)
+      const node = button(spec.label, glyphs[type] ?? null, () => host?.registerControl ? picker ? toggle('directory') : perform(spec.action) : host?.bindControl ? undefined : picker ? toggle('directory') : perform(spec.action), type.startsWith('step.') ? spec.label : picker ? '目录' : !glyphs[type] ? spec.label : undefined, spec.id)
       node.style.width = `${teacherControllerButtonWidth(spec)}px`
       node.dataset.controllerButtonId = spec.id; node.disabled ||= !host?.canExecute(spec.action)
       if (type === 'step.next') node.className = 'primary'
@@ -143,6 +202,7 @@ export function mount(context: TeacherControllerRuntimeContext): MountedComponen
       if (type === 'audio.toggle-mute') node.setAttribute('aria-pressed', String(state?.muted ?? false))
       if (type === 'player.fullscreen.toggle') node.setAttribute('aria-pressed', String(state?.fullscreen ?? false))
       ;(type.startsWith('step.') ? steps : tools).append(node)
+      if(!host?.registerControl && host?.bindControl)boundControls.push(host.bindControl(node,spec.action))
     }
     const zoom = button('缩放', null, () => toggle('zoom'), `${Math.round((state?.zoom ?? 1) * 100)}%`, 'zoom')
     zoom.style.width = '80px'
@@ -195,7 +255,7 @@ export function mount(context: TeacherControllerRuntimeContext): MountedComponen
   const unsubscribe = host?.subscribe(render), unsubscribeLayout = context.layout?.subscribe(render)
   const dispose = () => {
     if (disposed) return
-    disposed = true; endDrag(); unsubscribe?.(); unsubscribeLayout?.(); observer?.disconnect()
+    disposed = true; registration?.();for(const release of boundControls)release();boundControls=[];endDrag(); unsubscribe?.(); unsubscribeLayout?.(); observer?.disconnect()
     panel.removeEventListener('pointerdown', down); panel.removeEventListener('pointermove', move); panel.removeEventListener('click', suppressDragClick, true)
     doc.removeEventListener('pointerup', endDrag); doc.removeEventListener('pointercancel', endDrag); doc.removeEventListener('pointerdown', outside, true)
     root.removeEventListener('keydown', escape); doc.defaultView?.removeEventListener('resize', fitPopup); panel.remove(); css.remove()

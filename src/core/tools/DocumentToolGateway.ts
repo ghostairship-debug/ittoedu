@@ -1,3 +1,4 @@
+import {prepareExistingObjectLayout,existingLayoutChanges,compileExistingObjectLayout,type ExistingLayoutRequest,type ExistingLayoutMeasurement} from '../course/existingObjectLayout'
 import { componentSurfaces, componentContainers } from '../../shared/contracts/component-platform/project'
 import { isNativeProjectFilename, nativeProjectStem } from '../../shared/nativeProjectFile'
 import { createProjectDefinitionDiscoveryEntries, type ComponentDiscoveryEntry } from '../../shared/componentDiscovery'
@@ -25,7 +26,7 @@ import { DocumentRegistry } from '../documents/DocumentRegistry'
 import { documentDigest } from '../documents/documentDigest'
 import { batchInputSchema, batchInputSchemaFor, canonicalToolRegistration, describeToolFamily, describeTools, familyOfTool, gatewayToolRegistration, mutationCallSchema, mutationNamesIn, selectRunToolNames, toolCatalog, toolEffectTargets, toolFamilies, toolRegistration, visibleRunToolNames, type BatchMutationCall, type InitialToolProfile, type RunToolScope, type ToolFamily } from './ToolCatalog'
 import { viewObserveInputSchema } from '../../shared/workbench/viewObservation'
-import { childTargets, containsTarget, courseAuthorFieldReadPaths, replaceCourseAuthorField, courseInstanceContext, courseInstanceScopeId, instanceWithinScope, courseInstanceTextTarget, mapMarkdownRange, readTarget, readSemanticTarget, targetFootprint, replaceCourseInstanceText, readCourseInstanceText, sliceCourseInstanceText, isCourseInstanceRange, readEditableTargetContent, recoverEditableTargetAfterReplacement, prepareHtmlAuthorFieldEdit, mapHtmlAuthorFieldTarget, planTextSelectionReplacement, mapExternalCourseTextTarget } from './ToolTargets'
+import { childTargets, containsTarget, courseAuthorFieldReadPaths, replaceCourseAuthorField, courseInstanceContext, courseInstanceScopeId, instanceWithinScope, courseInstanceTextTarget, mapMarkdownRange, readTarget, readSemanticTarget, targetFootprint, replaceCourseInstanceText, readCourseInstanceText, sliceCourseInstanceText, isCourseInstanceRange, readEditableTargetContent, editableReplacementFormat, recoverEditableTargetAfterReplacement, prepareHtmlAuthorFieldEdit, mapHtmlAuthorFieldTarget, planTextSelectionReplacement, mapExternalCourseTextTarget } from './ToolTargets'
 import { courseInstancePropertyEdits, courseInstanceConversionEdits, courseInstanceDataAppearancePlan, readCourseInstanceAppearance } from './courseInstanceEdits'
 import { formatCourseInstanceText } from './ToolTargets'
 import { formatMarkdownSource } from './textFormatting'
@@ -38,6 +39,7 @@ import { prepareCourseTeacherControllerEdits } from '../course/courseElementInse
 import { planCourseElementInsertion, CourseInsertionError } from '../course/courseElementInsertPlan'
 import { prepareCourseFlowColumns } from '../course/courseFlowLayoutEdits'
 import { courseGeometryEdits } from '../course/courseGeometryEdits'
+import { prepareCourseGroup } from '../course/courseGroupEdits'
 import { courseObjectRemovalEdits, courseObjectOrder, courseObjectOrderEdits, courseObjectMoveEdits, courseGlobalPlacementEdits, createCourseObjectPastePlanningBatch } from '../course/courseObjectEdits'
 import { flowPlacementEdits, flowBodyLayoutEdits, flowReadingOrderEdits } from '../course/courseFlowEdits'
 import { componentDataEdits, componentDataPropertyPaths, componentTableDataEdits, componentChartDataEdits } from '../course/componentDataEdits'
@@ -169,6 +171,7 @@ function writableKinds(model: DocumentModel, writable: readonly ToolTarget[]): T
 
 export interface DocumentToolGatewayOptions { prepareImage?: PrepareImageResourcePort; prepareMedia?: PrepareMediaResourcePort; services?: HostToolServices;
   prepareSpatialViewport?(documentId: string, surfaceId: string): Promise<SpatialViewportCapture>
+  measureExistingLayout?(request:ExistingLayoutRequest):Promise<readonly ExistingLayoutMeasurement[]>
   prepareInput?(documentId: string): Promise<void>
   componentContent?: {
     plan?(input: { baseline: ComponentProjectSnapshot; request: ContentApplyRequest }, options?: ContentApplyPlanOptions): Promise<ContentApplyPlan>
@@ -1788,7 +1791,8 @@ export class DocumentToolGateway implements ToolGateway {
   async boundContentCall(runId: string, targetHandle: string, content: string): Promise<ModelToolCall> {
     const resolved = await this.resolveEditTarget(runId, targetHandle)
     const view = readEditableTargetContent(resolved.model, resolved.target)
-    return { name: 'text.replace', input: { target: targetHandle, content, ...(view.format === 'html' ? { format: 'html' } : {}) } }
+    const format = editableReplacementFormat(content, view.format)
+    return { name: 'text.replace', input: { target: targetHandle, content, ...(format === 'html' ? { format } : {}) } }
   }
 
   private parseAllowedBatch(run: Run, input: unknown): BatchMutationCall[] {
@@ -2532,9 +2536,57 @@ export class DocumentToolGateway implements ToolGateway {
     return (await dispatched)[0]
   }
 
+  /** A current-object plan can be remeasured without re-running the model. Geometry conflicts never overwrite the human edit. */
+  private async applyExistingLayout(runId:string,operationId:string,requestDigest:string,references:readonly string[],intent:{html:string;viewport?:{width:number;height:number}}):Promise<ToolResult>{
+    if(!this.options.measureExistingLayout)throw new ToolError('unsupported-layout-measurement','当前宿主没有接入正式布局测量服务')
+    const handles=references.map(reference=>this.handle(runId,reference))
+    if(handles.some(h=>h.documentId!==handles[0]!.documentId))throw new ToolError('cross-document-batch','重排对象必须属于同一文档')
+    const documentId=handles[0]!.documentId,session=this.registry.get(documentId)
+    await this.options.prepareInput?.(documentId)
+    const original=await session.drain();if(original.model.kind!=='course-v10')throw new ToolError('invalid-target','重排需要果铃对象')
+    const targets=handles.map(handle=>this.resolve(handle,original,true))
+    const ids=targets.map(target=>{if(target.kind!=='course-instance'||target.authorField||target.dataPath||target.from!==undefined||target.stateId)throw new ToolError('invalid-target','重排使用母版整对象句柄，不改变局部字段或展示状态');return target.instanceId})
+    let measuredFrom=original as ComponentProjectSnapshot
+    for(let attempt=0;attempt<3;attempt++){
+      const run=this.run(runId);if(run.stopped)throw new ToolError('run-stopped','任务已停止，未应用布局')
+      const request=prepareExistingObjectLayout(measuredFrom.model.project,measuredFrom.model.resources,ids,intent.html,intent.viewport)
+      const measured=await this.options.measureExistingLayout(request)
+      const latest=await session.drain()
+      if(latest.model.kind!=='course-v10'||latest.epoch!==original.epoch)throw new ToolError('stale-epoch','文档会话已经改变，未应用布局')
+      if(this.run(runId).stopped)throw new ToolError('run-stopped','任务已停止，布局候选未写入')
+      for(const target of targets)if(!this.canWrite(this.run(runId),latest,target))throw new ToolError('not-authorized','当前对象写入授权已经变化')
+      const change=existingLayoutChanges(measuredFrom.model.project,latest.model.project,request)
+      if(change==='conflict')throw new ToolError('layout-conflict','重排期间人工改变了对象几何、父级或布局关系；当前稿保留，请根据新布局重新规划')
+      if(change==='remeasure'){measuredFrom=latest as ComponentProjectSnapshot;continue}
+      const command=compileExistingObjectLayout(latest.model.project,request,measured)
+      // The normalized group frame is part of this exact geometry operation. Structural/baseline paint materialization requires parent authority.
+      for(const edit of command.edits){
+        const id='instanceId'in edit?edit.instanceId:edit.type==='instance.insert'&&edit.container.kind==='instance'?edit.container.instanceId:undefined
+        if(id&&latest.model.project.instances[id]&&!this.canWrite(this.run(runId),latest,{kind:'course-instance',surfaceId:request.surfaceId,instanceId:id}))
+          throw new ToolError('not-authorized','此重排需要共同父级的等价坐标调整权限；当前对象未改变')
+      }
+      const driver=this.drivers.find(driver=>driver.kind===latest.model.kind);if(!driver)throw new ToolError('unsupported-document','当前文档缺少正式驱动')
+      const model=await driver.apply(latest.model,command)
+      const result=await session.execute({documentId,epoch:latest.epoch,baseRevision:latest.revision,operationId,requestDigest,actor:run.grant.actor,runId,runLeaseId:this.operationLease(runId,operationId,documentId),mutation:{type:'command',command}},{rebaseComponentExpectations:true})
+      if(result.status==='applied')this.recordAppliedFootprints(runId,latest,model,result.revision,[],[])
+      const affected:string[]=[]
+      if(result.status==='applied'||result.status==='unchanged'){
+        const committed=session.readRevision(result.revision)??{...latest,model,revision:result.revision}
+        for(const target of targets)affected.push(this.capture(runId,committed,target,true))
+      }
+      return {kind:'document-operation',result,affected}
+    }
+    throw new ToolError('layout-input-changing','当前正文或字体仍在变化，已保留人工内容；结束输入后重试布局')
+  }
+
   /** Original canonical planner and single Session writer for both direct and batch calls. */
   private async applyCanonicalMutations(runId: string, operationId: string, requestDigest: string,
     mutations: BatchMutationCall[], captureInput: unknown, sourceOperation?: { handle: Handle; assertActive?: () => void }): Promise<ToolResult> {
+    const reflow=mutations.find(mutation=>mutation.name==='object.layout'&&mutation.input.intent.kind==='reflow')
+    if(reflow?.name==='object.layout'&&reflow.input.intent.kind==='reflow'){
+      if(mutations.length!==1||sourceOperation)throw new ToolError('invalid-input','保身份重排是独立的一次原子布局操作，请与正文修改分开提交')
+      return this.applyExistingLayout(runId,operationId,requestDigest,reflow.input.targets,reflow.input.intent)
+    }
     const run = this.run(runId)
     const observedHandles = sourceOperation ? [sourceOperation.handle] : await this.captureMutationHandles(runId, mutations, captureInput)
     if (observedHandles.some(handle => handle.documentId !== observedHandles[0].documentId)) throw new ToolError('cross-document-batch', '批量原子操作只能属于同一文档')
@@ -2565,7 +2617,7 @@ export class DocumentToolGateway implements ToolGateway {
         }
         if (mutation.name !== 'text.replace') throw new ToolError('invalid-target', '连续文字选区支持正文替换或文字格式')
         try {
-          const format = mutation.input.format ?? (readEditableTargetContent(snapshot.model, target).format === 'html' ? 'html' : 'text')
+          const format = mutation.input.format ?? editableReplacementFormat(mutation.input.content, readEditableTargetContent(snapshot.model, target).format)
           for (const fragment of planTextSelectionReplacement(snapshot.model, target, mutation.input.content, format)) {
             handles.push(this.capturedHandle(runId, snapshot, fragment.target, handle.writable)); targets.push(fragment.target)
             expanded.push({ name: 'text.replace', input: { ...mutation.input, content: fragment.content, format: fragment.format } })
@@ -2653,7 +2705,20 @@ export class DocumentToolGateway implements ToolGateway {
           const instanceIds = selected.map(value => (value as Extract<ToolTarget, { kind: 'course-instance' }>).instanceId)
           let nextTarget: ToolTarget = target
           let planned: ComponentEdit[]
-          if (mutation.input.intent.kind === 'columns') {
+          if(mutation.input.intent.kind==='reflow')throw new ToolError('invalid-input','保身份重排必须从独立测量入口提交')
+          if (mutation.input.intent.kind === 'group' || mutation.input.intent.kind === 'ungroup') {
+            if (stateId) throw new ToolError('invalid-target', '组合改变正式对象层级，请切回母版后操作')
+            for (const id of instanceIds) {
+              const owner = owningContainer(project, id)
+              const ownerTarget: ToolTarget = owner?.kind === 'instance' ? {kind:'course-instance',surfaceId,instanceId:owner.instanceId,stateId}
+                : owner?.kind === 'surface' ? {kind:'course-surface',surfaceId:owner.surfaceId,stateId} : {kind:'document'}
+              if (!owner || !this.canWrite(run,snapshot,ownerTarget)) throw new ToolError('not-authorized','组合与解组需要共同父级的结构修改权限')
+            }
+            const prepared = prepareCourseGroup(project,instanceIds,mutation.input.intent.kind,this.createId)
+            planned = prepared.edits
+            nextTarget = {kind:'course-instance',surfaceId,instanceId:prepared.selectedIds[0]!,stateId}
+            for (const id of prepared.selectedIds.slice(1)) finalTargets.push({kind:'course-instance',surfaceId,instanceId:id,stateId})
+          } else if (mutation.input.intent.kind === 'columns') {
             const owner = owningContainer(project, instanceIds[0])
             const ownerTarget: ToolTarget = owner?.kind === 'instance' ? { kind: 'course-instance', surfaceId, instanceId: owner.instanceId, stateId }
               : owner?.kind === 'surface' ? { kind: 'course-surface', surfaceId: owner.surfaceId, stateId } : { kind: 'document' }
@@ -2679,7 +2744,7 @@ export class DocumentToolGateway implements ToolGateway {
         if (mutation.name === 'object.insert' || mutation.name === 'teacher.ensure') {
           if (target.kind !== 'course-surface' && (target.kind !== 'course-instance' || target.authorField || target.dataPath || target.from !== undefined))
             throw new ToolError('invalid-target', '专业插入需要已观察页面或容器，当前目标不是插入容器。可对文档使用 listChildren 取得页面 target，再把返回的页面 target 用于 object.insert；未修改原文档。')
-          if (mutation.name === 'teacher.ensure' && target.kind !== 'course-surface') throw new ToolError('invalid-target', '教师控制台需要已观察页面')
+          if (mutation.name === 'teacher.ensure' && target.kind !== 'course-surface') throw new ToolError('invalid-target', '导航组件需要已观察页面')
           const project = resolveComponentPresentation(model.project, target.surfaceId, target.stateId ?? null)
           // An observed whole-instance handle retains the Gateway's original container acceptance.
           // GUI insertion also supports a legitimate empty program root without childIds.
@@ -2704,7 +2769,7 @@ export class DocumentToolGateway implements ToolGateway {
           }
           let prepared: { edits: ComponentEdit[]; stages?: ComponentEdit[][]; instanceIds: string[]; bodyContainer?: ComponentContainer }
           try {
-            prepared = mutation.name === 'teacher.ensure' ? prepareCourseTeacherControllerEdits(project, target.surfaceId)
+            prepared = mutation.name === 'teacher.ensure' ? prepareCourseTeacherControllerEdits(project, target.surfaceId,undefined,null,mutation.input)
               : planCourseElementInsertion(project, { surfaceId: target.surfaceId, stateId: target.stateId, kind: mutation.input.kind,
                 options: { ...mutation.input, container }, afterInstanceId, flowSelection,
                 appearance: mutation.input.appearance, click: mutation.input.click, references })
@@ -2923,7 +2988,7 @@ export class DocumentToolGateway implements ToolGateway {
           from: target.from ?? 0, to: target.to ?? (typeof textBefore === 'string' ? Array.from(textBefore).length : documentTextLength(textBefore)),
           inserted: Array.from(mutation.input.content).length } : null
         const textFormat = mutation.name === 'text.replace'
-          ? mutation.input.format ?? (readEditableTargetContent(model, target).format === 'html' ? 'html' : 'text') : undefined
+          ? mutation.input.format ?? editableReplacementFormat(mutation.input.content, readEditableTargetContent(model, target).format) : undefined
         let edits: ComponentEdit[] | null
         let mapPresentation = true
         let readPaths: string[][] = []
@@ -3339,7 +3404,9 @@ export class DocumentToolGateway implements ToolGateway {
         || this.canWrite(this.run(runId), snapshot, child.target))
       return { target: this.capture(runId, snapshot, child.target, writable, refreshedHandle.readOnly), label: child.label, kind: child.target.kind }
     })
-    if (method === 'read' && !offset && snapshot.model.kind === 'course-v10'
+    // Semantic reads expose the selected content first. Source discovery is
+    // explicit, so a short edit does not pull an unrelated project directory.
+    if (method === 'read' && input.detail === 'object' && !offset && snapshot.model.kind === 'course-v10'
       && (target.kind === 'document' || target.kind === 'course-surface' || target.kind === 'spatial-graph'
         || target.kind === 'course-instance' && !target.authorField && !target.dataPath && target.from === undefined)) {
       // File reads capture the current owner independently of a stale mutation

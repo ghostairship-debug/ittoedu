@@ -24,8 +24,19 @@ export interface ChatGPTOAuthClientOptions {
   timeoutMs?: number
   refreshMarginMs?: number
 }
+export type OAuthFailurePhase='refresh'|'authorization-code'|'device-code'|'device-poll'
+export type OAuthMachineError='invalid_request'|'invalid_client'|'invalid_grant'|'unauthorized_client'|'unsupported_grant_type'|'invalid_scope'|'access_denied'|'authorization_pending'|'slow_down'|'expired_token'|'server_error'|'temporarily_unavailable'|'refresh_token_reused'|'refresh_token_expired'|'refresh_token_invalidated'|'unknown_oauth_error'
+const machineCodes=new Set<OAuthMachineError>(['invalid_request','invalid_client','invalid_grant','unauthorized_client','unsupported_grant_type','invalid_scope','access_denied','authorization_pending','slow_down','expired_token','server_error','temporarily_unavailable','refresh_token_reused','refresh_token_expired','refresh_token_invalidated'])
 export class ChatGPTOAuthError extends Error {
-  constructor(readonly code: string, readonly httpStatus?: number) { super(`ChatGPT 登录操作未完成（${code}）。`); this.name = 'ChatGPTOAuthError' }
+ constructor(readonly code:string,readonly httpStatus?:number,readonly phase?:OAuthFailurePhase,readonly machineError?:OAuthMachineError){
+  super('ChatGPT 登录操作未完成（'+[code,phase,machineError].filter(Boolean).join(' / ')+'）。');this.name='ChatGPTOAuthError'
+ }
+}
+/** Parse only fixed machine codes. Provider descriptions, IDs and token-like unknown values never leave this function. */
+export function oauthMachineError(value:unknown):OAuthMachineError {
+ const record=value&&typeof value==='object'&&!Array.isArray(value)?value as Record<string,unknown>:undefined
+ const raw=typeof record?.error==='string'?record.error:record?.error&&typeof record.error==='object'?(record.error as Record<string,unknown>).code:record?.code
+ return typeof raw==='string'&&machineCodes.has(raw as OAuthMachineError)?raw as OAuthMachineError:'unknown_oauth_error'
 }
 const AUTH_ORIGIN = 'https://auth.openai.com'
 const TOKEN_ENDPOINT = `${AUTH_ORIGIN}/oauth/token`
@@ -185,6 +196,7 @@ export class ChatGPTOAuthClient {
   }
   private async tokenRequest(body: Record<string, string>, signal?: AbortSignal) { return await this.request(TOKEN_ENDPOINT, body, true, signal) }
   private async request(url: string, body: Record<string, string>, form: boolean, signal?: AbortSignal): Promise<Record<string, unknown>> {
+    const phase:OAuthFailurePhase=body.grant_type==='refresh_token'?'refresh':body.grant_type==='authorization_code'?'authorization-code':url.endsWith('/usercode')?'device-code':'device-poll'
     const controller = new AbortController(), abort = () => controller.abort()
     signal?.addEventListener('abort', abort, { once: true }); if (signal?.aborted) abort()
     const timer = setTimeout(abort, this.options.timeoutMs ?? 30_000)
@@ -194,7 +206,14 @@ export class ChatGPTOAuthClient {
       response = await (this.options.fetch ?? fetch)(url, { method: 'POST', redirect: 'error', signal: controller.signal,
         headers: { 'Content-Type': form ? 'application/x-www-form-urlencoded' : 'application/json', Accept: 'application/json' },
         body: form ? new URLSearchParams(body).toString() : JSON.stringify(body) })
-      if (!response.ok) throw new ChatGPTOAuthError(`http-${response.status}`, response.status)
+      if (!response.ok) {
+        let machine:OAuthMachineError='unknown_oauth_error'
+        const reader=response.body?.getReader(),chunks:Uint8Array[]=[];let total=0
+        try{if(reader){for(;;){const next=await reader.read();if(next.done)break;total+=next.value.length;if(total>16*1024)break;chunks.push(next.value)}
+          if(total<=16*1024)try{machine=oauthMachineError(JSON.parse(Buffer.concat(chunks).toString('utf8')))}catch{/* Non-JSON errors convey only status. */}}}
+        finally{if(reader){await reader.cancel().catch(()=>{});reader.releaseLock()}}
+        throw new ChatGPTOAuthError('http-'+response.status,response.status,phase,machine)
+      }
       if (!response.body) throw new ChatGPTOAuthError('empty-token-response')
       const reader = response.body.getReader(), chunks: Uint8Array[] = []; let total = 0
       try {

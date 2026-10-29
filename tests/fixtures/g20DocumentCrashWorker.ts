@@ -58,6 +58,7 @@ const receipt = await session.execute({ documentId: session.documentId, epoch: '
   } },
 })
 if (receipt.status !== 'applied') throw new Error(JSON.stringify(receipt))
+if(point==='applied-before-reply')await pause()
 await session.save()
 throw new Error(`Fault point was not reached: ${point}`)
 }

@@ -4,16 +4,19 @@ import { createServer, type Server } from 'node:net'
 import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
+import { ToolListChangedNotificationSchema } from '@modelcontextprotocol/sdk/types.js'
 import { DocumentHostService } from '../../src/main/workbench/DocumentHostService'
 import { ExecutionEventStore } from '../../src/main/workbench/execution/ExecutionEventStore'
 import { agentFileTools } from '../../src/core/tools/AgentFileTools'
 import { describeTools } from '../../src/core/tools/ToolCatalog'
 import { toolFailed } from '../../src/core/tools/modelToolResult'
 import type { ToolResult } from '../../src/shared/workbench/tools'
+import type { DocumentSnapshot } from '../../src/shared/workbench/document'
 import type { ExternalFilePort } from '../../src/main/workbench/external/ExternalMcpService'
 import type { AgentFileService } from '../../src/main/workbench/execution/AgentFileService'
 import type { ExternalApproval } from '../../src/main/workbench/external/ExternalMcpService'
 import { callTool, residentMcpFixture, type ResidentToolReply } from '../helpers/residentMcpFixture'
+import { setRootContainers } from '../helpers/glxWorkFixture'
 import { OpenImageService } from '../../src/main/workbench/assetSources/OpenImageService'
 import { createBlankCourseProjectV10 } from '../../src/core/course/createCourseProjectV10'
 import { artifactDeliverySource } from '../../src/core/tools/HostArtifactTools'
@@ -21,7 +24,7 @@ import { loadToolsDefinition } from '../../src/main/workbench/execution/Executio
 import { DelegationJobService } from '../../src/main/workbench/delegation/DelegationJobService'
 import type { LocalToolRunner } from '../../src/main/workbench/delegation/LocalToolRunner'
 import { HostJobService } from '../../src/main/workbench/jobs/HostJobService'
-import type { ImageGenerationService } from '../../src/main/workbench/images/ImageGenerationService'
+import { ImageGenerationService } from '../../src/main/workbench/images/ImageGenerationService'
 
 const cleanups: (() => Promise<unknown>)[] = []
 
@@ -52,12 +55,47 @@ async function fixture(options: { confirm?: (request: ExternalApproval) => boole
   const host = new DocumentHostService(path.join(directory, 'documents'))
   const events = new ExecutionEventStore({ directory: path.join(directory, 'events') })
   const mcp = await residentMcpFixture({ host, directory, workspaceRoot: workspace, appendEvent: event => events.append(event), confirm: options.confirm, files: options.files,
-    settings: { ...(options.enabled !== undefined ? { enabled: options.enabled } : {}), ...(options.permission ? { permission: options.permission } : {}), ...(options.port !== undefined ? { port: options.port } : {}) } })
+    settings: { permission: options.permission ?? 'workspace', ...(options.enabled !== undefined ? { enabled: options.enabled } : {}), ...(options.port !== undefined ? { port: options.port } : {}) } })
   cleanups.push(() => mcp.close())
   await mcp.conversations.registerWorkspace({ workspaceId: 'second', rootPath: await realpath(second), managed: false, authorization: 'user-selected' })
   return { directory, workspace, second, host, events, ...mcp }
 }
 const data = (reply: { structuredContent: { result: any } }) => reply.structuredContent.result.data
+function expectSameAuthorState(actual: DocumentSnapshot, expected: DocumentSnapshot) {
+  for (const field of ['documentId', 'epoch', 'revision', 'model', 'binding', 'dirty', 'undoDepth', 'redoDepth'] as const)
+    expect(actual[field], field).toEqual(expected[field])
+}
+
+it.each(['workspace', 'read-only'] as const)('recovers an unknown tool with the actual %s catalog and schema without executing an alias', async permission => {
+  const f = await fixture({ permission }), client = await f.connect('unknown-tool-recovery')
+  const opened = data(await callTool(client, 'file.open', { path: 'notes.md' }))
+  const before = f.host.registry.get(opened.documentId).read()
+  const listed = (await client.listTools()).tools
+  const execute = vi.spyOn(f.host.tools, 'execute')
+  const rejected = await callTool(client, 'text.read', { target: opened.target })
+  expect(rejected.isError).toBe(true)
+  expect(rejected.structuredContent.result).toMatchObject({ kind: 'error', code: 'unknown-tool',
+    data: { requestedName: 'text.read', recovery: { catalog: { method: 'tools/list' } } } })
+  const recovery = data(rejected).recovery.tools as Array<{ name: string; inputSchema: unknown }>
+  const read = recovery.find(tool => tool.name === 'read')!
+  expect(read).toBeDefined()
+  expect(read.inputSchema).toEqual(listed.find(tool => tool.name === 'read')!.inputSchema)
+  expect(recovery.every(tool => listed.some(actual => actual.name === tool.name))).toBe(true)
+  expect(recovery.every(tool => tool.name === 'tools.load' || tool.name.split('.').at(-1) === 'read')).toBe(true)
+  expect(execute).not.toHaveBeenCalled()
+  const resumed = await callTool(client, read.name, { target: opened.target })
+  expect(resumed.isError).toBe(false)
+  expect(JSON.stringify(data(resumed))).toContain('AAA BBB')
+  const loaded = await callTool(client, 'tools.load', { names: ['text.read'] })
+  expect(data(loaded)).toMatchObject({ unavailable: [{ name: 'text.read', code: 'unknown-tool' }],
+    recovery: { tools: expect.arrayContaining([expect.objectContaining({ name: 'read', inputSchema: read.inputSchema })]) } })
+  const listRejected = await callTool(client, 'tools.list')
+  expect(listRejected.structuredContent.result).toMatchObject({ kind: 'error', code: 'unknown-tool',
+    data: { recovery: { catalog: { method: 'tools/list' } } } })
+  expect(f.host.registry.get(opened.documentId).read()).toMatchObject({ revision: before.revision, dirty: before.dirty, model: before.model })
+  expect(await readFile(path.join(f.root, 'notes.md'), 'utf8')).toBe('AAA BBB')
+  expect(f.approvals).toEqual([])
+})
 
 it('loads exact names and families together over real MCP while diagnosing unavailable names individually', async () => {
   const f = await fixture(), client = await f.connect('exact-tool-discovery')
@@ -144,7 +182,13 @@ it.each(['ask', 'outside-workspace', 'denied', 'stop-approved'] as const)('binds
       library: 'openverse', providerId: 'fixture', title: 'Offline resource', license: { code: 'cc0', id: 'CC0 1.0', attributionRequired: false },
       sourceName: 'Offline resource', pageUrl: 'https://example.com/fixture', fileUrl: 'https://example.com/fixture.png',
     }] })]] })
+  const imageOwner = new ImageGenerationService({ directory: path.join(f.directory, 'images'),
+    provider: { generate: async () => { throw new Error('Fetched images must not call a generator') } } })
   f.host.tools.configureHostServices({ openImages: images, beginRun: async grant => { images.beginRun(grant.runId) }, stopRun: runId => { images.stopRun(runId) },
+    images: { selection: () => { throw new Error('No model selection for fetched images') },
+      run: imageOwner.run.bind(imageOwner), read: imageOwner.read.bind(imageOwner), stop: imageOwner.stop.bind(imageOwner),
+      readResource: imageOwner.readResource.bind(imageOwner), registerWorkspaceResource: imageOwner.registerWorkspaceResource.bind(imageOwner),
+      readWorkspaceResource: imageOwner.readWorkspaceResource.bind(imageOwner) },
     artifacts: {
       preflight: ({ grant, destination }) => f.host.artifactDeliveries.preflight({ workspaceRoot: grant.fileAccess!.workspaceRoot!, permission: grant.fileAccess!.permission, destination }),
       lookup: (runId, operationId) => f.host.artifactDeliveries.lookup(operationId, runId),
@@ -158,7 +202,9 @@ it.each(['ask', 'outside-workspace', 'denied', 'stop-approved'] as const)('binds
   const client = await f.connect('artifact-path-owner')
   expect((await callTool(client, 'file.open', { path: 'source.h5lesson' })).isError).toBe(false)
   const found = data(await callTool(client, 'image.search', { query: 'fixture', limit: 1 }))
-  const fetched = data(await callTool(client, 'image.fetch', { image: found.candidates[0].image }))
+  const fetchedReply = await callTool(client, 'image.fetch', { image: found.candidates[0].image })
+  expect(fetchedReply.isError, JSON.stringify(fetchedReply.structuredContent.result)).toBe(false)
+  const fetched = data(fetchedReply)
   expect(fetched).toMatchObject({ status: 'ready' })
   f.approvals.length = 0
   artifactPhase = true
@@ -377,7 +423,8 @@ it('gives the foreground selection actionable handles through the read-only work
   const f = await fixture()
   const document = await f.host.internalAPI.open(path.join(f.workspace, 'notes.md'))
   f.ui.state = { workspaceId: 'space', activeDocumentId: document.documentId,
-    selection: { documentId: document.documentId, targets: [{ kind: 'markdown-range', from: 4, to: 7 }] } }
+    selection: { documentId: document.documentId, epoch: document.epoch, revision: document.revision,
+      targets: [{ kind: 'markdown-range', from: 4, to: 7 }] } }
   const client = await f.connect('Claude Code')
   const state = data(await callTool(client, 'workbench.state'))
   expect(state.documents).toEqual([expect.objectContaining({ documentId: document.documentId, name: 'notes.md', active: true, dirty: false })])
@@ -387,6 +434,186 @@ it('gives the foreground selection actionable handles through the read-only work
   const applied = await callTool(client, 'text.replace', { target: state.selection.targets[0].target, content: '选中处' })
   expect(applied.structuredContent.result).toMatchObject({ kind: 'document-operation', result: { status: 'applied' } })
   expect(f.host.registry.get(document.documentId).read().model).toMatchObject({ source: 'AAA 选中处' })
+})
+
+it.each(['workspace', 'read-only'] as const)('narrows only after explicit mapped focus, preserving discovery and %s authority', async permission => {
+  const f = await fixture({ permission })
+  const document = await f.host.internalAPI.open(path.join(f.workspace, 'notes.md'))
+  const ordinaryClient = await f.connect('Ordinary discovery client')
+  const ordinary = (await ordinaryClient.listTools()).tools.map(tool => tool.name)
+  f.ui.state = { workspaceId: 'space', activeDocumentId: document.documentId,
+    selection: { documentId: document.documentId, epoch: document.epoch, revision: document.revision,
+      targets: [{ kind: 'markdown-range', from: 4, to: 7 }] } }
+  const client = await f.connect('Explicit focus client'), changed = vi.fn()
+  client.setNotificationHandler(ToolListChangedNotificationSchema, changed)
+  const initial = (await client.listTools()).tools.map(tool => tool.name)
+  // Connecting with a foreground selection does not change ordinary MCP discovery.
+  expect(initial).toEqual(ordinary)
+  expect(initial).toEqual(expect.arrayContaining(['asset.search', 'file.read', 'tools.load', 'workbench.state']))
+  expect((await callTool(client, 'tools.load', { names: ['project.list'] })).isError).toBe(false)
+  await vi.waitFor(() => expect(changed).toHaveBeenCalled())
+  changed.mockClear()
+
+  const state = data(await callTool(client, 'workbench.state'))
+  expect(state.selection).toMatchObject({ documentId: document.documentId,
+    targets: [{ kind: 'markdown-range', target: expect.any(String) }] })
+  expect(state.activeDocument.writable).toBe(permission === 'workspace')
+  await vi.waitFor(() => expect(changed).toHaveBeenCalled())
+  const focused = (await client.listTools()).tools.map(tool => tool.name)
+  expect(focused).toEqual(expect.arrayContaining(['read', 'inspect', 'listChildren', 'project.list', 'tools.load']))
+  expect(focused).not.toContain('asset.search')
+  expect(focused).not.toContain('project.read')
+  expect(focused).not.toContain('project.apply')
+  expect(focused.includes('text.replace')).toBe(permission === 'workspace')
+  expectSameAuthorState(f.host.registry.get(document.documentId).read(), document)
+
+  const expanded = await callTool(client, 'tools.load', { names: ['project.read'] })
+  expect(expanded.isError).toBe(false)
+  expect(data(expanded).tools).toEqual([expect.objectContaining({ name: 'project.read',
+    inputSchema: describeTools(['project.read'])[0]!.schema })])
+  expect((await client.listTools()).tools.map(tool => tool.name)).toContain('project.read')
+  expect((await f.service.status()).sessions.find(session => session.clientName === 'Explicit focus client')!.permission).toBe(permission)
+  const target = state.selection.targets[0].target
+  expect((await callTool(client, 'read', { target })).structuredContent.result).toMatchObject({ kind: 'read', data: { text: 'BBB' } })
+  const edited = await callTool(client, 'text.replace', { target, content: '选中处' })
+  const fileWrite = await callTool(client, 'file.write', { mode: 'create', path: 'profile-rights.txt', content: 'workspace grant' })
+  if (permission === 'read-only') {
+    expect(edited.isError).toBe(true)
+    expect(fileWrite.isError).toBe(true)
+    expectSameAuthorState(f.host.registry.get(document.documentId).read(), document)
+    await expect(readFile(path.join(f.workspace, 'profile-rights.txt'))).rejects.toMatchObject({ code: 'ENOENT' })
+  } else {
+    expect(edited.structuredContent.result).toMatchObject({ kind: 'document-operation', result: { status: 'applied' } })
+    expect(f.host.registry.get(document.documentId).read()).toMatchObject({ model: { source: 'AAA 选中处' }, undoDepth: 1, dirty: true })
+    expect(fileWrite.isError).toBe(false)
+    expect(await readFile(path.join(f.workspace, 'profile-rights.txt'), 'utf8')).toBe('workspace grant')
+  }
+  expect(await readFile(path.join(f.workspace, 'notes.md'), 'utf8')).toBe('AAA BBB')
+  expect(f.approvals).toEqual([])
+})
+
+it('freezes the first precise disclosure per run, preserves exact-name discovery and resets it on rebind', async () => {
+  const f = await fixture(), project = createBlankCourseProjectV10('Focus disclosure')
+  project.definitions.box = { id: 'box', role: 'content', implementation: { kind: 'source', language: 'javascript',
+    source: 'export default {mount(){return {update(){},dispose(){}}}}' } }
+  project.instances.box = { id: 'box', definitionId: 'box', data: {} }
+  setRootContainers(project, [{ id: 'flow', kind: 'flow', title: '讲义', childIds: ['box'] }])
+  const course = await f.host.internalAPI.create({ kind: 'course-v10', project, resources: { assets: {}, components: {} } }, 'focus.glx')
+  const document = await f.host.internalAPI.open(path.join(f.workspace, 'notes.md'))
+  f.ui.state = { workspaceId: 'space', activeDocumentId: course.documentId }
+  const client = await f.connect('Frozen disclosure client')
+  expect(data(await callTool(client, 'workbench.state')).selection).toBeNull()
+  expect((await client.listTools()).tools.map(tool => tool.name)).toContain('object.update')
+
+  f.ui.state = { ...f.ui.state, selection: { documentId: course.documentId, epoch: course.epoch, revision: course.revision,
+    targets: [{ kind: 'course-instance', surfaceId: 'flow', instanceId: 'box' }] } }
+  const focused = data(await callTool(client, 'workbench.state'))
+  expect(focused.selection.targets).toEqual([{ kind: 'course-instance', target: expect.any(String) }])
+  const contentNames = (await client.listTools()).tools.map(tool => tool.name)
+  expect(contentNames).toEqual(expect.arrayContaining(['project.read', 'project.apply']))
+  expect(contentNames).not.toContain('object.update')
+  expect(contentNames).not.toContain('project.list')
+  // A known allowed tool remains callable without an extra tools.load gate.
+  expect((await callTool(client, 'project.list', { project: focused.activeDocument.target })).isError).toBe(false)
+  expect((await client.listTools()).tools.map(tool => tool.name)).toContain('project.list')
+
+  f.ui.state = { workspaceId: 'space', activeDocumentId: document.documentId,
+    selection: { documentId: document.documentId, epoch: document.epoch, revision: document.revision,
+      targets: [{ kind: 'markdown-range', from: 4, to: 7 }] } }
+  const later = data(await callTool(client, 'workbench.state'))
+  expect(later.selection.targets[0].kind).toBe('markdown-range')
+  expect((await client.listTools()).tools.map(tool => tool.name)).toEqual(expect.arrayContaining(['project.list', 'project.apply']))
+
+  const id = (await f.service.status()).sessions[0]!.sessionId
+  await f.service.configureSession(id, 'full')
+  expect((await client.listTools()).tools.map(tool => tool.name)).toContain('asset.search')
+  const rebound = data(await callTool(client, 'workbench.state'))
+  expect(rebound.selection.targets[0].kind).toBe('markdown-range')
+  const reboundNames = (await client.listTools()).tools.map(tool => tool.name)
+  expect(reboundNames).not.toContain('asset.search')
+  expect(reboundNames).not.toContain('project.list')
+  expect(reboundNames).not.toContain('project.apply')
+  expect((await callTool(client, 'read', { target: rebound.selection.targets[0].target })).isError).toBe(false)
+  expect((await callTool(client, 'read', { target: later.selection.targets[0].target })).isError).toBe(true)
+  expectSameAuthorState(f.host.registry.get(course.documentId).read(), course)
+  expectSameAuthorState(f.host.registry.get(document.documentId).read(), document)
+})
+
+it.each(['workspace', 'read-only'] as const)('maps the versioned foreground range through human edits without changing %s authority', async permission => {
+  const f = await fixture({ permission })
+  const document = await f.host.internalAPI.open(path.join(f.workspace, 'notes.md'))
+  f.ui.state = { workspaceId: 'space', activeDocumentId: document.documentId,
+    selection: { documentId: document.documentId, epoch: document.epoch, revision: document.revision,
+      targets: [{ kind: 'markdown-range', from: 4, to: 7 }] } }
+  const client = await f.connect('Versioned focus client'), session = f.host.registry.get(document.documentId)
+  expect(await session.execute({ documentId: document.documentId, epoch: document.epoch, baseRevision: document.revision,
+    operationId: `human-prefix-${permission}`, actor: 'human', mutation: { type: 'command', command: { type: 'markdown.replace', source: '人改 AAA BBB' } } }))
+    .toMatchObject({ status: 'applied' })
+  const humanDraft = session.read()
+  const state = data(await callTool(client, 'workbench.state'))
+  expect(state.selection).toMatchObject({ documentId: document.documentId, epoch: document.epoch, revision: humanDraft.revision })
+  expect(state.activeDocument.writable).toBe(permission !== 'read-only')
+  expect(state.selectionUnavailable).toBeUndefined()
+  const target = state.selection.targets[0].target
+  expect((await callTool(client, 'read', { target })).structuredContent.result).toMatchObject({ kind: 'read', data: { text: 'BBB' } })
+  const edited = await callTool(client, 'text.replace', { target, content: '选中处' })
+  if (permission === 'read-only') {
+    expect(edited.structuredContent.result).toMatchObject({ kind: 'error' })
+    expectSameAuthorState(session.read(), humanDraft)
+  } else {
+    expect(edited.structuredContent.result).toMatchObject({ kind: 'document-operation', result: { status: 'applied' } })
+    expect(session.read()).toMatchObject({ model: { source: '人改 AAA 选中处' }, undoDepth: 2, dirty: true })
+  }
+  expect(await readFile(path.join(f.workspace, 'notes.md'), 'utf8')).toBe('AAA BBB')
+})
+
+it('reports a changed foreground range or epoch without substituting a page or document selection', async () => {
+  const f = await fixture()
+  const document = await f.host.internalAPI.open(path.join(f.workspace, 'notes.md'))
+  f.ui.state = { workspaceId: 'space', activeDocumentId: document.documentId,
+    selection: { documentId: document.documentId, epoch: document.epoch, revision: document.revision,
+      targets: [{ kind: 'markdown-range', from: 4, to: 7 }] } }
+  const client = await f.connect('Conflicting focus client'), session = f.host.registry.get(document.documentId)
+  expect(await session.execute({ documentId: document.documentId, epoch: document.epoch, baseRevision: document.revision,
+    operationId: 'human-overlap', actor: 'human', mutation: { type: 'command', command: { type: 'markdown.replace', source: 'AAA 人的新正文' } } }))
+    .toMatchObject({ status: 'applied' })
+  const humanDraft = session.read()
+  const conflict = data(await callTool(client, 'workbench.state'))
+  expect(conflict).toMatchObject({ selection: null, selectionUnavailable: { code: 'selection-changed' } })
+  expect(conflict.activeDocument).toMatchObject({ documentId: document.documentId, writable: true })
+  f.ui.state = { workspaceId: 'space', activeDocumentId: document.documentId,
+    selection: { documentId: document.documentId, epoch: 'obsolete-epoch', revision: humanDraft.revision,
+      targets: [{ kind: 'markdown-range', from: 4, to: 7 }] } }
+  expect(data(await callTool(client, 'workbench.state'))).toMatchObject({ selection: null, selectionUnavailable: { code: 'selection-changed' } })
+  expectSameAuthorState(session.read(), humanDraft)
+})
+
+it('keeps legacy page identities readable but diagnoses unversioned text offsets instead of issuing current edit handles', async () => {
+  const f = await fixture()
+  const document = await f.host.internalAPI.open(path.join(f.workspace, 'notes.md'))
+  f.ui.state = { workspaceId: 'space', activeDocumentId: document.documentId,
+    selection: { documentId: document.documentId, targets: [{ kind: 'markdown-range', from: 4, to: 7 }] } }
+  const client = await f.connect('Legacy text focus client')
+  expect(data(await callTool(client, 'workbench.state'))).toMatchObject({ selection: null,
+    selectionUnavailable: { code: 'selection-version-missing' }, activeDocument: { documentId: document.documentId, writable: true } })
+  expect((await client.listTools()).tools.map(tool => tool.name)).toContain('asset.search')
+  f.ui.state = { ...f.ui.state, selection: { documentId: document.documentId, epoch: document.epoch, revision: document.revision,
+    targets: [{ kind: 'markdown-range', from: 4, to: 7 }] } }
+  expect(data(await callTool(client, 'workbench.state')).selection.targets[0].kind).toBe('markdown-range')
+  expect((await client.listTools()).tools.map(tool => tool.name)).not.toContain('asset.search')
+  expectSameAuthorState(f.host.registry.get(document.documentId).read(), document)
+
+  const project = createBlankCourseProjectV10('Legacy stable page')
+  const course = await f.host.internalAPI.create({ kind: 'course-v10', project, resources: { assets: {}, components: {} } }, 'legacy.glx')
+  f.ui.state = { workspaceId: 'space', activeDocumentId: course.documentId,
+    selection: { documentId: course.documentId, targets: [{ kind: 'course-surface', surfaceId: project.rootIds[0] }] } }
+  const pageClient = await f.connect('Legacy page focus client')
+  const state = data(await callTool(pageClient, 'workbench.state'))
+  expect(state.selection).toMatchObject({ documentId: course.documentId, epoch: course.epoch, revision: course.revision,
+    targets: [{ kind: 'course-surface', target: expect.any(String) }] })
+  expect(state.selectionUnavailable).toBeUndefined()
+  expect((await callTool(pageClient, 'read', { target: state.selection.targets[0].target })).structuredContent.result).toMatchObject({ kind: 'read' })
+  expectSameAuthorState(f.host.registry.get(course.documentId).read(), course)
 })
 
 it('freezes the permission level per session: read-only hides changes and ask requires the host confirmation', async () => {

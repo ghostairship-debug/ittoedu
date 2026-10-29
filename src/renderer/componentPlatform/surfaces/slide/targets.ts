@@ -93,26 +93,17 @@ export function hitFreeObject(targets: readonly FreeObjectTarget[], point: Geome
   return null
 }
 
-/** SAT intersection avoids selecting empty AABB corners beside a rotated object. */
+/** A marquee contains visible geometry; partial overlap never silently selects a group's children. */
 export function marqueeFreeTargets(targets: readonly FreeObjectTarget[], start: GeometryPoint, end: GeometryPoint, activeGroupId: string | null = null): string[] {
-  const rect = [{ x: Math.min(start.x, end.x), y: Math.min(start.y, end.y) },
-    { x: Math.max(start.x, end.x), y: Math.min(start.y, end.y) },
-    { x: Math.max(start.x, end.x), y: Math.max(start.y, end.y) },
-    { x: Math.min(start.x, end.x), y: Math.max(start.y, end.y) }]
-  const intersects = (polygon: readonly GeometryPoint[]) => {
-    const axes: GeometryPoint[] = [{ x: 1, y: 0 }, { x: 0, y: 1 }]
-    for (let i = 0; i < polygon.length; i++) {
-      const a = polygon[i]!, b = polygon[(i + 1) % polygon.length]!
-      axes.push({ x: a.y - b.y, y: b.x - a.x })
-    }
-    return axes.every(axis => {
-      const a = polygon.map(p => p.x * axis.x + p.y * axis.y), b = rect.map(p => p.x * axis.x + p.y * axis.y)
-      return Math.max(...a) >= Math.min(...b) && Math.max(...b) >= Math.min(...a)
-    })
-  }
-  const ids = targets.filter(target => freeTargetAtEditingLevel(targets, target.instanceId, activeGroupId)?.instanceId === target.instanceId
-    && intersects(frameCorners(target.frame, target.parentToSurface))).map(target => target.instanceId)
-  return ids
+  const left = Math.min(start.x, end.x), right = Math.max(start.x, end.x)
+  const top = Math.min(start.y, end.y), bottom = Math.max(start.y, end.y)
+  if (right === left || bottom === top) return []
+  const contained = targets.filter(target => {
+    if (activeGroupId ? !target.ancestors.includes(activeGroupId) : target.ancestors.length > 0) return false
+    return frameCorners(target.frame, target.parentToSurface).every(point => point.x >= left && point.x <= right && point.y >= top && point.y <= bottom)
+  })
+  const selected = new Set(contained.map(target => target.instanceId))
+  return contained.filter(target => !target.ancestors.some(id => selected.has(id))).map(target => target.instanceId)
 }
 
 export function sameFreeTarget(a: FreeObjectTarget, b: FreeObjectTarget): boolean {

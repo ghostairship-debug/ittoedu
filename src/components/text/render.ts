@@ -41,7 +41,9 @@ export function textAppearanceStyles(appearance: TextAppearance, sizing: TextSiz
     fontWeight: appearance.bold ? '700' : '400', fontStyle: appearance.italic ? 'italic' : 'normal',
     letterSpacing: `${appearance.letterSpacing}px`, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere',
     writingMode: appearance.writingMode === 'horizontal' ? 'horizontal-tb' : appearance.writingMode,
-    transform: `scale(${appearance.flipX ? -1 : 1},${appearance.flipY ? -1 : 1})`, transformOrigin: 'center',
+    // An identity transform still creates a stacking context: the full-width text box
+    // would intercept pointer events over a neighboring floated image or component.
+    transform: appearance.flipX || appearance.flipY ? `scale(${appearance.flipX ? -1 : 1},${appearance.flipY ? -1 : 1})` : 'none', transformOrigin: 'center',
   }
   if (appearance.writingMode !== 'horizontal') content.height = '100%'
   return { box, content }

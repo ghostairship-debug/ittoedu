@@ -65,7 +65,7 @@ export const componentBackgroundSchema = z.object({
     'background-blend-mode': z.string().optional(),
   }).strict(), resourceBindings: ownRecordSchema(z.string().min(1), id) }).strict()).min(1) }).strict().nullable().optional(),
 }).strict()
-export const componentFlowBodyLayoutSchema = z.object({ width: z.enum(['content-width', 'wide', 'full-width']), wrap: z.enum(['none', 'left', 'right']).optional(), caption: documentTextContentSchema.optional() }).strict()
+export const componentFlowBodyLayoutSchema = z.object({ width: z.enum(['content-width', 'wide', 'full-width']), wrap: z.enum(['none', 'left', 'right']).optional(), widthPercent: z.number().finite().positive().max(100).optional(), caption: documentTextContentSchema.optional() }).strict()
 export const componentFlowPlacementSchema = z.object({
   space: z.enum(['paper', 'viewport']), plane: z.enum(['overlay', 'underlay']),
   paragraphAnchor: z.object({ blockId: id, offsetY: finite, xRatio: finite }).strict().optional(),

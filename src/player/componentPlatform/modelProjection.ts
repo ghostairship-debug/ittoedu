@@ -1,9 +1,11 @@
+import { hostNavigationExplicitlyHidden } from '../../shared/contracts/playback-v1'
 import { createFlowReadingNavigation, observeFlowReading } from '../../shared/flowReading'
 import { resolveFlowChapterEntry } from '../../shared/flowChapterEntry'
 import {allDocumentTextSlots,inlineComponentIds,documentInlineChildIds} from '../../shared/document/textInteraction'
 import {paintComponentSpatialGraph} from './paintSpatialGraph'
 import {bindSpatialInput} from './spatialInput'
 import { mountComponentFlowToc } from './flowToc'
+import { flowRuntimeTocShellLayout } from '../surfaces/flow/flowRuntimeToc'
 import type { ComponentInstance, ComponentSurface, CourseProjectV10 } from '../../shared/contracts/component-platform'
 import { resolveComponentBackground, resolveComponentSurfaceBackground, isComponentVisibleAtSurface, componentDefinitionBuiltinKey, owningContainer, componentSurface, componentContainers } from '../../shared/contracts/component-platform'
 import { resolveComponentOuterPresentation, applyComponentPresentationStyle } from '../../shared/componentPresentation'
@@ -147,7 +149,7 @@ export function createComponentModelProjection(context: {
   }
 
   function placeNode(node: NodeView, instance: ComponentInstance, project: CourseProjectV10, inlineSize: number) {
-    const presentation = resolveComponentOuterPresentation(project, instance, { placement: node.flow ? 'flow' : 'free', purpose: 'playback', inlineSize, flowLayout: node.flowLayout })
+    const presentation = resolveComponentOuterPresentation(project, instance, { placement: node.flow ? 'flow' : 'free', purpose: 'playback', inlineSize, availableInlineSize:node.outer.parentElement?.clientWidth||inlineSize, flowLayout: node.flowLayout })
     applyComponentPresentationStyle(node.outer,presentation.outerStyle)
     applyComponentPresentationStyle(node.stage,presentation.stageStyle)
     applyComponentPresentationStyle(node.content,presentation.contentStyle)
@@ -163,7 +165,7 @@ export function createComponentModelProjection(context: {
       used.add(id)
       let node = nodes.get(id)
       const presentation = resolveComponentOuterPresentation(project, instance, { placement: flow ? 'flow' : 'free', purpose: 'playback',
-        inlineSize: node?.outer.clientWidth || parent.clientWidth || instance.frame?.width || 1, flowLayout })
+        inlineSize: node?.outer.clientWidth || parent.clientWidth || instance.frame?.width || 1, availableInlineSize:parent.clientWidth||instance.frame?.width||1, flowLayout })
       if (!node) {
         const outer = document.createElement('div'), stage = document.createElement(presentation.section ? 'details' : 'div'), content = document.createElement(presentation.section ? 'summary' : 'div'), children = document.createElement('div')
         outer.dataset.componentObject = id
@@ -253,6 +255,8 @@ export function createComponentModelProjection(context: {
     const active = activeSurface ? surfaces.get(activeSurface) : undefined
     Object.assign(shell.style, { width: '100%', height: context.naturalHeight ? 'auto' : '100%', transform: 'none' })
     Object.assign(surfacePlane.style, { position: context.naturalHeight ? 'relative' : 'absolute', inset: context.naturalHeight ? 'auto' : '0px' })
+    for (const view of surfaces.values()) if (view.flow)
+      view.flow.scroll.style.marginLeft = `${flowRuntimeTocShellLayout(view.toc?.open ?? false).articleInsetPx}px`
     // Establish the current viewport before measuring paragraph anchors in logical coordinates.
     active?.playback?.resize()
     const activeModel = project && activeSurface ? componentSurface(project, activeSurface) : undefined
@@ -322,7 +326,7 @@ export function createComponentModelProjection(context: {
       observer?.observe(element)
        {
         element.dataset.pageBackdrop = 'transparent'
-        const playback = new PlaybackViewSession(), viewport = playback.mount(element), host = document.createElement('div')
+        const playback = new PlaybackViewSession({ chrome: !hostNavigationExplicitlyHidden(project.playback) }), viewport = playback.mount(element), host = document.createElement('div')
         viewport.append(host)
         const content = createPlaybackContent(host)
         if (surface.designSize) { host.dataset.canvasWidth = String(surface.designSize.width); host.dataset.canvasHeight = String(surface.designSize.height) }
@@ -404,6 +408,7 @@ export function createComponentModelProjection(context: {
     if (view.topLevel && !topLevel) view.root.style.display = ''
     view.topLevel = topLevel
     view.naturalHeight = naturalHeight
+    view.playback?.setChromeEnabled(!hostNavigationExplicitlyHidden(project.playback))
     if (!naturalHeight) view.root.style.height = '100%'
     if (!topLevel) view.root.hidden = false
     applyComponentBackgroundPaint(view.root, resolveComponentSurfaceBackground(project, surface), id => runtime.assetUrl(id))
@@ -411,9 +416,9 @@ export function createComponentModelProjection(context: {
     if (view.flow) {
       Object.assign(view.flow.scroll.style, { position: naturalHeight ? 'relative' : 'absolute', inset: naturalHeight ? 'auto' : '0px', overflow: naturalHeight ? 'visible' : 'auto' })
       view.flow.paper.style.minHeight = naturalHeight ? '0px' : '100%'
-      if (surface.flow?.layout.toc === 'hidden') { view.toc?.destroy(); view.toc = undefined }
+      if (surface.flow?.layout.toc === 'hidden' || hostNavigationExplicitlyHidden(project.playback)) { view.toc?.destroy(); view.toc = undefined }
       else if (topLevel && context.teacherController) {
-        view.toc ??= mountComponentFlowToc(view.root, surface.id, context.teacherController)
+        view.toc ??= mountComponentFlowToc(view.root, surface.id, context.teacherController, { onOpenChange: resize })
         view.toc.sync()
       }
       const layout = surface.flow?.layout ?? { readingWidth: 860, wideContentWidth: 1100 }

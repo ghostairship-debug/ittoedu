@@ -10,6 +10,7 @@
 | 判断正文、图片和共享动态效果怎样分工 | [Runtime-first 方法](../docs/creative-production/works/coffee-journey/runtime-first-system-20261025/METHOD.md) | 状态归属、响应式构图、生命周期及视觉连续性的判断方法 | 来自特定作品的实证。高频共享状态可放在同一程序，独立文字、图像与参数按实际编辑需要保留边界；不规定原生比例或 Runtime 比例。 |
 | 观察整篇内容、持续主体、章节导航和局部实验的组织 | [咖啡冻结案例 r264](../docs/creative-production/works/coffee-journey/design/v08-runtime-first/final-20261025/README.md) | 设计关系、必要连续状态和可编辑结构的参考 | 正式保存、独立冷开、七章桌面/390px 视口与离线互动已有证据。七章结构、咖啡素材和完整场景源码属于该主题，不能默认当成通用模板；研究时用副本。 |
 | 找到已验证的背景、连续变量配方及其操作前提 | [现有资产短索引](../docs/creative-production/works/coffee-journey/runtime-first-system-20261025/ASSET_INDEX.md) | 沿现有资产库查找和采用可靠实现 | 复用现有身份、版本和资源服务。配方的默认排版是采用验证，不是新作艺术方向。 |
+| 在共享计算中保留作者输入和深度编辑，或在Source内嵌原生文字 | [生产力与ACP实证](../docs/development-plan/20261028-productivity-acp/RESULT.md) | 原生表格保存作者输入、Runtime维护派生状态、图表get/subscribe；Source内部原生文字沿原编辑器修改 | 市场局改后编辑态/冷开/离线12情景与Source原生编辑生命周期分别已验。按内容需要选择，不复制实例ID、整作或新模板；订阅竞态由软件修复，无需在Skill中手工规避。 |
 | 理解完整 HTML 正式采用、手机响应式和后续局改的得失 | [城市夜线的采用与交付记录](../docs/development-plan/20261026-product-execution/RESULT.md) | 识别源内容问题、采用损耗与返工，选择完整程序或独立页面的现有入口 | 原始 H/G0 与返工 G1 分开记账；保存成功不等于作品合格，修后结果不代表首次生成成功。 |
 
 ## 查找、采用和修改

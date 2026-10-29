@@ -36,7 +36,10 @@ export interface FlowRuntimeTocEntry {
   readonly kind: FlowRuntimeTocKind
   readonly surfaceId: string
   readonly title: string
+  /** Visual indentation, which may include section nesting. */
   readonly level: number
+  /** Authored heading level; absent when the navigation source has no such fact. */
+  readonly headingLevel?: number
   readonly anchorId: string
   readonly blockId?: string
   readonly locationId?: string
@@ -96,6 +99,7 @@ export function buildFlowSurfaceToc(
       surfaceId: surface.id,
       title: flowAnchorTitle(block),
       level: block.type === 'heading' ? block.level + depth : depth + 1,
+      ...(block.type === 'heading' ? { headingLevel: block.level } : {}),
       anchorId: flowRuntimeTocAnchorId(block.id),
       blockId: block.id,
       locationId: locationByBlockId.get(block.id),
@@ -316,5 +320,7 @@ export class FlowRuntimeTocChrome {
 function tocItemAriaLabel(entry: FlowRuntimeTocEntry): string {
   if (entry.kind === 'page') return `跳转到页面：${entry.title}`
   if (entry.kind === 'section') return `跳转到分节：${entry.title}`
-  return `跳转到标题 ${entry.level}：${entry.title}`
+  const level = entry.headingLevel
+  return typeof level === 'number' && Number.isInteger(level) && level >= 1 && level <= 6
+    ? `跳转到标题 ${level}：${entry.title}` : `跳转到标题：${entry.title}`
 }

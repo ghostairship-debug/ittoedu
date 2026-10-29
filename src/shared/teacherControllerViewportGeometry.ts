@@ -29,7 +29,7 @@ function viewportStretch(style: CourseProjectV10['instances'][string]['style']) 
   return { width: style?.width === '100%', height: style?.height === '100%' }
 }
 
-export type TeacherControllerDisplayPort = Pick<TeacherControllerPort, 'read' | 'subscribe' | 'setCollapsed' | 'forInstance' | 'subscribePlacement'> & {
+export type TeacherControllerDisplayPort = Pick<TeacherControllerPort, 'read' | 'subscribe' | 'setCollapsed' | 'forInstance' | 'subscribePlacement' | 'readControls' | 'subscribeControls'> & {
   placement?(): { x: number; y: number }
   canExecute?: TeacherControllerPort['canExecute']
   execute?: TeacherControllerPort['execute']

@@ -63,6 +63,7 @@ export const projectPresenterSettingsSchema: z.ZodType<ProjectPresenterSettings>
 
 export const projectPlaybackSettingsSchema: z.ZodType<ProjectPlaybackSettings> = z.object({
   controls: z.enum(['canvas', 'none']),
+  hostNavigation: z.enum(['auto', 'intentionally-hidden']).optional(),
   keyboardNavigation: z.boolean(),
   presenter: projectPresenterSettingsSchema,
 }).strict()
@@ -83,6 +84,7 @@ const courseProjectPresenterKeyBindingSchema = z.object({
  */
 export const courseProjectPlaybackSettingsSchema: z.ZodType<ProjectPlaybackSettings> = z.object({
   controls: z.enum(['canvas', 'none']),
+  hostNavigation: z.enum(['auto', 'intentionally-hidden']).optional(),
   keyboardNavigation: z.boolean(),
   presenter: z.object({
     enabled: z.boolean(),

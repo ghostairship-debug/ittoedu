@@ -1,5 +1,5 @@
 {
-  "description": "对同页同展示状态的已观察对象做对齐、等距分布或Flow正文分栏。targets用对象句柄；intent.kind=columns将同一正文父级内对象编入分栏，可用columns按这些句柄分列、ratios设列宽、gap设间距。软件保留对象身份、内容和人工样式，准备布局及正式事务，一次撤销。对齐与分布复用世界坐标、父级逆变换和锁定规则，无需逐个计算frame。",
+  "description": "对同页同展示状态的已观察对象做一次对齐、等距分布、普通组合/解组或Flow正文分栏。reflow在母版使用临时HTML/CSS，空div data-layout-ref=\"0\"、\"1\"按targets顺序引用当前对象；每个一次，软件注入最新正文/资源，保留身份/数据/Source/父级，只应用几何。重排期间无关人改合并，正文或字体变化自动重测，几何冲突保留当前稿。group/ungroup在母版修改一层共同父级关系，需父级结构授权，保持成员身份与画面几何；已知成员直接使用句柄，无需模拟UI先选组。普通组默认自由，复杂组件与共同效果不强拆。targets用对象句柄；intent.kind=columns将同一正文父级内对象编入分栏，可用columns按这些句柄分列、ratios设列宽、gap设间距。软件保留对象身份、内容和人工样式，准备布局及正式事务，一次撤销。对齐与分布复用世界坐标、父级逆变换和锁定规则，无需逐个计算frame。",
   "inputSchema": {
     "$defs": {
       "__schema0": {
@@ -71,6 +71,61 @@
           {
             "additionalProperties": false,
             "properties": {
+              "kind": {
+                "enum": [
+                  "group",
+                  "ungroup"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "html": {
+                "description": "临时HTML/CSS构图，按targets顺序使用空div data-layout-ref=\"0\"、\"1\"等，每个恰好一次。软件注入当前内容，只应用几何，不保存包装、不改正文。",
+                "minLength": 1,
+                "type": "string"
+              },
+              "kind": {
+                "const": "reflow",
+                "type": "string"
+              },
+              "viewport": {
+                "additionalProperties": false,
+                "properties": {
+                  "height": {
+                    "exclusiveMinimum": 0,
+                    "maximum": 9007199254740991,
+                    "type": "integer"
+                  },
+                  "width": {
+                    "exclusiveMinimum": 0,
+                    "maximum": 9007199254740991,
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "width",
+                  "height"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "kind",
+              "html"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
               "columns": {
                 "items": {
                   "$ref": "#/$defs/__schema1"
@@ -118,7 +173,7 @@
   "invocation": "静态目录只说明已登记接口；当前运行是否可调用、文档范围、写权限、短句柄和服务配置，以宿主本轮发现与实际回执为准。",
   "manual": {
     "group": "edit",
-    "label": "对齐与分布",
+    "label": "布局与组合",
     "targetKinds": [
       "course-instance"
     ]

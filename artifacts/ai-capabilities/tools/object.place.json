@@ -305,6 +305,11 @@
                     ],
                     "type": "string"
                   },
+                  "widthPercent": {
+                    "exclusiveMinimum": 0,
+                    "maximum": 100,
+                    "type": "number"
+                  },
                   "wrap": {
                     "enum": [
                       "none",

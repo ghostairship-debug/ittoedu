@@ -1,18 +1,28 @@
 {
   "description": "在需要内容地图时列出当前工程虚拟路径、语义摘要、typed入口与正式frame。已有精确目标可直接project.read，无需先列目录。project可用已读文档/页面/对象/空间关系target限定范围。共享API是单独reference路径，按需读取；Source和原始工作区文件完整可读。nextOffset配原project续读固定目录。 project省略时使用本任务当前课件；明确file.create/file.open后接续该课件。显式project可参考或修改另一课，不改变当前课件。",
   "inputSchema": {
+    "$defs": {
+      "__schema0": {
+        "maximum": 9007199254740991,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "__schema1": {
+        "exclusiveMinimum": 0,
+        "maximum": 9007199254740991,
+        "type": "integer"
+      }
+    },
     "$schema": "https://json-schema.org/draft/2020-12/schema",
     "additionalProperties": false,
     "properties": {
       "limit": {
-        "exclusiveMinimum": 0,
-        "maximum": 9007199254740991,
-        "type": "integer"
+        "$ref": "#/$defs/__schema1",
+        "description": "最多返回的目录项数；交付容量可能提前分页，以返回的 nextOffset 为准。"
       },
       "offset": {
-        "maximum": 9007199254740991,
-        "minimum": 0,
-        "type": "integer"
+        "$ref": "#/$defs/__schema0",
+        "description": "续页传入上一页 nextOffset，并沿用 project。"
       },
       "project": {
         "minLength": 1,

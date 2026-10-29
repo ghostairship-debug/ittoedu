@@ -234,8 +234,34 @@ export class DelegationJobService {
   }
   private frozenSources(sources: readonly PreparedTaskSource[]): readonly PreparedTaskSource[] {
     const result = sources.map(({ bytes, ...source }) => ({ ...structuredClone(source), name: artifactName(source.name), bytes: new Uint8Array(bytes) }))
-    if (new Set(result.map(source => source.name)).size !== result.length) throw new DelegationJobError('invalid-materials', '任务输入文件重名')
+    const key = (name: string) => process.platform === 'win32' ? name.toLowerCase() : name
+    const names = new Map(result.map(source => [key(source.name), source.name]))
+    if (names.size !== result.length) throw new DelegationJobError('invalid-materials', '任务输入文件重名')
+    // Validate the whole capture before creating a task directory. A virtual
+    // file cannot also be another input's physical parent directory.
+    for (const source of result) {
+      const parts = source.name.split('/')
+      for (let length = 1; length < parts.length; length++) {
+        const ancestor = names.get(key(parts.slice(0, length).join('/')))
+        if (ancestor) throw new DelegationJobError('invalid-materials', `任务输入文件路径冲突：${ancestor} 同时是 ${source.name} 的目录祖先`)
+      }
+    }
     return result
+  }
+  private nativeTaskSources(sources: readonly PreparedTaskSource[], outputs: readonly string[]): readonly PreparedTaskSource[] {
+    const key = (name: string) => process.platform === 'win32' ? name.toLowerCase() : name
+    const overlaps = (left: string, right: string) => {
+      const a = key(left), b = key(right)
+      return a === b || a.startsWith(`${b}/`) || b.startsWith(`${a}/`)
+    }
+    if (!sources.some(source => outputs.some(output => overlaps(source.name, output)))) return sources
+    // Keep the complete source tree together so relative dependencies still
+    // resolve. The existing sources brief advertises these actual input paths;
+    // a declared output must then be produced, including an explicit unchanged
+    // copy when that is the intended result, rather than inheriting input bytes.
+    let prefix = 'inputs'
+    for (let index = 2; outputs.some(output => overlaps(prefix, output)); index++) prefix = `inputs-${index}`
+    return sources.map(source => ({ ...source, name: `${prefix}/${source.name}` }))
   }
   private sourcePreparation(input: TaskSourcePreparation): (signal: AbortSignal) => Promise<readonly PreparedTaskSource[]> {
     if (input.sources !== undefined && input.prepareSources)
@@ -404,7 +430,7 @@ export class DelegationJobService {
     let resumeRunId: string | undefined
     return this.startExecution(task, requestDigest, 'native', async signal => {
       signal.throwIfAborted()
-      sources = await prepareSources(signal)
+      sources = this.nativeTaskSources(await prepareSources(signal), task.expectedArtifacts)
       const targetSource = sources.find(source => source.source.startsWith('task-target:'))
       const targetContext = targetSource ? JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(targetSource.bytes)) as unknown : undefined
       await this.update(input.jobId, job => { job.nativeIntent = input.intent; job.goal = input.intent.goal;

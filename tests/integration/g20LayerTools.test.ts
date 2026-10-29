@@ -128,3 +128,19 @@ it('aligns and distributes unmounted objects while rejecting cross-owner moves a
   expect(after.undoDepth).toBe(1); expect(driver.load(driver.serialize(after.model))).toEqual(after.model)
   await undo(f, 'undo-layout'); expect(project(f.session.read()).instances).toEqual(project(baseline).instances)
 })
+
+it('groups and ungroups through exact-target domain tools without any UI selection state',async()=>{
+ const f=await harness(true),before=f.session.read(),ids=['shape-a','shape-b','shape-c']
+ const handles=await Promise.all(ids.map(f.object))
+ applied(await f.invoke('group','object.layout',{targets:handles,intent:{kind:'group'}}))
+ const grouped=f.session.read(),created=Object.values(project(grouped).instances).find(i=>!project(before).instances[i.id])!
+ expect(created.childIds).toEqual(ids)
+ expect(grouped.undoDepth).toBe(1)
+ for(const id of ids)expect(project(grouped).instances[id].data).toEqual(project(before).instances[id].data)
+ const groupHandle=await f.object(created.id)
+ applied(await f.invoke('ungroup','object.layout',{targets:[groupHandle],intent:{kind:'ungroup'}}))
+ expect(project(f.session.read()).instances).toEqual(project(before).instances)
+ expect(f.session.read().model.resources).toEqual(before.model.resources)
+ expect(driver.load(driver.serialize(f.session.read().model))).toEqual(f.session.read().model)
+ await undo(f,'undo-ungroup');expect(project(f.session.read()).instances).toEqual(project(grouped).instances)
+})

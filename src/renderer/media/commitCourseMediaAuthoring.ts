@@ -236,8 +236,8 @@ export async function removeCourseAsset(kernel: EditorStoreKernel, assetId: stri
   const target = kernel.captureTarget()
   await kernel.editCaptured(kernel.capture([{ type: 'asset.remove', assetId }], target))
 }
-export async function ensureCourseTeacherController(kernel: EditorStoreKernel, target = captureCourseInsertionTarget(kernel), origin?: 'slide-authoring'): Promise<CourseInsertionResult> {
-  const { edits, instanceIds } = prepareCourseTeacherControllerEdits(target.project, target.surfaceId, origin, target.instanceId)
+export async function ensureCourseTeacherController(kernel: EditorStoreKernel, target = captureCourseInsertionTarget(kernel), origin?: 'slide-authoring', options:Parameters<typeof prepareCourseTeacherControllerEdits>[4]={}): Promise<CourseInsertionResult> {
+  const { edits, instanceIds } = prepareCourseTeacherControllerEdits(target.project, target.surfaceId, origin, target.instanceId,options)
   if (edits.length) await kernel.editCaptured(kernel.capture(edits, target))
   if (capturedCourseViewIsCurrent(kernel.readView(), target)) kernel.selectInstances(instanceIds, target.surfaceId, target.documentId)
   return { instanceIds, documentId: target.documentId, surfaceId: target.surfaceId }

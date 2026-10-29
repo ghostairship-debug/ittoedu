@@ -52,7 +52,7 @@ export async function connectInstalledMcp(options: InstalledMcpBootstrapOptions,
 /** A successful transport is not proof of a committed document or a saved package. */
 export function requireCurrentProjectSave(result: unknown, filename: string): void {
   if (!result || typeof result !== 'object' || !('kind' in result) || result.kind !== 'read' || !('data' in result)) {
-    throw new Error('project.save 未返回正式保存回执')
+    throw new Error('file.save 未返回正式保存回执')
   }
   const data = result.data
   if (!data || typeof data !== 'object' || !('status' in data) || data.status !== 'saved'

@@ -565,6 +565,16 @@ export function readEditableTargetContent(model: DocumentModel, target: ToolTarg
   // legitimately add a link, formula or emphasis without switching workflows.
   return { text: inlineHtml(selected), format: 'html' }
 }
+/** Rich source projection does not make unmarked replacement text an HTML formatting reset. */
+export function editableReplacementFormat(content: string, representation: 'text' | 'markdown' | 'html'): 'text' | 'html' {
+  if (representation !== 'html') return 'text'
+  const nodes = parseFragment(content).childNodes
+  // Use the same HTML parser as replacement: actual markup and character references
+  // retain their existing semantics; ordinary text inherits the selected inline marks.
+  const plain = nodes.every(node => node.nodeName === '#text')
+    && nodes.map(node => (node as DefaultTreeAdapterTypes.TextNode).value).join('') === content.replace(/\r\n?/g, '\n')
+  return plain ? 'text' : 'html'
+}
 /** Both visible selection entry points and Main use the same current-content eligibility. */
 export function prepareExecutionContentOutput(snapshot: DocumentSnapshot, target: ToolTarget): ExecutionContentOutput | undefined {
   if (target.kind !== 'markdown-range' && target.kind !== 'course-instance' && target.kind !== 'html-author-field' && target.kind !== 'text-selection') return undefined
@@ -642,7 +652,8 @@ export function recoverEditableTargetAfterReplacement(model: DocumentModel, orig
   const field = courseInstanceTextTarget(model, original)
   const value = readCourseInstanceText(model, field)
   if (value === null) return null
-  const rich = !isHtmlSourceTextTarget(model, field) && (format === 'html' || format === undefined && typeof value !== 'string')
+  const rich = !isHtmlSourceTextTarget(model, field)
+    && (format ?? editableReplacementFormat(content, typeof value === 'string' ? 'text' : 'html')) === 'html'
   const parsed = rich ? parseEditableInlineHtml(content, { inlines: [] }) : undefined
   const inserted = parsed ? documentTextLength(parsed) : Array.from(content).length
   const target = original.from !== undefined && original.to !== undefined ? { ...field, to: original.from + inserted } : field

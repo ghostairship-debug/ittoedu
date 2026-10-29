@@ -36,6 +36,7 @@ function controllerFor(h: Awaited<ReturnType<typeof createV10StoreHost>>) {
     read: () => { const view = h.bridge.read(); return { project: view.editingProject!, surfaceId: view.surfaceId!,
       documentId: view.activeDocumentId!, activeStateId: view.activeStateId, activeGroupId: view.activeGroupId, selectedInstanceIds: view.selectedInstanceIds } },
     capture: () => h.bridge.captureOwnedTarget(), select: ids => h.bridge.selectInstances(h.first.documentId, ids),
+    selectCanvas: (ids, groupId) => h.bridge.selectInstances(h.first.documentId, ids, undefined, groupId),
     commit: (edits, target, group) => h.bridge.editCaptured(h.bridge.capture(edits, target), group), report,
   })
   return { controller, report }
@@ -59,16 +60,16 @@ it('single-click selects and drags the whole group, and entering it changes only
     expect(h.first.read().undoDepth).toBe(0)
     expect(h.operations).toHaveLength(2) // Only the completed drag and its undo reached the document owner.
     controller.pointerDown({ x: 80, y: 70 }, identity)
-    expect(h.bridge.read().selectedInstanceIds).toEqual(['inner'])
+    expect(h.bridge.read().selectedInstanceIds).toEqual(['text'])
     await controller.pointerUp({ x: 80, y: 70 }, identity)
     controller.pointerDown({ x: 1200, y: 650 }, identity)
     await controller.pointerUp({ x: 1200, y: 650 }, identity)
-    expect(h.bridge.read()).toMatchObject({ activeGroupId: 'outer', selectedInstanceIds: [] })
+    expect(h.bridge.read()).toMatchObject({ activeGroupId: null, selectedInstanceIds: [] })
     expect(h.first.read().undoDepth).toBe(0)
   } finally { h.bridge.dispose() }
 })
 
-it('hit, marquee and context selection use direct children while preserving full geometry and lock ancestry', async () => {
+it('legacy hierarchy queries stay explicit while canvas context selects a member and preserves full geometry and lock ancestry', async () => {
   const project = fixture(), targets = freeSurfaceTargets(project, 'slide')
   expect(hitFreeObject(targets, { x: 80, y: 70 })?.instanceId).toBe('outer')
   expect(freeTargetAtEditingLevel(targets, 'text', 'outer')?.instanceId).toBe('inner')
@@ -80,7 +81,7 @@ it('hit, marquee and context selection use direct children while preserving full
   const h = await createV10StoreHost(project), { controller } = controllerFor(h)
   try {
     h.bridge.enterGroup(h.first.documentId, 'outer')
-    expect(controller.contextTarget({ x: 80, y: 70 }, identity)).toBe('inner')
+    expect(controller.contextTarget({ x: 80, y: 70 }, identity)).toBe('text')
     controller.pointerDown({ x: 80, y: 70 }, identity)
     await controller.pointerUp({ x: 100, y: 90 }, identity)
     expect(h.first.read().undoDepth).toBe(0)

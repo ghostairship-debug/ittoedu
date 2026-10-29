@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "semanticVersion": "5f3900ddda3e2b0e1f456b23f4086310f260f01ea91bc2e19e694b5d4e5a581a",
+  "semanticVersion": "fc4ded8eaaed7c4a7c32c33421197bd9a0add4a35daa3760c6d61d74a95f957c",
   "entries": [
     {
       "id": "artifact.save",
@@ -1779,7 +1779,7 @@
       "carriers": [
         "component"
       ],
-      "summary": "对同页同展示状态的已观察对象做对齐、等距分布或Flow正文分栏。targets用对象句柄；intent.kind=columns将同一正文父级内对象编入分栏，可用columns按这些句柄分列、ratios设列宽、gap设间距。软件保留对象身份、内容和人工样式，准备布局及正式事务，一次撤销。对齐与分布复用世界坐标、父级逆变换和锁定规则，无需逐个计算frame。"
+      "summary": "对同页同展示状态的已观察对象做一次对齐、等距分布、普通组合/解组或Flow正文分栏。reflow在母版使用临时HTML/CSS，空div data-layout-ref=\"0\"、\"1\"按targets顺序引用当前对象；每个一次，软件注入最新正文/资源，保留身份/数据/Source/父级，只应用几何。重排期间无关人改合并，正文或字体变化自动重测，几何冲突保留当前稿。group/ungroup在母版修改一层共同父级关系，需父级结构授权，保持成员身份与画面几何；已知成员直接使用句柄，无需模拟UI先选组。普通组默认自由，复杂组件与共同效果不强拆。targets用对象句柄；intent.kind=columns将同一正文父级内对象编入分栏，可用columns按这些句柄分列、ratios设列宽、gap设间距。软件保留对象身份、内容和人工样式，准备布局及正式事务，一次撤销。对齐与分布复用世界坐标、父级逆变换和锁定规则，无需逐个计算frame。"
     },
     {
       "id": "object.place",
@@ -3149,7 +3149,7 @@
       "carriers": [
         "component"
       ],
-      "summary": "为已观察演示页准备全局控制台；复用已有控制台，否则使用人工插入默认、共享层和软件身份创建。涉及全局层时需要整课授权，一次事务可撤销。"
+      "summary": "为已观察页面创建同源导航组件。placement=content可插入directory/top/side/progress内容导航；默认placement=global复用或创建整课控制台。presentation选择呈现，位置/当前章节/动作沿同一正式服务，绑定和合法禁用由软件处理。全局层需要整课授权，内容导航只需要页面插入权限。一次事务可撤销，参数可编辑。"
     },
     {
       "id": "text.format",

@@ -44,7 +44,10 @@ export interface ExternalMcpStatus {
 export const externalUiStateSchema = z.object({
   workspaceId: z.string().min(1).optional(),
   activeDocumentId: z.string().min(1).optional(),
-  selection: z.object({ documentId: z.string().min(1), targets: z.array(executionSelectionTargetSchema).min(1) }).strict().optional(),
+  selection: z.object({ documentId: z.string().min(1), targets: z.array(executionSelectionTargetSchema).min(1),
+    /** Older renderer reports remain readable; unversioned precise ranges cannot become current edit handles. */
+    epoch: z.string().min(1).optional(), revision: z.number().int().nonnegative().optional(),
+  }).strict().refine(value => (value.epoch === undefined) === (value.revision === undefined), '选区会话和版本必须同时提供').optional(),
 }).strict()
 export type ExternalUiState = z.infer<typeof externalUiStateSchema>
 

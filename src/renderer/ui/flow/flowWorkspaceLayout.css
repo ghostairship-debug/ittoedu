@@ -58,3 +58,8 @@
 .flow-text-interactions { position:relative; flex:none; font-size:12px; }
 .flow-text-interactions > summary { cursor:pointer; white-space:nowrap; }
 .flow-text-interactions > [role=group] { position:absolute; top:100%; right:0; z-index:5; max-height:60vh; overflow:auto; background:var(--panel-bg,#fff); border:1px solid var(--border,#cbd5e1); box-shadow:0 4px 12px #0002; }
+
+/* Allocation handles belong to the document shell, never to a Source program. */
+[data-flow-body-resize]{visibility:hidden}
+.ProseMirror-selectednode>[data-flow-body-resize],[data-flow-body-resize]:focus{visibility:visible}
+[data-flow-layout-preview]{user-select:none;pointer-events:none}

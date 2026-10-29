@@ -36,6 +36,7 @@ export function flowSettingsEdits(project: CourseProjectV10, surfaceId: string, 
 export function flowBodyLayoutEdits(project: CourseProjectV10, instanceId: string, patch: Partial<ComponentFlowBodyLayout>): ComponentEdit[] {
   const instance = requireEditable(project, instanceId)
   const flowLayout = { width: 'content-width' as const, ...instance.flowLayout, ...patch }
+  if(patch.width!==undefined&&!Object.hasOwn(patch,'widthPercent'))delete flowLayout.widthPercent
   return equalComponentValue(instance.flowLayout, flowLayout) ? [] : [{ type: 'instance.flowLayout.set', instanceId, flowLayout }]
 }
 

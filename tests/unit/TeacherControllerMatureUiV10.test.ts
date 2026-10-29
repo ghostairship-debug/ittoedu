@@ -38,7 +38,7 @@ describe('mature teacher UI on the V10 navigation port', () => {
   it('restores the 52px round entrance, full controls, directory and zoom while preserving the author frame', async () => {
     const value = await fixture(undefined, true)
     try {
-      const panel = value.root.querySelector<HTMLElement>('nav[aria-label="教师控制台"]')!
+      const panel = value.root.querySelector<HTMLElement>('nav[aria-label="全局控制台"]')!
       const style = getComputedStyle(panel)
       expect([style.width, style.height, style.borderRadius, style.right, style.bottom]).toEqual(['52px', '52px', '50%', '0px', '0px'])
       expect(value.root.style.width).toBe('100%')
@@ -47,7 +47,7 @@ describe('mature teacher UI on the V10 navigation port', () => {
       expect(panel.style.backgroundImage).toContain('blob:controller-texture')
       value.button('collapse').click()
       expect(panel.classList.contains('collapsed')).toBe(false)
-      expect(panel.querySelector('.identity strong')?.textContent).toBe('教师控制台')
+      expect(panel.querySelector('.identity strong')?.textContent).toBe('全局控制台')
       expect(panel.querySelector('.track i')).not.toBeNull()
       expect(panel.querySelectorAll('.steps button svg')).toHaveLength(2)
       expect(panel.querySelector('.tools button svg')).not.toBeNull()

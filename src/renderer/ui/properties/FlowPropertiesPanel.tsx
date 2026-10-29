@@ -795,6 +795,8 @@ export function FlowPropertiesPanel({ context }: { context: FlowPropertiesContex
             <SelectField<'none' | 'left' | 'right'> label="文字环绕" value={context.flowLayout?.wrap ?? 'none'} disabled={Boolean(context.structureDisabledReason)}
               options={[{ value: 'none', label: '不环绕（独占一行）' }, { value: 'left', label: '居左环绕' }, { value: 'right', label: '居右环绕' }]}
               onChange={wrap => context.commands.patchSelectedBlock({ wrap })} />
+            <BufferedInput label="正文占宽（%）" type="number" value={context.flowLayout?.widthPercent ?? (context.flowLayout?.wrap && context.flowLayout.wrap!=='none' ? 48 : 100)} min={1} max={100} step={1}
+              onCommit={value=>commitBlockProperties(context.commands,{widthPercent:Number(value)})} />
             {context.block?.type === 'media' && <BufferedInput label="替代文本" value={context.block.altText ?? ''} onCommit={altText => commitBlockProperties(context.commands, { altText })} />}
             {(context.block?.type === 'media' || context.block?.type === 'table') && <>
               {!context.block.caption && <button type="button" onClick={() => context.commands.patchSelectedBlock({ caption: { inlines: [] } })}>{context.block.type === 'table' ? '添加表格标题说明' : '添加题注'}</button>}

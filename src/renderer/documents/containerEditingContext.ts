@@ -24,6 +24,38 @@ export function editingLevelFromAncestry(instanceId: string, ancestors: readonly
   return deep ? instanceId : ancestors[index + 1] ?? instanceId
 }
 
+/** A click may enter a group, but the same press dragged before release still moves the selected group. */
+export interface GroupSelectionIntent {
+  pressId: string
+  clickId: string
+  groupId: string | null
+}
+
+export function resolveGroupSelectionIntent(project: GroupEditingProject, scopeId: string | null,
+  instanceId: string, selectedIds: readonly string[], activeGroupId: string | null = null,
+  deep = false, additive = false): GroupSelectionIntent | null {
+  if (!scopeId || instanceId === scopeId || !project.instances[instanceId]) return null
+  const groups: string[] = [], visited = new Set<string>()
+  let id = instanceId, inScope = false
+  const ownership = { ...project, global: project.global ?? { underlay: [], overlay: [] } }
+  while (!visited.has(id)) {
+    visited.add(id)
+    const owner = owningContainer(ownership, id)
+    if (owner?.kind === 'global' || owner?.kind === 'instance' && owner.instanceId === scopeId) { inScope = true; break }
+    if (owner?.kind !== 'instance' || project.instances[owner.instanceId]?.container) break
+    id = owner.instanceId
+    if (isOrdinaryEditingGroup(project, id)) groups.unshift(id)
+  }
+  if (!inScope) return null
+  const context = activeGroupId && (groups.includes(activeGroupId) || activeGroupId === instanceId) ? activeGroupId : null
+  if (deep) return { pressId: instanceId, clickId: instanceId, groupId: context ?? groups[0] ?? null }
+  const selectedGroup = selectedIds.length === 1 && groups.includes(selectedIds[0]!) ? selectedIds[0]! : null
+  if (selectedGroup && !additive) return { pressId: selectedGroup, clickId: instanceId, groupId: selectedGroup }
+  if (context) return { pressId: instanceId, clickId: instanceId, groupId: context }
+  const outer = groups[0] ?? instanceId
+  return { pressId: outer, clickId: outer, groupId: null }
+}
+
 /** Resolve a visible leaf to its current selection level using only the formal author tree. */
 export function editingLevelInstanceId(project: Pick<CourseProjectV10, 'instances' | 'rootIds' | 'global'>,
   scopeId: string | null, instanceId: string, activeGroupId: string | null = null, deep = false): string | null {

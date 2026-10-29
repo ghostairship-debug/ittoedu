@@ -491,6 +491,17 @@ export function NativeSelectionContext({ documentId, revision, surfaceId, locati
       <QuickBarSeparator />{ai}<QuickBarMenu items={items} />
     </>
   }
+  if (enabled && !textEditing && !selectedField && editingProject && itemIds.length) {
+    const implementation = itemIds.length === 1 ? editingProject.instances[itemIds[0]!] : undefined
+    const definition = implementation && (implementation.implementationOverride ?? editingProject.definitions[implementation.definitionId]?.implementation)
+    const intent = itemIds.length > 1 ? 'group' as const : definition?.kind === 'builtin' && definition.key === 'guoling.group' ? 'ungroup' as const : null
+    if (intent) {
+      const label = intent === 'group' ? '组合' : '解除组合', reason = selectionObjectCommands.groupReason(intent)
+      const command: MenuCommand = { id: 'object.'+intent, label, group:'structure', disabledReason:reason, run:()=>selectionObjectCommands.group(intent) }
+      contextItems.push(...guarded([command]))
+      content = <>{content}<QuickBarButton label={reason ? label+'：'+reason : label} text={label} disabled={Boolean(reason)} onClick={()=>run(command.run,report)} /></>
+    }
+  }
   menuRequestState.current = { ids: sortedIds(itemIds), identity: authorIdentity, items: [...guarded([...extraMenuItems]), ...contextItems] }
   if (!enabled) return null
   // The in-place crop of the selected image, drawn over the canvas while it runs (M21).

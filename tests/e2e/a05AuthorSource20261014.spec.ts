@@ -115,7 +115,7 @@ async function visibleTitlePoint(page: Page, instanceId: string, facts?: Record<
     const outer = await iframe(page, instanceId).evaluate(node => node.getBoundingClientRect().toJSON())
     const host = await hotspot.evaluate(node => node.getBoundingClientRect().toJSON())
     point = { x: host.x + Math.min(host.width / 2, 110), y: host.y + host.height / 2 }
-    const spots = await page.getByRole('button', { name: '双击编辑此处文字', exact: true }).evaluateAll((nodes, point) => nodes
+    const spots = await page.locator('.course-editor-frame:visible button[data-author-spot]').evaluateAll((nodes, point) => nodes
       .map(node => node.getBoundingClientRect().toJSON()).filter(rect => point.x >= rect.left && point.x < rect.right && point.y >= rect.top && point.y < rect.bottom), point)
     if (facts) facts[`${instanceId}TitleTarget`] = { local, outer, host, point }
     return Math.abs(host.width - local.rect.width * outer.width / local.width) < 2 && spots.length === 1
@@ -309,7 +309,7 @@ test('A05 real author source entry preserves mature Web behavior, ordinary edits
     const titlePoint = await visibleTitlePoint(page, 'primary', facts)
     await page.mouse.dblclick(titlePoint.x, titlePoint.y)
     const titleInput = page.getByRole('textbox', { name: '编辑此处文字', exact: true })
-    await expect(titleInput).toHaveValue(originalTitle)
+    await expect(titleInput).toHaveText(originalTitle)
     await titleInput.click(); await page.keyboard.press('Control+a'); await page.keyboard.insertText(changedTitle)
     await page.keyboard.press('Control+Enter')
     await expect(titleInput).toHaveCount(0)

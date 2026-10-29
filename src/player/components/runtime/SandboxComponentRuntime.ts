@@ -1,3 +1,5 @@
+import { createNavigationControlBinder } from '../../behaviors/navigation/bindNavigationControl'
+import { navigationControlVisible } from '../../behaviors/navigation/navigationControls'
 import { componentPaintStack } from '../../../components/web/paintHit'
 import { hasWebContentData } from '../../../components/web/sourcePreparation'
 import { nanoid } from 'nanoid'
@@ -27,7 +29,7 @@ import { ownedDocumentExecutionSource } from '../../../components/web/ownedDocum
 import { domTextOverrideRealmSource, type DomTextOverrideController } from '../../lightEdit/domTextOverrides'
 import type { LightEditTextOverride } from '../../../shared/contracts/runtime/lightEdit'
 import { invertMatrix, multiplyMatrices, transformPoint, type AffineMatrix } from '../../../core/components/geometry'
-import { componentClientMatrix } from './componentClientMatrix'
+import { componentClientMatrix, componentClientMatrixRealmSource } from './componentClientMatrix'
 import { projectComponentGeometry } from './componentGeometry'
 
 export interface RuntimeTargetSnapshot { reference: ComponentTarget; instanceId: string; value?: JsonValue }
@@ -51,7 +53,7 @@ export function componentAuthorPaintAtPoint(root: Element, x: number, y: number)
 }
 
 /** Serialized trusted bridge only. Author code arrives through its dedicated port. */
-function contentRealmBridge(nonce: string, fragmentBox: { resourceFactory: typeof createWebResourceUrlLease; navigationReady: typeof installCourseNavigationReady; isMeasured: typeof isMeasuredWebFragmentBox; extent: typeof measuredFragmentExtent; refreshResources: typeof refreshWebResourceReferences; fragments: typeof createComponentFragmentProjection; authoring: typeof createDomAuthoring; paintAt: typeof componentAuthorPaintAtPoint; clientMatrix: typeof componentClientMatrix; ownedAuthoring: typeof installOwnedDocumentAuthoring; input: typeof installAuthoringInputArbitration; caret: typeof authoringCaretOffset; frameGeometry: typeof createAuthoringFrameGeometry; textOverrides(roots: readonly Node[], rules: readonly LightEditTextOverride[]): DomTextOverrideController }, authoredDocument?: { release(): void; resourceLease?: ReturnType<typeof createWebResourceUrlLease>; blobCarriers?: OwnedDocumentBlobCarriers; transportFragment?: boolean; setActivity?(value: { active: boolean; visible: boolean; playing: boolean }): void; onDiagnostic?(listener: (message: string) => void): () => void }) {
+function contentRealmBridge(nonce: string, fragmentBox: { navigationBinder: typeof createNavigationControlBinder; resourceFactory: typeof createWebResourceUrlLease; navigationReady: typeof installCourseNavigationReady; isMeasured: typeof isMeasuredWebFragmentBox; extent: typeof measuredFragmentExtent; refreshResources: typeof refreshWebResourceReferences; fragments: typeof createComponentFragmentProjection; authoring: typeof createDomAuthoring; paintAt: typeof componentAuthorPaintAtPoint; clientMatrix: typeof componentClientMatrix; ownedAuthoring: typeof installOwnedDocumentAuthoring; input: typeof installAuthoringInputArbitration; caret: typeof authoringCaretOffset; frameGeometry: typeof createAuthoringFrameGeometry; textOverrides(roots: readonly Node[], rules: readonly LightEditTextOverride[]): DomTextOverrideController }, authoredDocument?: { release(): void; resourceLease?: ReturnType<typeof createWebResourceUrlLease>; blobCarriers?: OwnedDocumentBlobCarriers; transportFragment?: boolean; setActivity?(value: { active: boolean; visible: boolean; playing: boolean }): void; onDiagnostic?(listener: (message: string) => void): () => void }) {
   const resourceLease = authoredDocument?.resourceLease ?? fragmentBox.resourceFactory(window)
   const navigationReady = fragmentBox.navigationReady(window)
   const runtimeInstance = (value: ComponentInstance): ComponentInstance => ({ ...value, data: JSON.parse(resourceLease.project(JSON.stringify(value.data))) })
@@ -295,8 +297,13 @@ function contentRealmBridge(nonce: string, fragmentBox: { resourceFactory: typeo
   if (authoredDocument) adoptDocument(authoredDocument)
   const subscribe = (kind: string, name: string, listener: (value: unknown) => void) => {
     const key = `${kind}:${name}`, set = listeners.get(key) ?? new Set()
-    listeners.set(key, set); set.add(listener); send({ type: 'subscribe', kind, name })
-    const off = () => { set.delete(listener); if (!set.size) send({ type: 'unsubscribe', kind, name }) }
+    // State and activity already have permanent host bridges. Registering a
+    // second remote state listener leaves a round-trip gap after this local
+    // subscription, and duplicates the __runtime.state mirror.
+    const remote = kind !== 'state' && !(kind === 'event' && ['__runtime.activity', '__runtime.state'].includes(name))
+    listeners.set(key, set); set.add(listener)
+    if (remote) send({ type: 'subscribe', kind, name })
+    const off = () => { set.delete(listener); if (remote && !set.size) send({ type: 'unsubscribe', kind, name }) }
     cleanups.add(off)
     if (kind === 'event' && name === '__runtime.activity' && activity) listener(activitySnapshot())
     return () => { cleanups.delete(off); off() }
@@ -503,6 +510,7 @@ function contentRealmBridge(nonce: string, fragmentBox: { resourceFactory: typeo
             authorKey: hitAuthor(event.clientX, event.clientY) })
           root.addEventListener('dblclick', doubleClicked, true); cleanups.add(() => root.removeEventListener('dblclick', doubleClicked, true))
         }
+        let navigationBinder: ReturnType<typeof createNavigationControlBinder> | undefined
         const teacherController = teacher ? {
           read: () => teacher!.snapshot,
           readLocation: () => teacher!.snapshot.locationId,
@@ -511,6 +519,17 @@ function contentRealmBridge(nonce: string, fragmentBox: { resourceFactory: typeo
           canExecute: (action: TeacherControllerAction) => Boolean(teacher?.allowed[action.type]) && (action.type !== 'scene.go'
             || teacher!.snapshot.scenes.some(scene => scene.id === action.sceneId)),
           execute: (action: TeacherControllerAction, signal?: AbortSignal) => teacherRequest('execute', { action }, signal),
+          bindControl:(element:HTMLElement,action:TeacherControllerAction)=>{
+            if(!root||!root.contains(element))throw new Error('导航按钮必须位于当前组件内容中')
+            if(!navigationBinder){
+              navigationBinder=fragmentBox.navigationBinder({root,live:()=>active,read:()=>teacher!.snapshot,
+                canExecute:(action:TeacherControllerAction)=>Boolean(teacher?.allowed[action.type]),execute:(action:TeacherControllerAction)=>teacherRequest('execute',{action}),
+                report:(id,action,visible)=>send({type:'teacher.control',controlId:id,action,visible}),remove:id=>send({type:'teacher.control.remove',controlId:id}),
+                error:message=>scope.events.emit('component.diagnostic',{instanceId:instance.id,message})})
+              cleanups.add(()=>navigationBinder?.dispose());teacherListeners.add(()=>navigationBinder?.refresh())
+            }
+            return navigationBinder.bind(element,action)
+          },
           setCollapsed: (value: boolean) => { void teacherRequest('setCollapsed', { value }).catch(() => {}) },
           moveBy: (dx: number, dy: number) => { void teacherRequest('moveBy', { dx, dy }).catch(() => {}) },
           movePointer: (phase: 'start' | 'move' | 'end', x: number, y: number) => { void teacherRequest('movePointer', { phase, x, y }).catch(() => {}) },
@@ -1021,13 +1040,15 @@ function contentRealmBridge(nonce: string, fragmentBox: { resourceFactory: typeo
         if (kind === 'event' && name === '__runtime.state') {
           const update = message.value as { name: string; value: JsonValue }
           const pending = typeof update?.name === 'string' ? pendingStateWrites.get(update.name) : undefined
-          if (pending) { pending.eventNotified = true; return }
-          if (typeof update?.name === 'string') states[update.name] = snapshotValue(update.value)
-        }
-        if (kind === 'state') {
-          const pending = pendingStateWrites.get(name)
-          if (pending) { pending.stateNotified = true; return }
-          states[name] = snapshotValue(message.value as JsonValue)
+          if (pending) { pending.stateNotified = true; pending.eventNotified = true; return }
+          if (typeof update?.name === 'string') {
+            states[update.name] = snapshotValue(update.value)
+            for (const listener of listeners.get(`state:${update.name}`) ?? []) listener(snapshotValue(update.value))
+            // A state listener may issue a newer optimistic write. Its mirror
+            // still settles with that write's ACK, as on the host's two phases.
+            const feedback = pendingStateWrites.get(update.name)
+            if (feedback) { feedback.eventNotified = true; return }
+          }
         }
         for (const listener of listeners.get(`${kind}:${name}`) ?? []) listener(snapshotValue(message.value))
         return
@@ -1112,9 +1133,9 @@ export async function preparePublishedNativeComponent(artifact: CompiledComponen
   // Main's existing preview protocol supplies the desktop document, without its
   // parent's CSP or Blob storage key. Standalone HTML owns this inline document.
   // The author module still arrives over a dedicated port and is loaded by the child.
-  const realmClientMatrix = `(function(){const ${multiplyMatrices.name}=(${multiplyMatrices.toString()});const ${transformPoint.name}=(${transformPoint.toString()});return (${componentClientMatrix.toString()});})()`
+  const realmClientMatrix = componentClientMatrixRealmSource()
   const bridge = (programs?: import('../../../components/web/authoredDocumentBootstrap').AuthoredDocumentPrograms) =>
-    `(function(){${programs ? `const authored=${authoredDocumentProgramsSource(programs)};` : ''}(${contentRealmBridge.toString()})(${JSON.stringify(nonce)}, {resourceFactory:(${createWebResourceUrlLease.toString()}),navigationReady:(${installCourseNavigationReady.toString()}),isMeasured:(${isMeasuredWebFragmentBox.toString()}),extent:(${measuredFragmentExtent.toString()}),fragments:(${createComponentFragmentProjection.toString()}),refreshResources:(${refreshWebResourceReferences.toString()}),authoring:${domAuthoringFactorySource()},paintAt:(root,x,y)=>(${componentPaintStack.toString()})(root,x,y).length>0,clientMatrix:${realmClientMatrix},ownedAuthoring:(${installOwnedDocumentAuthoring.toString()}),input:(${installAuthoringInputArbitration.toString()}),caret:(${authoringCaretOffset.toString()}),frameGeometry:(${createAuthoringFrameGeometry.toString()}),textOverrides:(roots,rules)=>{${domTextOverrideRealmSource()}return createPageTextOverrides(roots,rules)}}${programs ? ',authored' : ''})})()`
+    `(function(){${programs ? `const authored=${authoredDocumentProgramsSource(programs)};` : ''}(${contentRealmBridge.toString()})(${JSON.stringify(nonce)}, {navigationBinder:(${createNavigationControlBinder.toString()}),resourceFactory:(${createWebResourceUrlLease.toString()}),navigationReady:(${installCourseNavigationReady.toString()}),isMeasured:(${isMeasuredWebFragmentBox.toString()}),extent:(${measuredFragmentExtent.toString()}),fragments:(${createComponentFragmentProjection.toString()}),refreshResources:(${refreshWebResourceReferences.toString()}),authoring:${domAuthoringFactorySource()},paintAt:(root,x,y)=>(${componentPaintStack.toString()})(root,x,y).length>0,clientMatrix:${realmClientMatrix},ownedAuthoring:(${installOwnedDocumentAuthoring.toString()}),input:(${installAuthoringInputArbitration.toString()}),caret:(${authoringCaretOffset.toString()}),frameGeometry:(${createAuthoringFrameGeometry.toString()}),textOverrides:(roots,rules)=>{${domTextOverrideRealmSource()}return createPageTextOverrides(roots,rules)}}${programs ? ',authored' : ''})})()`
   let runtimeBuiltinKey = snapshots.builtinKey, sourceWebDocument = false
   const pendingDocumentKeys: Record<string, string> = {}
   const readAuthorHtml = (instance: ComponentInstance | undefined): string | undefined => {
@@ -1193,6 +1214,7 @@ export async function preparePublishedNativeComponent(artifact: CompiledComponen
   void ready.catch(() => undefined)
   const pending = new Map<number, { resolve(value?: { document?: 'web'; fontFaceCss?: string }): void; reject(error: Error): void }>()
   const subscriptions = new Map<string, () => void>()
+  const navigationControls=new Map<number,{visible:boolean;off():void}>()
   const authorSpots = new Map<number, () => void>()
   const observedSpots = new Map<string, { signature: string; off(): void }>()
   const authorPreviews = new Set<string>()
@@ -1285,6 +1307,7 @@ export async function preparePublishedNativeComponent(artifact: CompiledComponen
     pending.clear()
     for (const off of subscriptions.values()) off()
     subscriptions.clear(); window.removeEventListener('message', handshake)
+    for(const entry of navigationControls.values())entry.off();navigationControls.clear()
     for (const off of authorSpots.values()) off()
     authorSpots.clear()
     for (const value of observedSpots.values()) value.off()
@@ -1644,6 +1667,16 @@ export async function preparePublishedNativeComponent(artifact: CompiledComponen
         previewGeometry: geometry => { if (scope?.isActive() && !disposed) port.postMessage({ type: 'authoring.preview', generation: scope.generation, spotId: message.spotId, geometry }) },
       } : undefined)); return
     }
+    if(message.type==='teacher.control.remove' && Number.isInteger(message.controlId)){navigationControls.get(message.controlId)?.off();navigationControls.delete(message.controlId);return}
+    if(message.type==='teacher.control' && Number.isInteger(message.controlId) && typeof message.visible==='boolean' && runtimeTeacherController?.registerControl){
+      const action=teacherControllerActionSchema.safeParse(message.action);if(!action.success)return
+      let entry=navigationControls.get(message.controlId)
+      if(entry){entry.off();navigationControls.delete(message.controlId)}
+      entry={visible:message.visible,off:()=>{}};navigationControls.set(message.controlId,entry)
+      const current=entry
+      current.off=runtimeTeacherController.registerControl({actions:[action.data],present:()=>!disposed&&scope?.isActive()===true&&current.visible&&navigationControlVisible(iframe)&&activity?.active!==false&&activity?.visible!==false})
+      return
+    }
     if (message.type === 'teacher.cancel') { teacherActions.get(message.requestId)?.controller.abort(); return }
     if (message.type === 'teacher.request' && runtimeTeacherController) {
       const currentScope = scope, teacher = runtimeTeacherController
@@ -1697,15 +1730,16 @@ export async function preparePublishedNativeComponent(artifact: CompiledComponen
       const reference = componentTargetSchema.safeParse(message.reference)
       if (reference.success) scope.target(reference.data)?.emit(message.name, value.data)
     }
-    else if ((message.type === 'subscribe' || message.type === 'unsubscribe') && typeof message.name === 'string' && ['state', 'event'].includes(message.kind)) {
-      // This instance fact already has one permanent bridge subscription; the child owns listener replay.
-      if (message.kind === 'event' && message.name === '__runtime.activity') return
+    else if ((message.type === 'subscribe' || message.type === 'unsubscribe') && typeof message.name === 'string' && message.kind === 'event') {
+      // These facts already have permanent bridge subscriptions; the child
+      // owns local listeners and the existing activity-only initial replay.
+      if (['__runtime.activity', '__runtime.state'].includes(message.name)) return
       const key = `${message.kind}:${message.name}`
       if (message.type === 'unsubscribe') { subscriptions.get(key)?.(); subscriptions.delete(key); return }
       if (subscriptions.has(key)) return
       const currentScope = scope
       const listener = (value: JsonValue | undefined) => { if (currentScope.isActive() && !disposed) port.postMessage({ type: 'notification', kind: message.kind, name: message.name, value }) }
-      subscriptions.set(key, message.kind === 'state' ? currentScope.state.subscribe(message.name, listener) : currentScope.events.subscribe(message.name, listener))
+      subscriptions.set(key, currentScope.events.subscribe(message.name, listener))
     }
   }
   port.start(); window.addEventListener('message', handshake)

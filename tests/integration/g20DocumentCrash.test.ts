@@ -34,7 +34,7 @@ async function crashAt(directory: string, point: string): Promise<void> {
   })
 }
 
-it.each(['resources-before-log', 'journal-mid-write', 'durable-before-state', 'save-before-replace', 'save-after-replace'])(
+it.each(['resources-before-log', 'journal-mid-write', 'durable-before-state', 'applied-before-reply', 'save-before-replace', 'save-after-replace'])(
   'S03-T02 actual process kill at %s recovers complete content/resources/receipt', async point => {
     const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'g20-crash-'))
     directories.push(directory)
@@ -53,6 +53,10 @@ it.each(['resources-before-log', 'journal-mid-write', 'durable-before-state', 's
       const original = restored.lookupOperation('content-and-resource')!
       expect(original).toMatchObject({ revision: 1 })
       expect(restored.read().revision).toBe(1)
+      const replay=await restored.execute({documentId:'crash-document',epoch:'worker-epoch',baseRevision:0,operationId:'content-and-resource',actor:'human',mutation:{type:'command',command:{type:'markdown.replace',source:'# After\n![New](assets/new.png)\n',resources:{assets:state!.model.resources.assets,components:{}}}}})
+      expect(replay).toEqual(original);expect(restored.read().revision).toBe(1)
+      const late=await restored.execute({documentId:'crash-document',epoch:'worker-epoch',baseRevision:1,operationId:'late-old-process',actor:'human',mutation:{type:'command',command:{type:'markdown.replace',source:'wrong-late-write'}}})
+      expect(late).toMatchObject({status:'conflict',code:'stale-epoch'});expect(restored.read().revision).toBe(1)
     }
     const fileSource = await fs.readFile(path.join(directory, 'lesson.md'), 'utf8')
     expect(fileSource).toBe(point === 'save-after-replace' ? '# After\n![New](assets/new.png)\n' : '# Before\n')

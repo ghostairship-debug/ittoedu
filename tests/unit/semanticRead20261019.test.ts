@@ -165,7 +165,9 @@ it('loads an authorized tool by its actual name even without a family and return
     expect(loaded.map(tool => tool.name)).not.toContain('skills.read')
     expect(await h.call('skills.list', {})).toMatchObject({ kind: 'read', data: { entries: [] } })
     expect(await h.gateway.resolveRunTool('semantic', 'skills.read')).toMatchObject({ name: 'skills.read', schema: { properties: { skill: { type: 'string' } } } })
-    await expect(h.gateway.loadToolFamilies('semantic', [], ['not-an-actual-tool'])).rejects.toMatchObject({ code: 'not-authorized' })
+    // Discovery keeps unknown names unavailable; execution retains the canonical authorization owner.
+    await h.gateway.loadToolFamilies('semantic', [], ['not-an-actual-tool'])
+    expect(await h.gateway.resolveRunTool('semantic', 'not-an-actual-tool')).toBeNull()
     expect((await h.gateway.describeRun('semantic')).map(tool => tool.name)).not.toContain('not-an-actual-tool')
   } finally { await h.gateway.stop('semantic') }
 })

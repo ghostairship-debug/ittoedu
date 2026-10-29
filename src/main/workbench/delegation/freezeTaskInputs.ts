@@ -1,5 +1,6 @@
 import path from 'node:path'
 import { componentProjectFiles } from '../../../core/projectFiles/componentPlatform'
+import { prepareComponentProjectFileSource, type ComponentProjectFile } from '../../../core/projectFiles/componentPlatform/projection'
 import { isSourceDocumentModel, type DocumentSnapshot } from '../../../shared/workbench/document'
 import type { PreparedTaskSource } from '../../../shared/workbench/toolPorts'
 import { sourceResourceFiles } from '../documentSourceResources'
@@ -23,6 +24,30 @@ const resourceView = (source: string, name: string, version: string, bytes: Uint
   if (!textExtension.test(name)) return undefined
   try { return modelView(source, version, new TextDecoder('utf-8', { fatal: true }).decode(bytes)) }
   catch { return undefined }
+}
+
+/** Logical aggregate addresses can also name directories in the same projection.
+ * Resolve that distinction once for this capture; source references keep their
+ * original project addresses and concrete content/dependency paths stay intact. */
+function materializedProjectPaths(files: readonly ComponentProjectFile[]): Map<ComponentProjectFile, string> {
+  const key = (name: string) => process.platform === 'win32' ? name.toLowerCase() : name
+  const directories = new Set<string>()
+  for (const file of files) {
+    const parts = file.path.split('/')
+    for (let length = 1; length < parts.length; length++) directories.add(key(parts.slice(0, length).join('/')))
+  }
+  const occupied = new Set([...files.map(file => key(file.path)), ...directories])
+  return new Map(files.map(file => {
+    let name = file.path
+    if (file.kind === 'framework' && !file.binding && directories.has(key(name))) {
+      for (let index = 1; ; index++) {
+        const candidate = `${name}/index${index === 1 ? '' : `-${index}`}.json`
+        if (occupied.has(key(candidate))) continue
+        occupied.add(key(candidate)); name = candidate; break
+      }
+    }
+    return [file, name] as const
+  }))
 }
 
 /** Full source capture and model representation share one existing source owner. */
@@ -59,11 +84,19 @@ export async function freezeTaskInputs(sources: readonly string[], ports: TaskIn
       const version = `document:${current.documentId}:${current.epoch}:${current.revision}`
       // This is the same formal file projection consumed by project.read/apply,
       // including current Source dependencies and resource bytes, never the saved GLX.
-      for (const file of componentProjectFiles(current.model.project, current.model.resources)) {
+      const files = componentProjectFiles(current.model.project, current.model.resources)
+      const materializedPaths = materializedProjectPaths(files)
+      for (const file of files) {
+        active()
+        // Directory captures intentionally leave builtin author sources lazy.
+        // A complete task copy must prepare those same sources before reading
+        // their bytes, even when no earlier project.read has warmed the loader.
+        await prepareComponentProjectFileSource(file)
+        active()
         const bytes = file.bytes ?? (file.content === undefined ? undefined : encoder.encode(file.content))
         if (!bytes) continue
         const reference = `${source}#project:${file.path}`
-        inputs.push({ source: reference, name: `${path.basename(filename)}.current/${file.path}`, mimeType: file.mimeType ?? 'text/plain',
+        inputs.push({ source: reference, name: `${path.basename(filename)}.current/${materializedPaths.get(file)!}`, mimeType: file.mimeType ?? 'text/plain',
           bytes: new Uint8Array(bytes), version,
           ...(options.modelRepresentation !== false && file.content !== undefined ? { modelRepresentation: modelView(reference, version, file.content) } : {}) })
       }

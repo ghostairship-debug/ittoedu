@@ -37,7 +37,7 @@ type AuthorElementPointer = React.PointerEvent<HTMLElement> & {
 }
 
 /** The same registered author field enters the same input owner on every workspace. */
-export function useComponentAuthorInteraction({ root, documentId, surfaceId, enabled, selectImage, report, wholeInstanceEditor = true, contextKey, onObjectPointer, resolveObjectTarget, onObjectDoubleClick }: {
+export function useComponentAuthorInteraction({ root, documentId, surfaceId, enabled, selectImage, report, wholeInstanceEditor = true, contextKey, onObjectPointer, resolveObjectTarget, onObjectDoubleClick, workspaceOwnsObjectSelection = false }: {
   root: RefObject<HTMLElement | null>; documentId: string; surfaceId: string | null; enabled: boolean
   selectImage?(): Promise<ImportedImageAsset | null>; report(message: string): void
   /** A workspace with the native table/chart owner renders whole-instance drafts there. */
@@ -47,14 +47,16 @@ export function useComponentAuthorInteraction({ root, documentId, surfaceId, ena
   onObjectPointer?(detail: ComponentAuthorObjectPointer, clientPoint: GeometryPoint): void
   resolveObjectTarget?(instanceId: string): string | null
   onObjectDoubleClick?(instanceId: string, clientPoint: GeometryPoint): void
+  /** Free-canvas workspaces decide first-group/second-member selection at pointer release. */
+  workspaceOwnsObjectSelection?: boolean
 }) {
   const runtime = useCourseV10Runtime()
   const bridge = useEditorStore(state => state.courseBridge)
   const selection = useEditorStore(state => state.courseView.interactionSelection)
   const draft = useEditorStore(selectActiveSlideContentEdit)
   const [spots, setSpots] = useState<readonly ComponentAuthorSpot[]>(() => runtime.world.authorSpots())
-  const latest = useRef({ runtime, documentId, surfaceId, enabled, selectImage, report, contextKey, onObjectPointer, resolveObjectTarget, onObjectDoubleClick })
-  latest.current = { runtime, documentId, surfaceId, enabled, selectImage, report, contextKey, onObjectPointer, resolveObjectTarget, onObjectDoubleClick }
+  const latest = useRef({ runtime, documentId, surfaceId, enabled, selectImage, report, contextKey, onObjectPointer, resolveObjectTarget, onObjectDoubleClick, workspaceOwnsObjectSelection })
+  latest.current = { runtime, documentId, surfaceId, enabled, selectImage, report, contextKey, onObjectPointer, resolveObjectTarget, onObjectDoubleClick, workspaceOwnsObjectSelection }
   const intent = useRef(0)
   const caret = useRef<GeometryPoint | undefined>(undefined)
   const fieldCaret = useRef<FieldCaretIntent | undefined>(undefined)
@@ -83,6 +85,7 @@ export function useComponentAuthorInteraction({ root, documentId, surfaceId, ena
       scheduled = 0
       const outer = owner.getBoundingClientRect(), shown = new Set<string>(), current = latest.current
       for (const spot of current.runtime.world.authorSpots()) {
+        if (current.resolveObjectTarget && current.resolveObjectTarget(spot.instanceId) !== spot.instanceId) continue
         const element = current.runtime.world.contentElement?.(spot.instanceId), matrix = element && flowContentClientMatrix(element)
         if (!element || !owner.contains(element) || !matrix) continue
         const points = frameCorners(spot.localBounds).map(point => transformPoint(matrix, point)), xs = points.map(point => point.x), ys = points.map(point => point.y)
@@ -495,7 +498,7 @@ export function useComponentAuthorInteraction({ root, documentId, surfaceId, ena
           || interactionSelectionIdentity(current.interactionSelection) !== interactionSelectionIdentity(initial.interactionSelection)) return
         if (hit.spot) await prepareAuthorPointer(pending, hit.spot)
         else {
-          const accepted = hit.object && await selectPaintedObject(request.instanceId, initial, ticket)
+          const accepted = hit.object && (owner.workspaceOwnsObjectSelection && owner.onObjectPointer ? true : await selectPaintedObject(request.instanceId, initial, ticket))
           if (authorPointer.current !== pending || pending.cancelled) return
           if (accepted && latest.current.onObjectPointer) {
             pending.objectStarted = true

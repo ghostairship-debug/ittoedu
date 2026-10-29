@@ -1,7 +1,8 @@
 import type { ModelChatMessage, ModelNativeToolCall } from '../../../shared/workbench/modelProvider'
-import type { ExecutionRunRecord } from '../../../shared/workbench/execution'
+import type { ExecutionRunRecord, ExecutionStart } from '../../../shared/workbench/execution'
 import { createHash } from 'node:crypto'
-import type { ToolResult } from '../../../shared/workbench/tools'
+import type { ToolResult, ToolTarget } from '../../../shared/workbench/tools'
+import { isCourseInstanceRange } from '../../../core/tools/ToolTargets'
 import type { ProgrammaticJournalEntry } from '../../../shared/workbench/programmatic'
 import { contentApplyFact, exportFact, modelToolResult, operationFact, saveFact } from '../../../core/tools/modelToolResult'
 import { htmlActionToolCatalog, isHtmlActionTool } from '../../../core/tools/HtmlActionTools'
@@ -10,6 +11,25 @@ import { retireSupersededObservationMessages } from './observationModelInput'
 import { boundedModelValue, MODEL_DELIVERY_BYTES, modelJsonBytes, modelJsonFits } from '../../../core/tools/modelDeliveryBudget'
 import { isViewObservationTool } from '../../../shared/workbench/viewObservation'
 import { projectProgrammaticModelResult } from './ProgrammaticToolRunner'
+
+/** Initial disclosure follows the captured focus, independently of write grants.
+ * Default page/document references and multiple targets keep the general profile;
+ * precise edits can expand the same authorized catalog with tools.load. */
+function targetContextToolProfile(target?: ToolTarget): 'general' | 'text' | 'content-edit' {
+  if (target?.kind === 'markdown-range' || target?.kind === 'text-selection') return 'text'
+  if (target?.kind === 'course-instance') {
+    // Native ranges have already passed the text-slot validator; dataPath alone is not a text focus.
+    return target.authorField?.kind === 'text' || !target.authorField && isCourseInstanceRange(target) ? 'text' : 'content-edit'
+  }
+  if (target?.kind === 'html-author-field') return target.field === 'text' ? 'text' : 'content-edit'
+  if (target?.kind === 'course-object' || target?.kind === 'flow-block' || target?.kind === 'flow-range') return 'content-edit'
+  return 'general'
+}
+export function executionContextToolProfile(input: Pick<ExecutionStart, 'documents' | 'contentOutput'>): 'general' | 'text' | 'content-edit' {
+  if (input.contentOutput) return targetContextToolProfile(input.contentOutput.target)
+  const reference = input.documents.length === 1 ? input.documents[0] : undefined
+  return targetContextToolProfile(reference?.selection?.length === 1 ? reference.selection[0] : undefined)
+}
 
 /** Project a completed tool's working value; execution and original receipts stay with their owners. */
 export function projectCurrentToolResult(tool: ProgrammaticJournalEntry, records: readonly ProgrammaticJournalEntry[], sourceId: string): ToolResult | undefined {

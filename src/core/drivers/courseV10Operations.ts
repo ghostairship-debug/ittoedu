@@ -1,3 +1,4 @@
+import {expandFreeGroupBounds,equivalentFreeFrameCompensations} from '../course/freeGroupBounds'
 import { equalComponentValue } from '../../shared/componentValue'
 import { componentTextRelationshipEdits, type TextRelationshipPlanOptions } from '../course/componentTextRelationshipEdits'
 import { canonicalNavigationGuard, removeNavigationGuardSurfaces } from '../../shared/courseNavigationGuards'
@@ -512,8 +513,9 @@ export function prepareComponentTextRelationships(project: CourseProjectV10, edi
 
 export function captureComponentOperation(project: CourseProjectV10, edits: ComponentEdit[], readPaths: readonly string[][] = [],
   options: { deferTextRelationships?: boolean } = {}): ComponentOperationBatch {
-  const prepared = options.deferTextRelationships ? edits : prepareComponentTextRelationships(project, edits)
-  return { type: 'component-platform.apply', edits: structuredClone(prepared), expected: [...new Map([...dependencyPaths(project, prepared), ...readPaths].map(path => [JSON.stringify(path), path])).values()]
+  const bounds=expandFreeGroupBounds(project,options.deferTextRelationships ? edits : prepareComponentTextRelationships(project, edits))
+  const prepared=bounds.edits
+  return { type: 'component-platform.apply', edits: structuredClone(prepared), expected: [...new Map([...dependencyPaths(project, prepared), ...bounds.reads, ...readPaths].map(path => [JSON.stringify(path), path])).values()]
     .map(path => ({ path, ...structuredClone(componentValueAt(project, path)) })) }
 }
 
@@ -829,6 +831,7 @@ function applyComponentOperationCandidate(project: CourseProjectV10, raw: Compon
   }
   const passive = command.edits.some(edit => edit.type === 'instance.move' && componentIsLocked(project, edit.instanceId))
     ? passiveFlowMoves(project, command.edits) : new Set<ComponentEdit>()
+  const passiveFrames=equivalentFreeFrameCompensations(project,command.edits)
   const removedInBatch = new Set<string>()
   const textBodies = new Set(command.edits.filter(edit => flowBodyContentEdit(project, edit))
     .flatMap(edit => 'instanceId' in edit ? [edit.instanceId] : []))
@@ -847,7 +850,7 @@ function applyComponentOperationCandidate(project: CourseProjectV10, raw: Compon
       if (project.instances[id] && componentIsLocked(next, id) && !(allowBodyLock && hasOnlyBodyInheritedLocks(next, id, bodyOwner))) throw new Error('对象已锁定，请先解锁')
     }
     if ('instanceId' in edit && !(edit.type === 'instance.patch' && Object.keys(edit.patch).every(key => key === 'locked'))
-      && !(edit.type === 'instance.move' && passive.has(edit)) && !flowBodyContentEdit(next, edit))
+      && !(edit.type === 'instance.move' && passive.has(edit)) && !passiveFrames.has(edit) && !flowBodyContentEdit(next, edit))
       requireUnlocked(edit.instanceId, relationEdit)
     if (edit.type === 'instance.insert' && edit.container.kind === 'instance') requireUnlocked(edit.container.instanceId)
     if (edit.type === 'instance.insert' && edit.container.kind === 'surface') requireUnlocked(edit.container.surfaceId)

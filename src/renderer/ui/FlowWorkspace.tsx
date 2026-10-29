@@ -1,3 +1,6 @@
+import {mountFlowBodyResize} from './flow/flowBodyResize'
+import {flowObjectCanWrap,prepareFlowObjectDrop,type FlowObjectDrop} from '../../core/course/courseFlowObjectDrop'
+import { hostNavigationExplicitlyHidden } from '../../shared/contracts/playback-v1'
 import { requestImageEdit } from '../editing/commands/objectContextMenu'
 import { visibleComponentAuthorHit } from '../components/componentAuthorHit'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
@@ -36,7 +39,7 @@ import { SharedDocumentEditor, type SharedDocumentEditorHandle } from '../docume
 import { prepareDocumentSelection, prepareDocumentTextEdit, requestDocumentSelection, type DocumentSelectionAdapter } from '../document/documentSelectionCommands'
 import { createFlowBlockPaint } from './flow/flowBlockPaint'
 import { observeFlowParagraphLayout, measureFlowParagraphLayout, flowDocumentInsertionAt, flowFloatingModeEdits, flowContentClientMatrix, type FlowFloatingMode } from './flow/flowParagraphLayout'
-import { flowPlacementEdits, flowReadingOrderEdits } from '../../core/course/courseFlowEdits'
+import { flowPlacementEdits, flowReadingOrderEdits, flowBodyLayoutEdits } from '../../core/course/courseFlowEdits'
 import { prepareCourseFlowColumns } from '../../core/course/courseFlowLayoutEdits'
 import { projectFlowDocument,flowDocumentBlock } from '../componentPlatform/surfaces/flow/documentProjection'
 import { flowSurface } from '../componentPlatform/surfaces/flow/model'
@@ -113,13 +116,13 @@ export function FlowWorkspace({ documentId, project, surfaceId, toolbarContainer
   const objectPointer = useRef<{ instanceId: string; x: number; y: number } | null>(null)
   const workspace=useRef<HTMLDivElement>(null)
   useEffect(() => {
-    if (!workspace.current || globalEditing || surface.flow?.layout.toc === 'hidden') return
+    if (!workspace.current || globalEditing || surface.flow?.layout.toc === 'hidden' || readOnly && hostNavigationExplicitlyHidden(project.playback)) return
     const navigation = runtime.navigation.editorPort()
     const toc = mountComponentFlowToc(workspace.current, surfaceId, project.rootIds.includes(surfaceId) ? navigation : navigation.forContainer?.(surfaceId) ?? navigation, {
       beforeNavigate: () => commitContentEdit(), onError: onStatus,
     })
     return () => toc.destroy()
-  }, [surfaceId, surface.flow?.layout.toc, runtime.navigation, commitContentEdit, onStatus, globalEditing])
+  }, [surfaceId, surface.flow?.layout.toc, runtime.navigation, commitContentEdit, onStatus, globalEditing, readOnly, project.playback?.hostNavigation])
   const observationMount=useRef<HTMLDivElement>(null),observationRoot=useRef<HTMLDivElement>(null),observationContent=useRef<HTMLDivElement>(null)
   const viewSession=useRef<PlaybackViewSession|null>(null),[observationHost,setObservationHost]=useState<HTMLElement|null>(null)
   const readBaseScale = () => viewSession.current?.fitScale(surfaceId) ?? 1
@@ -163,8 +166,8 @@ export function FlowWorkspace({ documentId, project, surfaceId, toolbarContainer
   const [paperLayout, setPaperLayout] = useState<{ width: number; rects: readonly FlowParagraphBlockRect[] }>({ width: 0, rects: [] })
   const containerRoots = useRef(new Map<string, { root: ReturnType<typeof createRoot>; project: CourseProjectV10; render: typeof runtime.renderContainer; place(project: CourseProjectV10): void }>())
   const mediaSource = useWorkspaceMediaSource()
-  const latest = useRef({ project, surfaceId, documentId, selection, runtime, mediaSource, globalEditing })
-  latest.current = { project, surfaceId, documentId, selection, runtime, mediaSource, globalEditing }
+  const latest = useRef({ project, surfaceId, documentId, selection, runtime, mediaSource, globalEditing, readOnly })
+  latest.current = { project, surfaceId, documentId, selection, runtime, mediaSource, globalEditing, readOnly }
   useLayoutEffect(() => {
     for (const [id, entry] of containerRoots.current) if (project.instances[id]?.container && (entry.project !== project || entry.render !== runtime.renderContainer)) {
       entry.project = project; entry.render = runtime.renderContainer; entry.place(project)
@@ -736,6 +739,22 @@ export function FlowWorkspace({ documentId, project, surfaceId, toolbarContainer
             return style.display === 'grid' ? style.gridTemplateColumns.trim().split(/\s+/).length > 1
               : style.display === 'flex' && !style.flexDirection.startsWith('column')
           }}
+          objectLayout={{
+            read:id=>{const current=latest.current.project,instance=current.instances[id];return flowObjectCanWrap(current,id)?{wrap:instance.flowLayout?.wrap??'none',widthPercent:instance.flowLayout?.widthPercent}:null},
+            begin:async sourceId=>{
+              const ready=await drain();if(!ready.ok)throw new Error(ready.reason??'请先完成当前正文输入')
+              const captured=bridge.captureTarget(documentId)
+              if(captured.surfaceId!==surfaceId||!flowObjectCanWrap(captured.editingProject,sourceId))throw new Error('拖动对象或正文范围已改变')
+              return async drop=>{
+                const current=latest.current;if(current.documentId!==documentId||current.surfaceId!==surfaceId)throw new Error('当前页面已切换，未移动对象')
+                const edits=prepareFlowObjectDrop(captured.editingProject,surfaceId,drop)
+                assertFlowStructureEditsAllowed(captured.editingProject,edits)
+                const readPaths=[['instances',sourceId,'frame'],['instances',sourceId,'flowLayout'],['instances',drop.targetId,'data']]
+                await bridge.editCaptured(bridge.capture(edits,captured,readPaths),crypto.randomUUID())
+                current.runtime.selectInstances([sourceId],surfaceId)
+              }
+            }
+          }}
           onColumns={async instanceIds => {
             const ready = await drain()
             if (!ready.ok) throw new Error(ready.reason ?? '请先完成当前正文输入')
@@ -826,20 +845,36 @@ export function FlowWorkspace({ documentId, project, surfaceId, toolbarContainer
             const root=content ? createRoot(content) : children ? createRoot(children) : null
             const stage=window.document.createElement('div')
             shell.prepend(stage); stage.append(host); if(children) stage.append(children)
-            let resize:ResizeObserver|undefined
+            let resize:ResizeObserver|undefined,resizeFrame=0,previewWidth:number|undefined
+            let resizeControl:ReturnType<typeof mountFlowBodyResize<CapturedCourseTarget>>|undefined
             let presentation = resolveComponentOuterPresentation(objectProject, instance, { placement: 'flow', purpose: 'author', inlineSize: paperLayout.width, flowLayout: layout })
             const place=(nextProject?: CourseProjectV10)=>{
               if(nextProject){objectProject=nextProject;instance=nextProject.instances[block.id] ?? instance}
               const currentLayout=flowSurface(objectProject,surfaceId).flow?.layout ?? { widthMode:'reading' as const,readingWidth:860,wideContentWidth:1100 }
-              presentation=resolveComponentOuterPresentation(objectProject,instance,{placement:'flow',purpose:'author',inlineSize:paperLayout.width,flowLayout:currentLayout})
+              const projected=previewWidth===undefined?instance:{...instance,flowLayout:{width:'content-width' as const,...instance.flowLayout,widthPercent:previewWidth}}
+              const available=shell.parentElement?.clientWidth||paperLayout.width
+              presentation=resolveComponentOuterPresentation(objectProject,projected,{placement:'flow',purpose:'author',inlineSize:available,availableInlineSize:available,flowLayout:currentLayout})
               applyComponentPresentationStyle(shell,presentation.outerStyle)
-              presentation=resolveComponentOuterPresentation(objectProject,instance,{placement:'flow',purpose:'author',inlineSize:shell.clientWidth || paperLayout.width,flowLayout:currentLayout})
+              presentation=resolveComponentOuterPresentation(objectProject,projected,{placement:'flow',purpose:'author',inlineSize:shell.clientWidth || available,availableInlineSize:available,flowLayout:currentLayout})
               applyComponentPresentationStyle(stage,presentation.stageStyle)
               applyComponentPresentationStyle(host,presentation.contentStyle)
               if(children)applyComponentPresentationStyle(children,presentation.childrenStyle)
+              resizeControl?.sync()
             }
             place()
-            if(typeof ResizeObserver!=='undefined'){resize=new ResizeObserver(()=>place());resize.observe(shell)}
+            if(typeof ResizeObserver!=='undefined'){
+              let lastSize=''
+              resize=new ResizeObserver(()=>{const size=[shell.clientWidth,shell.clientHeight,shell.parentElement?.clientWidth].join('/');if(size===lastSize)return;lastSize=size;if(!resizeFrame)resizeFrame=requestAnimationFrame(()=>{resizeFrame=0;place()})});resize.observe(shell);if(shell.parentElement)resize.observe(shell.parentElement)
+            }
+            if(!readOnly&&flowObjectCanWrap(objectProject,block.id))resizeControl=mountFlowBodyResize(shell,{
+              enabled:()=>!latest.current.readOnly&&ownsBody()&&!flowStructureDisabledReason(latest.current.project,block.id),
+              wrap:()=>instance.flowLayout?.wrap??'none',
+              widthPercent:()=>previewWidth??instance.flowLayout?.widthPercent??(instance.flowLayout?.wrap&&instance.flowLayout.wrap!=='none'?48:100),
+              begin:async()=>{const ready=await drain();if(!ready.ok)throw new Error(ready.reason);const captured=bridge.captureTarget(documentId);if(captured.surfaceId!==surfaceId||!flowObjectCanWrap(captured.editingProject,block.id))throw new Error('正文对象已改变');return captured},
+              preview:value=>{previewWidth=value;editor.current?.paintProjection(()=>place())},
+              commit:async(value,captured)=>{const edits=flowBodyLayoutEdits(captured.editingProject,block.id,{widthPercent:Math.round(value*100)/100});assertFlowStructureEditsAllowed(captured.editingProject,edits);await bridge.editCaptured(bridge.capture(edits,captured),crypto.randomUUID())},
+              report:message=>setError(message)
+            })
             if (instance.container) {
               containerRoots.current.set(block.id, { root: root!, project: objectProject, render: runtime.renderContainer, place })
               root!.render(<>{runtime.renderContainer(block.id, objectProject, 'flow')}</>)
@@ -860,6 +895,7 @@ export function FlowWorkspace({ documentId, project, surfaceId, toolbarContainer
             return () => {
               if(containerRoots.current.get(block.id)?.root===root)containerRoots.current.delete(block.id)
               releaseRuntime()
+              resizeControl?.destroy();if(resizeFrame)cancelAnimationFrame(resizeFrame)
               resize?.disconnect()
               if(root)queueMicrotask(()=>root.unmount())
               // Restore the reusable NodeView host before discarding this render's

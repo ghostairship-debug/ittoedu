@@ -274,6 +274,7 @@ export function ElementsTab({
   const tableInsertion = insertionCapability(authoringSurface, editingScope, 'table', spatialInsertionScope ?? undefined)
   const chartInsertion = insertionCapability(authoringSurface, editingScope, 'chart', spatialInsertionScope ?? undefined)
   const ensureTeacherController = () => { void ensureCourseTeacherController(kernel).catch(error => mediaAuthoringError(kernel, error)) }
+  const navigationChoices=([['directory','内容目录'],['top','顶部导航'],['side','侧边导航'],['progress','进度导航']] as const).map(([presentation,label])=><button type="button" key={presentation} className="element-card" data-testid={'insert-navigation-'+presentation} onClick={()=>{void ensureCourseTeacherController(kernel,undefined,undefined,{placement:'content',presentation}).catch(error=>mediaAuthoringError(kernel,error))}}>{label}</button>)
   const categories = ADD_CATEGORIES
   const normalizedQuery = searchQuery.trim().toLocaleLowerCase()
   const searching = normalizedQuery.length > 0
@@ -321,7 +322,8 @@ export function ElementsTab({
     (searching
       ? matchesSearch('navigation')
       : activeCategory === 'controls')
-  const showQuickAdd = showText || showFormula || showImage || showVideo || showAudio || showController || showTable || showCharts
+  const showNavigation=editingScope!=='global'&&(searching?matchesSearch('navigation'):activeCategory==='controls')
+  const showQuickAdd = showNavigation || showText || showFormula || showImage || showVideo || showAudio || showController || showTable || showCharts
   const showShapes = searching
     ? visibleShapeGroups.length > 0
     : activeCategory === 'common'
@@ -344,6 +346,7 @@ export function ElementsTab({
       <label className="add-search"><Search size={15} aria-hidden="true"/><input type="search" value={searchQuery}
         placeholder="搜索元素、图形或素材" aria-label="搜索元素内容" onChange={event=>setSearchQuery(event.currentTarget.value)}/></label>
       <FlowInsertMenu onInsert={command => onFlowInsert(command)} query={searchQuery} />
+      {(!searching||matchesSearch('navigation'))&&<section aria-label="导航组件"><h3>导航组件</h3><div className="element-grid">{navigationChoices}</div></section>}
       {showCharts&&<div className="element-grid element-grid--primary">
         <button type="button" aria-label="图表"
           className={`element-card element-card--primary ${showChartPicker ? 'is-active' : ''}`}
@@ -544,16 +547,17 @@ export function ElementsTab({
                 声音
               </button>
             )}
+            {showNavigation&&navigationChoices}
             {showController && (
               <button
                 type="button"
-                aria-label="教师控制器"
+                aria-label="全局控制台"
                 className="element-card element-card--primary"
                 data-testid="add-teacher-controller"
                 onClick={ensureTeacherController}
               >
                 <span className="element-icon"><SlidersHorizontal size={20} /></span>
-                教师控制器
+                全局控制台
               </button>
             )}
             {authoringSurface === 'slide' && inputAvailable && matchesSearch('input') && (
@@ -763,7 +767,7 @@ export function ElementsTab({
 
           {showControlsEmpty && (
             <div className="empty-state add-category-empty">
-              教师控制器和全局元素需要在左侧切换到“全局层”后添加。
+              全局控制台和全局元素需要在左侧切换到“全局层”后添加。
             </div>
           )}
       </>

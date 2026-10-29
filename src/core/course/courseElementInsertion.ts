@@ -1,3 +1,4 @@
+import type {NavigationPresentation} from '../../shared/teacherControllerConfig'
 import { courseInsertionFrame } from './courseInsertionGeometry'
 import { componentSurface } from '../../shared/contracts/component-platform/project'
 import { nanoid } from 'nanoid'
@@ -79,14 +80,24 @@ export function prepareCourseElementEdits(project: CourseProjectV10, surfaceId: 
 
 /** Existing controller reuse and both supported UI defaults share one preparation owner. */
 export function prepareCourseTeacherControllerEdits(project: CourseProjectV10, surfaceId: string | null,
-  origin?: 'slide-authoring', selectedInstanceId?: string | null): { edits: ComponentEdit[]; instanceIds: string[] } {
-  const existing = Object.values(project.instances).find(instance => componentDefinitionBuiltinKey(project.definitions[instance.definitionId]) === 'guoling.navigation')
+  origin?: 'slide-authoring', selectedInstanceId?: string | null, options: {placement?:'global'|'content';presentation?:NavigationPresentation} = {}): { edits: ComponentEdit[]; instanceIds: string[] } {
+  if(options.placement==='content'){
+    const surface=surfaceId?componentSurface(project,surfaceId):undefined;if(!surface)throw new Error('请先选择导航组件所在页面')
+    const id='instance_'+nanoid(),presentation=options.presentation??'directory'
+    const data={...createTeacherControllerData(surface.designSize),presentation,title:presentation==='directory'?'内容目录':'作品导航',collapsible:false,defaultCollapsed:false,includeInStaticExports:true}
+    const width=surface.kind==='flow'?surface.flow?.layout.readingWidth??800:Math.min(surface.designSize?.width??1280,880)-48
+    const height=presentation==='directory'||presentation==='side'?240:72
+    const instance:ComponentInstance={id,definitionId:TEACHER_CONTROLLER_DEFINITION.id,name:data.title,data:courseAuthorData(data),frame:{width,height,transform:[1,0,0,1,surface.kind==='flow'?0:24,surface.kind==='flow'?0:24]},...(surface.kind==='flow'?{flowLayout:{width:'content-width' as const}}:{})}
+    return {instanceIds:[id],edits:[...definitionInsertionEdits({project,surfaceId},TEACHER_CONTROLLER_DEFINITION),{type:'instance.insert',container:{kind:'instance',instanceId:surface.id},index:surface.kind==='flow'?0:surface.childIds.length,instances:[instance],rootIds:[id]}]}
+  }
+  const existing = Object.values(project.instances).find(instance => (project.global.overlay.includes(instance.id)||project.global.underlay.includes(instance.id))&&componentDefinitionBuiltinKey(project.definitions[instance.definitionId]) === 'guoling.navigation')
   const playback = courseSettingsEdits(project, { playback: { controls: 'canvas' } })
   if (existing) {
     const data = existing.data && typeof existing.data === 'object' && !Array.isArray(existing.data) ? existing.data : {}
     const variants = data.sceneStyles, variant = variants && typeof variants === 'object' && !Array.isArray(variants) && surfaceId ? variants[surfaceId] : undefined
     return { edits: [...playback, { type: 'instance.patch', instanceId: existing.id, patch: { visible: true } },
       { type: 'data.set', instanceId: existing.id, path: ['enabled'], value: true },
+      ...(options.presentation?[{type:'data.set' as const,instanceId:existing.id,path:['presentation'],value:options.presentation}]:[]),
       ...(variant && typeof variant === 'object' && !Array.isArray(variant) && variant.enabled === false && surfaceId
         ? [{ type: 'data.set' as const, instanceId: existing.id, path: ['sceneStyles', surfaceId, 'enabled'], value: true }] : []),
       ...(surfaceId ? courseGlobalPlacementEdits(project, existing.id, { atSurface: { surfaceId, visible: true } }) : [])], instanceIds: [existing.id] }
@@ -95,7 +106,7 @@ export function prepareCourseTeacherControllerEdits(project: CourseProjectV10, s
   if (surfaceId && !surface) throw new Error('插入的原页面已不存在')
   const canvas = origin === 'slide-authoring' ? surface?.designSize ?? { width: 1280, height: 720 } : undefined
   const instance: ComponentInstance = { id: `instance_${nanoid()}`, definitionId: TEACHER_CONTROLLER_DEFINITION.id,
-    ...(origin ? {} : { name: '教师控制台' }), data: courseAuthorData(createTeacherControllerData(canvas)),
+    ...(origin ? {} : { name: '全局控制台' }), data: courseAuthorData({...createTeacherControllerData(canvas),...(options.presentation?{presentation:options.presentation}:{})}),
     frame: origin ? createTeacherControllerFrame(canvas) : { width: 720, height: 80, transform: [1, 0, 0, 1, 20, 20] } }
   return { instanceIds: [instance.id], edits: [...playback, ...definitionInsertionEdits({ project, surfaceId }, TEACHER_CONTROLLER_DEFINITION),
     { type: 'instance.insert', container: { kind: 'global', plane: 'overlay' },

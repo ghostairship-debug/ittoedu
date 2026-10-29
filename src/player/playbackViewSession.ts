@@ -89,6 +89,13 @@ function hostStage(host: PlaybackViewHost): SlideCanvasSize {
 }
 
 export class PlaybackViewSession implements PlaybackViewPort {
+  #chromeEnabled: boolean
+  constructor(options: { chrome?: boolean } = {}) { this.#chromeEnabled = options.chrome !== false }
+  /** Presentation policy only; observation and native document scrolling remain usable. */
+  setChromeEnabled(enabled: boolean): void {
+    if (enabled === this.#chromeEnabled) return
+    this.#chromeEnabled = enabled; if (!enabled) this.#closePanel(false); this.#paint()
+  }
   #state: PlaybackViewState = { zoom: 1, pan: { x: 0, y: 0 }, viewport: { width: 1280, height: 720 },
     bounds: { x: 0, y: 0, width: 1280, height: 720 }, generation: 0 }
   #hosts = new Map<string, PlaybackViewHost>()
@@ -291,7 +298,7 @@ export class PlaybackViewSession implements PlaybackViewPort {
   }
   #deriveChrome(): void {
     const range = playbackPanRange({ ...this.#state, chromeInsets: undefined })
-    const x = range.x.max > range.x.min, y = range.y.max > range.y.min
+    const x = this.#chromeEnabled && range.x.max > range.x.min, y = this.#chromeEnabled && range.y.max > range.y.min
     const native = { right: 0, bottom: 0 }
     const host = this.#active ? this.#hosts.get(this.#active) : undefined
     const fit = host ? this.fitScale(host.id) : 1
@@ -309,6 +316,7 @@ export class PlaybackViewSession implements PlaybackViewPort {
     this.#state.chromeInsets = this.#chrome.insets
   }
   openZoomPanel(button: HTMLButtonElement): void {
+    if (!this.#chromeEnabled) return
     if (this.#panelButton === button) { this.#closePanel(true); return }
     this.#closePanel(false)
     if (!this.#frame) return

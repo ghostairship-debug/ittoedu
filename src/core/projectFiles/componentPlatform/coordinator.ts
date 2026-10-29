@@ -94,7 +94,7 @@ const contentApplyFileSchema = z.union([
     edits: z.array(z.object({ old: z.string().min(1), new: z.string() }).strict()).min(1) }).strict(),
 ])
 export const componentProjectFileSchemas = {
-  'project.list': z.object({ project: selector, offset: z.number().int().nonnegative().optional(), limit: z.number().int().positive().optional() }).strict(),
+  'project.list': z.object({ project: selector, offset: z.number().int().nonnegative().optional().describe('续页传入上一页 nextOffset，并沿用 project。'), limit: z.number().int().positive().optional().describe('最多返回的目录项数；交付容量可能提前分页，以返回的 nextOffset 为准。') }).strict(),
   'project.read': z.object({ project: selector, path, query: z.string().min(1).optional(), refresh: z.boolean().optional(), full: z.boolean().optional(), offset: z.number().int().nonnegative().optional(), limit: z.number().int().positive().optional() }).strict(),
   'project.apply': z.union([
     z.object({ project: selector, path: z.literal('entry.html'), intent: z.literal('program.set'), content: z.string() }).strict(),
@@ -400,14 +400,28 @@ export class ComponentProjectFileCoordinator {
       captured = { snapshot: current, files: componentProjectScopeFiles(current.model.project, authoringFiles(current, scope.state, scopeFileRequest(scope)), scope) }
       listings.set(listingKey, captured); this.listings.set(runId, listings)
     }
-    const end = Math.min(captured.files.length, offset + Math.min(limit, 1000))
-    const files = captured.files.slice(offset, end)
-    this.remember(runId, captured.snapshot, files, true, scope)
-    return { files: listedFiles(files), offset, total: captured.files.length, revision: captured.snapshot.revision, currentRevision: current.revision,
+    const metadata = { offset, total: captured.files.length, revision: captured.snapshot.revision, currentRevision: current.revision,
       ...(captured.snapshot.revision !== current.revision ? { staleSnapshot: true } : {}),
-      ...(end < captured.files.length ? { nextOffset: end } : {}),
       basis: scope.state ? 'state-data-style-and-base-source' : 'base',
-      note: `${scope.state ? 'data/style 为所选展示状态的有效内容；组件源码仍是基态。HTML/页面结构的状态修改使用该状态目标的 object.update、presentation.update。' : '这些工程文件是基础作者内容。'}目录续页把 nextOffset 传给 project.list 的 offset，并沿用 project。` }
+      note: `${scope.state ? 'data/style 为所选展示状态的有效内容；组件源码仍是基态。HTML/页面结构的状态修改使用该状态目标的 object.update、presentation.update。' : '这些工程文件是基础作者内容。'}limit 是目录项数上限，交付容量可能提前分页；续页把返回的 nextOffset 传给 project.list 的 offset，并沿用 project。` }
+    const requestedEnd = Math.min(captured.files.length, offset + Math.min(limit, 1000))
+    const files: ReturnType<typeof listedFiles> = []
+    let end = Math.min(offset, captured.files.length)
+    // Page complete directory records before the generic public preview can
+    // shorten their paths or replace items with null. Reserve the same envelope
+    // headroom as project.read; the largest possible cursor is counted upfront.
+    let used = modelJsonBytes({ kind: 'read', data: { files, ...metadata, nextOffset: captured.files.length } })
+    while (end < requestedEnd) {
+      const entry = listedFiles([captured.files[end]!])[0]!
+      const bytes = modelJsonBytes(entry) + (files.length ? 1 : 0)
+      if (used + bytes > MODEL_DELIVERY_BYTES - 1024) {
+        if (!files.length) throw new Error('单个目录项超出本次交付容量；请按已知路径 project.read，或用已观察的页面/对象 target 限定 project。')
+        break
+      }
+      files.push(entry); used += bytes; end++
+    }
+    this.remember(runId, captured.snapshot, captured.files.slice(offset, end), true, scope)
+    return { files, ...metadata, ...(end < captured.files.length ? { nextOffset: end } : {}) }
   }
 
   private remember(runId: string, snapshot: ComponentProjectSnapshot, files: ComponentProjectFile[], captured = true, scope: ComponentProjectFileScope = { kind: 'document' }): void {

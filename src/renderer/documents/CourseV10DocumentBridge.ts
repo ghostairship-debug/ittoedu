@@ -8,7 +8,7 @@ import { DocumentAckUnknownError, DocumentBlockedInputError, DocumentProjection,
 import { captureComponentOperation, presentationComponentEdits, componentValueAt } from '../../core/drivers/courseV10Operations'
 import { equalComponentValue } from '../../shared/componentValue'
 import type { ComponentOperationBatch } from '../../shared/contracts/component-platform/operations'
-import { containerEditingPath, groupEditingPath, normalizeEditingContext, parentEditingGroup, type ContainerEditingContext } from './containerEditingContext'
+import { containerEditingPath, editingLevelInstanceId, groupEditingPath, normalizeEditingContext, parentEditingGroup, type ContainerEditingContext } from './containerEditingContext'
 import { isNativeFlowLayoutGroup } from '../../shared/flowNativeLayout'
 import { authorFieldFromSpot, interactionInstanceIds, interactionSelectionIdentity, type CourseInteractionSelection } from './interactionSelection'
 import type { ComponentAuthorSpot } from '../../shared/contracts/component-platform/runtime'
@@ -148,6 +148,8 @@ function selectionEditingGroup(project: CourseProjectV10, context: ContainerEdit
   previous: (ContainerEditingContext & { activeGroupId: string | null }) | undefined, target: CourseInteractionSelection | null): string | null {
   const ids = interactionInstanceIds(target)
   if (!ids.length) return retainedEditingGroup(project, context, previous)
+  const retained = retainedEditingGroup(project, context, previous)
+  if (retained && ids.every(id => id === retained || editingLevelInstanceId(project, context.surfaceId ?? context.rootInstanceId, id, retained, true) === id)) return retained
   const parents = ids.map(id => parentEditingGroup(project, context.surfaceId ?? context.rootInstanceId, id))
   const groupId = parents[0]
   if (!groupId || parents.some(id => id !== groupId)) return null
@@ -563,7 +565,7 @@ export class CourseV10DocumentBridge {
   selectInstance(documentId: string, instanceId: string | null): void {
     this.selectInstances(documentId, instanceId ? [instanceId] : [])
   }
-  selectInstances(documentId: string, instanceIds: readonly string[], surfaceId?: string | null): void {
+  selectInstances(documentId: string, instanceIds: readonly string[], surfaceId?: string | null, groupContext?: string | null): void {
     const view = this.projection(documentId).read(), model = view.draft ?? view.committed?.model
     if (model?.kind !== 'course-v10') return
     const ids = [...new Set(instanceIds)].filter(id => Boolean(model.project.instances[id]))
@@ -572,7 +574,10 @@ export class CourseV10DocumentBridge {
       ? normalizeEditingContext(model.project, surfaceId)
       : normalizeEditingContext(model.project, old?.rootInstanceId, surfaceId ?? old?.editingContainerId, old?.path)
     const target: CourseInteractionSelection | null = ids.length ? { kind: 'objects', instanceIds: ids } : null
-    const activeGroupId = selectionEditingGroup(model.project, context, old, target)
+    const activeGroupId = groupContext === undefined ? selectionEditingGroup(model.project, context, old, target) : groupContext
+    if (activeGroupId && (!groupEditingPath(model.project, context.surfaceId ?? context.rootInstanceId, activeGroupId)
+      || ids.some(id => id !== activeGroupId && editingLevelInstanceId(model.project, context.surfaceId ?? context.rootInstanceId, id, activeGroupId, true) !== id)))
+      throw new Error('选择不属于当前组范围')
     if (old && old.surfaceId === context.surfaceId && old.rootInstanceId === context.rootInstanceId
       && old.editingContainerId === context.editingContainerId && old.editingPlane === context.editingPlane
       && old.activeGroupId === activeGroupId
@@ -654,9 +659,13 @@ export class CourseV10DocumentBridge {
     if (!old?.activeGroupId) return
     const view = this.projection(documentId).read(), model = view.draft ?? view.committed?.model
     if (model?.kind !== 'course-v10') return
+    const selected = interactionInstanceIds(old.target)
+    const parent = selected.length === 1 ? parentEditingGroup(model.project, old.surfaceId ?? old.rootInstanceId, selected[0]!) : null
     const path = groupEditingPath(model.project, old.surfaceId ?? old.rootInstanceId, old.activeGroupId)
-    this.selections.set(documentId, { ...old, activeGroupId: path?.at(-2) ?? null,
-      target: model.project.instances[old.activeGroupId] ? { kind: 'objects', instanceIds: [old.activeGroupId] } : null })
+    const inside = parent && (parent === old.activeGroupId || editingLevelInstanceId(model.project, old.surfaceId ?? old.rootInstanceId, parent, old.activeGroupId, true) === parent)
+    const targetId = inside ? parent : selected.length ? null : old.activeGroupId
+    this.selections.set(documentId, { ...old, activeGroupId: inside ? parent === old.activeGroupId ? path?.at(-2) ?? null : old.activeGroupId : selected.length ? null : path?.at(-2) ?? null,
+      target: targetId && model.project.instances[targetId] ? { kind: 'objects', instanceIds: [targetId] } : null })
     this.publish({ activation: this.state.activation + 1 }, documentId)
   }
   captureLatestAgentUndoTarget(): CourseAgentUndoTarget | null {

@@ -110,6 +110,11 @@ type DeepReadonlyChart<T> = T extends readonly (infer Item)[]
 /** Accepts both authoring (mutable) and Published (frozen) chart content. */
 export type NativeChartViewContent = DeepReadonlyChart<NativeChartContent>
 
+/** Existing chart font size is the title size; labels and legends keep a consistent visual hierarchy. */
+export function nativeChartFontSizes(fontSize: number) {
+  return { label: fontSize * 0.75, legend: fontSize * 0.7 }
+}
+
 const DEFAULT_SERIES_COLORS = [
   '#2563eb', // blue
   '#10b981', // green
@@ -174,18 +179,32 @@ export function buildNativeChartView(
   const height = options.height !== undefined && options.height > 0 ? options.height : 400
 
   const accessibleDescription = describeNativeChart(chart)
+  const fonts = nativeChartFontSizes(chart.style.fontSize)
+  const horizontal = chart.chartType === 'bar' && chart.style.barDirection === 'horizontal'
+  let minVal = 0, maxVal = 1
+  if (chart.chartType === 'bar' || chart.chartType === 'line' || chart.chartType === 'area') {
+    let values = chart.series.flatMap(series => series.points.map(point => point.value)).filter(Number.isFinite)
+    if (!values.length) values = [0, 10]
+    minVal = chart.style.valueMin !== undefined ? chart.style.valueMin : Math.min(0, ...values)
+    maxVal = chart.style.valueMax !== undefined ? chart.style.valueMax : Math.max(1, ...values)
+    if (minVal >= maxVal) maxVal = minVal + 1
+  }
+  const valueLabelWidth = Math.max(...Array.from({ length: 5 }, (_, index) =>
+    String(Math.round((minVal + (maxVal - minVal) * index / 4) * 100) / 100).length * fonts.label * 0.65))
+  const valueAxis = 'showValueAxis' in chart.style && chart.style.showValueAxis
+  const legendColumnWidth = Math.max(80, fonts.legend * 6 + 18)
 
   // Layout margins
-  const titleHeight = chart.title ? 32 : 12
-  const legendSpace = chart.style.showLegend ? 28 : 0
+  const titleHeight = chart.title ? Math.max(32, chart.style.fontSize + 12) : 12
+  const legendSpace = chart.style.showLegend ? Math.max(28, fonts.legend + 14) : 0
   const legendPos = chart.style.legendPosition ?? 'top'
 
-  let plotX = 50
+  let plotX = !horizontal && valueAxis ? Math.max(50, valueLabelWidth + 12) : 50
   let plotY = titleHeight
-  let plotW = width - 70
-  let plotH = height - titleHeight - 40
+  let plotW = width - plotX - (horizontal && valueAxis ? Math.max(20, valueLabelWidth / 2 + 6) : 20)
+  let plotH = height - titleHeight - Math.max(40, fonts.label * 2 + 10)
   if (chart.chartType === 'bar' && chart.style.barDirection === 'horizontal' && chart.style.showCategoryAxis) {
-    const labelWidth = Math.min(width * 0.3, Math.max(50, ...chart.categories.map(category => category.label.length * 12 + 16)))
+    const labelWidth = Math.min(width * 0.3, Math.max(50, ...chart.categories.map(category => category.label.length * fonts.label + 16)))
     plotW -= labelWidth - plotX
     plotX = labelWidth
   }
@@ -197,10 +216,10 @@ export function buildNativeChartView(
     } else if (legendPos === 'bottom') {
       plotH -= legendSpace
     } else if (legendPos === 'left') {
-      plotX += 80
-      plotW -= 80
+      plotX += legendColumnWidth
+      plotW -= legendColumnWidth
     } else if (legendPos === 'right') {
-      plotW -= 80
+      plotW -= legendColumnWidth
     }
   }
 
@@ -319,20 +338,6 @@ export function buildNativeChartView(
   }
 
   // Cartesian Chart (bar, line, area)
-  const horizontal = chart.chartType === 'bar' && chart.style.barDirection === 'horizontal'
-  // Determine value range
-  let allValues: number[] = []
-  for (const s of chart.series) {
-    for (const p of s.points) {
-      if (Number.isFinite(p.value)) allValues.push(p.value)
-    }
-  }
-  if (allValues.length === 0) allValues = [0, 10]
-
-  let minVal = chart.style.valueMin !== undefined ? chart.style.valueMin : Math.min(0, ...allValues)
-  let maxVal = chart.style.valueMax !== undefined ? chart.style.valueMax : Math.max(1, ...allValues)
-  if (minVal >= maxVal) maxVal = minVal + 1
-
   const valRange = maxVal - minVal
 
   // Grid lines (4 intervals, 5 lines)

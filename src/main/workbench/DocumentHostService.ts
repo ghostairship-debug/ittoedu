@@ -113,6 +113,11 @@ export class DocumentHostService {
     this.compilation = new InMemoryComponentCompilation(createEsbuildComponentCompiler())
     this.tools = new DocumentToolGateway(this.registry, this.drivers, randomUUID, { prepareImage: prepareImageResource, prepareMedia: prepareMediaResource,
       prepareInput: documentId => this.prepareDocumentInput(documentId),
+      measureExistingLayout: async request=>{
+        const measured=await (await import('./contentApply/measurement/ElectronHtmlDesignMeasurement.js')).measureHtmlAtDesignViewport({html:request.html,viewport:request.viewport,layoutSlots:request.slots,resourceUrls:request.resourceUrls,framing:'viewport'})
+        if(!measured.layoutMeasurements)throw new Error('布局测量没有返回当前对象几何')
+        return measured.layoutMeasurements
+      },
       prepareSpatialViewport: (documentId: string, surfaceId: string) => this.prepareSpatialViewport(documentId, surfaceId),
       componentContent: {
         verifyDiagnostic: (snapshot, diagnostic) => verifyContentResourceDiagnostic({ project: snapshot.model.project,

@@ -8,7 +8,9 @@ export interface TeacherControllerButton {
   visible: boolean
 }
 
+export type NavigationPresentation = 'console' | 'directory' | 'top' | 'side' | 'progress'
 export interface TeacherControllerConfig {
+  presentation?: NavigationPresentation
   title: string
   showSceneProgress: boolean
   compact: boolean
@@ -29,7 +31,7 @@ export interface TeacherControllerConfig {
 
 export function defaultTeacherControllerConfig(): TeacherControllerConfig {
   return {
-    title: '教师控制台', showSceneProgress: true, compact: false, collapsible: true, defaultCollapsed: true,
+    title: '全局控制台', showSceneProgress: true, compact: false, collapsible: true, defaultCollapsed: true,
     buttons: [
       ['previous', '上一步', 'step.previous'], ['next', '下一步', 'step.next'],
       ['previous-scene', '上一场景', 'scene.previous'], ['next-scene', '下一场景', 'scene.next'],
@@ -50,6 +52,7 @@ const STYLE_KEYS = [
 export function readTeacherControllerConfig(props: Record<string, unknown>): TeacherControllerConfig {
   const defaults = defaultTeacherControllerConfig()
   const result = { ...defaults }
+  if(['console','directory','top','side','progress'].includes(String(props.presentation)))result.presentation=props.presentation as NavigationPresentation
   for (const key of ['title', 'showSceneProgress', 'compact', 'collapsible', 'defaultCollapsed', 'includeInStaticExports'] as const) {
     if (typeof props[key] === typeof defaults[key]) Object.assign(result, { [key]: props[key] })
   }

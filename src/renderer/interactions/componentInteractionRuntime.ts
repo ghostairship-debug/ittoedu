@@ -8,7 +8,7 @@ export interface ComponentInteractionPorts {
   currentSurfaceId(): string | null
   currentStateId(): string | null
   courseState: { get(key: string): unknown; set(key: string, value: unknown): void }
-  subscribeTrigger(trigger: InteractionTrigger, listener: (payload?: unknown) => boolean | void | PromiseLike<boolean | void>, isEnabled?: () => boolean): () => void
+  subscribeTrigger(trigger: InteractionTrigger, listener: (payload?: unknown) => boolean | void | PromiseLike<boolean | void>, isEnabled?: () => boolean, navigationBinding?: { actions(): readonly InteractionAction[]; inScope(): boolean }): () => void
   /** The actual host action must recheck signal/scope before an asynchronous write. */
   executeAction(action: InteractionAction, context: { signal: AbortSignal; ruleId: string; stepId: string; restartFromBeginning: boolean; onNavigationCommit?: () => void }): boolean | void | PromiseLike<boolean | void>
   report(message: string): void
@@ -96,7 +96,9 @@ export function createComponentInteractionRuntime(createPorts: ComponentInteract
         const triggers = new Map(rules.filter(rule => rule.enabled).map(rule => [JSON.stringify(rule.trigger), rule.trigger]))
         const stops: (() => void)[] = []
         try { for (const trigger of triggers.values()) stops.push(ports.subscribeTrigger(trigger, () => dispatch(trigger),
-          () => active() && rules.some(rule => rule.enabled && triggerMatches(rule.trigger, trigger) && inScope(rule) && rule.conditions.every(matches)))) }
+          () => active() && rules.some(rule => rule.enabled && triggerMatches(rule.trigger, trigger) && inScope(rule) && rule.conditions.every(matches)),
+          { actions:()=>rules.filter(rule=>rule.enabled && triggerMatches(rule.trigger,trigger) && inScope(rule)).flatMap(rule=>rule.actions.map(step=>step.action)),
+            inScope:()=>active()&&rules.some(rule=>rule.enabled&&triggerMatches(rule.trigger,trigger)&&inScope(rule)) })) }
         catch (error) { for (const stop of stops.reverse()) stop(); throw error }
         return () => { for (const stop of stops.reverse()) stop() }
       }

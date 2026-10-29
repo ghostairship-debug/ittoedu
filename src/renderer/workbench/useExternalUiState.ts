@@ -12,6 +12,7 @@ export function useExternalUiStateProvider(api: ExternalMcpAPI | undefined, work
     // Unfinished input or a view still loading only means there is no reportable foreground selection right now.
     const [reference] = await capture(false).catch(() => [])
     return { ...(space ? { workspaceId: space } : {}), ...(reference ? { activeDocumentId: reference.documentId } : {}),
-      ...(reference?.selection ? { selection: { documentId: reference.documentId, targets: reference.selection } } : {}) }
+      ...(reference?.selection ? { selection: { documentId: reference.documentId, epoch: reference.epoch,
+        revision: reference.revision, targets: reference.selection } } : {}) }
   }), [api])
 }

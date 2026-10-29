@@ -1,3 +1,4 @@
+import { navigationControlVisible } from '../../behaviors/navigation/navigationControls'
 import type { ComponentRuntimeContext, ComponentPresentationPort, CourseProjectV10, JsonValue, TeacherControllerPort, TeacherControllerSnapshot } from '../../../shared/contracts/component-platform'
 import type { InteractionAction, InteractionTrigger, NodeMotionAction } from '../../../shared/interactionTypes'
 import type { ComponentInteractionPorts } from '../../../renderer/interactions/componentInteractionRuntime'
@@ -39,7 +40,7 @@ export class ComponentWorldInteractions {
   private readonly leases = new Map<string, symbol>()
   private readonly presentationVisibility = new Map<string, Map<symbol, { element: HTMLElement; visible: boolean }>>()
   private readonly presentationCleanup = new Map<string, Set<() => void>>()
-  private readonly presenterListeners = new Map<'next' | 'previous', Set<{ instanceId: string; invoke(): ReturnType<TriggerListener> }>>()
+  private readonly presenterListeners = new Map<'next' | 'previous', Set<{ instanceId: string; live():boolean;enabled():boolean; invoke(): ReturnType<TriggerListener> }>>()
   private readonly videoThresholds = new Set<{ nodeId: string; seconds: number; previous: number; crossed: boolean; scope: ComponentRuntimeContext['scope']; listener: TriggerListener }>()
   private readonly videoSamples = new WeakSet<object>()
   private readonly stableVisibility = new Map<string, { element: HTMLElement; visible: boolean }>()
@@ -286,6 +287,14 @@ export class ComponentWorldInteractions {
     for (const style of this.clickStyles.values()) style.remove()
     this.clickStyles.clear()
   }
+  readPresenterCommands(): readonly ('next'|'previous')[] {
+    const current=this.world.navigation?.readLocation()??null
+    return (['previous','next'] as const).filter(command=>[...(this.presenterListeners.get(command)??[])].some(binding=>binding.live()&&(this.navigationForInstance(binding.instanceId)?.readLocation()??null)===current))
+  }
+  canDispatchPresenterCommand(command:'next'|'previous'):boolean {
+    const current=this.world.navigation?.readLocation()??null
+    return [...(this.presenterListeners.get(command)??[])].some(binding=>binding.live()&&binding.enabled()&&(this.navigationForInstance(binding.instanceId)?.readLocation()??null)===current)
+  }
   async dispatchPresenterCommand(command: 'next' | 'previous'): Promise<boolean> {
     if (!this.world.active()) return false
     const project = this.world.project(), focused = this.world.document()?.activeElement
@@ -320,7 +329,7 @@ export class ComponentWorldInteractions {
       const explicit = 'containerId' in action ? action.containerId : undefined
       return typeof explicit === 'string' ? world.navigation?.forContainer?.(explicit) : navigation
     }
-    const subscribeTrigger = (trigger: InteractionTrigger, listener: TriggerListener, isEnabled?: () => boolean): (() => void) => {
+    const subscribeTrigger = (trigger: InteractionTrigger, listener: TriggerListener, isEnabled?: () => boolean, navigationBinding?: {actions(): readonly InteractionAction[];inScope():boolean}): (() => void) => {
       if (trigger.type === 'animation.completed') return () => {}
       if (trigger.type === 'scene.enter' || trigger.type === 'presentation.enter') {
         const identity = () => trigger.type === 'scene.enter' ? currentSurfaceId() : JSON.stringify([currentSurfaceId(), currentStateId()])
@@ -369,7 +378,7 @@ export class ComponentWorldInteractions {
       if (trigger.type === 'presenter.command') {
         const callbacks = this.presenterListeners.get(trigger.command) ?? new Set()
         this.presenterListeners.set(trigger.command, callbacks)
-        const binding = { instanceId: scope.instanceId, invoke: () => scope.isActive() && world.active() && this.canPresent(scope.instanceId) ? listener() : false }
+        const binding = { instanceId: scope.instanceId,live:()=>scope.isActive()&&world.active()&&this.canPresent(scope.instanceId),enabled:()=>isEnabled?.()!==false, invoke: () => scope.isActive() && world.active() && this.canPresent(scope.instanceId) ? listener() : false }
         callbacks.add(binding)
         const stop = () => { callbacks.delete(binding); if (!callbacks.size) this.presenterListeners.delete(trigger.command) }
         scope.cleanup(stop); return stop
@@ -380,6 +389,14 @@ export class ComponentWorldInteractions {
         })
       }
       if (trigger.type === 'node.click') {
+        const control = navigationBinding && navigation?.registerControl?.({
+          get actions(){return navigationBinding.actions().flatMap(action=>{
+            if(action.type==='location.go')return [{type:'scene.go' as const,sceneId:action.locationId,...explicitTarget(action)}]
+            if(action.type==='presentation.set'){const id=currentSurfaceId();return id?[{type:'scene.go' as const,sceneId:id,targetStateId:action.stateId,...explicitTarget(action)}]:[]}
+            return ['step.previous','step.next','scene.previous','scene.next','scene.go','scene.open-picker','course.restart'].includes(action.type)?[action as import('../../../shared/contracts/component-platform').TeacherControllerAction]:[]
+          })},
+          present:()=>{const element=world.element(trigger.nodeId);return active()&&navigationBinding.inScope()&&this.canPresent(trigger.nodeId)&&Boolean(element&&navigationControlVisible(element))}
+        })
         const binding: ClickBinding = { nodeId: trigger.nodeId, enabled: () => active() && isEnabled?.() !== false,
           click: event => {
             const element = world.element(trigger.nodeId)
@@ -396,7 +413,7 @@ export class ComponentWorldInteractions {
         const stop = () => {
           if (stopped) return
           stopped = true; binding.document?.removeEventListener('click', binding.click, true); binding.document = undefined
-          off(); this.clickBindings.delete(binding)
+          off(); control?.(); this.clickBindings.delete(binding)
           refresh()
         }
         scope.cleanup(stop)
