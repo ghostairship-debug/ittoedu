@@ -12,6 +12,8 @@ export interface TaskInputFreezePorts {
   material(source: string, signal?: AbortSignal, modelRepresentation?: boolean): Promise<{ name: string; mimeType: string; bytes: Uint8Array; version: string; representation?: string }>
   /** Read authority is checked before asking the current document owner; no disk read prerequisite. */
   authorize(source: string): Promise<string>
+  /** A directory capture keeps its own read boundary and verifies membership/identity after freezing its files. */
+  directory?(source: string, signal?: AbortSignal): Promise<{ files: readonly string[]; verify(): Promise<void> } | undefined>
   opened(filename: string): Promise<DocumentSnapshot | undefined>
   disk(source: string): Promise<{ name: string; bytes: Uint8Array; version: string }>
 }
@@ -67,6 +69,33 @@ export async function freezeTaskInputs(sources: readonly string[], ports: TaskIn
     }
     const filename = await ports.authorize(source)
     active()
+    const directory = await ports.directory?.(source, options.signal)
+    active()
+    if (directory) {
+      const key = (value: string) => process.platform === 'win32' ? value.toLowerCase() : value
+      const rootName = path.basename(filename)
+      if (!rootName) throw new Error('目录来源必须有可保留的目录名')
+      for (const member of directory.files) {
+        active()
+        const relative = path.relative(filename, member)
+        if (!relative || relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative))
+          throw new Error('目录来源成员超出已授权目录；未冻结来源')
+        const captured = await freezeTaskInputs([member], { ...ports, directory: undefined,
+          authorize: async selected => {
+            const authorized = await ports.authorize(selected)
+            if (key(path.resolve(authorized)) !== key(path.resolve(member)))
+              throw new Error('目录来源成员位置已改变或包含链接；未冻结来源')
+            return authorized
+          },
+        }, options)
+        const parent = path.dirname(relative)
+        const prefix = [rootName, ...(parent === '.' ? [] : parent.split(path.sep))].join('/') + '/'
+        inputs.push(...captured.map(input => ({ ...input, name: prefix + input.name })))
+      }
+      await directory.verify()
+      active()
+      continue
+    }
     const current = options.sourceVersion === 'disk' ? undefined : await ports.opened(filename)
     active()
     if (current && isSourceDocumentModel(current.model)) {

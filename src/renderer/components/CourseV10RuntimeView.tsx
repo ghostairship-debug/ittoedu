@@ -24,6 +24,7 @@ import { attachComponentPlatformNavigationKeys } from '../../player/behaviors/na
 import { mountPlaybackNavigationChrome } from '../../player/componentPlatform/playbackNavigationChrome'
 import { createComponentModelProjection } from '../../player/componentPlatform/modelProjection'
 import type { ComponentPlayerProjection } from '../../player/componentPlatform/ModelPlayer'
+import { reportRendererDiagnostic } from '../diagnostics/installRendererDiagnostics'
 
 /** Temporary reading/observation state for an editor scope, never author content. */
 export interface ContainerEditorViewState {
@@ -78,6 +79,8 @@ export interface CourseV10RuntimeViewProps {
   documentId: string; model: Extract<DocumentModel, { kind: 'course-v10' }>; surfaceId: string | null
   active?: boolean
   selectedInstanceId: string | null; player: boolean; onSelect(id: string | null): void; report(message: string): void
+  /** Runtime diagnostics do not become user-operation errors or cover playable content. */
+  reportDiagnostic?(message: string): void
   selectedInstanceIds?: readonly string[]
   activeStateId?: string | null
   /** An object is already prepared; a callback adds drafts after the shared navigation's state projection. */
@@ -102,6 +105,10 @@ export function CourseV10RuntimeView(props: CourseV10RuntimeViewProps) {
   const compositionUpdate = useRef<Promise<void>>(Promise.resolve())
   current.current = model
   callbacks.current = props
+  const diagnostic = useCallback((message: string) => {
+    if (callbacks.current.reportDiagnostic) callbacks.current.reportDiagnostic(message)
+    else reportRendererDiagnostic(message, { operation: 'course-runtime', documentId })
+  }, [documentId])
   const bridgeView = props.bridge?.read().views.find(view => view.documentId === documentId)
   const rootInstanceId = bridgeView?.rootInstanceId ?? (surfaceId && model.project.rootIds.includes(surfaceId) ? surfaceId : model.project.entry?.rootInstanceId ?? model.project.rootIds[0] ?? null)
   // Local inspection may replace a workspace; ordinary work-root navigation still starts fresh.
@@ -141,7 +148,7 @@ export function CourseV10RuntimeView(props: CourseV10RuntimeViewProps) {
         ?? wrapper.current?.querySelector<HTMLElement>('.canvas-viewport')
         ?? wrapper.current?.querySelector<HTMLElement>('[data-program-viewport]') ?? wrapper.current)?.getBoundingClientRect()
     },
-    restart: () => runtimeRef.current?.resetPlayback(true, { preserveNavigation: true }), audio: () => runtimeRef.current?.audio(), report: message => callbacks.current.report(message) }), [documentId])
+    restart: () => runtimeRef.current?.resetPlayback(true, { preserveNavigation: true }), audio: () => runtimeRef.current?.audio(), report: diagnostic }), [documentId, diagnostic])
   const host = useMemo(() => {
     const teacherController = navigation.teacherPort()
     const compilations = new WeakMap<ComponentCompilationInput, { consumers: Set<AbortSignal>; promise: Promise<ComponentCompilationResult> }>()
@@ -167,16 +174,16 @@ export function CourseV10RuntimeView(props: CourseV10RuntimeViewProps) {
     }
     const mounted = createV10ModelPlayer({ runScopeId: `document:${documentId}:${crypto.randomUUID()}`,
       fontFaceCss: installedBundledFontFaceCss(document),
-      report: message => callbacks.current.report(message),
+      report: diagnostic,
       mode: player ? 'play' : 'edit', presentationPrepared: true,
       teacherController, studentNavigation: navigation,
       onDispose: () => { for (const pending of projectionNavigation.pending.values()) pending.finish(false); navigation.dispose() },
       resolveBuiltin: async (_key, signal, instance) => {
-        const projected = await projectWebModuleGraph(instance, input => window.desktopAPI.compileComponent(input), message => callbacks.current.report(message))
+        const projected = await projectWebModuleGraph(instance, input => window.desktopAPI.compileComponent(input), diagnostic)
         const graph = (projected.data as unknown as WebRuntimeData).moduleGraph
         if (signal.aborted) throw new Error('组件源码准备已取消')
         const prepared = await prepareSandboxComponent({ format: 'esm', code: webContentRealmSource(), css: '', diagnostics: [] }, signal,
-        { builtinKey: _key, state: () => runtime.stateSnapshot(), targetChanges: true, targets: profile => runtime.targetSnapshots(profile), instance: async value => resolveWebResourceBindings((value.data as unknown as WebRuntimeData).moduleGraph ? value : await projectWebModuleGraph(value, input => window.desktopAPI.compileComponent(input), message => callbacks.current.report(message)), id => runtime.contentAssetUrl(id) ? webRuntimeResourceAddress(id) : undefined, message => callbacks.current.report(message)), htmlAuthoring: true, teacherController,
+        { builtinKey: _key, state: () => runtime.stateSnapshot(), targetChanges: true, targets: profile => runtime.targetSnapshots(profile), instance: async value => resolveWebResourceBindings((value.data as unknown as WebRuntimeData).moduleGraph ? value : await projectWebModuleGraph(value, input => window.desktopAPI.compileComponent(input), diagnostic), id => runtime.contentAssetUrl(id) ? webRuntimeResourceAddress(id) : undefined, diagnostic), htmlAuthoring: true, teacherController,
           connectOrigins: () => current.current.project.logic?.network?.connectOrigins ?? [], themeCss: () => runtime.themeCss(), resources: () => runtime.resourceUrls() })
         return { ...prepared, webModuleGraph: graph }
       },
@@ -187,7 +194,7 @@ export function CourseV10RuntimeView(props: CourseV10RuntimeViewProps) {
         if (signal.aborted) throw new Error('组件源码准备已取消')
         if (compilation.status === 'failed') throw new Error(compilation.diagnostics.map(value => `${value.file ?? ''}:${value.line ?? ''} ${value.message}`).join('\n'))
         return prepareSandboxComponent(compilation.artifact, signal, { htmlAuthoring: true,
-          webInstance: async value => hasWebContentData(value.data) ? resolveWebResourceBindings(value.data.moduleGraph ? value : await projectWebModuleGraph(value, input => window.desktopAPI.compileComponent(input), message => callbacks.current.report(message)), id => runtime.contentAssetUrl(id) ? webRuntimeResourceAddress(id) : undefined, message => callbacks.current.report(message), implementation.resourceBindings) : value, state: () => runtime.stateSnapshot(), targetChanges: true, targets: profile => runtime.targetSnapshots(profile), teacherController,
+          webInstance: async value => hasWebContentData(value.data) ? resolveWebResourceBindings(value.data.moduleGraph ? value : await projectWebModuleGraph(value, input => window.desktopAPI.compileComponent(input), diagnostic), id => runtime.contentAssetUrl(id) ? webRuntimeResourceAddress(id) : undefined, diagnostic, implementation.resourceBindings) : value, state: () => runtime.stateSnapshot(), targetChanges: true, targets: profile => runtime.targetSnapshots(profile), teacherController,
           authorHtml: instance => {
             const key = componentDefinitionBuiltinKey(current.current.project.definitions[instance.definitionId]), data = instance.data
             return ['guoling.web', 'guoling.html-program'].includes(key ?? '') && data && typeof data === 'object' && !Array.isArray(data) && typeof data.html === 'string' ? data.html : undefined
@@ -197,7 +204,7 @@ export function CourseV10RuntimeView(props: CourseV10RuntimeViewProps) {
     })
     const runtime = mounted.runtime
     return mounted
-  }, [documentId, navigation])
+  }, [documentId, navigation, diagnostic])
   const world = host.runtime
   runtimeRef.current = world
   const navigationStates = useSyncExternalStore(navigation.subscribe, () => JSON.stringify(Object.fromEntries(
@@ -244,9 +251,9 @@ export function CourseV10RuntimeView(props: CourseV10RuntimeViewProps) {
     // Author workspaces keep their controls; preview uses live authored coverage rather than presence of settings.
     if (!player || !root || !content) return
     const chrome = mountPlaybackNavigationChrome(root, navigation, { content, playback: model.project.playback, active: () => callbacks.current.active !== false,
-      report: message => callbacks.current.report(message),onAuthoredCommand:command=>world.dispatchPresenterCommand(command),authoredCommands:()=>world.readPresenterCommands(),canAuthoredCommand:command=>world.canDispatchPresenterCommand(command) })
+      report: diagnostic,onAuthoredCommand:command=>world.dispatchPresenterCommand(command),authoredCommands:()=>world.readPresenterCommands(),canAuthoredCommand:command=>world.canDispatchPresenterCommand(command) })
     return () => chrome.destroy()
-  }, [player, navigation, model.project.playback])
+  }, [player, navigation, model.project.playback, diagnostic])
   useEffect(() => {
     const root = wrapper.current
     if (!root) return
@@ -259,12 +266,12 @@ export function CourseV10RuntimeView(props: CourseV10RuntimeViewProps) {
         keyboardNavigation: model.project.playback?.keyboardNavigation ?? true,
         presenter: model.project.playback?.presenter ?? { enabled: true, strategy: 'scene-navigation', additionalBindings: [] },
         onAuthoredCommand: command => world.dispatchPresenterCommand(command),
-        onFeedback: feedback => callbacks.current.report(feedback.message), onError: error => callbacks.current.report(String(error)),
+        onFeedback: feedback => diagnostic(feedback.message), onError: error => diagnostic(String(error)),
       })
     }
     const off = navigation.subscribe(syncKeys); syncKeys()
     return () => { off(); keys?.destroy(); tasks.dispose() }
-  }, [world, navigation, model.project.playback])
+  }, [world, navigation, model.project.playback, diagnostic])
   useEffect(() => props.bridge ? registerRuntimeLightEditDocument(documentId, world, props.bridge) : undefined, [documentId, world, props.bridge])
   useEffect(() => {
     const pending = new Set<AbortController>(), timers = new Set<ReturnType<typeof setTimeout>>()
@@ -337,7 +344,7 @@ export function CourseV10RuntimeView(props: CourseV10RuntimeViewProps) {
   const selectedInstanceIds = props.selectedInstanceIds ?? (selectedInstanceId ? [selectedInstanceId] : [])
   const selectionView = props.bridge?.read()
   const selectionKind = selectionView?.activeDocumentId === documentId ? selectionView.interactionSelection?.kind : undefined
-  const renderContainer = (containerId: string, project = renderProject, placement: 'free' | 'flow' = 'free') => <ContainerPreview containerId={containerId} model={{ ...model, project }} world={world} navigation={navigation} report={props.report} placement={placement} />
+  const renderContainer = (containerId: string, project = renderProject, placement: 'free' | 'flow' = 'free') => <ContainerPreview containerId={containerId} model={{ ...model, project }} world={world} navigation={navigation} report={diagnostic} placement={placement} />
   const ports: CourseV10RuntimePorts = {
     documentId, project: renderProject, resources: model.resources, surfaceId, selectedInstanceId, selectedInstanceIds, player,
     world, navigation, onElement: world.bind, onTargetElement: world.bindTarget, edit, onEdits: flowEdit,
@@ -351,7 +358,7 @@ export function CourseV10RuntimeView(props: CourseV10RuntimeViewProps) {
     selectedInstanceId={selectedInstanceId} selectedInstanceIds={selectedInstanceIds} selectionKind={selectionKind} player={player} isPlaying={() => world.isPlaying()} onSelect={onSelect} onElement={world.bind} onTargetElement={world.bindTarget}
     renderContainer={renderContainer} />
   return <RuntimeContext.Provider value={ports}><ProjectionMutationBoundary model={{ ...model, project: renderProject }} host={host} projectionKey={projectionKey}
-    report={error => callbacks.current.report(error instanceof Error ? error.message : '组件运行未完成')}>
+    report={error => diagnostic(error instanceof Error ? error.message : '组件运行未完成')}>
     <div ref={wrapper} style={{ position: 'relative', display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gridTemplateRows: 'minmax(0, 1fr)', width: '100%', height: '100%', minWidth: 0, minHeight: 0 }}>
       {player ? <div ref={playbackContent} style={{ position: 'absolute', inset: 0, minWidth: 0, minHeight: 0 }}>{view}</div> : view}
     </div>

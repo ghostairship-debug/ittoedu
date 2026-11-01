@@ -80,7 +80,11 @@ export interface ComponentProjectFile {
   projection?: HtmlContentProjection
   language?: 'javascript' | 'typescript'
   implementation?: Extract<ComponentImplementation, { kind: 'source' }>
+  /** Derived shared import addresses; the formal definition identities stay software-owned. */
+  imports?: Readonly<Record<string, string>>
   sourceFile?: { path: string; files: Record<string, Uint8Array>; privateOwner: boolean }
+  /** A Web author's module is data owned by this target, not the component implementation. */
+  webModule?: { path: string; modules: Readonly<Record<string, string>> }
   authorSource?: { prepared: ComponentAuthorSource; dependencyId?: string }
   /** An unloaded builtin's directory alias; actual author bindings are resolved after its entry is prepared. */
   builtinSource?: { key: string; part: 'entry' | 'implementation' }
@@ -355,6 +359,13 @@ export function componentProjectFiles(project: CourseProjectV10, resources: Docu
   files.push({ path: 'theme.css', kind: 'style', content: project.theme?.css ?? '', binding: { kind: 'theme' },
     note: '整课主题源码；修改主题保留对象和人工 frame，资源仍来自本工程。' })
   files.push({ path: componentProjectApiReferencePath, kind: 'reference', content: componentAuthorSourceRuntimeNote })
+  const sharedSourcePaths = new Map(Object.values(project.definitions).flatMap((definition, index) => {
+    const implementation = definition.implementation
+    if (implementation.kind !== 'source') return []
+    const base = `components/${String(index + 1).padStart(2, '0')}-${stem(definition.title ?? definition.id)}`
+    return [[definition.id, implementation.workspace ? `${base}.source/${implementation.workspace.entry}`
+      : `${base}.view.${implementation.language === 'typescript' ? 'ts' : 'js'}`] as const]
+  }))
   const sources = (base: string, effective: ComponentImplementation, binding: Extract<NonNullable<ComponentProjectFile['binding']>, { kind: 'instance-source' | 'definition-source' }>, target?: ContentApplyTarget) => {
     if (typeof requested === 'string' && !requested.startsWith(`${base}.view.`)
       && !requested.startsWith(`${base}.source/`) && !requested.startsWith(`${base}.dependencies/`)) return
@@ -395,7 +406,11 @@ export function componentProjectFiles(project: CourseProjectV10, resources: Docu
       const moduleBase = module.id ? `${base}.dependencies/${stem(module.id)}` : base
       const note = module.id ? '完整依赖源码；仅深改底层实现时按需读取。从此作者入口深改只复制必要引用路径，其他实例和未改依赖保持。'
         : `${binding.kind === 'definition-source' ? '共享定义的作者入口；应用后使用此定义的实例一起更新。' : '当前实例的作者入口；应用只改变本实例。'}${binding.kind === 'instance-source' && Object.keys(project.instances[binding.instanceId]?.stateBindings ?? {}).length ? ` 当前显式状态别名：${JSON.stringify(project.instances[binding.instanceId].stateBindings)}` : ''}`
+      const imports = Object.fromEntries(Object.entries(sourceModuleBindings(implementation)).flatMap(([specifier, id]) => {
+        const path = sharedSourcePaths.get(id); return path ? [[specifier, path]] : []
+      }))
       const common = { binding, target, implementation, language: implementation.language, authorSource: { prepared, dependencyId: module.id }, note,
+        ...(Object.keys(imports).length ? { imports } : {}),
         references: [{ path: componentProjectApiReferencePath, type: 'reference' as const }] }
       if (!implementation.workspace) {
         files.push({ ...common, path: `${moduleBase}.view.${implementation.language === 'typescript' ? 'ts' : 'js'}`, kind: 'source', content: implementation.source })
@@ -444,6 +459,19 @@ export function componentProjectFiles(project: CourseProjectV10, resources: Docu
         path: `${base}.data.json`, kind: 'data', target,
         note: 'HTML 程序的正式数据；modules 按原相对路径保存可编辑模块源码。修改后复用同一事务并重新准备运行图。',
       }, { content: () => json(data), summary: () => dataSummary(data) }))
+      const declaredModules = data && typeof data === 'object' && !Array.isArray(data) ? data.modules : undefined
+      if (declaredModules && typeof declaredModules === 'object' && !Array.isArray(declaredModules)) {
+        const modules = Object.fromEntries(Object.entries(declaredModules).filter((entry): entry is [string, string] => typeof entry[1] === 'string'))
+        for (const [modulePath, content] of Object.entries(modules)) {
+          // Keep relative folders visible without allowing special path segments to alias another file.
+          const moduleName = modulePath.split('/').map(part => part === '.' || part === '..'
+            ? part.replace(/\./g, '%2E') : encodeURIComponent(part)).join('/')
+          files.push({ path: `${base}.modules/${moduleName}`, kind: 'source', target, content,
+            webModule: { path: modulePath, modules },
+            summary: `作者模块，${content.length} 字符`,
+            note: '此文件只修改当前对象 data.modules 中的一个作者模块；content/from/edits 保留其他模块和组件实现，运行图由软件重新准备。' })
+        }
+      }
     } else files.push(deferredFile({ path: `${base}.data.json`, kind: 'data', target },
       { content: () => json(instance.data), summary: () => dataSummary(instance.data) }))
     const entry = files[firstFile]!
@@ -466,7 +494,7 @@ export function componentProjectFiles(project: CourseProjectV10, resources: Docu
       if (file.target?.kind !== 'instance' || file.target.instanceId !== id) continue
       file.programViewport = programViewport
       if (instance.frame) file.frame = instance.frame
-      if (effectiveImplementation.kind === 'source' && !file.authorSource) file.implementation = effectiveImplementation
+      if (effectiveImplementation.kind === 'source' && !file.authorSource && !file.webModule) file.implementation = effectiveImplementation
     }
     if (instance.childIds?.length) objects(instance.childIds, base, programViewport)
   })

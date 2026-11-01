@@ -64,7 +64,7 @@ import { flowInsertionSelection } from './ToolTargets'
 import { documentReplacementEdits } from '../../shared/document/textInteraction'
 import { projectFileRegistration } from './ProjectFileTools'
 import { skillReadInputSchema } from './SkillTools'
-import { ComponentProjectFileCoordinator, componentProjectSettings, componentProjectFileSchemas, componentProjectFiles, componentProjectSurfaceId, componentFileContentSource, canonicalComponentFileEdits, type ComponentProjectSnapshot, type ComponentProjectFileInput, type ComponentProjectFile, type ComponentProjectFileScope } from '../projectFiles/componentPlatform'
+import { ComponentProjectFileCoordinator, componentProjectSettings, componentProjectFileSchemas, componentProjectFiles, prepareComponentProjectFileSource, componentProjectSurfaceId, componentFileContentSource, canonicalComponentFileEdits, type ComponentProjectSnapshot, type ComponentProjectFileInput, type ComponentProjectFile, type ComponentProjectFileScope } from '../projectFiles/componentPlatform'
 import type { ContentApplyRequest, ContentApplyResult, ContentApplySource, ContentApplyIntent, ContentApplyDiagnostic, ContentApplyPlan, ContentApplyPlanOptions } from '../contentApply/planning/types'
 import { readHtmlAuthoringRecords } from '../../shared/html/htmlAuthoringRecords'
 import { planAggregateMarkdownTextEdit } from '../../shared/document/aggregateTextEdit'
@@ -170,6 +170,8 @@ function writableKinds(model: DocumentModel, writable: readonly ToolTarget[]): T
 }
 
 export interface DocumentToolGatewayOptions { prepareImage?: PrepareImageResourcePort; prepareMedia?: PrepareMediaResourcePort; services?: HostToolServices;
+  /** Main's existing read path owner canonicalizes a physical path; virtual project paths stay in their owner. */
+  resolveFilePath?(from: string, fileAccess: ToolRunGrant['fileAccess'], runId: string): Promise<string>
   prepareSpatialViewport?(documentId: string, surfaceId: string): Promise<SpatialViewportCapture>
   measureExistingLayout?(request:ExistingLayoutRequest):Promise<readonly ExistingLayoutMeasurement[]>
   prepareInput?(documentId: string): Promise<void>
@@ -237,6 +239,7 @@ export class DocumentToolGateway implements ToolGateway {
       documentIds: runId => this.run(runId).grant.documents.map(document => document.documentId),
       projectDiscovery: runId => this.projectDiscovery(runId),
       taskTargetContext: (runId, target, resumeContext) => this.taskTargetContext(runId, target, resumeContext),
+      prepareTaskTargetInputs: (runId, target, resumeContext, sources) => this.componentProjectFiles.prepareTaskTargetInputs(runId, target, resumeContext, sources),
       ownsReceiptDocument: (runId, documentId) => {
         const run = this.run(runId)
         return run.grant.documents.some(document => document.documentId === documentId) || run.detachedDocuments?.has(documentId) === true
@@ -969,6 +972,7 @@ export class DocumentToolGateway implements ToolGateway {
           paths = Object.keys(value).map(field => [field])
         } else if (binding?.kind === 'theme') paths = [['theme']]
         else if (binding?.kind === 'asset') paths = [['assets', binding.assetId]]
+        else if (file.webModule && file.target?.kind === 'instance') paths = [['instances', file.target.instanceId, 'data', 'modules', file.webModule.path]]
         else if (binding?.kind === 'instance-source') paths = [['instances', binding.instanceId, 'implementationOverride', file.sourceFile?.path ?? '@entry']]
         else if (binding?.kind === 'definition-source') paths = [['definitions', binding.definitionId, 'implementation', file.sourceFile?.path ?? '@entry']]
         else if (binding?.kind === 'definition') paths = ['role', 'title', 'dataSchema', 'professionalBuiltinKey', 'version'].map(field => ['definitions', binding.definitionId, field])
@@ -2303,7 +2307,18 @@ export class DocumentToolGateway implements ToolGateway {
           && document.binding.kind === 'file' && /\.html?$/i.test(document.binding.path))
         if ('path' in input && !input.project) {
           const normalized = (path: string) => path.replace(/\\/g, '/').toLowerCase()
-          snapshot = html.find(document => document.binding.kind === 'file' && normalized(document.binding.path) === normalized(input.path))
+          let wanted = input.path
+          const matches = () => html.filter(document => document.binding.kind === 'file' && normalized(document.binding.path) === normalized(wanted))
+          let candidates = matches()
+          if (!candidates.length && html.length && this.options.resolveFilePath) {
+            try { wanted = await this.options.resolveFilePath(input.path, run.grant.fileAccess, runId); candidates = matches() }
+            catch (error) {
+              // An absent disk path can still be a valid virtual project entry.
+              if (!error || typeof error !== 'object' || !('code' in error) || error.code !== 'ENOENT') throw error
+            }
+          }
+          if (candidates.length > 1) throw new ToolError('html-target-ambiguous', '该路径对应多个已打开的 HTML 文档，请使用明确 target')
+          snapshot = candidates[0]
         } else if (!('path' in input)) snapshot = html.find(document => document.documentId === run.currentHtmlDocumentId)
           ?? (documents.length === 1 ? html[0] : undefined)
       }
@@ -2816,7 +2831,8 @@ export class DocumentToolGateway implements ToolGateway {
             if (!result.ok) throw new ToolError('invalid-content', result.reason)
             edits = result.edits; nextTarget = { kind: 'course-surface', surfaceId: result.createdLocationId }
           } else if (mutation.name === 'surface.remix') {
-            const result = planCourseStyleRemixEdits(model.project, target.surfaceId, mutation.input.replacements, this.createId)
+            const result = planCourseStyleRemixEdits(model.project, target.surfaceId, mutation.input.replacements, this.createId,
+              { title: mutation.input.title, placement: mutation.input.placement })
             edits = result.edits; readPaths = result.readPaths; nextTarget = { kind: 'course-surface', surfaceId: result.createdSurfaceId }
           } else {
             const project = mutation.input.request.scope==='course' ? model.project : resolveComponentPresentation(model.project, target.surfaceId, target.stateId ?? null)
@@ -2908,7 +2924,7 @@ export class DocumentToolGateway implements ToolGateway {
         if (mutation.name === 'surface.duplicate') {
           if (target.kind !== 'course-surface') throw new ToolError('invalid-target', '复制页面需要已观察页面目标')
           if (!this.canWrite(run, snapshot, { kind: 'document' })) throw new ToolError('not-authorized', '复制页面需要整课授权')
-          const copy = duplicateSurfaceEdits(model.project, target.surfaceId, this.createId), command = captureWorkingOperation(model.project, copy.edits, copy.readPaths)
+          const copy = duplicateSurfaceEdits(model.project, target.surfaceId, this.createId, mutation.input), command = captureWorkingOperation(model.project, copy.edits, copy.readPaths)
           model = await applyPlanned(command); componentEdits.push(...command.edits)
           for (const expected of command.expected) componentReadPaths.set(JSON.stringify(expected.path), expected.path)
           finalTargets.push({ kind: 'course-surface', surfaceId: copy.surfaceId })
@@ -3120,7 +3136,9 @@ export class DocumentToolGateway implements ToolGateway {
             const sourceInstanceId = target.instanceId
             const observed = componentProjectFiles(model.project, model.resources).find(file => file.kind === 'source'
               && file.target?.kind === 'instance' && file.target.instanceId === sourceInstanceId
-              && (!file.implementation?.workspace || file.sourceFile?.path === file.implementation.workspace.entry))
+              && (file.builtinSource ? file.builtinSource.part === 'entry'
+                : (!file.implementation?.workspace || file.sourceFile?.path === file.implementation.workspace.entry)))
+            await prepareComponentProjectFileSource(observed)
             const file: ComponentProjectFile = { ...observed, path: observed?.path ?? `source.${implementation.language === 'typescript' ? 'ts' : 'js'}`,
               kind: 'source', target: { kind: 'instance', instanceId: target.instanceId }, binding: { kind: 'instance-source', instanceId: target.instanceId },
               implementation: { ...(observed?.implementation ?? { kind: 'source', source: '', language: 'javascript' }),

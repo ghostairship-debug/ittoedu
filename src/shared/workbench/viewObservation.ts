@@ -1,4 +1,4 @@
-import { componentContainers } from '../contracts/component-platform/project'
+import { componentRootInstance, componentSurface } from '../contracts/component-platform/project'
 import { z } from 'zod'
 import type { DocumentModel, DocumentSnapshot } from './document'
 import type { ObservationResult } from './toolPorts'
@@ -41,9 +41,11 @@ export function sameObservationIdentity(a: ViewObservationIdentity, b: ViewObser
 
 export function observationSnapshotMatches(snapshot: DocumentSnapshot, identity: ViewObservationIdentity,
   projectId: string): snapshot is ViewObservationSnapshot {
-  return snapshot.documentId === identity.documentId && snapshot.epoch === identity.epoch
-    && snapshot.revision === identity.revision && snapshot.model.kind === 'course-v10'
-    && snapshot.model.project.id === projectId
-    && componentContainers(snapshot.model.project).some(surface => surface.id === identity.locationId
-      && (!identity.stateId || surface.presentation?.states.some(state => state.id === identity.stateId)))
+  if (snapshot.documentId !== identity.documentId || snapshot.epoch !== identity.epoch
+    || snapshot.revision !== identity.revision || snapshot.model.kind !== 'course-v10'
+    || snapshot.model.project.id !== projectId) return false
+  const project = snapshot.model.project, surface = componentSurface(project, identity.locationId)
+  if (surface) return !identity.stateId || Boolean(surface.presentation?.states.some(state => state.id === identity.stateId))
+  // Programs occupy a formal root, but do not own container presentation states.
+  return !identity.stateId && Boolean(componentRootInstance(project, identity.locationId))
 }

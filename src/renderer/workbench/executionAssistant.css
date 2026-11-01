@@ -240,10 +240,9 @@
 .execution-assistant__popup > button > small { color: var(--muted-text, #607069); font-size: 11px; }
 .execution-assistant__popup > button[aria-checked="true"] > span::after { content: ' ✓'; color: #92683d; }
 .execution-assistant__popup > p { margin: 4px 8px 2px; color: var(--muted-text, #607069); font-size: 11px; }
-/* One bottom row like common agents: permission on the left, model and send on the right; the model summary truncates first. */
-.execution-assistant__toolbar { display: flex; flex-wrap: nowrap; align-items: center; gap: 6px 8px; min-width: 0; }
-.execution-assistant__toolbar > .execution-assistant__composer-model { flex: 1 1 0; min-width: 0; flex-wrap: nowrap; justify-content: flex-end; }
-.execution-assistant__toolbar > .execution-assistant__actions { display: flex; flex: none; gap: 6px; }
+/* Settings stay on one row; their font fits the actual available width. */
+.execution-assistant__toolbar { display: flex; flex-wrap: nowrap; align-items: center; gap: 4px 6px; min-width: 0; }
+.execution-assistant__toolbar > .execution-assistant__composer-model { flex: 1 0 auto; min-width: max-content; flex-wrap: nowrap; justify-content: flex-end; }
 .execution-assistant__permission { position: relative; flex: 0 1 auto; min-width: 0; }
 .execution-assistant__permission-button { display: inline-flex; align-items: center; gap: 4px; max-width: 100%; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; padding: 3px 8px; border: 1px solid var(--border-color, #cbd3cf); border-radius: 999px; background: #fff; color: #4b3527; font-size: 11px; cursor: pointer; }
 .execution-assistant__permission-button:hover, .execution-assistant__permission-button[aria-expanded="true"] { border-color: #b59672; background: #f6f3ee; }
@@ -256,15 +255,16 @@
 .execution-assistant__composer textarea { border: 0; border-radius: 0; padding: 7px 2px; min-height: 68px; max-height: 180px; resize: none; background: transparent; color: #49382b; line-height: 1.5; overflow-y: auto; }
 .execution-assistant__composer textarea:focus { border: 0; outline: 0; }
 .execution-assistant__composer:focus-within { border-color: #b68b56; box-shadow: 0 0 0 2px #c58a3117; }
-.execution-assistant__input-row { display: block; }
-.execution-assistant__plus { position: absolute; left: 8px; bottom: 26px; }
+.execution-assistant__input-row { position: relative; display: block; padding-bottom: 38px; }
+.execution-assistant__input-row > textarea { display: block; padding: 10px 10px 4px; }
+.execution-assistant__plus { position: absolute; left: 6px; bottom: 6px; }
 .execution-assistant__plus-button { border: 0; border-radius: 6px; width: 28px; height: 28px; background: transparent; }
-.execution-assistant__toolbar { padding-left: 28px; gap: 4px; min-height: 28px; }
+.execution-assistant__toolbar { padding-left: 0; min-height: 28px; }
 .execution-assistant__permission-button { min-height: 28px; padding: 2px 5px; border: 0; background: transparent; border-radius: 6px; }
 .execution-assistant__composer-model > span:first-child { display: none; }
 .execution-assistant__composer-model button { padding: 3px 4px; min-height: 28px; }
-.execution-assistant__toolbar .execution-assistant__actions { gap: 3px; flex-wrap: wrap; max-width: 45%; justify-content: flex-end; }
-.execution-assistant__toolbar .execution-assistant__actions > button { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 28px; height: 28px; min-height: 28px; padding: 0; border-radius: 6px; }
+.execution-assistant__input-row > .execution-assistant__actions { position: absolute; right: 6px; bottom: 6px; display: flex; gap: 4px; flex-wrap: wrap; max-width: calc(100% - 48px); justify-content: flex-end; }
+.execution-assistant__input-row > .execution-assistant__actions > button { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 28px; height: 28px; min-height: 28px; padding: 0; border-radius: 6px; }
 .execution-assistant__composer-hint { font-size: 10px; margin: 0; color: #8e7a69; }
 .execution-assistant__references { display: flex; flex-wrap: wrap; gap: 4px; max-height: 92px; overflow-y: auto; scrollbar-width: thin; }
 .execution-assistant__references .execution-assistant__chip { display: inline-flex; align-items: center; gap: 3px; min-width: 0; max-width: 100%; padding: 2px 3px 2px 6px; border: 1px solid #e2d7c8; border-radius: 5px; background: #f7f2ea; }
@@ -307,3 +307,29 @@
 .execution-assistant__run-route { color: #8c7560; font-size: 11px; }
 .execution-assistant__more > summary:hover, .execution-assistant__more[open] > summary, .execution-assistant__more-menu button:hover { background: #f0e6d7; color: #4b3527; }
 .execution-assistant__welcome h2 { color: #4b3527; }
+.execution-assistant__native-controls { display: flex; flex: 1 0 auto; flex-wrap: nowrap; align-items: center; justify-content: flex-end; gap: 4px; min-width: max-content; }
+.execution-assistant__native-controls .acp-configuration-picker--model { flex: 1 0 auto; min-width: max-content; justify-content: flex-end; }
+.execution-assistant__native-controls .acp-configuration-picker--effort { flex: 0 0 auto; min-width: max-content; }
+.execution-assistant__native-controls .acp-configuration-picker__trigger > span, .execution-assistant__composer-model > button > span:first-child { flex: none; overflow: visible; text-overflow: clip; white-space: nowrap; }
+.execution-assistant__composer-effort { display: flex; flex: 0 0 auto; align-items: center; min-width: 0; }
+.execution-assistant__composer-effort > button { display: inline-flex; align-items: center; gap: 3px; min-height: 28px; padding: 3px 4px; border: 0; border-radius: 6px; background: transparent; color: #4b3527; font-size: 11px; cursor: pointer; }
+.execution-assistant__composer-effort > button:hover, .execution-assistant__composer-effort > button[aria-expanded="true"] { background: #f6f3ee; }
+.execution-assistant__effort-menu { height: auto; }
+.execution-assistant__permission { flex: 0 0 auto; min-width: max-content; }
+.execution-assistant__permission-button { min-width: max-content; max-width: none; white-space: nowrap; text-overflow: clip; }
+.execution-assistant__permission-button > span { flex: none; overflow: visible; text-overflow: clip; }
+.execution-assistant__permission-button > svg { flex: none; }
+.execution-assistant__native-mode { display: grid; gap: 2px; padding-bottom: 5px; border-bottom: 1px solid var(--border); }
+.execution-assistant__native-mode > strong, .execution-assistant__tool-permission-label { margin: 4px 8px; color: var(--text-secondary); font-size: 11px; font-weight: 500; }
+.execution-assistant__native-mode > button { display: grid; gap: 1px; padding: 6px 8px; border: 0; border-radius: 7px; color: inherit; background: transparent; text-align: left; cursor: pointer; font-size: 12px; }
+.execution-assistant__native-mode > button > small { color: var(--text-secondary); font-size: 11px; }
+.execution-assistant__native-mode > button[aria-checked="true"], .execution-assistant__native-mode > button:hover:not(:disabled) { background: var(--surface-muted); }
+.execution-assistant__title > strong { color: #49382b; font-size: 14px; font-weight: 600; }
+.execution-assistant__agent-switch { display: flex; flex: none; align-items: center; min-width: 0; margin: 4px 14px 0; }
+.execution-assistant__agent-switch .acp-agent-selector { width: max-content; max-width: 100%; }
+.execution-assistant__agent-switch .acp-agent-selector__trigger { flex: none; width: max-content; min-width: max-content; max-width: none; margin: 0; }
+.execution-assistant__agent-switch .acp-agent-selector__trigger > span { flex: none; overflow: visible; text-overflow: clip; }
+.execution-assistant__toolbar .execution-assistant__permission-button,
+.execution-assistant__toolbar .acp-configuration-picker__trigger,
+.execution-assistant__toolbar .execution-assistant__composer-model > button,
+.execution-assistant__toolbar .execution-assistant__composer-effort > button { font-size: var(--composer-option-font, 11px); }

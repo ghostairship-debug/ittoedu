@@ -1,7 +1,7 @@
 import type { TeacherControllerPort } from '../../shared/contracts/component-platform'
 
 /** The content-facing subset of the existing course navigation owner. */
-export type WebCourseNavigation = Pick<TeacherControllerPort, 'read' | 'readLocation' | 'subscribe' | 'canExecute' | 'execute'>
+export type WebCourseNavigation = Pick<TeacherControllerPort, 'read' | 'readLocation' | 'subscribe' | 'canExecute' | 'execute' | 'bindControl'>
 
 /** Serialized into the content realm before authored scripts are parsed. */
 export function installCourseNavigationReady(target: Window = window) {
@@ -19,7 +19,8 @@ export function installCourseNavigationReady(target: Window = window) {
       if (!port) { reject(new Error('当前载体未接通正式课程导航')); return }
       resolve({ read: () => port.read(), readLocation: () => port.readLocation(),
         subscribe: listener => port.subscribe(listener), canExecute: action => port.canExecute(action),
-        execute: (action, signal) => port.execute(action, signal) })
+        execute: (action, signal) => port.execute(action, signal),
+        ...(port.bindControl ? { bindControl: (element: HTMLElement, action: Parameters<NonNullable<WebCourseNavigation['bindControl']>>[1]) => port.bindControl!(element, action) } : {}) })
     },
     dispose() {
       if (!settled) { settled = true; reject(new Error('内容已关闭')) }

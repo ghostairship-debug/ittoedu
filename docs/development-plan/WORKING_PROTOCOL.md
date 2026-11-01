@@ -56,3 +56,14 @@ Windows worktree 的共享依赖若为 junction/symlink，清理只移除本轮�
 结果只记录一处：改好了什么、直接证据、仍未完成什么、下一步。状态页只在交接或重要变化时写短摘要，计划不复制日志。代码候选、实际用户体验、作品合格与用户验收分别说明。
 
 提交、push、打包发行、部署、新凭据/采购与收费渠道沿当前用户授权，不因旧计划或治理整理自动获得。未经授权不把已有费用范围扩大；开发模型配置不改产品默认。当前有效账号/渠道和限制见 [当前状态](CURRENT_STATUS.md) 的授权参考。
+
+## 8. 中断恢复
+
+`EXECUTION_CHECKPOINT.json` 记录本轮任务、实际修改、验证、进程、日志与下一动作；它不拥有产品数据，也不代替 Git/文件/真实验收。主 Agent 集成任务状态，后台命令由 `scripts/execution-checkpoint.mjs` 自动登记、每 10 秒落盘、结束记录退出码。写入使用排他锁、同步临时文件和原子替换；上一份保留在 `output/execution-checkpoints/previous.json`。
+
+- 新批次首次用 `node scripts/execution-checkpoint.mjs init <batch-id>`，已有状态不覆盖。恢复先 `reconcile`，再 `status`；存活不代表有进展，未知结果不能直接重跑。
+- 工作单元开始/完成/受阻时调用 `task <patch.json>`；patch 包含 `id`、`status`（pending/in_progress/verified/blocked）、`modifiedFiles`、`changes`、`nextAction`、必要的 `blockers`；verified 必须附 `evidence`。只在重要里程碑同步状态页和执行方案。
+- 测试、构建及可独立执行的确定性操作用 `run <spec.json>`：`{"taskId":"T1-check","label":"定向回归","command":["node","node_modules/vitest/vitest.mjs","run","tests/unit/example.test.ts"],"timeoutMs":120000,"nextAction":"核对行为结果"}`。真实 executable/参数数组、无隐式 shell；Windows npm 可通过 `node` 执行 npm CLI。调用立即返回后台 supervisor PID、日志和结果文件，命令不依赖当前工具连接持续存活。
+- 单次命令成功只登记 passed，不自动把产品任务标为合格；失败自动受阻并保留日志。已有未结算进程会拒绝同任务重启。子进程丢失时保留 unknown/orphaned，先核对实际副作用；脚本从不自动重放。
+- 对没有独立 result、且 supervisor 与子进程均已退出的孤儿任务，完成副作用核查后可用 `resolve-run <resolution.json>`（`jobId`、`note`、`evidence`）结算。它单独保存核查依据，保留 unknown 结果并把任务置为 blocked，不冒充命令成功；新动作须以核查后的真实状态开始。
+- 检查点损坏时保留损坏文件后显式 `restore-previous`，随后重新核对 Git、当前进程和日志，不能把回退后的旧记录当作最新事实。此机制减少中断损失，不承诺主模型或聊天断线后还能继续作新判断。

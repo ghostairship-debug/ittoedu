@@ -86,6 +86,8 @@ export const agentFileTools = agentFileRegistrations.map(tool => ({ name: tool.n
 export interface AgentFileContext {
   runId: string
   workspaceRoot: string
+  /** Canonical, host-created directory for this run's mechanical assembly only. */
+  assemblyRoot?: string
   conversationHomeRoot?: string
   conversationHome?: ConversationHome
   permission: ExecutionPermissionMode

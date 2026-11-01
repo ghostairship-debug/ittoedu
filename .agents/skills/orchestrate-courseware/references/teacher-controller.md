@@ -18,9 +18,38 @@
 
 沿现 `mount`、`update`、`dispose` 生命周期使用实际端口，不从页面 DOM 或全局变量猜课程状态；几何、资源、身份由软件维护，不访问未开放文件、凭据或系统接口。
 
-这些端口属于 API5 源码实现的 `mount(context)` 参数，普通 HTML 内的 `<script>` 没有 `window.runtimeContext`、`teacherController` 或 `courseState` 全局。普通 HTML 的定制导航用 `const navigation = await window.courseNavigationReady` 取得软件注入的正式导航子集：`read()`、`readLocation()`、`subscribe(sync)`、`canExecute(action)` 和 `execute(action)`。从 `read().scenes` 取得真实场景与显示名称，调用 `{type:"step.next"}`、`{type:"step.previous"}` 或 `{type:"scene.go",sceneId:实际场景id}`；首次显示读取当前值，再订阅后续变化。订阅由宿主生命周期清理，局部提前退出或替换界面时也调用返回的取消函数。端口尚未接通时保留实际错误，不叠加默认教师台或退回自写翻页脚本。
+这些端口属于 API5 源码实现的 `mount(context)` 参数，普通 HTML 内的 `<script>` 没有 `window.runtimeContext`、`teacherController` 或 `courseState` 全局。普通 HTML 的定制导航用 `const navigation = await window.courseNavigationReady` 取得软件注入的正式导航子集：`read()`、`readLocation()`、`subscribe(sync)`、`canExecute(action)`、`execute(action)` 和 `bindControl(element, action)`。从 `read().scenes` 取得真实场景与显示名称，动作使用 `{type:"step.next"}`、`{type:"step.previous"}` 或 `{type:"scene.go",sceneId:实际场景id}`。实际按钮可用 `bindControl` 一次绑定点击与导航覆盖事实，返回取消函数；可见性、Shadow DOM 归属和销毁由软件维护，不另做控件登记。`execute` 继续支持程序化动作。首次显示读取当前值，再订阅后续变化；局部提前退出或替换界面时调用取消函数。端口尚未接通或局部操作失败的诊断进入日志，不覆盖可用正文；宿主按实际缺失提供可展开的小控制台入口，内容程序不自行叠加默认教师台或退回自写翻页脚本。
 
-新建独立内容链接时，可在 `object.insert` 一并带 `click:{action:"location-go",value:"已观察的目的页面句柄"}`，跨页已有目的地的入口同批创建；软件生成绑定，不另写导航程序。独立对象只需点击跳到已知页面时，可直接用 `interaction.update {target:"已观察的独立对象句柄",change:{kind:"click",action:"location-go",value:"已观察的目的页面句柄"}}` 绑定正式动作，不必改成 Source。程序需要共享课程结果或其他源码端口时，再沿实际局部程序入口使用宿主能力：先 `project.list` 找该实例实际 `.view.js/.view.ts` 和内容/数据文件，再读写短作者入口，保留其实际 import；入口回执note已提供常用API事实，普通接线不先翻完整框架依赖；软件维护工程共享依赖，完整源码按需从 `.dependencies/` 读取。复用 Web 时保留导入实现的 `document:'web'` 声明，并在 `await implementation.mount(context)` 后接所需局部行为；写回形成实例私有实现，其他实例及共享定义保持原有内容。沿 `context.scope.state.get/set/subscribe` 或 `context.interactions?.courseState` 使用实际课程状态，沿 `context.teacherController` 导航，不猜另页 DOM 或全局桥。
+新建独立内容链接时，可在 `object.insert` 一并带 `click:{action:"location-go",value:"已观察的目的页面句柄"}`，跨页已有目的地的入口同批创建；软件生成绑定，不另写导航程序。独立对象只需点击跳到已知页面时，可直接用 `interaction.update {target:"已观察的独立对象句柄",change:{kind:"click",action:"location-go",value:"已观察的目的页面句柄"}}` 绑定正式动作，不必改成 Source。程序需要共享课程结果或导航时，优先沿下面的现有局部增强入口接线。只有确实需要更换组件实现，才读取并编辑主 Source 的 `mount/update/dispose`；复用 Web 时保留导入实现的 `document:'web'` 声明及 `await implementation.mount(context)`。共享定义作用所有引用者，实例增强保持当前实例范围。
+
+## 局部增强的最短路径
+
+先用 `project.list` 找到目标实例主 `.view.js/.view.ts` 或 workspace 入口，再以 `project.apply {path:实际主入口,intent:"enhance",content:增强模块}` 提交。软件保留原内容、几何和实现，回执返回可继续局改的 `enhancementPath`。已有增强模块后续用普通 `content/edits` 更新该实际路径，不反复包一层完整组件。
+
+```js
+export default ({ root, scope, listen, observe, bindings, teacherController }) => {
+  // 此例的实例已声明 complete 状态别名；导航守卫使用同一个正式标量。
+  listen('click', '[data-run]', () => {
+    const result = { choice: 'sample-a', measured: 24 };
+    scope.state.set('experiment.result', result);
+    bindings.set('complete', true);
+  });
+  // 同一次 render 消费首次值与后续值，不另维护结果副本。
+  observe('experiment.result', result => {
+    const output = root.querySelector('[data-result]');
+    if (output) output.textContent = result ? String(result.measured) : '等待实验';
+  });
+  listen('click', '[data-next]', () =>
+    teacherController?.execute({ type: 'scene.next' }, scope.signal));
+};
+```
+
+`listen` 在稳定局部根上委托事件，支持经过该根的开放 Shadow DOM 组合事件；不会穿越关闭的 Shadow DOM 或凭空产生未组合事件。`observe(key,render)` 包含首次渲染和后续订阅；`bindings.get/set/observe` 使用当前实例已声明别名。这些监听、订阅与 `scope.cleanup` 随更新/销毁清理，不需要手写第二套生命周期包装。动态替换的输出节点可在 render 中重新查询。
+
+运行中的 JSON 结果沿 `scope.state` 共享，影响正式导航守卫的完成字段用声明状态/别名；两者都由既有课程运行 owner 管理，不读另页 DOM 或猜全局变量。共享常量和计算逻辑用同一个 Source 依赖引用；实际引用入口由工程回执给出。持续存档另见[本设备学习进度](learning-progress.md)，不能把共享运行状态的存在当作关闭后已保存。
+
+## 正式导航端口
+
 
 | 入口 | 用途 |
 |---|---|

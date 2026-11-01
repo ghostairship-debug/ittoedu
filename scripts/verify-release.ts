@@ -387,7 +387,7 @@ async function verifyPackagedRuntimeResources(): Promise<void> {
     'dist-renderer/index.html',
     'dist-renderer/attachment-extraction.html',
     'dist-renderer/native-text-measurement.html',
-    'dist-player/player.iife.js',
+    'dist-electron/main/workbench/compute/NativePythonComputeBackend.js',
     'resources/icons/icon.png',
     'resources/built-in-components/catalog.json',
     'node_modules/sharp/package.json',

@@ -78,7 +78,12 @@ it('prepares real Source HTML/module/resource data and retains it through compil
       const custom=page.frameLocator('[data-compiled-runtime-root="custom"] iframe')
       await custom.locator('#custom').click();expect(await custom.locator('#custom').textContent()).toBe('custom:1')
       await frame.locator('#business').click();expect(await frame.locator('#business').textContent()).toBe('business:1')
-      expect(await frame.locator('img').getAttribute('src')).toMatch(/^data:image\/svg\+xml/)
+      // Delivery may lease an equivalent blob URL; verify the actual resource,
+      // not the transport spelling (the original data-URI assertion was stale).
+      expect(await frame.locator('img').evaluate(async element => {
+        const image = element as HTMLImageElement
+        return [...new Uint8Array(await (await fetch(image.currentSrc || image.src)).arrayBuffer())]
+      })).toEqual([...image])
       await expect.poll(()=>frame.locator('img').evaluate(image=>(image as HTMLImageElement).naturalWidth)).toBe(2)
       await page.evaluate(surface=>(window as any).player.go(surface,'next'),componentSurfaces(project)[0].id)
       await expect.poll(()=>frame.frameLocator('iframe').locator('#child').textContent()).toBe('next')

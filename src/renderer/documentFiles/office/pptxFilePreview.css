@@ -1,0 +1,66 @@
+.pptx-file-preview {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  color: var(--text-primary, #243040);
+  background: var(--surface, #fff);
+}
+.pptx-file-preview[hidden] { display: none; }
+.pptx-file-preview__toolbar,
+.pptx-file-preview__navigation {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border, #dfe4eb);
+}
+.pptx-file-preview__toolbar { justify-content: space-between; }
+.pptx-file-preview__identity { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
+.pptx-file-preview__identity strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 38vw; }
+.pptx-file-preview__identity > span,
+.pptx-file-preview__step { color: var(--text-muted, #637084); font-size: 12px; }
+.pptx-file-preview__actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.pptx-file-preview button {
+  padding: 5px 10px;
+  border: 1px solid var(--border, #d8dfe8);
+  border-radius: 5px;
+  background: var(--surface, #fff);
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.pptx-file-preview button:hover:not(:disabled) { background: var(--surface-hover, #f0f4fa); }
+.pptx-file-preview button[aria-pressed="true"] { border-color: #5483b9; background: #e9f2ff; }
+.pptx-file-preview button:disabled { opacity: .5; cursor: default; }
+.pptx-file-preview__navigation { font-size: 13px; }
+.pptx-file-preview__messages {
+  flex: none;
+  max-height: 24%;
+  overflow: auto;
+  padding: 5px 14px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-muted, #637084);
+}
+.pptx-file-preview__messages p { margin: 3px 0; overflow-wrap: anywhere; }
+.pptx-file-preview__messages [role="alert"] { color: #b13c33; }
+.pptx-file-preview__viewport {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 1;
+  min-height: 80px;
+  min-width: 0;
+  overflow: hidden;
+  background: var(--canvas-background, #e9edf2);
+}
+.pptx-file-preview__viewport:focus-visible { outline: 2px solid #4f81be; outline-offset: -2px; }
+.pptx-file-preview__surface { position: relative; flex: none; box-shadow: 0 2px 12px #1e293b26; }
+.pptx-file-preview__surface > svg { display: block; }
+.pptx-file-preview__surface[aria-hidden="true"] { visibility: hidden; }
+.pptx-file-preview__loading { position: absolute; margin: 0; color: #637084; }

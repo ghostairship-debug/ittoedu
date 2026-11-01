@@ -50,9 +50,13 @@ export { serviceToolOutcome, toolFailed, type ServiceToolOutcome } from '../../.
 const fileMutations = new Set<string>(agentFileMutationNames)
 
 export function persistedToolWork(name: string, result?: ToolResult): boolean {
+  if (internalAssembly(result)) return false
   const status = serviceToolOutcome(name, result)?.status
   return knownApplication(name, result) || fileCreated(name, result) || status === 'saved' || status === 'written'
 }
+/** Only the file/artifact owner supplies this marker from the actual frozen root. */
+const internalAssembly = (result?: ToolResult): boolean => result?.kind === 'read' && !!result.data
+  && typeof result.data === 'object' && (result.data as { purpose?: unknown }).purpose === 'assembly'
 
 /** Purpose describes an optional read, never authority or an exception for side effects. */
 function optionalObservationFailure(tool: ExecutionToolRecord): boolean {
@@ -201,7 +205,7 @@ function sameObservedTarget(failed: ExecutionToolRecord, later: ExecutionToolRec
   return !!failed.effectTargets?.length && !!later.effectTargets?.length
     && JSON.stringify(stable(failed.effectTargets)) === JSON.stringify(stable(later.effectTargets))
 }
-const delivered = (tool: ExecutionToolRecord) => !failedTool(tool)
+const delivered = (tool: ExecutionToolRecord) => !failedTool(tool) && !internalAssembly(tool.result)
   && (knownApplication(tool.call.name, tool.result) || fileCreated(tool.call.name, tool.result)
     || tool.result?.kind === 'read' && (tool.call.name === 'file.read' || tool.call.name === 'material.read'
       || tool.call.name === 'image.generate' && (tool.result.data as { status?: unknown })?.status === 'ready'

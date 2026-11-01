@@ -45,8 +45,10 @@ it('reads the same short entry without mutating builtin, then persists a real sh
   for (const api of ['context.root', 'scope.state', 'get(name)', 'set(name, value)', 'subscribe(name, listener)',
     'scope.cleanup', 'return mounted', 'tc.read().scenes', 'tc.execute', 'context.scope.signal']) expect(apiReference.content).toContain(api)
   expect(apiReference.content).toContain('subscribe 不回放当前值')
-  const dependency = files.find(file => file.authorSource?.dependencyId && file.content?.includes('mountWebContent'))!
-  expect(dependency.note).toContain('仅深改底层实现时按需读取')
+  const dependency = files.find(file => file.binding?.kind === 'instance-source' && file.binding.instanceId === 'a'
+    && file.authorSource?.dependencyId && file.content?.includes('mountWebContent'))!
+  expect(dependency.builtinSource).toEqual({ key: 'guoling.web', part: 'implementation' })
+  expect(dependency.note).toContain('Source/COW')
   const modified = entry.content!.replace('return implementation.mount(context);', 'context.root.dataset.custom = "a";\n    return implementation.mount(context);')
   const edits = canonicalComponentFileEdits(snapshot(current), entry, modified)
   current = driver.apply(current, captureComponentOperation(current.project, edits)) as typeof current

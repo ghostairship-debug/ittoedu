@@ -239,9 +239,10 @@ function idOf(attributes: readonly HtmlAttributeSpan[] | undefined): string | nu
 }
 
 /**
- * Build the element tree and the page-section view over a scanned document.
+ * Build the element tree and candidate-section view over a scanned document.
  * Sections are the direct `<section>` children of `<body>`, or of a unique
- * direct `<main>` child of `<body>`; nested sections are not pages.
+ * direct `<main>` child of `<body>`; nested sections are not page candidates.
+ * This structural index alone does not authorize preview pagination or fitting.
  *
  * Unclosed elements keep `endTag: null` and are bounded by wherever the parser
  * ran out (the closing tag that implicitly popped them, or end of source).

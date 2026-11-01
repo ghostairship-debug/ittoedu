@@ -39,7 +39,11 @@ export const courseProductivityInputSchema = z.object({ target: semanticId, requ
   z.object({ kind: z.literal('color'), scope: z.enum(['page', 'surface', 'course']), tokenId: semanticId,
     property: z.enum(['text', 'fill', 'stroke', 'background', 'all']) }).strict(),
 ]) }).strict()
-export const surfaceRemixInputSchema = z.object({ target: semanticId, replacements: z.record(z.string(), z.string()) }).strict()
+export const surfaceDuplicateInputSchema = z.object({ target: semanticId,
+  title: z.string().optional().describe('新页面标题；省略时沿用此操作默认的副本标题。'),
+  placement: z.enum(['after-reference', 'end']).optional().describe('默认在参考页后插入；end 放到参考页所在容器末尾，保持其他页面顺序。'),
+}).strict()
+export const surfaceRemixInputSchema = surfaceDuplicateInputSchema.extend({ replacements: z.record(z.string(), z.string()) })
 const objectInsertOptionsSchema = z.object({ kind: z.enum(['text', 'formula', 'shape', 'table', 'chart', 'input']),
   click: clickInteractionInputSchema.optional().describe('同次绑定正式点击规则；location-go 的 value 使用已观察目的页面句柄或路径；scene.next/scene.previous无需value，audio-play 使用已配置声音。'),
   text: z.string().optional(), shapeType: shapeDataSchema.shape.shapeType.optional(), chartType: z.enum(['bar', 'line', 'area', 'pie', 'donut']).optional(),

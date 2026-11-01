@@ -3,6 +3,7 @@ import { webResourceReferenceMarker } from '../../components/web/resources'
 import { compiledLocalParentProperty, compiledNativeChildDiagnosticProperty, unsupportedJavascriptSubmitAttribute, type CompiledWebInitialization, type CompiledWebModuleActivation, type CompiledWebModuleProgram } from '../../core/publish/componentPlatform/compiledContract'
 import { compiledPreparedImportOptionsProperty, compiledScopeActiveProperty, createPreparedJavaScriptImportOptionsValidator, createPreparedJavaScriptNativeImport } from '../../shared/browser/validatePreparedJavaScriptImportOptions'
 import { createLocalStageLayout } from '../../components/web/localStageLayout'
+import { installCourseProgressReady } from '../../components/web/courseProgress'
 
 export interface CompiledContentEnvironment {
   root: HTMLElement
@@ -418,6 +419,8 @@ export function createCompiledContentEnvironment(context: ComponentRuntimeContex
     },
   })
   values.window = windowView; values.self = windowView; values.globalThis = windowView
+  const progressReady = installCourseProgressReady(windowView as unknown as Window)
+  progressReady.connect(context.scope.progress)
   for (const name of [...Object.keys(values), 'parent', 'top', 'innerWidth', 'outerWidth', 'innerHeight', 'outerHeight', 'devicePixelRatio', 'closed']) intrinsicNames.add(name)
   // Authored srcdoc keeps its native child document; its parser prefix reads the same owning local parent.
   Object.defineProperty(host, compiledLocalParentProperty, { value: windowView })
@@ -428,6 +431,7 @@ export function createCompiledContentEnvironment(context: ComponentRuntimeContex
   const dispose = (): void => {
     if (disposed) return
     disposed = true
+    progressReady.dispose()
     stageLayout?.dispose()
     preparedOptions.dispose()
     finishInitializationTurn?.(); finishInitializationTurn = undefined

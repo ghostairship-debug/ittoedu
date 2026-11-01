@@ -72,3 +72,29 @@ it('coalesces concurrent stop requests without losing confirmed stop or granting
   expect(denied).toMatchObject({ status: 'rejected', reason: { code: 'job-not-authorized' } })
   expect(cancel).toHaveBeenCalledOnce()
 })
+
+it.each(['outcome-first', 'cancel-first'])('preserves unconfirmed native stop without delivery or replay: %s', async order => {
+  const root = await fixture()
+  let finish!: (value: ComputeProcessResult) => void
+  const done = new Promise<ComputeProcessResult>(resolve => { finish = resolve })
+  const outcome = { exitCode: null, stdout: '', stderr: 'unconfirmed native stop', truncated: false, cancelled: false }
+  let service!: ComputeJobService
+  const cancel = vi.fn(async () => {
+    if (order === 'outcome-first') { finish(outcome); await service.wait('run', request.jobId, 2000) }
+    return false
+  })
+  const start = vi.fn(async () => ({ done, cancel }))
+  const backend = { kind: 'native-python' as const, availability: async () => ({ available: true }), start }
+  service = new ComputeJobService({ directory: root, backend })
+  await service.start(request)
+  await expect.poll(async () => (await service.status('run', request.jobId)).status).toBe('running')
+  expect(await service.cancel('run', request.jobId)).toMatchObject({ status: 'unknown', stopped: true })
+  if (order === 'cancel-first') finish(outcome)
+  await expect.poll(async () => (await service.status('run', request.jobId)).reason).toContain('停止未获确认')
+  expect(await service.status('run', request.jobId)).toMatchObject({ status: 'unknown', exitCode: null, artifacts: [], stopped: true })
+  await expect(service.readArtifact('run', request.jobId, 'late.txt')).rejects.toMatchObject({ code: 'artifact-not-ready' })
+  const reopened = new ComputeJobService({ directory: root, backend })
+  expect(await reopened.start(request)).toMatchObject({ status: 'unknown', stopped: true })
+  expect(await reopened.cancel('run', request.jobId)).toMatchObject({ status: 'unknown', stopped: true })
+  expect(start).toHaveBeenCalledOnce(); expect(cancel).toHaveBeenCalledOnce()
+})

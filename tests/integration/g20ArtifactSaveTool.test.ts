@@ -203,7 +203,7 @@ it('cold opens a saved document and saves its ready image through public artifac
   }
 })
 
-it('saves a fetched task image through the existing artifact writer and retains resource, run, stop, and overwrite boundaries', async () => {
+it('saves a fetched workspace image through the existing artifact writer and retains resource, workspace, stop, and overwrite boundaries', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'g20-fetched-artifact-'))
   const host = new DocumentHostService(path.join(root, 'documents'))
   const bytes = await fs.readFile(path.resolve('tests/fixtures/g20M17/local-media.png'))
@@ -213,7 +213,12 @@ it('saves a fetched task image through the existing artifact writer and retains 
       library: 'openverse', providerId: 'fixture', title: 'Offline fixture', license: { code: 'cc0', id: 'CC0 1.0', attributionRequired: false },
       sourceName: 'Offline fixture', pageUrl: 'https://example.com/fixture', fileUrl: 'https://example.com/fixture.png',
     }] })]] })
+  const generate = vi.fn(async (): Promise<never> => { throw new Error('Fetched delivery must not generate an image') })
+  const images = new ImageGenerationService({ directory: path.join(root, 'images'), provider: { generate } })
   host.tools.configureHostServices({ openImages,
+    images: { selection: () => selection, run: images.run.bind(images), read: images.read.bind(images), stop: images.stop.bind(images),
+      readResource: images.readResource.bind(images), registerWorkspaceResource: images.registerWorkspaceResource.bind(images),
+      readWorkspaceResource: images.readWorkspaceResource.bind(images) },
     beginRun: async grant => { openImages.beginRun(grant.runId) }, stopRun: runId => { openImages.stopRun(runId) },
     artifacts: { lookup: (runId, operationId) => host.artifactDeliveries.lookup(operationId, runId),
       save: ({ grant, operationId, source, bytes: supplied, assertActive }) => host.artifactDeliveries.deliver({
@@ -225,13 +230,13 @@ it('saves a fetched task image through the existing artifact writer and retains 
     const document = await host.internalAPI.create({ kind: 'course-v10', project: createBlankCourseProjectV10('Fetched image'),
       resources: { assets: {}, components: {} } }, 'source.h5lesson')
     await host.internalAPI.save(document.documentId, path.join(root, 'source.h5lesson'))
-    const begin = (runId: string) => host.tools.beginRun({ runId, actor: 'agent',
-      documents: [{ documentId: document.documentId, writable: [{ kind: 'document' }] }], fileAccess: { permission: 'workspace', workspaceRoot: root } })
+    const begin = (runId: string, workspaceRoot = root) => host.tools.beginRun({ runId, actor: 'agent',
+      documents: [{ documentId: document.documentId, writable: [{ kind: 'document' }] }], fileAccess: { permission: 'workspace', workspaceRoot } })
     await begin('fetch-owner')
     const found = data(await host.tools.execute('fetch-owner', 'search', { name: 'image.search', input: { query: 'fixture', limit: 1 } }))
     const fetched = data(await host.tools.execute('fetch-owner', 'fetch', { name: 'image.fetch', input: { image: found.candidates[0].image } }))
     expect(fetched).toMatchObject({ status: 'ready', source: { kind: 'open-library', title: 'Offline fixture' } })
-    const original = await host.tools.readImageResource('fetch-owner', document.documentId, fetched.resource)
+    const original = await host.tools.readOpenImagePreview('fetch-owner', fetched.resource)
     const receipt = data(await host.tools.execute('fetch-owner', 'save', { name: 'artifact.save',
       input: { source: fetched.resource, destination: 'download.png' } }))
     expect(receipt).toMatchObject({ status: 'written', sourceKind: 'image', sourceId: fetched.resource, path: path.join(root, 'download.png') })
@@ -239,15 +244,22 @@ it('saves a fetched task image through the existing artifact writer and retains 
     expect(data(await host.tools.execute('fetch-owner', 'overwrite', { name: 'artifact.save',
       input: { source: fetched.resource, destination: 'download.png' } }))).toMatchObject({ status: 'conflict' })
     expect(await fs.readFile(receipt.path)).toEqual(Buffer.from(original.bytes))
-    await begin('unrelated')
+    await begin('same-workspace')
+    expect(data(await host.tools.execute('same-workspace', 'reuse', { name: 'artifact.save',
+      input: { source: fetched.resource, destination: 'reused.png' } }))).toMatchObject({ status: 'written' })
+    expect(await fs.readFile(path.join(root, 'reused.png'))).toEqual(Buffer.from(original.bytes))
+    const unrelatedRoot = path.join(root, 'unrelated-workspace'); await fs.mkdir(unrelatedRoot)
+    await begin('unrelated', unrelatedRoot)
     expect(await host.tools.execute('unrelated', 'foreign', { name: 'artifact.save',
       input: { source: fetched.resource, destination: 'foreign.png' } })).toMatchObject({ kind: 'error' })
     await host.tools.stop('fetch-owner')
     expect(await host.tools.execute('fetch-owner', 'late', { name: 'artifact.save',
       input: { source: fetched.resource, destination: 'late.png' } })).toMatchObject({ kind: 'error' })
-    for (const name of ['foreign.png', 'late.png']) await expect(fs.stat(path.join(root, name))).rejects.toMatchObject({ code: 'ENOENT' })
+    await expect(fs.stat(path.join(unrelatedRoot, 'foreign.png'))).rejects.toMatchObject({ code: 'ENOENT' })
+    await expect(fs.stat(path.join(root, 'late.png'))).rejects.toMatchObject({ code: 'ENOENT' })
     expect(getBytes).toHaveBeenCalledOnce()
-    await host.tools.stop('unrelated')
+    expect(generate).not.toHaveBeenCalled()
+    await host.tools.stop('unrelated'); await host.tools.stop('same-workspace')
   } finally {
     if (!path.resolve(root).startsWith(path.resolve(os.tmpdir()) + path.sep) || !path.basename(root).startsWith('g20-fetched-artifact-'))
       throw new Error('Unexpected test directory')

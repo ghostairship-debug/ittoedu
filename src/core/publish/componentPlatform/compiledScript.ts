@@ -119,7 +119,9 @@ function isReference(node: Ast, parent: Ast | undefined, bindings: WeakSet<Ast>)
 const localLanguageGlobals = new Set(('undefined NaN Infinity Object Array String Number Boolean BigInt Symbol Date RegExp Math JSON Promise Map Set WeakMap WeakSet Error AggregateError EvalError RangeError ReferenceError SyntaxError TypeError URIError ArrayBuffer DataView Int8Array Uint8Array Uint8ClampedArray Int16Array Uint16Array Int32Array Uint32Array Float32Array Float64Array BigInt64Array BigUint64Array Intl parseInt parseFloat isNaN isFinite encodeURI decodeURI encodeURIComponent decodeURIComponent TextEncoder TextDecoder console performance CSS').split(' '))
 const localTaskGlobals = new Set('setTimeout clearTimeout setInterval clearInterval requestAnimationFrame cancelAnimationFrame queueMicrotask'.split(' '))
 const localDocumentMembers = new Set(('querySelector querySelectorAll getElementById getElementsByClassName getElementsByTagName getElementsByName createElement createElementNS createTextNode createComment createDocumentFragment addEventListener removeEventListener dispatchEvent elementFromPoint elementsFromPoint documentElement body head currentScript readyState activeElement forms images scripts links title').split(' '))
-const localWindowMembers = new Set([...localLanguageGlobals, ...localTaskGlobals, 'document', 'window', 'self', 'globalThis', 'addEventListener', 'removeEventListener', 'dispatchEvent', 'getComputedStyle', '__eventProperty'])
+// courseProgressReady is installed by the local adapter before author scripts,
+// just as in the native realm. Unknown browser storage APIs still route native.
+const localWindowMembers = new Set([...localLanguageGlobals, ...localTaskGlobals, 'document', 'window', 'self', 'globalThis', 'addEventListener', 'removeEventListener', 'dispatchEvent', 'getComputedStyle', '__eventProperty', 'courseProgressReady'])
 export function stylesRequireNativeDocument(styles: string): boolean {
   return /\b\d*\.?\d+(?:[sld]?v[whib]|vmin|vmax)\b|position\s*:\s*fixed\b|@media[^{}]*(?:width|height|orientation|aspect-ratio)/i.test(styles)
 }

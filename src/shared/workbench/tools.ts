@@ -47,7 +47,11 @@ export interface ToolRunGrant {
   /** The accepted task's speech route; missing historical configuration stays unavailable. */
   speechSelection?: SpeechSelectionSnapshot
   /** Main-frozen file scope for built-in task delivery tools; external MCP grants use their bound documents. */
-  fileAccess?: { permission: ExecutionPermissionMode; workspaceRoot?: string; conversationHomeRoot?: string; conversationHome?: ConversationHome; boundPaths?: Record<string, string> }
+  fileAccess?: { permission: ExecutionPermissionMode; workspaceRoot?: string; conversationHomeRoot?: string; conversationHome?: ConversationHome; boundPaths?: Record<string, string>;
+    /** Main-owned current-run assembly root; never supplied by model tool arguments. */
+    assemblyRoot?: string;
+    /** Verified same-task predecessors. Read authority only; existing files stay intact. */
+    assemblyReadRoots?: readonly string[] }
   /** Explicit user result authorization, frozen by Main; methods and observations cannot extend it. */
   webAuthorization?: { origins: readonly string[]; actions: readonly ('submit' | 'upload' | 'download')[] }
   materialIds?: readonly string[]

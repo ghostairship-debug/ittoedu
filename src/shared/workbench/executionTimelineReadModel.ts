@@ -8,6 +8,12 @@ import type { ApprovalView } from './executionPermission'
 import type { ConversationMessage } from './conversations'
 
 const terminal = new Set(['completed', 'failed', 'stopped', 'partial', 'interrupted', 'cancelled'])
+/** A pending job receipt has already returned from its tool call. Its job/child
+ * owner reports subsequent work; the historical receipt never becomes a busy call. */
+const pendingJobReceipt = (item: ExecutionItem) => item.data.status === 'pending'
+  && (item.data.output !== undefined || item.data.outputRef !== undefined)
+const activeTool = (item: ExecutionItem) => item.type === 'tool'
+  && ['running', 'executing', 'pending', 'queued', 'stopping'].includes(item.data.status ?? '') && !pendingJobReceipt(item)
 /** A text/tool/usage item's completion does not end its containing built-in run. */
 export function executionActivity(projection: ExecutionProjection) {
   const builtIn = new Set<string>(), ended = new Set<string>(), waiting = new Set<string>()
@@ -15,7 +21,7 @@ export function executionActivity(projection: ExecutionProjection) {
   for (const item of projection.items) {
     if (item.source === 'external-mcp') {
       if (item.type === 'run.end') ended.add(item.runId)
-      if (item.type === 'tool' && ['running', 'executing', 'pending', 'queued', 'stopping'].includes(item.data.status ?? '')) external.set(item.runId, (external.get(item.runId) ?? 0) + 1)
+      if (activeTool(item)) external.set(item.runId, (external.get(item.runId) ?? 0) + 1)
       continue
     }
     if (item.type === 'document.save') continue
@@ -35,7 +41,7 @@ export function executionActivity(projection: ExecutionProjection) {
 export function currentExecutionStatus(projection: ExecutionProjection): string | null {
   const ends = executionTimelineIndex(projection).ends
   const active = projection.items.filter(item => !ends.has(item.runId) && (item.type === 'run.state' && !terminal.has(item.data.status ?? '')
-    || item.type === 'tool' && ['running', 'executing', 'pending', 'queued', 'stopping'].includes(item.data.status ?? '')))
+    || activeTool(item)))
     .sort((left, right) => right.sequence - left.sequence)[0]
   if (active?.type === 'tool') return `${active.source === 'external-mcp' ? '外部工具' : '工具'}执行中${active.data.label || active.data.toolName ? ` · ${active.data.label || active.data.toolName}` : ''}`
   const current = active ?? projection.items.filter(item => item.type === 'run.state' || item.type === 'run.end')
@@ -129,7 +135,7 @@ export function toolGroupSummary(items: readonly ExecutionItem[]): string {
     .map(item => [`${item.runId}:${item.itemId.slice(0, -':commit'.length)}`, item.data.operationId!]))
   const modifications = new Set([...commits, ...calls.filter(item => item.data.applicationStatus === 'applied')]
     .map(item => item.data.operationId ?? callOperations.get(`${item.runId}:${item.itemId}`) ?? `${item.runId}:${item.itemId}`))
-  const active = calls.findLast(item => ['running', 'executing', 'pending', 'queued'].includes(item.data.status ?? ''))
+  const active = calls.findLast(item => activeTool(item) && item.data.status !== 'stopping')
   const failed = calls.filter(item => item.data.status === 'failed').length
   return [calls.length ? `${calls.length} 次工具调用` : '执行记录', modifications.size ? `${modifications.size} 项修改` : '',
     active ? `正在${active.data.label || active.data.toolName || '执行'}` : '', failed ? `${failed} 次调用有错误` : ''].filter(Boolean).join(' · ')
@@ -257,7 +263,6 @@ export function collapseInterruptedAttempts(items: readonly ExecutionItem[]): Ex
 }
 
 const displayKey = (item: Pick<ExecutionItem, 'runId' | 'itemId'>) => JSON.stringify([item.runId, item.itemId])
-const activeTool = (item: ExecutionItem) => item.type === 'tool' && ['running', 'executing', 'pending', 'queued', 'stopping'].includes(item.data.status ?? '')
 const savedFile = (item: ExecutionItem) => item.type === 'tool' && item.data.saveStatus === 'saved' && ['file.save', 'file.write'].includes(item.data.toolName ?? '')
 const entryKey = (entry: TimelineEntry) => entry.kind === 'message' ? entry.message.messageId : entry.kind === 'tools' ? entry.key : `${entry.item.runId}:${entry.item.itemId}`
 type ReaderIndex = ReturnType<typeof buildIndex>
@@ -265,6 +270,7 @@ type GroupState = { entry: Extract<TimelineEntry, { kind: 'tools' }>; summary: s
 type RunActivity = { members: number; terminal: number; waiting: Map<number, boolean> }
 function sameSummaryInput(left: ExecutionItem, right: ExecutionItem): boolean {
   return left.type === right.type && left.data.status === right.data.status && left.data.label === right.data.label
+    && pendingJobReceipt(left) === pendingJobReceipt(right)
     && left.data.toolName === right.data.toolName && left.data.applicationStatus === right.data.applicationStatus && left.data.operationId === right.data.operationId
 }
 /** Exact counters behind the existing group summary; only actual changed contributions move. */
@@ -304,7 +310,7 @@ class ToolGroupFacts {
       const value = this.items.get(affectedKey), operation = value && this.operation(value)
       if (operation) { this.contributed.set(affectedKey, operation); this.modifications.set(operation, (this.modifications.get(operation) ?? 0) + 1) }
     }
-    if (item.type === 'tool' && ['running', 'executing', 'pending', 'queued'].includes(item.data.status ?? '')) {
+    if (activeTool(item) && item.data.status !== 'stopping') {
       this.active.set(position, item); this.activePosition = Math.max(this.activePosition, position)
     } else {
       this.active.delete(position)

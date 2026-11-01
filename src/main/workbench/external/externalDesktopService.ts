@@ -1,5 +1,5 @@
 import path from 'node:path'
-import { randomUUID } from 'node:crypto'
+import { randomBytes, randomUUID } from 'node:crypto'
 import { app, dialog, ipcMain, type BrowserWindow, type MessageBoxOptions } from 'electron'
 import { IPC_CHANNELS } from '../../../shared/ipcTypes'
 import { externalRequestSchema, externalUiStateSchema, type ExternalUiState } from '../../../shared/workbench/external'
@@ -9,6 +9,9 @@ import { documentHost } from '../documentHost'
 import { authorizeWorkspaceFilesRoot, operateWorkspaceFiles } from '../workspaceFilesDesktopService'
 import { ExternalMcpService, type ExternalApproval } from './ExternalMcpService'
 import { ResidentMcpSettingsStore } from './ResidentMcpSettings'
+import type { AcpDomainBinding } from './acp/AcpAgentHost'
+import type { AcpStructuredHandoff } from '../../../shared/workbench/acp'
+import type { ExecutionPermissionMode } from '../../../shared/workbench/executionPermission'
 
 let singleton: Promise<ExternalMcpService> | undefined
 let mainWindow: (() => BrowserWindow | null) | undefined
@@ -107,4 +110,44 @@ export async function bindHeadlessMcpWorkspace(directory: string): Promise<strin
     managed: false, authorization: 'user-selected' })
   await (await externalMcpService()).setInitialWorkspace(workspace.workspaceId)
   return root.resolvedPath
+}
+
+/** A selected ACP Agent gets an ephemeral private endpoint backed by the same domain implementation. */
+export async function createAcpDomainBinding(input: {
+  workspaceId: string; conversationId: string; segmentId: string; handoff: AcpStructuredHandoff;
+  permission(): ExecutionPermissionMode;
+  pending(operations: string[]): void;
+  linkRun(input: { runId: string; portId: string }): Promise<string>;
+}): Promise<AcpDomainBinding> {
+  const execution = await executionDesktopService(), documents = documentHost();
+  const workspace = await execution.conversations.readWorkspace(input.workspaceId);
+  if (!workspace) throw new Error('ACP 工作空间已不存在');
+  const cwd = (await operateWorkspaceFiles({ type: 'root', directory: workspace.rootPath })).resolvedPath;
+  const token = randomBytes(32).toString('hex');
+  const service = new ExternalMcpService({
+    // Port zero is an explicit ephemeral endpoint, never a fallback for the user's configured resident port.
+    settings: { read: async () => ({ enabled: true, port: 0, permission: input.permission(), closeAction: 'ask' }),
+      update: async () => { throw new Error('ACP 私有连接不修改用户 MCP 设置') } },
+    conversations: execution.conversations, registry: documents.registry, gateway: documents.tools, files: documents.agentFiles,
+    workspaceRoot: async root => (await operateWorkspaceFiles({ type: 'root', directory: root })).resolvedPath,
+    uiState: () => uiState?.() ?? Promise.resolve(null), appendEvent: event => execution.appendExternalEvent(event),
+    recordingState: () => execution.events.getPendingState(), confirm: confirmExternalChange, transportToken: token,
+    managedConversation: { workspaceId: input.workspaceId, conversationId: input.conversationId, linkRun: input.linkRun },
+  });
+  const status = await service.start();
+  if (status.state !== 'running') { await service.close(); throw new Error(status.message ?? 'ACP 领域连接未能启动') }
+  return { cwd, handoff: input.handoff,
+    mcpServers: [{ type: 'http', name: `guoling-${input.segmentId}`, url: status.endpoint, headers: [{ name: 'Authorization', value: `Bearer ${token}` }] }],
+    stdioMcpServers: [{ name: `guoling-${input.segmentId}`, command: process.execPath,
+      args: [path.join(__dirname, 'acp', 'AcpMcpStdioEntry.js')],
+      env: [{ name: 'ELECTRON_RUN_AS_NODE', value: '1' },
+        { name: 'GUOLING_ACP_MCP_ENDPOINT', value: status.endpoint }, { name: 'GUOLING_ACP_MCP_TOKEN', value: token }] }],
+    activate: () => service.activateManaged(), revoke: () => service.revokeManaged(),
+    settle: async () => {
+      await service.settleManaged();
+      input.pending(service.managedOperations().filter(operation => ['pending', 'running'].includes(operation.status) || operation.delivered === false)
+        .map(operation => `${operation.tool} / ${operation.ticket}: ${operation.status}${operation.delivered === false ? '，回复未送达；先核对回执' : ''}`));
+    },
+    dispose: () => service.close(),
+  };
 }

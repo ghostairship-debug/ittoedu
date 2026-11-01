@@ -54,16 +54,19 @@ describe('offline Chrome 113 compatibility boundary', () => {
   it('shows bundle parse failures and synchronous entry/JSON failures instead of a blank page', async () => {
     const artifact = { title: 'Compatibility', format: 'compiled-course-v2' } as CompiledCoursePlayback
     for (const [bundle, mutate, expected] of [
-      ['const =;', false, /Unexpected token/],
+      ['const =;', false, /CoursewareCompiledPlayer/],
       ['var CoursewareCompiledPlayer={mountCompiledCourse:function(){throw new Error("entry failed")}};', false, /entry failed/],
       ['var CoursewareCompiledPlayer={mountCompiledCourse:function(){return Promise.resolve({})}};', true, /课件加载失败/],
     ] as const) {
       let html = buildCompiledSingleHtml(artifact, bundle)
       if (mutate) html = html.replace(/(<script id="course-data" type="application\/json">)[\s\S]*?(<\/script>)/, '$1{$2')
-      const dom = new JSDOM(html, { runScripts: 'dangerously', virtualConsole: new VirtualConsole() })
+      const errors: string[] = [], virtualConsole = new VirtualConsole()
+      virtualConsole.on('jsdomError', error => errors.push(error.message))
+      const dom = new JSDOM(html, { runScripts: 'dangerously', virtualConsole })
       await new Promise(resolve => setTimeout(resolve, 0))
       expect(dom.window.document.getElementById('course-diagnostic')!.textContent).toMatch(expected)
       expect(dom.window.document.getElementById('course-diagnostic')!.hidden).toBe(false)
+      if (bundle === 'const =;') expect(errors.some(error => error.includes('Unexpected token'))).toBe(true)
       dom.window.close()
     }
   })

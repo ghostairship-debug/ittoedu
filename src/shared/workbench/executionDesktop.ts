@@ -1,3 +1,4 @@
+import { acpDesktopRequestSchema, type AcpDesktopRequest, type AcpDesktopResult, type AcpSendInput, type AcpSnapshotEvent } from './acpDesktop'
 import { documentSlotSchema } from '../document/selectionSchema'
 import { z } from 'zod'
 import { validHomePath, executionAdvancementModeSchema, type ExecutionAdvancementMode, type ConversationElementScope, type ConversationRecord, type WorkspaceRecord } from './conversations'
@@ -100,6 +101,8 @@ export function captureRendererTiming(): RendererTimingStamp {
     monotonicMs: performance.now(), wallTimeMs: Date.now() }
 }
 export const executionDesktopRequestSchema = z.discriminatedUnion('type', [
+  z.object({ type: z.literal('acp'), request: acpDesktopRequestSchema }).strict(),
+  z.object({ type: z.literal('acp-send'), ...identity, submissionId: z.uuid(), expectedRevision: index, text: z.string().refine(value => value.trim().length > 0), documents: z.array(executionDocumentReferenceSchema), permission: executionPermissionModeSchema }).strict(),
   z.object({ type: z.literal('workspace'), root: z.string().min(1).max(32767).nullable() }).strict(),
   z.object({ type: z.literal('conversations'), workspaceId: id }).strict(),
   z.object({ type: z.literal('create-conversation'), workspaceId: id, title: z.string().optional(), home: conversationHomeSchema.optional(),
@@ -235,6 +238,9 @@ export interface ExecutionTimelineViewInput {
   workspaceId: string; conversationId: string; consumerId: string; userHistoryRevision: number; userHistoryOffset?: number
 }
 export interface ExecutionDesktopAPI {
+  acp?(request: AcpDesktopRequest): Promise<AcpDesktopResult>
+  sendAcp?(input: AcpSendInput): Promise<AcpDesktopResult>
+  subscribeAcp?(listener: (event: AcpSnapshotEvent) => void): () => void
   workspace(root: string | null): Promise<ExecutionWorkspace>
   conversations(workspaceId: string): Promise<ConversationRecord[]>
   /** `element` makes the conversation behind one element's AI card (M15): unlisted, cleared when its document closes. */

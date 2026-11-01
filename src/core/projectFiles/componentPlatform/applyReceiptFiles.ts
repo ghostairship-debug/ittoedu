@@ -15,6 +15,7 @@ export const sameComponentProjectFile = (left: ComponentProjectFile, right: Comp
   && (left.binding ? equalComponentValue(bindingIdentity(left), bindingIdentity(right))
     : !right.binding && (left.target ? equalComponentValue(left.target, right.target) : !right.target && left.path === right.path))
   && left.sourceFile?.path === right.sourceFile?.path
+  && left.webModule?.path === right.webModule?.path
   && (left.builtinSource && right.builtinSource
     ? left.builtinSource.key === right.builtinSource.key && left.builtinSource.part === right.builtinSource.part
     : (left.builtinSource?.part !== 'implementation' || hasBuiltinComponentSource(left.builtinSource.key))

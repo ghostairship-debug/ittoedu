@@ -31,7 +31,9 @@ it('creates a complete Source program through project.apply, then edits the same
     let serial = 0
     const tool = (name: string, input: unknown) => host.tools.execute('program', `program-${++serial}`, { name, input })
     const current = () => host.internalAPI.read(initial.documentId)
-    expect(await tool('project.apply', { path: 'entry.html', intent: 'program.set', content: html })).toMatchObject({ kind: 'read', data: { commit: 'committed' } })
+    expect(await tool('project.apply', { path: 'entry.html', intent: 'program.set', content: html })).toMatchObject({ kind: 'read', data: {
+      commit: 'committed', rootCount: 1, containerCount: 0, replacedFactoryEmptyRoot: true,
+    } })
     const created = await current(), project = model(created).project, id = project.entry!.rootInstanceId
     expect(created.undoDepth).toBe(1)
     expect(project.rootIds).toEqual([id]); expect(componentSurfaces(project)).toEqual([])
@@ -73,9 +75,14 @@ it('keeps source admission failure atomic and preserves authored roots when esta
     await host.tools.beginRun({ runId: 'preserve', actor: 'agent', documents: [{ documentId: initial.documentId, writable: [{ kind: 'document' }] }], fileAccess: { permission: 'workspace', workspaceRoot: root } })
     const failed = await host.tools.execute('preserve', 'missing', { name: 'project.apply', input: { path: 'entry.html', intent: 'program.set', from: 'missing.html' } })
     expect(failed).toMatchObject({ kind: 'read', data: { commit: 'not_committed' } })
+    expect(data(failed)).not.toHaveProperty('rootCount')
+    expect(data(failed)).not.toHaveProperty('containerCount')
+    expect(data(failed)).not.toHaveProperty('replacedFactoryEmptyRoot')
     expect(model(await host.internalAPI.read(initial.documentId))).toEqual(model(initial))
     await fs.writeFile(path.join(root, 'program.html'), html)
-    expect(await host.tools.execute('preserve', 'set', { name: 'project.apply', input: { path: 'entry.html', intent: 'program.set', from: 'program.html' } })).toMatchObject({ kind: 'read', data: { commit: 'committed' } })
+    expect(await host.tools.execute('preserve', 'set', { name: 'project.apply', input: { path: 'entry.html', intent: 'program.set', from: 'program.html' } })).toMatchObject({ kind: 'read', data: {
+      commit: 'committed', rootCount: 2, containerCount: 1, replacedFactoryEmptyRoot: false,
+    } })
     const after = await host.internalAPI.read(initial.documentId)
     expect(model(after).project.instances[oldId]).toEqual(model(initial).project.instances[oldId])
     expect(model(after).project.rootIds).toContain(oldId)

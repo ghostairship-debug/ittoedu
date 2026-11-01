@@ -791,6 +791,155 @@ it('exposes an OAuth-style incomplete delta as a pageable retained draft and con
   expect(h.session.read()).toMatchObject({ revision: 1, undoDepth: 1, model: { source: 'restored draft' } })
 })
 
+it.each(['reply', 'status'] as const)('returns a nonterminal automatic compute wait to the model after one owner window (%s)', async trigger => {
+  let turns = 0, waits = 0, starts = 0
+  const job = 'compute-stalled', pending = { kind: 'compute', jobId: job, status: 'running', terminal: false }
+  const h = await fixture({ async *stream(request) {
+    turns++
+    if (turns === 1) yield response(request, '启动确定性计算', [{ name: 'compute.run', input: { code: 'wait_for_input()' } }])
+    else if (turns === 2) yield response(request, '计算尚未完成', trigger === 'status' ? [{ name: 'job.status', input: { job } }] : [])
+    else if (turns === 3) {
+      expect(waits).toBe(1)
+      expect(JSON.stringify(request.messages)).toContain('宿主已等待原作业')
+      expect(request.messages.map(message => String(message.content)).join('\n')).toContain('"terminal":false')
+      yield response(request, '读取原计算日志，同时保留独立正文修改', [
+        { name: 'job.logs', input: { job } }, { name: 'text.replace', input: { content: 'independent work' } },
+      ])
+    } else yield response(request, '独立正文已完成；原计算仍在运行，成果未核验。')
+  } })
+  const execute = h.gateway.execute.bind(h.gateway)
+  vi.spyOn(h.gateway, 'execute').mockImplementation(async (runId, callId, call) => {
+    if (call.name === 'compute.run') { starts++; return { kind: 'read', data: { job, status: 'running' } } }
+    if (call.name === 'job.status') return { kind: 'read', data: pending }
+    if (call.name === 'job.wait') {
+      expect(call.input).toEqual({ job, milliseconds: 30_000 })
+      // A second implicit wait fails promptly instead of hanging the regression.
+      if (++waits > 1) return { kind: 'error', code: 'unexpected-host-rewait', message: '等待窗口已经返回，必须先交回模型' }
+      return { kind: 'read', data: pending }
+    }
+    if (call.name === 'job.logs') return { kind: 'read', data: { entries: [{ cursor: 1, stream: 'stdout', message: 'waiting for input' }], nextCursor: 1 } }
+    return execute(runId, callId, call)
+  })
+  const started = await h.engine.start(h.input), final = await h.engine.wait(started.runId)
+  expect(final.status).toBe('partial')
+  expect(final.failure).toBeUndefined()
+  expect(turns).toBe(4)
+  expect(waits).toBe(1)
+  expect(starts).toBe(1)
+  expect(final.tools.filter(tool => tool.origin === 'host' && tool.call.name === 'job.wait')).toHaveLength(1)
+  expect(final.tools.some(tool => tool.call.name === 'job.logs')).toBe(true)
+  expect(h.session.read()).toMatchObject({ revision: 1, model: { source: 'independent work' } })
+})
+
+it.each([0, 30_000])('returns an explicit %sms job wait without a hidden extension and permits another model wait', async milliseconds => {
+  let turns = 0, starts = 0
+  const job = 'compute-explicit-wait', waits: number[] = []
+  const h = await fixture({ async *stream(request) {
+    turns++
+    if (turns === 1) yield response(request, '启动原计算', [{ name: 'compute.run', input: { code: 'wait_for_input()' } }])
+    else if (turns === 2) yield response(request, '按本次窗口等待', [{ name: 'job.wait', input: { job, milliseconds } }])
+    else if (turns === 3) {
+      expect(waits).toEqual([milliseconds])
+      expect(JSON.stringify(request.messages)).not.toContain('宿主已等待原作业')
+      const receipt = JSON.parse(String(request.messages.filter(message => message.role === 'tool').at(-1)!.content))
+      expect(receipt.data).toMatchObject({ jobId: job, status: 'running', terminal: false })
+      yield response(request, '诊断原计算', [{ name: 'job.logs', input: { job } }])
+    } else if (turns === 4) yield response(request, '继续等待同一个计算', [{ name: 'job.wait', input: { job, milliseconds: 17 } }])
+    else yield response(request, '原计算已完成。')
+  } })
+  const execute = h.gateway.execute.bind(h.gateway)
+  vi.spyOn(h.gateway, 'execute').mockImplementation(async (runId, callId, call) => {
+    if (call.name === 'compute.run') { starts++; return { kind: 'read', data: { job, status: 'running' } } }
+    if (call.name === 'job.wait') {
+      waits.push((call.input as { milliseconds: number }).milliseconds)
+      const ready = waits.length > 1
+      return { kind: 'read', data: { kind: 'compute', jobId: job, status: ready ? 'ready' : 'running', terminal: ready } }
+    }
+    if (call.name === 'job.logs') return { kind: 'read', data: { entries: [], nextCursor: 0 } }
+    return execute(runId, callId, call)
+  })
+  const started = await h.engine.start(h.input), final = await h.engine.wait(started.runId)
+  expect(final.status).toBe('completed')
+  expect(final.failure).toBeUndefined()
+  expect(turns).toBe(5)
+  expect(waits).toEqual([milliseconds, 17])
+  expect(starts).toBe(1)
+  expect(final.tools.some(tool => tool.origin === 'host' && tool.call.name === 'job.wait')).toBe(false)
+})
+
+it('yields after the first nonterminal automatic wait while other jobs remain available for a model decision', async () => {
+  let turns = 0
+  const jobs = ['compute-first', 'compute-second'], waited: string[] = [], cancelled: string[] = []
+  const h = await fixture({ async *stream(request) {
+    turns++
+    if (turns === 1) yield response(request, '启动独立计算', jobs.map(job => ({ name: 'compute.run', input: { code: job } })))
+    else if (turns === 2) yield response(request, '两个计算还在运行')
+    else if (turns === 3) {
+      expect(waited).toEqual([jobs[0]])
+      yield response(request, '停止两个无进展计算，保留已经完成的正文', [
+        ...jobs.map(job => ({ name: 'job.cancel', input: { job } })), { name: 'text.replace', input: { content: 'preserved work' } },
+      ])
+    } else yield response(request, '两个计算已停止，正文已保留。')
+  } })
+  const execute = h.gateway.execute.bind(h.gateway)
+  vi.spyOn(h.gateway, 'execute').mockImplementation(async (runId, callId, call) => {
+    if (call.name === 'compute.run') return { kind: 'read', data: { job: (call.input as { code: string }).code, status: 'running' } }
+    const job = (call.input as { job?: string }).job
+    if (call.name === 'job.wait') {
+      waited.push(job!)
+      if (waited.length > 1) return { kind: 'error', code: 'unexpected-host-rewait', message: '必须交回模型决定原计算' }
+      return { kind: 'read', data: { kind: 'compute', jobId: job, status: 'running', terminal: false } }
+    }
+    if (call.name === 'job.cancel') { cancelled.push(job!); return { kind: 'read', data: { kind: 'compute', jobId: job, status: 'cancelled', terminal: true } } }
+    return execute(runId, callId, call)
+  })
+  const started = await h.engine.start(h.input), final = await h.engine.wait(started.runId)
+  expect(final.status).toBe('completed')
+  expect(final.failure).toBeUndefined()
+  expect(turns).toBe(4)
+  expect(waited).toEqual([jobs[0]])
+  expect(cancelled).toEqual(jobs)
+  expect(final.tools.filter(tool => tool.call.name === 'compute.run')).toHaveLength(2)
+  expect(h.session.read()).toMatchObject({ revision: 1, model: { source: 'preserved work' } })
+})
+
+it('delivers steering accepted during an automatic wait before the next model decision', async () => {
+  const waiting = deferred(), release = deferred(), job = 'compute-steered'
+  let turns = 0, waits = 0
+  const h = await fixture({ async *stream(request) {
+    turns++
+    if (turns === 1) yield response(request, '启动原计算', [{ name: 'compute.run', input: { code: 'wait_for_input()' } }])
+    else if (turns === 2) yield response(request, '原计算尚未完成')
+    else if (turns === 3) {
+      expect(JSON.stringify(request.messages)).toContain('取消原计算，只保留当前正文')
+      yield response(request, '按最新调整处理', [
+        { name: 'job.cancel', input: { job } }, { name: 'text.replace', input: { content: 'steered work' } },
+      ])
+    } else yield response(request, '已取消原计算，正文已保留。')
+  } })
+  const execute = h.gateway.execute.bind(h.gateway)
+  vi.spyOn(h.gateway, 'execute').mockImplementation(async (runId, callId, call) => {
+    if (call.name === 'compute.run') return { kind: 'read', data: { job, status: 'running' } }
+    if (call.name === 'job.wait') {
+      waits++; waiting.resolve(); await release.promise
+      return { kind: 'read', data: { kind: 'compute', jobId: job, status: 'running', terminal: false } }
+    }
+    if (call.name === 'job.cancel') return { kind: 'read', data: { kind: 'compute', jobId: job, status: 'cancelled', terminal: true } }
+    return execute(runId, callId, call)
+  })
+  const started = await h.engine.start(h.input)
+  await waiting.promise
+  try { await h.engine.steer(started.runId, 'cancel-compute', '取消原计算，只保留当前正文') }
+  finally { release.resolve() }
+  const final = await h.engine.wait(started.runId)
+  expect(final.status).toBe('completed')
+  expect(final.failure).toBeUndefined()
+  expect(turns).toBe(4)
+  expect(waits).toBe(1)
+  expect(final.tools.filter(tool => tool.call.name === 'compute.run')).toHaveLength(1)
+  expect(h.session.read()).toMatchObject({ revision: 1, model: { source: 'steered work' } })
+})
+
 it('returns an automatic job wait error to the model so independent authorized work can continue', async () => {
   let turns = 0, waits = 0
   const h = await fixture({ async *stream(request) {

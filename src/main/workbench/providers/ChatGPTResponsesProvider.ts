@@ -1,5 +1,5 @@
 import { isDeepStrictEqual } from 'node:util'
-import type { ModelAssistantMessage, ModelConnectionSnapshot, ModelEvent, ModelFailure, ModelJsonObject, ModelProvider, ModelRequest, ModelUsage, PreparedModelRequest, ModelPreparationOptions, ModelTransportDiagnostic } from '../../../shared/workbench/modelProvider'
+import type { ModelAssistantMessage, ModelConnectionSnapshot, ModelEvent, ModelFailure, ModelJsonObject, ModelProvider, ModelRequest, ModelUsage, PreparedModelRequest, ModelPreparationOptions, ModelTransportDiagnostic, ModelProviderTiming, ModelStreamOptions } from '../../../shared/workbench/modelProvider'
 import { modelAcceptsImages } from '../../../shared/workbench/modelProvider'
 import { effectiveModelProtocol } from '../../../shared/workbench/modelRouting'
 import { normalizeModelOutputParameters } from '../../../shared/workbench/modelOutputParameters'
@@ -7,7 +7,7 @@ import { modelToolWireName, waitForModelOperation } from './OpenAIChatProvider'
 import { serverSentEvents } from './serverSentEvents'
 import { modelFetch, responseIdleTimeoutCode, transportDiagnostic } from './modelFetch'
 import { httpFailure, providerStreamFailure } from './providerHttpFailure'
-import { providerSessionCacheParameters } from './providerSessionAffinity'
+import { providerSessionCacheParameters, providerSessionAffinityHeaders } from './providerSessionAffinity'
 
 export const CHATGPT_RESPONSES_BASE_URL = 'https://chatgpt.com/backend-api/codex'
 interface ResponsesTransportOptions {
@@ -152,7 +152,7 @@ class ResponsesProvider implements ModelProvider {
     const serialized = JSON.stringify(prepared.body)
     return { serialized, ...(accounting ? { tokens: accounting.measurePayload(prepared.body) } : {}), stream: (requestId, options) => this.streamPrepared({ ...request, requestId }, prepared, serialized, options) }
   }
-  async *stream(input: ModelRequest, options: { signal?: AbortSignal } = {}): AsyncGenerator<ModelEvent> {
+  async *stream(input: ModelRequest, options: ModelStreamOptions = {}): AsyncGenerator<ModelEvent> {
     let prepared: PreparedModelRequest
     try { if (!input.requestId) throw new Error('missing-request-id'); prepared = this.prepare(input) }
     catch {
@@ -164,11 +164,34 @@ class ResponsesProvider implements ModelProvider {
     yield* prepared.stream(input.requestId, options)
   }
   private async *streamPrepared(input: ModelRequest, prepared: ReturnType<typeof prepare>, serialized: string,
-    options: { signal?: AbortSignal } = {}): AsyncGenerator<ModelEvent> {
+    options: ModelStreamOptions = {}): AsyncGenerator<ModelEvent> {
     let sequence = 0, attempted = false
     const providerLabel = this.protocol === 'chatgpt-responses' ? 'ChatGPT' : 'Responses API'
     const failureCode = (code: string) => this.protocol === 'chatgpt-responses' ? code : code.replace(/^chatgpt-/, 'responses-')
-    const event = (value: object) => ({ ...value, requestId: input.requestId, sequence: ++sequence }) as ModelEvent
+    const now = this.options.now ?? Date.now
+    const timing: ModelProviderTiming = { startedAt: now() }
+    const publishTiming = () => {
+      // Diagnostics must never fail or delay the actual model stream.
+      try { options.onTiming?.({ ...timing }) } catch { /* Keep the original provider outcome. */ }
+    }
+    const stamp = (key: Exclude<keyof ModelProviderTiming, 'startedAt'>) => {
+      if (timing[key] !== undefined) return
+      timing[key] = now(); publishTiming()
+    }
+    publishTiming()
+    const event = (value: object): ModelEvent => {
+      const normalized = { ...value, requestId: input.requestId, sequence: ++sequence } as ModelEvent
+      stamp('firstNormalizedEventAt')
+      if (normalized.type === 'tool.delta' && normalized.name
+        || normalized.type === 'response.completed' && normalized.toolCalls.length) stamp('firstToolNameAt')
+      if (normalized.type === 'reasoning.delta' && normalized.text) stamp('firstReasoningAt')
+      if (normalized.type === 'text.delta' && normalized.text
+        || normalized.type === 'tool.delta' && normalized.argumentsDelta
+        || normalized.type === 'response.completed' && (normalized.assistant.content || normalized.toolCalls.some(call => call.argumentsText)))
+        stamp('firstContentAt')
+      if (normalized.type === 'response.completed' || normalized.type === 'response.failed') stamp('terminalEventAt')
+      return normalized
+    }
     const controller = new AbortController()
     const abort = () => controller.abort()
     options.signal?.addEventListener('abort', abort, { once: true })
@@ -180,6 +203,7 @@ class ResponsesProvider implements ModelProvider {
       let credential: string | { accessToken: string; accountId: string }
       try { credential = await waitForModelOperation<string | { accessToken: string; accountId: string }>(() => this.options.credentialResolver(request.selection.connection), controller.signal) }
       catch { controller.signal.throwIfAborted(); yield event({ type: 'response.failed', failure: { outcome: 'not-sent', kind: 'auth', code: 'credential-unavailable', message: `${providerLabel} 凭据不可用；请求未发送。` } }); return }
+      stamp('credentialReadyAt')
       const headers: Record<string, string> = { 'Content-Type': 'application/json', Accept: 'text/event-stream' }
       if (this.protocol === 'chatgpt-responses') {
         if (typeof credential === 'string' || credential.accountId !== request.selection.connection.accountId
@@ -188,6 +212,7 @@ class ResponsesProvider implements ModelProvider {
         }
         headers.Authorization = `Bearer ${credential.accessToken}`
         headers['chatgpt-account-id'] = credential.accountId
+        Object.assign(headers, providerSessionAffinityHeaders(request))
       } else {
         if (typeof credential !== 'string' || !text(credential) || /[\r\n]/.test(credential)) {
           yield event({ type: 'response.failed', failure: { outcome: 'not-sent', kind: 'auth', code: 'credential-unavailable', message: 'Responses API 凭据不可用；请求未发送。' } }); return
@@ -196,10 +221,12 @@ class ResponsesProvider implements ModelProvider {
       }
       controller.signal.throwIfAborted()
       attempted = true
+      stamp('fetchStartedAt')
       response = await modelFetch(this.options.fetch)(prepared.endpoint, {
         method: 'POST', redirect: 'error', signal: controller.signal,
         headers, body: serialized,
       })
+      stamp('headersReceivedAt')
       providerRequestId = response.headers.get('x-request-id') ?? response.headers.get('request-id') ?? undefined
       credential = { accessToken: '', accountId: '' }
       if (!response.ok) {
@@ -224,13 +251,14 @@ class ResponsesProvider implements ModelProvider {
       const doneItemIds = new Set<string>()
       let nextDoneIndex = 0
       let lastActivity = -Infinity
-      for await (const data of serverSentEvents(response.body, { yieldActivity: true })) {
+      for await (const data of serverSentEvents(response.body, { yieldActivity: true, onBytes: () => stamp('firstBodyReadAt') })) {
         controller.signal.throwIfAborted()
         if (data === '') {
           const receivedAt = (this.options.now ?? Date.now)()
           if (receivedAt - lastActivity >= 1000) { lastActivity = receivedAt; yield event({ type: 'response.activity', receivedAt, source: 'data' }) }
           continue
         }
+        stamp('firstSseFrameAt')
         if (data === '[DONE]') break
         sawFramedEvent = true
         const chunk: unknown = JSON.parse(data)

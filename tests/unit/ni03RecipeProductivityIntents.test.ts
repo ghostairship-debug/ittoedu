@@ -15,6 +15,8 @@ import { INTERACTIONS_DEFINITION, interactionRules } from '../../src/shared/comp
 import type { ComponentEdit } from '../../src/shared/contracts/component-platform/operations'
 import type { CourseProjectV10, JsonValue } from '../../src/shared/contracts/component-platform/project'
 import type { DocumentResources } from '../../src/shared/workbench/document'
+import { surfaceDuplicateInputSchema, surfaceRemixInputSchema } from '../../src/core/tools/toolSchemas'
+import { duplicateSurfaceEdits } from '../../src/core/course/courseSurfaceStructure'
 
 const json = (value: unknown): JsonValue => JSON.parse(JSON.stringify(value)) as JsonValue
 async function sessionPlan(project: CourseProjectV10, edits: ComponentEdit[], resources: DocumentResources = { assets: {}, components: {} }) {
@@ -118,10 +120,13 @@ it('uses the full formal copy for reference and remix: named states, rule famili
   const slots = inspectCourseRemixSlots(project, surface.id)
   expect(slots.slots.map(slot => slot.original)).toEqual(['旧头强调旧尾'])
   const cloned = prepareCourseReferenceClone(project, surface.id)
+  expect(cloned.surface.title).toBe(`${surface.name} 副本`)
   expect(cloned.edits.some(edit => edit.type === 'instance.patch' && edit.instanceId === 'decoration')).toBe(true)
   const plan = planCourseStyleRemixEdits(project, surface.id, { [slots.slots[0].id]: '新头强调新尾' })
   const model = await sessionPlan(project, plan.edits, resources)
   const copy = componentSurfaces(model.project).find(value => value.id === plan.createdSurfaceId)!, state = copy.presentation!.states[0]
+  expect(model.project.rootIds).toEqual([surface.id, copy.id, 'external'])
+  expect(copy.title).toBe(`${surface.name} 改写`)
   const id = (sourceId: string) => plan.instanceIds.get(sourceId)!
   expect(state.id).not.toBe('answer')
   expect(copy.presentation).toMatchObject({ initialStateId: state.id, thumbnailStateId: state.id })
@@ -182,6 +187,27 @@ it.each(['新头强调新尾', ''])('applies partial remix intent with explicit 
 it('diagnoses unknown observed slots for partial remix intent without changing the source', () => {
   const { project, surface } = reference(), before = structuredClone(project)
   expect(() => planCourseStyleRemixEdits(project, surface.id, { missing: '' })).toThrow('已不存在')
+  expect(project).toEqual(before)
+})
+
+it.each([['remix', false], ['remix', true], ['duplicate', false], ['duplicate', true]] as const)('names and appends a %s page in the existing owner in one undoable transaction (nested=%j)', async (operation, nested) => {
+  const { project, surface, resources } = reference()
+  if (nested) {
+    appendRootContainers(project, { id: 'wrapper', kind: 'slide', title: '保留父容器', childIds: [...project.rootIds] })
+    project.rootIds = ['wrapper']; project.entry = { ...project.entry, rootInstanceId: 'wrapper' }
+  }
+  const before = structuredClone(project), observed = inspectCourseRemixSlots(project, surface.id)
+  const input = surfaceRemixInputSchema.parse({ target: 'observed-reference', replacements: { [observed.slots[0].id]: '新头强调新尾' }, title: '  河畔夜市  ', placement: 'end' })
+  const plan = operation === 'remix' ? planCourseStyleRemixEdits(project, surface.id, input.replacements, undefined, input)
+    : duplicateSurfaceEdits(project, surface.id, undefined, surfaceDuplicateInputSchema.parse({ target: input.target, title: input.title, placement: input.placement }))
+  const createdId = 'createdSurfaceId' in plan ? plan.createdSurfaceId : plan.surfaceId, ids = 'instanceIds' in plan ? plan.instanceIds : plan.ids
+  const model = await sessionPlan(project, plan.edits, resources), copy = model.project.instances[createdId]
+  expect(copy.name).toBe('河畔夜市')
+  expect(nested ? model.project.instances.wrapper.childIds : model.project.rootIds).toEqual([surface.id, 'external', copy.id])
+  if (nested) expect(model.project.rootIds).toEqual(['wrapper'])
+  expect(model.project.instances[ids.get('text')!].frame).toEqual(project.instances.text.frame)
+  expect(model.project.instances.external).toEqual(project.instances.external)
+  expect(model.resources).toEqual(resources)
   expect(project).toEqual(before)
 })
 

@@ -1,6 +1,7 @@
 // @vitest-environment node
 import { afterEach, expect, it, vi } from 'vitest'
 import { promises as fs } from 'node:fs'
+import { createHash } from 'node:crypto'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { DocumentHostService } from '../../src/main/workbench/DocumentHostService'
@@ -18,7 +19,7 @@ import { AttachmentService } from '../../src/main/workbench/attachments/Attachme
 import { createBlankCourseProjectV10 } from '../../src/core/course/createCourseProjectV10'
 import { artifactDeliverySource, computeArtifactSource } from '../../src/core/tools/HostArtifactTools'
 import { dispatchMaterialTool } from '../../src/main/workbench/execution/MaterialReadTools'
-import type { ExecutionStart } from '../../src/shared/workbench/execution'
+import type { ExecutionRunRecord, ExecutionStart } from '../../src/shared/workbench/execution'
 import type { ModelEvent, ModelProvider, ModelRequest, ModelSelection } from '../../src/shared/workbench/modelProvider'
 
 const roots: string[] = []
@@ -32,7 +33,8 @@ afterEach(async () => {
 const selection: ModelSelection = { model: 'fixture', connection: { id: 'fixture', revision: 1, provider: 'fixture',
   protocol: 'openai-chat', baseURL: 'http://127.0.0.1:1/v1', accountId: 'fixture', auth: { kind: 'api-key', credentialRef: 'unused' },
   billing: { kind: 'unknown' }, capabilities: { tools: 'supported', stream: 'supported', vision: 'supported', reasoning: 'unknown' } } }
-function complete(request: ModelRequest, calls: { id: string; name: string; input: unknown }[] = [], content = ''): Extract<ModelEvent, { type: 'response.completed' }> {
+// Successful final responses are visible; empty-final failure has its own Engine coverage.
+function complete(request: ModelRequest, calls: { id: string; name: string; input: unknown }[] = [], content = calls.length ? '' : '已核对当前结果，未确认事项仍按回执保留。'): Extract<ModelEvent, { type: 'response.completed' }> {
   return { requestId: request.requestId, sequence: 1, type: 'response.completed', responseId: 'fixture-response', actualModel: 'fixture',
     nativeResponse: {}, finishReason: calls.length ? 'tool_calls' : 'stop',
     toolCalls: calls.map(call => ({ id: call.id, name: call.name, argumentsText: JSON.stringify(call.input) })),
@@ -332,3 +334,122 @@ it.each([undefined, 'diagnostic'] as const)('keeps required visual checks partia
     expect(verified.status, JSON.stringify(verified.failure)).toBe('completed')
   }
 })
+
+// Real durable owners; recovery must never call the provider or replay a tool.
+async function recoveryHistoryFixture(segmentBytes: number) {
+  const root = await fs.mkdtemp(path.join(tmpdir(), 'g20-recovery-history-')); roots.push(root)
+  const host = new DocumentHostService(path.join(root, 'documents'))
+  const runs = new ExecutionRunStore(path.join(root, 'runs')), directory = path.join(root, 'events')
+  const writer = new ExecutionEventStore({ directory, segmentBytes })
+  for (let index = 0; index < 8; index++) {
+    const runId = `history-${index}`
+    await runs.save({ schemaVersion: 1, runId, version: 1, status: 'completed', createdAt: 1, updatedAt: 2,
+      input: { conversationId: 'seed', taskId: `${runId}:task`, instruction: '原任务', selection, documents: [] },
+      messages: [{ role: 'assistant', content: '原回复' }], initialMessageCount: 0, requests: [], tools: [] })
+  }
+  // Use the actual store order and interleave two conversations. The unfinished B run precedes A,
+  // although A's group starts first, so the recovery result must retain the original record order.
+  const records = await runs.list()
+  for (const [index, record] of records.entries()) {
+    record.version++
+    record.input.conversationId = [0, 3, 4, 6].includes(index) ? 'history-a' : 'history-b'
+    if (index === 2 || index === 3) {
+      record.status = 'running'; record.messages = []
+      record.requests = [{ requestId: `${record.runId}:request`, state: 'sending' }]
+    }
+    await runs.save(record)
+  }
+  for (const conversationId of ['history-a', 'history-b']) {
+    await writer.batchAppend(records.filter(record => record.input.conversationId === conversationId && record.status === 'completed')
+      .map(record => ({ eventId: `${record.runId}:terminal`, conversationId, taskId: record.input.taskId,
+        runId: record.runId, itemId: 'run', time: record.updatedAt, source: 'builtin' as const,
+        type: 'run.end' as const, update: 'snapshot' as const,
+        data: { status: record.status, phase: 'ended', label: '本轮已结束', text: `recovery-history-${record.runId}` } })))
+  }
+  await writer.flushPending(); await writer.flushMaintenance()
+  const events = new ExecutionEventStore({ directory, segmentBytes })
+  const stream = vi.fn(async function* (): AsyncGenerator<ModelEvent> { throw new Error('Recovery must not send a model request') })
+  const execute = vi.spyOn(host.tools, 'execute')
+  const engine = new ExecutionEngine({ registry: host.registry, gateway: host.tools, runs, events, provider: { stream } })
+  const folder = (conversationId: string) => path.join(directory, createHash('sha256').update(conversationId).digest('hex'))
+  return { root, host, runs, events, engine, records, stream, execute, folder,
+    async close() { await engine.shutdown(); await events.flushPending(); await events.flushMaintenance() } }
+}
+
+function observeRecoveryConsumers(events: ExecutionEventStore) {
+  const consumers = new Set<string>()
+  let peak = 0
+  const retain = events.retain.bind(events), release = events.release.bind(events)
+  vi.spyOn(events, 'retain').mockImplementation((conversationId, consumer) => {
+    retain(conversationId, consumer); consumers.add(consumer); peak = Math.max(peak, consumers.size)
+  })
+  vi.spyOn(events, 'release').mockImplementation(async (conversationId, consumer) => {
+    await release(conversationId, consumer); consumers.delete(consumer)
+  })
+  return { consumers, peak: () => peak }
+}
+
+it.each([1024 * 1024, 512])('recovers multiple terminal runs with one event history load per conversation (%i byte segments)', async segmentBytes => {
+  const f = await recoveryHistoryFixture(segmentBytes)
+  // A real view may already own this conversation; recovery must release only its own hold.
+  f.events.retain('history-a', 'existing-view')
+  const holds = observeRecoveryConsumers(f.events), reads = vi.spyOn(fs, 'readdir')
+  const eventReads = (conversationId: string) => reads.mock.calls.filter(call => path.resolve(String(call[0])) === f.folder(conversationId)).length
+  const lookupReads = new Map<string, number>(), findEvent = f.events.findEvent.bind(f.events)
+  vi.spyOn(f.events, 'findEvent').mockImplementation(async (conversationId, eventId) => {
+    const before = eventReads(conversationId)
+    try { return await findEvent(conversationId, eventId) }
+    finally { lookupReads.set(conversationId, (lookupReads.get(conversationId) ?? 0) + eventReads(conversationId) - before) }
+  })
+  try {
+    const unfinished = f.records.filter(record => record.status === 'running')
+    const recovered = await f.engine.recover()
+    expect(recovered.map(record => record.runId)).toEqual(unfinished.map(record => record.runId))
+    for (const record of recovered) {
+      expect(record).toMatchObject({ status: 'interrupted', failure: { outcome: 'unknown' },
+        requests: [{ state: 'failed', failure: { outcome: 'unknown', code: 'interrupted-request' } }] })
+      expect(await f.runs.read(record.runId)).toEqual(record)
+    }
+    expect(f.engine.recoveryIssues.size).toBe(0)
+    expect(lookupReads.get('history-a')).toBe(1)
+    expect(lookupReads.get('history-b')).toBe(1)
+    expect(holds.peak()).toBe(1)
+    expect(holds.consumers.size).toBe(0)
+    expect(f.stream).not.toHaveBeenCalled()
+    expect(f.execute).not.toHaveBeenCalled()
+    for (const record of f.records.filter(record => record.status === 'completed')) expect(await f.runs.read(record.runId)).toEqual(record)
+    const beforeViewA = eventReads('history-a'), beforeViewB = eventReads('history-b')
+    for (const conversationId of ['history-a', 'history-b']) {
+      const page = await f.events.readPage({ conversationId, limit: 50 })
+      const ends = page.events.filter(event => event.type === 'run.end')
+      expect(ends.map(event => event.eventId).sort()).toEqual(f.records.filter(record => record.input.conversationId === conversationId)
+        .map(record => `${record.runId}:terminal`).sort())
+    }
+    expect(eventReads('history-a')).toBe(beforeViewA) // The existing view still holds A.
+    expect(eventReads('history-b')).toBe(beforeViewB + 1) // No recovery cache survives for B.
+  } finally { await f.events.release('history-a', 'existing-view'); await f.close() }
+}, 15000)
+
+it('isolates corrupt committed history and releases its recovery hold before an explicit retry rejects', async () => {
+  const f = await recoveryHistoryFixture(512), holds = observeRecoveryConsumers(f.events)
+  try {
+    const folder = f.folder('history-a'), filename = (await fs.readdir(folder)).find(name => name.endsWith('.events'))!
+    const location = path.join(folder, filename), corrupt = Buffer.from(await fs.readFile(location))
+    const offset = corrupt.indexOf(Buffer.from('recovery-history-'))
+    expect(offset).toBeGreaterThan(0)
+    corrupt[offset] = corrupt[offset]! ^ 1 // Complete committed frame, unchanged length/commit marker, invalid checksum.
+    await fs.writeFile(location, corrupt)
+    const recovered = await f.engine.recover()
+    expect(recovered.map(record => record.runId)).toEqual(f.records.filter(record => record.status === 'running' && record.input.conversationId === 'history-b').map(record => record.runId))
+    expect(new Set(f.engine.recoveryIssues.keys())).toEqual(new Set(f.records.filter(record => record.input.conversationId === 'history-a').map(record => record.runId)))
+    expect(holds.peak()).toBe(1)
+    expect(holds.consumers.size).toBe(0)
+    const rejected = f.records.find(record => record.input.conversationId === 'history-a' && record.status === 'completed')!
+    await expect(f.engine.recover(rejected.runId)).rejects.toThrow()
+    expect(holds.consumers.size).toBe(0)
+    expect(await f.runs.read(rejected.runId)).toEqual(rejected)
+    expect(await fs.readFile(location)).toEqual(corrupt)
+    expect(f.stream).not.toHaveBeenCalled()
+    expect(f.execute).not.toHaveBeenCalled()
+  } finally { await f.close() }
+}, 15000)

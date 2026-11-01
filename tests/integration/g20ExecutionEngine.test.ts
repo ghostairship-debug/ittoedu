@@ -1109,7 +1109,7 @@ it('M26 context.read uses an actual stored source, rejects another run, and puts
     if (turns === 2) {
       const native = request.messages.filter(message => !isHostWorkFacts(message))
       expect(native.slice(-3).map(message => message.role)).toEqual(['tool', 'tool', 'user'])
-      expect(native.at(-1)?.content).toEqual(expect.arrayContaining([{ type: 'image_url', image_url: { url: image } }]))
+      expect(native.at(-1)?.content).toEqual(expect.arrayContaining([{ type: 'image_url', image_url: { url: image, detail: 'high' } }]))
       yield complete(request, [{ id: 'foreign-context', name: 'context.read', argumentsText: JSON.stringify({ sourceId: 'run:unrelated-run:0' }) }]); return
     }
     expect(request.messages.filter(message => message.role === 'tool').at(-1)?.content).toContain('context-read-failed')

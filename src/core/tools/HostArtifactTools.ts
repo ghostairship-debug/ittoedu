@@ -7,7 +7,7 @@ import { parseGeneratedImageReference } from '../../shared/workbench/images'
 const id = z.string().min(1)
 const destination = z.string().min(1).max(32767)
 /** Source identities are owner receipts; the user supplies only the destination. */
-export const hostArtifactSaveSchema = z.object({ source: id, destination }).strict()
+export const hostArtifactSaveSchema = z.object({ source: id, destination: destination.optional() }).strict()
 export type HostArtifactSaveInput = z.infer<typeof hostArtifactSaveSchema>
 export type HostArtifactResolvedSource = ({ kind: 'image'; job: string; resourceId: string }
   | { kind: 'image-resource'; resource: string }
@@ -27,7 +27,7 @@ export function resolveJobArtifactSource(source: string): { kind: 'compute' | 'd
   const match = /^((compute|delegate)-[^@\s]+)@(.+)$/.exec(source)
   return match ? { kind: match[2] === 'compute' ? 'compute' : 'delegation', job: match[1]!, name: decodeURIComponent(match[3]!) } : null
 }
-export function resolveArtifactSource(input: HostArtifactSaveInput): HostArtifactResolvedSource {
+export function resolveArtifactSource(input: Required<HostArtifactSaveInput>): HostArtifactResolvedSource {
   if (input.source.startsWith('media:')) return { kind: 'media-resource', resource: input.source, destination: input.destination }
   const image = parseGeneratedImageReference(input.source)
   if (image) return { kind: 'image', job: image.jobId, resourceId: image.resourceId, destination: input.destination }
@@ -41,7 +41,7 @@ export function resolveArtifactSource(input: HostArtifactSaveInput): HostArtifac
 }
 export const hostArtifactSaveTool: ModelToolDefinition = {
   name: 'artifact.save',
-  description: '把创建、状态或等待返回的 source，或 image.fetch 返回的 resource 原样传入，保存当前任务已获授权且 ready 的图片、生成媒体或计算/委派成果为工作空间新文件。语音使用 media.start 返回的 job.resources[].source。仅指定来源和目的地，不拼接身份或选择 kind；目标已存在时拒绝覆盖。ready 与已保存分别有回执。',
+  description: '把创建、状态或等待返回的 source，或 image.fetch 返回的 resource 原样传入，保存当前任务已获授权且 ready 的图片、生成媒体或计算/委派成果为新文件。计算/委派文件省略 destination 时，软件放入本运行内部装配目录并保留同作业相对目录关系，返回实际 path 可供 file.read/write 或 from 采用；同组成果可直接 from 时无需先落盘。用户要交付的文件显式填 destination，相对路径仍从工作空间根解析；图片/媒体需明确目的地。语音使用 media.start 返回的 job.resources[].source。不拼接身份或选择 kind；目标已存在时拒绝覆盖。ready、内部装配、已交付分别判断。',
   inputSchema: z.toJSONSchema(hostArtifactSaveSchema) as ModelJsonObject,
 }
 /** Both agent entry points use the same source and file owners. */

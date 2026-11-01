@@ -7,9 +7,11 @@
       "references": [
         "skills/orchestrate-courseware/references/creation-method.md",
         "skills/orchestrate-courseware/references/creation-plan.md",
+        "skills/orchestrate-courseware/references/creative-reference.md",
         "skills/orchestrate-courseware/references/examples/text-evidence.html",
         "skills/orchestrate-courseware/references/examples/variable-relation.html",
         "skills/orchestrate-courseware/references/interaction-design.md",
+        "skills/orchestrate-courseware/references/learning-progress.md",
         "skills/orchestrate-courseware/references/main-progression.md",
         "skills/orchestrate-courseware/references/material-assembly.md",
         "skills/orchestrate-courseware/references/teacher-controller.md",
@@ -18,7 +20,7 @@
         "skills/orchestrate-courseware/references/web-composition-examples.md",
         "skills/orchestrate-courseware/scripts/assemble-html.mjs"
       ],
-      "version": "1633fa6cfc7842a9e249188e35c1251090c34e49fe4817c29f8918d4100f2d1b"
+      "version": "d8972460981ac6cef00a0decf3f5b1cf147a775363ce918acc45fe2ccf34bfd1"
     },
     {
       "description": "将已有第三方或外来 HTML 保真导入可编辑课件；适用于 HTML 转课件，不承担新课创作与已有工程续改。",
@@ -60,11 +62,11 @@
       "version": "8550d646badf876cd2cae296726d224fbf99c4df659dcbe2582e1d66f1ce9d26"
     },
     {
-      "description": "读取数据、受限计算并交付真实图表与报告，保证数值可核查、结果资源实际保存。",
+      "description": "读取数据、原生 Python 计算并交付真实图表与报告，保证数值可核查、结果资源实际保存。",
       "name": "data-and-report",
       "path": "skills/data-and-report/SKILL.md",
       "references": [],
-      "version": "2d8de2f54ba0a7dd2a274bdc0c7b9280da9cbbc3d6aa8616311094f766ee2141"
+      "version": "0501acd318bedc105be519c2d7ba968029015ed3e4a2285af5a50440e966647e"
     },
     {
       "description": "果铃工作台的共享操作指南；在需要理解当前编辑、来源、资源、保存或观察语义时按主题读取，不替代内容方法或实际工具目录。",

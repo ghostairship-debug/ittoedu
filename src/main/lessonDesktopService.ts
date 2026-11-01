@@ -1,4 +1,5 @@
 import { isNativeProjectFilename } from '../shared/nativeProjectFile'
+import { fileCapabilities } from '../shared/workbench/sourceFileKind'
 import { authorizeWorkspaceFilesRoot } from './workbench/workspaceFilesDesktopService'
 import { app, dialog, shell, type BrowserWindow } from 'electron'
 import { promises as fs } from 'node:fs'
@@ -42,10 +43,18 @@ export async function operateLessonDesktop(window: BrowserWindow, request: unkno
       catch { return { opened: false, openError: '浏览器未能打开该链接，请复制链接后重试。' } }
     }
     case 'open-external': {
-      // F06：经系统关联宿主打开真实文件；无关联程序或失败时回执明确，不抛错中断流程。
-      const filename = await fs.realpath(input.path)
-      const error = await shell.openPath(filename)
-      return error ? { opened: false, openError: error } : { opened: true }
+      // F06：失败始终返回明确回执，且此入口不执行程序或系统快捷方式。
+      try {
+        const filename = await fs.realpath(input.path)
+        if (!fileCapabilities(input.path).externalOpenAllowed || !fileCapabilities(filename).externalOpenAllowed) {
+          return { opened: false, openError: '不能从果铃运行可执行文件或系统快捷方式' }
+        }
+        const error = await shell.openPath(filename)
+        return error ? { opened: false, openError: error } : { opened: true }
+      } catch (error) {
+        const code = (error as NodeJS.ErrnoException).code
+        return { opened: false, openError: code === 'ENOENT' ? '文件不存在，可能已被移动或删除' : error instanceof Error ? error.message : '系统应用未能打开该文件' }
+      }
     }
     case 'list-projects': return { projects: await projects.list(input.directory) }
     case 'create-project': return { project: await projects.designate(input.directory, input.name, input.path) }

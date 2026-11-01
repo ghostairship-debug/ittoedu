@@ -1,9 +1,12 @@
+import { AcpAgentSelector, AcpConfigurationPicker, AcpPermissionRequests, findAcpConfigurationControl } from '../components/AcpAgentSelector'
+import type { AcpHostSnapshot } from '../../shared/workbench/acp'
+import type { AcpDesktopRequest, AcpDesktopResult } from '../../shared/workbench/acpDesktop'
 import { selectionReference, workbenchSelection, type ContextualEditRequest } from './SelectionContextController'
 import { elementCards } from './elementCards/elementCardController'
 import './selectionContext.css'
 import { forwardRef, useCallback, useEffect, useId, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type KeyboardEvent } from 'react'
 import { createPortal } from 'react-dom'
-import { File, Folder, Plus, MoreHorizontal, Sparkles, Pin, PinOff, X, Send, Square, ListPlus, Pencil, Pause, Monitor, Hand, Play, Settings } from 'lucide-react'
+import { File, Folder, Plus, MoreHorizontal, Sparkles, Pin, PinOff, X, Send, Square, ListPlus, Pencil, Pause, Monitor, Hand, Play, Settings, ChevronDown } from 'lucide-react'
 import { ConversationInput } from './ConversationInput'
 import { dispatchRevealInExplorer } from './revealInExplorer'
 import { useDismissableDetails } from '../ui/useDismissableDetails'
@@ -124,6 +127,8 @@ function openedCourseDocumentId(toolName: string, output: string): string | null
     && (toolName === 'file.open' ? data.kind === 'course-v10' : toolName === 'file.create' && data.course && typeof data.course === 'object')
     ? data.documentId : null
 }
+type PendingAcpSubmission = { workspaceId: string; conversationId: string; submissionId: string; text: string }
+const pendingAcpKey = (identity: { workspaceId: string; conversationId: string }) => `guoling.acp.pending.v1:${identity.workspaceId}:${identity.conversationId}`
 const permissionKey = (workspaceId: string) => `guoling.execution.permission.v1:${workspaceId}`
 function readPermission(workspaceId: string): ExecutionPermissionMode {
   try {
@@ -157,6 +162,40 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
   useExternalUiStateProvider(externalAPI, workspaceId, captureDocuments)
   const [conversations, setConversations] = useState<ConversationRecord[]>([])
   const [active, setActive] = useState<ConversationRecord | null>(null)
+  const [acpState, setAcpState] = useState<AcpHostSnapshot | null>(null)
+  const acpExternal = Boolean(acpState && acpState.selectedAgentId !== 'builtin')
+  const nativeMode = acpExternal && acpState ? findAcpConfigurationControl(acpState, 'mode') : undefined
+  const nativePermissionMode = acpState?.selectedAgentId === 'codex' || acpState?.selectedAgentId === 'claude'
+  const nativeModeLabel = nativeMode?.type === 'select' ? nativeMode.options.find(option => option.value === nativeMode.currentValue)?.name ?? nativeMode.currentValue : undefined
+  const nativeModeChange = useRef(false)
+  // Only an unconfirmed request pointer; the Main conversation remains the execution truth.
+  const pendingAcpSubmissions = useRef(new Map<string, PendingAcpSubmission>())
+  const [, refreshPendingAcp] = useState(0)
+  const readPendingAcp = (identity: { workspaceId: string; conversationId: string }): PendingAcpSubmission | undefined => {
+    const key = pendingAcpKey(identity), cached = pendingAcpSubmissions.current.get(key)
+    if (cached) return cached
+    try {
+      const value = JSON.parse(window.sessionStorage.getItem(key) ?? 'null') as PendingAcpSubmission | null
+      if (value && value.workspaceId === identity.workspaceId && value.conversationId === identity.conversationId
+        && typeof value.submissionId === 'string' && value.submissionId && typeof value.text === 'string') {
+        pendingAcpSubmissions.current.set(key, value); return value
+      }
+    } catch { /* Main history remains authoritative if an old UI cache is unavailable. */ }
+    return undefined
+  }
+  const rememberPendingAcp = (value: PendingAcpSubmission) => {
+    const key = pendingAcpKey(value)
+    // Store before dispatch, so a renderer reload can query the original identity.
+    window.sessionStorage.setItem(key, JSON.stringify(value))
+    pendingAcpSubmissions.current.set(key, value); refreshPendingAcp(version => version + 1)
+  }
+  const forgetPendingAcp = (value: PendingAcpSubmission) => {
+    const key = pendingAcpKey(value)
+    if (readPendingAcp(value)?.submissionId !== value.submissionId) return
+    window.sessionStorage.removeItem(key); pendingAcpSubmissions.current.delete(key)
+    refreshPendingAcp(version => version + 1)
+  }
+  const pendingAcp = active ? readPendingAcp(active) : undefined
   const [delegationInteractions, setDelegationInteractions] = useState<Record<string, ExecutionDelegationInteraction>>({})
   const emptyDelegationInteraction = useMemo(createExecutionDelegationInteraction, [active?.workspaceId, active?.conversationId])
   const [draft, setDraft] = useState('')
@@ -183,6 +222,7 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
   const [checkpointBusy, setCheckpointBusy] = useState(false)
   const [forkAdvisory, setForkAdvisory] = useState<{ conversationId: string; remaining: string[] } | null>(null)
   const [modelMenuOpen, setModelMenuOpen] = useState(false)
+  const [effortMenuOpen, setEffortMenuOpen] = useState(false)
   const [modelQuery, setModelQuery] = useState('')
   const [favoriteBusy, setFavoriteBusy] = useState(false)
   const [favoriteError, setFavoriteError] = useState('')
@@ -197,6 +237,8 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
   const plusRef = useRef<HTMLDivElement>(null), permissionRef = useRef<HTMLDivElement>(null), popupRef = useRef<HTMLDivElement>(null)
   const [popupPosition, setPopupPosition] = useState({ left: 8, bottom: 8 })
   const modelButtonRef = useRef<HTMLButtonElement>(null), modelSummaryId = useId()
+  const effortButtonRef = useRef<HTMLButtonElement>(null), nativeModelRef = useRef<HTMLDivElement>(null)
+  const toolbarRef = useRef<HTMLDivElement>(null)
   const modelMenuRef = useRef<HTMLDivElement>(null)
   const [submissions, setSubmissions] = useState<ExecutionSubmissionRecord[]>([])
   const [userHistoryOffsets, setUserHistoryOffsets] = useState<Record<string, number>>({})
@@ -250,16 +292,16 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
     setAttachmentBusy(attachmentBusyOwners.has(active.conversationId))
   }, [active, attachments, root, attachmentBusyOwners])
   useEffect(() => {
-    if (!modelMenuOpen) return
+    if (!modelMenuOpen && !effortMenuOpen) return
     const dismiss = (event: PointerEvent) => {
       const target = event.target as Node
-      if (!modelButtonRef.current?.contains(target) && !modelMenuRef.current?.contains(target)) setModelMenuOpen(false)
+      if (!modelButtonRef.current?.contains(target) && !effortButtonRef.current?.contains(target) && !modelMenuRef.current?.contains(target)) { setModelMenuOpen(false); setEffortMenuOpen(false) }
     }
-    const escape = (event: globalThis.KeyboardEvent) => { if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); setModelMenuOpen(false); modelButtonRef.current?.focus() } }
+    const escape = (event: globalThis.KeyboardEvent) => { if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); setModelMenuOpen(false); setEffortMenuOpen(false); (effortMenuOpen ? effortButtonRef : modelButtonRef).current?.focus() } }
     document.addEventListener('pointerdown', dismiss)
     document.addEventListener('keydown', escape)
     return () => { document.removeEventListener('pointerdown', dismiss); document.removeEventListener('keydown', escape) }
-  }, [modelMenuOpen])
+  }, [modelMenuOpen, effortMenuOpen])
   useEffect(() => {
     if (!plusOpen && !permissionOpen) return
     const dismiss = (event: PointerEvent) => {
@@ -276,8 +318,8 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
     if (plusOpen || permissionOpen) popupRef.current?.querySelector<HTMLButtonElement>('button:not(:disabled)')?.focus()
   }, [plusOpen, permissionOpen])
   useLayoutEffect(() => {
-    if (modelMenuOpen) modelMenuRef.current?.querySelector<HTMLButtonElement>('button:not(:disabled)')?.focus()
-  }, [modelMenuOpen])
+    if (modelMenuOpen || effortMenuOpen) modelMenuRef.current?.querySelector<HTMLButtonElement>('button:not(:disabled)')?.focus()
+  }, [modelMenuOpen, effortMenuOpen])
   // The composer scrolls, so its popups are fixed above their button; keep an open popup inside the window.
   useLayoutEffect(() => {
     const node = popupRef.current
@@ -288,10 +330,11 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
   const togglePopup = (kind: 'plus' | 'permission', anchor: HTMLElement) => {
     const rect = anchor.getBoundingClientRect()
     setPopupPosition({ left: rect.left, bottom: Math.max(8, window.innerHeight - rect.top + 6) })
-    setModelMenuOpen(false)
+    setModelMenuOpen(false); setEffortMenuOpen(false)
     setPlusOpen(value => kind === 'plus' && !value); setPermissionOpen(value => kind === 'permission' && !value)
   }
   const toggleModelMenu = () => {
+    setEffortMenuOpen(false)
     setPlusOpen(false); setPermissionOpen(false)
     if (!modelMenuOpen) {
       setModelQuery('')
@@ -304,6 +347,17 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
       }
     }
     setModelMenuOpen(value => !value)
+  }
+
+  const toggleEffortMenu = () => {
+    setPlusOpen(false); setPermissionOpen(false); setModelMenuOpen(false)
+    const rect = effortButtonRef.current?.getBoundingClientRect()
+    if (rect) {
+      const width = Math.min(320, window.innerWidth - 16)
+      setModelMenuPosition({ left: Math.max(8, Math.min(rect.right - width, window.innerWidth - width - 8)),
+        bottom: Math.max(8, window.innerHeight - rect.top + 6), width })
+    }
+    setEffortMenuOpen(value => !value)
   }
 
   const applyConversation = (conversation: ConversationRecord) => {
@@ -399,6 +453,51 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
   }, [api, root, workspaceId])
 
   useEffect(() => {
+    setAcpState(null)
+    if (!api?.acp || !active) return
+    const identity = { workspaceId: active.workspaceId, conversationId: active.conversationId }
+    let live = true
+    const refreshConversation = () => { void api.conversation(identity.workspaceId, identity.conversationId).then(latest => {
+      if (!live || !latest || activeRef.current?.conversationId !== latest.conversationId || activeRef.current.revision > latest.revision) return
+      setConversations(value => updateConversation(value, latest)); setActive(latest); activeRef.current = latest
+      // Background receipts update history/revisions without replacing a newer human draft.
+      if (!draftRef.current && latest.inputDraft) { setDraft(latest.inputDraft); draftRef.current = latest.inputDraft }
+    }).catch(() => undefined) }
+    void api.acp({ action: 'status', ...identity }).then(result => { if (live) setAcpState(result.snapshot) })
+      .catch(failure => { if (live) setError(failure instanceof Error ? failure.message : 'Agent 状态暂不可读取') })
+    const unsubscribe = api.subscribeAcp?.(event => {
+      if (!live || event.workspaceId !== identity.workspaceId || event.conversationId !== identity.conversationId) return
+      setAcpState(event.snapshot)
+      if (!['prompting', 'switching', 'authenticating'].includes(event.snapshot.phase)) refreshConversation()
+    })
+    return () => { live = false; unsubscribe?.() }
+  }, [api, active?.workspaceId, active?.conversationId])
+
+  const operateAcp = async (request: Omit<AcpDesktopRequest, 'workspaceId' | 'conversationId'>) => {
+    const current = activeRef.current
+    if (!api?.acp || !current) throw new Error('Agent 服务尚未就绪')
+    // Preserve the current draft before a switch can stop a task and publish its final history.
+    if (request.action === 'select' || request.action === 'install') {
+      if (readPendingAcp(current)) throw new Error('请先核对原提交，再切换 Agent；停止操作仍然可用。')
+      await persist()
+    }
+    const result = await api.acp({ ...request, workspaceId: current.workspaceId, conversationId: current.conversationId } as AcpDesktopRequest)
+    if (activeRef.current?.conversationId === current.conversationId) {
+      setAcpState(result.snapshot); setConversations(value => updateConversation(value, result.conversation))
+      if (activeRef.current.revision <= result.conversation.revision) { setActive(result.conversation); activeRef.current = result.conversation }
+      setModelMenuOpen(false)
+    }
+    return result
+  }
+  const chooseNativeMode = async (value: string) => {
+    if (!nativeMode || nativeModeChange.current) return
+    nativeModeChange.current = true; setBusy(true)
+    try { await operateAcp({ action: 'configure', values: { [nativeMode.id]: value } } as AcpDesktopRequest); setPermissionOpen(false) }
+    catch (failure) { setError(failure instanceof Error ? failure.message : '原生设置未保存') }
+    finally { nativeModeChange.current = false; setBusy(false) }
+  }
+
+  useEffect(() => {
     if (!settingsAPI) { setSettings(null); return }
     let disposed = false
     void settingsAPI.read().then(value => { if (!disposed) setSettings(value) }).catch(() => { if (!disposed) setSettings(null) })
@@ -420,14 +519,14 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
     }
   }, [modelCatalogs, settings, settingsAPI])
   useEffect(() => {
-    if (!modelMenuOpen || !settingsAPI) return
+    if ((!modelMenuOpen && !effortMenuOpen) || !settingsAPI) return
     let current = true
     setKnowledgeError('')
     void settingsAPI.knownModels().then(entries => {
       if (current) setModelKnowledge([...new Map(entries.map(entry => [knowledgeKey(entry), entry])).values()])
     }).catch(() => { if (current) setKnowledgeError('型号资料暂不可读取；已有模型与参数保留。') })
     return () => { current = false }
-  }, [modelMenuOpen, settingsAPI])
+  }, [modelMenuOpen, effortMenuOpen, settingsAPI])
 
   useEffect(() => {
     const selected = active
@@ -845,6 +944,30 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
   const reasoningToolsNeedResponses = selectedModel && effectiveModelProtocol(selectedModel) === 'openai-chat'
     && (resolvedReasoning?.toolRequirement === 'responses'
       || resolvedReasoning?.toolRequirement === 'responses-when-thinking' && selectedEffort !== 'none')
+  useLayoutEffect(() => {
+    const row = toolbarRef.current
+    if (!row) return
+    let live = true
+    const fit = () => {
+      if (!live || row.clientWidth === 0) return
+      row.style.setProperty('--composer-option-font', '11px')
+      if (row.scrollWidth <= row.clientWidth) return
+      let low = 1, high = 11
+      for (let step = 0; step < 9; step++) {
+        const size = (low + high) / 2
+        row.style.setProperty('--composer-option-font', size + 'px')
+        if (row.scrollWidth > row.clientWidth) high = size
+        else low = size
+      }
+      row.style.setProperty('--composer-option-font', low + 'px')
+    }
+    fit()
+    const resize = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(fit)
+    resize?.observe(row)
+    void document.fonts?.ready.then(fit)
+    return () => { live = false; resize?.disconnect() }
+  }, [modelSummary, selectedEffort, nativeModeLabel, acpState?.configuration])
+
   const chooseEffort = (effort?: DiscoveredReasoningEffort) => {
     if (!conversationSelection || !resolvedReasoning) return
     const parameters = withModelReasoning(conversationSelection.parameters ?? {}, effort, resolvedReasoning)
@@ -862,7 +985,7 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
     if (selected && selected.connectionId === choice.connectionId && selected.model === choice.model
       && selected.capabilityModel === choice.capabilityModel
       && JSON.stringify(selected.parameters ?? {}) === JSON.stringify(choice.parameters ?? {})) {
-      if (!keepMenuOpen) { setModelMenuOpen(false); modelButtonRef.current?.focus() }
+      if (!keepMenuOpen) { setModelMenuOpen(false); setEffortMenuOpen(false); (effortMenuOpen ? effortButtonRef : modelButtonRef).current?.focus() }
       return
     }
     const entry = settings.connections.find(value => value.connection.id === choice.connectionId)
@@ -881,7 +1004,7 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
         || actual.capabilityModel !== choice.capabilityModel
         || JSON.stringify(actual.parameters ?? {}) !== JSON.stringify(choice.parameters ?? {})) {
         setError('模型配置在切换时发生变化，请查看当前模型后重试。')
-      } else if (!keepMenuOpen) { setModelMenuOpen(false); modelButtonRef.current?.focus() }
+      } else if (!keepMenuOpen) { setModelMenuOpen(false); setEffortMenuOpen(false); (effortMenuOpen ? effortButtonRef : modelButtonRef).current?.focus() }
     } catch {
       const refreshed = await settingsAPI.read().catch(() => null)
       if (refreshed) setSettings(refreshed)
@@ -901,6 +1024,9 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
       const captured = await (capture ?? Promise.resolve(fallbackReferences))
       const refs = documentOverride ?? (ticket === generation.current && captured.length > 0 ? captured : fallbackReferences)
       const base = await api.conversation(selected.workspaceId, selected.conversationId) ?? selected
+      // A blur during an unknown ACP ACK must not put the accepted input back into the composer record.
+      const pending = readPendingAcp(selected)
+      if (pending?.text === localDraft && inputAttachments.length === 0) return base
       if (localDraft === base.inputDraft && sameAttachments(inputAttachments, base.inputAttachments) && sameDocuments(refs, restoredDocuments(base))) return base
       const write = (base: ConversationRecord) => api.draft({ workspaceId: base.workspaceId, conversationId: base.conversationId,
         expectedRevision: base.revision, text: localDraft, documents: refs, attachments: inputAttachments })
@@ -1049,10 +1175,67 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
     if (result.run) setRun(result.run)
     revealSubmission(result.submission)
   }
+  const applyAcpAcknowledgement = (pending: PendingAcpSubmission, result: AcpDesktopResult) => {
+    const accepted = result.conversation.messages.find(message => message.messageId === pending.submissionId)
+    if (accepted && (accepted.role !== 'user' || accepted.text !== pending.text)) throw new Error('原提交身份与会话记录不符，请保留输入并查看原记录。')
+    if (activeRef.current?.conversationId === pending.conversationId) {
+      setAcpState(result.snapshot)
+      if (activeRef.current.revision <= result.conversation.revision) {
+        setConversations(value => updateConversation(value, result.conversation))
+        setActive(result.conversation); activeRef.current = result.conversation
+      }
+      if (accepted && draftRef.current === pending.text && !attachmentsRef.current.length) {
+        setDraft(result.conversation.inputDraft); draftRef.current = result.conversation.inputDraft
+      }
+      if (accepted) { setUserHistoryOffsets(value => ({ ...value, [pending.conversationId]: 0 })); setLatestRequest(undefined) }
+    }
+    forgetPendingAcp(pending)
+    return Boolean(accepted)
+  }
+  const confirmAcpSubmission = async () => {
+    const current = activeRef.current, pending = current && readPendingAcp(current)
+    if (!pending || !api?.acp || submittingRef.current) return
+    submittingRef.current = true; setBusy(true); setError('')
+    try {
+      // Waits for the original Main acceptance attempt, without preparing documents or sending a prompt.
+      const result = await api.acp({ action: 'confirm', workspaceId: pending.workspaceId,
+        conversationId: pending.conversationId, submissionId: pending.submissionId })
+      const accepted = applyAcpAcknowledgement(pending, result)
+      if (!accepted && activeRef.current?.conversationId === pending.conversationId) setError('原提交未被接收，输入已保留；核对后可以发送。')
+    } catch (failure) { setError(failure instanceof Error ? failure.message : '原提交仍无法确认，请稍后继续核对。') }
+    finally { submittingRef.current = false; setBusy(false) }
+  }
+  const submitAcp = async () => {
+    const current = activeRef.current
+    if (!current || !api?.sendAcp || submittingRef.current) return
+    if (readPendingAcp(current)) { setError('请先核对原提交，避免重复执行。'); return }
+    if (acpState?.phase !== 'ready') { setError('所选 Agent 尚未就绪，请先连接或完成原生认证。'); return }
+    if (attachmentsRef.current.length) { setError('当前原生 Agent 接入先支持文字与果铃文档引用；附件已保留，可切回果铃内置发送。'); return }
+    submittingRef.current = true; setBusy(true); setError('')
+    try {
+      const references = await (capturePromise.current ?? Promise.resolve(documentsRef.current))
+      if (!await prepareSend(references)) throw new Error('引用文档的输入尚未同步，请处理后再发送。')
+      const persisted = await persist()
+      if (!persisted || activeRef.current?.conversationId !== current.conversationId) throw new Error('会话已切换，消息没有发送。')
+      const pending = { workspaceId: current.workspaceId, conversationId: current.conversationId,
+        submissionId: crypto.randomUUID(), text: draftRef.current }
+      rememberPendingAcp(pending)
+      const result = await api.sendAcp({ ...pending, expectedRevision: persisted.revision,
+        documents: documentsForPermission(references, permission), permission })
+      applyAcpAcknowledgement(pending, result)
+    } catch (failure) { setError(failure instanceof Error ? failure.message : '原生 Agent 消息未确认，请核对原提交；当前输入保留。') }
+    finally { submittingRef.current = false; setBusy(false) }
+  }
   const submit = async (mode: ExecutionSubmissionMode = 'queue', retry?: ExecutionSubmissionRecord, continueRun?: ExecutionRunRecord, permissionOverride?: ExecutionPermissionMode, contentOutput?: ExecutionContentOutput) => {
     const clicked = !retry ? captureRendererTiming() : undefined
     const selected = activeRef.current
     if (!api || !selected || submittingRef.current || attachmentBusy || !retry && !continueRun && !draftRef.current.trim() && attachmentsRef.current.length === 0) return
+    if (readPendingAcp(selected)) { setError('上一条原生消息尚未确认，请先核对原提交；新输入已保留。'); return }
+    if (acpExternal) {
+      if (mode === 'adjust' || retry || continueRun || contentOutput) { setError('这些操作属于原内置任务；请先切回果铃内置。'); return }
+      await submitAcp(); return
+    }
+    if (api.acp && !acpState) { setError('正在确认所选 Agent，请稍后再发送。'); return }
     if (!configured && mode !== 'adjust') { setError('尚未配置可用的对话模型。请先在模型设置中选择连接、模型和账号。'); return }
     submittingRef.current = true; setBusy(true); setError('')
     let request: ExecutionSendInput | undefined, sendInvoked = false
@@ -1417,9 +1600,9 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
     <div className="execution-assistant__main">
       <header className="execution-assistant__header">
         <div className="execution-assistant__heading">
-          <div className="execution-assistant__title"><span><Sparkles size={14} /> 果铃AI</span><strong title={active?.title || '新会话'}>{active?.title || '新会话'}</strong></div>
+          <div className="execution-assistant__title"><strong title={active?.title || '新会话'}>{active?.title || '新会话'}</strong></div>
           <button type="button" className="execution-assistant__header-action" aria-label="新建果铃AI会话" title="新建会话" disabled={busy || !workspaceId} onClick={() => void create()}><Plus size={16} /></button>
-          <button type="button" className="execution-assistant__header-action" aria-label="模型与连接设置" title="模型与连接设置" onClick={() => { setSettingsEntry('default'); setSettingsOpen(true) }}><Settings size={16} /></button>
+          {!api?.acp && <button type="button" className="execution-assistant__header-action" aria-label="模型与连接设置" title="模型与连接设置" onClick={() => { setSettingsEntry('default'); setSettingsOpen(true) }}><Settings size={16} /></button>}
           <details className="execution-assistant__more" ref={moreRef}>
             <summary aria-label="会话更多操作" title="会话更多操作"><MoreHorizontal size={18} /></summary>
             <div className="execution-assistant__more-menu" aria-label="会话次级操作">
@@ -1442,7 +1625,7 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
           <span className="execution-assistant__welcome-mark" aria-hidden="true">✦</span>
           <h2>告诉我想做什么</h2>
           <p>描述目标，或拖入材料，我们一起完善内容。</p>
-          {!configured && <div className="execution-assistant__welcome-connect"><p>连接模型后即可开始对话。</p>
+          {!configured && !acpExternal && <div className="execution-assistant__welcome-connect"><p>连接模型后即可开始对话。</p>
             <button type="button" className="primary-button" onClick={() => { setSettingsEntry('default'); setSettingsOpen(true) }}>连接模型</button></div>}
           <div className="execution-assistant__welcome-examples" aria-label="试试这些任务">
             {['帮我整理材料，提炼重点并给出清晰的结构。', '帮我制作一份演示，先和我确认主题与内容。'].map((text, index) => <button type="button" key={text} disabled={!active || busy}
@@ -1521,7 +1704,18 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
           <TaskBrowserViewport workspaceId={workspaceId} conversationId={active.conversationId} runId={run.runId}
             pageUrl={taskBrowser.pageUrl} viewport={api.browserViewport} onReady={setBrowserViewportReady} />
         </div>}
+        {acpExternal && acpState && <AcpPermissionRequests snapshot={acpState}
+          onPermission={(id, optionId) => operateAcp({ action: 'permission', id, optionId } as AcpDesktopRequest)} />}
+      {api?.acp && acpState && <div className="execution-assistant__agent-switch"><AcpAgentSelector snapshot={acpState}
+            onSelect={agentId => operateAcp({ action: 'select', agentId } as AcpDesktopRequest)}
+            onInstall={agentId => operateAcp({ action: 'install', agentId } as AcpDesktopRequest)}
+            onAuthenticate={methodId => operateAcp({ action: 'authenticate', methodId } as AcpDesktopRequest)} /></div>}
       <footer className="execution-assistant__composer">
+
+        {pendingAcp && <div className="execution-assistant__reference-notice" role="status">
+          <p>上一条原生消息的接收结果尚未确认。核对原提交只读取结果；当前新输入会保留。</p>
+          <button type="button" disabled={busy} onClick={() => void confirmAcpSubmission()}>核对原提交</button>
+        </div>}
         {Object.keys(documentReferenceIssues).length > 0 && <div className="execution-assistant__reference-notice" role="status">
           <p>{Object.entries(documentReferenceIssues).map(([id, issue]) => `${documentNames[id] ?? '原文档'}：${issue}`).join('；')}。文字和附件仍保留。</p>
           <div><button type="button" disabled={busy} onClick={() => void changeSelection(false, true)}>重新引用当前文档</button>
@@ -1566,23 +1760,52 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
               onFocus={() => { setPlusOpen(false); setPermissionOpen(false) }}
               onCompositionStart={() => { composingRef.current = true }} onCompositionEnd={() => { composingRef.current = false }} onKeyDown={onComposerKeyDown}
               onChange={value => { setDraft(value); draftRef.current = value }} onBlur={() => { void persist().catch(failure => setError(failure instanceof Error ? failure.message : '草稿未保存，请重试。')) }}
-              onModel={toggleModelMenu} onPermission={() => { const anchor = permissionRef.current?.querySelector<HTMLButtonElement>('button'); if (anchor) togglePopup('permission', anchor) }}
+              onModel={acpExternal ? () => nativeModelRef.current?.querySelector<HTMLButtonElement>('button[aria-label="切换模型"]')?.click() : toggleModelMenu} onPermission={() => { const anchor = permissionRef.current?.querySelector<HTMLButtonElement>('button'); if (anchor) togglePopup('permission', anchor) }}
               onNewConversation={() => void create()} onReference={selection => void changeSelection(selection)} />
+            {owner.conversation.conversationId === active?.conversationId && <div className="execution-assistant__actions">
+            {acpExternal && (acpState?.phase === 'prompting' || acpState?.phase === 'authenticating') && <button type="button" aria-label="停止原生 Agent" title="停止原生 Agent" onClick={() => { void operateAcp({ action: 'cancel' }).catch(failure => setError(failure instanceof Error ? failure.message : '停止未完成')) }}><Square size={15} /></button>}
+            {run && run.status === 'running' && api?.browserControl && taskBrowser?.runId === run.runId
+              && taskBrowser.state !== 'stopped' && (taskBrowser.pageUrl || taskBrowser.state === 'human' || taskBrowser.state === 'transition')
+              && <>{api.browserViewport && <button type="button" disabled={busy || taskBrowser.state === 'human' || taskBrowser.state === 'transition'}
+                aria-label={browserPanelOpen ? '收起任务网页' : '查看任务网页'} title={browserPanelOpen ? '收起任务网页' : '查看任务网页'} onClick={() => setBrowserPanelOpen(value => !value)}><Monitor size={15} /></button>}
+              <button type="button" disabled={busy || taskBrowser.state === 'transition' || (taskBrowser.state !== 'human' && !!api.browserViewport && !browserViewportReady)} title={taskBrowser.pageUrl}
+                aria-label={taskBrowser.state === 'human' ? '完成操作，继续任务' : taskBrowser.state === 'transition' ? '正在切换浏览器…' : '接管当前网页'}
+                onClick={() => void controlBrowser(taskBrowser.state === 'human' ? 'resume' : 'takeover')}>
+                {taskBrowser.state === 'human' ? <Play size={15} /> : <Hand size={15} />}</button></>}
+            {!acpExternal && run && ['queued', 'running', 'stopping'].includes(run.status) && <button type="button" aria-label={run.status === 'stopping' ? '正在停止…' : '停止当前'} title="停止当前" onClick={() => void stop()} disabled={busy || run.status === 'stopping'}><Square size={15} /></button>}
+            {!acpExternal && run?.status === 'running' && submissions.some(item => item.state === 'queued') && <button type="button" aria-label="停止并暂停后续" title="停止并暂停后续" disabled={busy} onClick={() => void stop(true)}><Pause size={15} /></button>}
+            {!acpExternal && run && ['queued', 'running'].includes(run.status) && <button type="button" onClick={() => { composerRef.current?.focus(); void submit('adjust') }}
+              disabled={!active || busy || attachmentBusy || !draft.trim() || attachments.length > 0 || permission !== recordedPermissionMode(run.input.permission)}
+              aria-label="调整当前任务" title="在原任务的范围内继续；新增材料或权限请加入队列。"><Pencil size={15} /></button>}
+            <button type="button" className="primary-button" aria-label={!acpExternal && run && ['queued', 'running', 'stopping'].includes(run.status) ? '加入队列' : '发送'} title={!acpExternal && run && ['queued', 'running', 'stopping'].includes(run.status) ? '加入队列' : '发送'} onClick={() => { composerRef.current?.focus(); void submit('queue') }} disabled={!active || busy || Boolean(acpState && ['installing', 'switching', 'authenticating'].includes(acpState.phase)) || Boolean(pendingAcp) || attachmentBusy || Boolean(api?.acp && !acpState) || acpExternal && acpState?.phase !== 'ready' || (!draft.trim() && attachments.length === 0)}>{!acpExternal && run && ['queued', 'running', 'stopping'].includes(run.status) ? <ListPlus size={16} /> : <Send size={16} />}</button>
+          </div>}
           </div>}
         </AttachmentComposer></div>)}
-        <div className="execution-assistant__toolbar">
+        <div className="execution-assistant__toolbar" ref={toolbarRef}>
           <div className="execution-assistant__permission" ref={permissionRef}>
-            <button type="button" className="execution-assistant__permission-button" aria-label={`权限：${permissionLabels[permission]}`} aria-haspopup="menu" aria-expanded={permissionOpen}
-              title={`${permissionLabels[permission]}：${permissionDescriptions[permission]}`} onClick={event => togglePopup('permission', event.currentTarget)}>
-              <span aria-hidden="true">{permission === 'read-only' ? '👁' : permission === 'ask' ? '✋' : '✓'}</span>{permissionShortLabels[permission]}</button>
+            <button type="button" className="execution-assistant__permission-button" aria-label={nativeModeLabel ? `${nativePermissionMode ? '原生权限' : 'Agent 工作模式'}：${nativeModeLabel}` : `${acpExternal ? '果铃工具' : ''}权限：${permissionLabels[permission]}`} aria-haspopup="menu" aria-expanded={permissionOpen}
+              title={nativeModeLabel ? `${nativeMode!.name}：${nativeModeLabel}` : `${permissionLabels[permission]}：${permissionDescriptions[permission]}`} onClick={event => togglePopup('permission', event.currentTarget)}>
+              {nativeModeLabel ? <><span>{nativeModeLabel}</span><ChevronDown size={11} /></> : <><span aria-hidden="true">{permission === 'read-only' ? '👁' : permission === 'ask' ? '✋' : '✓'}</span>{permissionShortLabels[permission]}</>}</button>
             {permissionOpen && <div ref={popupRef} className="execution-assistant__popup execution-assistant__popup--permission" role="menu" aria-label="权限模式"
               style={{ left: popupPosition.left, bottom: popupPosition.bottom }}>
+              {nativeMode?.type === 'select' && <div className="execution-assistant__native-mode" role="group" aria-label={nativePermissionMode ? '原生权限模式' : 'Agent 工作模式'}>
+                <strong>{nativePermissionMode ? '原生权限' : '工作模式'}</strong>
+                {nativeMode.options.map(option => <button type="button" key={option.value} role="menuitemradio" aria-checked={nativeMode.currentValue === option.value}
+                  disabled={busy || acpState?.phase !== 'ready'} title={option.description} onClick={() => { void chooseNativeMode(option.value) }}>
+                  <span>{option.name}</span>{option.description && <small>{option.description}</small>}
+                </button>)}
+              </div>}
+              {acpExternal && <strong className="execution-assistant__tool-permission-label">果铃工具访问</strong>}
               {executionPermissionModes.map(mode => <button type="button" role="menuitemradio" aria-checked={mode === permission} key={mode} onClick={() => choosePermission(mode)}>
                 <span>{permissionLabels[mode]}</span><small>{permissionDescriptions[mode]}</small></button>)}
-              <p>只影响之后发送的任务；正在运行的任务保持发送时的权限。</p>
+              <p>{acpExternal ? '工具访问仅控制果铃工具；原生 Agent 按自己的权限运行。' : '只影响之后发送的任务；正在运行的任务保持发送时的权限。'}</p>
             </div>}
           </div>
-          <div className="execution-assistant__composer-model" aria-label="当前模型" title={modelDescription}>
+          {acpExternal && acpState && <div className="execution-assistant__native-controls" ref={nativeModelRef}>
+            <AcpConfigurationPicker snapshot={acpState} kind="model" onConfigure={values => operateAcp({ action: 'configure', values } as AcpDesktopRequest)} />
+            <AcpConfigurationPicker snapshot={acpState} kind="effort" onConfigure={values => operateAcp({ action: 'configure', values } as AcpDesktopRequest)} />
+          </div>}
+          {!acpExternal && <div className="execution-assistant__composer-model" aria-label="当前模型" title={modelDescription}>
             <span className={configured ? 'is-ready' : 'is-unavailable'} aria-hidden="true" />
             {/* Like common agents, the model summary itself opens the model menu. */}
             <button ref={modelButtonRef} type="button" aria-label="切换模型" aria-describedby={modelSummaryId} aria-expanded={modelMenuOpen} aria-controls="assistant-model-choices" onClick={toggleModelMenu}>
@@ -1592,6 +1815,42 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
             {modelMenuOpen && createPortal(<div ref={modelMenuRef} id="assistant-model-choices" className="execution-assistant__model-menu" role="group" aria-label="对话模型选择"
               style={{ left: modelMenuPosition.left, bottom: modelMenuPosition.bottom, width: modelMenuPosition.width }}>
               <strong>下次任务使用</strong>
+              <div className="execution-assistant__model-list" role="group" aria-label="全部连接与模型">
+                  <input aria-label="搜索模型" value={modelQuery} onChange={event => setModelQuery(event.target.value)} placeholder="搜索模型或连接" />
+                  {matchingModelGroups.map(group => {
+                    const key = group.entry ? `${group.id}:${group.entry.connection.revision}` : undefined
+                    const available = group.entry?.hasCredential && !group.entry.revoked
+                    return <div className="execution-assistant__model-group" key={group.id} role="group" aria-label={`连接 ${group.label}`}>
+                      <strong>{group.label}</strong>
+                      {!available && <small>连接不可用</small>}
+                      {group.options.map(modelChoice)}
+                      {group.options.length === 0 && <p>{!available ? '该连接当前不可用。'
+                        : key && !modelCatalogs[key] && !modelCatalogErrors[key] ? '正在读取模型目录…' : '暂无匹配的模型。'}</p>}
+                      {key && modelCatalogErrors[key] && <div className="execution-assistant__catalog-error"><p>{modelCatalogErrors[key]}</p>
+                        <button type="button" onClick={() => {
+                          catalogRequested.current.delete(key)
+                          setModelCatalogErrors(current => { const next = { ...current }; delete next[key]; return next })
+                          setModelCatalogs(current => { const next = { ...current }; delete next[key]; return next })
+                        }}>重试目录</button></div>}
+                    </div>
+                  })}
+                  {matchingModelGroups.length === 0 && <p>{query ? '没有匹配的模型或连接。' : '还没有连接。可以接入 API 或登录 ChatGPT。'}</p>}
+              </div>
+              {favoriteError && <p role="alert">{favoriteError}</p>}
+              <p>{bodyStreamingLabel(bodyStreaming)}</p>
+              <button type="button" className="execution-assistant__manage-models" onClick={() => { setModelMenuOpen(false); setSettingsEntry('chatgpt-oauth'); setSettingsOpen(true) }}>登录 ChatGPT（OAuth）…</button>
+              <button type="button" className="execution-assistant__manage-models" onClick={() => { setModelMenuOpen(false); setSettingsEntry('default'); setSettingsOpen(true) }}>管理模型与连接…</button>
+            </div>, document.body)}
+          </div>}
+          {!acpExternal && <div className="execution-assistant__composer-effort">
+            <button ref={effortButtonRef} type="button" aria-label="切换思考强度" aria-expanded={effortMenuOpen}
+              aria-controls="assistant-effort-choices" title="思考强度" onClick={toggleEffortMenu}>
+              {selectedEffort ? effortLabels[selectedEffort] : '默认'}<ChevronDown size={11} />
+            </button>
+            {effortMenuOpen && createPortal(<div ref={modelMenuRef} id="assistant-effort-choices"
+              className="execution-assistant__model-menu execution-assistant__effort-menu" role="group" aria-label="思考强度选择"
+              style={{ left: modelMenuPosition.left, bottom: modelMenuPosition.bottom, width: modelMenuPosition.width,
+                maxHeight: Math.max(0, window.innerHeight - modelMenuPosition.bottom - 8) }}>
               {conversationSelection && <div className="execution-assistant__model-effort" role="group" aria-label="推理强度">
                 <strong>{resolvedReasoning?.kind === 'toggle' ? '思考模式' : '推理强度'}</strong>
                 {resolvedReasoning?.kind !== 'budget' && resolvedReasoning?.kind !== 'fixed' && <div>
@@ -1619,49 +1878,9 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
                 </div>}
                 {knowledgeError && <small>{knowledgeError}</small>}
               </div>}
-              <div className="execution-assistant__model-list" role="group" aria-label="全部连接与模型">
-                  <input aria-label="搜索模型" value={modelQuery} onChange={event => setModelQuery(event.target.value)} placeholder="搜索模型或连接" />
-                  {matchingModelGroups.map(group => {
-                    const key = group.entry ? `${group.id}:${group.entry.connection.revision}` : undefined
-                    const available = group.entry?.hasCredential && !group.entry.revoked
-                    return <div className="execution-assistant__model-group" key={group.id} role="group" aria-label={`连接 ${group.label}`}>
-                      <strong>{group.label}</strong>
-                      {!available && <small>连接不可用</small>}
-                      {group.options.map(modelChoice)}
-                      {group.options.length === 0 && <p>{!available ? '该连接当前不可用。'
-                        : key && !modelCatalogs[key] && !modelCatalogErrors[key] ? '正在读取模型目录…' : '暂无匹配的模型。'}</p>}
-                      {key && modelCatalogErrors[key] && <div className="execution-assistant__catalog-error"><p>{modelCatalogErrors[key]}</p>
-                        <button type="button" onClick={() => {
-                          catalogRequested.current.delete(key)
-                          setModelCatalogErrors(current => { const next = { ...current }; delete next[key]; return next })
-                          setModelCatalogs(current => { const next = { ...current }; delete next[key]; return next })
-                        }}>重试目录</button></div>}
-                    </div>
-                  })}
-                  {matchingModelGroups.length === 0 && <p>{query ? '没有匹配的模型或连接。' : '还没有连接。可以接入 API 或登录 ChatGPT。'}</p>}
-              </div>
-              {favoriteError && <p role="alert">{favoriteError}</p>}
-              <p>{bodyStreamingLabel(bodyStreaming)}</p>
-              <button type="button" className="execution-assistant__manage-models" onClick={() => { setModelMenuOpen(false); setSettingsEntry('chatgpt-oauth'); setSettingsOpen(true) }}>登录 ChatGPT（OAuth）…</button>
-              <button type="button" className="execution-assistant__manage-models" onClick={() => { setModelMenuOpen(false); setSettingsEntry('default'); setSettingsOpen(true) }}>管理模型与连接…</button>
             </div>, document.body)}
-          </div>
-          <div className="execution-assistant__actions">
-            {run && run.status === 'running' && api?.browserControl && taskBrowser?.runId === run.runId
-              && taskBrowser.state !== 'stopped' && (taskBrowser.pageUrl || taskBrowser.state === 'human' || taskBrowser.state === 'transition')
-              && <>{api.browserViewport && <button type="button" disabled={busy || taskBrowser.state === 'human' || taskBrowser.state === 'transition'}
-                aria-label={browserPanelOpen ? '收起任务网页' : '查看任务网页'} title={browserPanelOpen ? '收起任务网页' : '查看任务网页'} onClick={() => setBrowserPanelOpen(value => !value)}><Monitor size={15} /></button>}
-              <button type="button" disabled={busy || taskBrowser.state === 'transition' || (taskBrowser.state !== 'human' && !!api.browserViewport && !browserViewportReady)} title={taskBrowser.pageUrl}
-                aria-label={taskBrowser.state === 'human' ? '完成操作，继续任务' : taskBrowser.state === 'transition' ? '正在切换浏览器…' : '接管当前网页'}
-                onClick={() => void controlBrowser(taskBrowser.state === 'human' ? 'resume' : 'takeover')}>
-                {taskBrowser.state === 'human' ? <Play size={15} /> : <Hand size={15} />}</button></>}
-            {run && ['queued', 'running', 'stopping'].includes(run.status) && <button type="button" aria-label={run.status === 'stopping' ? '正在停止…' : '停止当前'} title="停止当前" onClick={() => void stop()} disabled={busy || run.status === 'stopping'}><Square size={15} /></button>}
-            {run?.status === 'running' && submissions.some(item => item.state === 'queued') && <button type="button" aria-label="停止并暂停后续" title="停止并暂停后续" disabled={busy} onClick={() => void stop(true)}><Pause size={15} /></button>}
-            {run && ['queued', 'running'].includes(run.status) && <button type="button" onClick={() => { composerRef.current?.focus(); void submit('adjust') }}
-              disabled={!active || busy || attachmentBusy || !draft.trim() || attachments.length > 0 || permission !== recordedPermissionMode(run.input.permission)}
-              aria-label="调整当前任务" title="在原任务的范围内继续；新增材料或权限请加入队列。"><Pencil size={15} /></button>}
-            <button type="button" className="primary-button" aria-label={run && ['queued', 'running', 'stopping'].includes(run.status) ? '加入队列' : '发送'} title={run && ['queued', 'running', 'stopping'].includes(run.status) ? '加入队列' : '发送'} onClick={() => { composerRef.current?.focus(); void submit('queue') }} disabled={!active || busy || attachmentBusy || (!draft.trim() && attachments.length === 0)}>{run && ['queued', 'running', 'stopping'].includes(run.status) ? <ListPlus size={16} /> : <Send size={16} />}</button>
-          </div>
+          </div>}
+
         </div>
         <small id="assistant-composer-hint" className="execution-assistant__composer-hint">Enter 发送 · Shift + Enter 换行</small>
       </footer>

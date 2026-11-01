@@ -7,12 +7,45 @@ import { extractHtmlResources } from '../../src/main/workbench/htmlImport/extrac
 import { createEsbuildComponentCompiler } from '../../src/main/workbench/contentApply/compilation/esbuildComponentCompiler'
 import { componentCompilationInput, componentModuleSource, componentSourceFileText } from '../../src/core/components/compilation/componentCompilationInput'
 import { courseThemeVariables, courseTokenVariableName } from '../../src/shared/contracts/design-v1/theme'
-import { projectWebModuleUrls } from '../../src/components/web/resources'
+import { projectWebModuleUrls, resolveWebJavaScriptResources } from '../../src/components/web/resources'
 import type { CourseProjectV10 } from '../../src/shared/contracts/component-platform'
 const bytes = (source: string) => new TextEncoder().encode(source)
 const identityTransform = async (source: string) => ({ code: source, warnings: [] })
 const project = (): CourseProjectV10 => (createTestProjectFromLegacy({ schemaVersion: 10, id: 'modules', revision: 0, title: 'Modules', definitions: {}, instances: {}, surfaces: [], global: { underlay: [], overlay: [] }, assets: {} }))
 describe('R39/R41/R42/R87 native source counterexamples', () => {
+  it('closes nested media URL objects through extraction, compilation and runtime resource binding', async () => {
+    const png = Uint8Array.from(Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLbtAAAAABJRU5ErkJggg==', 'base64'))
+    const wav = new Uint8Array(46), header = new DataView(wav.buffer)
+    wav.set(bytes('RIFF'), 0); header.setUint32(4, 38, true); wav.set(bytes('WAVEfmt '), 8)
+    header.setUint32(16, 16, true); header.setUint16(20, 1, true); header.setUint16(22, 1, true)
+    header.setUint32(24, 8000, true); header.setUint32(28, 16000, true); header.setUint16(32, 2, true); header.setUint16(34, 16, true)
+    wav.set(bytes('data'), 36); header.setUint32(40, 2, true)
+    const extracted = extractHtmlResources({ html: '<script type="module" src="./scenes/main.js"></script>', siblingFiles: new Map([
+      ['scenes/main.js', bytes('export const photo = new URL("../media/pixel.png", import.meta.url); export const sound = new URL("../media/tone.wav", import.meta["url"]).href; export const helper = () => import("../helper.js");')],
+      ['helper.js', bytes('export const value = 42;')], ['media/pixel.png', png], ['media/tone.wav', wav],
+    ]) })
+    expect(extracted.resources.map(resource => resource.mediaType).sort()).toEqual(['audio/wav', 'image/png'])
+    expect(extracted.modules?.['helper.js']).toContain('42')
+    const prepared = webModuleCompilationInput({ html: extracted.html, modules: extracted.modules })!
+    const compiled = await compileHtmlModules(prepared.input, identityTransform)
+    if (compiled.status !== 'ready') throw new Error('Expected compiled local media modules')
+    const urls = new Map(extracted.resources.map(resource => [`cw-resource:${resource.key}`, `data:${resource.mediaType};base64,${Buffer.from(resource.bytes).toString('base64')}`]))
+    const code = resolveWebJavaScriptResources(compiled.artifact.modules!['scenes/main.js'].code, reference => urls.get(reference), true)
+    const result = new Function(`${code.replace(/\bexport\s+/g, '')};return {photo,sound};`)() as { photo: URL; sound: string }
+    expect(result.photo).toBeInstanceOf(URL)
+    expect(new Uint8Array(await (await fetch(result.photo)).arrayBuffer())).toEqual(png)
+    expect(new Uint8Array(await (await fetch(result.sound)).arrayBuffer())).toEqual(wav)
+  })
+  it.each([
+    'export function asset(URL) { return new URL("./photo.png", import.meta.url); }',
+    'import.meta.url = "https://example.test/changed.js"; export const asset = new URL("./photo.png", import.meta.url);',
+  ])('preserves non-native or mutable-base URL constructors without inventing local media (%s)', source => {
+    const result = extractHtmlResources({ html: '<script type="module" src="./main.js"></script>', siblingFiles: new Map([
+      ['main.js', bytes(source)], ['photo.png', new Uint8Array([1, 2, 3])],
+    ]) })
+    expect(result.resources).toEqual([])
+    expect(result.modules?.['main.js']).toBe(source)
+  })
   it('CA038 closes newly edited CSS imports through the current supplied modules', async () => {
     const result = await compileHtmlModules({ entry: 'main.js', files: { 'main.js': 'import "./theme.css";', 'theme.css': '@import "./nested.css";body{color:red}', 'nested.css': 'body{background:url(cw-resource:image)}' } }, identityTransform)
     expect(result.status).toBe('ready')

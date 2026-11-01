@@ -15,7 +15,7 @@ import type { ExecutionSettingsAPI } from '../../src/shared/workbench/executionS
 import { workbenchSelection } from '../../src/renderer/workbench/SelectionContextController'
 import { executionInputMessages } from '../../src/shared/workbench/executionInputMessages'
 
-afterEach(() => { cleanup(); localStorage.clear(); vi.unstubAllGlobals() })
+afterEach(() => { cleanup(); localStorage.clear(); sessionStorage.clear(); vi.unstubAllGlobals() })
 
 it('windowed Assistant uses bounded page/body IPC and global pending facts without downloading raw history', async () => {
   const original = conversation('a', '窗口会话')
@@ -613,15 +613,15 @@ it('opens ChatGPT OAuth setup directly from the assistant model menu without cha
   await waitFor(() => expect(screen.getByLabelText('当前模型')).toHaveAttribute('title', expect.stringContaining('fixture-provider · fixture-model')))
   fireEvent.click(screen.getByRole('button', { name: '切换模型' }))
   fireEvent.click(within(screen.getByRole('group', { name: '对话模型选择' })).getByRole('button', { name: '登录 ChatGPT（OAuth）…' }))
-  await waitFor(() => expect(screen.getByRole('dialog', { name: '连接账号' })).toBeInTheDocument())
-  expect(screen.getByRole('button', { name: '登录 ChatGPT' })).toBeEnabled()
+  await screen.findByRole('dialog', { name: '模型与连接' })
+  await waitFor(() => expect(screen.getByRole('button', { name: '登录 ChatGPT' })).toBeEnabled())
   expect(screen.queryByLabelText('API 地址')).toBeNull()
   expect(screen.queryByRole('button', { name: '保存连接' })).toBeNull()
   expect(settingsAPI.saveProfile).not.toHaveBeenCalled()
   expect(settingsAPI.startOAuthLogin).not.toHaveBeenCalled()
 })
 
-it('folds same-state increments into one card and lets a final snapshot replace provisional content without exposing internal ids', () => {
+it('folds same-state increments into one card and lets a final snapshot replace provisional content without exposing internal ids', async () => {
   const base = { conversationId: 'conversation', taskId: 'task', runId: 'run', time: 1, source: 'builtin' as const }
   const events: ExecutionEvent[] = [
     { ...base, eventId: 'e1', itemId: 'answer', sequence: 1, type: 'text', update: 'append', data: { text: '正' } },
@@ -634,7 +634,11 @@ it('folds same-state increments into one card and lets a final snapshot replace 
   render(<ExecutionTimeline projection={projection} />)
   expect(screen.getByRole('article', { name: '回复' })).toHaveTextContent('最终回答')
   expect(screen.queryByText('正在生成')).toBeNull()
-  const tool = screen.getByRole('article', { name: '工具执行' })
+  // Settled tools are grouped and collapsed until the user opens their history.
+  const group = screen.getByRole('article', { name: '工具组' })
+  fireEvent.click(within(group).getByText('1 次工具调用'))
+  const tool = await within(group).findByRole('article', { name: '工具执行' })
+  expect(within(group).getAllByRole('article', { name: '工具执行' })).toHaveLength(1)
   expect(tool).toHaveTextContent('正文已更新 · 已返回')
   expect(tool).not.toHaveTextContent('operation-secret')
   expect(tool).not.toHaveTextContent('document-secret')
@@ -650,7 +654,7 @@ it('M07-T07/S10-T05 freezes the exact send without a service notice, pins the sh
   // The old write checkbox, scope details and inline attachment buttons are gone.
   expect(screen.queryByRole('checkbox', { name: '允许修改已绑定文档' })).toBeNull()
   expect(screen.queryByText('选择范围')).toBeNull()
-  expect(screen.getByRole('button', { name: '权限：完全访问（工作空间）' })).toBeInTheDocument()
+  expect(screen.getByRole('button', { name: '权限：完全访问' })).toBeInTheDocument()
   const composer = screen.getByRole('textbox', { name: '给果铃AI发消息' })
   fireEvent.change(composer, { target: { value: '保留这份草稿' } })
   await waitFor(() => expect(captureDocuments).toHaveBeenCalledWith(true, false))
@@ -670,12 +674,12 @@ it('M07-T07/S10-T05 freezes the exact send without a service notice, pins the sh
   fireEvent.click(screen.getByRole('button', { name: '发送' }))
   await waitFor(() => expect(api.send).toHaveBeenCalledTimes(1))
   expect(screen.queryByRole('dialog')).toBeNull()
-  expect(vi.mocked(api.send).mock.calls[0]![0]).toMatchObject({ workspaceId: 'workspace', conversationId: 'a', text: '直接发送', permission: 'workspace',
+  expect(vi.mocked(api.send).mock.calls[0]![0]).toMatchObject({ workspaceId: 'workspace', conversationId: 'a', text: '直接发送', permission: 'full',
     documents: [{ documentId: 'document-a', writable: [{ kind: 'document' }] }],
     disclosedSettings: { profileRevision: 1, roles: { conversation: { provider: 'fixture-provider', model: 'fixture-model', billingKind: 'token-plan' } } } })
   // Read-only strips writes at send; a later level change never touches a task already sent.
   await waitFor(() => expect(screen.getByRole('textbox', { name: '给果铃AI发消息' })).toBeEnabled())
-  fireEvent.click(screen.getByRole('button', { name: '权限：完全访问（工作空间）' }))
+  fireEvent.click(screen.getByRole('button', { name: '权限：完全访问' }))
   const levels = screen.getByRole('menu', { name: '权限模式' })
   expect(within(levels).getAllByRole('menuitemradio').map(item => item.firstElementChild?.textContent)).toEqual(['完全访问', '完全访问（工作空间）', '修改前询问', '只读'])
   fireEvent.click(within(levels).getByRole('menuitemradio', { name: /^只读/ }))
@@ -695,6 +699,7 @@ it('M07-T07/S10-T05 freezes the exact send without a service notice, pins the sh
   await waitFor(() => expect(api.send).toHaveBeenCalledTimes(3))
   expect(vi.mocked(api.send).mock.calls[2]![0]).toMatchObject({ disclosedSettings: { roles: { conversation: { connectionRevision: 2 } } } })
   expect(container.querySelector('.execution-assistant__toolbar')).toContainElement(screen.getByRole('button', { name: '切换模型' }))
+  expect(container.querySelector('.execution-assistant__toolbar')).toContainElement(screen.getByRole('button', { name: '切换思考强度' }))
 })
 
 it('shows an actionable configuration error and does not prepare or send an unconfigured request', async () => {
@@ -987,6 +992,51 @@ it('reports an empty directory and retries into a selectable model without losin
   expect(api.send).not.toHaveBeenCalled()
 })
 
+it('keeps model and thinking-strength menus separate without mutating the configured route', async () => {
+  const { api } = executionFixture([conversation('a', '课堂讨论')])
+  const current = settingsView(true)
+  current.profile.roles.conversation!.parameters = { reasoning_effort: 'low', temperature: 0.4, max_tokens: 24000 }
+  const selected = structuredClone(current.profile.roles)
+  const settingsAPI = settingsFixture(true)
+  vi.mocked(settingsAPI.read).mockResolvedValue(current)
+  vi.mocked(settingsAPI.discoverModels).mockResolvedValue({ connectionId: 'connection', connectionRevision: 1,
+    models: [{ id: 'fixture-model', reasoningEfforts: [{ effort: 'low' }, { effort: 'high' }] }],
+    capabilitiesVerified: false, source: 'live', checkedAt: '2026-09-25T00:00:00.000Z' })
+  const { container } = render(<ExecutionAssistant root="C:/workspace" api={api} settingsAPI={settingsAPI}
+    captureDocuments={vi.fn(async () => [])} prepareSend={vi.fn(async () => true)} />)
+  await waitFor(() => expect(screen.getByLabelText('当前模型')).toHaveTextContent('fixture-model'))
+  const modelButton = screen.getByRole('button', { name: '切换模型' })
+  const effortButton = screen.getByRole('button', { name: '切换思考强度' })
+  expect(container.querySelector('.execution-assistant__toolbar')).toContainElement(modelButton)
+  expect(container.querySelector('.execution-assistant__toolbar')).toContainElement(effortButton)
+
+  fireEvent.click(modelButton)
+  const models = screen.getByRole('group', { name: '对话模型选择' })
+  await within(models).findByRole('button', { name: /fixture-modelfixture-provider/ })
+  expect(within(models).getByRole('group', { name: '全部连接与模型' })).toBeVisible()
+  expect(within(models).queryByRole('group', { name: '推理强度' })).toBeNull()
+  expect(screen.queryByRole('group', { name: '思考强度选择' })).toBeNull()
+  expect(modelButton).toHaveAttribute('aria-expanded', 'true')
+  expect(effortButton).toHaveAttribute('aria-expanded', 'false')
+
+  fireEvent.click(effortButton)
+  const efforts = screen.getByRole('group', { name: '思考强度选择' })
+  expect(screen.queryByRole('group', { name: '对话模型选择' })).toBeNull()
+  expect(within(efforts).getByRole('group', { name: '推理强度' })).toBeVisible()
+  expect(within(efforts).queryByRole('group', { name: '全部连接与模型' })).toBeNull()
+  expect(within(efforts).queryByRole('textbox', { name: '搜索模型' })).toBeNull()
+  expect(within(efforts).queryByRole('button', { name: /fixture-modelfixture-provider/ })).toBeNull()
+  expect(modelButton).toHaveAttribute('aria-expanded', 'false')
+  expect(effortButton).toHaveAttribute('aria-expanded', 'true')
+
+  fireEvent.click(modelButton)
+  expect(screen.getByRole('group', { name: '对话模型选择' })).toBeVisible()
+  expect(screen.queryByRole('group', { name: '思考强度选择' })).toBeNull()
+  expect(current.profile.roles).toEqual(selected)
+  expect(settingsAPI.saveProfile).not.toHaveBeenCalled()
+  expect(api.send).not.toHaveBeenCalled()
+})
+
 it('offers a discovered model and provider-declared reasoning strengths without typing a model ID or sending a request', async () => {
   const { api } = executionFixture([conversation('a', '课堂讨论')])
   let current = settingsView(true)
@@ -1008,7 +1058,7 @@ it('offers a discovered model and provider-declared reasoning strengths without 
   expect(discovered).toHaveTextContent('目录能力未验证')
   fireEvent.click(discovered)
   await waitFor(() => expect(current.profile.roles.conversation).toEqual({ connectionId: 'connection', model: 'catalog-model', parameters: { reasoning_effort: 'low' } }))
-  fireEvent.click(screen.getByRole('button', { name: '切换模型' }))
+  fireEvent.click(screen.getByRole('button', { name: '切换思考强度' }))
   fireEvent.click(within(screen.getByRole('group', { name: '推理强度' })).getByRole('button', { name: '高' }))
   await waitFor(() => expect(current.profile.roles.conversation).toEqual({ connectionId: 'connection', model: 'catalog-model', parameters: { reasoning_effort: 'high' } }))
   expect(api.send).not.toHaveBeenCalled()
@@ -1033,12 +1083,12 @@ it('edits saved OAuth reasoning.effort without conflicting shorthand or losing r
   render(<ExecutionAssistant root="C:/workspace" api={api} settingsAPI={settingsAPI}
     captureDocuments={vi.fn(async () => [])} prepareSend={vi.fn(async () => true)} />)
   await waitFor(() => expect(screen.getByLabelText('当前模型')).toHaveTextContent('oauth-model'))
-  fireEvent.click(screen.getByRole('button', { name: '切换模型' }))
+  fireEvent.click(screen.getByRole('button', { name: '切换思考强度' }))
   const strength = await within(screen.getByRole('group', { name: '推理强度' })).findByRole('button', { name: '中' })
   expect(strength).toHaveAttribute('aria-pressed', 'true')
   fireEvent.click(within(screen.getByRole('group', { name: '推理强度' })).getByRole('button', { name: '高' }))
   await waitFor(() => expect(current.profile.roles.conversation?.parameters).toEqual({ reasoning: { effort: 'high', summary: 'auto' }, temperature: 0.4 }))
-  fireEvent.click(screen.getByRole('button', { name: '切换模型' }))
+  fireEvent.click(screen.getByRole('button', { name: '切换思考强度' }))
   fireEvent.click(within(screen.getByRole('group', { name: '推理强度' })).getByRole('button', { name: '默认' }))
   await waitFor(() => expect(current.profile.roles.conversation?.parameters).toEqual({ reasoning: { summary: 'auto' }, temperature: 0.4 }))
   expect(api.send).not.toHaveBeenCalled()
@@ -1062,8 +1112,8 @@ it('offers documented GPT-6 OAuth strengths when the directory omits them withou
   render(<ExecutionAssistant root="C:/workspace" api={api} settingsAPI={settingsAPI}
     captureDocuments={vi.fn(async () => [])} prepareSend={vi.fn(async () => true)} />)
   await waitFor(() => expect(screen.getByLabelText('当前模型')).toHaveTextContent('gpt-6-luna'))
-  fireEvent.click(screen.getByRole('button', { name: '切换模型' }))
-  const effort = within(screen.getByRole('group', { name: '对话模型选择' })).getByRole('group', { name: '推理强度' })
+  fireEvent.click(screen.getByRole('button', { name: '切换思考强度' }))
+  const effort = within(screen.getByRole('group', { name: '思考强度选择' })).getByRole('group', { name: '推理强度' })
   await waitFor(() => expect(effort).toHaveTextContent('模型文档补充；当前连接目录未声明，实际支持尚未验证'))
   expect(effort).not.toHaveTextContent('工具调用在此模式下要求 Responses')
   for (const label of ['关闭', '低', '中', '高', '极高', '最高']) expect(within(effort).getByRole('button', { name: label })).toBeInTheDocument()
@@ -1086,14 +1136,14 @@ it('explains GPT Chat tool compatibility without blocking effort selection and r
   render(<ExecutionAssistant root="C:/workspace" api={api} settingsAPI={settingsAPI}
     captureDocuments={vi.fn(async () => [])} prepareSend={vi.fn(async () => true)} />)
   await waitFor(() => expect(screen.getByLabelText('当前模型')).toHaveTextContent('gpt-6-luna'))
-  fireEvent.click(screen.getByRole('button', { name: '切换模型' }))
+  fireEvent.click(screen.getByRole('button', { name: '切换思考强度' }))
   const effort = screen.getByRole('group', { name: '推理强度' })
   expect(effort).toHaveTextContent('工具调用在此模式下要求 Responses')
   expect(within(effort).getByRole('button', { name: '最高' })).toBeEnabled()
   fireEvent.click(within(effort).getByRole('button', { name: '关闭' }))
-  await waitFor(() => expect(screen.queryByRole('group', { name: '对话模型选择' })).toBeNull())
+  await waitFor(() => expect(screen.queryByRole('group', { name: '思考强度选择' })).toBeNull())
   expect(current.profile.roles.conversation?.parameters).toEqual({ reasoning_effort: 'none' })
-  fireEvent.click(screen.getByRole('button', { name: '切换模型' }))
+  fireEvent.click(screen.getByRole('button', { name: '切换思考强度' }))
   expect(screen.getByRole('group', { name: '推理强度' })).not.toHaveTextContent('工具调用在此模式下要求 Responses')
   expect(api.send).not.toHaveBeenCalled()
 })
@@ -1113,8 +1163,8 @@ it('uses explicit live OAuth effort declarations instead of documented fallbacks
   render(<ExecutionAssistant root="C:/workspace" api={api} settingsAPI={settingsAPI}
     captureDocuments={vi.fn(async () => [])} prepareSend={vi.fn(async () => true)} />)
   await waitFor(() => expect(screen.getByLabelText('当前模型')).toHaveTextContent('gpt-6-astra'))
-  fireEvent.click(screen.getByRole('button', { name: '切换模型' }))
-  const effort = within(screen.getByRole('group', { name: '对话模型选择' })).getByRole('group', { name: '推理强度' })
+  fireEvent.click(screen.getByRole('button', { name: '切换思考强度' }))
+  const effort = within(screen.getByRole('group', { name: '思考强度选择' })).getByRole('group', { name: '推理强度' })
   await waitFor(() => expect(effort).not.toHaveTextContent('模型文档补充'))
   expect(within(effort).getByRole('button', { name: '高' })).toBeInTheDocument()
   expect(within(effort).queryByRole('button', { name: '最高' })).toBeNull()
@@ -1136,8 +1186,8 @@ it('treats an explicit empty OAuth effort directory as authoritative', async () 
   render(<ExecutionAssistant root="C:/workspace" api={api} settingsAPI={settingsAPI}
     captureDocuments={vi.fn(async () => [])} prepareSend={vi.fn(async () => true)} />)
   await waitFor(() => expect(screen.getByLabelText('当前模型')).toHaveTextContent('gpt-6-luna'))
-  fireEvent.click(screen.getByRole('button', { name: '切换模型' }))
-  const effort = within(screen.getByRole('group', { name: '对话模型选择' })).getByRole('group', { name: '推理强度' })
+  fireEvent.click(screen.getByRole('button', { name: '切换思考强度' }))
+  const effort = within(screen.getByRole('group', { name: '思考强度选择' })).getByRole('group', { name: '推理强度' })
   await waitFor(() => expect(effort).toHaveTextContent('此连接目录未提供可选强度'))
   expect(within(effort).getAllByRole('button')).toHaveLength(1)
   expect(within(effort).getByRole('button', { name: '默认' })).toBeInTheDocument()
@@ -1164,10 +1214,9 @@ it('shows all account models immediately, pins favorites first, and searches wit
   fireEvent.click(screen.getByRole('button', { name: '切换模型' }))
   const menu = screen.getByRole('group', { name: '对话模型选择' })
   await within(menu).findByText(/日常创作与开发/)
-  const effort = within(menu).getByRole('group', { name: '推理强度' })
   const list = within(menu).getByRole('group', { name: '全部连接与模型' })
-  expect(menu.children[1]).toBe(effort)
-  expect(menu.children[2]).toBe(list)
+  expect(within(menu).queryByRole('group', { name: '推理强度' })).toBeNull()
+  expect(menu.children[1]).toBe(list)
   expect(list).toContainElement(within(menu).getByRole('button', { name: /gpt-6-solopenai/ }))
   expect(list).not.toContainElement(within(menu).getByRole('button', { name: '管理模型与连接…' }))
   expect(menu).toHaveTextContent('ChatGPT 账号 · 尾号 3762')
@@ -1282,18 +1331,18 @@ it('maps DeepSeek reasoning off, restored low, and default from the UI while pre
   render(<ExecutionAssistant root="C:/workspace" api={api} settingsAPI={settingsAPI}
     captureDocuments={vi.fn(async () => [])} prepareSend={vi.fn(async () => true)} />)
   await waitFor(() => expect(screen.getByLabelText('当前模型')).toHaveTextContent('deepseek-flash'))
-  fireEvent.click(screen.getByRole('button', { name: '切换模型' }))
+  fireEvent.click(screen.getByRole('button', { name: '切换思考强度' }))
   fireEvent.click(within(screen.getByRole('group', { name: '推理强度' })).getByRole('button', { name: '关闭' }))
   await waitFor(() => expect(current.profile.roles.conversation?.parameters).toEqual({ thinking: { type: 'disabled', extra: 'keep' }, temperature: 0.4 }))
-  await waitFor(() => expect(screen.queryByRole('group', { name: '对话模型选择' })).toBeNull())
-  fireEvent.click(screen.getByRole('button', { name: '切换模型' }))
+  await waitFor(() => expect(screen.queryByRole('group', { name: '思考强度选择' })).toBeNull())
+  fireEvent.click(screen.getByRole('button', { name: '切换思考强度' }))
   let effort = screen.getByRole('group', { name: '推理强度' })
   expect(within(effort).getByRole('button', { name: '关闭' })).toHaveAttribute('aria-pressed', 'true')
   expect(within(effort).getByRole('button', { name: '默认' })).toHaveAttribute('aria-pressed', 'false')
   fireEvent.click(within(effort).getByRole('button', { name: '低' }))
   await waitFor(() => expect(current.profile.roles.conversation?.parameters).toEqual({ thinking: { type: 'enabled', extra: 'keep' }, reasoning_effort: 'low', temperature: 0.4 }))
-  await waitFor(() => expect(screen.queryByRole('group', { name: '对话模型选择' })).toBeNull())
-  fireEvent.click(screen.getByRole('button', { name: '切换模型' }))
+  await waitFor(() => expect(screen.queryByRole('group', { name: '思考强度选择' })).toBeNull())
+  fireEvent.click(screen.getByRole('button', { name: '切换思考强度' }))
   effort = screen.getByRole('group', { name: '推理强度' })
   expect(within(effort).getByRole('button', { name: '低' })).toHaveAttribute('aria-pressed', 'true')
   fireEvent.click(within(effort).getByRole('button', { name: '默认' }))
@@ -1330,7 +1379,7 @@ it('automatically maps catalog Claude effort to Messages controls on the same me
   })
   render(<ExecutionAssistant root="C:/workspace" api={api} settingsAPI={settingsAPI} captureDocuments={vi.fn(async () => [])} prepareSend={vi.fn(async () => true)} />)
   await waitFor(() => expect(screen.getByLabelText('当前模型')).toHaveTextContent('claude-opus-4-6'))
-  fireEvent.click(screen.getByRole('button', { name: '切换模型' }))
+  fireEvent.click(screen.getByRole('button', { name: '切换思考强度' }))
   const group = screen.getByRole('group', { name: '推理强度' })
   fireEvent.click(await within(group).findByRole('button', { name: '最高' }))
   await waitFor(() => expect(current.profile.roles.conversation?.parameters).toEqual({ temperature: 0.4, thinking: { type: 'adaptive' }, output_config: { effort: 'max' } }))
@@ -1353,7 +1402,7 @@ it('selects a searchable capability reference for an unknown alias without JSON 
   })
   render(<ExecutionAssistant root="C:/workspace" api={api} settingsAPI={settingsAPI} captureDocuments={vi.fn(async () => [])} prepareSend={vi.fn(async () => true)} />)
   await waitFor(() => expect(screen.getByLabelText('当前模型')).toHaveTextContent('private-alias'))
-  fireEvent.click(screen.getByRole('button', { name: '切换模型' }))
+  fireEvent.click(screen.getByRole('button', { name: '切换思考强度' }))
   const reference = await screen.findByLabelText('参考型号')
   await within(reference).findByRole('option', { name: 'claude-opus-4-6' })
   fireEvent.change(screen.getByLabelText('搜索参考型号'), { target: { value: 'claude' } })
@@ -1381,7 +1430,7 @@ it('sets Haiku thinking tokens directly and supports disabling or default withou
   })
   render(<ExecutionAssistant root="C:/workspace" api={api} settingsAPI={settingsAPI} captureDocuments={vi.fn(async () => [])} prepareSend={vi.fn(async () => true)} />)
   await waitFor(() => expect(screen.getByLabelText('当前模型')).toHaveTextContent('claude-haiku-4-5'))
-  fireEvent.click(screen.getByRole('button', { name: '切换模型' }))
+  fireEvent.click(screen.getByRole('button', { name: '切换思考强度' }))
   const group = screen.getByRole('group', { name: '思考 token 设置' })
   expect(within(group).getByRole('button', { name: '开启思考' })).toBeDisabled()
   fireEvent.change(screen.getByLabelText('思考 token 数'), { target: { value: '12000' } })
@@ -1396,6 +1445,8 @@ it('sets Haiku thinking tokens directly and supports disabling or default withou
 
 
 it('sends a text-only adjustment on the existing task without capturing temporary targets, new materials or a new model route', async () => {
+  // A legacy accepted run keeps workspace authority; steering must retain that saved mode.
+  localStorage.setItem('guoling.execution.permission.v1:workspace', 'workspace')
   const active = conversation('a', '原任务正在执行', '改变后续要求')
   active.runIndex.builtinRunIds.push('run')
   const { api } = executionFixture([active])
@@ -1461,4 +1512,124 @@ it('does not let a late older task record overwrite the newer task model and coa
   expect(screen.getByText(/当前任务：new-task-model/)).toBeTruthy()
   await act(async () => olderRead.resolve({ ...run('a'), runId: 'older', createdAt: 10, version: 99 }))
   expect(screen.getByText(/当前任务：new-task-model/)).toBeTruthy()
+})
+
+
+const nativeSnapshot = (): import('../../src/shared/workbench/acp').AcpHostSnapshot => ({
+  selectedAgentId: 'codex', phase: 'ready', agents: [{ id: 'codex', name: 'Codex', nativeInstalled: true, adapterInstalled: true,
+    readiness: 'ready', documentationUrl: 'https://example.test/adapter', nativeLoginHint: 'codex login' }],
+  configuration: [], authenticationMethods: [], pendingPermissions: [], segments: [], nativeDiskAccess: true,
+})
+
+it('ACP native permission menu configures the native mode while preserving Guoling tool permission', async () => {
+  localStorage.setItem('guoling.execution.permission.v1:workspace', 'ask')
+  const { api, state } = executionFixture([conversation('a', '原生权限')])
+  let snapshot = nativeSnapshot()
+  snapshot.configuration = [
+    { id: 'mode', name: 'Approval mode', category: 'mode', type: 'select', currentValue: 'agent',
+      options: [{ value: 'read-only', name: 'Read only' }, { value: 'agent', name: 'Auto review' }] },
+    { id: 'model', name: 'Model', category: 'model', type: 'select', currentValue: 'native-model',
+      options: [{ value: 'native-model', name: 'Native model' }] },
+    { id: 'reasoning_effort', name: 'Thinking', category: 'thought_level', type: 'select', currentValue: 'high',
+      options: [{ value: 'high', name: 'High' }] },
+  ]
+  api.acp = vi.fn(async input => {
+    if (input.action === 'configure') snapshot = { ...snapshot, configuration: snapshot.configuration.map(control =>
+      control.id === 'mode' && control.type === 'select' ? { ...control, currentValue: String(input.values.mode) } : control) }
+    return { snapshot: structuredClone(snapshot), conversation: structuredClone(state.get('a')!) }
+  })
+  const settingsAPI = settingsFixture(true)
+  render(<ExecutionAssistant root="C:/workspace" api={api} settingsAPI={settingsAPI}
+    captureDocuments={async () => []} prepareSend={async () => true} />)
+  fireEvent.click(await screen.findByRole('button', { name: '原生权限：Auto review' }))
+  const menu = screen.getByRole('menu', { name: '权限模式' })
+  const nativeModes = within(menu).getByRole('group', { name: '原生权限模式' })
+  expect(within(nativeModes).getByRole('menuitemradio', { name: 'Auto review' })).toHaveAttribute('aria-checked', 'true')
+  expect(within(menu).getByText('果铃工具访问')).toBeVisible()
+  expect(within(menu).getByRole('menuitemradio', { name: /^修改前询问/ })).toHaveAttribute('aria-checked', 'true')
+  fireEvent.click(within(nativeModes).getByRole('menuitemradio', { name: 'Read only' }))
+  await waitFor(() => expect(api.acp).toHaveBeenCalledWith({ action: 'configure', workspaceId: 'workspace', conversationId: 'a', values: { mode: 'read-only' } }))
+  const updated = await screen.findByRole('button', { name: '原生权限：Read only' })
+  await waitFor(() => expect(screen.queryByRole('menu', { name: '权限模式' })).toBeNull())
+  fireEvent.click(updated)
+  expect(within(screen.getByRole('group', { name: '原生权限模式' })).getByRole('menuitemradio', { name: 'Read only' })).toHaveAttribute('aria-checked', 'true')
+  expect(within(screen.getByRole('menu', { name: '权限模式' })).getByRole('menuitemradio', { name: /^修改前询问/ })).toHaveAttribute('aria-checked', 'true')
+  expect(localStorage.getItem('guoling.execution.permission.v1:workspace')).toBe('ask')
+  expect(settingsAPI.saveProfile).not.toHaveBeenCalled()
+  expect(api.send).not.toHaveBeenCalled()
+})
+
+it('ACP confirms a lost ACK by its original identity while preserving a newer human draft and avoiding blur replay', async () => {
+  const { api, state } = executionFixture([conversation('a', '原生接续', '改这份稿')])
+  let snapshot = nativeSnapshot()
+  api.acp = vi.fn(async () => ({ snapshot: structuredClone(snapshot), conversation: structuredClone(state.get('a')!) }))
+  api.sendAcp = vi.fn(async input => {
+    const current = state.get('a')!
+    state.set('a', { ...current, inputDraft: '', revision: current.revision + 1, messages: [...current.messages,
+      { messageId: input.submissionId, role: 'user', text: input.text, createdAt: 3, attachmentIds: [] }] })
+    snapshot = { ...snapshot, phase: 'prompting' }
+    throw new Error('desktop ACK transport failed')
+  })
+  const prepare = vi.fn(async () => true)
+  render(<ExecutionAssistant root="C:/workspace" api={api} settingsAPI={settingsFixture(false)} captureDocuments={async () => []} prepareSend={prepare} />)
+  await waitFor(() => expect(screen.getByRole('button', { name: '发送' })).toBeEnabled())
+  fireEvent.click(screen.getByRole('button', { name: '发送' }))
+  await waitFor(() => expect(screen.getByRole('button', { name: '核对原提交' })).toBeEnabled())
+  const submission = vi.mocked(api.sendAcp).mock.calls[0]![0]
+  const writes = vi.mocked(api.draft).mock.calls.length
+  fireEvent.blur(screen.getByRole('textbox', { name: '给果铃AI发消息' }))
+  await act(async () => { await Promise.resolve(); await Promise.resolve() })
+  expect(api.draft).toHaveBeenCalledTimes(writes)
+  expect(state.get('a')!.inputDraft).toBe('')
+  fireEvent.change(screen.getByRole('textbox', { name: '给果铃AI发消息' }), { target: { value: '教师继续写的新稿' } })
+  fireEvent.click(screen.getByRole('button', { name: '核对原提交' }))
+  await waitFor(() => expect(screen.queryByRole('button', { name: '核对原提交' })).toBeNull())
+  expect(api.acp).toHaveBeenCalledWith({ action: 'confirm', workspaceId: 'workspace', conversationId: 'a', submissionId: submission.submissionId })
+  expect(api.sendAcp).toHaveBeenCalledTimes(1)
+  expect(api.send).not.toHaveBeenCalled()
+  expect(prepare).toHaveBeenCalledTimes(1)
+  expect(screen.getByRole('textbox', { name: '给果铃AI发消息' })).toHaveValue('教师继续写的新稿')
+})
+
+it('ACP releases a confirmed unaccepted request without sending it or discarding the original input', async () => {
+  const { api, state } = executionFixture([conversation('a', '原生未接收', '尚未接收的稿')])
+  api.acp = vi.fn(async () => ({ snapshot: nativeSnapshot(), conversation: structuredClone(state.get('a')!) }))
+  api.sendAcp = vi.fn(async () => { throw new Error('request failed before acceptance') })
+  render(<ExecutionAssistant root="C:/workspace" api={api} settingsAPI={settingsFixture(false)} captureDocuments={async () => []} prepareSend={async () => true} />)
+  await waitFor(() => expect(screen.getByRole('button', { name: '发送' })).toBeEnabled())
+  fireEvent.click(screen.getByRole('button', { name: '发送' }))
+  await waitFor(() => expect(screen.getByRole('button', { name: '核对原提交' })).toBeEnabled())
+  expect(screen.getByRole('button', { name: '发送' })).toBeDisabled()
+  fireEvent.click(screen.getByRole('button', { name: '核对原提交' }))
+  await waitFor(() => expect(screen.queryByRole('button', { name: '核对原提交' })).toBeNull())
+  expect(screen.getByRole('textbox', { name: '给果铃AI发消息' })).toHaveValue('尚未接收的稿')
+  expect(api.sendAcp).toHaveBeenCalledTimes(1)
+  expect(state.get('a')!.messages).toHaveLength(0)
+  expect(screen.getByRole('button', { name: '发送' })).toBeEnabled()
+})
+
+it('ACP recovers only the unconfirmed identity after a renderer remount, even with builtin selected', async () => {
+  const { api, state } = executionFixture([conversation('a', '重载后核对', '原请求')])
+  let snapshot = nativeSnapshot()
+  api.acp = vi.fn(async () => ({ snapshot: structuredClone(snapshot), conversation: structuredClone(state.get('a')!) }))
+  api.sendAcp = vi.fn(async input => {
+    const current = state.get('a')!
+    state.set('a', { ...current, inputDraft: '', revision: current.revision + 1, messages: [
+      { messageId: input.submissionId, role: 'user', text: input.text, createdAt: 3, attachmentIds: [] }] })
+    throw new Error('lost ACK')
+  })
+  const view = () => <ExecutionAssistant root="C:/workspace" api={api} settingsAPI={settingsFixture(false)} captureDocuments={async () => []} prepareSend={async () => true} />
+  const first = render(view())
+  await waitFor(() => expect(screen.getByRole('button', { name: '发送' })).toBeEnabled())
+  fireEvent.click(screen.getByRole('button', { name: '发送' }))
+  await waitFor(() => expect(screen.getByRole('button', { name: '核对原提交' })).toBeEnabled())
+  const id = vi.mocked(api.sendAcp).mock.calls[0]![0].submissionId
+  first.unmount(); snapshot = { ...snapshot, selectedAgentId: 'builtin', phase: 'idle' }
+  render(view())
+  await waitFor(() => expect(screen.getByRole('button', { name: '核对原提交' })).toBeEnabled())
+  expect(screen.getByRole('button', { name: '发送' })).toBeDisabled()
+  fireEvent.click(screen.getByRole('button', { name: '核对原提交' }))
+  await waitFor(() => expect(screen.queryByRole('button', { name: '核对原提交' })).toBeNull())
+  expect(api.acp).toHaveBeenCalledWith({ action: 'confirm', workspaceId: 'workspace', conversationId: 'a', submissionId: id })
+  expect(api.sendAcp).toHaveBeenCalledTimes(1); expect(api.send).not.toHaveBeenCalled()
 })

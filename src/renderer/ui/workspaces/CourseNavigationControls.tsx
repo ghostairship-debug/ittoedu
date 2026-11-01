@@ -1,11 +1,11 @@
 import { ChevronLeft, ChevronRight, RotateCcw } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { useCourseNavigationToolbarSlot } from '../../documents/CourseEditorChromeContext'
 import type { TeacherControllerDisplayPort } from '../../../shared/teacherControllerViewportGeometry'
 
 /** One host chrome for the existing runtime/navigation owner on each presentation surface. */
-export function CourseNavigationControls({ canvasMode, onCanvasModeChange, navigation, beforeNavigate, resetPlayback, report, runTitle = '从当前位置试运行' }: {
+export function CourseNavigationControls({ canvasMode, onCanvasModeChange, navigation, beforeNavigate, resetPlayback, report, runTitle = '从当前位置试运行', children }: {
   canvasMode: 'edit' | 'run'
   onCanvasModeChange(mode: 'edit' | 'run'): void
   navigation?: TeacherControllerDisplayPort
@@ -13,6 +13,7 @@ export function CourseNavigationControls({ canvasMode, onCanvasModeChange, navig
   resetPlayback?(playing: boolean): Promise<void>
   report(message: string): void
   runTitle?: string
+  children?: ReactNode
 }) {
   const slots = useCourseNavigationToolbarSlot()
   const [, refresh] = useState(0), [busy, setBusy] = useState(false)
@@ -35,6 +36,7 @@ export function CourseNavigationControls({ canvasMode, onCanvasModeChange, navig
     <button type="button" aria-label="上一步" title="上一步" data-testid="course-try-run-previous" disabled={busy || !navigation?.execute || navigation.canExecute?.({ type: 'step.previous' }) === false} onClick={() => { void perform('step.previous') }}><ChevronLeft size={16} /></button>
     <button type="button" aria-label="下一步" title="下一步" data-testid="course-try-run-next" disabled={busy || !navigation?.execute || navigation.canExecute?.({ type: 'step.next' }) === false} onClick={() => { void perform('step.next') }}><ChevronRight size={16} /></button>
     <button type="button" aria-label="回到初始画面" title="回到初始画面" disabled={busy || !(resetPlayback || navigation?.execute) || navigation?.canExecute?.({ type: 'scene.replay' }) === false} onClick={() => { void perform('scene.replay') }}><RotateCcw size={15} /></button>
+    {children}
   </div>
   if (!slots) return controls
   const target = slots.targets[slots.mode]

@@ -1,4 +1,4 @@
-import { componentContainers } from '../../../shared/contracts/component-platform/project'
+import { componentSurface, type ComponentContainerReadModel } from '../../../shared/contracts/component-platform/project'
 import { randomUUID } from 'node:crypto'
 import { BrowserWindow, session } from 'electron'
 import { installEditorProtocol } from '../../protocols'
@@ -8,7 +8,7 @@ import type { ViewObservationCapture, ViewObservationIdentity, ViewObservationSn
 import { buildPublishedCourseV3 } from '../../../core/publish/componentPlatform'
 import { InMemoryComponentCompilation } from '../../../core/components/compilation/InMemoryComponentCompilation'
 import { createEsbuildComponentCompiler } from '../contentApply/compilation/esbuildComponentCompiler'
-import { htmlPreviewResponse } from '../htmlPreview/htmlPreviewResponse'
+import { ObservationBootstrapService } from './ObservationBootstrapService'
 import type { PublishedCourseV3 } from '../../../shared/contracts/component-platform/published'
 import { waitForCaptureFramePaint } from './captureFramePaint'
 import { observationSnapshotMatches } from '../../../shared/workbench/viewObservation'
@@ -33,6 +33,10 @@ interface PublishedCaptureTarget {
 }
 type PublishedCapture = Omit<ViewObservationCapture, 'identity'>
 
+function observationViewport(project: ComponentContainerReadModel, locationId: string) {
+  return componentSurface(project, locationId)?.designSize ?? { width: 1280, height: 720 }
+}
+
 /** A no-preload, isolated Published playback host. It never navigates the user's editor. */
 interface PreparedObservationHost {
   token: string
@@ -40,7 +44,7 @@ interface PreparedObservationHost {
   initial: ObservationWorkerResult
   capture(): Promise<PublishedCapture>
   read(): Promise<ObservationWorkerResult>
-  select(locationId: string, stateId: string | null): Promise<ObservationWorkerResult>
+  select(locationId: string, stateId: string | null, viewport: { width: number; height: number }): Promise<ObservationWorkerResult>
   reset(input: PublishedCaptureTarget, publication: { payload: PublishedCourseV3; diagnostics: string[] }): Promise<void>
   close(): Promise<void>
 }
@@ -151,9 +155,9 @@ export class ViewObservationDesktopService implements PublishedActionPreviewPort
       if (this.stopped.has(input.runId) || input.signal?.aborted) throw new Error('课件观察已停止')
       const current = await host.read()
       if (current.locationId !== input.identity.locationId || current.stateId !== (input.identity.stateId ?? null)) {
-        const size = componentContainers(input.snapshot.model.project).find(surface => surface.id === input.identity.locationId)?.designSize ?? { width: 1280, height: 720 }
+        const size = observationViewport(input.snapshot.model.project, input.identity.locationId)
         host.worker.setContentSize(Math.ceil(size.width), Math.ceil(size.height))
-        await host.select(input.identity.locationId, input.identity.stateId ?? null)
+        await host.select(input.identity.locationId, input.identity.stateId ?? null, size)
       }
       const frame = host.worker.webContents.mainFrame
       const context: PublishedActionAutomationContext = { kind: 'published', runId: input.runId,
@@ -234,16 +238,17 @@ export class ViewObservationDesktopService implements PublishedActionPreviewPort
     }
     const publication = await prepare(resource)
     let project = publication.payload, target = input
-    const bootstrapPath = `/_observation/${token}/bootstrap/`
+    const entry = new URL('observation.html', this.options.rendererEntryUrl).toString()
+    const entryUrl = new URL(entry), entryOrigin = entryUrl.origin === 'null' ? `${entryUrl.protocol}//${entryUrl.host}` : entryUrl.origin
+    const bootstrap = new ObservationBootstrapService({ token, entryOrigin, connectOrigins: () => project.logic?.network?.connectOrigins ?? [] })
     const payloadPath = `/_observation/${token}/payload/${randomUUID()}`
     const payloadUrl = `courseware-editor://app${payloadPath}`
     const workerInput = (diagnostics: string[]) => ({ published: project, locationId: target.locationId, stateId: target.stateId ?? null,
-      bootstrapBaseUrl: `courseware-editor://app${bootstrapPath}`, diagnostics,
+      viewport: observationViewport(project, target.locationId),
+      bootstrapBaseUrl: bootstrap.baseUrl, diagnostics,
       instanceId: target.instanceId, spatialFrameId: target.spatialFrameId, staticExport: target.staticExport, interactive: target.interactive })
     let payload = workerInput(publication.diagnostics)
     const isolatedSession = session.fromPartition(`observation-${randomUUID()}`)
-    const entry = new URL('observation.html', this.options.rendererEntryUrl).toString()
-    const entryUrl = new URL(entry), entryOrigin = entryUrl.origin === 'null' ? `${entryUrl.protocol}//${entryUrl.host}` : entryUrl.origin
     let closed = false
     installEditorProtocol(isolatedSession, async (url, request) => {
       if (url.hostname === 'app' && url.pathname === payloadPath) {
@@ -259,27 +264,8 @@ export class ViewObservationDesktopService implements PublishedActionPreviewPort
         if (method !== 'GET' && method !== 'HEAD') return reply(405, 'Method not allowed')
         return reply(200, method === 'HEAD' ? undefined : JSON.stringify(payload))
       }
-      if (url.hostname === 'app' && url.pathname.startsWith(bootstrapPath)) {
-        const headers = { 'Access-Control-Allow-Origin': entryOrigin, 'Access-Control-Allow-Methods': 'POST, DELETE, OPTIONS', 'Vary': 'Origin' }
-        const reply = (status: number, message?: string) => new Response(message ?? null, { status, headers })
-        if (closed) return reply(410, 'Observation closed')
-        if (url.search) return reply(400, 'Bootstrap content belongs in the request body')
-        const method = request.method.toUpperCase()
-        if (method === 'POST' || method === 'DELETE' || method === 'OPTIONS') {
-          const origin = request.headers.get('Origin')
-          if (origin && origin !== entryOrigin) return reply(403, 'Invalid observation origin')
-          if (method === 'OPTIONS') return reply(204)
-          if (method === 'DELETE') { binarySources.delete(url.pathname); return reply(204) }
-          const html = await request.text()
-          if (closed) return reply(410, 'Observation closed')
-          binarySources.set(url.pathname, { bytes: new TextEncoder().encode(html), mime: 'text/html; charset=utf-8' })
-          return reply(204)
-        }
-        if (method !== 'GET' && method !== 'HEAD') return reply(405, 'Method not allowed')
-        const source = binarySources.get(url.pathname)
-        return source ? htmlPreviewResponse(source.bytes, { contentType: source.mime, method,
-          connectOrigins: project.logic?.network?.connectOrigins ?? [] }) : reply(404, 'Missing bootstrap')
-      }
+      const bootstrapResponse = await bootstrap.handle(url, request)
+      if (bootstrapResponse) return bootstrapResponse
       const entry = url.hostname === 'app' ? binarySources.get(url.pathname) : undefined
       if (!entry) return undefined
       const body = entry.bytes.buffer instanceof ArrayBuffer
@@ -292,7 +278,7 @@ export class ViewObservationDesktopService implements PublishedActionPreviewPort
     network.activateDocument(owner)
     network.replacePreviewLease({ leaseId: token, connectOrigins: project.logic?.network?.connectOrigins ?? [], remoteAssetUrls: [] }, owner)
     configureRestrictedSession(isolatedSession, url => network.allowsRequest(url))
-    const size = componentContainers(project).find(surface => surface.id === input.locationId)?.designSize ?? { width: 1280, height: 720 }
+    const size = observationViewport(project, input.locationId)
     const worker = new BrowserWindow({ width: size.width, height: size.height, useContentSize: true, frame: false, show: false,
       ...(input.interactive !== true ? { transparent: true, backgroundColor: '#00000000' } : {}),
       skipTaskbar: true, webPreferences: { session: isolatedSession, contextIsolation: true, sandbox: true,
@@ -313,7 +299,7 @@ export class ViewObservationDesktopService implements PublishedActionPreviewPort
       worker.removeListener('closed', onClosed)
       contents.removeListener('render-process-gone', onGone)
       if (!worker.isDestroyed()) worker.destroy()
-      binarySources.clear()
+      binarySources.clear(); bootstrap.dispose()
       isolatedSession.protocol.unhandle('courseware-editor')
       closing = isolatedSession.clearStorageData()
       return closing
@@ -347,14 +333,14 @@ export class ViewObservationDesktopService implements PublishedActionPreviewPort
       const read = () => withFaultWait(() => contents.executeJavaScript('window.__COURSEWARE_OBSERVATION_READ__()') as Promise<ObservationWorkerResult>, '观察宿主读取无响应')
       return { token, worker, get initial() { return initial }, close, read,
         reset: (next, publication) => withFaultWait(async () => {
-          target = next; project = publication.payload; binarySources.clear()
+          target = next; project = publication.payload; binarySources.clear(); bootstrap.clear()
           payload = workerInput(publication.diagnostics)
           network.replacePreviewLease({ leaseId: token, connectOrigins: project.logic?.network?.connectOrigins ?? [], remoteAssetUrls: [] }, owner)
-          const size = componentContainers(project).find(surface => surface.id === target.locationId)?.designSize ?? { width: 1280, height: 720 }
+          const size = observationViewport(project, target.locationId)
           worker.setContentSize(Math.ceil(size.width), Math.ceil(size.height))
           initial = await run()
         }, '观察宿主准备或截图无响应'),
-        select: (locationId, stateId) => withFaultWait(() => contents.executeJavaScript(`window.__COURSEWARE_OBSERVATION_SELECT__(${JSON.stringify(locationId)},${JSON.stringify(stateId)})`) as Promise<ObservationWorkerResult>, '观察宿主切换无响应'),
+        select: (locationId, stateId, viewport) => withFaultWait(() => contents.executeJavaScript(`window.__COURSEWARE_OBSERVATION_SELECT__(${JSON.stringify(locationId)},${JSON.stringify(stateId)},${JSON.stringify(viewport)})`) as Promise<ObservationWorkerResult>, '观察宿主切换无响应'),
         capture: () => withFaultWait(async () => {
           const current = target.interactive ? await read() : initial, rect = current.rect
           if (rect && !target.interactive) {

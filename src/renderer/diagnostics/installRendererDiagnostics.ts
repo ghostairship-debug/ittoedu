@@ -5,17 +5,23 @@ function reasonDetails(reason: unknown): { message: string; stack?: string } {
   return { message: String(reason) }
 }
 
-export function installRendererDiagnostics(): () => void {
-  const report = (reason: unknown): void => {
-    if (!window.desktopAPI?.reportDiagnostic) return
-    const details = reasonDetails(reason)
-    void window.desktopAPI.reportDiagnostic({
-      source: 'renderer',
-      ...details,
-    }).catch(() => undefined)
+/** Runtime findings stay in the existing log, never in the editor's operation-error toast. */
+export function reportRendererDiagnostic(reason: unknown, details?: Record<string, unknown>): void {
+  const diagnostic = reasonDetails(reason)
+  if (!window.desktopAPI?.reportDiagnostic) {
+    console.warn(diagnostic.message)
+    return
   }
-  const onError = (event: ErrorEvent): void => report(event.error ?? event.message)
-  const onRejection = (event: PromiseRejectionEvent): void => report(event.reason)
+  void window.desktopAPI.reportDiagnostic({
+    source: 'renderer',
+    ...diagnostic,
+    ...(details ? { details } : {}),
+  }).catch(() => undefined)
+}
+
+export function installRendererDiagnostics(): () => void {
+  const onError = (event: ErrorEvent): void => reportRendererDiagnostic(event.error ?? event.message)
+  const onRejection = (event: PromiseRejectionEvent): void => reportRendererDiagnostic(event.reason)
   window.addEventListener('error', onError)
   window.addEventListener('unhandledrejection', onRejection)
   return () => {

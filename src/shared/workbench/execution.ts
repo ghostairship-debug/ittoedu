@@ -99,6 +99,15 @@ export interface ExecutionModelRecord {
       firstDifference: 'instructions' | 'tools' | 'messages' | 'parameters' | 'identical' } }
   firstEventWaitMs?: number
   firstContentWaitMs?: number
+  /** Diagnostic clocks only. Preparation can include context summarization, not just CPU work. */
+  timing?: {
+    preparationStartedAt: number
+    preparationFinishedAt: number
+    adapterEnteredAt?: number
+    provider?: import('./modelProvider').ModelProviderTiming
+    /** Time spent consuming yielded events, including awaited persistence/display; not upstream generation time. */
+    consumption?: { events: number; totalMs: number; maxMs: number }
+  }
   /** Local unfinished content only; never calls, model messages, effects or replay inputs. */
   argumentDrafts?: Array<{ state: 'incomplete-prefix'; providerCallId?: string; toolName?: string; argumentsText: string }>
   /** Latest cumulative provider report for this request; never summed across stream events. */
@@ -145,10 +154,13 @@ export interface ExecutionRunRecord {
   documentPaths?: Record<string, string>
   /** Successful save/open bindings, keyed by the document session actually associated with this run. */
   documentBindings?: Record<string, ExecutionDocumentBinding>
+  /** Host-created current-run mechanical assembly. Not an author project or user destination. */
+  assemblyRoot?: string
   requests: ExecutionModelRecord[]
   tools: ExecutionToolRecord[]
   /** Durable user adjustments; the original provider, grant and input remain frozen. */
-  steering?: { submissionId: string; text: string; senderRunId?: string; advancementMode?: ExecutionAdvancementMode; acceptedAt: number; messageIndex?: number; appliedAt?: number }[]
+  steering?: { submissionId: string; text: string; senderRunId?: string; replyJob?: string; senderRole?: string;
+    advancementMode?: ExecutionAdvancementMode; acceptedAt: number; messageIndex?: number; appliedAt?: number }[]
   failure?: { code: string; message: string; outcome?: ModelFailure['outcome'] }
   /** Fact summary contains only actual tool returns; it cannot grant permissions. */
   compacted?: { atRequest: number; facts: string; fromMessage?: number

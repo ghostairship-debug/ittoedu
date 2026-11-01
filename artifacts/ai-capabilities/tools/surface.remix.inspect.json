@@ -1,5 +1,5 @@
 {
-  "description": "读取参考页可替换的正文槽位、原文及局部问题。后续 surface.remix 使用返回的槽位引用，不需提供对象身份或字段路径。",
+  "description": "读取参考页可替换的正文槽位、原文及局部问题。capacity 仅说明原框尺寸或原排版，不是文字适配检查结果。后续 surface.remix 使用返回的槽位引用，不需提供对象身份或字段路径。",
   "inputSchema": {
     "$schema": "https://json-schema.org/draft/2020-12/schema",
     "additionalProperties": false,

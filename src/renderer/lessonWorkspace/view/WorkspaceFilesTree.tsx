@@ -1,4 +1,5 @@
 import { isNativeProjectFilename } from '../../../shared/nativeProjectFile'
+import { fileCapabilities } from '../../../shared/workbench/sourceFileKind'
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type MouseEvent, type DragEvent } from 'react'
 import { ChevronDown, ChevronRight, File, FileCode2, FileText, Folder, FolderOpen, Plus, Presentation, RotateCw } from 'lucide-react'
 import type { LessonDesktopRequest, LessonDesktopResult, LessonDirectoryEntry } from '../../../shared/lessonDesktopContract'
@@ -47,7 +48,7 @@ export function WorkspaceFilesTree({ directory, files, operation, refreshVersion
   const [results, setResults] = useState<WorkspaceOperationResult>(), [retry, setRetry] = useState<WorkspaceFilesRequest>()
   const [clipboard, setClipboard] = useState<{ workspaceId: string; ids: string[]; type: 'copy' | 'move' }>()
   const [copyVersion, setCopyVersion] = useState<'disk' | 'current'>('disk')
-  const [menu, setMenu] = useState<{ x: number; y: number; directoryEntryId: string; htmlImport: 'pick' | 'selected' | null; sourceEntryId?: string }>(), [dropTarget, setDropTarget] = useState<string>()
+  const [menu, setMenu] = useState<{ x: number; y: number; directoryEntryId: string; htmlImport: 'pick' | 'selected' | null; sourceEntryId?: string; sourceName?: string }>(), [dropTarget, setDropTarget] = useState<string>()
   const active = useRef<RegisteredWorkspaceRoot | undefined>(undefined), epoch = useRef(0), lock = useRef<number | null>(null)
   const scopeTicket = useRef(0)
   const saveDirectoryListener = useRef(onSaveDirectoryChange); saveDirectoryListener.current = onSaveDirectoryChange
@@ -195,6 +196,28 @@ export function WorkspaceFilesTree({ directory, files, operation, refreshVersion
     if (generation !== epoch.current || active.current?.workspaceId !== currentRoot.workspaceId) return
     if (entry.kind === 'file') onFile({ name: entry.name, kind: 'file', path: resolved.resolvedPath })
     else { onDirectory(resolved.resolvedPath); setExpanded(value => new Set([...value, entry.entryId])); await load(entry.entryId, currentRoot, generation) }
+  }
+  const openExternal = async () => {
+    const target = menu, currentRoot = root, generation = epoch.current
+    if (!target?.sourceEntryId || !currentRoot || lock.current !== null) return
+    setMenu(undefined)
+    if (!operation) { setError('当前界面不能调用系统应用'); return }
+    if (!fileCapabilities(target.sourceName ?? '').externalOpenAllowed) { setError('不能从果铃运行可执行文件或系统快捷方式'); return }
+    const current = () => generation === epoch.current && active.current?.workspaceId === currentRoot.workspaceId
+    lock.current = generation; setBusy(true); setError(''); setNotice(`正在请求系统应用打开 ${target.sourceName ?? '文件'}…`)
+    try {
+      const resolved = await files({ type: 'resolve', workspaceId: currentRoot.workspaceId, entryId: target.sourceEntryId })
+      if (!current()) return
+      const result = await operation({ operation: 'open-external', path: resolved.resolvedPath })
+      if (!current()) return
+      if (result.opened === false) throw new Error(result.openError ?? '没有可用的关联程序')
+      setNotice(`已请求系统应用打开 ${target.sourceName ?? '文件'}`)
+    } catch (reason) {
+      if (current()) { setNotice(''); setError(`无法用系统应用打开 ${target.sourceName ?? '文件'}：${message(reason)}`) }
+    } finally {
+      if (lock.current === generation) lock.current = null
+      if (current()) setBusy(false)
+    }
   }
   const choose = (row: Row, event?: Pick<MouseEvent, 'ctrlKey' | 'metaKey' | 'shiftKey'>) => {
     const directoryEntryId = row.entry.kind === 'directory' ? row.entry.entryId : row.parentId
@@ -447,7 +470,7 @@ export function WorkspaceFilesTree({ directory, files, operation, refreshVersion
     importFlow: () => { if (single && root && onImportFlow) onImportFlow({ workspaceId: root.workspaceId, directoryEntryId: parentId ?? root.rootEntryId }, single.entryId); setMenu(undefined) },
     create: type => action(type),
     importHtml: () => { if (root && menu && onImportHtml) { onImportHtml({ workspaceId: root.workspaceId, directoryEntryId: menu.directoryEntryId }, menu.sourceEntryId); setMenu(undefined) } },
-    openHtmlExternal: () => { if (root && menu?.sourceEntryId) { if (!operation) { setError('当前界面不能用浏览器打开文件'); return } void files({ type: 'resolve', workspaceId: root.workspaceId, entryId: menu.sourceEntryId }).then(value => operation({ operation: 'open-external', path: value.resolvedPath })).then(result => { if (result.opened === false) throw new Error(result.openError ?? '没有可用的关联程序') }).catch(reason => setError(message(reason))); setMenu(undefined) } },
+    openExternal: () => { void openExternal() },
     rename: () => action('rename'), copy: () => copy('copy'), cut: () => copy('move'), paste,
     copyTo: () => action('copy'), moveTo: () => action('move'), trash: () => action('trash'),
     copyPath: () => { void copyPath().catch(reason => setError(message(reason))) },
@@ -460,7 +483,7 @@ export function WorkspaceFilesTree({ directory, files, operation, refreshVersion
         setExpanded(value => { const next = new Set(value); if (opening) next.add(entry.entryId); else next.delete(entry.entryId); return next })
         if (opening && active.current) void load(entry.entryId, active.current).catch(reason => setError(message(reason)))
       }}><ChevronRight size={14} /></button>}
-      <button type="button" className="lesson-tree-row" data-entry-id={entry.entryId} aria-pressed={selection.has(entry.entryId)} ref={element => { if (element) buttons.current.set(entry.entryId, element); else buttons.current.delete(entry.entryId) }} draggable={!busy} onDragStart={event => { writeWorkspaceEntryDrag(event.dataTransfer, root!.workspaceId, selection.has(entry.entryId) ? selected.map(row => row.entry) : [entry]) }} onClick={event => choose({ entry, parentId: id }, event)} onDoubleClick={() => { void open(entry).catch(reason => setError(message(reason))) }} onContextMenu={event => { event.preventDefault(); if (!selection.has(entry.entryId)) choose({ entry, parentId: id }); setMenu({ x: event.clientX, y: event.clientY, directoryEntryId: entry.kind === 'directory' ? entry.entryId : id, htmlImport: entry.kind === 'directory' ? 'pick' : /\.html?$/i.test(entry.name) ? 'selected' : null, ...(entry.kind === 'file' && /\.html?$/i.test(entry.name) ? { sourceEntryId: entry.entryId } : {}) }) }}>
+      <button type="button" className="lesson-tree-row" data-entry-id={entry.entryId} aria-pressed={selection.has(entry.entryId)} ref={element => { if (element) buttons.current.set(entry.entryId, element); else buttons.current.delete(entry.entryId) }} draggable={!busy} onDragStart={event => { writeWorkspaceEntryDrag(event.dataTransfer, root!.workspaceId, selection.has(entry.entryId) ? selected.map(row => row.entry) : [entry]) }} onClick={event => choose({ entry, parentId: id }, event)} onDoubleClick={() => { void open(entry).catch(reason => setError(message(reason))) }} onContextMenu={event => { event.preventDefault(); if (!selection.has(entry.entryId)) choose({ entry, parentId: id }); setMenu({ x: event.clientX, y: event.clientY, directoryEntryId: entry.kind === 'directory' ? entry.entryId : id, htmlImport: entry.kind === 'directory' ? 'pick' : /\.html?$/i.test(entry.name) ? 'selected' : null, ...(entry.kind === 'file' ? { sourceEntryId: entry.entryId, sourceName: entry.name } : {}) }) }}>
         {entry.kind === 'directory' ? expanded.has(entry.entryId) ? <FolderOpen size={16} /> : <Folder size={16} /> : icon(entry.name)}<span title={entry.name}>{entry.name}</span>
       </button>
     </div>{entry.kind === 'directory' && expanded.has(entry.entryId) && renderEntries(entry.entryId)}
@@ -486,7 +509,7 @@ export function WorkspaceFilesTree({ directory, files, operation, refreshVersion
       {root && <><button type="button" className="workspace-tree-root" aria-label="工作空间根目录" aria-pressed={selection.size === 0 && targetDirectory === root.rootEntryId} title={root.resolvedPath} data-drop={dropTarget === root.rootEntryId} {...droppable(root.rootEntryId)} onClick={() => { ++scopeTicket.current; onScope?.(root.resolvedPath, 'folder', root.workspaceId); setSelection(new Set()); setParentId(root.rootEntryId); onSaveDirectoryChange?.({ workspaceId: root.workspaceId, directoryEntryId: root.rootEntryId }); setMenu(undefined) }} onContextMenu={event => { event.preventDefault(); setSelection(new Set()); setParentId(root.rootEntryId); setMenu({ x: event.clientX, y: event.clientY, directoryEntryId: root.rootEntryId, htmlImport: 'pick' }) }}><Folder size={16} aria-hidden="true" /><span>{root.resolvedPath.replace(/[\\/]+$/, '').split(/[\\/]/).at(-1) || root.resolvedPath}</span></button>{renderEntries(root.rootEntryId)}</>}
     </div>
     {menu && <ContextMenu at={menu} label="文件菜单" onClose={() => setMenu(undefined)}
-      items={explorerContextCommands({ blocked, selected: selected.length, pptx: false, flowImport: Boolean(onImportFlow && single?.kind === 'file' && /\.(docx|md|markdown|txt)$/i.test(single.name)), htmlImport: onImportHtml ? menu.htmlImport : null, htmlFile: menu.htmlImport === 'selected', clipboard: clipboard?.ids.length ?? 0 }, commandPorts)} />}
+      items={explorerContextCommands({ blocked, selected: selected.length, pptx: false, flowImport: Boolean(onImportFlow && single?.kind === 'file' && /\.(docx|md|markdown|txt)$/i.test(single.name)), htmlImport: onImportHtml ? menu.htmlImport : null, externalFile: Boolean(menu.sourceEntryId), externalBlocked: !operation ? '当前界面不能调用系统应用' : menu.sourceName && !fileCapabilities(menu.sourceName).externalOpenAllowed ? '不能从果铃运行可执行文件或系统快捷方式' : null, clipboard: clipboard?.ids.length ?? 0 }, commandPorts)} />}
     {dialog && <section ref={dialogRef} className="workspace-file-dialog" role="dialog" aria-modal="true" aria-label="文件操作" onKeyDown={event => { event.stopPropagation(); if (event.key === 'Escape' && !busy) { event.preventDefault(); close() } else if (event.key === 'Tab') { const controls = [...(dialogRef.current?.querySelectorAll<HTMLElement>('input:not(:disabled), select:not(:disabled), button:not(:disabled)') ?? [])]; const first = controls[0], last = controls.at(-1); if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus() } else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus() } } else if (event.key === 'Enter' && event.target instanceof HTMLInputElement && !event.nativeEvent.isComposing && event.nativeEvent.keyCode !== 229 && !busy && !retry && (dialog === 'rename' || dialog === 'mkdir' || dialog.startsWith('create-')) && name.trim()) { event.preventDefault(); submit() } }}>
       {dialog === 'create-course' && <label>画布尺寸<select aria-label="画布尺寸" value={canvasPreset} onChange={event => setCanvasPreset(event.target.value)}>
         {SLIDE_CANVAS_PRESETS.map(preset => <option key={preset.id} value={preset.id}>{preset.label}（{preset.width}×{preset.height}）</option>)}

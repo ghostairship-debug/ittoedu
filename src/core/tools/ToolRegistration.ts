@@ -12,7 +12,7 @@ export type ToolFamily = typeof toolFamilies[number]
 
 /** These are the existing service owners, supplied by the composition root. */
 export type ToolSupportContext = Partial<Record<'componentContent' | 'images' | 'skills' | 'deliveries' | 'observations' | 'viewActions'
-  | 'projectFiles' | 'files' | 'office' | 'artifacts' | 'materials' | 'htmlActions' | 'pptxImport' | 'jobs' | 'compute' | 'delegation' | 'web' | 'mcp' | 'media' | 'openImages' | 'assetLibrary', boolean>> & {
+  | 'projectFiles' | 'files' | 'office' | 'artifacts' | 'materials' | 'htmlActions' | 'pptxImport' | 'jobs' | 'compute' | 'delegation' | 'localTools' | 'web' | 'mcp' | 'media' | 'openImages' | 'assetLibrary', boolean>> & {
   scopes?: readonly RunToolScope[]
   standaloneImage?: boolean
   projectFilesAccess?: 'read' | 'write'
@@ -93,7 +93,7 @@ export function hasRunDelivery(context: ToolSupportContext, kind?: DocumentKind)
   return context.scopes === undefined || context.scopes.some(scope => (!kind || scope.kind === kind)
     && (scope.wholeDocumentWritable || scope.writableTargetKinds.length > 0))
 }
-export function supportsWorkbenchService(context: ToolSupportContext, service: 'jobs' | 'compute' | 'delegation' | 'web' | 'mcp' | 'media' | 'openImages' | 'assetLibrary'): boolean {
+export function supportsWorkbenchService(context: ToolSupportContext, service: 'jobs' | 'compute' | 'delegation' | 'web' | 'mcp' | 'media' | 'openImages' | 'assetLibrary' | 'materials' | 'observations'): boolean {
   return context.workbenchServices !== false && context[service] !== false
 }
 

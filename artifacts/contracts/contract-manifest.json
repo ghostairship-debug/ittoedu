@@ -13,13 +13,13 @@
       "name": "courseProjectV10Schema",
       "file": "course-project-v11.schema.json",
       "sourceOfTruth": "src/shared/contracts/component-platform/schema.ts",
-      "sha256": "a6128f26de29562b9a8e34e802fe83447493612b3b98ce78d171d93cef5bf3fd"
+      "sha256": "4c7f26a3c7aa0498e1be6cca03f17bb3ed9e95cea3c0fb5bb899c19425a7afd5"
     },
     {
       "name": "publishedCourseV3Schema",
       "file": "published-course-v4.schema.json",
       "sourceOfTruth": "src/shared/contracts/component-platform/published.ts",
-      "sha256": "7913679bdb2c6cb26a3e3cc2df37282b223b4f4c8a2082d5a1cbf69bb0147413"
+      "sha256": "f010f1b846cdfff307ea42bddf0a3ad08b52c7be62a9640bd4f760a4995b5d4b"
     },
     {
       "name": "componentDefinitionSchema",

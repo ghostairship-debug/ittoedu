@@ -1,0 +1,4450 @@
+{
+  "schemaVersion": 1,
+  "batchId": "20261101-resilient",
+  "createdAt": "2026-11-01T08:24:40.690Z",
+  "tasks": {
+    "RECOVERY": {
+      "id": "RECOVERY",
+      "status": "verified",
+      "modifiedFiles": [],
+      "changes": [
+        "复用原工作区；保全347个已有变更文件指纹和binary diff；识别闲置创作MCP，不将其视为正在开发。",
+        "找回类型检查reloadPptx缺口、4项UI失败和ACP initialize超时。"
+      ],
+      "tests": [],
+      "blockers": [],
+      "nextAction": "按本批任务单继续，不重复凌晨已验旅程。",
+      "owner": "root",
+      "evidence": [
+        "output/comprehensive-execution-20261101/resilient-20261101/baseline.json",
+        "output/comprehensive-execution-20261101/resilient-20261101/baseline.patch"
+      ],
+      "updatedAt": "2026-11-01T08:24:53.532Z"
+    },
+    "RESILIENCE": {
+      "id": "RESILIENCE",
+      "status": "verified",
+      "modifiedFiles": [
+        "scripts/execution-checkpoint.mjs",
+        "scripts/tests/execution-checkpoint.test.mjs",
+        "AGENTS.md",
+        "docs/development-plan/WORKING_PROTOCOL.md"
+      ],
+      "changes": [
+        "机械化原子检查点、后台任务监督和断线结果恢复",
+        "未知结果显式resolve-run，保留未知、不重放、不伪造完成"
+      ],
+      "tests": [
+        {
+          "label": "Windows runner recovery",
+          "passed": 8,
+          "failed": 0,
+          "log": "output/comprehensive-execution-20261101/resilient-20261101/checkpoint-tests-02.log"
+        }
+      ],
+      "blockers": [],
+      "nextAction": "后续单元持续使用run/task/reconcile；新会话先读checkpoint与实际进程，不重放未知操作。",
+      "owner": "root",
+      "evidence": [
+        "output/comprehensive-execution-20261101/resilient-20261101/checkpoint-tests-02.log",
+        "output/execution-checkpoints/1793522234434-c8afe710/result.json"
+      ],
+      "updatedAt": "2026-11-01T08:38:44.636Z"
+    },
+    "T1": {
+      "id": "T1",
+      "status": "verified",
+      "modifiedFiles": [
+        "tests/e2e/generalFileEntrypoints20261101.spec.ts",
+        "tests/integration/g20AgentFileTools.test.ts"
+      ],
+      "changes": [
+        "树/启动参数/AI工具入口统一原文消费者全部核实",
+        "已知.dat在分类层拒绝、未知含NUL文本在编码层拒绝，原字节均保持"
+      ],
+      "tests": [],
+      "blockers": [],
+      "nextAction": "当前文件入口主链收口，不重跑同义测试。",
+      "owner": "office_closure",
+      "updatedAt": "2026-11-01T08:54:39.911Z",
+      "evidence": [
+        "output/g20/m20/files/run-ssMjtT/evidence.json",
+        "output/execution-checkpoints/1793522709923-777be344/result.json",
+        "output/execution-checkpoints/1793522910028-33677152/result.json"
+      ]
+    },
+    "T2": {
+      "id": "T2",
+      "status": "verified",
+      "modifiedFiles": [
+        "src/core/tools/HostToolServices.ts",
+        "src/main/workbench/projectFiles/componentPlatformFileInput.ts",
+        "tests/integration/projectArtifactSourceRouting20261101.test.ts",
+        "tests/integration/q2ProjectFileSources.test.ts"
+      ],
+      "changes": [
+        "compute/delegation非图片成果进入既有sealed同组装配，真图片仍走原图片owner",
+        "structure.json目标的内联HTML继续正式图片资源准入，既有cw-result不再被提前返回截断",
+        "公开资源表示/P11命名fixture按真实合同修正；Windows临时Host全部沿正式owner收束"
+      ],
+      "tests": [
+        {
+          "name": "同组来源/装配/混合源码/资源授权",
+          "result": "23/23 passed",
+          "jobId": "1793525071944-bedddf94"
+        }
+      ],
+      "blockers": [],
+      "nextAction": "两项实际装配缺陷与集成验收已闭合，r9/r12视觉交付亦完成；当前无待执行动作。",
+      "owner": "root",
+      "updatedAt": "2026-11-01T13:43:04.071Z",
+      "evidence": [
+        "output/execution-checkpoints/1793525071944-bedddf94/result.json",
+        "output/execution-checkpoints/1793524507279-6b87bf9d/result.json"
+      ]
+    },
+    "T3": {
+      "id": "T3",
+      "status": "verified",
+      "modifiedFiles": [],
+      "changes": [
+        "恢复/保存/交付6文件36项通过，保留空最终回复/未知不重放/跨工作空间/人改保护",
+        "真实C r4保存/同revision导出，模型completed与外层cleanup timeout分开持久记录",
+        "原生人改→正式Source窄改r8→独立冷开→正式再导出→完整离线行为通过；副本与原件保持"
+      ],
+      "tests": [],
+      "blockers": [],
+      "nextAction": "当前恢复/交付及作业等待修复已验；本次原生取消修复另有17项回归与真实Windows证据，不推导整体质量或速度。",
+      "owner": "root",
+      "updatedAt": "2026-11-01T13:43:04.235Z",
+      "evidence": [
+        "output/execution-checkpoints/1793521901545-ff0c51fe/result.json",
+        "output/comprehensive-execution-20261101/creation/builtin-moon-normal-20261101T084000/candidate-recovered.json",
+        "output/execution-checkpoints/1793524581055-466f4e4f/result.json",
+        "output/execution-checkpoints/1793524638455-2148115a/result.json"
+      ]
+    },
+    "T4": {
+      "id": "T4",
+      "status": "verified",
+      "modifiedFiles": [],
+      "changes": [
+        "发布Source独立缓存去inline map，作者源和调试缓存保持",
+        "正式重导温室HTML由8494757B降至4146609B"
+      ],
+      "tests": [],
+      "blockers": [],
+      "nextAction": "当前范围收口；体积减少不外推首开性能，原件保持/真实离线行为已核。",
+      "owner": "root",
+      "updatedAt": "2026-11-01T08:45:53.373Z",
+      "evidence": [
+        "output/comprehensive-execution-20261101/source-delivery/focused.log",
+        "output/comprehensive-execution-20261101/resume-20261101/greenhouse-P2DLA5/consumer/result.json",
+        "output/execution-checkpoints/1793521538608-0bed8e5e/result.json"
+      ]
+    },
+    "T5": {
+      "id": "T5",
+      "status": "verified",
+      "modifiedFiles": [],
+      "changes": [
+        "现有选择器与Controller/Host/Session恢复/撤权/ACK机制独审并63测试通过",
+        "OpenCode direct exe与当前npm shim均零模型初始化/配置/关闭/跨Host恢复通过；旧timeout未复现"
+      ],
+      "tests": [],
+      "blockers": [],
+      "nextAction": "当前轻量确定性范围收口；未声称外部模型创作/所有适配器通过，用户禁止外部Agent代写。",
+      "owner": "acp_closure",
+      "updatedAt": "2026-11-01T08:54:40.691Z",
+      "evidence": [
+        "output/execution-checkpoints/1793522542946-a6cd2df0/result.json",
+        "output/execution-checkpoints/1793522385513-f02310ba/result.json",
+        "output/comprehensive-execution-20261101/resilient-20261101/acp/direct-exe/protocol-7d0f9c94-63c5-43ee-8bdc-9dc0abd157f1.json",
+        "output/comprehensive-execution-20261101/resilient-20261101/acp/shim-current/protocol-461d4702-ab5a-45da-a109-756f5c93ab54.json"
+      ]
+    },
+    "T6": {
+      "id": "T6",
+      "status": "verified",
+      "modifiedFiles": [
+        "tests/e2e/pptxReadonlyPreview20261101.spec.ts"
+      ],
+      "changes": [
+        "正式PPTX只读预览/播放/生命周期/失败反馈通过",
+        "实际Office窄改仅目标part，刷新与独立冷开保持已存版本"
+      ],
+      "tests": [],
+      "blockers": [],
+      "nextAction": "当前准入与只读接线收口；不宣称完整PPT对象编辑器或所有格式保真。",
+      "owner": "office_closure",
+      "updatedAt": "2026-11-01T08:45:54.000Z",
+      "evidence": [
+        "output/execution-checkpoints/1793522389206-ce8a8894/result.json",
+        "output/comprehensive-execution-20261101/resilient-20261101/office/reload-ui-pYDw98/evidence.json",
+        "output/comprehensive-execution-20261101/resilient-20261101/office/reload-ui-pYDw98/01-reloaded-edited-title.png"
+      ]
+    },
+    "T7": {
+      "id": "T7",
+      "status": "verified",
+      "modifiedFiles": [
+        "scripts/experiments/builtin-moon-consumer-20261101.mjs"
+      ],
+      "changes": [
+        "r9与A2 r12当前确定性交付、独立视觉、交互、冷开及离线验收已闭合；旧失败和停止终态保留",
+        "同质量速度、十分钟首次合格、并行净提速及整体视觉等价未证明"
+      ],
+      "tests": [],
+      "blockers": [],
+      "nextAction": "本轮作品验收收口；不再创作或重发旧请求，长期目标按新任务处理。",
+      "owner": "root",
+      "updatedAt": "2026-11-01T13:29:54.918Z",
+      "evidence": [
+        "output/comprehensive-execution-20261101/final-closure-2026-11-01T11-34-58-201Z/r9-packaged-cold/result.json",
+        "output/comprehensive-execution-20261101/final-closure-2026-11-01T11-34-58-201Z/a2-r12-packaged-cold/result.json",
+        "output/comprehensive-execution-20261101/final-closure-2026-11-01T11-34-58-201Z/quality-accounting-review-20261101.md",
+        "output/comprehensive-execution-20261101/final-closure-2026-11-01T11-34-58-201Z/quality-accounting-addendum-a2-r12-20261101.md"
+      ]
+    },
+    "T8": {
+      "id": "T8",
+      "status": "verified",
+      "modifiedFiles": [],
+      "changes": [
+        "发现并机械重建过期office.edit/discovery/index能力派生物",
+        "安装参考包与打包Skill 10测试通过；C实际按需读取创作与交付指南",
+        "既有小机制迁移/索引差异独审，不晋升整作模板、不强制引用"
+      ],
+      "tests": [],
+      "blockers": [],
+      "nextAction": "安装参考、Skill与最终包身份已核；本轮无待执行动作。",
+      "owner": "root",
+      "updatedAt": "2026-11-01T13:43:04.395Z",
+      "evidence": [
+        "output/execution-checkpoints/1793522711615-346bb700/result.json",
+        "output/execution-checkpoints/1793523219218-1e842e0e/result.json"
+      ]
+    },
+    "BUILD-PLAYER": {
+      "id": "BUILD-PLAYER",
+      "status": "verified",
+      "modifiedFiles": [],
+      "changes": [],
+      "tests": [
+        {
+          "jobId": "1793521536931-a7ee8424",
+          "taskId": "BUILD-PLAYER",
+          "label": "当前运行库构建",
+          "status": "passed",
+          "exitCode": 0,
+          "signal": null,
+          "finishedAt": "2026-11-01T08:25:45.068Z",
+          "log": "output/execution-checkpoints/1793521536931-a7ee8424/command.log"
+        }
+      ],
+      "blockers": [],
+      "nextAction": "player与renderer未因本次compute取消修复变化，最终包对应内容身份已核，复用已有验收。",
+      "updatedAt": "2026-11-01T13:43:04.570Z",
+      "evidence": [
+        "output/execution-checkpoints/1793521536931-a7ee8424/result.json"
+      ]
+    },
+    "CORE-REGRESSION": {
+      "id": "CORE-REGRESSION",
+      "status": "verified",
+      "modifiedFiles": [],
+      "changes": [
+        "4文件23项通过，包含真实Chromium iframe滚动反例。"
+      ],
+      "tests": [
+        {
+          "jobId": "1793521538608-0bed8e5e",
+          "taskId": "CORE-REGRESSION",
+          "label": "Source交付、地址读取、程序滚动与host事实回归",
+          "status": "passed",
+          "exitCode": 0,
+          "signal": null,
+          "finishedAt": "2026-11-01T08:25:45.185Z",
+          "log": "output/execution-checkpoints/1793521538608-0bed8e5e/command.log"
+        }
+      ],
+      "blockers": [],
+      "nextAction": "当前核心回归证据有效，T3与真实内置AI交付已闭合；无需重复。",
+      "updatedAt": "2026-11-01T13:43:04.753Z",
+      "evidence": [
+        "output/execution-checkpoints/1793521538608-0bed8e5e/result.json"
+      ]
+    },
+    "T3-RECOVERY-TEST": {
+      "id": "T3-RECOVERY-TEST",
+      "status": "verified",
+      "modifiedFiles": [
+        "tests/integration/g20ExecutionRecoveryScopes.test.ts",
+        "tests/integration/g20ArtifactSaveTool.test.ts"
+      ],
+      "changes": [
+        "成功final夹具遵守已有空final防护",
+        "图片读回走真实workspace资源服务并保留跨workspace拒绝"
+      ],
+      "tests": [
+        {
+          "jobId": "1793521776652-55d27ca6",
+          "taskId": "T3-RECOVERY-TEST",
+          "label": "交付结算与运行恢复定向回归",
+          "status": "failed",
+          "exitCode": 1,
+          "signal": null,
+          "finishedAt": "2026-11-01T08:29:44.697Z",
+          "log": "output/execution-checkpoints/1793521776652-55d27ca6/command.log"
+        },
+        {
+          "jobId": "1793521901545-ff0c51fe",
+          "taskId": "T3-RECOVERY-TEST",
+          "label": "交付结算与运行恢复定向回归",
+          "status": "passed",
+          "exitCode": 0,
+          "signal": null,
+          "finishedAt": "2026-11-01T08:31:49.640Z",
+          "log": "output/execution-checkpoints/1793521901545-ff0c51fe/command.log"
+        }
+      ],
+      "blockers": [],
+      "nextAction": "36项恢复/交付证据有效，r9/r12正式保存导出已核；本轮无待执行动作。",
+      "updatedAt": "2026-11-01T13:43:04.920Z",
+      "evidence": [
+        "output/execution-checkpoints/1793521901545-ff0c51fe/result.json"
+      ]
+    },
+    "BUILD-APP": {
+      "id": "BUILD-APP",
+      "status": "verified",
+      "modifiedFiles": [],
+      "changes": [],
+      "tests": [
+        {
+          "jobId": "1793522234434-c8afe710",
+          "taskId": "BUILD-APP",
+          "label": "统一当前源码 renderer/electron 生产构建",
+          "status": "passed",
+          "exitCode": 0,
+          "signal": null,
+          "finishedAt": "2026-11-01T08:37:26.553Z",
+          "log": "output/execution-checkpoints/1793522234434-c8afe710/command.log"
+        },
+        {
+          "jobId": "1793524057756-2b465f5e",
+          "taskId": "BUILD-APP",
+          "label": "统一当前源码 renderer/electron 生产构建",
+          "status": "passed",
+          "exitCode": 0,
+          "signal": null,
+          "finishedAt": "2026-11-01T09:07:52.394Z",
+          "log": "output/execution-checkpoints/1793524057756-2b465f5e/command.log"
+        },
+        {
+          "jobId": "1793524507279-6b87bf9d",
+          "taskId": "BUILD-APP",
+          "label": "统一当前源码 renderer/electron 生产构建",
+          "status": "passed",
+          "exitCode": 0,
+          "signal": null,
+          "finishedAt": "2026-11-01T09:15:12.252Z",
+          "log": "output/execution-checkpoints/1793524507279-6b87bf9d/command.log"
+        }
+      ],
+      "blockers": [],
+      "nextAction": "来源/资源接线已构建并验收；最新受影响Electron构建见FINAL-PRODUCTION-BUILD。",
+      "updatedAt": "2026-11-01T13:43:05.103Z",
+      "evidence": [
+        "output/execution-checkpoints/1793524507279-6b87bf9d/result.json"
+      ]
+    },
+    "TYPECHECK": {
+      "id": "TYPECHECK",
+      "status": "verified",
+      "modifiedFiles": [],
+      "changes": [
+        "读取原三目标类型检查成功回执，纠正滞后状态；后续新源码另验。"
+      ],
+      "tests": [
+        {
+          "jobId": "1793522235043-ee840693",
+          "taskId": "TYPECHECK",
+          "label": "全三目标类型检查",
+          "status": "passed",
+          "exitCode": 0,
+          "signal": null,
+          "finishedAt": "2026-11-01T08:37:23.219Z",
+          "log": "output/execution-checkpoints/1793522235043-ee840693/command.log"
+        },
+        {
+          "jobId": "1793523787101-398e26e9",
+          "taskId": "TYPECHECK",
+          "label": "全三目标类型检查",
+          "status": "failed",
+          "exitCode": 1,
+          "signal": null,
+          "finishedAt": "2026-11-01T09:03:18.135Z",
+          "log": "output/execution-checkpoints/1793523787101-398e26e9/command.log"
+        },
+        {
+          "jobId": "1793524507881-e3a79bc2",
+          "taskId": "TYPECHECK",
+          "label": "全三目标类型检查",
+          "status": "failed",
+          "exitCode": 1,
+          "signal": null,
+          "finishedAt": "2026-11-01T09:15:16.348Z",
+          "log": "output/execution-checkpoints/1793524507881-e3a79bc2/command.log"
+        },
+        {
+          "jobId": "1793524581830-3a4d999a",
+          "taskId": "TYPECHECK",
+          "label": "全三目标类型检查",
+          "status": "passed",
+          "exitCode": 0,
+          "signal": null,
+          "finishedAt": "2026-11-01T09:16:24.243Z",
+          "log": "output/execution-checkpoints/1793524581830-3a4d999a/command.log"
+        },
+        {
+          "jobId": "1793524700035-5c6df915",
+          "taskId": "TYPECHECK",
+          "label": "全三目标类型检查",
+          "status": "passed",
+          "exitCode": 0,
+          "signal": null,
+          "finishedAt": "2026-11-01T09:18:22.441Z",
+          "log": "output/execution-checkpoints/1793524700035-5c6df915/command.log"
+        },
+        {
+          "jobId": "1793525072577-a50dfb87",
+          "taskId": "TYPECHECK",
+          "label": "全三目标类型检查",
+          "status": "passed",
+          "exitCode": 0,
+          "signal": null,
+          "finishedAt": "2026-11-01T09:24:35.026Z",
+          "log": "output/execution-checkpoints/1793525072577-a50dfb87/command.log"
+        },
+        {
+          "jobId": "1793526174775-6169f953",
+          "taskId": "TYPECHECK",
+          "label": "全三目标类型检查",
+          "status": "passed",
+          "exitCode": 0,
+          "signal": null,
+          "finishedAt": "2026-11-01T09:42:59.984Z",
+          "log": "output/execution-checkpoints/1793526174775-6169f953/command.log"
+        }
+      ],
+      "blockers": [],
+      "nextAction": "本次主/测试类型与Electron构建通过；未变E2E类型复用FINAL-E2E-TYPES证据。",
+      "updatedAt": "2026-11-01T13:43:05.261Z",
+      "evidence": [
+        "output/execution-checkpoints/1793533469816-6de42b78/result.json"
+      ]
+    },
+    "T7-BUILTIN-C": {
+      "id": "T7-BUILTIN-C",
+      "status": "verified",
+      "modifiedFiles": [],
+      "changes": [
+        "原r4真实完成并保存导出；旧创建wrapper清理超时保持，不代表首次质量合格",
+        "r9后续修订已独立验收，模型角色恢复有证据；原工作区不可用的恢复限制保留"
+      ],
+      "tests": [
+        {
+          "jobId": "1793522330343-ffb17c03",
+          "taskId": "T7-BUILTIN-C",
+          "label": "同题内置AI普通App真实创作（禁止盲重放）",
+          "status": "timed_out",
+          "exitCode": 1,
+          "signal": null,
+          "finishedAt": "2026-11-01T08:50:50.850Z",
+          "log": "output/execution-checkpoints/1793522330343-ffb17c03/command.log"
+        }
+      ],
+      "blockers": [],
+      "nextAction": "原run/命令结果不改写、不重发；交付验收见r9。",
+      "updatedAt": "2026-11-01T13:29:55.104Z",
+      "evidence": [
+        "output/comprehensive-execution-20261101/final-closure-2026-11-01T11-34-58-201Z/quality-evidence/original-run-accounting.json",
+        "output/comprehensive-execution-20261101/final-closure-2026-11-01T11-34-58-201Z/quality-evidence/c-original-cleanup-recovery.json",
+        "output/comprehensive-execution-20261101/final-closure-2026-11-01T11-34-58-201Z/r9-packaged-cold/result.json"
+      ]
+    },
+    "T5-UI": {
+      "id": "T5-UI",
+      "status": "verified",
+      "modifiedFiles": [
+        "tests/unit/g20ExecutionAssistant.test.tsx"
+      ],
+      "changes": [
+        "修复过期dialog/折叠组入口和默认权限fixture，产品权限不变"
+      ],
+      "tests": [
+        {
+          "jobId": "1793522385513-f02310ba",
+          "taskId": "T5-UI",
+          "label": "ExecutionAssistant全部界面回归",
+          "status": "passed",
+          "exitCode": 0,
+          "signal": null,
+          "finishedAt": "2026-11-01T08:40:00.843Z",
+          "log": "output/execution-checkpoints/1793522385513-f02310ba/command.log"
+        }
+      ],
+      "blockers": [],
+      "nextAction": "56/56通过；继续原生ACP真实协议边界。",
+      "updatedAt": "2026-11-01T08:45:55.408Z",
+      "evidence": [
+        "output/execution-checkpoints/1793522385513-f02310ba/result.json"
+      ]
+    },
+    "T6-UI": {
+      "id": "T6-UI",
+      "status": "verified",
+      "modifiedFiles": [],
+      "changes": [],
+      "tests": [
+        {
+          "jobId": "1793522389206-ce8a8894",
+          "taskId": "T6-UI",
+          "label": "PPTX正式App原件保持、窄改刷新及冷开",
+          "status": "passed",
+          "exitCode": 0,
+          "signal": null,
+          "finishedAt": "2026-11-01T08:41:03.376Z",
+          "log": "output/execution-checkpoints/1793522389206-ce8a8894/command.log"
+        }
+      ],
+      "blockers": [],
+      "nextAction": "2个真实App消费者已通过，无需重复整套。",
+      "updatedAt": "2026-11-01T08:45:54.659Z",
+      "evidence": [
+        "output/execution-checkpoints/1793522389206-ce8a8894/result.json",
+        "output/comprehensive-execution-20261101/resilient-20261101/office/reload-ui-pYDw98/evidence.json"
+      ]
+    },
+    "T5-NATIVE-VERSION": {
+      "id": "T5-NATIVE-VERSION",
+      "status": "verified",
+      "modifiedFiles": [],
+      "changes": [],
+      "tests": [
+        {
+          "jobId": "1793522542346-9a93e6c5",
+          "taskId": "T5-NATIVE-VERSION",
+          "label": "OpenCode既有入口底层可执行文件--version无模型探测",
+          "status": "passed",
+          "exitCode": 0,
+          "signal": null,
+          "finishedAt": "2026-11-01T08:42:22.791Z",
+          "log": "output/execution-checkpoints/1793522542346-9a93e6c5/command.log"
+        }
+      ],
+      "blockers": [],
+      "nextAction": "OpenCode版本查询通过；不代表模型创作验收。",
+      "updatedAt": "2026-11-01T09:16:51.366Z",
+      "evidence": [
+        "output/execution-checkpoints/1793522542346-9a93e6c5/result.json"
+      ]
+    },
+    "T5-ACP-REGRESSION": {
+      "id": "T5-ACP-REGRESSION",
+      "status": "verified",
+      "modifiedFiles": [],
+      "changes": [],
+      "tests": [
+        {
+          "jobId": "1793522542946-a6cd2df0",
+          "taskId": "T5-ACP-REGRESSION",
+          "label": "ACP发现选择权限会话恢复与stdio全部定向回归",
+          "status": "passed",
+          "exitCode": 0,
+          "signal": null,
+          "finishedAt": "2026-11-01T08:42:29.764Z",
+          "log": "output/execution-checkpoints/1793522542946-a6cd2df0/command.log"
+        }
+      ],
+      "blockers": [],
+      "nextAction": "7文件63/63通过并独审session/controller/host；与真实原生可用性分别结算。",
+      "updatedAt": "2026-11-01T08:45:56.062Z",
+      "evidence": [
+        "output/execution-checkpoints/1793522542946-a6cd2df0/result.json"
+      ]
+    },
+    "T8-CAPABILITIES": {
+      "id": "T8-CAPABILITIES",
+      "status": "verified",
+      "modifiedFiles": [],
+      "changes": [],
+      "tests": [
+        {
+          "jobId": "1793522543916-9d65e199",
+          "taskId": "T8-CAPABILITIES",
+          "label": "能力和打包Skill派生一致性",
+          "status": "failed",
+          "exitCode": 1,
+          "signal": null,
+          "finishedAt": "2026-11-01T08:42:25.765Z",
+          "log": "output/execution-checkpoints/1793522543916-9d65e199/command.log"
+        },
+        {
+          "jobId": "1793522711615-346bb700",
+          "taskId": "T8-CAPABILITIES",
+          "label": "能力和打包Skill派生一致性",
+          "status": "passed",
+          "exitCode": 0,
+          "signal": null,
+          "finishedAt": "2026-11-01T08:45:13.075Z",
+          "log": "output/execution-checkpoints/1793522711615-346bb700/command.log"
+        }
+      ],
+      "blockers": [],
+      "nextAction": "派生能力索引检查已过，与实际skills.read证据共同使用。",
+      "updatedAt": "2026-11-01T09:16:51.873Z",
+      "evidence": [
+        "output/execution-checkpoints/1793522711615-346bb700/result.json"
+      ]
+    },
+    "T5-NATIVE-PROBE": {
+      "id": "T5-NATIVE-PROBE",
+      "status": "verified",
+      "modifiedFiles": [],
+      "changes": [],
+      "tests": [
+        {
+          "jobId": "1793522612120-a3e13a3a",
+          "taskId": "T5-NATIVE-PROBE",
+          "label": "原生ACP direct exe initialize对照（零模型消息）",
+          "status": "passed",
+          "exitCode": 0,
+          "signal": null,
+          "finishedAt": "2026-11-01T08:43:41.199Z",
+          "log": "output/execution-checkpoints/1793522612120-a3e13a3a/command.log"
+        }
+      ],
+      "blockers": [],
+      "nextAction": "直接exe原生协议会话/config/恢复/关闭已过，零prompt。",
+      "updatedAt": "2026-11-01T09:16:51.524Z",
+      "evidence": [
+        "output/execution-checkpoints/1793522612120-a3e13a3a/result.json"
+      ]
+    },
+    "T8-REGENERATE": {
+      "id": "T8-REGENERATE",
+      "status": "verified",
+      "modifiedFiles": [],
+      "changes": [],
+      "tests": [
+        {
+          "jobId": "1793522612954-82685fbc",
+          "taskId": "T8-REGENERATE",
+          "label": "从正式工具schema重新生成过期Office能力清单",
+          "status": "passed",
+          "exitCode": 0,
+          "signal": null,
+          "finishedAt": "2026-11-01T08:43:34.310Z",
+          "log": "output/execution-checkpoints/1793522612954-82685fbc/command.log"
+        }
+      ],
+      "blockers": [],
+      "nextAction": "从唯一能力源重新生成过期Office派生文件完成。",
+      "updatedAt": "2026-11-01T09:16:52.000Z",
+      "evidence": [
+        "output/execution-checkpoints/1793522612954-82685fbc/result.json"
+      ]
+    },
+    "T1-STARTUP": {
+      "id": "T1-STARTUP",
+      "status": "verified",
+      "modifiedFiles": [],
+      "changes": [],
+      "tests": [
+        {
+          "jobId": "1793522709923-777be344",
+          "taskId": "T1-STARTUP",
+          "label": "真实App启动JSON与TS参数入口",
+          "status": "passed",
+          "exitCode": 0,
+          "signal": null,
+          "finishedAt": "2026-11-01T08:45:17.734Z",
+          "log": "output/execution-checkpoints/1793522709923-777be344/command.log"
+        }
+      ],
+      "blockers": [],
+      "nextAction": "真实App启动参数打开JSON/代码与原文保持通过。",
+      "updatedAt": "2026-11-01T09:16:52.126Z",
+      "evidence": [
+        "output/execution-checkpoints/1793522709923-777be344/result.json"
+      ]
+    },
+    "T1-AI-FILES": {
+      "id": "T1-AI-FILES",
+      "status": "verified",
+      "modifiedFiles": [],
+      "changes": [],
+      "tests": [
+        {
+          "jobId": "1793522710501-2442471f",
+          "taskId": "T1-AI-FILES",
+          "label": "正式AI通用文件open/create与二进制隔离",
+          "status": "failed",
+          "exitCode": 1,
+          "signal": null,
+          "finishedAt": "2026-11-01T08:45:18.253Z",
+          "log": "output/execution-checkpoints/1793522710501-2442471f/command.log"
+        },
+        {
+          "jobId": "1793522910028-33677152",
+          "taskId": "T1-AI-FILES",
+          "label": "正式AI通用文件open/create与二进制隔离",
+          "status": "passed",
+          "exitCode": 0,
+          "signal": null,
+          "finishedAt": "2026-11-01T08:48:37.506Z",
+          "log": "output/execution-checkpoints/1793522910028-33677152/command.log"
+        }
+      ],
+      "blockers": [],
+      "nextAction": "正式AI文件工具3/3通过；保留未知二进制拒绝与原始字节。",
+      "updatedAt": "2026-11-01T09:16:52.251Z",
+      "evidence": [
+        "output/execution-checkpoints/1793522910028-33677152/result.json"
+      ]
+    },
+    "T5-NATIVE-SHIM": {
+      "id": "T5-NATIVE-SHIM",
+      "status": "verified",
+      "modifiedFiles": [],
+      "changes": [],
+      "tests": [
+        {
+          "jobId": "1793522909424-382ec043",
+          "taskId": "T5-NATIVE-SHIM",
+          "label": "当前环境npm shim零模型协议复核",
+          "status": "passed",
+          "exitCode": 0,
+          "signal": null,
+          "finishedAt": "2026-11-01T08:48:38.187Z",
+          "log": "output/execution-checkpoints/1793522909424-382ec043/command.log"
+        }
+      ],
+      "blockers": [],
+      "nextAction": "同环境shim协议已过，原20秒timeout未复现且记录保持。",
+      "updatedAt": "2026-11-01T09:16:51.687Z",
+      "evidence": [
+        "output/execution-checkpoints/1793522909424-382ec043/result.json"
+      ]
+    },
+    "T8-PACKAGED-REFERENCES": {
+      "id": "T8-PACKAGED-REFERENCES",
+      "status": "verified",
+      "modifiedFiles": [],
+      "changes": [],
+      "tests": [
+        {
+          "jobId": "1793523219218-1e842e0e",
+          "taskId": "T8-PACKAGED-REFERENCES",
+          "label": "独立安装参考包与打包Skill真实读取",
+          "status": "passed",
+          "exitCode": 0,
+          "signal": null,
+          "finishedAt": "2026-11-01T08:53:44.655Z",
+          "log": "output/execution-checkpoints/1793523219218-1e842e0e/command.log"
+        }
+      ],
+      "blockers": [],
+      "nextAction": "安装参考与Skill分发10项通过，实际C已读取对应Skill/参考。",
+      "updatedAt": "2026-11-01T09:16:52.364Z",
+      "evidence": [
+        "output/execution-checkpoints/1793523219218-1e842e0e/result.json"
+      ]
+    },
+    "T2-ARTIFACT-ROUTING": {
+      "id": "T2-ARTIFACT-ROUTING",
+      "status": "verified",
+      "modifiedFiles": [],
+      "changes": [],
+      "tests": [
+        {
+          "jobId": "1793523386281-8f8265bf",
+          "taskId": "T2-ARTIFACT-ROUTING",
+          "label": "直接子任务HTML装配公共Gateway回归（先旧码复现）",
+          "status": "failed",
+          "exitCode": 1,
+          "signal": null,
+          "finishedAt": "2026-11-01T08:56:30.731Z",
+          "log": "output/execution-checkpoints/1793523386281-8f8265bf/command.log"
+        },
+        {
+          "jobId": "1793523545417-c6baf745",
+          "taskId": "T2-ARTIFACT-ROUTING",
+          "label": "直接子任务HTML装配公共Gateway回归（先旧码复现）",
+          "status": "failed",
+          "exitCode": 1,
+          "signal": null,
+          "finishedAt": "2026-11-01T08:59:10.219Z",
+          "log": "output/execution-checkpoints/1793523545417-c6baf745/command.log"
+        }
+      ],
+      "blockers": [],
+      "nextAction": "4个新case通过；直接HTML、同组依赖、真正图片、越权/停止/未知拒绝均保持。",
+      "updatedAt": "2026-11-01T09:27:04.065Z",
+      "evidence": [
+        "output/execution-checkpoints/1793525071944-bedddf94/command.log"
+      ]
+    },
+    "T7-C-HUMAN-EDIT": {
+      "id": "T7-C-HUMAN-EDIT",
+      "status": "verified",
+      "modifiedFiles": [],
+      "changes": [],
+      "tests": [
+        {
+          "jobId": "1793523387032-7af0303b",
+          "taskId": "T7-C-HUMAN-EDIT",
+          "label": "原C独立副本的真实UI标题编辑撤销保存冷开",
+          "status": "passed",
+          "exitCode": 0,
+          "signal": null,
+          "finishedAt": "2026-11-01T08:56:33.946Z",
+          "log": "output/execution-checkpoints/1793523387032-7af0303b/command.log"
+        }
+      ],
+      "blockers": [],
+      "nextAction": "原生标题真实UI修改、撤销重做、保存独立冷开通过；原C保持。",
+      "updatedAt": "2026-11-01T09:16:52.503Z",
+      "evidence": [
+        "output/execution-checkpoints/1793523387032-7af0303b/result.json"
+      ]
+    },
+    "T7-C-OFFLINE": {
+      "id": "T7-C-OFFLINE",
+      "status": "verified",
+      "modifiedFiles": [],
+      "changes": [],
+      "tests": [
+        {
+          "jobId": "1793523548017-989ca62d",
+          "taskId": "T7-C-OFFLINE",
+          "label": "原C独立离线桌面全交互与390观察",
+          "status": "passed",
+          "exitCode": 0,
+          "signal": null,
+          "finishedAt": "2026-11-01T08:59:10.819Z",
+          "log": "output/execution-checkpoints/1793523548017-989ca62d/command.log"
+        }
+      ],
+      "blockers": [],
+      "nextAction": "1440/900实际指针/键盘/四相位/正误反馈/复位通过；390仅观察，不代表视觉质量达标。",
+      "updatedAt": "2026-11-01T09:16:52.623Z",
+      "evidence": [
+        "output/execution-checkpoints/1793523548017-989ca62d/result.json"
+      ]
+    },
+    "T7-C-CLEANUP": {
+      "id": "T7-C-CLEANUP",
+      "status": "verified",
+      "modifiedFiles": [],
+      "changes": [],
+      "tests": [
+        {
+          "jobId": "1793523785711-b300aa23",
+          "taskId": "T7-C-CLEANUP",
+          "label": "原C设置与工作空间有界恢复（零模型、CAS不覆盖并发变更）",
+          "status": "passed",
+          "exitCode": 0,
+          "signal": null,
+          "finishedAt": "2026-11-01T09:03:10.421Z",
+          "log": "output/execution-checkpoints/1793523785711-b300aa23/command.log"
+        }
+      ],
+      "blockers": [],
+      "nextAction": "独立恢复已确认original roles revision61与原工作空间；无dirty文档，新owned App关闭，旧创建timeout保持。",
+      "updatedAt": "2026-11-01T09:16:52.741Z",
+      "evidence": [
+        "output/execution-checkpoints/1793523785711-b300aa23/result.json"
+      ]
+    },
+    "T2-SOURCE-INTEGRATION": {
+      "id": "T2-SOURCE-INTEGRATION",
+      "status": "verified",
+      "modifiedFiles": [],
+      "changes": [],
+      "tests": [
+        {
+          "jobId": "1793523786371-a37ea51d",
+          "taskId": "T2-SOURCE-INTEGRATION",
+          "label": "HTML job artifact修复及同组依赖、物化、正式from回归",
+          "status": "failed",
+          "exitCode": 1,
+          "signal": null,
+          "finishedAt": "2026-11-01T09:03:18.010Z",
+          "log": "output/execution-checkpoints/1793523786371-a37ea51d/command.log"
+        },
+        {
+          "jobId": "1793524523479-618956be",
+          "taskId": "T2-SOURCE-INTEGRATION",
+          "label": "HTML来源与生成图引用正式装配回归",
+          "status": "failed",
+          "exitCode": 1,
+          "signal": null,
+          "finishedAt": "2026-11-01T09:15:32.714Z",
+          "log": "output/execution-checkpoints/1793524523479-618956be/command.log"
+        },
+        {
+          "jobId": "1793524699332-70f195b6",
+          "taskId": "T2-SOURCE-INTEGRATION",
+          "label": "HTML来源与生成图引用正式装配回归",
+          "status": "failed",
+          "exitCode": 1,
+          "signal": null,
+          "finishedAt": "2026-11-01T09:18:30.957Z",
+          "log": "output/execution-checkpoints/1793524699332-70f195b6/command.log"
+        },
+        {
+          "jobId": "1793524773792-4fb9bc1d",
+          "taskId": "T2-SOURCE-INTEGRATION",
+          "label": "HTML来源与生成图引用正式装配回归",
+          "status": "failed",
+          "exitCode": 1,
+          "signal": null,
+          "finishedAt": "2026-11-01T09:19:45.766Z",
+          "log": "output/execution-checkpoints/1793524773792-4fb9bc1d/command.log"
+        },
+        {
+          "jobId": "1793525071944-bedddf94",
+          "taskId": "T2-SOURCE-INTEGRATION",
+          "label": "HTML来源与生成图引用正式装配回归",
+          "status": "passed",
+          "exitCode": 0,
+          "signal": null,
+          "finishedAt": "2026-11-01T09:24:44.730Z",
+          "log": "output/execution-checkpoints/1793525071944-bedddf94/command.log"
+        }
+      ],
+      "blockers": [],
+      "nextAction": "4文件23/23已过；无需重复，后续只因新相关反例扩大。",
+      "updatedAt": "2026-11-01T09:27:04.248Z",
+      "evidence": [
+        "output/execution-checkpoints/1793525071944-bedddf94/result.json"
+      ]
+    },
+    "T7-C-SOURCE": {
+      "id": "T7-C-SOURCE",
+      "status": "verified",
+      "modifiedFiles": [],
+      "changes": [],
+      "tests": [
+        {
+          "jobId": "1793524411636-1d3da5cf",
+          "taskId": "T7-C-SOURCE",
+          "label": "C正式内容局部编辑与人工结果保护",
+          "status": "passed",
+          "exitCode": 0,
+          "signal": null,
+          "finishedAt": "2026-11-01T09:13:33.818Z",
+          "log": "output/execution-checkpoints/1793524411636-1d3da5cf/command.log"
+        }
+      ],
+      "blockers": [],
+      "nextAction": "正式Source窄改r8、独立冷开、再导出和离线完整行为通过；原C/人工/Source原件保持。",
+      "updatedAt": "2026-11-01T09:27:04.523Z",
+      "evidence": [
+        "output/execution-checkpoints/1793524411636-1d3da5cf/result.json",
+        "output/execution-checkpoints/1793524581055-466f4e4f/result.json",
+        "output/execution-checkpoints/1793524638455-2148115a/result.json"
+      ]
+    },
+    "T7-C-SOURCE-COLD": {
+      "id": "T7-C-SOURCE-COLD",
+      "status": "verified",
+      "modifiedFiles": [],
+      "changes": [],
+      "tests": [
+        {
+          "jobId": "1793524581055-466f4e4f",
+          "taskId": "T7-C-SOURCE-COLD",
+          "label": "C源码接力副本独立App冷开与正式导出",
+          "status": "passed",
+          "exitCode": 0,
+          "signal": null,
+          "finishedAt": "2026-11-01T09:16:29.566Z",
+          "log": "output/execution-checkpoints/1793524581055-466f4e4f/command.log"
+        }
+      ],
+      "blockers": [],
+      "nextAction": "真实App7.6s通过；r8正式导出与作者态/资源/原件保持已核。",
+      "updatedAt": "2026-11-01T09:27:04.650Z",
+      "evidence": [
+        "output/execution-checkpoints/1793524581055-466f4e4f/result.json"
+      ]
+    },
+    "T7-C-SOURCE-OFFLINE": {
+      "id": "T7-C-SOURCE-OFFLINE",
+      "status": "verified",
+      "modifiedFiles": [],
+      "changes": [],
+      "tests": [
+        {
+          "jobId": "1793524638455-2148115a",
+          "taskId": "T7-C-SOURCE-OFFLINE",
+          "label": "正式再导出副本的桌面尺寸完整行为",
+          "status": "passed",
+          "exitCode": 0,
+          "signal": null,
+          "finishedAt": "2026-11-01T09:17:21.137Z",
+          "log": "output/execution-checkpoints/1793524638455-2148115a/command.log"
+        }
+      ],
+      "blockers": [],
+      "nextAction": "r8行为已验，后继r9可读性及交付已闭合；不重跑本组。",
+      "updatedAt": "2026-11-01T13:43:05.436Z",
+      "evidence": [
+        "output/execution-checkpoints/1793524638455-2148115a/result.json"
+      ]
+    },
+    "T7-C-CONTINUATION": {
+      "id": "T7-C-CONTINUATION",
+      "status": "verified",
+      "modifiedFiles": [],
+      "changes": [
+        "唯一续改run已在旧收集器清理时停止；r9已保存/导出并通过双桌面真实离线行为，900主阅读障碍经独立看图解除。"
+      ],
+      "tests": [
+        {
+          "jobId": "1793524914440-a912e28f",
+          "taskId": "T7-C-CONTINUATION",
+          "label": "正常内置AI基于r8人工接力副本改善课堂可读性",
+          "status": "failed",
+          "exitCode": 1,
+          "signal": null,
+          "finishedAt": "2026-11-01T09:22:20.679Z",
+          "log": "output/execution-checkpoints/1793524914440-a912e28f/command.log"
+        },
+        {
+          "jobId": "1793525725349-def59c4a",
+          "taskId": "T7-C-CONTINUATION",
+          "label": "旧profile完成恢复后，正常内置AI续改r8新副本",
+          "status": "failed",
+          "exitCode": 1,
+          "signal": null,
+          "finishedAt": "2026-11-01T09:45:46.386Z",
+          "log": "output/execution-checkpoints/1793525725349-def59c4a/command.log"
+        }
+      ],
+      "blockers": [],
+      "nextAction": "r9交付验收完成；原run仍stopped、旧wrapper仍failed，禁止重发。",
+      "updatedAt": "2026-11-01T13:29:55.270Z",
+      "evidence": [
+        "output/comprehensive-execution-20261101/final-closure-2026-11-01T11-34-58-201Z/public-recovery/public-recovery.json",
+        "output/comprehensive-execution-20261101/final-closure-2026-11-01T11-34-58-201Z/r9-packaged-cold/result.json",
+        "output/comprehensive-execution-20261101/final-closure-2026-11-01T11-34-58-201Z/quality-accounting-review-20261101.md"
+      ]
+    },
+    "T7-C-CONTINUATION-CLEANUP": {
+      "id": "T7-C-CONTINUATION-CLEANUP",
+      "status": "verified",
+      "modifiedFiles": [],
+      "changes": [],
+      "tests": [
+        {
+          "jobId": "1793525058894-c9eba6e3",
+          "taskId": "T7-C-CONTINUATION-CLEANUP",
+          "label": "零发送失败后的独立工作空间恢复",
+          "status": "passed",
+          "exitCode": 0,
+          "signal": null,
+          "finishedAt": "2026-11-01T09:24:22.704Z",
+          "log": "output/execution-checkpoints/1793525058894-c9eba6e3/command.log"
+        }
+      ],
+      "blockers": [],
+      "nextAction": "零发送失败后原roles rev63与英语素材2恢复确认；ownedApp3320关闭。",
+      "updatedAt": "2026-11-01T09:27:04.899Z",
+      "evidence": [
+        "output/execution-checkpoints/1793525058894-c9eba6e3/result.json"
+      ]
+    },
+    "T7-C-READINESS": {
+      "id": "T7-C-READINESS",
+      "status": "verified",
+      "modifiedFiles": [],
+      "changes": [
+        "新独立观察中所有公开读取已完成；历史前置超时失败保留。"
+      ],
+      "tests": [
+        {
+          "jobId": "1793525297312-85bafc55",
+          "taskId": "T7-C-READINESS",
+          "label": "逐公开读取阶段确认旧profile后台恢复",
+          "status": "failed",
+          "exitCode": 1,
+          "signal": null,
+          "finishedAt": "2026-11-01T09:28:29.826Z",
+          "log": "output/execution-checkpoints/1793525297312-85bafc55/command.log"
+        },
+        {
+          "jobId": "1793525425440-c53f9976",
+          "taskId": "T7-C-READINESS",
+          "label": "已登记会话身份下的后台恢复与公开读取时序",
+          "status": "failed",
+          "exitCode": 1,
+          "signal": null,
+          "finishedAt": "2026-11-01T09:30:49.615Z",
+          "log": "output/execution-checkpoints/1793525425440-c53f9976/command.log"
+        }
+      ],
+      "blockers": [],
+      "nextAction": "已核实原run，无需复跑readiness探针。",
+      "updatedAt": "2026-11-01T11:41:57.268Z",
+      "evidence": [
+        "output/comprehensive-execution-20261101/final-closure-2026-11-01T11-34-58-201Z/public-recovery/public-recovery.json"
+      ]
+    },
+    "T3-STARTUP-RECOVERY": {
+      "id": "T3-STARTUP-RECOVERY",
+      "status": "verified",
+      "modifiedFiles": [],
+      "changes": [
+        "原14项恢复owner测试已通过，纠正in_progress摘要。"
+      ],
+      "tests": [
+        {
+          "jobId": "1793526174199-1e34af16",
+          "taskId": "T3-STARTUP-RECOVERY",
+          "label": "同会话恢复期间复用事件状态与未知不重放回归",
+          "status": "passed",
+          "exitCode": 0,
+          "signal": null,
+          "finishedAt": "2026-11-01T09:43:07.043Z",
+          "log": "output/execution-checkpoints/1793526174199-1e34af16/command.log"
+        }
+      ],
+      "blockers": [],
+      "nextAction": "不重跑已验启动恢复；新增作业等待修复单独验证。",
+      "updatedAt": "2026-11-01T11:41:57.001Z",
+      "evidence": [
+        "output/execution-checkpoints/1793526174199-1e34af16/result.json"
+      ]
+    },
+    "T7-C-FINAL-RECOVERY": {
+      "id": "T7-C-FINAL-RECOVERY",
+      "status": "verified",
+      "modifiedFiles": [],
+      "changes": [
+        "正式公开接口核实0345终态stopped且只有一次accepted；原角色revision65、准确workspaceId、无recoveryIssues、4原件及r9保存文件保持。"
+      ],
+      "tests": [
+        {
+          "jobId": "1793533045430-2ed10062",
+          "taskId": "T7-C-FINAL-RECOVERY",
+          "label": "只读核实既有0345 run与唯一提交和r9",
+          "status": "passed",
+          "exitCode": 0,
+          "signal": null,
+          "finishedAt": "2026-11-01T11:37:50.043Z",
+          "log": "output/execution-checkpoints/1793533045430-2ed10062/command.log"
+        }
+      ],
+      "blockers": [],
+      "nextAction": "原请求未重发；r9独立冷开/再导出及等待软件修复均已验收。",
+      "updatedAt": "2026-11-01T13:43:05.628Z",
+      "evidence": [
+        "output/comprehensive-execution-20261101/final-closure-2026-11-01T11-34-58-201Z/public-recovery/public-recovery.json",
+        "output/execution-checkpoints/1793533045430-2ed10062/result.json"
+      ]
+    },
+    "T7-C-R9-OFFLINE": {
+      "id": "T7-C-R9-OFFLINE",
+      "status": "verified",
+      "modifiedFiles": [],
+      "changes": [],
+      "tests": [
+        {
+          "jobId": "1793533142297-e8b667ef",
+          "taskId": "T7-C-R9-OFFLINE",
+          "label": "既有r9独立离线指针键盘与900画面",
+          "status": "passed",
+          "exitCode": 0,
+          "signal": null,
+          "finishedAt": "2026-11-01T11:39:05.491Z",
+          "log": "output/execution-checkpoints/1793533142297-e8b667ef/command.log"
+        }
+      ],
+      "blockers": [],
+      "nextAction": "1440/900行为与截图独审通过：标题、重置、指针、键盘、四相位及正误；390仅观察。",
+      "updatedAt": "2026-11-01T11:53:14.292Z",
+      "evidence": [
+        "output/execution-checkpoints/1793533142297-e8b667ef/result.json"
+      ]
+    },
+    "RESILIENCE-FINAL": {
+      "id": "RESILIENCE-FINAL",
+      "status": "verified",
+      "modifiedFiles": [],
+      "changes": [],
+      "tests": [
+        {
+          "jobId": "1793533293715-79e89b35",
+          "taskId": "RESILIENCE-FINAL",
+          "label": "原子检查点上一份恢复的Windows验证",
+          "status": "passed",
+          "exitCode": 0,
+          "signal": null,
+          "finishedAt": "2026-11-01T11:41:39.823Z",
+          "log": "output/execution-checkpoints/1793533293715-79e89b35/command.log"
+        }
+      ],
+      "blockers": [],
+      "nextAction": "检查点前一份快照真实保留旧嵌套状态；8/8 Windows恢复测试通过。",
+      "updatedAt": "2026-11-01T11:53:12.888Z",
+      "evidence": [
+        "output/execution-checkpoints/1793533293715-79e89b35/result.json"
+      ]
+    },
+    "T7-WAIT-RED": {
+      "id": "T7-WAIT-RED",
+      "status": "verified",
+      "modifiedFiles": [],
+      "changes": [],
+      "tests": [
+        {
+          "jobId": "1793533391462-d1f17af8",
+          "taskId": "T7-WAIT-RED",
+          "label": "旧Engine重现有界wait被自动无限延长",
+          "status": "failed",
+          "exitCode": 1,
+          "signal": null,
+          "finishedAt": "2026-11-01T11:43:19.199Z",
+          "log": "output/execution-checkpoints/1793533391462-d1f17af8/command.log"
+        }
+      ],
+      "blockers": [],
+      "nextAction": "旧Engine5项新增行为反例失败已复现；command原始failed保持，红灯取证完成。",
+      "updatedAt": "2026-11-01T11:53:13.066Z",
+      "evidence": [
+        "output/execution-checkpoints/1793533391462-d1f17af8/result.json"
+      ]
+    },
+    "T7-WAIT-GREEN": {
+      "id": "T7-WAIT-GREEN",
+      "status": "verified",
+      "modifiedFiles": [],
+      "changes": [],
+      "tests": [
+        {
+          "jobId": "1793533468586-3be17e31",
+          "taskId": "T7-WAIT-GREEN",
+          "label": "Engine等待/终态/停止/恢复直接消费者回归",
+          "status": "failed",
+          "exitCode": 1,
+          "signal": null,
+          "finishedAt": "2026-11-01T11:44:53.109Z",
+          "log": "output/execution-checkpoints/1793533468586-3be17e31/command.log"
+        }
+      ],
+      "blockers": [],
+      "nextAction": "受影响3文件149项通过；唯一既有图片夹具修复后focused1项通过。原3文件命令失败记录保持。",
+      "updatedAt": "2026-11-01T11:53:13.583Z",
+      "evidence": [
+        "output/execution-checkpoints/1793533468586-3be17e31/result.json",
+        "output/execution-checkpoints/1793533731385-c69be14c/result.json"
+      ]
+    },
+    "FINAL-PRODUCTION-BUILD": {
+      "id": "FINAL-PRODUCTION-BUILD",
+      "status": "verified",
+      "modifiedFiles": [],
+      "changes": [],
+      "tests": [
+        {
+          "jobId": "1793533469816-6de42b78",
+          "taskId": "FINAL-PRODUCTION-BUILD",
+          "label": "三目标类型与最终生产player/renderer/electron构建",
+          "status": "passed",
+          "exitCode": 0,
+          "signal": null,
+          "finishedAt": "2026-11-01T11:44:41.774Z",
+          "log": "output/execution-checkpoints/1793533469816-6de42b78/command.log"
+        },
+        {
+          "jobId": "1793540222547-4df65638",
+          "taskId": "FINAL-PRODUCTION-BUILD",
+          "label": "取消结果修复后的主/测试类型检查与受影响Electron生产构建",
+          "status": "failed",
+          "exitCode": 1,
+          "signal": null,
+          "finishedAt": "2026-11-01T13:37:07.470Z",
+          "log": "output/execution-checkpoints/1793540222547-4df65638/command.log"
+        },
+        {
+          "jobId": "1793540297338-bfa2f841",
+          "taskId": "FINAL-PRODUCTION-BUILD",
+          "label": "取消结果修复后的主/测试类型检查与受影响Electron生产构建",
+          "status": "passed",
+          "exitCode": 0,
+          "signal": null,
+          "finishedAt": "2026-11-01T13:38:26.063Z",
+          "log": "output/execution-checkpoints/1793540297338-bfa2f841/command.log"
+        }
+      ],
+      "blockers": [],
+      "nextAction": "当前compute修复已通过主/测试类型并实际重建Electron；player/renderer与E2E未变，复用有效证据。",
+      "updatedAt": "2026-11-01T13:43:03.470Z",
+      "evidence": [
+        "output/execution-checkpoints/1793540297338-bfa2f841/result.json",
+        "output/execution-checkpoints/1793533469816-6de42b78/result.json"
+      ]
+    },
+    "FINAL-DIR-PACKAGE": {
+      "id": "FINAL-DIR-PACKAGE",
+      "status": "verified",
+      "modifiedFiles": [],
+      "changes": [],
+      "tests": [
+        {
+          "jobId": "1793533613188-da597221",
+          "taskId": "FINAL-DIR-PACKAGE",
+          "label": "当前生产构建隔离Windows目录包",
+          "status": "passed",
+          "exitCode": 0,
+          "signal": null,
+          "finishedAt": "2026-11-01T11:48:18.671Z",
+          "log": "output/execution-checkpoints/1793533613188-da597221/command.log"
+        },
+        {
+          "jobId": "1793540333157-40109903",
+          "taskId": "FINAL-DIR-PACKAGE",
+          "label": "取消结算修复后的隔离Windows目录验证包，保留原包",
+          "status": "passed",
+          "exitCode": 0,
+          "signal": null,
+          "finishedAt": "2026-11-01T13:40:26.778Z",
+          "log": "output/execution-checkpoints/1793540333157-40109903/command.log"
+        }
+      ],
+      "blockers": [],
+      "nextAction": "这是11月1日已验目录包及对应UI证据，不含后续ACP安装和输入区修改；后续修改按ACP任务的源码构建/实机结果收口，未重制发行包。",
+      "updatedAt": "2026-11-01T16:23:27.464Z",
+      "evidence": [
+        "output/execution-checkpoints/1793540333157-40109903/result.json",
+        "output/comprehensive-execution-20261101/final-closure-2026-11-01T11-34-58-201Z/closeout-package-identity.json"
+      ]
+    },
+    "M26-BASELINE": {
+      "id": "M26-BASELINE",
+      "status": "verified",
+      "modifiedFiles": [],
+      "changes": [],
+      "tests": [
+        {
+          "jobId": "1793533640534-5f75933a",
+          "taskId": "M26-BASELINE",
+          "label": "旧Engine隔离对照既存图片断言失败",
+          "status": "passed",
+          "exitCode": 0,
+          "signal": null,
+          "finishedAt": "2026-11-01T11:47:26.009Z",
+          "log": "output/execution-checkpoints/1793533640534-5f75933a/command.log"
+        }
+      ],
+      "blockers": [],
+      "nextAction": "旧Engine同样复现图片detail断言失败；不是等待修复回归。临时副本已仅清理本次所有。",
+      "updatedAt": "2026-11-01T11:53:13.307Z",
+      "evidence": [
+        "output/execution-checkpoints/1793533640534-5f75933a/result.json"
+      ]
+    },
+    "FINAL-E2E-TYPES": {
+      "id": "FINAL-E2E-TYPES",
+      "status": "verified",
+      "modifiedFiles": [],
+      "changes": [],
+      "tests": [
+        {
+          "jobId": "1793533707310-55f40422",
+          "taskId": "FINAL-E2E-TYPES",
+          "label": "新增隔离包真实入口测试类型检查",
+          "status": "passed",
+          "exitCode": 0,
+          "signal": null,
+          "finishedAt": "2026-11-01T11:48:28.005Z",
+          "log": "output/execution-checkpoints/1793533707310-55f40422/command.log"
+        },
+        {
+          "jobId": "1793534146631-0b88da81",
+          "taskId": "FINAL-E2E-TYPES",
+          "label": "新增隔离包真实入口测试类型检查",
+          "status": "passed",
+          "exitCode": 0,
+          "signal": null,
+          "finishedAt": "2026-11-01T11:55:47.368Z",
+          "log": "output/execution-checkpoints/1793534146631-0b88da81/command.log"
+        },
+        {
+          "jobId": "1793534375300-b48ede9f",
+          "taskId": "FINAL-E2E-TYPES",
+          "label": "新增隔离包真实入口测试类型检查",
+          "status": "failed",
+          "exitCode": 1,
+          "signal": null,
+          "finishedAt": "2026-11-01T11:59:35.951Z",
+          "log": "output/execution-checkpoints/1793534375300-b48ede9f/command.log"
+        },
+        {
+          "jobId": "1793534412177-3fdb87f3",
+          "taskId": "FINAL-E2E-TYPES",
+          "label": "新增隔离包真实入口测试类型检查",
+          "status": "passed",
+          "exitCode": 0,
+          "signal": null,
+          "finishedAt": "2026-11-01T12:00:12.841Z",
+          "log": "output/execution-checkpoints/1793534412177-3fdb87f3/command.log"
+        }
+      ],
+      "blockers": [],
+      "nextAction": "最后类型检查通过，旧失败保留；当前修复不改E2E测试。",
+      "updatedAt": "2026-11-01T13:29:55.437Z",
+      "evidence": [
+        "output/execution-checkpoints/1793534412177-3fdb87f3/result.json"
+      ]
+    },
+    "M26-FIXTURE": {
+      "id": "M26-FIXTURE",
+      "status": "verified",
+      "modifiedFiles": [],
+      "changes": [],
+      "tests": [
+        {
+          "jobId": "1793533731385-c69be14c",
+          "taskId": "M26-FIXTURE",
+          "label": "既有显式原图high语义断言复验",
+          "status": "passed",
+          "exitCode": 0,
+          "signal": null,
+          "finishedAt": "2026-11-01T11:48:57.140Z",
+          "log": "output/execution-checkpoints/1793533731385-c69be14c/command.log"
+        }
+      ],
+      "blockers": [],
+      "nextAction": "正确high细节断言通过；保留3请求、跨run拒绝、存档和作者态保护。",
+      "updatedAt": "2026-11-01T11:53:13.442Z",
+      "evidence": [
+        "output/execution-checkpoints/1793533731385-c69be14c/result.json"
+      ]
+    },
+    "T7-C-R9-PACKAGED-COLD": {
+      "id": "T7-C-R9-PACKAGED-COLD",
+      "status": "verified",
+      "modifiedFiles": [],
+      "changes": [],
+      "tests": [
+        {
+          "jobId": "1793533732586-7a83e431",
+          "taskId": "T7-C-R9-PACKAGED-COLD",
+          "label": "最终目录包独立冷开r9与正式Source读回/再导出",
+          "status": "passed",
+          "exitCode": 0,
+          "signal": null,
+          "finishedAt": "2026-11-01T11:49:01.821Z",
+          "log": "output/execution-checkpoints/1793533732586-7a83e431/command.log"
+        }
+      ],
+      "blockers": [],
+      "nextAction": "r9在最终包fresh profile独立冷开，正式Source读回/同r9再导出通过；HTML与已验r9字节一致复用离线证据，原件保全。",
+      "updatedAt": "2026-11-01T11:53:14.433Z",
+      "evidence": [
+        "output/execution-checkpoints/1793533732586-7a83e431/result.json"
+      ]
+    },
+    "FINAL-PACKAGED-SMOKE": {
+      "id": "FINAL-PACKAGED-SMOKE",
+      "status": "verified",
+      "modifiedFiles": [],
+      "changes": [],
+      "tests": [
+        {
+          "jobId": "1793533733835-62c90629",
+          "taskId": "FINAL-PACKAGED-SMOKE",
+          "label": "真实目录包文件/PPTX/参考/内置AI零发送入口",
+          "status": "failed",
+          "exitCode": 1,
+          "signal": null,
+          "finishedAt": "2026-11-01T11:49:36.985Z",
+          "log": "output/execution-checkpoints/1793533733835-62c90629/command.log"
+        },
+        {
+          "jobId": "1793533914348-4b72084d",
+          "taskId": "FINAL-PACKAGED-SMOKE",
+          "label": "真实目录包文件/PPTX/参考/内置AI零发送入口",
+          "status": "failed",
+          "exitCode": 1,
+          "signal": null,
+          "finishedAt": "2026-11-01T11:52:27.906Z",
+          "log": "output/execution-checkpoints/1793533914348-4b72084d/command.log"
+        },
+        {
+          "jobId": "1793534052477-3901a854",
+          "taskId": "FINAL-PACKAGED-SMOKE",
+          "label": "真实目录包文件/PPTX/参考/内置AI零发送入口",
+          "status": "failed",
+          "exitCode": 1,
+          "signal": null,
+          "finishedAt": "2026-11-01T11:54:38.614Z",
+          "log": "output/execution-checkpoints/1793534052477-3901a854/command.log"
+        },
+        {
+          "jobId": "1793534132147-7482a56d",
+          "taskId": "FINAL-PACKAGED-SMOKE",
+          "label": "真实目录包文件/PPTX/参考/内置AI零发送入口",
+          "status": "passed",
+          "exitCode": 0,
+          "signal": null,
+          "finishedAt": "2026-11-01T11:56:02.040Z",
+          "log": "output/execution-checkpoints/1793534132147-7482a56d/command.log"
+        },
+        {
+          "jobId": "1793534224936-d5833f2e",
+          "taskId": "FINAL-PACKAGED-SMOKE",
+          "label": "真实目录包文件/PPTX/参考/内置AI零发送入口",
+          "status": "passed",
+          "exitCode": 0,
+          "signal": null,
+          "finishedAt": "2026-11-01T11:57:09.622Z",
+          "log": "output/execution-checkpoints/1793534224936-d5833f2e/command.log"
+        }
+      ],
+      "blockers": [],
+      "nextAction": "这是11月1日已验目录包及对应UI证据，不含后续ACP安装和输入区修改；后续修改按ACP任务的源码构建/实机结果收口，未重制发行包。",
+      "updatedAt": "2026-11-01T16:23:27.633Z",
+      "evidence": [
+        "output/comprehensive-execution-20261101/packaged-smoke/run-Cz5HAV/evidence.json",
+        "output/comprehensive-execution-20261101/final-closure-2026-11-01T11-34-58-201Z/closeout-package-identity.json"
+      ]
+    },
+    "T7-A2-READABILITY": {
+      "id": "T7-A2-READABILITY",
+      "status": "blocked",
+      "modifiedFiles": [],
+      "changes": [],
+      "tests": [
+        {
+          "jobId": "1793534785370-2e63db50",
+          "taskId": "T7-A2-READABILITY",
+          "label": "A2课堂关键标签局部Source正式MCP修复副本r11",
+          "status": "failed",
+          "exitCode": 1,
+          "signal": null,
+          "finishedAt": "2026-11-01T12:06:28.635Z",
+          "log": "output/execution-checkpoints/1793534785370-2e63db50/command.log"
+        }
+      ],
+      "blockers": [
+        "历史r11消费者断言失败，原apply已提交；该候选由r12取代，不是当前交付阻塞。"
+      ],
+      "nextAction": "保留原failed；原操作已公开恢复且零重复apply，最终交付为r12，无待重试动作。",
+      "evidence": [
+        "output/execution-checkpoints/1793534785370-2e63db50/result.json",
+        "output/comprehensive-execution-20261101/final-closure-2026-11-01T11-34-58-201Z/a2-r11-public-recovery/result.json",
+        "output/comprehensive-execution-20261101/final-closure-2026-11-01T11-34-58-201Z/a2-r12-packaged-cold/result.json"
+      ],
+      "updatedAt": "2026-11-01T13:29:55.787Z"
+    },
+    "T7-A2-READABILITY-RESUME": {
+      "id": "T7-A2-READABILITY-RESUME",
+      "status": "verified",
+      "modifiedFiles": [],
+      "changes": [],
+      "tests": [
+        {
+          "jobId": "1793534871626-88b9f264",
+          "taskId": "T7-A2-READABILITY-RESUME",
+          "label": "A2已提交r11真实恢复后仅保存导出，零重复apply",
+          "status": "failed",
+          "exitCode": 1,
+          "signal": null,
+          "finishedAt": "2026-11-01T12:07:54.557Z",
+          "log": "output/execution-checkpoints/1793534871626-88b9f264/command.log"
+        },
+        {
+          "jobId": "1793534958844-400bc5e2",
+          "taskId": "T7-A2-READABILITY-RESUME",
+          "label": "A2公开恢复API取回已提交r11后保存导出，0 apply",
+          "status": "passed",
+          "exitCode": 0,
+          "signal": null,
+          "finishedAt": "2026-11-01T12:09:26.376Z",
+          "log": "output/execution-checkpoints/1793534958844-400bc5e2/command.log"
+        }
+      ],
+      "blockers": [],
+      "nextAction": "原operation applied/r11/undoDepth1已核，恢复projectApplyInvocations=0，保存导出通过；禁止重放。",
+      "updatedAt": "2026-11-01T13:29:55.959Z",
+      "evidence": [
+        "output/comprehensive-execution-20261101/final-closure-2026-11-01T11-34-58-201Z/a2-r11-public-recovery/result.json"
+      ]
+    },
+    "T7-A2-R11-OFFLINE": {
+      "id": "T7-A2-R11-OFFLINE",
+      "status": "verified",
+      "modifiedFiles": [],
+      "changes": [],
+      "tests": [
+        {
+          "jobId": "1793535000514-a6c31d66",
+          "taskId": "T7-A2-R11-OFFLINE",
+          "label": "A2 r11同版离线三页行为与双桌面实际画面",
+          "status": "passed",
+          "exitCode": 0,
+          "signal": null,
+          "finishedAt": "2026-11-01T12:10:04.577Z",
+          "log": "output/execution-checkpoints/1793535000514-a6c31d66/command.log"
+        }
+      ],
+      "blockers": [],
+      "nextAction": "r11行为证据有效，标签相交未通过；最终候选为r12，不外推r11质量。",
+      "updatedAt": "2026-11-01T13:29:56.154Z",
+      "evidence": [
+        "output/comprehensive-execution-20261101/final-closure-2026-11-01T11-34-58-201Z/a2-r11-offline/result.json"
+      ]
+    },
+    "T7-A2-R11-LABELS": {
+      "id": "T7-A2-R11-LABELS",
+      "status": "blocked",
+      "modifiedFiles": [],
+      "changes": [],
+      "tests": [
+        {
+          "jobId": "1793535057070-5de41703",
+          "taskId": "T7-A2-R11-LABELS",
+          "label": "A2真实浏览器361角度标签边界及900关键帧",
+          "status": "failed",
+          "exitCode": 1,
+          "signal": null,
+          "finishedAt": "2026-11-01T12:10:58.302Z",
+          "log": "output/execution-checkpoints/1793535057070-5de41703/command.log"
+        }
+      ],
+      "blockers": [
+        "历史r11的263–269度标签相交实测失败；r12已修复，不是当前交付阻塞。"
+      ],
+      "nextAction": "保留r11失败证据，不重跑或回填；r12的361角度及实际视觉验收已通过。",
+      "updatedAt": "2026-11-01T13:29:56.412Z",
+      "evidence": [
+        "output/execution-checkpoints/1793535057070-5de41703/result.json",
+        "output/comprehensive-execution-20261101/final-closure-2026-11-01T11-34-58-201Z/a2-r12-labels/result.json"
+      ]
+    },
+    "T7-A2-R12-LABEL-FIX": {
+      "id": "T7-A2-R12-LABEL-FIX",
+      "status": "verified",
+      "modifiedFiles": [],
+      "changes": [],
+      "tests": [
+        {
+          "jobId": "1793535150099-234b4fa0",
+          "taskId": "T7-A2-R12-LABEL-FIX",
+          "label": "A2下半轨道标签避让实测修订r12，保留r11",
+          "status": "passed",
+          "exitCode": 0,
+          "signal": null,
+          "finishedAt": "2026-11-01T12:12:37.049Z",
+          "log": "output/execution-checkpoints/1793535150099-234b4fa0/command.log"
+        }
+      ],
+      "blockers": [],
+      "nextAction": "r12局部修正、保存和导出完成，r10/r11与失败保留。",
+      "updatedAt": "2026-11-01T13:29:56.580Z",
+      "evidence": [
+        "output/comprehensive-execution-20261101/final-closure-2026-11-01T11-34-58-201Z/a2-readability-r12/result.json",
+        "output/comprehensive-execution-20261101/final-closure-2026-11-01T11-34-58-201Z/quality-accounting-addendum-a2-r12-20261101.md"
+      ]
+    },
+    "T7-A2-R12-OFFLINE": {
+      "id": "T7-A2-R12-OFFLINE",
+      "status": "verified",
+      "modifiedFiles": [],
+      "changes": [],
+      "tests": [
+        {
+          "jobId": "1793535192844-cbead85d",
+          "taskId": "T7-A2-R12-OFFLINE",
+          "label": "A2最终r12离线三页与双桌面画面",
+          "status": "passed",
+          "exitCode": 0,
+          "signal": null,
+          "finishedAt": "2026-11-01T12:13:17.226Z",
+          "log": "output/execution-checkpoints/1793535192844-cbead85d/command.log"
+        }
+      ],
+      "blockers": [],
+      "nextAction": "双桌面视觉和交互通过；390仅观察，不外推移动可读性。",
+      "updatedAt": "2026-11-01T13:29:56.757Z",
+      "evidence": [
+        "output/comprehensive-execution-20261101/final-closure-2026-11-01T11-34-58-201Z/a2-r12-offline/result.json",
+        "output/comprehensive-execution-20261101/final-closure-2026-11-01T11-34-58-201Z/quality-accounting-addendum-a2-r12-20261101.md"
+      ]
+    },
+    "T7-A2-R12-LABELS": {
+      "id": "T7-A2-R12-LABELS",
+      "status": "verified",
+      "modifiedFiles": [],
+      "changes": [],
+      "tests": [
+        {
+          "jobId": "1793535194066-13dacfad",
+          "taskId": "T7-A2-R12-LABELS",
+          "label": "A2最终r12真实361角度label边界",
+          "status": "passed",
+          "exitCode": 0,
+          "signal": null,
+          "finishedAt": "2026-11-01T12:13:15.606Z",
+          "log": "output/execution-checkpoints/1793535194066-13dacfad/command.log"
+        }
+      ],
+      "blockers": [],
+      "nextAction": "361整数角边界与900关键帧独审通过，不追加留白门槛。",
+      "updatedAt": "2026-11-01T13:29:56.923Z",
+      "evidence": [
+        "output/comprehensive-execution-20261101/final-closure-2026-11-01T11-34-58-201Z/a2-r12-labels/result.json",
+        "output/comprehensive-execution-20261101/final-closure-2026-11-01T11-34-58-201Z/quality-accounting-addendum-a2-r12-20261101.md"
+      ]
+    },
+    "T7-A2-R12-COLD": {
+      "id": "T7-A2-R12-COLD",
+      "status": "verified",
+      "modifiedFiles": [],
+      "changes": [],
+      "tests": [
+        {
+          "jobId": "1793535195326-2f562a15",
+          "taskId": "T7-A2-R12-COLD",
+          "label": "A2最终r12目录包独立冷开和同版再导出",
+          "status": "passed",
+          "exitCode": 0,
+          "signal": null,
+          "finishedAt": "2026-11-01T12:13:24.310Z",
+          "log": "output/execution-checkpoints/1793535195326-2f562a15/command.log"
+        }
+      ],
+      "blockers": [],
+      "nextAction": "r12作者态、非目标人改/资源及同版再导出通过，原件保全；无需重跑。",
+      "updatedAt": "2026-11-01T13:29:57.120Z",
+      "evidence": [
+        "output/comprehensive-execution-20261101/final-closure-2026-11-01T11-34-58-201Z/a2-r12-packaged-cold/result.json"
+      ]
+    },
+    "NATIVE-PIPE-WINDOWS-DIAGNOSTIC": {
+      "id": "NATIVE-PIPE-WINDOWS-DIAGNOSTIC",
+      "status": "verified",
+      "modifiedFiles": [
+        "scripts/experiments/native-pipe-windows-diagnostic-20261101.mjs",
+        "src/main/workbench/compute/nativePythonProcess.ts",
+        "src/main/workbench/compute/NativePythonComputeBackend.ts",
+        "src/main/workbench/compute/ComputeJobService.ts"
+      ],
+      "changes": [
+        "真实Python父子进程建立前提并复现取消延迟；旧Node诊断未建立前提的失败保留",
+        "runner取消/超时释放读管道，正常完整输出保持；停止未确认经Backend到Job为unknown，不交付/重放",
+        "Windows真实修后AbortError及时结算、stopConfirmed=false；未知后代仍可运行的限制保留"
+      ],
+      "tests": [
+        {
+          "jobId": "1793535663978-1278883f",
+          "taskId": "NATIVE-PIPE-WINDOWS-DIAGNOSTIC",
+          "label": "限定Windows原runner继承管道取消归类；受控后代4秒自行退出",
+          "status": "passed",
+          "exitCode": 0,
+          "signal": null,
+          "finishedAt": "2026-11-01T12:21:04.230Z",
+          "log": "output/execution-checkpoints/1793535663978-1278883f/command.log"
+        },
+        {
+          "jobId": "1793535720038-84eb1d2b",
+          "taskId": "NATIVE-PIPE-WINDOWS-DIAGNOSTIC",
+          "label": "Windows确认后代已启动且无stdout写入并持续4秒；原runner取消归类",
+          "status": "failed",
+          "exitCode": 1,
+          "signal": null,
+          "finishedAt": "2026-11-01T12:22:00.341Z",
+          "log": "output/execution-checkpoints/1793535720038-84eb1d2b/command.log"
+        },
+        {
+          "jobId": "1793539655259-c75ad8a8",
+          "taskId": "NATIVE-PIPE-WINDOWS-DIAGNOSTIC",
+          "label": "真实Python父进程退出后的继承管道取消定点诊断",
+          "status": "passed",
+          "exitCode": 0,
+          "signal": null,
+          "finishedAt": "2026-11-01T13:27:39.615Z",
+          "log": "output/execution-checkpoints/1793539655259-c75ad8a8/command.log"
+        },
+        {
+          "jobId": "1793539914162-a5140e2c",
+          "taskId": "NATIVE-PIPE-WINDOWS-DIAGNOSTIC",
+          "label": "真实Python父已退出、后代持管道时修后取消结算",
+          "status": "passed",
+          "exitCode": 0,
+          "signal": null,
+          "finishedAt": "2026-11-01T13:31:58.540Z",
+          "log": "output/execution-checkpoints/1793539914162-a5140e2c/command.log"
+        },
+        {
+          "jobId": "1793540298331-07a16513",
+          "taskId": "NATIVE-PIPE-WINDOWS-DIAGNOSTIC",
+          "label": "最终真实Python取消及时结算且停止未确认回执",
+          "status": "passed",
+          "exitCode": 0,
+          "signal": null,
+          "finishedAt": "2026-11-01T13:38:22.778Z",
+          "log": "output/execution-checkpoints/1793540298331-07a16513/command.log"
+        }
+      ],
+      "blockers": [],
+      "nextAction": "本轮缺陷已闭合；父退出后的未知后代回收限制已记录，不扩大进程工程。",
+      "updatedAt": "2026-11-01T13:43:03.152Z",
+      "evidence": [
+        "output/comprehensive-execution-20261101/native-pipe-python-parent-before-fix/result.json",
+        "output/comprehensive-execution-20261101/native-pipe-python-parent-final-unknown/result.json",
+        "output/execution-checkpoints/1793540221922-618f0100/result.json"
+      ]
+    },
+    "NATIVE-PIPE-CLOSEOUT-UNIT": {
+      "id": "NATIVE-PIPE-CLOSEOUT-UNIT",
+      "status": "verified",
+      "modifiedFiles": [
+        "tests/unit/nativePythonRuntime20261030.test.ts",
+        "tests/integration/g20ComputeJobRecovery.test.ts"
+      ],
+      "changes": [
+        "2文件17项通过，覆盖取消/超时、正常输出、停止false/true、两种结果时序和禁止交付/重放",
+        "新增fixture类型错误仅改类型，main类型检查已复核"
+      ],
+      "tests": [
+        {
+          "jobId": "1793539913403-5f6ded49",
+          "taskId": "NATIVE-PIPE-CLOSEOUT-UNIT",
+          "label": "原生Python runner取消/超时与正常完整输出定向回归",
+          "status": "passed",
+          "exitCode": 0,
+          "signal": null,
+          "finishedAt": "2026-11-01T13:31:55.845Z",
+          "log": "output/execution-checkpoints/1793539913403-5f6ded49/command.log"
+        },
+        {
+          "jobId": "1793540221922-618f0100",
+          "taskId": "NATIVE-PIPE-CLOSEOUT-UNIT",
+          "label": "原生取消结算与未确认停止unknown的直接消费者回归",
+          "status": "passed",
+          "exitCode": 0,
+          "signal": null,
+          "finishedAt": "2026-11-01T13:37:02.939Z",
+          "log": "output/execution-checkpoints/1793540221922-618f0100/command.log"
+        }
+      ],
+      "blockers": [],
+      "nextAction": "通过即停，不扩全矩阵；17项后仅测试类型注解调整，不重跑等价行为。",
+      "updatedAt": "2026-11-01T13:43:03.311Z",
+      "evidence": [
+        "output/execution-checkpoints/1793540221922-618f0100/result.json",
+        "output/execution-checkpoints/1793540297338-bfa2f841/result.json"
+      ]
+    },
+    "ACP-CONNECTION-REGRESSION": {
+      "id": "ACP-CONNECTION-REGRESSION",
+      "status": "verified",
+      "modifiedFiles": [],
+      "changes": [],
+      "tests": [
+        {
+          "jobId": "1793545621274-291d5ac0",
+          "taskId": "ACP-CONNECTION-REGRESSION",
+          "label": "安装闭环与连接发现的定向回归",
+          "status": "passed",
+          "exitCode": 0,
+          "signal": null,
+          "finishedAt": "2026-11-01T15:07:04.855Z",
+          "log": "output/execution-checkpoints/1793545621274-291d5ac0/command.log"
+        },
+        {
+          "jobId": "1793546183924-1d5524fa",
+          "taskId": "ACP-CONNECTION-REGRESSION",
+          "label": "安装状态归属最终Host回归",
+          "status": "passed",
+          "exitCode": 0,
+          "signal": null,
+          "finishedAt": "2026-11-01T15:16:26.786Z",
+          "log": "output/execution-checkpoints/1793546183924-1d5524fa/command.log"
+        }
+      ],
+      "blockers": [],
+      "nextAction": "当前增量已验；复用有效证据，不重跑整套或重发消息。",
+      "updatedAt": "2026-11-01T16:23:25.577Z",
+      "evidence": [
+        "output/execution-checkpoints/1793546183924-1d5524fa/result.json"
+      ]
+    },
+    "ACP-REAL-INSTALL": {
+      "id": "ACP-REAL-INSTALL",
+      "status": "verified",
+      "modifiedFiles": [],
+      "changes": [],
+      "tests": [
+        {
+          "jobId": "1793545622096-8b9ca9d1",
+          "taskId": "ACP-REAL-INSTALL",
+          "label": "用户已授权安装Codex/Claude ACP并零prompt核实际协议",
+          "status": "failed",
+          "exitCode": 1,
+          "signal": null,
+          "finishedAt": "2026-11-01T15:07:02.573Z",
+          "log": "output/execution-checkpoints/1793545622096-8b9ca9d1/command.log"
+        },
+        {
+          "jobId": "1793545880852-804423aa",
+          "taskId": "ACP-REAL-INSTALL",
+          "label": "用户已授权安装Codex/Claude ACP并零prompt核实际协议",
+          "status": "passed",
+          "exitCode": 0,
+          "signal": null,
+          "finishedAt": "2026-11-01T15:12:46.706Z",
+          "log": "output/execution-checkpoints/1793545880852-804423aa/command.log"
+        }
+      ],
+      "blockers": [],
+      "nextAction": "当前增量已验；复用有效证据，不重跑整套或重发消息。",
+      "updatedAt": "2026-11-01T16:23:25.758Z",
+      "evidence": [
+        "output/acp-runtime-20261101/native-handshake.json",
+        "output/execution-checkpoints/1793545880852-804423aa/result.json"
+      ]
+    },
+    "ACP-UI-REGRESSION": {
+      "id": "ACP-UI-REGRESSION",
+      "status": "verified",
+      "modifiedFiles": [],
+      "changes": [],
+      "tests": [
+        {
+          "jobId": "1793545881604-83bfa533",
+          "taskId": "ACP-UI-REGRESSION",
+          "label": "标题Agent切换、自动安装入口与模型强度分离行为",
+          "status": "failed",
+          "exitCode": 1,
+          "signal": null,
+          "finishedAt": "2026-11-01T15:11:29.336Z",
+          "log": "output/execution-checkpoints/1793545881604-83bfa533/command.log"
+        },
+        {
+          "jobId": "1793545956168-c479e5df",
+          "taskId": "ACP-UI-REGRESSION",
+          "label": "标题Agent切换、自动安装入口与模型强度分离行为",
+          "status": "passed",
+          "exitCode": 0,
+          "signal": null,
+          "finishedAt": "2026-11-01T15:12:57.614Z",
+          "log": "output/execution-checkpoints/1793545956168-c479e5df/command.log"
+        }
+      ],
+      "blockers": [],
+      "nextAction": "当前增量已验；复用有效证据，不重跑整套或重发消息。",
+      "updatedAt": "2026-11-01T16:23:25.973Z",
+      "evidence": [
+        "output/execution-checkpoints/1793545956168-c479e5df/result.json",
+        "output/execution-checkpoints/1793548255645-4543a7fb/result.json"
+      ]
+    },
+    "ACP-UI-BUILD": {
+      "id": "ACP-UI-BUILD",
+      "status": "verified",
+      "modifiedFiles": [],
+      "changes": [],
+      "tests": [
+        {
+          "jobId": "1793546183005-ee2bc1a9",
+          "taskId": "ACP-UI-BUILD",
+          "label": "新ACP入口主/测试及Electron类型检查与受影响生产构建",
+          "status": "passed",
+          "exitCode": 0,
+          "signal": null,
+          "finishedAt": "2026-11-01T15:16:57.144Z",
+          "log": "output/execution-checkpoints/1793546183005-ee2bc1a9/command.log"
+        },
+        {
+          "jobId": "1793546596633-f8b45db7",
+          "taskId": "ACP-UI-BUILD",
+          "label": "新ACP入口主/测试及Electron类型检查与受影响生产构建",
+          "status": "passed",
+          "exitCode": 0,
+          "signal": null,
+          "finishedAt": "2026-11-01T15:23:37.403Z",
+          "log": "output/execution-checkpoints/1793546596633-f8b45db7/command.log"
+        },
+        {
+          "jobId": "1793547562302-01a27d17",
+          "taskId": "ACP-UI-BUILD",
+          "label": "新ACP入口主/测试及Electron类型检查与受影响生产构建",
+          "status": "passed",
+          "exitCode": 0,
+          "signal": null,
+          "finishedAt": "2026-11-01T15:39:43.796Z",
+          "log": "output/execution-checkpoints/1793547562302-01a27d17/command.log"
+        },
+        {
+          "jobId": "1793548256655-98008e7b",
+          "taskId": "ACP-UI-BUILD",
+          "label": "新ACP入口主/测试及Electron类型检查与受影响生产构建",
+          "status": "passed",
+          "exitCode": 0,
+          "signal": null,
+          "finishedAt": "2026-11-01T15:51:19.852Z",
+          "log": "output/execution-checkpoints/1793548256655-98008e7b/command.log"
+        }
+      ],
+      "blockers": [],
+      "nextAction": "当前增量已验；复用有效证据，不重跑整套或重发消息。",
+      "updatedAt": "2026-11-01T16:23:26.666Z",
+      "evidence": [
+        "output/execution-checkpoints/1793548256655-98008e7b/result.json",
+        "output/execution-checkpoints/1793549634558-ab9db4d7/result.json"
+      ]
+    },
+    "ACP-NATIVE-CONFIG-REGRESSION": {
+      "id": "ACP-NATIVE-CONFIG-REGRESSION",
+      "status": "verified",
+      "modifiedFiles": [],
+      "changes": [],
+      "tests": [
+        {
+          "jobId": "1793546594849-f44ba812",
+          "taskId": "ACP-NATIVE-CONFIG-REGRESSION",
+          "label": "原生配置与发送互斥及权限UI分派",
+          "status": "passed",
+          "exitCode": 0,
+          "signal": null,
+          "finishedAt": "2026-11-01T15:23:17.626Z",
+          "log": "output/execution-checkpoints/1793546594849-f44ba812/command.log"
+        },
+        {
+          "jobId": "1793547561526-476096c8",
+          "taskId": "ACP-NATIVE-CONFIG-REGRESSION",
+          "label": "原生空会话恢复、同Agent幂等与最终标题切换定向验收",
+          "status": "passed",
+          "exitCode": 0,
+          "signal": null,
+          "finishedAt": "2026-11-01T15:39:25.794Z",
+          "log": "output/execution-checkpoints/1793547561526-476096c8/command.log"
+        },
+        {
+          "jobId": "1793548255645-4543a7fb",
+          "taskId": "ACP-NATIVE-CONFIG-REGRESSION",
+          "label": "最终恢复接线与输入框上方具名切换按钮",
+          "status": "passed",
+          "exitCode": 0,
+          "signal": null,
+          "finishedAt": "2026-11-01T15:51:00.767Z",
+          "log": "output/execution-checkpoints/1793548255645-4543a7fb/command.log"
+        }
+      ],
+      "blockers": [],
+      "nextAction": "当前增量已验；复用有效证据，不重跑整套或重发消息。",
+      "updatedAt": "2026-11-01T16:23:26.146Z",
+      "evidence": [
+        "output/execution-checkpoints/1793548255645-4543a7fb/result.json",
+        "output/execution-checkpoints/1793547561526-476096c8/result.json"
+      ]
+    },
+    "ACP-NATIVE-PERMISSION-UI": {
+      "id": "ACP-NATIVE-PERMISSION-UI",
+      "status": "verified",
+      "modifiedFiles": [],
+      "changes": [],
+      "tests": [
+        {
+          "jobId": "1793546595644-b3c8b99b",
+          "taskId": "ACP-NATIVE-PERMISSION-UI",
+          "label": "底部原生权限选择与果铃工具权限分离的真实组件消费",
+          "status": "passed",
+          "exitCode": 0,
+          "signal": null,
+          "finishedAt": "2026-11-01T15:23:26.719Z",
+          "log": "output/execution-checkpoints/1793546595644-b3c8b99b/command.log"
+        }
+      ],
+      "blockers": [],
+      "nextAction": "当前增量已验；复用有效证据，不重跑整套或重发消息。",
+      "updatedAt": "2026-11-01T16:23:26.310Z",
+      "evidence": [
+        "output/execution-checkpoints/1793546595644-b3c8b99b/result.json",
+        "output/acp-ui-20261101/visual-delivery/codex-after-switch.json"
+      ]
+    },
+    "ACP-UI-VISUAL": {
+      "id": "ACP-UI-VISUAL",
+      "status": "verified",
+      "modifiedFiles": [],
+      "changes": [],
+      "tests": [
+        {
+          "jobId": "1793546694074-9f7788b3",
+          "taskId": "ACP-UI-VISUAL",
+          "label": "隔离真实窗口检验标题切换和底部独立菜单，零模型消息",
+          "status": "passed",
+          "exitCode": 0,
+          "signal": null,
+          "finishedAt": "2026-11-01T15:38:10.243Z",
+          "log": "output/execution-checkpoints/1793546694074-9f7788b3/command.log"
+        },
+        {
+          "jobId": "1793547682086-cf84fc34",
+          "taskId": "ACP-UI-VISUAL",
+          "label": "最终标题切换、空会话恢复与原生底部配置实机核验",
+          "status": "passed",
+          "exitCode": 0,
+          "signal": null,
+          "finishedAt": "2026-11-01T15:48:59.297Z",
+          "log": "output/execution-checkpoints/1793547682086-cf84fc34/command.log"
+        },
+        {
+          "jobId": "1793548347674-a84e2d7d",
+          "taskId": "ACP-UI-VISUAL",
+          "label": "按用户红框：输入框上方Agent切换，顶部对话名，实际原生配置",
+          "status": "timed_out",
+          "exitCode": 1,
+          "signal": null,
+          "finishedAt": "2026-11-01T16:12:28.525Z",
+          "log": "output/execution-checkpoints/1793548347674-a84e2d7d/command.log"
+        },
+        {
+          "jobId": "1793549748622-3c732b77",
+          "taskId": "ACP-UI-VISUAL",
+          "label": "最终灰色输入框内按钮与底部单行自适应字号实机呈现",
+          "status": "passed",
+          "exitCode": 0,
+          "signal": null,
+          "finishedAt": "2026-11-01T16:20:00.361Z",
+          "log": "output/execution-checkpoints/1793549748622-3c732b77/command.log"
+        }
+      ],
+      "blockers": [],
+      "nextAction": "当前要求的实际布局、三Agent连接及原生配置已验；验证窗正常关闭，旧QA超时/原失败保留，未发送模型消息。",
+      "updatedAt": "2026-11-01T16:23:27.299Z",
+      "evidence": [
+        "output/acp-ui-20261101/visual-fit/result.json",
+        "output/acp-ui-20261101/visual-fit/no-model-messages.json",
+        "output/acp-ui-20261101/visual-fit/composer-final.png",
+        "output/acp-ui-20261101/visual-fit/composer-narrow.png",
+        "output/acp-ui-20261101/visual-delivery/claude-final.png",
+        "output/acp-ui-20261101/visual-delivery/opencode-ready.json"
+      ]
+    },
+    "ACP-EMPTY-RESUME-DIAGNOSTIC": {
+      "id": "ACP-EMPTY-RESUME-DIAGNOSTIC",
+      "status": "verified",
+      "modifiedFiles": [],
+      "changes": [],
+      "tests": [
+        {
+          "jobId": "1793547293051-52c932ab",
+          "taskId": "ACP-EMPTY-RESUME-DIAGNOSTIC",
+          "label": "已关闭且零消息Codex原生空会话恢复归因",
+          "status": "passed",
+          "exitCode": 0,
+          "signal": null,
+          "finishedAt": "2026-11-01T15:34:59.307Z",
+          "log": "output/execution-checkpoints/1793547293051-52c932ab/command.log"
+        },
+        {
+          "jobId": "1793548254455-83ecc7c9",
+          "taskId": "ACP-EMPTY-RESUME-DIAGNOSTIC",
+          "label": "真实事件owner按原生会话边界证明空历史，未知保持拒绝",
+          "status": "passed",
+          "exitCode": 0,
+          "signal": null,
+          "finishedAt": "2026-11-01T15:51:07.208Z",
+          "log": "output/execution-checkpoints/1793548254455-83ecc7c9/command.log"
+        }
+      ],
+      "blockers": [],
+      "nextAction": "当前增量已验；复用有效证据，不重跑整套或重发消息。",
+      "updatedAt": "2026-11-01T16:23:26.486Z",
+      "evidence": [
+        "output/acp-runtime-20261101/resume-probe.json",
+        "output/execution-checkpoints/1793548254455-83ecc7c9/result.json",
+        "output/acp-ui-20261101/visual-delivery/codex-after-switch.json"
+      ]
+    },
+    "ACP-COMPOSER-LAYOUT": {
+      "id": "ACP-COMPOSER-LAYOUT",
+      "status": "verified",
+      "modifiedFiles": [],
+      "changes": [],
+      "tests": [
+        {
+          "jobId": "1793549634558-ab9db4d7",
+          "taskId": "ACP-COMPOSER-LAYOUT",
+          "label": "加号/发送进入灰色输入框，底部保持单行按实际宽度缩放",
+          "status": "passed",
+          "exitCode": 0,
+          "signal": null,
+          "finishedAt": "2026-11-01T16:14:06.614Z",
+          "log": "output/execution-checkpoints/1793549634558-ab9db4d7/command.log"
+        }
+      ],
+      "blockers": [],
+      "nextAction": "当前增量已验；复用有效证据，不重跑整套或重发消息。",
+      "updatedAt": "2026-11-01T16:23:26.859Z",
+      "evidence": [
+        "output/execution-checkpoints/1793549634558-ab9db4d7/result.json",
+        "output/acp-ui-20261101/visual-fit/layout-default.json",
+        "output/acp-ui-20261101/visual-fit/layout-narrow.json",
+        "output/acp-ui-20261101/visual-fit/layout-restored.json"
+      ]
+    },
+    "ACP-COMPOSER-BEHAVIOR": {
+      "id": "ACP-COMPOSER-BEHAVIOR",
+      "status": "verified",
+      "modifiedFiles": [],
+      "changes": [],
+      "tests": [
+        {
+          "jobId": "1793549635563-09140a05",
+          "taskId": "ACP-COMPOSER-BEHAVIOR",
+          "label": "输入动作移位后的发送、模型强度与原生权限行为",
+          "status": "passed",
+          "exitCode": 0,
+          "signal": null,
+          "finishedAt": "2026-11-01T16:14:05.333Z",
+          "log": "output/execution-checkpoints/1793549635563-09140a05/command.log"
+        }
+      ],
+      "blockers": [],
+      "nextAction": "当前增量已验；复用有效证据，不重跑整套或重发消息。",
+      "updatedAt": "2026-11-01T16:23:27.033Z",
+      "evidence": [
+        "output/execution-checkpoints/1793549635563-09140a05/result.json"
+      ]
+    }
+  },
+  "runs": {
+    "1793521536931-a7ee8424": {
+      "jobId": "1793521536931-a7ee8424",
+      "taskId": "BUILD-PLAYER",
+      "label": "当前运行库构建",
+      "status": "passed",
+      "requestedAt": "2026-11-01T08:25:36.948Z",
+      "specFile": "output/execution-checkpoints/1793521536931-a7ee8424/spec.json",
+      "log": "output/execution-checkpoints/1793521536931-a7ee8424/command.log",
+      "statusFile": "output/execution-checkpoints/1793521536931-a7ee8424/result.json",
+      "supervisorPid": 44236,
+      "childPid": 77988,
+      "startedAt": "2026-11-01T08:25:37.008Z",
+      "lastHeartbeatAt": "2026-11-01T08:25:45.078Z",
+      "exitCode": 0,
+      "signal": null,
+      "finishedAt": "2026-11-01T08:25:45.068Z"
+    },
+    "1793521538608-0bed8e5e": {
+      "jobId": "1793521538608-0bed8e5e",
+      "taskId": "CORE-REGRESSION",
+      "label": "Source交付、地址读取、程序滚动与host事实回归",
+      "status": "passed",
+      "requestedAt": "2026-11-01T08:25:38.623Z",
+      "specFile": "output/execution-checkpoints/1793521538608-0bed8e5e/spec.json",
+      "log": "output/execution-checkpoints/1793521538608-0bed8e5e/command.log",
+      "statusFile": "output/execution-checkpoints/1793521538608-0bed8e5e/result.json",
+      "supervisorPid": 54024,
+      "childPid": 64836,
+      "startedAt": "2026-11-01T08:25:38.679Z",
+      "lastHeartbeatAt": "2026-11-01T08:25:45.510Z",
+      "exitCode": 0,
+      "signal": null,
+      "finishedAt": "2026-11-01T08:25:45.185Z"
+    },
+    "1793521776652-55d27ca6": {
+      "jobId": "1793521776652-55d27ca6",
+      "taskId": "T3-RECOVERY-TEST",
+      "label": "交付结算与运行恢复定向回归",
+      "status": "failed",
+      "requestedAt": "2026-11-01T08:29:36.659Z",
+      "specFile": "output/execution-checkpoints/1793521776652-55d27ca6/spec.json",
+      "log": "output/execution-checkpoints/1793521776652-55d27ca6/command.log",
+      "statusFile": "output/execution-checkpoints/1793521776652-55d27ca6/result.json",
+      "supervisorPid": 45312,
+      "childPid": 35544,
+      "startedAt": "2026-11-01T08:29:36.713Z",
+      "lastHeartbeatAt": "2026-11-01T08:29:44.706Z",
+      "exitCode": 1,
+      "signal": null,
+      "finishedAt": "2026-11-01T08:29:44.697Z"
+    },
+    "1793521901545-ff0c51fe": {
+      "jobId": "1793521901545-ff0c51fe",
+      "taskId": "T3-RECOVERY-TEST",
+      "label": "交付结算与运行恢复定向回归",
+      "status": "passed",
+      "requestedAt": "2026-11-01T08:31:41.560Z",
+      "specFile": "output/execution-checkpoints/1793521901545-ff0c51fe/spec.json",
+      "log": "output/execution-checkpoints/1793521901545-ff0c51fe/command.log",
+      "statusFile": "output/execution-checkpoints/1793521901545-ff0c51fe/result.json",
+      "supervisorPid": 24884,
+      "childPid": 73280,
+      "startedAt": "2026-11-01T08:31:41.622Z",
+      "lastHeartbeatAt": "2026-11-01T08:31:49.648Z",
+      "exitCode": 0,
+      "signal": null,
+      "finishedAt": "2026-11-01T08:31:49.640Z"
+    },
+    "1793522234434-c8afe710": {
+      "jobId": "1793522234434-c8afe710",
+      "taskId": "BUILD-APP",
+      "label": "统一当前源码 renderer/electron 生产构建",
+      "status": "passed",
+      "requestedAt": "2026-11-01T08:37:14.442Z",
+      "specFile": "output/execution-checkpoints/1793522234434-c8afe710/spec.json",
+      "log": "output/execution-checkpoints/1793522234434-c8afe710/command.log",
+      "statusFile": "output/execution-checkpoints/1793522234434-c8afe710/result.json",
+      "supervisorPid": 46248,
+      "childPid": 64060,
+      "startedAt": "2026-11-01T08:37:14.502Z",
+      "lastHeartbeatAt": "2026-11-01T08:37:26.573Z",
+      "exitCode": 0,
+      "signal": null,
+      "finishedAt": "2026-11-01T08:37:26.553Z"
+    },
+    "1793522235043-ee840693": {
+      "jobId": "1793522235043-ee840693",
+      "taskId": "TYPECHECK",
+      "label": "全三目标类型检查",
+      "status": "passed",
+      "requestedAt": "2026-11-01T08:37:15.052Z",
+      "specFile": "output/execution-checkpoints/1793522235043-ee840693/spec.json",
+      "log": "output/execution-checkpoints/1793522235043-ee840693/command.log",
+      "statusFile": "output/execution-checkpoints/1793522235043-ee840693/result.json",
+      "supervisorPid": 2940,
+      "childPid": 33620,
+      "startedAt": "2026-11-01T08:37:15.103Z",
+      "lastHeartbeatAt": "2026-11-01T08:37:23.230Z",
+      "exitCode": 0,
+      "signal": null,
+      "finishedAt": "2026-11-01T08:37:23.219Z"
+    },
+    "1793522330343-ffb17c03": {
+      "jobId": "1793522330343-ffb17c03",
+      "taskId": "T7-BUILTIN-C",
+      "label": "同题内置AI普通App真实创作（禁止盲重放）",
+      "status": "timed_out",
+      "requestedAt": "2026-11-01T08:38:50.357Z",
+      "specFile": "output/execution-checkpoints/1793522330343-ffb17c03/spec.json",
+      "log": "output/execution-checkpoints/1793522330343-ffb17c03/command.log",
+      "statusFile": "output/execution-checkpoints/1793522330343-ffb17c03/result.json",
+      "supervisorPid": 73568,
+      "childPid": 35040,
+      "startedAt": "2026-11-01T08:38:50.437Z",
+      "lastHeartbeatAt": "2026-11-01T08:50:50.860Z",
+      "exitCode": 1,
+      "signal": null,
+      "finishedAt": "2026-11-01T08:50:50.850Z"
+    },
+    "1793522385513-f02310ba": {
+      "jobId": "1793522385513-f02310ba",
+      "taskId": "T5-UI",
+      "label": "ExecutionAssistant全部界面回归",
+      "status": "passed",
+      "requestedAt": "2026-11-01T08:39:45.522Z",
+      "specFile": "output/execution-checkpoints/1793522385513-f02310ba/spec.json",
+      "log": "output/execution-checkpoints/1793522385513-f02310ba/command.log",
+      "statusFile": "output/execution-checkpoints/1793522385513-f02310ba/result.json",
+      "supervisorPid": 60472,
+      "childPid": 93052,
+      "startedAt": "2026-11-01T08:39:45.579Z",
+      "lastHeartbeatAt": "2026-11-01T08:40:00.851Z",
+      "exitCode": 0,
+      "signal": null,
+      "finishedAt": "2026-11-01T08:40:00.843Z"
+    },
+    "1793522389206-ce8a8894": {
+      "jobId": "1793522389206-ce8a8894",
+      "taskId": "T6-UI",
+      "label": "PPTX正式App原件保持、窄改刷新及冷开",
+      "status": "passed",
+      "requestedAt": "2026-11-01T08:39:49.216Z",
+      "specFile": "output/execution-checkpoints/1793522389206-ce8a8894/spec.json",
+      "log": "output/execution-checkpoints/1793522389206-ce8a8894/command.log",
+      "statusFile": "output/execution-checkpoints/1793522389206-ce8a8894/result.json",
+      "supervisorPid": 52820,
+      "childPid": 8108,
+      "startedAt": "2026-11-01T08:39:49.307Z",
+      "lastHeartbeatAt": "2026-11-01T08:41:03.385Z",
+      "exitCode": 0,
+      "signal": null,
+      "finishedAt": "2026-11-01T08:41:03.376Z"
+    },
+    "1793522542346-9a93e6c5": {
+      "jobId": "1793522542346-9a93e6c5",
+      "taskId": "T5-NATIVE-VERSION",
+      "label": "OpenCode既有入口底层可执行文件--version无模型探测",
+      "status": "passed",
+      "requestedAt": "2026-11-01T08:42:22.355Z",
+      "specFile": "output/execution-checkpoints/1793522542346-9a93e6c5/spec.json",
+      "log": "output/execution-checkpoints/1793522542346-9a93e6c5/command.log",
+      "statusFile": "output/execution-checkpoints/1793522542346-9a93e6c5/result.json",
+      "supervisorPid": 78744,
+      "childPid": 88696,
+      "startedAt": "2026-11-01T08:42:22.413Z",
+      "lastHeartbeatAt": "2026-11-01T08:42:22.799Z",
+      "exitCode": 0,
+      "signal": null,
+      "finishedAt": "2026-11-01T08:42:22.791Z"
+    },
+    "1793522542946-a6cd2df0": {
+      "jobId": "1793522542946-a6cd2df0",
+      "taskId": "T5-ACP-REGRESSION",
+      "label": "ACP发现选择权限会话恢复与stdio全部定向回归",
+      "status": "passed",
+      "requestedAt": "2026-11-01T08:42:23.193Z",
+      "specFile": "output/execution-checkpoints/1793522542946-a6cd2df0/spec.json",
+      "log": "output/execution-checkpoints/1793522542946-a6cd2df0/command.log",
+      "statusFile": "output/execution-checkpoints/1793522542946-a6cd2df0/result.json",
+      "supervisorPid": 59388,
+      "childPid": 78268,
+      "startedAt": "2026-11-01T08:42:23.257Z",
+      "lastHeartbeatAt": "2026-11-01T08:42:29.774Z",
+      "exitCode": 0,
+      "signal": null,
+      "finishedAt": "2026-11-01T08:42:29.764Z"
+    },
+    "1793522543916-9d65e199": {
+      "jobId": "1793522543916-9d65e199",
+      "taskId": "T8-CAPABILITIES",
+      "label": "能力和打包Skill派生一致性",
+      "status": "failed",
+      "requestedAt": "2026-11-01T08:42:23.928Z",
+      "specFile": "output/execution-checkpoints/1793522543916-9d65e199/spec.json",
+      "log": "output/execution-checkpoints/1793522543916-9d65e199/command.log",
+      "statusFile": "output/execution-checkpoints/1793522543916-9d65e199/result.json",
+      "supervisorPid": 94516,
+      "childPid": 69960,
+      "startedAt": "2026-11-01T08:42:23.999Z",
+      "lastHeartbeatAt": "2026-11-01T08:42:25.771Z",
+      "exitCode": 1,
+      "signal": null,
+      "finishedAt": "2026-11-01T08:42:25.765Z"
+    },
+    "1793522612120-a3e13a3a": {
+      "jobId": "1793522612120-a3e13a3a",
+      "taskId": "T5-NATIVE-PROBE",
+      "label": "原生ACP direct exe initialize对照（零模型消息）",
+      "status": "passed",
+      "requestedAt": "2026-11-01T08:43:32.128Z",
+      "specFile": "output/execution-checkpoints/1793522612120-a3e13a3a/spec.json",
+      "log": "output/execution-checkpoints/1793522612120-a3e13a3a/command.log",
+      "statusFile": "output/execution-checkpoints/1793522612120-a3e13a3a/result.json",
+      "supervisorPid": 34172,
+      "childPid": 26148,
+      "startedAt": "2026-11-01T08:43:32.185Z",
+      "lastHeartbeatAt": "2026-11-01T08:43:41.209Z",
+      "exitCode": 0,
+      "signal": null,
+      "finishedAt": "2026-11-01T08:43:41.199Z"
+    },
+    "1793522612954-82685fbc": {
+      "jobId": "1793522612954-82685fbc",
+      "taskId": "T8-REGENERATE",
+      "label": "从正式工具schema重新生成过期Office能力清单",
+      "status": "passed",
+      "requestedAt": "2026-11-01T08:43:32.964Z",
+      "specFile": "output/execution-checkpoints/1793522612954-82685fbc/spec.json",
+      "log": "output/execution-checkpoints/1793522612954-82685fbc/command.log",
+      "statusFile": "output/execution-checkpoints/1793522612954-82685fbc/result.json",
+      "supervisorPid": 41216,
+      "childPid": 42688,
+      "startedAt": "2026-11-01T08:43:33.017Z",
+      "lastHeartbeatAt": "2026-11-01T08:43:34.320Z",
+      "exitCode": 0,
+      "signal": null,
+      "finishedAt": "2026-11-01T08:43:34.310Z"
+    },
+    "1793522709923-777be344": {
+      "jobId": "1793522709923-777be344",
+      "taskId": "T1-STARTUP",
+      "label": "真实App启动JSON与TS参数入口",
+      "status": "passed",
+      "requestedAt": "2026-11-01T08:45:09.934Z",
+      "specFile": "output/execution-checkpoints/1793522709923-777be344/spec.json",
+      "log": "output/execution-checkpoints/1793522709923-777be344/command.log",
+      "statusFile": "output/execution-checkpoints/1793522709923-777be344/result.json",
+      "supervisorPid": 13156,
+      "childPid": 88248,
+      "startedAt": "2026-11-01T08:45:09.991Z",
+      "lastHeartbeatAt": "2026-11-01T08:45:17.752Z",
+      "exitCode": 0,
+      "signal": null,
+      "finishedAt": "2026-11-01T08:45:17.734Z"
+    },
+    "1793522710501-2442471f": {
+      "jobId": "1793522710501-2442471f",
+      "taskId": "T1-AI-FILES",
+      "label": "正式AI通用文件open/create与二进制隔离",
+      "status": "failed",
+      "requestedAt": "2026-11-01T08:45:10.509Z",
+      "specFile": "output/execution-checkpoints/1793522710501-2442471f/spec.json",
+      "log": "output/execution-checkpoints/1793522710501-2442471f/command.log",
+      "statusFile": "output/execution-checkpoints/1793522710501-2442471f/result.json",
+      "supervisorPid": 82368,
+      "childPid": 94928,
+      "startedAt": "2026-11-01T08:45:10.559Z",
+      "lastHeartbeatAt": "2026-11-01T08:45:18.261Z",
+      "exitCode": 1,
+      "signal": null,
+      "finishedAt": "2026-11-01T08:45:18.253Z"
+    },
+    "1793522711615-346bb700": {
+      "jobId": "1793522711615-346bb700",
+      "taskId": "T8-CAPABILITIES",
+      "label": "能力和打包Skill派生一致性",
+      "status": "passed",
+      "requestedAt": "2026-11-01T08:45:11.623Z",
+      "specFile": "output/execution-checkpoints/1793522711615-346bb700/spec.json",
+      "log": "output/execution-checkpoints/1793522711615-346bb700/command.log",
+      "statusFile": "output/execution-checkpoints/1793522711615-346bb700/result.json",
+      "supervisorPid": 82688,
+      "childPid": 55616,
+      "startedAt": "2026-11-01T08:45:11.692Z",
+      "lastHeartbeatAt": "2026-11-01T08:45:13.081Z",
+      "exitCode": 0,
+      "signal": null,
+      "finishedAt": "2026-11-01T08:45:13.075Z"
+    },
+    "1793522909424-382ec043": {
+      "jobId": "1793522909424-382ec043",
+      "taskId": "T5-NATIVE-SHIM",
+      "label": "当前环境npm shim零模型协议复核",
+      "status": "passed",
+      "requestedAt": "2026-11-01T08:48:29.431Z",
+      "specFile": "output/execution-checkpoints/1793522909424-382ec043/spec.json",
+      "log": "output/execution-checkpoints/1793522909424-382ec043/command.log",
+      "statusFile": "output/execution-checkpoints/1793522909424-382ec043/result.json",
+      "supervisorPid": 90200,
+      "childPid": 82200,
+      "startedAt": "2026-11-01T08:48:29.490Z",
+      "lastHeartbeatAt": "2026-11-01T08:48:38.199Z",
+      "exitCode": 0,
+      "signal": null,
+      "finishedAt": "2026-11-01T08:48:38.187Z"
+    },
+    "1793522910028-33677152": {
+      "jobId": "1793522910028-33677152",
+      "taskId": "T1-AI-FILES",
+      "label": "正式AI通用文件open/create与二进制隔离",
+      "status": "passed",
+      "requestedAt": "2026-11-01T08:48:30.043Z",
+      "specFile": "output/execution-checkpoints/1793522910028-33677152/spec.json",
+      "log": "output/execution-checkpoints/1793522910028-33677152/command.log",
+      "statusFile": "output/execution-checkpoints/1793522910028-33677152/result.json",
+      "supervisorPid": 64316,
+      "childPid": 25276,
+      "startedAt": "2026-11-01T08:48:30.102Z",
+      "lastHeartbeatAt": "2026-11-01T08:48:37.515Z",
+      "exitCode": 0,
+      "signal": null,
+      "finishedAt": "2026-11-01T08:48:37.506Z"
+    },
+    "1793523219218-1e842e0e": {
+      "jobId": "1793523219218-1e842e0e",
+      "taskId": "T8-PACKAGED-REFERENCES",
+      "label": "独立安装参考包与打包Skill真实读取",
+      "status": "passed",
+      "requestedAt": "2026-11-01T08:53:39.224Z",
+      "specFile": "output/execution-checkpoints/1793523219218-1e842e0e/spec.json",
+      "log": "output/execution-checkpoints/1793523219218-1e842e0e/command.log",
+      "statusFile": "output/execution-checkpoints/1793523219218-1e842e0e/result.json",
+      "supervisorPid": 74428,
+      "childPid": 69288,
+      "startedAt": "2026-11-01T08:53:39.281Z",
+      "lastHeartbeatAt": "2026-11-01T08:53:44.664Z",
+      "exitCode": 0,
+      "signal": null,
+      "finishedAt": "2026-11-01T08:53:44.655Z"
+    },
+    "1793523386281-8f8265bf": {
+      "jobId": "1793523386281-8f8265bf",
+      "taskId": "T2-ARTIFACT-ROUTING",
+      "label": "直接子任务HTML装配公共Gateway回归（先旧码复现）",
+      "status": "failed",
+      "requestedAt": "2026-11-01T08:56:26.290Z",
+      "specFile": "output/execution-checkpoints/1793523386281-8f8265bf/spec.json",
+      "log": "output/execution-checkpoints/1793523386281-8f8265bf/command.log",
+      "statusFile": "output/execution-checkpoints/1793523386281-8f8265bf/result.json",
+      "supervisorPid": 43636,
+      "childPid": 27592,
+      "startedAt": "2026-11-01T08:56:26.342Z",
+      "lastHeartbeatAt": "2026-11-01T08:56:30.742Z",
+      "exitCode": 1,
+      "signal": null,
+      "finishedAt": "2026-11-01T08:56:30.731Z"
+    },
+    "1793523387032-7af0303b": {
+      "jobId": "1793523387032-7af0303b",
+      "taskId": "T7-C-HUMAN-EDIT",
+      "label": "原C独立副本的真实UI标题编辑撤销保存冷开",
+      "status": "passed",
+      "requestedAt": "2026-11-01T08:56:27.041Z",
+      "specFile": "output/execution-checkpoints/1793523387032-7af0303b/spec.json",
+      "log": "output/execution-checkpoints/1793523387032-7af0303b/command.log",
+      "statusFile": "output/execution-checkpoints/1793523387032-7af0303b/result.json",
+      "supervisorPid": 95796,
+      "childPid": 632,
+      "startedAt": "2026-11-01T08:56:27.100Z",
+      "lastHeartbeatAt": "2026-11-01T08:56:33.955Z",
+      "exitCode": 0,
+      "signal": null,
+      "finishedAt": "2026-11-01T08:56:33.946Z"
+    },
+    "1793523545417-c6baf745": {
+      "jobId": "1793523545417-c6baf745",
+      "taskId": "T2-ARTIFACT-ROUTING",
+      "label": "直接子任务HTML装配公共Gateway回归（先旧码复现）",
+      "status": "failed",
+      "requestedAt": "2026-11-01T08:59:05.426Z",
+      "specFile": "output/execution-checkpoints/1793523545417-c6baf745/spec.json",
+      "log": "output/execution-checkpoints/1793523545417-c6baf745/command.log",
+      "statusFile": "output/execution-checkpoints/1793523545417-c6baf745/result.json",
+      "supervisorPid": 82160,
+      "childPid": 27608,
+      "startedAt": "2026-11-01T08:59:05.493Z",
+      "lastHeartbeatAt": "2026-11-01T08:59:10.227Z",
+      "exitCode": 1,
+      "signal": null,
+      "finishedAt": "2026-11-01T08:59:10.219Z"
+    },
+    "1793523548017-989ca62d": {
+      "jobId": "1793523548017-989ca62d",
+      "taskId": "T7-C-OFFLINE",
+      "label": "原C独立离线桌面全交互与390观察",
+      "status": "passed",
+      "requestedAt": "2026-11-01T08:59:08.025Z",
+      "specFile": "output/execution-checkpoints/1793523548017-989ca62d/spec.json",
+      "log": "output/execution-checkpoints/1793523548017-989ca62d/command.log",
+      "statusFile": "output/execution-checkpoints/1793523548017-989ca62d/result.json",
+      "supervisorPid": 48292,
+      "childPid": 65688,
+      "startedAt": "2026-11-01T08:59:08.089Z",
+      "lastHeartbeatAt": "2026-11-01T08:59:10.828Z",
+      "exitCode": 0,
+      "signal": null,
+      "finishedAt": "2026-11-01T08:59:10.819Z"
+    },
+    "1793523785711-b300aa23": {
+      "jobId": "1793523785711-b300aa23",
+      "taskId": "T7-C-CLEANUP",
+      "label": "原C设置与工作空间有界恢复（零模型、CAS不覆盖并发变更）",
+      "status": "passed",
+      "requestedAt": "2026-11-01T09:03:05.726Z",
+      "specFile": "output/execution-checkpoints/1793523785711-b300aa23/spec.json",
+      "log": "output/execution-checkpoints/1793523785711-b300aa23/command.log",
+      "statusFile": "output/execution-checkpoints/1793523785711-b300aa23/result.json",
+      "supervisorPid": 44632,
+      "childPid": 18904,
+      "startedAt": "2026-11-01T09:03:05.786Z",
+      "lastHeartbeatAt": "2026-11-01T09:03:10.432Z",
+      "exitCode": 0,
+      "signal": null,
+      "finishedAt": "2026-11-01T09:03:10.421Z"
+    },
+    "1793523786371-a37ea51d": {
+      "jobId": "1793523786371-a37ea51d",
+      "taskId": "T2-SOURCE-INTEGRATION",
+      "label": "HTML job artifact修复及同组依赖、物化、正式from回归",
+      "status": "failed",
+      "requestedAt": "2026-11-01T09:03:06.378Z",
+      "specFile": "output/execution-checkpoints/1793523786371-a37ea51d/spec.json",
+      "log": "output/execution-checkpoints/1793523786371-a37ea51d/command.log",
+      "statusFile": "output/execution-checkpoints/1793523786371-a37ea51d/result.json",
+      "supervisorPid": 83824,
+      "childPid": 54772,
+      "startedAt": "2026-11-01T09:03:06.463Z",
+      "lastHeartbeatAt": "2026-11-01T09:03:18.020Z",
+      "exitCode": 1,
+      "signal": null,
+      "finishedAt": "2026-11-01T09:03:18.010Z"
+    },
+    "1793523787101-398e26e9": {
+      "jobId": "1793523787101-398e26e9",
+      "taskId": "TYPECHECK",
+      "label": "全三目标类型检查",
+      "status": "failed",
+      "requestedAt": "2026-11-01T09:03:07.110Z",
+      "specFile": "output/execution-checkpoints/1793523787101-398e26e9/spec.json",
+      "log": "output/execution-checkpoints/1793523787101-398e26e9/command.log",
+      "statusFile": "output/execution-checkpoints/1793523787101-398e26e9/result.json",
+      "supervisorPid": 67812,
+      "childPid": 62392,
+      "startedAt": "2026-11-01T09:03:07.173Z",
+      "lastHeartbeatAt": "2026-11-01T09:03:18.480Z",
+      "exitCode": 1,
+      "signal": null,
+      "finishedAt": "2026-11-01T09:03:18.135Z"
+    },
+    "1793524057756-2b465f5e": {
+      "jobId": "1793524057756-2b465f5e",
+      "taskId": "BUILD-APP",
+      "label": "统一当前源码 renderer/electron 生产构建",
+      "status": "passed",
+      "requestedAt": "2026-11-01T09:07:37.775Z",
+      "specFile": "output/execution-checkpoints/1793524057756-2b465f5e/spec.json",
+      "log": "output/execution-checkpoints/1793524057756-2b465f5e/command.log",
+      "statusFile": "output/execution-checkpoints/1793524057756-2b465f5e/result.json",
+      "supervisorPid": 82480,
+      "childPid": 66220,
+      "startedAt": "2026-11-01T09:07:37.833Z",
+      "lastHeartbeatAt": "2026-11-01T09:07:52.404Z",
+      "exitCode": 0,
+      "signal": null,
+      "finishedAt": "2026-11-01T09:07:52.394Z"
+    },
+    "1793524411636-1d3da5cf": {
+      "jobId": "1793524411636-1d3da5cf",
+      "taskId": "T7-C-SOURCE",
+      "label": "C正式内容局部编辑与人工结果保护",
+      "status": "passed",
+      "requestedAt": "2026-11-01T09:13:31.653Z",
+      "specFile": "output/execution-checkpoints/1793524411636-1d3da5cf/spec.json",
+      "log": "output/execution-checkpoints/1793524411636-1d3da5cf/command.log",
+      "statusFile": "output/execution-checkpoints/1793524411636-1d3da5cf/result.json",
+      "supervisorPid": 48536,
+      "childPid": 54120,
+      "startedAt": "2026-11-01T09:13:31.713Z",
+      "lastHeartbeatAt": "2026-11-01T09:13:33.824Z",
+      "exitCode": 0,
+      "signal": null,
+      "finishedAt": "2026-11-01T09:13:33.818Z"
+    },
+    "1793524507279-6b87bf9d": {
+      "jobId": "1793524507279-6b87bf9d",
+      "taskId": "BUILD-APP",
+      "label": "统一当前源码 renderer/electron 生产构建",
+      "status": "passed",
+      "requestedAt": "2026-11-01T09:15:07.295Z",
+      "specFile": "output/execution-checkpoints/1793524507279-6b87bf9d/spec.json",
+      "log": "output/execution-checkpoints/1793524507279-6b87bf9d/command.log",
+      "statusFile": "output/execution-checkpoints/1793524507279-6b87bf9d/result.json",
+      "supervisorPid": 4592,
+      "childPid": 85092,
+      "startedAt": "2026-11-01T09:15:07.352Z",
+      "lastHeartbeatAt": "2026-11-01T09:15:12.268Z",
+      "exitCode": 0,
+      "signal": null,
+      "finishedAt": "2026-11-01T09:15:12.252Z"
+    },
+    "1793524507881-e3a79bc2": {
+      "jobId": "1793524507881-e3a79bc2",
+      "taskId": "TYPECHECK",
+      "label": "全三目标类型检查",
+      "status": "failed",
+      "requestedAt": "2026-11-01T09:15:07.887Z",
+      "specFile": "output/execution-checkpoints/1793524507881-e3a79bc2/spec.json",
+      "log": "output/execution-checkpoints/1793524507881-e3a79bc2/command.log",
+      "statusFile": "output/execution-checkpoints/1793524507881-e3a79bc2/result.json",
+      "supervisorPid": 22380,
+      "childPid": 30816,
+      "startedAt": "2026-11-01T09:15:07.953Z",
+      "lastHeartbeatAt": "2026-11-01T09:15:16.361Z",
+      "exitCode": 1,
+      "signal": null,
+      "finishedAt": "2026-11-01T09:15:16.348Z"
+    },
+    "1793524523479-618956be": {
+      "jobId": "1793524523479-618956be",
+      "taskId": "T2-SOURCE-INTEGRATION",
+      "label": "HTML来源与生成图引用正式装配回归",
+      "status": "failed",
+      "requestedAt": "2026-11-01T09:15:23.494Z",
+      "specFile": "output/execution-checkpoints/1793524523479-618956be/spec.json",
+      "log": "output/execution-checkpoints/1793524523479-618956be/command.log",
+      "statusFile": "output/execution-checkpoints/1793524523479-618956be/result.json",
+      "supervisorPid": 52720,
+      "childPid": 14160,
+      "startedAt": "2026-11-01T09:15:23.552Z",
+      "lastHeartbeatAt": "2026-11-01T09:15:32.722Z",
+      "exitCode": 1,
+      "signal": null,
+      "finishedAt": "2026-11-01T09:15:32.714Z"
+    },
+    "1793524581055-466f4e4f": {
+      "jobId": "1793524581055-466f4e4f",
+      "taskId": "T7-C-SOURCE-COLD",
+      "label": "C源码接力副本独立App冷开与正式导出",
+      "status": "passed",
+      "requestedAt": "2026-11-01T09:16:21.073Z",
+      "specFile": "output/execution-checkpoints/1793524581055-466f4e4f/spec.json",
+      "log": "output/execution-checkpoints/1793524581055-466f4e4f/command.log",
+      "statusFile": "output/execution-checkpoints/1793524581055-466f4e4f/result.json",
+      "supervisorPid": 36260,
+      "childPid": 77796,
+      "startedAt": "2026-11-01T09:16:21.132Z",
+      "lastHeartbeatAt": "2026-11-01T09:16:29.577Z",
+      "exitCode": 0,
+      "signal": null,
+      "finishedAt": "2026-11-01T09:16:29.566Z"
+    },
+    "1793524581830-3a4d999a": {
+      "jobId": "1793524581830-3a4d999a",
+      "taskId": "TYPECHECK",
+      "label": "全三目标类型检查",
+      "status": "passed",
+      "requestedAt": "2026-11-01T09:16:21.847Z",
+      "specFile": "output/execution-checkpoints/1793524581830-3a4d999a/spec.json",
+      "log": "output/execution-checkpoints/1793524581830-3a4d999a/command.log",
+      "statusFile": "output/execution-checkpoints/1793524581830-3a4d999a/result.json",
+      "supervisorPid": 17008,
+      "childPid": 79484,
+      "startedAt": "2026-11-01T09:16:21.907Z",
+      "lastHeartbeatAt": "2026-11-01T09:16:24.252Z",
+      "exitCode": 0,
+      "signal": null,
+      "finishedAt": "2026-11-01T09:16:24.243Z"
+    },
+    "1793524638455-2148115a": {
+      "jobId": "1793524638455-2148115a",
+      "taskId": "T7-C-SOURCE-OFFLINE",
+      "label": "正式再导出副本的桌面尺寸完整行为",
+      "status": "passed",
+      "requestedAt": "2026-11-01T09:17:18.470Z",
+      "specFile": "output/execution-checkpoints/1793524638455-2148115a/spec.json",
+      "log": "output/execution-checkpoints/1793524638455-2148115a/command.log",
+      "statusFile": "output/execution-checkpoints/1793524638455-2148115a/result.json",
+      "supervisorPid": 87748,
+      "childPid": 91640,
+      "startedAt": "2026-11-01T09:17:18.548Z",
+      "lastHeartbeatAt": "2026-11-01T09:17:21.144Z",
+      "exitCode": 0,
+      "signal": null,
+      "finishedAt": "2026-11-01T09:17:21.137Z"
+    },
+    "1793524699332-70f195b6": {
+      "jobId": "1793524699332-70f195b6",
+      "taskId": "T2-SOURCE-INTEGRATION",
+      "label": "HTML来源与生成图引用正式装配回归",
+      "status": "failed",
+      "requestedAt": "2026-11-01T09:18:19.345Z",
+      "specFile": "output/execution-checkpoints/1793524699332-70f195b6/spec.json",
+      "log": "output/execution-checkpoints/1793524699332-70f195b6/command.log",
+      "statusFile": "output/execution-checkpoints/1793524699332-70f195b6/result.json",
+      "supervisorPid": 91800,
+      "childPid": 46096,
+      "startedAt": "2026-11-01T09:18:19.413Z",
+      "lastHeartbeatAt": "2026-11-01T09:18:30.967Z",
+      "exitCode": 1,
+      "signal": null,
+      "finishedAt": "2026-11-01T09:18:30.957Z"
+    },
+    "1793524700035-5c6df915": {
+      "jobId": "1793524700035-5c6df915",
+      "taskId": "TYPECHECK",
+      "label": "全三目标类型检查",
+      "status": "passed",
+      "requestedAt": "2026-11-01T09:18:20.045Z",
+      "specFile": "output/execution-checkpoints/1793524700035-5c6df915/spec.json",
+      "log": "output/execution-checkpoints/1793524700035-5c6df915/command.log",
+      "statusFile": "output/execution-checkpoints/1793524700035-5c6df915/result.json",
+      "supervisorPid": 87568,
+      "childPid": 35048,
+      "startedAt": "2026-11-01T09:18:20.105Z",
+      "lastHeartbeatAt": "2026-11-01T09:18:22.450Z",
+      "exitCode": 0,
+      "signal": null,
+      "finishedAt": "2026-11-01T09:18:22.441Z"
+    },
+    "1793524773792-4fb9bc1d": {
+      "jobId": "1793524773792-4fb9bc1d",
+      "taskId": "T2-SOURCE-INTEGRATION",
+      "label": "HTML来源与生成图引用正式装配回归",
+      "status": "failed",
+      "requestedAt": "2026-11-01T09:19:33.805Z",
+      "specFile": "output/execution-checkpoints/1793524773792-4fb9bc1d/spec.json",
+      "log": "output/execution-checkpoints/1793524773792-4fb9bc1d/command.log",
+      "statusFile": "output/execution-checkpoints/1793524773792-4fb9bc1d/result.json",
+      "supervisorPid": 77576,
+      "childPid": 38356,
+      "startedAt": "2026-11-01T09:19:33.865Z",
+      "lastHeartbeatAt": "2026-11-01T09:19:45.776Z",
+      "exitCode": 1,
+      "signal": null,
+      "finishedAt": "2026-11-01T09:19:45.766Z"
+    },
+    "1793524914440-a912e28f": {
+      "jobId": "1793524914440-a912e28f",
+      "taskId": "T7-C-CONTINUATION",
+      "label": "正常内置AI基于r8人工接力副本改善课堂可读性",
+      "status": "failed",
+      "requestedAt": "2026-11-01T09:21:54.455Z",
+      "specFile": "output/execution-checkpoints/1793524914440-a912e28f/spec.json",
+      "log": "output/execution-checkpoints/1793524914440-a912e28f/command.log",
+      "statusFile": "output/execution-checkpoints/1793524914440-a912e28f/result.json",
+      "supervisorPid": 49140,
+      "childPid": 67684,
+      "startedAt": "2026-11-01T09:21:54.512Z",
+      "lastHeartbeatAt": "2026-11-01T09:22:20.691Z",
+      "exitCode": 1,
+      "signal": null,
+      "finishedAt": "2026-11-01T09:22:20.679Z"
+    },
+    "1793525058894-c9eba6e3": {
+      "jobId": "1793525058894-c9eba6e3",
+      "taskId": "T7-C-CONTINUATION-CLEANUP",
+      "label": "零发送失败后的独立工作空间恢复",
+      "status": "passed",
+      "requestedAt": "2026-11-01T09:24:18.909Z",
+      "specFile": "output/execution-checkpoints/1793525058894-c9eba6e3/spec.json",
+      "log": "output/execution-checkpoints/1793525058894-c9eba6e3/command.log",
+      "statusFile": "output/execution-checkpoints/1793525058894-c9eba6e3/result.json",
+      "supervisorPid": 50008,
+      "childPid": 37024,
+      "startedAt": "2026-11-01T09:24:18.971Z",
+      "lastHeartbeatAt": "2026-11-01T09:24:22.713Z",
+      "exitCode": 0,
+      "signal": null,
+      "finishedAt": "2026-11-01T09:24:22.704Z"
+    },
+    "1793525071944-bedddf94": {
+      "jobId": "1793525071944-bedddf94",
+      "taskId": "T2-SOURCE-INTEGRATION",
+      "label": "HTML来源与生成图引用正式装配回归",
+      "status": "passed",
+      "requestedAt": "2026-11-01T09:24:31.953Z",
+      "specFile": "output/execution-checkpoints/1793525071944-bedddf94/spec.json",
+      "log": "output/execution-checkpoints/1793525071944-bedddf94/command.log",
+      "statusFile": "output/execution-checkpoints/1793525071944-bedddf94/result.json",
+      "supervisorPid": 37236,
+      "childPid": 43508,
+      "startedAt": "2026-11-01T09:24:32.014Z",
+      "lastHeartbeatAt": "2026-11-01T09:24:44.740Z",
+      "exitCode": 0,
+      "signal": null,
+      "finishedAt": "2026-11-01T09:24:44.730Z"
+    },
+    "1793525072577-a50dfb87": {
+      "jobId": "1793525072577-a50dfb87",
+      "taskId": "TYPECHECK",
+      "label": "全三目标类型检查",
+      "status": "passed",
+      "requestedAt": "2026-11-01T09:24:32.587Z",
+      "specFile": "output/execution-checkpoints/1793525072577-a50dfb87/spec.json",
+      "log": "output/execution-checkpoints/1793525072577-a50dfb87/command.log",
+      "statusFile": "output/execution-checkpoints/1793525072577-a50dfb87/result.json",
+      "supervisorPid": 83652,
+      "childPid": 40996,
+      "startedAt": "2026-11-01T09:24:32.646Z",
+      "lastHeartbeatAt": "2026-11-01T09:24:35.034Z",
+      "exitCode": 0,
+      "signal": null,
+      "finishedAt": "2026-11-01T09:24:35.026Z"
+    },
+    "1793525297312-85bafc55": {
+      "jobId": "1793525297312-85bafc55",
+      "taskId": "T7-C-READINESS",
+      "label": "逐公开读取阶段确认旧profile后台恢复",
+      "status": "failed",
+      "requestedAt": "2026-11-01T09:28:17.320Z",
+      "specFile": "output/execution-checkpoints/1793525297312-85bafc55/spec.json",
+      "log": "output/execution-checkpoints/1793525297312-85bafc55/command.log",
+      "statusFile": "output/execution-checkpoints/1793525297312-85bafc55/result.json",
+      "supervisorPid": 82316,
+      "childPid": 91516,
+      "startedAt": "2026-11-01T09:28:17.377Z",
+      "lastHeartbeatAt": "2026-11-01T09:28:29.836Z",
+      "exitCode": 1,
+      "signal": null,
+      "finishedAt": "2026-11-01T09:28:29.826Z"
+    },
+    "1793525425440-c53f9976": {
+      "jobId": "1793525425440-c53f9976",
+      "taskId": "T7-C-READINESS",
+      "label": "已登记会话身份下的后台恢复与公开读取时序",
+      "status": "failed",
+      "requestedAt": "2026-11-01T09:30:25.446Z",
+      "specFile": "output/execution-checkpoints/1793525425440-c53f9976/spec.json",
+      "log": "output/execution-checkpoints/1793525425440-c53f9976/command.log",
+      "statusFile": "output/execution-checkpoints/1793525425440-c53f9976/result.json",
+      "supervisorPid": 15872,
+      "childPid": 22552,
+      "startedAt": "2026-11-01T09:30:25.508Z",
+      "lastHeartbeatAt": "2026-11-01T09:30:49.627Z",
+      "exitCode": 1,
+      "signal": null,
+      "finishedAt": "2026-11-01T09:30:49.615Z"
+    },
+    "1793525725349-def59c4a": {
+      "jobId": "1793525725349-def59c4a",
+      "taskId": "T7-C-CONTINUATION",
+      "label": "旧profile完成恢复后，正常内置AI续改r8新副本",
+      "status": "failed",
+      "requestedAt": "2026-11-01T09:35:25.364Z",
+      "specFile": "output/execution-checkpoints/1793525725349-def59c4a/spec.json",
+      "log": "output/execution-checkpoints/1793525725349-def59c4a/command.log",
+      "statusFile": "output/execution-checkpoints/1793525725349-def59c4a/result.json",
+      "supervisorPid": 82612,
+      "childPid": 74872,
+      "startedAt": "2026-11-01T09:35:25.421Z",
+      "lastHeartbeatAt": "2026-11-01T09:45:46.396Z",
+      "exitCode": 1,
+      "signal": null,
+      "finishedAt": "2026-11-01T09:45:46.386Z"
+    },
+    "1793526174199-1e34af16": {
+      "jobId": "1793526174199-1e34af16",
+      "taskId": "T3-STARTUP-RECOVERY",
+      "label": "同会话恢复期间复用事件状态与未知不重放回归",
+      "status": "passed",
+      "requestedAt": "2026-11-01T09:42:54.206Z",
+      "specFile": "output/execution-checkpoints/1793526174199-1e34af16/spec.json",
+      "log": "output/execution-checkpoints/1793526174199-1e34af16/command.log",
+      "statusFile": "output/execution-checkpoints/1793526174199-1e34af16/result.json",
+      "supervisorPid": 16292,
+      "childPid": 75000,
+      "startedAt": "2026-11-01T09:42:54.261Z",
+      "lastHeartbeatAt": "2026-11-01T09:43:07.053Z",
+      "exitCode": 0,
+      "signal": null,
+      "finishedAt": "2026-11-01T09:43:07.043Z"
+    },
+    "1793526174775-6169f953": {
+      "jobId": "1793526174775-6169f953",
+      "taskId": "TYPECHECK",
+      "label": "全三目标类型检查",
+      "status": "passed",
+      "requestedAt": "2026-11-01T09:42:54.793Z",
+      "specFile": "output/execution-checkpoints/1793526174775-6169f953/spec.json",
+      "log": "output/execution-checkpoints/1793526174775-6169f953/command.log",
+      "statusFile": "output/execution-checkpoints/1793526174775-6169f953/result.json",
+      "supervisorPid": 10940,
+      "childPid": 95752,
+      "startedAt": "2026-11-01T09:42:54.851Z",
+      "lastHeartbeatAt": "2026-11-01T09:42:59.994Z",
+      "exitCode": 0,
+      "signal": null,
+      "finishedAt": "2026-11-01T09:42:59.984Z"
+    },
+    "1793533045430-2ed10062": {
+      "jobId": "1793533045430-2ed10062",
+      "taskId": "T7-C-FINAL-RECOVERY",
+      "label": "只读核实既有0345 run与唯一提交和r9",
+      "status": "passed",
+      "requestedAt": "2026-11-01T11:37:25.438Z",
+      "specFile": "output/execution-checkpoints/1793533045430-2ed10062/spec.json",
+      "log": "output/execution-checkpoints/1793533045430-2ed10062/command.log",
+      "statusFile": "output/execution-checkpoints/1793533045430-2ed10062/result.json",
+      "supervisorPid": 95816,
+      "childPid": 23356,
+      "startedAt": "2026-11-01T11:37:25.502Z",
+      "lastHeartbeatAt": "2026-11-01T11:37:50.054Z",
+      "exitCode": 0,
+      "signal": null,
+      "finishedAt": "2026-11-01T11:37:50.043Z"
+    },
+    "1793533142297-e8b667ef": {
+      "jobId": "1793533142297-e8b667ef",
+      "taskId": "T7-C-R9-OFFLINE",
+      "label": "既有r9独立离线指针键盘与900画面",
+      "status": "passed",
+      "requestedAt": "2026-11-01T11:39:02.305Z",
+      "specFile": "output/execution-checkpoints/1793533142297-e8b667ef/spec.json",
+      "log": "output/execution-checkpoints/1793533142297-e8b667ef/command.log",
+      "statusFile": "output/execution-checkpoints/1793533142297-e8b667ef/result.json",
+      "supervisorPid": 82028,
+      "childPid": 48744,
+      "startedAt": "2026-11-01T11:39:02.365Z",
+      "lastHeartbeatAt": "2026-11-01T11:39:05.502Z",
+      "exitCode": 0,
+      "signal": null,
+      "finishedAt": "2026-11-01T11:39:05.491Z"
+    },
+    "1793533293715-79e89b35": {
+      "jobId": "1793533293715-79e89b35",
+      "taskId": "RESILIENCE-FINAL",
+      "label": "原子检查点上一份恢复的Windows验证",
+      "status": "passed",
+      "requestedAt": "2026-11-01T11:41:33.733Z",
+      "specFile": "output/execution-checkpoints/1793533293715-79e89b35/spec.json",
+      "log": "output/execution-checkpoints/1793533293715-79e89b35/command.log",
+      "statusFile": "output/execution-checkpoints/1793533293715-79e89b35/result.json",
+      "supervisorPid": 57792,
+      "childPid": 59576,
+      "startedAt": "2026-11-01T11:41:33.796Z",
+      "lastHeartbeatAt": "2026-11-01T11:41:39.834Z",
+      "exitCode": 0,
+      "signal": null,
+      "finishedAt": "2026-11-01T11:41:39.823Z"
+    },
+    "1793533391462-d1f17af8": {
+      "jobId": "1793533391462-d1f17af8",
+      "taskId": "T7-WAIT-RED",
+      "label": "旧Engine重现有界wait被自动无限延长",
+      "status": "failed",
+      "requestedAt": "2026-11-01T11:43:11.470Z",
+      "specFile": "output/execution-checkpoints/1793533391462-d1f17af8/spec.json",
+      "log": "output/execution-checkpoints/1793533391462-d1f17af8/command.log",
+      "statusFile": "output/execution-checkpoints/1793533391462-d1f17af8/result.json",
+      "supervisorPid": 39920,
+      "childPid": 89888,
+      "startedAt": "2026-11-01T11:43:11.529Z",
+      "lastHeartbeatAt": "2026-11-01T11:43:19.209Z",
+      "exitCode": 1,
+      "signal": null,
+      "finishedAt": "2026-11-01T11:43:19.199Z"
+    },
+    "1793533468586-3be17e31": {
+      "jobId": "1793533468586-3be17e31",
+      "taskId": "T7-WAIT-GREEN",
+      "label": "Engine等待/终态/停止/恢复直接消费者回归",
+      "status": "failed",
+      "requestedAt": "2026-11-01T11:44:28.602Z",
+      "specFile": "output/execution-checkpoints/1793533468586-3be17e31/spec.json",
+      "log": "output/execution-checkpoints/1793533468586-3be17e31/command.log",
+      "statusFile": "output/execution-checkpoints/1793533468586-3be17e31/result.json",
+      "supervisorPid": 79772,
+      "childPid": 21904,
+      "startedAt": "2026-11-01T11:44:28.660Z",
+      "lastHeartbeatAt": "2026-11-01T11:44:53.119Z",
+      "exitCode": 1,
+      "signal": null,
+      "finishedAt": "2026-11-01T11:44:53.109Z"
+    },
+    "1793533469816-6de42b78": {
+      "jobId": "1793533469816-6de42b78",
+      "taskId": "FINAL-PRODUCTION-BUILD",
+      "label": "三目标类型与最终生产player/renderer/electron构建",
+      "status": "passed",
+      "requestedAt": "2026-11-01T11:44:29.826Z",
+      "specFile": "output/execution-checkpoints/1793533469816-6de42b78/spec.json",
+      "log": "output/execution-checkpoints/1793533469816-6de42b78/command.log",
+      "statusFile": "output/execution-checkpoints/1793533469816-6de42b78/result.json",
+      "supervisorPid": 2544,
+      "childPid": 17280,
+      "startedAt": "2026-11-01T11:44:29.887Z",
+      "lastHeartbeatAt": "2026-11-01T11:44:41.783Z",
+      "exitCode": 0,
+      "signal": null,
+      "finishedAt": "2026-11-01T11:44:41.774Z"
+    },
+    "1793533613188-da597221": {
+      "jobId": "1793533613188-da597221",
+      "taskId": "FINAL-DIR-PACKAGE",
+      "label": "当前生产构建隔离Windows目录包",
+      "status": "passed",
+      "requestedAt": "2026-11-01T11:46:53.196Z",
+      "specFile": "output/execution-checkpoints/1793533613188-da597221/spec.json",
+      "log": "output/execution-checkpoints/1793533613188-da597221/command.log",
+      "statusFile": "output/execution-checkpoints/1793533613188-da597221/result.json",
+      "supervisorPid": 8228,
+      "childPid": 28224,
+      "startedAt": "2026-11-01T11:46:53.267Z",
+      "lastHeartbeatAt": "2026-11-01T11:48:18.682Z",
+      "exitCode": 0,
+      "signal": null,
+      "finishedAt": "2026-11-01T11:48:18.671Z"
+    },
+    "1793533640534-5f75933a": {
+      "jobId": "1793533640534-5f75933a",
+      "taskId": "M26-BASELINE",
+      "label": "旧Engine隔离对照既存图片断言失败",
+      "status": "passed",
+      "requestedAt": "2026-11-01T11:47:20.543Z",
+      "specFile": "output/execution-checkpoints/1793533640534-5f75933a/spec.json",
+      "log": "output/execution-checkpoints/1793533640534-5f75933a/command.log",
+      "statusFile": "output/execution-checkpoints/1793533640534-5f75933a/result.json",
+      "supervisorPid": 42608,
+      "childPid": 25824,
+      "startedAt": "2026-11-01T11:47:20.603Z",
+      "lastHeartbeatAt": "2026-11-01T11:47:26.018Z",
+      "exitCode": 0,
+      "signal": null,
+      "finishedAt": "2026-11-01T11:47:26.009Z"
+    },
+    "1793533707310-55f40422": {
+      "jobId": "1793533707310-55f40422",
+      "taskId": "FINAL-E2E-TYPES",
+      "label": "新增隔离包真实入口测试类型检查",
+      "status": "passed",
+      "requestedAt": "2026-11-01T11:48:27.329Z",
+      "specFile": "output/execution-checkpoints/1793533707310-55f40422/spec.json",
+      "log": "output/execution-checkpoints/1793533707310-55f40422/command.log",
+      "statusFile": "output/execution-checkpoints/1793533707310-55f40422/result.json",
+      "supervisorPid": 82156,
+      "childPid": 7448,
+      "startedAt": "2026-11-01T11:48:27.389Z",
+      "lastHeartbeatAt": "2026-11-01T11:48:28.014Z",
+      "exitCode": 0,
+      "signal": null,
+      "finishedAt": "2026-11-01T11:48:28.005Z"
+    },
+    "1793533731385-c69be14c": {
+      "jobId": "1793533731385-c69be14c",
+      "taskId": "M26-FIXTURE",
+      "label": "既有显式原图high语义断言复验",
+      "status": "passed",
+      "requestedAt": "2026-11-01T11:48:51.404Z",
+      "specFile": "output/execution-checkpoints/1793533731385-c69be14c/spec.json",
+      "log": "output/execution-checkpoints/1793533731385-c69be14c/command.log",
+      "statusFile": "output/execution-checkpoints/1793533731385-c69be14c/result.json",
+      "supervisorPid": 95696,
+      "childPid": 87092,
+      "startedAt": "2026-11-01T11:48:51.477Z",
+      "lastHeartbeatAt": "2026-11-01T11:48:57.149Z",
+      "exitCode": 0,
+      "signal": null,
+      "finishedAt": "2026-11-01T11:48:57.140Z"
+    },
+    "1793533732586-7a83e431": {
+      "jobId": "1793533732586-7a83e431",
+      "taskId": "T7-C-R9-PACKAGED-COLD",
+      "label": "最终目录包独立冷开r9与正式Source读回/再导出",
+      "status": "passed",
+      "requestedAt": "2026-11-01T11:48:52.594Z",
+      "specFile": "output/execution-checkpoints/1793533732586-7a83e431/spec.json",
+      "log": "output/execution-checkpoints/1793533732586-7a83e431/command.log",
+      "statusFile": "output/execution-checkpoints/1793533732586-7a83e431/result.json",
+      "supervisorPid": 45588,
+      "childPid": 49148,
+      "startedAt": "2026-11-01T11:48:52.662Z",
+      "lastHeartbeatAt": "2026-11-01T11:49:01.831Z",
+      "exitCode": 0,
+      "signal": null,
+      "finishedAt": "2026-11-01T11:49:01.821Z"
+    },
+    "1793533733835-62c90629": {
+      "jobId": "1793533733835-62c90629",
+      "taskId": "FINAL-PACKAGED-SMOKE",
+      "label": "真实目录包文件/PPTX/参考/内置AI零发送入口",
+      "status": "failed",
+      "requestedAt": "2026-11-01T11:48:53.843Z",
+      "specFile": "output/execution-checkpoints/1793533733835-62c90629/spec.json",
+      "log": "output/execution-checkpoints/1793533733835-62c90629/command.log",
+      "statusFile": "output/execution-checkpoints/1793533733835-62c90629/result.json",
+      "supervisorPid": 12864,
+      "childPid": 27072,
+      "startedAt": "2026-11-01T11:48:53.904Z",
+      "lastHeartbeatAt": "2026-11-01T11:49:36.994Z",
+      "exitCode": 1,
+      "signal": null,
+      "finishedAt": "2026-11-01T11:49:36.985Z"
+    },
+    "1793533914348-4b72084d": {
+      "jobId": "1793533914348-4b72084d",
+      "taskId": "FINAL-PACKAGED-SMOKE",
+      "label": "真实目录包文件/PPTX/参考/内置AI零发送入口",
+      "status": "failed",
+      "requestedAt": "2026-11-01T11:51:54.357Z",
+      "specFile": "output/execution-checkpoints/1793533914348-4b72084d/spec.json",
+      "log": "output/execution-checkpoints/1793533914348-4b72084d/command.log",
+      "statusFile": "output/execution-checkpoints/1793533914348-4b72084d/result.json",
+      "supervisorPid": 75460,
+      "childPid": 48188,
+      "startedAt": "2026-11-01T11:51:54.425Z",
+      "lastHeartbeatAt": "2026-11-01T11:52:27.915Z",
+      "exitCode": 1,
+      "signal": null,
+      "finishedAt": "2026-11-01T11:52:27.906Z"
+    },
+    "1793534052477-3901a854": {
+      "jobId": "1793534052477-3901a854",
+      "taskId": "FINAL-PACKAGED-SMOKE",
+      "label": "真实目录包文件/PPTX/参考/内置AI零发送入口",
+      "status": "failed",
+      "requestedAt": "2026-11-01T11:54:12.494Z",
+      "specFile": "output/execution-checkpoints/1793534052477-3901a854/spec.json",
+      "log": "output/execution-checkpoints/1793534052477-3901a854/command.log",
+      "statusFile": "output/execution-checkpoints/1793534052477-3901a854/result.json",
+      "supervisorPid": 59084,
+      "childPid": 81780,
+      "startedAt": "2026-11-01T11:54:12.556Z",
+      "lastHeartbeatAt": "2026-11-01T11:54:38.625Z",
+      "exitCode": 1,
+      "signal": null,
+      "finishedAt": "2026-11-01T11:54:38.614Z"
+    },
+    "1793534132147-7482a56d": {
+      "jobId": "1793534132147-7482a56d",
+      "taskId": "FINAL-PACKAGED-SMOKE",
+      "label": "真实目录包文件/PPTX/参考/内置AI零发送入口",
+      "status": "passed",
+      "requestedAt": "2026-11-01T11:55:32.164Z",
+      "specFile": "output/execution-checkpoints/1793534132147-7482a56d/spec.json",
+      "log": "output/execution-checkpoints/1793534132147-7482a56d/command.log",
+      "statusFile": "output/execution-checkpoints/1793534132147-7482a56d/result.json",
+      "supervisorPid": 91608,
+      "childPid": 82864,
+      "startedAt": "2026-11-01T11:55:32.227Z",
+      "lastHeartbeatAt": "2026-11-01T11:56:02.051Z",
+      "exitCode": 0,
+      "signal": null,
+      "finishedAt": "2026-11-01T11:56:02.040Z"
+    },
+    "1793534146631-0b88da81": {
+      "jobId": "1793534146631-0b88da81",
+      "taskId": "FINAL-E2E-TYPES",
+      "label": "新增隔离包真实入口测试类型检查",
+      "status": "passed",
+      "requestedAt": "2026-11-01T11:55:46.650Z",
+      "specFile": "output/execution-checkpoints/1793534146631-0b88da81/spec.json",
+      "log": "output/execution-checkpoints/1793534146631-0b88da81/command.log",
+      "statusFile": "output/execution-checkpoints/1793534146631-0b88da81/result.json",
+      "supervisorPid": 32364,
+      "childPid": 61896,
+      "startedAt": "2026-11-01T11:55:46.741Z",
+      "lastHeartbeatAt": "2026-11-01T11:55:47.385Z",
+      "exitCode": 0,
+      "signal": null,
+      "finishedAt": "2026-11-01T11:55:47.368Z"
+    },
+    "1793534224936-d5833f2e": {
+      "jobId": "1793534224936-d5833f2e",
+      "taskId": "FINAL-PACKAGED-SMOKE",
+      "label": "真实目录包文件/PPTX/参考/内置AI零发送入口",
+      "status": "passed",
+      "requestedAt": "2026-11-01T11:57:04.952Z",
+      "specFile": "output/execution-checkpoints/1793534224936-d5833f2e/spec.json",
+      "log": "output/execution-checkpoints/1793534224936-d5833f2e/command.log",
+      "statusFile": "output/execution-checkpoints/1793534224936-d5833f2e/result.json",
+      "supervisorPid": 66380,
+      "childPid": 24212,
+      "startedAt": "2026-11-01T11:57:05.020Z",
+      "lastHeartbeatAt": "2026-11-01T11:57:09.641Z",
+      "exitCode": 0,
+      "signal": null,
+      "finishedAt": "2026-11-01T11:57:09.622Z"
+    },
+    "1793534375300-b48ede9f": {
+      "jobId": "1793534375300-b48ede9f",
+      "taskId": "FINAL-E2E-TYPES",
+      "label": "新增隔离包真实入口测试类型检查",
+      "status": "failed",
+      "requestedAt": "2026-11-01T11:59:35.319Z",
+      "specFile": "output/execution-checkpoints/1793534375300-b48ede9f/spec.json",
+      "log": "output/execution-checkpoints/1793534375300-b48ede9f/command.log",
+      "statusFile": "output/execution-checkpoints/1793534375300-b48ede9f/result.json",
+      "supervisorPid": 9320,
+      "childPid": 52536,
+      "startedAt": "2026-11-01T11:59:35.382Z",
+      "lastHeartbeatAt": "2026-11-01T11:59:35.961Z",
+      "exitCode": 1,
+      "signal": null,
+      "finishedAt": "2026-11-01T11:59:35.951Z"
+    },
+    "1793534412177-3fdb87f3": {
+      "jobId": "1793534412177-3fdb87f3",
+      "taskId": "FINAL-E2E-TYPES",
+      "label": "新增隔离包真实入口测试类型检查",
+      "status": "passed",
+      "requestedAt": "2026-11-01T12:00:12.196Z",
+      "specFile": "output/execution-checkpoints/1793534412177-3fdb87f3/spec.json",
+      "log": "output/execution-checkpoints/1793534412177-3fdb87f3/command.log",
+      "statusFile": "output/execution-checkpoints/1793534412177-3fdb87f3/result.json",
+      "supervisorPid": 25352,
+      "childPid": 44736,
+      "startedAt": "2026-11-01T12:00:12.261Z",
+      "lastHeartbeatAt": "2026-11-01T12:00:12.858Z",
+      "exitCode": 0,
+      "signal": null,
+      "finishedAt": "2026-11-01T12:00:12.841Z"
+    },
+    "1793534785370-2e63db50": {
+      "jobId": "1793534785370-2e63db50",
+      "taskId": "T7-A2-READABILITY",
+      "label": "A2课堂关键标签局部Source正式MCP修复副本r11",
+      "status": "failed",
+      "requestedAt": "2026-11-01T12:06:25.385Z",
+      "specFile": "output/execution-checkpoints/1793534785370-2e63db50/spec.json",
+      "log": "output/execution-checkpoints/1793534785370-2e63db50/command.log",
+      "statusFile": "output/execution-checkpoints/1793534785370-2e63db50/result.json",
+      "supervisorPid": 19004,
+      "childPid": 50992,
+      "startedAt": "2026-11-01T12:06:25.449Z",
+      "lastHeartbeatAt": "2026-11-01T12:06:28.654Z",
+      "exitCode": 1,
+      "signal": null,
+      "finishedAt": "2026-11-01T12:06:28.635Z"
+    },
+    "1793534871626-88b9f264": {
+      "jobId": "1793534871626-88b9f264",
+      "taskId": "T7-A2-READABILITY-RESUME",
+      "label": "A2已提交r11真实恢复后仅保存导出，零重复apply",
+      "status": "failed",
+      "requestedAt": "2026-11-01T12:07:51.643Z",
+      "specFile": "output/execution-checkpoints/1793534871626-88b9f264/spec.json",
+      "log": "output/execution-checkpoints/1793534871626-88b9f264/command.log",
+      "statusFile": "output/execution-checkpoints/1793534871626-88b9f264/result.json",
+      "supervisorPid": 26096,
+      "childPid": 45068,
+      "startedAt": "2026-11-01T12:07:51.716Z",
+      "lastHeartbeatAt": "2026-11-01T12:07:54.565Z",
+      "exitCode": 1,
+      "signal": null,
+      "finishedAt": "2026-11-01T12:07:54.557Z"
+    },
+    "1793534958844-400bc5e2": {
+      "jobId": "1793534958844-400bc5e2",
+      "taskId": "T7-A2-READABILITY-RESUME",
+      "label": "A2公开恢复API取回已提交r11后保存导出，0 apply",
+      "status": "passed",
+      "requestedAt": "2026-11-01T12:09:18.854Z",
+      "specFile": "output/execution-checkpoints/1793534958844-400bc5e2/spec.json",
+      "log": "output/execution-checkpoints/1793534958844-400bc5e2/command.log",
+      "statusFile": "output/execution-checkpoints/1793534958844-400bc5e2/result.json",
+      "supervisorPid": 84400,
+      "childPid": 11944,
+      "startedAt": "2026-11-01T12:09:18.915Z",
+      "lastHeartbeatAt": "2026-11-01T12:09:26.386Z",
+      "exitCode": 0,
+      "signal": null,
+      "finishedAt": "2026-11-01T12:09:26.376Z"
+    },
+    "1793535000514-a6c31d66": {
+      "jobId": "1793535000514-a6c31d66",
+      "taskId": "T7-A2-R11-OFFLINE",
+      "label": "A2 r11同版离线三页行为与双桌面实际画面",
+      "status": "passed",
+      "requestedAt": "2026-11-01T12:10:00.531Z",
+      "specFile": "output/execution-checkpoints/1793535000514-a6c31d66/spec.json",
+      "log": "output/execution-checkpoints/1793535000514-a6c31d66/command.log",
+      "statusFile": "output/execution-checkpoints/1793535000514-a6c31d66/result.json",
+      "supervisorPid": 34040,
+      "childPid": 41616,
+      "startedAt": "2026-11-01T12:10:00.596Z",
+      "lastHeartbeatAt": "2026-11-01T12:10:04.588Z",
+      "exitCode": 0,
+      "signal": null,
+      "finishedAt": "2026-11-01T12:10:04.577Z"
+    },
+    "1793535057070-5de41703": {
+      "jobId": "1793535057070-5de41703",
+      "taskId": "T7-A2-R11-LABELS",
+      "label": "A2真实浏览器361角度标签边界及900关键帧",
+      "status": "failed",
+      "requestedAt": "2026-11-01T12:10:57.085Z",
+      "specFile": "output/execution-checkpoints/1793535057070-5de41703/spec.json",
+      "log": "output/execution-checkpoints/1793535057070-5de41703/command.log",
+      "statusFile": "output/execution-checkpoints/1793535057070-5de41703/result.json",
+      "supervisorPid": 89200,
+      "childPid": 65000,
+      "startedAt": "2026-11-01T12:10:57.142Z",
+      "lastHeartbeatAt": "2026-11-01T12:10:58.311Z",
+      "exitCode": 1,
+      "signal": null,
+      "finishedAt": "2026-11-01T12:10:58.302Z"
+    },
+    "1793535150099-234b4fa0": {
+      "jobId": "1793535150099-234b4fa0",
+      "taskId": "T7-A2-R12-LABEL-FIX",
+      "label": "A2下半轨道标签避让实测修订r12，保留r11",
+      "status": "passed",
+      "requestedAt": "2026-11-01T12:12:30.110Z",
+      "specFile": "output/execution-checkpoints/1793535150099-234b4fa0/spec.json",
+      "log": "output/execution-checkpoints/1793535150099-234b4fa0/command.log",
+      "statusFile": "output/execution-checkpoints/1793535150099-234b4fa0/result.json",
+      "supervisorPid": 26080,
+      "childPid": 8524,
+      "startedAt": "2026-11-01T12:12:30.201Z",
+      "lastHeartbeatAt": "2026-11-01T12:12:37.059Z",
+      "exitCode": 0,
+      "signal": null,
+      "finishedAt": "2026-11-01T12:12:37.049Z"
+    },
+    "1793535192844-cbead85d": {
+      "jobId": "1793535192844-cbead85d",
+      "taskId": "T7-A2-R12-OFFLINE",
+      "label": "A2最终r12离线三页与双桌面画面",
+      "status": "passed",
+      "requestedAt": "2026-11-01T12:13:12.860Z",
+      "specFile": "output/execution-checkpoints/1793535192844-cbead85d/spec.json",
+      "log": "output/execution-checkpoints/1793535192844-cbead85d/command.log",
+      "statusFile": "output/execution-checkpoints/1793535192844-cbead85d/result.json",
+      "supervisorPid": 65860,
+      "childPid": 7892,
+      "startedAt": "2026-11-01T12:13:12.925Z",
+      "lastHeartbeatAt": "2026-11-01T12:13:17.245Z",
+      "exitCode": 0,
+      "signal": null,
+      "finishedAt": "2026-11-01T12:13:17.226Z"
+    },
+    "1793535194066-13dacfad": {
+      "jobId": "1793535194066-13dacfad",
+      "taskId": "T7-A2-R12-LABELS",
+      "label": "A2最终r12真实361角度label边界",
+      "status": "passed",
+      "requestedAt": "2026-11-01T12:13:14.075Z",
+      "specFile": "output/execution-checkpoints/1793535194066-13dacfad/spec.json",
+      "log": "output/execution-checkpoints/1793535194066-13dacfad/command.log",
+      "statusFile": "output/execution-checkpoints/1793535194066-13dacfad/result.json",
+      "supervisorPid": 37572,
+      "childPid": 88600,
+      "startedAt": "2026-11-01T12:13:14.142Z",
+      "lastHeartbeatAt": "2026-11-01T12:13:15.614Z",
+      "exitCode": 0,
+      "signal": null,
+      "finishedAt": "2026-11-01T12:13:15.606Z"
+    },
+    "1793535195326-2f562a15": {
+      "jobId": "1793535195326-2f562a15",
+      "taskId": "T7-A2-R12-COLD",
+      "label": "A2最终r12目录包独立冷开和同版再导出",
+      "status": "passed",
+      "requestedAt": "2026-11-01T12:13:15.342Z",
+      "specFile": "output/execution-checkpoints/1793535195326-2f562a15/spec.json",
+      "log": "output/execution-checkpoints/1793535195326-2f562a15/command.log",
+      "statusFile": "output/execution-checkpoints/1793535195326-2f562a15/result.json",
+      "supervisorPid": 85696,
+      "childPid": 28724,
+      "startedAt": "2026-11-01T12:13:15.414Z",
+      "lastHeartbeatAt": "2026-11-01T12:13:24.320Z",
+      "exitCode": 0,
+      "signal": null,
+      "finishedAt": "2026-11-01T12:13:24.310Z"
+    },
+    "1793535663978-1278883f": {
+      "jobId": "1793535663978-1278883f",
+      "taskId": "NATIVE-PIPE-WINDOWS-DIAGNOSTIC",
+      "label": "限定Windows原runner继承管道取消归类；受控后代4秒自行退出",
+      "status": "passed",
+      "requestedAt": "2026-11-01T12:21:03.987Z",
+      "specFile": "output/execution-checkpoints/1793535663978-1278883f/spec.json",
+      "log": "output/execution-checkpoints/1793535663978-1278883f/command.log",
+      "statusFile": "output/execution-checkpoints/1793535663978-1278883f/result.json",
+      "supervisorPid": 68572,
+      "childPid": 83600,
+      "startedAt": "2026-11-01T12:21:04.051Z",
+      "lastHeartbeatAt": "2026-11-01T12:21:04.237Z",
+      "exitCode": 0,
+      "signal": null,
+      "finishedAt": "2026-11-01T12:21:04.230Z"
+    },
+    "1793535720038-84eb1d2b": {
+      "jobId": "1793535720038-84eb1d2b",
+      "taskId": "NATIVE-PIPE-WINDOWS-DIAGNOSTIC",
+      "label": "Windows确认后代已启动且无stdout写入并持续4秒；原runner取消归类",
+      "status": "failed",
+      "requestedAt": "2026-11-01T12:22:00.048Z",
+      "specFile": "output/execution-checkpoints/1793535720038-84eb1d2b/spec.json",
+      "log": "output/execution-checkpoints/1793535720038-84eb1d2b/command.log",
+      "statusFile": "output/execution-checkpoints/1793535720038-84eb1d2b/result.json",
+      "supervisorPid": 95488,
+      "childPid": 87612,
+      "startedAt": "2026-11-01T12:22:00.119Z",
+      "lastHeartbeatAt": "2026-11-01T12:22:00.348Z",
+      "exitCode": 1,
+      "signal": null,
+      "finishedAt": "2026-11-01T12:22:00.341Z"
+    },
+    "1793539655259-c75ad8a8": {
+      "jobId": "1793539655259-c75ad8a8",
+      "taskId": "NATIVE-PIPE-WINDOWS-DIAGNOSTIC",
+      "label": "真实Python父进程退出后的继承管道取消定点诊断",
+      "status": "passed",
+      "requestedAt": "2026-11-01T13:27:35.267Z",
+      "specFile": "output/execution-checkpoints/1793539655259-c75ad8a8/spec.json",
+      "log": "output/execution-checkpoints/1793539655259-c75ad8a8/command.log",
+      "statusFile": "output/execution-checkpoints/1793539655259-c75ad8a8/result.json",
+      "supervisorPid": 91248,
+      "childPid": 10156,
+      "startedAt": "2026-11-01T13:27:35.335Z",
+      "lastHeartbeatAt": "2026-11-01T13:27:39.627Z",
+      "exitCode": 0,
+      "signal": null,
+      "finishedAt": "2026-11-01T13:27:39.615Z"
+    },
+    "1793539913403-5f6ded49": {
+      "jobId": "1793539913403-5f6ded49",
+      "taskId": "NATIVE-PIPE-CLOSEOUT-UNIT",
+      "label": "原生Python runner取消/超时与正常完整输出定向回归",
+      "status": "passed",
+      "requestedAt": "2026-11-01T13:31:53.414Z",
+      "specFile": "output/execution-checkpoints/1793539913403-5f6ded49/spec.json",
+      "log": "output/execution-checkpoints/1793539913403-5f6ded49/command.log",
+      "statusFile": "output/execution-checkpoints/1793539913403-5f6ded49/result.json",
+      "supervisorPid": 36020,
+      "childPid": 85820,
+      "startedAt": "2026-11-01T13:31:53.497Z",
+      "lastHeartbeatAt": "2026-11-01T13:31:55.856Z",
+      "exitCode": 0,
+      "signal": null,
+      "finishedAt": "2026-11-01T13:31:55.845Z"
+    },
+    "1793539914162-a5140e2c": {
+      "jobId": "1793539914162-a5140e2c",
+      "taskId": "NATIVE-PIPE-WINDOWS-DIAGNOSTIC",
+      "label": "真实Python父已退出、后代持管道时修后取消结算",
+      "status": "passed",
+      "requestedAt": "2026-11-01T13:31:54.178Z",
+      "specFile": "output/execution-checkpoints/1793539914162-a5140e2c/spec.json",
+      "log": "output/execution-checkpoints/1793539914162-a5140e2c/command.log",
+      "statusFile": "output/execution-checkpoints/1793539914162-a5140e2c/result.json",
+      "supervisorPid": 89984,
+      "childPid": 57728,
+      "startedAt": "2026-11-01T13:31:54.251Z",
+      "lastHeartbeatAt": "2026-11-01T13:31:58.547Z",
+      "exitCode": 0,
+      "signal": null,
+      "finishedAt": "2026-11-01T13:31:58.540Z"
+    },
+    "1793540221922-618f0100": {
+      "jobId": "1793540221922-618f0100",
+      "taskId": "NATIVE-PIPE-CLOSEOUT-UNIT",
+      "label": "原生取消结算与未确认停止unknown的直接消费者回归",
+      "status": "passed",
+      "requestedAt": "2026-11-01T13:37:01.931Z",
+      "specFile": "output/execution-checkpoints/1793540221922-618f0100/spec.json",
+      "log": "output/execution-checkpoints/1793540221922-618f0100/command.log",
+      "statusFile": "output/execution-checkpoints/1793540221922-618f0100/result.json",
+      "supervisorPid": 13692,
+      "childPid": 17052,
+      "startedAt": "2026-11-01T13:37:02.005Z",
+      "lastHeartbeatAt": "2026-11-01T13:37:02.947Z",
+      "exitCode": 0,
+      "signal": null,
+      "finishedAt": "2026-11-01T13:37:02.939Z"
+    },
+    "1793540222547-4df65638": {
+      "jobId": "1793540222547-4df65638",
+      "taskId": "FINAL-PRODUCTION-BUILD",
+      "label": "取消结果修复后的主/测试类型检查与受影响Electron生产构建",
+      "status": "failed",
+      "requestedAt": "2026-11-01T13:37:02.554Z",
+      "specFile": "output/execution-checkpoints/1793540222547-4df65638/spec.json",
+      "log": "output/execution-checkpoints/1793540222547-4df65638/command.log",
+      "statusFile": "output/execution-checkpoints/1793540222547-4df65638/result.json",
+      "supervisorPid": 19304,
+      "childPid": 64124,
+      "startedAt": "2026-11-01T13:37:02.617Z",
+      "lastHeartbeatAt": "2026-11-01T13:37:07.483Z",
+      "exitCode": 1,
+      "signal": null,
+      "finishedAt": "2026-11-01T13:37:07.470Z"
+    },
+    "1793540297338-bfa2f841": {
+      "jobId": "1793540297338-bfa2f841",
+      "taskId": "FINAL-PRODUCTION-BUILD",
+      "label": "取消结果修复后的主/测试类型检查与受影响Electron生产构建",
+      "status": "passed",
+      "requestedAt": "2026-11-01T13:38:17.466Z",
+      "specFile": "output/execution-checkpoints/1793540297338-bfa2f841/spec.json",
+      "log": "output/execution-checkpoints/1793540297338-bfa2f841/command.log",
+      "statusFile": "output/execution-checkpoints/1793540297338-bfa2f841/result.json",
+      "supervisorPid": 21740,
+      "childPid": 47072,
+      "startedAt": "2026-11-01T13:38:17.542Z",
+      "lastHeartbeatAt": "2026-11-01T13:38:26.085Z",
+      "exitCode": 0,
+      "signal": null,
+      "finishedAt": "2026-11-01T13:38:26.063Z"
+    },
+    "1793540298331-07a16513": {
+      "jobId": "1793540298331-07a16513",
+      "taskId": "NATIVE-PIPE-WINDOWS-DIAGNOSTIC",
+      "label": "最终真实Python取消及时结算且停止未确认回执",
+      "status": "passed",
+      "requestedAt": "2026-11-01T13:38:18.343Z",
+      "specFile": "output/execution-checkpoints/1793540298331-07a16513/spec.json",
+      "log": "output/execution-checkpoints/1793540298331-07a16513/command.log",
+      "statusFile": "output/execution-checkpoints/1793540298331-07a16513/result.json",
+      "supervisorPid": 80304,
+      "childPid": 35332,
+      "startedAt": "2026-11-01T13:38:18.417Z",
+      "lastHeartbeatAt": "2026-11-01T13:38:22.791Z",
+      "exitCode": 0,
+      "signal": null,
+      "finishedAt": "2026-11-01T13:38:22.778Z"
+    },
+    "1793540333157-40109903": {
+      "jobId": "1793540333157-40109903",
+      "taskId": "FINAL-DIR-PACKAGE",
+      "label": "取消结算修复后的隔离Windows目录验证包，保留原包",
+      "status": "passed",
+      "requestedAt": "2026-11-01T13:38:53.166Z",
+      "specFile": "output/execution-checkpoints/1793540333157-40109903/spec.json",
+      "log": "output/execution-checkpoints/1793540333157-40109903/command.log",
+      "statusFile": "output/execution-checkpoints/1793540333157-40109903/result.json",
+      "supervisorPid": 57664,
+      "childPid": 36696,
+      "startedAt": "2026-11-01T13:38:53.235Z",
+      "lastHeartbeatAt": "2026-11-01T13:40:26.788Z",
+      "exitCode": 0,
+      "signal": null,
+      "finishedAt": "2026-11-01T13:40:26.778Z"
+    },
+    "1793545621274-291d5ac0": {
+      "jobId": "1793545621274-291d5ac0",
+      "taskId": "ACP-CONNECTION-REGRESSION",
+      "label": "安装闭环与连接发现的定向回归",
+      "status": "passed",
+      "requestedAt": "2026-11-01T15:07:01.282Z",
+      "specFile": "output/execution-checkpoints/1793545621274-291d5ac0/spec.json",
+      "log": "output/execution-checkpoints/1793545621274-291d5ac0/command.log",
+      "statusFile": "output/execution-checkpoints/1793545621274-291d5ac0/result.json",
+      "supervisorPid": 73232,
+      "childPid": 47528,
+      "startedAt": "2026-11-01T15:07:01.392Z",
+      "lastHeartbeatAt": "2026-11-01T15:07:04.863Z",
+      "exitCode": 0,
+      "signal": null,
+      "finishedAt": "2026-11-01T15:07:04.855Z"
+    },
+    "1793545622096-8b9ca9d1": {
+      "jobId": "1793545622096-8b9ca9d1",
+      "taskId": "ACP-REAL-INSTALL",
+      "label": "用户已授权安装Codex/Claude ACP并零prompt核实际协议",
+      "status": "failed",
+      "requestedAt": "2026-11-01T15:07:02.107Z",
+      "specFile": "output/execution-checkpoints/1793545622096-8b9ca9d1/spec.json",
+      "log": "output/execution-checkpoints/1793545622096-8b9ca9d1/command.log",
+      "statusFile": "output/execution-checkpoints/1793545622096-8b9ca9d1/result.json",
+      "supervisorPid": 86076,
+      "childPid": 80324,
+      "startedAt": "2026-11-01T15:07:02.221Z",
+      "lastHeartbeatAt": "2026-11-01T15:07:02.578Z",
+      "exitCode": 1,
+      "signal": null,
+      "finishedAt": "2026-11-01T15:07:02.573Z"
+    },
+    "1793545880852-804423aa": {
+      "jobId": "1793545880852-804423aa",
+      "taskId": "ACP-REAL-INSTALL",
+      "label": "用户已授权安装Codex/Claude ACP并零prompt核实际协议",
+      "status": "passed",
+      "requestedAt": "2026-11-01T15:11:20.862Z",
+      "specFile": "output/execution-checkpoints/1793545880852-804423aa/spec.json",
+      "log": "output/execution-checkpoints/1793545880852-804423aa/command.log",
+      "statusFile": "output/execution-checkpoints/1793545880852-804423aa/result.json",
+      "supervisorPid": 16784,
+      "childPid": 73552,
+      "startedAt": "2026-11-01T15:11:20.940Z",
+      "lastHeartbeatAt": "2026-11-01T15:12:46.717Z",
+      "exitCode": 0,
+      "signal": null,
+      "finishedAt": "2026-11-01T15:12:46.706Z"
+    },
+    "1793545881604-83bfa533": {
+      "jobId": "1793545881604-83bfa533",
+      "taskId": "ACP-UI-REGRESSION",
+      "label": "标题Agent切换、自动安装入口与模型强度分离行为",
+      "status": "failed",
+      "requestedAt": "2026-11-01T15:11:21.613Z",
+      "specFile": "output/execution-checkpoints/1793545881604-83bfa533/spec.json",
+      "log": "output/execution-checkpoints/1793545881604-83bfa533/command.log",
+      "statusFile": "output/execution-checkpoints/1793545881604-83bfa533/result.json",
+      "supervisorPid": 71192,
+      "childPid": 37744,
+      "startedAt": "2026-11-01T15:11:21.687Z",
+      "lastHeartbeatAt": "2026-11-01T15:11:29.344Z",
+      "exitCode": 1,
+      "signal": null,
+      "finishedAt": "2026-11-01T15:11:29.336Z"
+    },
+    "1793545956168-c479e5df": {
+      "jobId": "1793545956168-c479e5df",
+      "taskId": "ACP-UI-REGRESSION",
+      "label": "标题Agent切换、自动安装入口与模型强度分离行为",
+      "status": "passed",
+      "requestedAt": "2026-11-01T15:12:36.177Z",
+      "specFile": "output/execution-checkpoints/1793545956168-c479e5df/spec.json",
+      "log": "output/execution-checkpoints/1793545956168-c479e5df/command.log",
+      "statusFile": "output/execution-checkpoints/1793545956168-c479e5df/result.json",
+      "supervisorPid": 65188,
+      "childPid": 8520,
+      "startedAt": "2026-11-01T15:12:36.306Z",
+      "lastHeartbeatAt": "2026-11-01T15:12:57.624Z",
+      "exitCode": 0,
+      "signal": null,
+      "finishedAt": "2026-11-01T15:12:57.614Z"
+    },
+    "1793546183005-ee2bc1a9": {
+      "jobId": "1793546183005-ee2bc1a9",
+      "taskId": "ACP-UI-BUILD",
+      "label": "新ACP入口主/测试及Electron类型检查与受影响生产构建",
+      "status": "passed",
+      "requestedAt": "2026-11-01T15:16:23.015Z",
+      "specFile": "output/execution-checkpoints/1793546183005-ee2bc1a9/spec.json",
+      "log": "output/execution-checkpoints/1793546183005-ee2bc1a9/command.log",
+      "statusFile": "output/execution-checkpoints/1793546183005-ee2bc1a9/result.json",
+      "supervisorPid": 83596,
+      "childPid": 82496,
+      "startedAt": "2026-11-01T15:16:23.088Z",
+      "lastHeartbeatAt": "2026-11-01T15:16:57.159Z",
+      "exitCode": 0,
+      "signal": null,
+      "finishedAt": "2026-11-01T15:16:57.144Z"
+    },
+    "1793546183924-1d5524fa": {
+      "jobId": "1793546183924-1d5524fa",
+      "taskId": "ACP-CONNECTION-REGRESSION",
+      "label": "安装状态归属最终Host回归",
+      "status": "passed",
+      "requestedAt": "2026-11-01T15:16:23.950Z",
+      "specFile": "output/execution-checkpoints/1793546183924-1d5524fa/spec.json",
+      "log": "output/execution-checkpoints/1793546183924-1d5524fa/command.log",
+      "statusFile": "output/execution-checkpoints/1793546183924-1d5524fa/result.json",
+      "supervisorPid": 92232,
+      "childPid": 88080,
+      "startedAt": "2026-11-01T15:16:24.137Z",
+      "lastHeartbeatAt": "2026-11-01T15:16:26.796Z",
+      "exitCode": 0,
+      "signal": null,
+      "finishedAt": "2026-11-01T15:16:26.786Z"
+    },
+    "1793546594849-f44ba812": {
+      "jobId": "1793546594849-f44ba812",
+      "taskId": "ACP-NATIVE-CONFIG-REGRESSION",
+      "label": "原生配置与发送互斥及权限UI分派",
+      "status": "passed",
+      "requestedAt": "2026-11-01T15:23:14.860Z",
+      "specFile": "output/execution-checkpoints/1793546594849-f44ba812/spec.json",
+      "log": "output/execution-checkpoints/1793546594849-f44ba812/command.log",
+      "statusFile": "output/execution-checkpoints/1793546594849-f44ba812/result.json",
+      "supervisorPid": 21276,
+      "childPid": 7348,
+      "startedAt": "2026-11-01T15:23:14.938Z",
+      "lastHeartbeatAt": "2026-11-01T15:23:17.644Z",
+      "exitCode": 0,
+      "signal": null,
+      "finishedAt": "2026-11-01T15:23:17.626Z"
+    },
+    "1793546595644-b3c8b99b": {
+      "jobId": "1793546595644-b3c8b99b",
+      "taskId": "ACP-NATIVE-PERMISSION-UI",
+      "label": "底部原生权限选择与果铃工具权限分离的真实组件消费",
+      "status": "passed",
+      "requestedAt": "2026-11-01T15:23:15.663Z",
+      "specFile": "output/execution-checkpoints/1793546595644-b3c8b99b/spec.json",
+      "log": "output/execution-checkpoints/1793546595644-b3c8b99b/command.log",
+      "statusFile": "output/execution-checkpoints/1793546595644-b3c8b99b/result.json",
+      "supervisorPid": 57400,
+      "childPid": 70824,
+      "startedAt": "2026-11-01T15:23:15.750Z",
+      "lastHeartbeatAt": "2026-11-01T15:23:26.733Z",
+      "exitCode": 0,
+      "signal": null,
+      "finishedAt": "2026-11-01T15:23:26.719Z"
+    },
+    "1793546596633-f8b45db7": {
+      "jobId": "1793546596633-f8b45db7",
+      "taskId": "ACP-UI-BUILD",
+      "label": "新ACP入口主/测试及Electron类型检查与受影响生产构建",
+      "status": "passed",
+      "requestedAt": "2026-11-01T15:23:16.640Z",
+      "specFile": "output/execution-checkpoints/1793546596633-f8b45db7/spec.json",
+      "log": "output/execution-checkpoints/1793546596633-f8b45db7/command.log",
+      "statusFile": "output/execution-checkpoints/1793546596633-f8b45db7/result.json",
+      "supervisorPid": 47796,
+      "childPid": 65464,
+      "startedAt": "2026-11-01T15:23:16.734Z",
+      "lastHeartbeatAt": "2026-11-01T15:23:37.413Z",
+      "exitCode": 0,
+      "signal": null,
+      "finishedAt": "2026-11-01T15:23:37.403Z"
+    },
+    "1793546694074-9f7788b3": {
+      "jobId": "1793546694074-9f7788b3",
+      "taskId": "ACP-UI-VISUAL",
+      "label": "隔离真实窗口检验标题切换和底部独立菜单，零模型消息",
+      "status": "passed",
+      "requestedAt": "2026-11-01T15:24:54.085Z",
+      "specFile": "output/execution-checkpoints/1793546694074-9f7788b3/spec.json",
+      "log": "output/execution-checkpoints/1793546694074-9f7788b3/command.log",
+      "statusFile": "output/execution-checkpoints/1793546694074-9f7788b3/result.json",
+      "supervisorPid": 11368,
+      "childPid": 81772,
+      "startedAt": "2026-11-01T15:24:54.160Z",
+      "lastHeartbeatAt": "2026-11-01T15:38:10.257Z",
+      "exitCode": 0,
+      "signal": null,
+      "finishedAt": "2026-11-01T15:38:10.243Z"
+    },
+    "1793547293051-52c932ab": {
+      "jobId": "1793547293051-52c932ab",
+      "taskId": "ACP-EMPTY-RESUME-DIAGNOSTIC",
+      "label": "已关闭且零消息Codex原生空会话恢复归因",
+      "status": "passed",
+      "requestedAt": "2026-11-01T15:34:53.059Z",
+      "specFile": "output/execution-checkpoints/1793547293051-52c932ab/spec.json",
+      "log": "output/execution-checkpoints/1793547293051-52c932ab/command.log",
+      "statusFile": "output/execution-checkpoints/1793547293051-52c932ab/result.json",
+      "supervisorPid": 85020,
+      "childPid": 94184,
+      "startedAt": "2026-11-01T15:34:53.138Z",
+      "lastHeartbeatAt": "2026-11-01T15:34:59.317Z",
+      "exitCode": 0,
+      "signal": null,
+      "finishedAt": "2026-11-01T15:34:59.307Z"
+    },
+    "1793547561526-476096c8": {
+      "jobId": "1793547561526-476096c8",
+      "taskId": "ACP-NATIVE-CONFIG-REGRESSION",
+      "label": "原生空会话恢复、同Agent幂等与最终标题切换定向验收",
+      "status": "passed",
+      "requestedAt": "2026-11-01T15:39:21.535Z",
+      "specFile": "output/execution-checkpoints/1793547561526-476096c8/spec.json",
+      "log": "output/execution-checkpoints/1793547561526-476096c8/command.log",
+      "statusFile": "output/execution-checkpoints/1793547561526-476096c8/result.json",
+      "supervisorPid": 55580,
+      "childPid": 2040,
+      "startedAt": "2026-11-01T15:39:21.612Z",
+      "lastHeartbeatAt": "2026-11-01T15:39:25.806Z",
+      "exitCode": 0,
+      "signal": null,
+      "finishedAt": "2026-11-01T15:39:25.794Z"
+    },
+    "1793547562302-01a27d17": {
+      "jobId": "1793547562302-01a27d17",
+      "taskId": "ACP-UI-BUILD",
+      "label": "新ACP入口主/测试及Electron类型检查与受影响生产构建",
+      "status": "passed",
+      "requestedAt": "2026-11-01T15:39:22.312Z",
+      "specFile": "output/execution-checkpoints/1793547562302-01a27d17/spec.json",
+      "log": "output/execution-checkpoints/1793547562302-01a27d17/command.log",
+      "statusFile": "output/execution-checkpoints/1793547562302-01a27d17/result.json",
+      "supervisorPid": 81856,
+      "childPid": 59732,
+      "startedAt": "2026-11-01T15:39:22.446Z",
+      "lastHeartbeatAt": "2026-11-01T15:39:43.814Z",
+      "exitCode": 0,
+      "signal": null,
+      "finishedAt": "2026-11-01T15:39:43.796Z"
+    },
+    "1793547682086-cf84fc34": {
+      "jobId": "1793547682086-cf84fc34",
+      "taskId": "ACP-UI-VISUAL",
+      "label": "最终标题切换、空会话恢复与原生底部配置实机核验",
+      "status": "passed",
+      "requestedAt": "2026-11-01T15:41:22.100Z",
+      "specFile": "output/execution-checkpoints/1793547682086-cf84fc34/spec.json",
+      "log": "output/execution-checkpoints/1793547682086-cf84fc34/command.log",
+      "statusFile": "output/execution-checkpoints/1793547682086-cf84fc34/result.json",
+      "supervisorPid": 61408,
+      "childPid": 63000,
+      "startedAt": "2026-11-01T15:41:22.186Z",
+      "lastHeartbeatAt": "2026-11-01T15:48:59.311Z",
+      "exitCode": 0,
+      "signal": null,
+      "finishedAt": "2026-11-01T15:48:59.297Z"
+    },
+    "1793548254455-83ecc7c9": {
+      "jobId": "1793548254455-83ecc7c9",
+      "taskId": "ACP-EMPTY-RESUME-DIAGNOSTIC",
+      "label": "真实事件owner按原生会话边界证明空历史，未知保持拒绝",
+      "status": "passed",
+      "requestedAt": "2026-11-01T15:50:54.722Z",
+      "specFile": "output/execution-checkpoints/1793548254455-83ecc7c9/spec.json",
+      "log": "output/execution-checkpoints/1793548254455-83ecc7c9/command.log",
+      "statusFile": "output/execution-checkpoints/1793548254455-83ecc7c9/result.json",
+      "supervisorPid": 82200,
+      "childPid": 11536,
+      "startedAt": "2026-11-01T15:50:54.811Z",
+      "lastHeartbeatAt": "2026-11-01T15:51:07.221Z",
+      "exitCode": 0,
+      "signal": null,
+      "finishedAt": "2026-11-01T15:51:07.208Z"
+    },
+    "1793548255645-4543a7fb": {
+      "jobId": "1793548255645-4543a7fb",
+      "taskId": "ACP-NATIVE-CONFIG-REGRESSION",
+      "label": "最终恢复接线与输入框上方具名切换按钮",
+      "status": "passed",
+      "requestedAt": "2026-11-01T15:50:55.670Z",
+      "specFile": "output/execution-checkpoints/1793548255645-4543a7fb/spec.json",
+      "log": "output/execution-checkpoints/1793548255645-4543a7fb/command.log",
+      "statusFile": "output/execution-checkpoints/1793548255645-4543a7fb/result.json",
+      "supervisorPid": 66364,
+      "childPid": 53324,
+      "startedAt": "2026-11-01T15:50:55.766Z",
+      "lastHeartbeatAt": "2026-11-01T15:51:00.780Z",
+      "exitCode": 0,
+      "signal": null,
+      "finishedAt": "2026-11-01T15:51:00.767Z"
+    },
+    "1793548256655-98008e7b": {
+      "jobId": "1793548256655-98008e7b",
+      "taskId": "ACP-UI-BUILD",
+      "label": "新ACP入口主/测试及Electron类型检查与受影响生产构建",
+      "status": "passed",
+      "requestedAt": "2026-11-01T15:50:56.667Z",
+      "specFile": "output/execution-checkpoints/1793548256655-98008e7b/spec.json",
+      "log": "output/execution-checkpoints/1793548256655-98008e7b/command.log",
+      "statusFile": "output/execution-checkpoints/1793548256655-98008e7b/result.json",
+      "supervisorPid": 46920,
+      "childPid": 57932,
+      "startedAt": "2026-11-01T15:50:56.794Z",
+      "lastHeartbeatAt": "2026-11-01T15:51:19.868Z",
+      "exitCode": 0,
+      "signal": null,
+      "finishedAt": "2026-11-01T15:51:19.852Z"
+    },
+    "1793548347674-a84e2d7d": {
+      "jobId": "1793548347674-a84e2d7d",
+      "taskId": "ACP-UI-VISUAL",
+      "label": "按用户红框：输入框上方Agent切换，顶部对话名，实际原生配置",
+      "status": "timed_out",
+      "requestedAt": "2026-11-01T15:52:27.687Z",
+      "specFile": "output/execution-checkpoints/1793548347674-a84e2d7d/spec.json",
+      "log": "output/execution-checkpoints/1793548347674-a84e2d7d/command.log",
+      "statusFile": "output/execution-checkpoints/1793548347674-a84e2d7d/result.json",
+      "supervisorPid": 3940,
+      "childPid": 42744,
+      "startedAt": "2026-11-01T15:52:27.777Z",
+      "lastHeartbeatAt": "2026-11-01T16:12:28.536Z",
+      "exitCode": 1,
+      "signal": null,
+      "finishedAt": "2026-11-01T16:12:28.525Z"
+    },
+    "1793549634558-ab9db4d7": {
+      "jobId": "1793549634558-ab9db4d7",
+      "taskId": "ACP-COMPOSER-LAYOUT",
+      "label": "加号/发送进入灰色输入框，底部保持单行按实际宽度缩放",
+      "status": "passed",
+      "requestedAt": "2026-11-01T16:13:54.570Z",
+      "specFile": "output/execution-checkpoints/1793549634558-ab9db4d7/spec.json",
+      "log": "output/execution-checkpoints/1793549634558-ab9db4d7/command.log",
+      "statusFile": "output/execution-checkpoints/1793549634558-ab9db4d7/result.json",
+      "supervisorPid": 51272,
+      "childPid": 31140,
+      "startedAt": "2026-11-01T16:13:54.655Z",
+      "lastHeartbeatAt": "2026-11-01T16:14:06.625Z",
+      "exitCode": 0,
+      "signal": null,
+      "finishedAt": "2026-11-01T16:14:06.614Z"
+    },
+    "1793549635563-09140a05": {
+      "jobId": "1793549635563-09140a05",
+      "taskId": "ACP-COMPOSER-BEHAVIOR",
+      "label": "输入动作移位后的发送、模型强度与原生权限行为",
+      "status": "passed",
+      "requestedAt": "2026-11-01T16:13:55.571Z",
+      "specFile": "output/execution-checkpoints/1793549635563-09140a05/spec.json",
+      "log": "output/execution-checkpoints/1793549635563-09140a05/command.log",
+      "statusFile": "output/execution-checkpoints/1793549635563-09140a05/result.json",
+      "supervisorPid": 59500,
+      "childPid": 92516,
+      "startedAt": "2026-11-01T16:13:55.710Z",
+      "lastHeartbeatAt": "2026-11-01T16:14:05.345Z",
+      "exitCode": 0,
+      "signal": null,
+      "finishedAt": "2026-11-01T16:14:05.333Z"
+    },
+    "1793549748622-3c732b77": {
+      "jobId": "1793549748622-3c732b77",
+      "taskId": "ACP-UI-VISUAL",
+      "label": "最终灰色输入框内按钮与底部单行自适应字号实机呈现",
+      "status": "passed",
+      "requestedAt": "2026-11-01T16:15:48.634Z",
+      "specFile": "output/execution-checkpoints/1793549748622-3c732b77/spec.json",
+      "log": "output/execution-checkpoints/1793549748622-3c732b77/command.log",
+      "statusFile": "output/execution-checkpoints/1793549748622-3c732b77/result.json",
+      "supervisorPid": 86264,
+      "childPid": 38780,
+      "startedAt": "2026-11-01T16:15:48.774Z",
+      "lastHeartbeatAt": "2026-11-01T16:20:00.372Z",
+      "exitCode": 0,
+      "signal": null,
+      "finishedAt": "2026-11-01T16:20:00.361Z"
+    }
+  },
+  "lastSuccessfulOperation": {
+    "taskId": "FINAL-PACKAGED-SMOKE",
+    "status": "verified",
+    "at": "2026-11-01T16:23:27.733Z",
+    "evidence": [
+      "output/comprehensive-execution-20261101/packaged-smoke/run-Cz5HAV/evidence.json",
+      "output/comprehensive-execution-20261101/final-closure-2026-11-01T11-34-58-201Z/closeout-package-identity.json"
+    ]
+  },
+  "workspace": {
+    "checkedAt": "2026-11-01T16:23:27.633Z",
+    "head": "8b1e540fe30e0b7d7b5f5d0086516f48651dfe7e",
+    "status": [
+      " M .agents/skills/data-and-report/SKILL.md",
+      " M .agents/skills/orchestrate-courseware/references/creation-method.md",
+      " M .agents/skills/orchestrate-courseware/references/teacher-controller.md",
+      " M AGENTS.md",
+      " M artifacts/ai-capabilities/discovery-data.json",
+      " M artifacts/ai-capabilities/discovery.json",
+      " M artifacts/ai-capabilities/index.json",
+      " M artifacts/ai-capabilities/protocols/component-api5.json",
+      " M artifacts/ai-capabilities/skills/data-and-report/SKILL.md",
+      " M artifacts/ai-capabilities/skills/manifest.json",
+      " M artifacts/ai-capabilities/skills/orchestrate-courseware/references/creation-method.md",
+      " M artifacts/ai-capabilities/skills/orchestrate-courseware/references/material-assembly.md",
+      " M artifacts/ai-capabilities/skills/orchestrate-courseware/references/teacher-controller.md",
+      " M artifacts/ai-capabilities/tools/artifact.save.json",
+      " M artifacts/ai-capabilities/tools/compute.run.json",
+      " M artifacts/ai-capabilities/tools/delegate.agent.json",
+      " M artifacts/ai-capabilities/tools/delegate.message.json",
+      " M artifacts/ai-capabilities/tools/delegate.resume.json",
+      " M artifacts/ai-capabilities/tools/delegate.start.json",
+      " M artifacts/ai-capabilities/tools/image.preview.json",
+      " M artifacts/ai-capabilities/tools/office.edit.json",
+      " M artifacts/ai-capabilities/tools/project.apply.json",
+      " M artifacts/ai-capabilities/tools/project.read.json",
+      " M artifacts/ai-capabilities/tools/skills.read.json",
+      " M artifacts/ai-capabilities/tools/surface.duplicate.json",
+      " M artifacts/ai-capabilities/tools/surface.remix.inspect.json",
+      " M artifacts/ai-capabilities/tools/surface.remix.json",
+      " M artifacts/contracts/contract-manifest.json",
+      " M artifacts/contracts/course-project-v11.schema.json",
+      " M artifacts/contracts/published-course-v4.schema.json",
+      " D compute.html",
+      " M creative-reference/README.md",
+      " M docs/development-plan/20261028-creation-editing-execution/RESULT.md",
+      " M docs/development-plan/CURRENT_STATUS.md",
+      " M docs/development-plan/NEXT_EXECUTION.md",
+      " M docs/development-plan/TASK_BOARD.md",
+      " M docs/development-plan/WORKING_PROTOCOL.md",
+      " M docs/development-plan/tasks/20261027-next-execution/next-execution.md",
+      " M electron-builder.yml",
+      " M package-lock.json",
+      " M package.json",
+      " D scripts/prepare-compute-runtime.mjs",
+      " M scripts/verify-release.ts",
+      " M src/components/table/data.ts",
+      " M src/components/web/courseNavigation.ts",
+      " M src/core/components/source/componentAuthorSource.ts",
+      " M src/core/components/source/componentEnhancement.ts",
+      " M src/core/contentApply/planning/types.ts",
+      " M src/core/course/courseProductivityEdits.ts",
+      " M src/core/course/courseSurfaceStructure.ts",
+      " M src/core/projectFiles/componentPlatform/applyReceiptFiles.ts",
+      " M src/core/projectFiles/componentPlatform/coordinator.ts",
+      " M src/core/projectFiles/componentPlatform/projection.ts",
+      " M src/core/publish/componentPlatform/buildPublishedCourseV3.ts",
+      " M src/core/publish/componentPlatform/buildSingleHtml.ts",
+      " M src/core/publish/componentPlatform/compiledScript.ts",
+      " M src/core/tools/AgentFileTools.ts",
+      " M src/core/tools/AssetSourceTools.ts",
+      " M src/core/tools/DocumentToolGateway.ts",
+      " M src/core/tools/HostArtifactTools.ts",
+      " M src/core/tools/HostToolServices.ts",
+      " M src/core/tools/ProjectFileTools.ts",
+      " M src/core/tools/ToolCatalog.ts",
+      " M src/core/tools/ToolRegistration.ts",
+      " M src/core/tools/WorkbenchServiceTools.ts",
+      " M src/core/tools/modelToolResult.ts",
+      " M src/core/tools/toolSchemas.ts",
+      " M src/main/ipc.ts",
+      " M src/main/launchFileArguments.ts",
+      " M src/main/lessonDesktopService.ts",
+      " M src/main/workbench/DocumentFileCoordinator.ts",
+      " M src/main/workbench/DocumentHostService.ts",
+      " M src/main/workbench/compute/ComputeBackend.ts",
+      " M src/main/workbench/compute/ComputeJobService.ts",
+      " D src/main/workbench/compute/PyodideComputeBackend.ts",
+      " M src/main/workbench/contentApply/application/plan.ts",
+      " M src/main/workbench/contentApply/applyService.ts",
+      " M src/main/workbench/delegation/DelegationJobService.ts",
+      " M src/main/workbench/delegation/LocalToolRunner.ts",
+      " M src/main/workbench/delegation/NativeTaskRunner.ts",
+      " M src/main/workbench/delegation/freezeTaskInputs.ts",
+      " M src/main/workbench/documentHost.ts",
+      " M src/main/workbench/documentJournal.ts",
+      " M src/main/workbench/documentSourceResources.ts",
+      " M src/main/workbench/execution/AgentFileService.ts",
+      " M src/main/workbench/execution/AgentFileText.ts",
+      " M src/main/workbench/execution/ExecutionDesktopService.ts",
+      " M src/main/workbench/execution/ExecutionEngine.ts",
+      " M src/main/workbench/execution/ExecutionRunStore.ts",
+      " M src/main/workbench/execution/HostArtifactDeliveryService.ts",
+      " M src/main/workbench/execution/executionOutcome.ts",
+      " M src/main/workbench/external/ExternalMcpService.ts",
+      " M src/main/workbench/external/ResidentMcpServer.ts",
+      " M src/main/workbench/external/acp/AcpAgentSession.ts",
+      " M src/main/workbench/external/externalDesktopService.ts",
+      " M src/main/workbench/htmlImport/extractHtmlResources.ts",
+      " M src/main/workbench/observation/HtmlActionPageScript.ts",
+      " M src/main/workbench/observation/ViewObservationDesktopService.ts",
+      " M src/main/workbench/office/OfficeFileService.ts",
+      " M src/main/workbench/office/officePackage.ts",
+      " M src/main/workbench/office/pptxContent.ts",
+      " M src/main/workbench/projectFiles/componentPlatformFileInput.ts",
+      " M src/main/workbench/projectFiles/componentSourceClosure.ts",
+      " M src/main/workbench/providers/ChatGPTResponsesProvider.ts",
+      " M src/main/workbench/providers/providerSessionAffinity.ts",
+      " M src/main/workbench/skills/BundledSkillService.ts",
+      " M src/main/workbench/workbenchToolServices.ts",
+      " M src/player/behaviors/navigation/navigationControls.ts",
+      " M src/player/componentPlatform/compiledContentEnvironment.ts",
+      " M src/player/componentPlatform/compiledPlayer.ts",
+      " M src/player/componentPlatform/outputCapture.ts",
+      " M src/player/componentPlatform/playbackNavigationChrome.ts",
+      " M src/player/componentPlatform/publishedPlayer.ts",
+      " M src/player/components/ComponentRuntimeWorld.ts",
+      " M src/player/components/runtime/ComponentRuntimeHost.ts",
+      " M src/player/components/runtime/SandboxComponentRuntime.ts",
+      " M src/player/htmlPreview/htmlPreviewAgent.ts",
+      " M src/player/htmlPreview/htmlPreviewGeometry.ts",
+      " M src/player/htmlPreview/htmlPreviewPagination.ts",
+      " D src/preload/compute.ts",
+      " M src/preload/index.ts",
+      " M src/renderer/App.tsx",
+      " M src/renderer/authoring/generation/observationWorker.ts",
+      " M src/renderer/components/CourseV10RuntimeView.tsx",
+      " D src/renderer/compute/computeEntry.ts",
+      " D src/renderer/compute/computeWorker.ts",
+      " M src/renderer/diagnostics/installRendererDiagnostics.ts",
+      " M src/renderer/documentFiles/PlainTextDocumentEditor.tsx",
+      " M src/renderer/lessonWorkspace/controller/useDocumentTabsController.ts",
+      " M src/renderer/lessonWorkspace/controller/useLessonWorkspaceController.ts",
+      " M src/renderer/lessonWorkspace/view/WorkspaceContentHost.tsx",
+      " M src/renderer/lessonWorkspace/view/WorkspaceFilesTree.tsx",
+      " M src/renderer/lessonWorkspace/view/explorerCommands.ts",
+      " M src/renderer/ui/Workspace.tsx",
+      " M src/renderer/ui/workspaces/CourseNavigationControls.tsx",
+      " M src/renderer/workbench/ExecutionAssistant.tsx",
+      " M src/renderer/workbench/ExecutionDelegationChildren.tsx",
+      " M src/renderer/workbench/executionAssistant.css",
+      " M src/shared/contracts/component-platform/project.ts",
+      " M src/shared/contracts/component-platform/runtime.ts",
+      " M src/shared/generated/bundledSkills.json",
+      " M src/shared/generated/componentBuiltinSources/table.ts",
+      " M src/shared/generated/courseAgentCapabilities.json",
+      " M src/shared/html/htmlSourceScanner.ts",
+      " M src/shared/ipcTypes.ts",
+      " M src/shared/workbench/delegation.ts",
+      " M src/shared/workbench/execution.ts",
+      " M src/shared/workbench/executionDesktop.ts",
+      " M src/shared/workbench/executionTimelineReadModel.ts",
+      " M src/shared/workbench/modelProvider.ts",
+      " M src/shared/workbench/officeFiles.ts",
+      " M src/shared/workbench/sourceFileKind.ts",
+      " M src/shared/workbench/tools.ts",
+      " M src/shared/workbench/viewObservation.ts",
+      " M tests/e2e/g20M20Files.spec.ts",
+      " M tests/e2e/helpers/g20M20Harness.ts",
+      " M tests/e2e/marketChartManualHandoff20261029.spec.ts",
+      " M tests/e2e/storyManualHandoff20261029.spec.ts",
+      " M tests/fixtures/observation/auditObservationMain.ts",
+      " M tests/helpers/currentFlowBrowserHarness.tsx",
+      " M tests/integration/delegationSourcePreparation20261019.test.ts",
+      " M tests/integration/g20AgentFileTools.test.ts",
+      " M tests/integration/g20ArtifactSaveTool.test.ts",
+      " M tests/integration/g20ComputeJobRecovery.test.ts",
+      " M tests/integration/g20ExecutionDesktop.test.ts",
+      " M tests/integration/g20ExecutionEngine.test.ts",
+      " M tests/integration/g20ExecutionNaturalCompletion.test.ts",
+      " M tests/integration/g20ExecutionRecoveryScopes.test.ts",
+      " M tests/integration/g20ExecutionSettingsService.test.ts",
+      " M tests/integration/g20M20PlainText.test.ts",
+      " M tests/integration/g20M20PlainTextEditor.test.tsx",
+      " M tests/integration/g20M23HtmlPagination.test.ts",
+      " M tests/integration/g20OpenImagePreviewEngine.test.ts",
+      " M tests/integration/g20ToolFamilyDescription.test.ts",
+      " M tests/integration/g20ViewObservation.test.ts",
+      " M tests/integration/glxProgramEntry20261020.test.ts",
+      " M tests/integration/nativeDelegation20261019.test.ts",
+      " D tests/integration/productFollowup/T06/teacherLocalCompute.test.ts",
+      " D tests/integration/productFollowup/T06/teacherLocalComputeExit3.test.ts",
+      " D tests/integration/productFollowup/T06/teacherLocalComputeExit3Harness.cjs",
+      " D tests/integration/productFollowup/T06/teacherLocalComputeHarness.cjs",
+      " D tests/integration/productFollowup/T06/teacherPackagedCompute.ps1",
+      " M tests/integration/projectFileServices.test.ts",
+      " M tests/integration/q2ProjectFileSources.test.ts",
+      " M tests/integration/s6ProviderAffinityAndFinish20261019.test.ts",
+      " M tests/integration/unifiedOfficeFileService.test.ts",
+      " M tests/unit/a05AuthorSource.test.ts",
+      " M tests/unit/a05WebSourcePublish20261014.test.ts",
+      " M tests/unit/acpAgentSession.test.ts",
+      " M tests/unit/auditAllAiLifecycle.test.ts",
+      " M tests/unit/auditAllExportsDevCompute.test.ts",
+      " M tests/unit/auditAllHtmlModules.test.ts",
+      " M tests/unit/auditObservationPublicRuntime.test.ts",
+      " M tests/unit/auditR43AuthorModules.test.ts",
+      " M tests/unit/browserCompatibility20261020.test.ts",
+      " M tests/unit/componentEnhancement20261017.test.ts",
+      " M tests/unit/contentBehaviorGateway20261017.test.ts",
+      " M tests/unit/courseNavigationControls.test.tsx",
+      " M tests/unit/creationWarningConsumer20261020.test.ts",
+      " M tests/unit/executionDelegationChildren20261019.test.tsx",
+      " M tests/unit/g20BundledSkillService.test.ts",
+      " M tests/unit/g20DefaultWorkspaceEntry.test.tsx",
+      " M tests/unit/g20ExecutionAssistant.test.tsx",
+      " M tests/unit/g20M23HtmlDocumentRouting.test.ts",
+      " M tests/unit/navigationCoverageCompletion20261029.test.ts",
+      " M tests/unit/ni03RecipeProductivityIntents.test.ts",
+      " M tests/unit/packagedRuntimeBoundary.test.ts",
+      " M tests/unit/playbackNavigationPresentation.test.ts",
+      " M tests/unit/projectFileReading20261019.test.ts",
+      " M tests/unit/readingProjection20261019.test.ts",
+      " M tests/unit/softwareAuthoringQuestionsAndTimeline.test.tsx",
+      " M tests/unit/styleRemixV10.test.tsx",
+      " M vite.player.config.ts",
+      " M vite.renderer.config.ts",
+      "?? $null",
+      "?? 'src",
+      "?? .agents/skills/orchestrate-courseware/references/creative-reference.md",
+      "?? .agents/skills/orchestrate-courseware/references/learning-progress.md",
+      "?? artifacts/ai-capabilities/skills/orchestrate-courseware/references/creative-reference.md",
+      "?? artifacts/ai-capabilities/skills/orchestrate-courseware/references/learning-progress.md",
+      "?? docs/development-plan/20261030-native-python-packaging/",
+      "?? docs/development-plan/20261031-creation-audit-execution/",
+      "?? docs/development-plan/20261101-comprehensive-execution/",
+      "?? docs/development-plan/EXECUTION_CHECKPOINT.json",
+      "?? docs/development-plan/EXECUTION_CHECKPOINT.json.lock",
+      "?? docs/果铃AI创作生产力与执行路线研究-2026-10-29.md",
+      "?? public/vendor/notices/",
+      "?? scripts/credential-preflight-20261030.mjs",
+      "?? scripts/execution-checkpoint.mjs",
+      "?? scripts/experiments/a2-moon-final-readability-20261101.mjs",
+      "?? scripts/experiments/a2-moon-recover-committed-20261101.mjs",
+      "?? scripts/experiments/a2-r12-packaged-cold-20261101.mjs",
+      "?? scripts/experiments/acp-native-protocol-probe-20261101.ts",
+      "?? scripts/experiments/build-lighthouse-independent-20261101.mjs",
+      "?? scripts/experiments/builtin-moon-cleanup-recovery-20261101.mjs",
+      "?? scripts/experiments/builtin-moon-consumer-20261101.mjs",
+      "?? scripts/experiments/builtin-moon-continuation-20261101.mjs",
+      "?? scripts/experiments/builtin-moon-continuation-check-20261101.mjs",
+      "?? scripts/experiments/builtin-moon-final-cold-20261101.mjs",
+      "?? scripts/experiments/builtin-moon-final-recovery-20261101.mjs",
+      "?? scripts/experiments/builtin-moon-readiness-probe-20261101.mjs",
+      "?? scripts/experiments/builtin-moon-source-handoff-20261101.ts",
+      "?? scripts/experiments/inspect-builtin-c-20261101.mjs",
+      "?? scripts/experiments/inspect-builtin-cleanup-20261101.mjs",
+      "?? scripts/experiments/native-pipe-windows-diagnostic-20261101.mjs",
+      "?? scripts/experiments/office-candidate-independent-20261101.mjs",
+      "?? scripts/experiments/office-preview-representative-20261101.mjs",
+      "?? scripts/experiments/office-preview-source-inspection-20261101.mjs",
+      "?? scripts/experiments/root-creation-session-20261101.mjs",
+      "?? scripts/experiments/run-e2-short-edit-20261030.mjs",
+      "?? scripts/experiments/source-delivery-20261101.ts",
+      "?? scripts/experiments/verify-a2-label-geometry-20261101.mjs",
+      "?? scripts/experiments/verify-builtin-moon-20261101.mjs",
+      "?? scripts/experiments/verify-energy-programs-20261101.mjs",
+      "?? scripts/experiments/verify-moon-baseline-20261101.mjs",
+      "?? scripts/experiments/verify-moon-glx-20261101.mjs",
+      "?? scripts/experiments/verify-wait-baseline-20261101.mjs",
+      "?? scripts/run-delegation-directory-consumer-20261030.mjs",
+      "?? scripts/tests/",
+      "?? sim.locator('#orders').innerText()",
+      "?? src/components/web/courseProgress.ts",
+      "?? src/main/workbench/compute/NativePythonComputeBackend.ts",
+      "?? src/main/workbench/compute/NativePythonRuntime.ts",
+      "?? src/main/workbench/compute/nativePythonProcess.ts",
+      "?? src/main/workbench/execution/ExecutionModelImageProjection.ts",
+      "?? src/main/workbench/execution/hostWorkFacts.ts",
+      "?? src/main/workbench/external/acp/AcpAgentDiscovery.ts",
+      "?? src/main/workbench/external/acp/AcpAgentHost.ts",
+      "?? src/main/workbench/external/acp/AcpAgentRuntime.ts",
+      "?? src/main/workbench/external/acp/AcpConfiguration.ts",
+      "?? src/main/workbench/external/acp/AcpExecutionController.ts",
+      "?? src/main/workbench/external/acp/AcpHandoff.ts",
+      "?? src/main/workbench/external/acp/AcpMcpStdioBridge.ts",
+      "?? src/main/workbench/external/acp/AcpMcpStdioEntry.ts",
+      "?? src/main/workbench/observation/ObservationBootstrapService.ts",
+      "?? src/main/workbench/officePreviewDesktopService.ts",
+      "?? src/main/workbench/referenceLibrary.ts",
+      "?? src/player/components/runtime/ComponentProgressStore.ts",
+      "?? src/renderer/components/AcpAgentSelector.css",
+      "?? src/renderer/components/AcpAgentSelector.tsx",
+      "?? src/renderer/documentFiles/office/",
+      "?? src/renderer/documentFiles/sourceLanguage.ts",
+      "?? src/shared/workbench/acp.ts",
+      "?? src/shared/workbench/acpDesktop.ts",
+      "?? src/shared/workbench/officePreview.ts",
+      "?? tests/e2e/builtinGlxAdoption20261029.spec.ts",
+      "?? tests/e2e/builtinMarketManual20261029.spec.ts",
+      "?? tests/e2e/builtinMoonHandoff20261101.spec.ts",
+      "?? tests/e2e/builtinMoonSourceCold20261101.spec.ts",
+      "?? tests/e2e/creationFinalCold20261101.spec.ts",
+      "?? tests/e2e/creationMigration20261031.node.ts",
+      "?? tests/e2e/delegationDirectoryConsumer20261030.node.ts",
+      "?? tests/e2e/e2ShortEdit20261030.node.ts",
+      "?? tests/e2e/editableSharedExperiment20261031.spec.ts",
+      "?? tests/e2e/experimentOwnerBootstrap20261031.node.ts",
+      "?? tests/e2e/finalStoryCold20261029.spec.ts",
+      "?? tests/e2e/generalFileEntrypoints20261101.spec.ts",
+      "?? tests/e2e/greenhouseAuthorHandoff20261031.spec.ts",
+      "?? tests/e2e/inspectGreenhouseCandidate20261031.mjs",
+      "?? tests/e2e/marketCurrentManual20261029.spec.ts",
+      "?? tests/e2e/moonAuthorHandoff20261101.spec.ts",
+      "?? tests/e2e/oasisAuthorHandoff20261031.spec.ts",
+      "?? tests/e2e/oasisAuthorHandoffAI20261031.node.ts",
+      "?? tests/e2e/oasisAuthorHandoffPrepare20261031.node.ts",
+      "?? tests/e2e/oasisProgressRepair20261031.node.ts",
+      "?? tests/e2e/packagedEntrypoints20261101.spec.ts",
+      "?? tests/e2e/packagedGuideRequestEvidence20261031.mjs",
+      "?? tests/e2e/packagedGuideRequestEvidence20261031.test.mjs",
+      "?? tests/e2e/pptxReadonlyPreview20261101.spec.ts",
+      "?? tests/e2e/programWorkspaceChrome20261031.spec.ts",
+      "?? tests/e2e/runCreationMigration20261031.mjs",
+      "?? tests/e2e/runOasisAuthorHandoffAI20261031.mjs",
+      "?? tests/e2e/runPackagedCreationGuide20261031.mjs",
+      "?? tests/e2e/runW3EditableSharedConsumer20261031.mjs",
+      "?? tests/e2e/runW7NetworkReuse20261031.mjs",
+      "?? tests/e2e/runW7ProviderAffinity20261031.mjs",
+      "?? tests/e2e/templateE020261030.node.ts",
+      "?? tests/e2e/templateE020261030.spec.ts",
+      "?? tests/e2e/w3EditableSharedConsumer20261031.node.ts",
+      "?? tests/e2e/w7NetworkReuse20261031.node.ts",
+      "?? tests/e2e/w7ProviderAffinity20261031.node.ts",
+      "?? tests/e2e/w7ZeroModelCosts20261031.node.ts",
+      "?? tests/fixtures/creation/",
+      "?? tests/fixtures/observation/auditOutputCaptureHost.ts",
+      "?? tests/fixtures/observation/auditProgramActions.ts",
+      "?? tests/helpers/w7NetworkReuseExperiment.ts",
+      "?? tests/helpers/w7PayloadCost.ts",
+      "?? tests/helpers/w7ProviderAffinityExperiment.ts",
+      "?? tests/integration/componentSourceImports20261031.test.ts",
+      "?? tests/integration/delegationArtifactImages20261031.test.ts",
+      "?? tests/integration/delegationDirectorySources20261030.test.ts",
+      "?? tests/integration/generalFileTreeOpening.test.tsx",
+      "?? tests/integration/htmlObservationPath20261031.test.ts",
+      "?? tests/integration/learningProgress20261031.test.ts",
+      "?? tests/integration/learningProgressPlayer20261031.test.ts",
+      "?? tests/integration/modelImageWorkingProjection20261031.test.ts",
+      "?? tests/integration/nativePythonCompute20261030.test.ts",
+      "?? tests/integration/nativeTaskBrief20261030.test.ts",
+      "?? tests/integration/oasisAudioConsumer20261031.test.ts",
+      "?? tests/integration/oasisProgressConsumer20261031.test.ts",
+      "?? tests/integration/oasisSubtitleConsumer20261031.test.ts",
+      "?? tests/integration/packagedReferenceFiles20261031.test.ts",
+      "?? tests/integration/pptxOriginalPreservation.test.ts",
+      "?? tests/integration/projectArtifactSourceRouting20261101.test.ts",
+      "?? tests/integration/providerPhaseTiming20261030.test.ts",
+      "?? tests/integration/runAssembly20261031.test.ts",
+      "?? tests/integration/w7NetworkReuseExperiment20261031.test.ts",
+      "?? tests/integration/w7PayloadCost20261031.test.ts",
+      "?? tests/integration/w7ProviderAffinityExperiment20261031.test.ts",
+      "?? tests/unit/acpAgentDiscovery.test.ts",
+      "?? tests/unit/acpAgentHost.test.ts",
+      "?? tests/unit/acpAgentSelector.test.tsx",
+      "?? tests/unit/acpExecutionController.test.ts",
+      "?? tests/unit/acpManagedMcp.test.ts",
+      "?? tests/unit/acpMcpStdioBridge.test.ts",
+      "?? tests/unit/builtinSourceGatewayCold20261029.test.ts",
+      "?? tests/unit/executionPendingJobTimeline20261030.test.ts",
+      "?? tests/unit/generalFileExplorerCommands.test.ts",
+      "?? tests/unit/generalFileExternalOpening.test.ts",
+      "?? tests/unit/generalFileLaunchArguments.test.ts",
+      "?? tests/unit/hostWorkFacts20261031.test.ts",
+      "?? tests/unit/htmlObservationShadow20261030.test.ts",
+      "?? tests/unit/localToolExposure20261031.test.ts",
+      "?? tests/unit/nativePythonRuntime20261030.test.ts",
+      "?? tests/unit/navigationBridgeCoverage20261030.test.ts",
+      "?? tests/unit/navigationSandboxBridge20261030.test.ts",
+      "?? tests/unit/playbackNonblockingExport20261030.test.ts",
+      "?? tests/unit/programViewportScroll20261101.test.ts",
+      "?? tests/unit/publishedSourceDelivery20261101.test.ts",
+      "?? tests/unit/runtimeDiagnosticsNonblocking20261030.test.tsx",
+      "?? tests/unit/sandboxResourceLeaseAdoption20261031.test.ts",
+      "?? tests/unit/sourceFileCapabilities.test.ts",
+      "?? tests/unit/sourceLanguage.test.ts",
+      "?? tests/unit/tableSourceCellUndefined20261029.test.ts",
+      "?? tests/unit/taskTargetInputs20261030.test.ts",
+      "?? tests/unit/templateRemixWholeSlot20261030.test.ts",
+      "?? 果铃创作问题独立核查与开发方案-2026-10-31.md",
+      "?? 果铃工作台-综合研究与开发方案-2026-11-01.md",
+      "?? 果铃生产尝试核查与改进建议-无光绿洲-2026-10-31.md",
+      "?? 果铃生产尝试评估报告-无光绿洲-2026-10-30.md"
+    ]
+  },
+  "lastSavedAt": "2026-11-01T16:23:27.733Z"
+}

@@ -73,6 +73,7 @@ function bundledFontsPlugin(): Plugin {
 }
 
 export default defineConfig({
+  publicDir: false,
   base: './',
   plugins: [productIdentityPlugin(), react(), playerBundlePlugin(), bundledFontsPlugin(), htmlPreviewAgentPlugin()],
   resolve: {
@@ -82,7 +83,7 @@ export default defineConfig({
   },
   worker: { format: 'es' },
   build: {
-    rollupOptions: { input: { main: resolve(__dirname, 'index.html'), admission: resolve(__dirname, 'admission.html'), observation: resolve(__dirname, 'observation.html'), attachmentExtraction: resolve(__dirname, 'attachment-extraction.html'), nativeTextMeasurement: resolve(__dirname, 'native-text-measurement.html'), documentExport: resolve(__dirname, 'document-export.html'), pptxImport: resolve(__dirname, 'pptx-import.html'), compute: resolve(__dirname, 'compute.html') } },
+    rollupOptions: { input: { main: resolve(__dirname, 'index.html'), admission: resolve(__dirname, 'admission.html'), observation: resolve(__dirname, 'observation.html'), attachmentExtraction: resolve(__dirname, 'attachment-extraction.html'), nativeTextMeasurement: resolve(__dirname, 'native-text-measurement.html'), documentExport: resolve(__dirname, 'document-export.html'), pptxImport: resolve(__dirname, 'pptx-import.html') } },
     outDir: 'dist-renderer',
     emptyOutDir: true,
     sourcemap: true,

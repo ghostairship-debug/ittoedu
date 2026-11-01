@@ -42,16 +42,30 @@ async function executablePath(command: string): Promise<string> {
 export class LocalToolRunner {
   constructor(private readonly options: { boundary?: WindowsCodexSandboxBoundary; sandboxExecutable?: string } = {}) {}
 
+  private async sandboxPath(): Promise<string> {
+    if (process.platform !== 'win32') throw new Error('当前已接入的本地工具隔离边界仅支持 Windows')
+    const sandbox = this.options.sandboxExecutable ?? await discoverNativeCodexExecutable()
+    if (!sandbox) throw new Error('未找到已有原生 Codex sandbox；未安装或启动模型')
+    const executable = await fs.realpath(sandbox)
+    if (!(await fs.stat(executable)).isFile()) throw new Error('已有原生 Codex sandbox 路径不是可执行文件')
+    return executable
+  }
+
+  /** Check the installed prerequisite only; the existing per-command boundary probe still owns execution. */
+  async availability(): Promise<{ available: boolean; reason?: string }> {
+    try { await this.sandboxPath(); return { available: true } }
+    catch (error) { return { available: false, reason: error instanceof Error ? error.message : '本地工具隔离边界不可用' } }
+  }
+
   async prepare(cwd: string, intent: LocalToolRunIntent): Promise<PreparedLocalCommand> {
     if (process.platform !== 'win32') throw new Error('当前已接入的本地工具隔离边界仅支持 Windows')
     if (!path.isAbsolute(cwd)) throw new Error('本地工具工作目录必须由宿主准备')
     if (intent.args?.some(arg => typeof arg !== 'string' || arg.includes('\0'))
       || intent.timeoutMs !== undefined && (!Number.isSafeInteger(intent.timeoutMs) || intent.timeoutMs < 1))
       throw new Error('本地工具参数、输入或超时无效')
-    const sandbox = this.options.sandboxExecutable ?? await discoverNativeCodexExecutable()
-    if (!sandbox) throw new Error('未找到已有原生 Codex sandbox；未安装或启动模型')
+    const sandbox = await this.sandboxPath()
     return { executable: await executablePath(intent.command), args: [...(intent.args ?? [])], cwd,
-      sandboxExecutable: await fs.realpath(sandbox), ...(intent.stdin !== undefined ? { stdin: intent.stdin } : {}),
+      sandboxExecutable: sandbox, ...(intent.stdin !== undefined ? { stdin: intent.stdin } : {}),
       ...(intent.timeoutMs !== undefined ? { timeoutMs: intent.timeoutMs } : {}) }
   }
 

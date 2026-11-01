@@ -1,3 +1,6 @@
+import { AcpExecutionController } from '../external/acp/AcpExecutionController'
+import type { AcpSnapshotEvent } from '../../../shared/workbench/acpDesktop'
+import type { AcpSessionSegment } from '../../../shared/workbench/acp'
 import { createHash, randomUUID } from 'node:crypto'
 import path from 'node:path'
 import { promises as fs } from 'node:fs'
@@ -30,7 +33,7 @@ import { ChatGPTResponsesProvider, OpenAIResponsesProvider } from '../providers/
 import { AnthropicMessagesProvider } from '../providers/AnthropicMessagesProvider'
 import { routeModelProviders, serializeModelPayload } from '../providers/ModelProviderRouter'
 import { DesktopOperationError } from '../../errors'
-import { DEFAULT_PERMISSION_MODE, recordedPermissionMode } from '../../../shared/workbench/executionPermission'
+import { DEFAULT_PERMISSION_MODE, recordedPermissionMode, isInsideRoot } from '../../../shared/workbench/executionPermission'
 import { executionInputError } from './executionInputErrors'
 import { ExecutionChangeReviewService } from '../review/ExecutionChangeReviewService'
 import type { HostArtifactDeliveryService } from './HostArtifactDeliveryService'
@@ -130,6 +133,8 @@ export class ExecutionDesktopService {
   readonly artifacts: HostArtifactDeliveryService
   private readonly queues = new Map<string, Promise<unknown>>()
   private readonly timelineViews = new Map<string, Map<string, TimelineView>>()
+  private readonly acpControllers = new Map<string, Promise<AcpExecutionController>>()
+  private acpSink?: (event: AcpSnapshotEvent) => void
   private closing = false
   private shutdownPromise?: Promise<void>
   private readonly elementChanges = new Map<string, ElementChangeTracker>()
@@ -202,6 +207,7 @@ export class ExecutionDesktopService {
       edits: this.edits, provider, serializePayload, initialCompiler: new PayloadCompiler({ attachments: this.attachments, serializePayload }),
       files: options.documents.agentFiles, materials: this.attachments, visualAnalysis, changeReview: this.changeReview,
       artifacts: this.artifacts,
+      collaborationPeers: async runId => (await import('../workbenchToolServices.js')).workbenchDelegationService().collaborationPeers(runId),
       readImageTiming: async jobId => (await import('../workbenchToolServices.js')).workbenchImageService().readTiming(jobId),
       approveBrowserAction: async input => (await import('../workbenchToolServices.js')).approveWorkbenchBrowserAction(input),
       authorizeBrowserActionFromTask: async input => (await import('../workbenchToolServices.js')).authorizeWorkbenchBrowserActionFromTask(input),
@@ -217,7 +223,7 @@ export class ExecutionDesktopService {
     })
     this.edits.subscribe(event => this.editSink?.(event))
   }
-  setSinks(events?: (event: ExecutionEvent) => void, edits?: (event: EditEvent) => void) { this.eventSink = events; this.editSink = edits }
+  setSinks(events?: (event: ExecutionEvent) => void, edits?: (event: EditEvent) => void, acp?: (event: AcpSnapshotEvent) => void) { this.eventSink = events; this.editSink = edits; this.acpSink = acp }
   async releaseTimelineClient(clientId: string): Promise<void> {
     const views = this.timelineViews.get(clientId)
     this.timelineViews.delete(clientId)
@@ -270,7 +276,7 @@ export class ExecutionDesktopService {
   shutdown(): Promise<void> {
     if (this.shutdownPromise) return this.shutdownPromise
     this.closing = true
-    const stopping = this.engine.shutdown()
+    const stopping = Promise.all([this.engine.shutdown(), ...[...this.acpControllers.values()].map(async controller => (await controller).dispose())])
     this.shutdownPromise = (async () => {
       await Promise.all([this.initialization, this.recoveryAndRebindPromise, stopping])
       // run.end can enqueue its final conversation write while another queue is draining.
@@ -396,6 +402,108 @@ export class ExecutionDesktopService {
           attachmentIds: await this.ownedConversationAttachments(conversation) })
       }
     await this.attachments.collectConversationReleases(live)
+  }
+  private async builtinAgentSelected(conversationId: string): Promise<boolean> {
+    const controller = this.acpControllers.get(conversationId)
+    if (!controller) return true
+    const state = (await controller).host.snapshot
+    return state.selectedAgentId === 'builtin' && state.phase === 'idle'
+  }
+  private acpController(input: { workspaceId: string; conversationId: string }): Promise<AcpExecutionController> {
+    const existing = this.acpControllers.get(input.conversationId)
+    if (existing) return existing
+    const pending = (async () => {
+      const conversation = await this.required(input.workspaceId, input.conversationId)
+      if (conversation.element) throw refused('元素编辑卡继续使用果铃内置 Agent；请在主会话中选择原生 Agent')
+      const workspace = await this.conversations.readWorkspace(input.workspaceId)
+      if (!workspace) throw refused('工作空间已不存在')
+      const cwd = (await this.options.authorizeWorkspaceRoot(workspace.rootPath)).resolvedPath
+      const controller = new AcpExecutionController({ ...input, cwd,
+        runtimeDirectory: path.join(this.options.directory, 'acp'),
+        read: () => this.required(input.workspaceId, input.conversationId),
+        readSegments: () => this.readAcpSegments(input.conversationId),
+        canReplaceUnpersistedSession: (segment, acceptedRunIds) => this.externalRunsPrecedeAcpSession(input.conversationId, acceptedRunIds, segment),
+        prepareDocuments: request => this.serial(request.conversationId, () => this.prepareDocuments(request)),
+        update: change => this.serial(input.conversationId, async () => {
+          const current = await this.required(input.workspaceId, input.conversationId), patch = change(current)
+          return patch ? this.conversations.updateConversation({ ...input, expectedRevision: current.revision, patch }) : current
+        }),
+        stopBuiltin: async () => {
+          await this.serial(input.conversationId, async () => { await this.submissions.pause(input.conversationId) })
+          const current = await this.required(input.workspaceId, input.conversationId), active = await this.activeRun(current)
+          if (active) {
+            const stopped = await this.engine.stop(active.runId)
+            if (!stopped || ['queued', 'running', 'stopping'].includes(stopped.status)) throw refused('内置任务尚未停止，Agent 尚未切换')
+          }
+          await this.options.documents.settleSaveObservations(); await this.engine.settleDocumentBindings()
+          await this.serial(input.conversationId, async () => undefined)
+        },
+        append: event => this.appendExternalEvent(event), flush: () => this.events.flushPending(),
+        onSnapshot: snapshot => this.acpSink?.({ ...input, snapshot }),
+        openDocumentation: async url => { await (await import('electron')).shell.openExternal(url) },
+        artifactFacts: () => this.options.documents.registry.list().flatMap(snapshot => snapshot.binding.kind === 'file' && isInsideRoot(cwd, snapshot.binding.path)
+          ? [{ path: snapshot.binding.path, revision: `${snapshot.epoch}:${snapshot.revision}` }] : []),
+        createBinding: async binding => (await import('../external/externalDesktopService.js')).createAcpDomainBinding({ ...input, ...binding }),
+      })
+      return controller
+    })()
+    this.acpControllers.set(input.conversationId, pending)
+    void pending.catch(() => { if (this.acpControllers.get(input.conversationId) === pending) this.acpControllers.delete(input.conversationId) })
+    return pending
+  }
+  private async readAcpSegments(conversationId: string): Promise<AcpSessionSegment[]> {
+    await this.events.flushPending()
+    const segments = new Map<string, AcpSessionSegment>()
+    let after = 0
+    for (;;) {
+      const page = await this.events.readPage({ conversationId, after, limit: 500 })
+      for (const event of page.events) {
+        const segment = await this.acpSegmentFromEvent(event)
+        if (segment) segments.set(segment.id, segment)
+      }
+      if (!page.hasMore) break
+      if (page.cursor <= after) throw new Error('ACP 历史读取未能前进，未重新创建原生会话')
+      after = page.cursor
+    }
+    return [...segments.values()]
+  }
+  private async acpSegmentFromEvent(event: ExecutionEvent): Promise<AcpSessionSegment | undefined> {
+    if (event.source !== 'external-mcp' || event.type !== 'run.state' || event.itemId !== 'native-session') return
+    const output = event.data.outputRef
+      ? Buffer.from(await this.events.readBlob(event.conversationId, event.data.outputRef)).toString('utf8') : event.data.output
+    if (!output) return
+    let value: Record<string, unknown>
+    try { value = JSON.parse(output) as Record<string, unknown> } catch { return }
+    if (!value || value.kind !== 'acp-session-segment' || typeof value.id !== 'string' || !value.id
+      || !['codex', 'claude', 'opencode'].includes(String(value.agentId))
+      || typeof value.nativeSessionId !== 'string' || !value.nativeSessionId
+      || typeof value.startedAt !== 'string' || !Number.isFinite(Date.parse(value.startedAt))) return
+    return { id: value.id, agentId: value.agentId as AcpSessionSegment['agentId'], nativeSessionId: value.nativeSessionId, startedAt: value.startedAt,
+      ...(typeof value.endedAt === 'string' ? { endedAt: value.endedAt } : {}),
+      ...(typeof value.modelId === 'string' ? { modelId: value.modelId } : {}),
+      ...(typeof value.effort === 'string' ? { effort: value.effort } : {}),
+      ...(value.configurationChoices && typeof value.configurationChoices === 'object' && !Array.isArray(value.configurationChoices)
+        && Object.values(value.configurationChoices).every(choice => typeof choice === 'string' || typeof choice === 'boolean')
+        ? { configurationChoices: value.configurationChoices as Record<string, string | boolean> } : {}) }
+  }
+  private async externalRunsPrecedeAcpSession(conversationId: string, acceptedRunIds: readonly string[], recovery: AcpSessionSegment): Promise<boolean> {
+    await this.events.flushPending()
+    const earlierRuns = new Set<string>()
+    let after = 0
+    for (;;) {
+      const page = await this.events.readPage({ conversationId, after, limit: 500 })
+      for (const event of page.events) {
+        const segment = await this.acpSegmentFromEvent(event)
+        // The first segment of the same native history is the boundary, including earlier resumptions.
+        if (segment?.agentId === recovery.agentId && segment.nativeSessionId === recovery.nativeSessionId) {
+          return acceptedRunIds.every(runId => earlierRuns.has(runId))
+        }
+        if (!segment && event.source === 'external-mcp' && event.type === 'run.state' && event.itemId === 'native-session') return false
+        if (event.source === 'external-mcp') earlierRuns.add(event.runId)
+      }
+      if (!page.hasMore || page.cursor <= after) return false
+      after = page.cursor
+    }
   }
   private async required(workspaceId: string, conversationId: string): Promise<ConversationRecord> {
     const record = await this.conversations.readConversation({ workspaceId, conversationId })
@@ -738,6 +846,7 @@ export class ExecutionDesktopService {
       patch: { inputDraft: record.text, inputAttachments: record.attachments, frozenContextRefs: this.refs(record.documents) } })
   }
   private async startSubmission(record: StoredExecutionSubmission, continuation = record.continuation): Promise<StoredExecutionSubmission> {
+    if (!await this.builtinAgentSelected(record.conversationId)) throw refused('当前已选择原生 Agent；内置排队消息保留，切回后可继续')
     if (this.closing) throw refused('应用正在关闭；排队输入已保留，未启动新任务')
     record = await this.submissions.update(record.submissionId, { state: 'starting', continuation, updatedAt: Date.now(), failure: undefined })
     try {
@@ -759,7 +868,7 @@ export class ExecutionDesktopService {
     }
   }
   private async startNext(conversationId: string, previous?: ExecutionRunRecord, explicit = false): Promise<void> {
-    if (this.closing) return
+    if (this.closing || !await this.builtinAgentSelected(conversationId)) return
     if (await this.submissions.pausedReason(conversationId)) return
     const records = (await this.submissions.list()).filter(record => record.conversationId === conversationId)
     if (records.some(record => record.state === 'starting')) return
@@ -846,6 +955,7 @@ export class ExecutionDesktopService {
     await this.startNext(conversationId, undefined, true)
   }
   private async send(input: ExecutionSendInput): Promise<ExecutionSendResult> {
+    if (!await this.builtinAgentSelected(input.conversationId)) throw refused('当前已选择原生 Agent；请使用其发送入口，或明确切回果铃内置')
     // Submit paths consult durable run state and the engine; they must see the recovery of any prior run.
     await this.awaitRecoveryAndRebind()
     if (input.retryOfRunId) {
@@ -1182,6 +1292,15 @@ export class ExecutionDesktopService {
       // recovery so it observes the same durable truth as before the async split.
       if (!['workspace', 'conversations', 'create-conversation'].includes(input.type)) await this.awaitRecoveryAndRebind()
       switch (input.type) {
+        case 'acp': {
+          await this.required(input.request.workspaceId, input.request.conversationId)
+          try { return await (await this.acpController(input.request)).operate(input.request) }
+          catch (error) { throw refused(error instanceof Error ? error.message : 'ACP 操作未完成') }
+        }
+        case 'acp-send': {
+          try { return await (await this.acpController(input)).send(input) }
+          catch (error) { throw refused(error instanceof Error ? error.message : '原生 Agent 消息未发送') }
+        }
         case 'workspace': return await this.serial('workspace', () => this.workspace(input.root))
         case 'conversations': return listed(await this.conversations.listConversations(input.workspaceId))
         case 'create-conversation': return await this.conversations.createConversation({ ...input,
@@ -1212,7 +1331,11 @@ export class ExecutionDesktopService {
             .catch(error => { throw error instanceof ConversationStoreError && error.code === 'revision-conflict' ? executionInputError('conversation-draft-changed', error) : error })
         }))
         case 'rename-conversation': return await this.serial(input.conversationId, () => this.conversations.updateConversation({ ...input, patch: { title: input.title } }))
-        case 'delete-conversation': return await this.serial('attachment-lifecycle', () => this.serial(input.conversationId, () => this.removeConversation(input)))
+        case 'delete-conversation': {
+          const controller = this.acpControllers.get(input.conversationId)
+          if (controller) { await (await controller).dispose(); this.acpControllers.delete(input.conversationId) }
+          return await this.serial('attachment-lifecycle', () => this.serial(input.conversationId, () => this.removeConversation(input)))
+        }
         case 'send': {
           if (input.clientTiming) {
             this.rendererTiming(input.conversationId, input.submissionId, `${input.submissionId}:renderer:click`,

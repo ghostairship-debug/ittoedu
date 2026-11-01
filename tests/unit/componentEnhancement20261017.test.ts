@@ -119,6 +119,30 @@ it('executes the serialized Source graph with namespace base and prototype lifec
   } finally { harness.close() }
 })
 
+it('delegates composed clicks inside open shadow roots within the owner and releases them on disposal', async () => {
+  const current = enhance(model()), harness = contextFor(current)
+  try {
+    const mounted = await (await loadImplementation(current, harness.dom)).mount(harness.context)
+    const host = harness.dom.window.document.createElement('section')
+    harness.root.append(host)
+    const shadow = host.attachShadow({ mode: 'open' })
+    shadow.innerHTML = '<button class="increment"><span>shadow</span></button>'
+    const button = shadow.querySelector('button')!
+    expect(harness.root.contains(button)).toBe(false)
+    button.dispatchEvent(new harness.dom.window.MouseEvent('click', { bubbles: true, composed: true }))
+    expect(harness.state.get('count')).toBe(8)
+    button.dispatchEvent(new harness.dom.window.MouseEvent('click', { bubbles: true, composed: false }))
+    expect(harness.state.get('count')).toBe(8)
+    const outside = harness.dom.window.document.createElement('button')
+    outside.className = 'increment'; harness.root.parentElement!.append(outside)
+    outside.dispatchEvent(new harness.dom.window.MouseEvent('click', { bubbles: true, composed: true }))
+    expect(harness.state.get('count')).toBe(8)
+    await mounted.dispose()
+    button.dispatchEvent(new harness.dom.window.MouseEvent('click', { bubbles: true, composed: true }))
+    expect(harness.state.get('count')).toBe(8)
+  } finally { harness.close() }
+})
+
 it('retains enhancement during ordinary suspend and releases its listeners and subscriptions on scope cancellation', async () => {
   const current = enhance(model()), harness = contextFor(current)
   try {

@@ -85,20 +85,31 @@ export function sameHtmlPreviewDocumentUrl(actual: string, expected: string): bo
 
 /** Kept self-contained so its compiled source can be evaluated by WebFrameMain. */
 export function htmlActionPageOperation(input: HtmlPageOperation): HtmlPageState | HtmlPageActionResult {
+  const parentOf = (element: Element): Element | null => element.assignedSlot ?? element.parentElement
+    ?? (element.parentNode instanceof ShadowRoot ? element.parentNode.host : null)
+  const textParent = (node: Text): Element | null => node.parentElement
+    ?? (node.parentNode instanceof ShadowRoot ? node.parentNode.host : null)
   const pathOf = (element: Element): number[] => {
     const result: number[] = []
-    for (let node: Element | null = element; node && node !== document.documentElement; node = node.parentElement) {
-      const parent = node.parentElement
-      if (!parent) return []
-      result.unshift(Array.prototype.indexOf.call(parent.children, node) as number)
+    for (let node: Element | null = element; node && node !== document.documentElement;) {
+      const parent: ParentNode | null = node.parentNode
+      if (parent instanceof ShadowRoot) {
+        // Private host-captured paths cross an open shadow boundary with -1.
+        result.unshift(-1, Array.prototype.indexOf.call(parent.children, node) as number)
+        node = parent.host
+      } else if (parent instanceof Element) {
+        result.unshift(Array.prototype.indexOf.call(parent.children, node) as number)
+        node = parent
+      } else return []
     }
     return result
   }
   const resolve = (path: number[]): Element | null => {
-    if (!Array.isArray(path) || path.length > 64 || path.some(index => !Number.isSafeInteger(index) || index < 0)) return null
-    let node: Element | null = document.documentElement
-    for (const index of path) node = node?.children.item(index) ?? null
-    return node
+    if (!Array.isArray(path) || path.length > 64 || path.some(index => !Number.isSafeInteger(index) || index < -1)) return null
+    let node: Element | ShadowRoot | null = document.documentElement
+    for (const index of path) node = index === -1
+      ? node instanceof Element ? node.shadowRoot : null : node?.children.item(index) ?? null
+    return node instanceof Element ? node : null
   }
   const labelOf = (element: Element): string => {
     const html = element as HTMLElement
@@ -129,11 +140,11 @@ export function htmlActionPageOperation(input: HtmlPageOperation): HtmlPageState
   const bodyOverflowClips = (element: Element) => {
     // Absolutely positioned descendants whose containing block is outside body
     // escape its box clip, even when root overflow itself is hidden.
-    for (let node: Element | null = element; node && node !== document.body; node = node.parentElement) {
+    for (let node: Element | null = element; node && node !== document.body; node = parentOf(node)) {
       const position = getComputedStyle(node).position
       if (position !== 'absolute' && position !== 'fixed') continue
       let contained = false
-      for (let parent = node.parentElement; parent && parent !== document.documentElement; parent = parent.parentElement) {
+      for (let parent = parentOf(node); parent && parent !== document.documentElement; parent = parentOf(parent)) {
         const style = getComputedStyle(parent)
         if (position === 'absolute' && style.position && style.position !== 'static'
           || style.transform && style.transform !== 'none' || style.perspective && style.perspective !== 'none'
@@ -154,7 +165,7 @@ export function htmlActionPageOperation(input: HtmlPageOperation): HtmlPageState
       left = Math.max(left, input.clip.x); top = Math.max(top, input.clip.y)
       right = Math.min(right, input.clip.x + input.clip.width); bottom = Math.min(bottom, input.clip.y + input.clip.height)
     }
-    for (let parent: Element | null = element; parent; parent = parent.parentElement) {
+    for (let parent: Element | null = element; parent; parent = parentOf(parent)) {
       const style = getComputedStyle(parent)
       if (style.visibility === 'hidden' || style.display === 'none') return null
       if (parent === element) continue
@@ -195,15 +206,24 @@ export function htmlActionPageOperation(input: HtmlPageOperation): HtmlPageState
       dateParts = Intl.DateTimeFormat(navigator.language, { calendar: 'gregory', year: 'numeric', month: '2-digit', day: '2-digit' })
         .formatToParts(new Date(2001, 10, 23)).filter(part => ['year', 'month', 'day'].includes(part.type)).map(part => values[part.type]!)
     }
-    if (input.type === 'input' && input.requireFocus && document.activeElement !== element && !element.contains(document.activeElement))
+    let focused = document.activeElement
+    while (focused?.shadowRoot?.activeElement) focused = focused.shadowRoot.activeElement
+    if (input.type === 'input' && input.requireFocus && focused !== element && !element.contains(focused))
       return { applied: false, reason: 'input-focus-changed' }
     const visibleRect = visibleRectOf(element)
     if (!visibleRect) return { applied: false, reason: 'not-visible' }
     const { left, top, right, bottom } = visibleRect
     const point = input.point ?? { x: (left + right) / 2, y: (top + bottom) / 2 }
     if (point.x < left || point.x >= right || point.y < top || point.y >= bottom) return { applied: false, reason: 'not-visible' }
-    const hit = document.elementFromPoint(point.x, point.y)
-    if (hit !== element && !element.contains(hit)) return { applied: false, reason: 'covered-element' }
+    let hit = document.elementFromPoint(point.x, point.y)
+    for (let depth = 0; hit?.shadowRoot && depth < 64; depth += 1) {
+      const inner = hit.shadowRoot.elementFromPoint(point.x, point.y)
+      if (!inner || inner === hit) break
+      hit = inner
+    }
+    let hitOwner = hit
+    while (hitOwner && hitOwner !== element) hitOwner = parentOf(hitOwner)
+    if (!hitOwner) return { applied: false, reason: 'covered-element' }
     // Preparation only. The Main port delivers trusted browser mouse/keyboard input.
     return { applied: true, point, rect: { x: left, y: top, width: right - left, height: bottom - top },
       identityFingerprint: stableIdentity(element),
@@ -221,7 +241,12 @@ export function htmlActionPageOperation(input: HtmlPageOperation): HtmlPageState
   const courseScenes = Array.isArray(courseState?.scenes) ? courseState.scenes : []
   const courseIndex = courseScenes.findIndex(scene => scene.id === courseState?.locationId)
   const elements: HtmlPageElement[] = []
-  const candidates = document.body ? Array.from(document.body.querySelectorAll('*')) : []
+  const roots: ParentNode[] = document.body ? [document.body] : []
+  const candidates: Element[] = []
+  for (let index = 0; index < roots.length; index += 1) for (const element of roots[index]!.querySelectorAll('*')) {
+    candidates.push(element)
+    if (element.shadowRoot) roots.push(element.shadowRoot)
+  }
   const isEditingHost = (element: Element) => element instanceof HTMLElement && element.isContentEditable
     && !(element.parentElement instanceof HTMLElement && element.parentElement.isContentEditable)
   const isControl = (element: Element) => ['button', 'a', 'input', 'textarea', 'select', 'summary', 'label'].includes(element.localName)
@@ -238,7 +263,7 @@ export function htmlActionPageOperation(input: HtmlPageOperation): HtmlPageState
     }
     const visibility = getComputedStyle(element).visibility
     if (visibility === 'hidden' || visibility === 'collapse') return null
-    for (let parent: Element | null = element; parent; parent = parent.parentElement) {
+    for (let parent: Element | null = element; parent; parent = parentOf(parent)) {
       const style = getComputedStyle(parent)
       if (style.display === 'none' || style.opacity === '0' || style.contentVisibility === 'hidden') return null
       const clip = overflowRect(parent, element)
@@ -249,7 +274,7 @@ export function htmlActionPageOperation(input: HtmlPageOperation): HtmlPageState
   }
   const normalizedText = (text: string) => text.replace(/\s+/g, ' ').trim()
   const renderedText = (node: Text): string => {
-    const parent = node.parentElement
+    const parent = textParent(node)
     if (!parent || parent.closest('script,style,noscript,template')) return ''
     const text = node.data
     const range = document.createRange()
@@ -278,12 +303,13 @@ export function htmlActionPageOperation(input: HtmlPageOperation): HtmlPageState
     || /^(button|checkbox|combobox|gridcell|link|listbox|menuitem|menuitemcheckbox|menuitemradio|option|radio|scrollbar|searchbox|slider|spinbutton|switch|tab|textbox|treeitem|alert|status|log|progressbar|meter|timer)$/.test(element.getAttribute('role') ?? '')
   const textSeparator = (previous: Text | undefined, current: Text, owner: Element): string => {
     if (!previous) return ''
+    if (previous.getRootNode() !== current.getRootNode()) return ' '
     const ancestors = new Set<Element>()
     for (let parent = previous.parentElement; parent; parent = parent.parentElement) {
       ancestors.add(parent)
       if (parent === owner) break
     }
-    let common = current.parentElement!
+    let common = textParent(current)!
     while (!ancestors.has(common) && common.parentElement) common = common.parentElement
     const blockBoundary = (element: Element) => {
       const display = getComputedStyle(element).display
@@ -298,12 +324,12 @@ export function htmlActionPageOperation(input: HtmlPageOperation): HtmlPageState
   const textByOwner = new Map<Element, string[]>()
   const previousTextByOwner = new Map<Element, Text>()
   const segments: Array<{ owner: Element; text: string }> = []
-  if (document.body) {
-    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT)
+  for (const root of roots) {
+    const walker = document.createTreeWalker(root as Node, NodeFilter.SHOW_TEXT)
     for (let node = walker.nextNode(); node; node = walker.nextNode()) {
       const text = renderedText(node as Text)
       if (!text) continue
-      let owner: Element = node.parentElement!
+      let owner: Element = textParent(node as Text)!
       for (let parent: Element | null = owner; parent && parent !== document.body; parent = parent.parentElement) {
         if (ownsDescendantText(parent)) { owner = parent; break }
       }

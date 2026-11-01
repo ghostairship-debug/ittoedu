@@ -49,7 +49,7 @@ function waitForSourceValue<T>(pending:PromiseLike<T>,signal:AbortSignal,retire?
  })
 }
 /** Materialized DOM plus the same navigation/action/media/state owners used by the editor. */
-export async function mountCompiledCourse(artifact:CompiledCoursePlayback,root:HTMLElement,options:{report?:(message:string,diagnostic?:{severity:'warning'|'error';code?:string;instanceId?:string})=>void;fontFaceCss?:string;keyboardNavigation?:boolean;preparedAssetBytes?:Readonly<Record<string,Uint8Array>>;prepareAssetBytes?:()=>Promise<Readonly<Record<string,Uint8Array>>>}={}){
+export async function mountCompiledCourse(artifact:CompiledCoursePlayback,root:HTMLElement,options:{report?:(message:string,diagnostic?:{severity:'warning'|'error';code?:string;instanceId?:string})=>void;fontFaceCss?:string;progressPersistence?:boolean;keyboardNavigation?:boolean;preparedAssetBytes?:Readonly<Record<string,Uint8Array>>;prepareAssetBytes?:()=>Promise<Readonly<Record<string,Uint8Array>>>}={}){
  if(artifact.format!=='compiled-course-v2')throw new Error('未知编译播放制品')
  const hasPresentation=Boolean(artifact.course.instances[artifact.course.entry?.rootInstanceId??'']?.container)
  const hostRoot=root;if(hasPresentation)root=createPlaybackNavigationContent(hostRoot)
@@ -151,7 +151,7 @@ export async function mountCompiledCourse(artifact:CompiledCoursePlayback,root:H
   context.scope.cleanup(context.scope.state.subscribe(key,projection.apply));context.scope.cleanup(projection.dispose)
   if(context.layout)context.scope.cleanup(context.layout.subscribe(projection.apply))
  }
- world=new ComponentRuntimeWorld(`compiled:${artifact.id}`,{mode:'play',authoring:false,readInstanceData:instance=>{const program=webEntry(instance)?.program;if(program?.nativeData)return nativeInstance(instance).data;const source=program?.semanticData;return source?{...currentWebData(source.data,instance),html:replaceAssets(restorePublishedWebMarkup(source.data.html,source.declarations,dom),instance),css:source.data.css&&replaceAssets(source.data.css,instance)} as any:instance.data},fixedViewport:instance=>webEntry(instance)?.program.fixedViewport,teacherController:teacher,studentNavigation:navigation,builtins,report,fontFaceCss:options.fontFaceCss,resolveAssetUrl:id=>assetUrls[id],
+ world=new ComponentRuntimeWorld(`compiled:${artifact.id}`,{mode:'play',progressPersistence:options.progressPersistence,authoring:false,readInstanceData:instance=>{const program=webEntry(instance)?.program;if(program?.nativeData)return nativeInstance(instance).data;const source=program?.semanticData;return source?{...currentWebData(source.data,instance),html:replaceAssets(restorePublishedWebMarkup(source.data.html,source.declarations,dom),instance),css:source.data.css&&replaceAssets(source.data.css,instance)} as any:instance.data},fixedViewport:instance=>webEntry(instance)?.program.fixedViewport,teacherController:teacher,studentNavigation:navigation,builtins,report,fontFaceCss:options.fontFaceCss,resolveAssetUrl:id=>assetUrls[id],
   resolveSource:async(implementation,signal)=>{
    const key=implementation.source??'',factory=sourceFactories.get(key)
    if(factory){let webDocument=false;return{isWebDocument:()=>webDocument,implementation:{mount:async context=>{

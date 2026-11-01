@@ -5,10 +5,11 @@ import { createHash } from 'node:crypto'
 import { CourseV10Driver } from '../../src/core/drivers/CourseV10Driver'
 import type { CourseProjectV10 } from '../../src/shared/contracts/component-platform/project'
 
-const root=resolve(__dirname,'../..'),out=resolve(root,'output/creation-editing-completion-20261029/resume-story-ui')
-const titleId='0fe5beca-0f75-4e65-9f9c-3a1ad72b182d',eveningId='9096bdc3-2818-458b-a5e4-0b41fba9002b',imageId='7b53f056-8478-4299-955f-b6666c6da72e',noonId='e7dc79ff-aa59-4e50-aa47-7862acd846f3'
-const oldTitle='旧站的一天',newTitle='旧站的一天 · 社区试运行版',oldNoon='12:00 候车厅档案',newNoon='12:00 记忆候车厅'
-const oldEvening='傍晚摊位可以撤收。',newEvening='傍晚摊位在闭市后统一撤收。'
+const variant=process.env.GUOLING_STORY_VARIANT?JSON.parse(process.env.GUOLING_STORY_VARIANT) as Record<string,string>:{}
+const root=resolve(__dirname,'../..'),out=resolve(root,variant.out||'output/creation-editing-completion-20261029/resume-story-ui')
+const titleId=variant.titleId||'0fe5beca-0f75-4e65-9f9c-3a1ad72b182d',eveningId=variant.eveningId||'9096bdc3-2818-458b-a5e4-0b41fba9002b',imageId=variant.imageId||'7b53f056-8478-4299-955f-b6666c6da72e',noonId=variant.noonId||'e7dc79ff-aa59-4e50-aa47-7862acd846f3'
+const oldTitle='旧站的一天',newTitle='旧站的一天 · 社区试运行版',oldNoon=variant.oldNoon||'12:00 候车厅档案',newNoon='12:00 记忆候车厅'
+const oldEvening=variant.oldEvening||'傍晚摊位可以撤收。',newEvening=variant.newEvening||'傍晚摊位在闭市后统一撤收。'
 const replacementPath=resolve(root,'output/audit-remediation-20261027/benchmark/assets/platform-alt.png')
 const hash=(bytes:Uint8Array)=>createHash('sha256').update(bytes).digest('hex')
 const text=(project:CourseProjectV10,id:string)=>{
@@ -37,7 +38,7 @@ const block=(page:Page,id:string)=>page.locator('.course-editor-frame:visible .P
 async function properties(page:Page){
  const panel=page.getByTestId('properties-tab'),opener=page.getByRole('button',{name:'属性与素材',exact:true})
  if(!await panel.isVisible()&&await opener.isVisible())await opener.click()
- const tab=page.getByRole('tab',{name:'属性',exact:true});if(await tab.isVisible())await tab.click()
+ const tab=page.getByRole('tab',{name:'属性',exact:true});if(!await panel.isVisible()&&await tab.isVisible())await tab.click()
  await expect(panel).toBeVisible();return panel
 }
 async function replaceFlowText(page:Page,id:string,before:string,after:string,run:string){
@@ -73,7 +74,7 @@ async function diagnoseStoryImage(page:Page,run:string,phase:string){
   const hitPoints=[...points(img??null,'img'),...points(picture??null,'block')].map(point=>({...point,stack:document.elementsFromPoint(point.x,point.y).slice(0,5).map(e=>({tag:e.tagName,classes:e.className,id:e.closest('[data-flow-block-id]')?.getAttribute('data-flow-block-id'),html:e.outerHTML.slice(0,250)}))}))
   const ranges=[];if(paragraph){const walker=document.createTreeWalker(paragraph,NodeFilter.SHOW_TEXT);for(let node=walker.nextNode();node;node=walker.nextNode()){if(!node.textContent?.trim())continue;const range=document.createRange();range.selectNodeContents(node);ranges.push({text:node.textContent,rects:[...range.getClientRects()].map(r=>r.toJSON()),parent:info(node.parentElement,0)})}}
   const pm=picture?.closest('.ProseMirror');return{phase,picture:info(picture??null),image:info(img??null),imageNatural:img?{width:img.naturalWidth,height:img.naturalHeight,complete:img.complete}:null,paragraph:info(paragraph??null),pictureAncestors:ancestors(picture??null),paragraphAncestors:ancestors(paragraph??null),hitPoints,ranges,pm:pm?{contenteditable:pm.getAttribute('contenteditable'),inputActive:pm.getAttribute('data-flow-input-active')}:null,activeElement:info(document.activeElement),selection:document.getSelection()?.toString()}
- },{imageId,paragraphId:'56672960-224b-45d8-8d0b-03ac98f7efa5',phase})
+ },{imageId,paragraphId:variant.paragraphId||'56672960-224b-45d8-8d0b-03ac98f7efa5',phase})
  writeFileSync(join(run,'image-input-'+phase+'.json'),JSON.stringify(observed))
 }
 function assertManual(project:CourseProjectV10,baseline:CourseProjectV10){
@@ -105,11 +106,12 @@ test('story manual handoff preserves real text, image crop, width, history and i
   await panel.getByLabel('显示方式',{exact:true}).selectOption('cover')
   const crop=panel.getByRole('slider',{name:'左裁剪',exact:true});await expect(crop).toBeVisible();await crop.focus();await crop.press('Home');for(let i=0;i<8;i++)await crop.press('ArrowRight');await crop.blur()
   await expect.poll(async()=>((await snapshot(page,documentId)).model.project.instances[imageId].data as any).crop.left).toBeGreaterThan(0)
-  const beforeWidth=await snapshot(page,documentId),width=panel.getByLabel('正文占宽（%）',{exact:true});await expect(width).toHaveValue('42');await width.fill('48');await width.press('Enter');await width.blur()
+  const beforeWidth=await snapshot(page,documentId),width=panel.getByLabel('正文占宽（%）',{exact:true});await expect(width).toHaveValue(variant.initialWidth||'42');await width.fill('48');await width.press('Enter');await width.blur()
   await expect.poll(async()=>(await snapshot(page,documentId)).model.project.instances[imageId].flowLayout?.widthPercent).toBe(48)
   const resized=await snapshot(page,documentId);expect(resized.undoDepth-beforeWidth.undoDepth).toBe(1)
   await picture.click();await page.keyboard.press('Control+z');await expect.poll(async()=>(await snapshot(page,documentId)).model.project.instances[imageId]).toEqual(beforeWidth.model.project.instances[imageId])
   await page.keyboard.press('Control+y');await expect.poll(async()=>(await snapshot(page,documentId)).model.project.instances[imageId]).toEqual(resized.model.project.instances[imageId])
+  if(variant.nativeBody==='true')await panel.getByLabel('文字环绕',{exact:true}).selectOption('right')
   const edited=await snapshot(page,documentId);assertManual(edited.model.project,before.model.project);await page.screenshot({path:join(run,'manual-edited.png')})
   await page.keyboard.press('Control+s');await expect.poll(async()=>(await snapshot(page,documentId)).dirty).toBe(false)
   const saved=await snapshot(page,documentId),driver=new CourseV10Driver(),disk=await driver.load(readFileSync(projectPath));if(disk.kind!=='course-v10')throw Error('Wrong saved model')
@@ -147,6 +149,7 @@ test('story after AI exact heading edit keeps the manual handoff and updates rea
   const{page,documentId}=current;page.on('pageerror',e=>errors.push(e.message));const after=await snapshot(page,documentId),expected=structuredClone(baseline.project.instances)
   const data=expected[noonId].data as {content:{inlines:{type:string;text?:string}[]}};expect(data.content.inlines).toHaveLength(1);data.content.inlines[0].text=newNoon
   expect(after.model.project.instances).toEqual(expected);expect(after.model.project.definitions).toEqual(baseline.project.definitions);expect(after.model.project.assets).toEqual(baseline.project.assets)
+  const expectedProject=structuredClone(baseline.project) as any;expectedProject.instances=expected;expectedProject.revision=(after.model.project as any).revision;expect(after.model.project).toEqual(expectedProject)
   const disk=await new CourseV10Driver().load(readFileSync(source));if(disk.kind!=='course-v10')throw Error('Wrong T3 model')
   expect(Object.fromEntries(Object.entries(disk.resources.assets).map(([id,bytes])=>[id,hash(bytes)]))).toEqual(baseline.resourceHashes)
   await expect(block(page,noonId)).toHaveText(newNoon)

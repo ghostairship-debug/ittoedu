@@ -135,6 +135,7 @@ export class AgentFileText {
     if (current.snapshot) {
       const snapshot = current.snapshot
       const approvedOutside = context.permission !== 'full' && !isInsideRoot(context.workspaceRoot, filename)
+        && !(context.assemblyRoot && isInsideRoot(context.assemblyRoot, filename))
       if (approvedOutside && !(context.approvedOutsidePaths ?? []).some(approved => samePath(approved, filename)))
         throw new Error('工作空间外文档的本次修改需要明确批准')
       if (!context.operationCall) throw new Error('源文件操作缺少宿主调用身份')
@@ -172,6 +173,7 @@ export class AgentFileText {
         throw new Error('提交前文件夹位置已改变，请重新读取')
       context.assertActive?.()
       await fs.rename(temporary, filename)
+      this.host.fileCoordinator.acknowledgeSourceWrite(filename, current.version, hash(bytes))
     } finally { await fs.rm(temporary, { force: true }).catch(() => {}) }
     return { data: { path: filename, operationId, status: 'written', beforeVersion: current.version,
       afterVersion: hash(bytes), saved: true, dirty: false } }

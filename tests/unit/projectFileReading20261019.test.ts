@@ -9,7 +9,60 @@ import { captureComponentOperation } from '../../src/core/drivers/courseV10Opera
 import { WEB_DEFINITION } from '../../src/components/web/data'
 import { componentProjectFiles } from '../../src/core/projectFiles/componentPlatform/projection'
 import { ComponentProjectFileCoordinator, type ComponentProjectSnapshot } from '../../src/core/projectFiles/componentPlatform/coordinator'
+import { planContentApply } from '../../src/main/workbench/contentApply/application/plan'
 import type { ComponentEdit } from '../../src/shared/contracts/component-platform'
+it('introduces only delivered structure object addresses and keeps Session conflict protection', async () => {
+  const h = await fixture()
+  const files = componentProjectFiles(h.snapshot().model.project, h.snapshot().model.resources)
+  const page = files.find(file => file.kind === 'structure' && file.target?.kind === 'container'
+    && file.target.container.kind === 'surface')!
+  await h.read({ path: page.path, full: true })
+  const observed = h.coordinator.captureFile('run', h.snapshot(), h.path, true)
+  expect(observed.file.target).toEqual({ kind: 'instance', instanceId: 'a' })
+  const unlistedSource = files.find(file => file.kind === 'source' && file.target?.kind === 'instance'
+    && file.target.instanceId === 'a')!
+  expect(() => h.coordinator.captureFile('run', h.snapshot(), unlistedSource.path, true)).toThrow(/尚未观察/)
+  await h.human([{ type: 'data.set', instanceId: 'a', path: ['html'], value: '<p>刚刚保存的人工意见</p>' }])
+  const captured = h.coordinator.captureFile('run', h.snapshot(), h.path, true)
+  expect(captured.snapshot.revision).toBe(0)
+  const receipt = await h.session.execute({ documentId: captured.snapshot.documentId, epoch: captured.snapshot.epoch,
+    baseRevision: h.snapshot().revision, operationId: 'structure-stale-edit', actor: 'agent',
+    mutation: { type: 'command', command: captureComponentOperation(captured.snapshot.model.project, [
+      { type: 'data.set', instanceId: 'a', path: ['html'], value: '<p>过时替换</p>' },
+    ]) } }, { rebaseComponentExpectations: true })
+  expect(receipt.status).toBe('conflict')
+  expect(h.snapshot().model.project.instances.a!.data).toMatchObject({ html: '<p>刚刚保存的人工意见</p>' })
+})
+
+it('does not introduce children from structure excerpts, queries or only the final continuation', async () => {
+  const h = await fixture()
+  const page = componentProjectFiles(h.snapshot().model.project, h.snapshot().model.resources)
+    .find(file => file.kind === 'structure' && file.target?.kind === 'container' && file.target.container.kind === 'surface')!
+  await h.read({ path: page.path, query: 'objects', limit: 1 })
+  expect(() => h.coordinator.captureFile('run', h.snapshot(), h.path, true)).toThrow(/尚未观察/)
+  const first = await h.read({ path: page.path, limit: 40 })
+  await h.read({ path: page.path, offset: first.nextOffset, full: true })
+  expect(() => h.coordinator.captureFile('run', h.snapshot(), h.path, true)).toThrow(/尚未观察/)
+  await h.read({ path: page.path, full: true })
+  expect(h.coordinator.captureFile('run', h.snapshot(), h.path, true).file.target)
+    .toEqual({ kind: 'instance', instanceId: 'a' })
+})
+
+it('does not rebind an observed child alias or absorb its unread human values on a later structure read', async () => {
+  const h = await fixture()
+  const page = componentProjectFiles(h.snapshot().model.project, h.snapshot().model.resources)
+    .find(file => file.kind === 'structure' && file.target?.kind === 'container' && file.target.container.kind === 'surface')!
+  await h.read({ path: page.path, full: true })
+  await h.human([{ type: 'instance.move', instanceId: 'b', container: { kind: 'surface', surfaceId: h.surfaceId }, index: 0 },
+    { type: 'data.set', instanceId: 'a', path: ['html'], value: '<p>人工保留</p>' }])
+  await h.read({ path: page.path, full: true })
+  const captured = h.coordinator.captureFile('run', h.snapshot(), h.path, true)
+  expect(captured.file.target).toEqual({ kind: 'instance', instanceId: 'a' })
+  expect(captured.snapshot.revision).toBe(0)
+  expect(captured.file.content).toContain('第一处')
+  expect(captured.file.content).not.toContain('人工保留')
+  expect((await h.read({ refresh: true })).content).toContain('其他对象')
+})
 
 async function fixture(html = '<h1>第一处🔎</h1>\n<p>第二处🔎</p>', currentInstance?: string) {
   const project = createBlankCourseProjectV10('Current reads')
@@ -67,6 +120,44 @@ it('keeps observed identities on ordinary reads and permits explicit per-file na
   expect(context).toMatchObject({ path: h.path, target: { kind: 'instance', instanceId: 'b' }, regionStatus: 'current-object' })
 })
 
+it('edits one author module after a path reorder, retaining sibling changes and stale-leaf conflicts', async () => {
+  const h = await fixture()
+  await h.human([{ type: 'data.set', instanceId: 'a', path: ['modules'], value: {
+    'first.js': 'export const value = 1;', 'second.js': 'export const value = 11;',
+  } }, { type: 'data.set', instanceId: 'b', path: ['modules'], value: { 'first.js': 'export const value = 100;' } }])
+  const files = componentProjectFiles(h.snapshot().model.project, h.snapshot().model.resources)
+    .filter(file => file.webModule && file.target?.kind === 'instance' && file.target.instanceId === 'a')
+  const first = files.find(file => file.webModule!.path === 'first.js')!, second = files.find(file => file.webModule!.path === 'second.js')!
+  expect((await h.read({ path: first.path })).content).toBe('export const value = 1;')
+  expect((await h.read({ path: second.path })).content).toBe('export const value = 11;')
+  await h.human([{ type: 'instance.move', instanceId: 'b', container: { kind: 'surface', surfaceId: h.surfaceId }, index: 0 }])
+  expect((await h.read({ path: first.path })).content).toBe('export const value = 1;')
+  const apply = (operationId: string, before: number, after: number) => h.coordinator.execute('run', operationId, operationId,
+    'project.apply', { path: first.path, edits: [{ old: `value = ${before}`, new: `value = ${after}` }] },
+    async (_run, operationId, _digest, baseline, request) => {
+      if (request.intent !== 'content') throw new Error('Author module writes use the existing content plan')
+      const plan = planContentApply({ project: baseline.model.project, request, createId: () => 'unexpected-new-object' })
+      const receipt = await h.session.execute({ documentId: baseline.documentId, epoch: baseline.epoch, operationId,
+        baseRevision: h.snapshot().revision, actor: 'agent', mutation: { type: 'command', command: plan.command } },
+      { rebaseComponentExpectations: true })
+      // The production Gateway's commit subscription performs this same acknowledgement.
+      if (receipt.status === 'applied') h.coordinator.acknowledge('run', baseline.documentId, baseline.epoch, receipt.revision, plan.command)
+      return { commit: receipt.status === 'applied' ? 'committed' : 'not_committed', usability: 'usable', delivery: 'not_requested',
+        input: request, diagnostics: [], insertedIds: [], receipt }
+    })
+  expect(await apply('module-leaf', 1, 2)).toMatchObject({ kind: 'read', data: { commit: 'committed' } })
+  await h.human([{ type: 'data.set', instanceId: 'a', path: ['modules', 'second.js'], value: 'export const value = 12;' }])
+  const withSibling = await apply('module-with-sibling', 2, 3)
+  expect(withSibling, JSON.stringify(withSibling)).toMatchObject({ kind: 'read', data: { commit: 'committed' } })
+  expect(h.snapshot().model.project.instances.a!.data).toMatchObject({ modules: {
+    'first.js': 'export const value = 3;', 'second.js': 'export const value = 12;',
+  } })
+  expect(h.snapshot().model.project.instances.b!.data).toMatchObject({ modules: { 'first.js': 'export const value = 100;' } })
+  await h.human([{ type: 'data.set', instanceId: 'a', path: ['modules', 'first.js'], value: 'export const value = 4;' }])
+  expect(await apply('module-stale-leaf', 3, 5)).toMatchObject({ kind: 'read', data: { commit: 'not_committed', receipt: { status: 'conflict' } } })
+  expect(h.snapshot().model.project.instances.a!.data).toMatchObject({ modules: { 'first.js': 'export const value = 4;' } })
+})
+
 it('pages an explicit full source request without losing the fixed source, and repairs an absent captured page', async () => {
   const html = `<p>${'内容'.repeat(60_000)}</p>`, h = await fixture(html)
   const result = await h.read({ full: true })
@@ -80,6 +171,7 @@ it('pages an explicit full source request without losing the fixed source, and r
     combined += page.content
   }
   expect(combined).toBe(html)
+  expect(page).toMatchObject({ complete: false, hasMore: false })
   const missing = await h.coordinator.execute('new-run', 'page', 'page', 'project.read', { path: h.path, offset: 12, limit: 20 })
   expect(missing).toMatchObject({ kind: 'error', code: 'read-page-unavailable', data: { repair: { read: [
     { tool: 'project.read', input: { path: h.path, offset: 12, refresh: true } },

@@ -6,6 +6,7 @@ export interface ComputeBackendRequest {
   executionId: string
   code?: string
   inputs?: readonly { name: string; bytes: Uint8Array }[]
+  onLog?(line: string): void
 }
 export interface ComputeProcessResult {
   exitCode: number | null
@@ -21,7 +22,8 @@ export interface ComputeProcess {
   cancel(): Promise<boolean>
 }
 export interface ComputeBackend {
-  readonly kind: 'pyodide' | 'podman'
+  readonly kind: 'native-python' | 'pyodide' | 'podman'
+  locations?(directory: string): { input: string; work: string; output: string }
   availability(): Promise<{ available: boolean; reason?: string }>
   start(request: ComputeBackendRequest): Promise<ComputeProcess>
   inspectExecution?(executionId: string): Promise<'running' | 'exited' | 'missing' | 'unknown'>

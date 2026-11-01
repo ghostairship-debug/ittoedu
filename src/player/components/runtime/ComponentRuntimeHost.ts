@@ -7,7 +7,7 @@ import type {
 } from '../../../shared/contracts/component-platform'
 import type { WebModuleGraph } from '../../../components/web/moduleGraph'
 
-export type ComponentRuntimePorts = Pick<ComponentRuntimeScope, 'target' | 'events' | 'state' | 'measure'>
+export type ComponentRuntimePorts = Pick<ComponentRuntimeScope, 'target' | 'events' | 'state' | 'measure' | 'progress'>
 
 /** An observation of the existing runtime slot, never author metadata. */
 export interface ComponentRuntimeCapabilities {
@@ -41,7 +41,7 @@ export interface ComponentRuntimeHostOptions {
     implementation: ComponentImplementation, definition: ComponentDefinition, signal: AbortSignal, instance: ComponentInstance,
   ): ComponentRuntimeImplementation | PreparedComponentRuntime
     | Promise<ComponentRuntimeImplementation | PreparedComponentRuntime>
-  ports(runScopeId: string, instanceId: string): ComponentRuntimePorts
+  ports(runScopeId: string, instanceId: string, signal: AbortSignal): ComponentRuntimePorts
   authoring?(runScopeId: string, instanceId: string, generation: number): ComponentRuntimeContext['authoring']
   layout?(runScopeId: string, instance: ComponentInstance, generation: number): ComponentLayoutPort | undefined
   resources?: ComponentRuntimeContext['resources']
@@ -498,7 +498,7 @@ export class ComponentRuntimeHost {
     request: ComponentRuntimeRequest, signature: string, generationSignature: string, controller: AbortController,
     releaseModule: () => Promise<void>,
   ): RuntimeRecord {
-    const ports = this.options.ports(request.runScopeId, request.instance.id)
+    const ports = this.options.ports(request.runScopeId, request.instance.id, controller.signal)
     const cleanups = new Set<() => void>()
     let cancelled = false
     let release: Promise<void> | undefined
@@ -541,6 +541,7 @@ export class ComponentRuntimeHost {
       signal: controller.signal,
       isActive: alive,
       cleanup,
+      ...(ports.progress ? { progress: ports.progress } : {}),
       ...(ports.measure ? { measure: async (references: Parameters<NonNullable<ComponentRuntimeScope['measure']>>[0]) => {
         if (!alive()) return null
         const sample = await ports.measure!(references)

@@ -52,6 +52,13 @@ export interface ExternalMcpServiceOptions {
   /** Same non-authoritative record queue shown by the GUI and normal quit. */
   recordingState?(): ExecutionEventPendingState
   now?: () => number
+  /** Private ACP instance; this token is never persisted in account settings or exposed to the renderer. */
+  transportToken?: string
+  managedConversation?: {
+    workspaceId: string
+    conversationId: string
+    linkRun(input: { runId: string; portId: string }): Promise<string>
+  }
 }
 type ToolKind = 'gateway' | 'file' | 'course' | 'load' | 'service'
 interface HostTool { name: string; description: string; schema: Record<string, unknown>; read: boolean; label: string; kind: ToolKind }
@@ -128,7 +135,10 @@ const workspaceName = (rootPath: string) => path.basename(rootPath) || rootPath
 
 /** Resident external sessions over the shared Gateway: one workspace-bound run per session, the built-in AI's tool selection and permission levels. */
 export class ExternalMcpService implements ResidentMcpHandler {
-  readonly server = new ResidentMcpServer(this)
+  readonly server: ResidentMcpServer
+  private managedActive = false
+  private managedGeneration = 0
+  private readonly managedRevocations = new Set<Promise<void>>()
   private readonly sessions = new Map<string, Session>()
   private readonly toolQueues = new Map<string, Promise<void>>()
   private state: ExternalMcpState = 'disabled'
@@ -141,7 +151,7 @@ export class ExternalMcpService implements ResidentMcpHandler {
   private sessionGeneration = 0
   private detachCatalog?: () => void
   private readonly now: () => number
-  constructor(private readonly options: ExternalMcpServiceOptions) { this.now = options.now ?? Date.now }
+  constructor(private readonly options: ExternalMcpServiceOptions) { this.now = options.now ?? Date.now; this.server = new ResidentMcpServer(this, options.transportToken) }
 
   private serial<T>(work: () => Promise<T>): Promise<T> {
     const next = this.lifecycle.catch(() => undefined).then(work)
@@ -221,13 +231,56 @@ export class ExternalMcpService implements ResidentMcpHandler {
   }
   close(): Promise<void> {
     // Stop intake synchronously, before close enters the same lifecycle queue used by initialize.
-    this.closing = true; this.state = 'disabled'; this.sessionGeneration++
+    this.closing = true; this.state = 'disabled'; this.sessionGeneration++; this.managedActive = false; this.managedGeneration++
     return this.serial(async () => {
     this.state = 'disabled'; await this.server.stop(); await this.closeSessions()
     // Transport disposal is not completion of the received tool calls or their event/journal ACKs.
     await Promise.allSettled([...this.requests])
     this.detachCatalog?.(); this.detachCatalog = undefined
   }) }
+
+  /** ACP prompts rotate real domain runs. Idle native sessions can list tools but cannot execute them. */
+  activateManaged(): Promise<void> {
+    if (!this.options.managedConversation) return Promise.reject(new Error('不是宿主管理的 ACP 会话'))
+    const generation = ++this.managedGeneration
+    return this.serial(async () => {
+      if (this.closing || generation !== this.managedGeneration) throw new Error('ACP 领域激活已被停止')
+      const settings = await this.options.settings.read()
+      for (const session of this.sessions.values()) {
+        if (session.stopped) continue
+        await this.rebind(session, session.workspaceId, settings.permission, true)
+      }
+      if (this.closing || generation !== this.managedGeneration) throw new Error('ACP 领域激活已被停止')
+      this.managedActive = true
+    })
+  }
+  suspendManaged(): Promise<void> {
+    return this.revokeManaged().then(() => this.settleManaged())
+  }
+  /** Revoke first; native cancellation must not wait behind pending tool replies. */
+  revokeManaged(): Promise<void> {
+    if (!this.options.managedConversation) return Promise.reject(new Error('不是宿主管理的 ACP 会话'))
+    // Intake closes before any async wait, including the planning-to-commit window.
+    this.managedActive = false; this.managedGeneration++
+    // stopRun installs each Gateway barrier synchronously before its settlement awaits.
+    // The native process can now be cancelled even if a previously committed write is draining.
+    for (const session of this.sessions.values()) {
+      const stopped = this.stopRun(session.runId)
+      this.managedRevocations.add(stopped)
+      void stopped.finally(() => this.managedRevocations.delete(stopped)).catch(() => undefined)
+    }
+    return Promise.resolve()
+  }
+  async settleManaged(): Promise<void> {
+    // Do not await initialize's lifecycle promise inside its own serial queue.
+    await Promise.allSettled([...this.managedRevocations])
+    await Promise.allSettled([...this.toolQueues.values()])
+    await Promise.allSettled([...this.sessions.values()].flatMap(session => session.operations.flatMap(operation => operation.result ? [operation.result] : [])))
+  }
+  managedOperations(): Array<{ ticket: string; tool: string; status: string; delivered: boolean | undefined }> {
+    return [...this.sessions.values()].flatMap(session => session.operations.map(operation => ({ ticket: operation.ticket, tool: operation.tool,
+      status: operation.summary?.status ?? 'running', delivered: operation.delivered })))
+  }
 
   /** Startup chooses a registered, already-authorized root; it grants no extra authority. */
   async setInitialWorkspace(workspaceId: string): Promise<void> {
@@ -259,6 +312,7 @@ export class ExternalMcpService implements ResidentMcpHandler {
     try { await this.options.gateway.stop(runId) } finally { this.options.files.releaseRun(runId) }
   }
   private async currentWorkspace(): Promise<string> {
+    if (this.options.managedConversation) return this.options.managedConversation.workspaceId
     // A CLI launch owns its default root even after the same host gains a GUI.
     // Session workspace.switch changes only that session, not this startup choice.
     if (this.initialWorkspaceId) return this.initialWorkspaceId
@@ -276,12 +330,12 @@ export class ExternalMcpService implements ResidentMcpHandler {
     return pending
   }
   /** The same connection gets a fresh frozen run; old uncommitted work stops before the new grant exists. */
-  private async rebind(session: Session, workspaceId: string, permission: ExecutionPermissionMode): Promise<void> {
+  private async rebind(session: Session, workspaceId: string, permission: ExecutionPermissionMode, force = false): Promise<void> {
     const workspace = await this.options.conversations.readWorkspace(workspaceId)
     if (!workspace) throw new Error('工作空间不存在或已移除')
     const root = await this.options.workspaceRoot(workspace.rootPath), runId = randomUUID(), previous = session.runId
-    if (previous) this.assertActive(session, previous)
-    if (session.workspaceId === workspaceId && session.workspaceRoot === root && session.permission === permission && previous) return
+    if (previous) this.assertActive(session, previous, force)
+    if (!force && session.workspaceId === workspaceId && session.workspaceRoot === root && session.permission === permission && previous) return
     const ui = await this.options.uiState().catch(() => null)
     // Foreground identities come only from trusted host/renderer state, never client-supplied paths.
     const boundDocumentIds = [...new Set([ui?.activeDocumentId, ui?.selection?.documentId].filter((id): id is string => !!id))]
@@ -348,11 +402,12 @@ export class ExternalMcpService implements ResidentMcpHandler {
     if (call.method === 'tools/list') {
       session.listChanged = false
       await session.authority
-      return { tools: (await this.catalog(this.scope(session))).map(tool => ({ name: tool.name, title: tool.label, description: tool.description,
+      return { tools: (await this.catalog(this.scope(session, true))).map(tool => ({ name: tool.name, title: tool.label, description: tool.description,
         inputSchema: tool.schema,
         ...(tool.read ? { annotations: { readOnlyHint: true } } : {}) })) }
     }
     if (call.method !== 'tools/call') throw new McpProtocolError(-32601, '不支持此 MCP 方法')
+    if (this.options.managedConversation && !this.managedActive) throw new McpProtocolError(-32000, 'ACP 当前没有活动任务；领域工具权限尚未启用或已撤销')
     session.pending++; session.lastCallAt = this.now()
     // Keep each session's planning through commit together, so two calls do not plan the same document revision.
     const pending = (this.toolQueues.get(session.sessionId) ?? Promise.resolve()).catch(() => undefined).then(() => this.callTool(session, call))
@@ -487,13 +542,14 @@ export class ExternalMcpService implements ResidentMcpHandler {
     const pending = serviceToolOutcome(toolName, result)?.status === 'pending'
     return { content, structuredContent: { result: publicResult, ...(ticket ? { ticket } : {}), ...(operation ? { operationScope: { runId: operation.runId, workspaceId: operation.workspaceId, workspaceRoot: operation.workspaceRoot } } : {}), ...(replayed ? { replayed: true } : {}) }, isError: !pending && toolFailed(toolName, result) || imageMissing }
   }
-  private scope(session: Session): CallScope {
-    this.assertActive(session, session.runId)
+  private scope(session: Session, allowManagedIdle = false): CallScope {
+    this.assertActive(session, session.runId, allowManagedIdle)
     const access = this.options.gateway.runFileAccess(session.runId)
     return { runId: session.runId, taskId: session.taskId, workspaceId: session.workspaceId, workspaceRoot: session.workspaceRoot,
       permission: session.permission, boundPaths: Object.values(access?.boundPaths ?? {}), boundDocumentIds: [...session.boundDocumentIds], children: session.children }
   }
-  private assertActive(session: Session, runId: string): void {
+  private assertActive(session: Session, runId: string, allowManagedIdle = false): void {
+    if (!allowManagedIdle && this.options.managedConversation && !this.managedActive) throw new Error('ACP 任务已停止，领域操作未提交')
     if (session.stopped || session.transitioning || session.runId !== runId || !this.sessions.has(session.sessionId)) throw new Error('外部会话已停止或已切换，操作未提交')
   }
   /** Recovery is a view of the current authorized catalog, never an alias or a
@@ -613,6 +669,7 @@ export class ExternalMcpService implements ResidentMcpHandler {
     }
     if (name === 'workspace.switch') {
       const input = serviceSchemas['workspace.switch'].parse(raw)
+      if (this.options.managedConversation && input.workspaceId !== this.options.managedConversation.workspaceId) throw new Error('ACP 会话绑定当前工作空间；请在果铃中切换空间后重新连接')
       await this.bind(session, input.workspaceId)
       return { workspaceId: session.workspaceId, name: session.workspaceName, rootPath: session.workspaceRoot, permission: permissionLabels[session.permission] }
     }
@@ -696,6 +753,12 @@ export class ExternalMcpService implements ResidentMcpHandler {
   private conversation(session: Session, scope: CallScope): Promise<string> {
     const { workspaceId, runId } = scope
     if (session.conversation) return session.conversation
+    if (this.options.managedConversation) {
+      const pending = this.options.managedConversation.linkRun({ runId, portId: session.sessionId })
+      session.conversation = pending
+      void pending.then(id => { if (session.runId === runId) session.conversationId = id }, () => { if (session.conversation === pending) session.conversation = undefined })
+      return pending
+    }
     const pending = (async () => {
       const title = `外部 AI · ${session.clientName}`
       const existing = (await this.options.conversations.listConversations(workspaceId)).find(item => item.title === title)

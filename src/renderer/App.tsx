@@ -31,6 +31,7 @@ import { useCourseDelivery } from './app/useCourseDelivery'
 import { courseDeliverySnapshot } from './app/courseDeliverySnapshot'
 import { resolveCourseProjectDeliveryFindingRoute, selectCourseProjectDiagnosticRoute } from './diagnostics/projectHealthNavigation'
 import { CoursePreviewNotices } from './app/CoursePreviewNotices'
+import { reportRendererDiagnostic } from './diagnostics/installRendererDiagnostics'
 import { adaptCourseDocumentActivation, useCourseProjectLifecycle } from './app/useCourseProjectLifecycle'
 import { useFlowDocumentRecovery } from './app/useFlowDocumentRecovery'
 import { createFlowDocumentRecoveryPort } from './authoring/flowDocumentDraft'
@@ -157,6 +158,7 @@ function CourseWorkspaces(props: ComponentProps<typeof Workspace>) {
         renderProject={renderProject}
         selectedInstanceId={document.selectedInstanceId} selectedInstanceIds={document.selectedInstanceIds}
         player={false} bridge={bridge} report={report}
+        reportDiagnostic={message => reportRendererDiagnostic(message, { operation: 'course-runtime', documentId: document.documentId })}
         onSelect={id => bridge.selectInstances(document.documentId, id ? [id] : [])}
         onSelectInstances={(ids, surfaceId) => bridge.selectInstances(document.documentId, ids, surfaceId)}
         onSurfaceSelect={id => bridge.selectSurface(document.documentId, id)}

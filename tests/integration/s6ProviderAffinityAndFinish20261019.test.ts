@@ -4,6 +4,7 @@ import { OpenAIChatProvider, serializeModelRequest } from '../../src/main/workbe
 import { ChatGPTResponsesProvider, OpenAIResponsesProvider, CHATGPT_RESPONSES_BASE_URL, serializeChatGPTResponsesRequest, serializeOpenAIResponsesRequest } from '../../src/main/workbench/providers/ChatGPTResponsesProvider'
 import { AnthropicMessagesProvider, serializeAnthropicMessagesRequest } from '../../src/main/workbench/providers/AnthropicMessagesProvider'
 import type { ModelEvent, ModelProvider, ModelRequest } from '../../src/shared/workbench/modelProvider'
+import { providerSessionAffinityHeaders } from '../../src/main/workbench/providers/providerSessionAffinity'
 
 function request(protocol: ModelRequest['selection']['connection']['protocol']): ModelRequest {
   return { requestId: 'first-request', sessionAffinity: { key: 'host-chat-session' }, selection: { model: 'gpt-6-luna', outputLimit: 2048,
@@ -24,6 +25,78 @@ async function complete(provider: ModelProvider, input: ModelRequest) {
 }
 
 describe('host session affinity', () => {
+
+  it('uses an OAuth-only opaque transport session without changing any prepared body bytes', async () => {
+    const fetch = transport([{ type: 'response.completed', response: { id: 'response', status: 'completed', output: [
+      { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'OK' }] }] } }])
+    const provider = new ChatGPTResponsesProvider({ fetch, credentialResolver: async () => ({ accessToken: 'fixture', accountId: 'account' }) })
+    const input = request('chatgpt-responses'), withoutAffinity = structuredClone(input)
+    delete withoutAffinity.sessionAffinity
+    expect(serializeChatGPTResponsesRequest(input)).toBe(serializeChatGPTResponsesRequest(withoutAffinity))
+    const expectedHeader = providerSessionAffinityHeaders(input)['session-id']
+    expect(expectedHeader).toMatch(/^[a-f0-9]{8}-[a-f0-9]{4}-5[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/)
+    expect(expectedHeader).not.toContain(input.sessionAffinity!.key)
+    const prepared = provider.prepare(input), expectedBody = prepared.serialized
+    input.sessionAffinity!.key = 'mutated-after-prepare'
+    input.selection.connection.revision++
+    input.selection.connection.auth.credentialRef = 'mutated-after-prepare'
+    for (const id of ['one', 'two']) for await (const _event of prepared.stream(id)) { /* collect transport only */ }
+    expect(fetch).toHaveBeenCalledTimes(2)
+    for (const [, init] of fetch.mock.calls as unknown as [unknown, RequestInit][]) {
+      expect(init.body).toBe(expectedBody)
+      const headers = new Headers(init.headers)
+      expect(headers.get('session-id')).toBe(expectedHeader)
+      expect(headers.get('chatgpt-account-id')).toBe('account')
+      expect(headers.get('authorization')).toBe('Bearer fixture')
+    }
+    const body = JSON.parse(expectedBody)
+    for (const key of ['sessionAffinity', 'session-id', 'prompt_cache_key', 'prompt_cache_retention', 'previous_response_id', 'conversation'])
+      expect(body).not.toHaveProperty(key)
+  })
+
+  it('separates OAuth account, exact connection/revision, login generation, model and host conversation scope', () => {
+    const input = request('chatgpt-responses'), first = providerSessionAffinityHeaders(input)
+    const same = structuredClone(input)
+    same.requestId = 'new-request'; same.messages[1]!.content = 'new-current-fact'
+    same.selection.parameters = { reasoning: { effort: 'xhigh' } }
+    expect(providerSessionAffinityHeaders(same)).toEqual(first)
+    for (const change of [
+      (next: ModelRequest) => { next.selection.connection.id = 'other-connection' },
+      (next: ModelRequest) => { next.selection.connection.revision++ },
+      (next: ModelRequest) => { next.selection.connection.accountId = 'other-account' },
+      (next: ModelRequest) => { next.selection.connection.auth.credentialRef = 'new-login-generation' },
+      (next: ModelRequest) => { next.selection.model = 'gpt-6.1-terra' },
+      (next: ModelRequest) => { next.sessionAffinity!.key = 'conversation:child:main' },
+      (next: ModelRequest) => { next.sessionAffinity!.key = 'conversation:host:context-summary' },
+    ]) {
+      const next = structuredClone(input); change(next)
+      expect(providerSessionAffinityHeaders(next)).not.toEqual(first)
+    }
+    for (const change of [
+      (next: ModelRequest) => { delete next.sessionAffinity },
+      (next: ModelRequest) => { next.selection.connection.baseURL = 'https://relay.invalid/backend-api/codex' },
+      (next: ModelRequest) => { next.selection.connection.auth.kind = 'api-key' },
+      (next: ModelRequest) => { next.selection.apiProtocol = 'openai-responses' },
+    ]) {
+      const next = structuredClone(input); change(next)
+      expect(providerSessionAffinityHeaders(next)).toEqual({})
+    }
+    expect(providerSessionAffinityHeaders(request('openai-responses'))).toEqual({})
+    expect(providerSessionAffinityHeaders(request('openai-chat'))).toEqual({})
+  })
+
+  it('does not let a transport affinity hint bypass unavailable or mismatched OAuth credentials', async () => {
+    for (const credentialResolver of [
+      async () => { throw new Error('revoked-fixture') },
+      async () => ({ accessToken: 'fixture', accountId: 'wrong-account' }),
+    ]) {
+      const fetch = transport([]), events: ModelEvent[] = []
+      const provider = new ChatGPTResponsesProvider({ fetch, credentialResolver })
+      for await (const event of provider.stream(request('chatgpt-responses'))) events.push(event)
+      expect(fetch).not.toHaveBeenCalled()
+      expect(events.at(-1)).toMatchObject({ type: 'response.failed', failure: { outcome: 'not-sent', kind: 'auth' } })
+    }
+  })
   it.each(['openai-chat', 'openai-responses'] as const)('scopes %s affinity independently from request identity, current facts and response lineage', protocol => {
     const serialize = protocol === 'openai-chat' ? serializeModelRequest : serializeOpenAIResponsesRequest
     const input = request(protocol)

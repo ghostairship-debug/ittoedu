@@ -35,7 +35,15 @@ const pptxCreate = z.object({
 })
 const pptxEdit = z.object({
   format: z.literal('pptx'), operation: z.literal('edit'),
-  edits: z.array(z.object({ slide: z.number().int().nonnegative(), shape: z.string(), text: z.string(), paragraph: z.number().int().nonnegative().optional() })).min(1),
+  edits: z.array(z.object({
+    slide: z.number().int().nonnegative(),
+    shape: z.string().optional().describe('兼容按唯一名称定位；重名时请使用 inspect 返回的 shapeId'),
+    shapeId: z.string().min(1).optional().describe('inspect 返回的原件形状标识；提供时优先于名称定位'),
+    /** Use the part and version returned by inspection to reject stale slide targets. */
+    part: z.string().min(1).optional().describe('原样沿用 inspect 返回的幻灯片 part，防止幻灯片顺序变化后误改'),
+    partVersion: z.string().regex(/^[a-f0-9]{64}$/).optional().describe('原样沿用 inspect 返回的 partVersion，不能自行生成或复用旧值'),
+    text: z.string(), paragraph: z.number().int().nonnegative().optional(),
+  }).refine(edit => edit.shapeId !== undefined || edit.shape !== undefined, 'PPT 文本目标需要 shapeId 或 shape')).min(1),
 })
 
 /** Semantic tool content does not repeat the mechanical create/edit operation. */
@@ -60,4 +68,4 @@ export interface OfficeContentResult {
 export type OfficeContentInspection =
   | { format: 'docx'; paragraphs: Array<{ index: number; text: string }>; tables: string[][][] }
   | { format: 'xlsx'; sheets: Array<{ name: string; cells: Array<{ cell: string; value: string | number | boolean | null; formula?: string }> }> }
-  | { format: 'pptx'; slides: Array<{ index: number; shapes: Array<{ name: string; text: string; paragraphs: string[] }> }> }
+  | { format: 'pptx'; slides: Array<{ index: number; part: string; partVersion: string; shapes: Array<{ shapeId: string; name: string; text: string; paragraphs: string[] }> }> }

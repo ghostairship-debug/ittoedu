@@ -1,6 +1,6 @@
 import path from 'node:path'
 import { randomUUID } from 'node:crypto'
-import { app } from 'electron'
+import { app, net } from 'electron'
 import { resolveRendererEntryUrl } from '../rendererEntry'
 import type { BrowserWindow } from 'electron'
 import type { HostToolServices } from '../../core/tools/HostToolServices'
@@ -35,7 +35,7 @@ import { frozenImageRoles } from './images/frozenImageRoles'
 import { ImageGenerationService } from './images/ImageGenerationService'
 import { HostJobService } from './jobs/HostJobService'
 import { ComputeJobService } from './compute/ComputeJobService'
-import { PyodideComputeBackend } from './compute/PyodideComputeBackend'
+import { NativePythonComputeBackend } from './compute/NativePythonComputeBackend'
 import { WebResearchService, type WebResearchOptions } from './network/WebResearchService'
 import { ManagedBrowserMcpService, type ManagedBrowserGrant } from './externalTools/ManagedBrowserMcpService'
 import { createElectronEmbeddedBrowserFactory } from './browserEmbedded/ElectronEmbeddedBrowser'
@@ -70,6 +70,7 @@ import { PptxCourseImportProducer } from './pptxImport/PptxCourseImportProducer'
 import { createDocumentArchive } from './documentArchiveWorker'
 import type { PptxImportBuildInput, PptxImportBuildResult } from '../../shared/workbench/pptxImport'
 import { mediaFileInput } from './admittedMediaResource'
+import { workbenchReferenceLibrary } from './referenceLibrary'
 
 let installed = false
 let skillCatalogService: ScopedSkillService | undefined
@@ -92,7 +93,7 @@ export async function buildWorkbenchPptxImport(input: PptxImportBuildInput, sign
     ? { mode: 'course', course: await producer.prepare(input, signal) }
     : { mode: 'draft', draft: await producer.parse(input, signal) }
 }
-let computeBackend: PyodideComputeBackend | undefined
+let computeBackend: NativePythonComputeBackend | undefined
 let nativeExecutionEngine: NativeExecutionEnginePort | undefined
 let delegationService: DelegationJobService | undefined
 /** User controls and model tools share the existing job lifecycle. */
@@ -240,11 +241,8 @@ export function installWorkbenchToolServices(context: { getMainWindow(): Browser
       (imageRoute(request) === 'chatgpt-oauth' ? oauthImages : apiImages).generate(request, references, options) },
     resolveReference: (runId, documentId, resource) => host.tools.readImageResource(runId, documentId, resource),
   })
-  const computeDevURL = app.isPackaged || !process.env.VITE_DEV_SERVER_URL ? undefined : resolveRendererEntryUrl()
-  computeBackend = new PyodideComputeBackend({ preloadPath: path.join(__dirname, '..', '..', 'preload', 'compute.js'),
-    ...(computeDevURL ? { rendererURL: new URL('compute.html', computeDevURL).href }
-      : { rendererFile: path.join(app.getAppPath(), 'dist-renderer', 'compute.html') }),
-    runtimeDirectory: path.join(app.getAppPath(), computeDevURL ? 'public' : 'dist-renderer', 'vendor', 'compute-runtime') })
+  computeBackend = new NativePythonComputeBackend({ directory: path.join(app.getPath('userData'), 'runtimes', 'python'),
+    download: (url, signal) => net.fetch(url, { signal }) })
   const compute = new ComputeJobService({ directory: path.join(directory, 'compute'),
     backend: computeBackend })
   const apiCredential = async (connection: Readonly<ModelConnectionSnapshot>) => (await executionSettingsStore()).resolveCredential(connection)
@@ -308,16 +306,20 @@ export function installWorkbenchToolServices(context: { getMainWindow(): Browser
   const deliverySignals = new Map<string, AbortController>()
   const runGrants = new Map<string, ToolRunGrant>()
   const materialIds = new Map<string, Set<string>>()
+  const { referenceRoot, readOnlyRoots: referenceReadOnlyRoots } = workbenchReferenceLibrary({ isPackaged: app.isPackaged,
+    resourcesPath: process.resourcesPath, appPath: app.getAppPath() })
   const fileContext = (runId: string, approvedPaths?: readonly string[], assertActive?: () => void): AgentFileContext => {
     const grant = runGrants.get(runId), access = grant?.fileAccess
     if (!access?.workspaceRoot) throw new Error('任务缺少已冻结的文件读取范围')
     return { runId, workspaceRoot: access.workspaceRoot, permission: access.permission,
+      ...(access.assemblyRoot ? { assemblyRoot: access.assemblyRoot } : {}),
       conversationHome: access.conversationHome, conversationHomeRoot: access.conversationHomeRoot,
       boundPaths: Object.values(access.boundPaths ?? {}), approvedOutsidePaths: approvedPaths,
+      readOnlyRoots: [...referenceReadOnlyRoots, ...(access.assemblyReadRoots ?? [])],
       assertActive: () => { deliverySignals.get(runId)?.signal.throwIfAborted(); if (!runGrants.has(runId)) throw new Error('任务已停止'); assertActive?.() } }
   }
   const frozenSkillRoots = new Map<string, readonly SkillRoot[]>()
-  const skills = new ScopedSkillService(new BundledSkillService(bundledSkills), async runId => {
+  const skills = new ScopedSkillService(new BundledSkillService(bundledSkills, { referenceRoot }), async runId => {
     if (!deliverySignals.has(runId) || deliverySignals.get(runId)!.signal.aborted) throw new Error('Skill 读取任务已停止')
     return frozenSkillRoots.get(runId) ?? []
   })
@@ -427,15 +429,22 @@ export function installWorkbenchToolServices(context: { getMainWindow(): Browser
       return { kind: 'read', data: result.data }
     } },
     artifacts: {
+      assemblyDestination: ({ grant, job, name }) => {
+        const access = fileContext(grant.runId)
+        if (!access.assemblyRoot) throw new Error('当前任务没有内部装配目录，请明确 destination')
+        return host.artifactDeliveries.assemblyDestination({ assemblyRoot: access.assemblyRoot, job, name })
+      },
       lookup: (runId, operationId) => host.artifactDeliveries.lookup(operationId, runId),
       preflight: ({ grant, destination }) => {
         const access = fileContext(grant.runId)
-        return host.artifactDeliveries.preflight({ workspaceRoot: access.workspaceRoot, permission: access.permission, destination })
+        return host.artifactDeliveries.preflight({ workspaceRoot: access.workspaceRoot, assemblyRoot: access.assemblyRoot,
+          readOnlyRoots: access.readOnlyRoots, permission: access.permission, destination })
       },
       save: ({ grant, operationId, source, bytes, approvedPaths, assertActive }) => {
         const access = fileContext(grant.runId, approvedPaths, assertActive)
         const destination = path.resolve(access.workspaceRoot, source.destination)
         return host.artifactDeliveries.deliver({ runId: grant.runId, operationId, workspaceRoot: access.workspaceRoot,
+          assemblyRoot: access.assemblyRoot, readOnlyRoots: access.readOnlyRoots,
           permission: access.permission, destination: source.destination, ...artifactDeliverySource(source), bytes,
           approvedTargetPath: approvedPaths?.find(value => path.resolve(value) === destination), assertActive: access.assertActive! })
       },
@@ -466,6 +475,7 @@ export function installWorkbenchToolServices(context: { getMainWindow(): Browser
             version: original.snapshot.digest, representation }
       },
       authorize: source => host.agentFiles.authorizeTaskInput(fileContext(runId), source),
+      directory: (source, signal) => host.agentFiles.taskInputDirectory(fileContext(runId), source, signal),
       opened: filename => host.readOpenedTaskInput(filename),
       disk: source => host.agentFiles.readAuthorizedFile(fileContext(runId), source),
     }, options) },
@@ -536,6 +546,7 @@ export function installWorkbenchToolServices(context: { getMainWindow(): Browser
     jobs,
     ...(compute ? { compute } : {}),
     delegation: {
+      localAvailability: () => delegation.localAvailability(),
       models: () => executionSettingsStore().then(store => store.availableDelegationModels()),
       availability: () => ({ ready: delegationWriteVerified,
         reason: delegationWriteVerified ? 'Codex Luna Fast 委派连接已显式验证可写'

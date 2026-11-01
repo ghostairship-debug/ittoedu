@@ -42,6 +42,8 @@ export type ContentApplySource =
       /** Source owners are admitted with their instances, never in a second transaction. */
       componentFiles?: Extract<import('../../../shared/contracts/component-platform/operations').ComponentEdit, { type: 'component.files.set' }>[] }
   | { kind: 'data'; fields: { path: string[]; value: JsonValue }[]; implementation?: ComponentImplementation | null;
+      /** Software-admitted module media joins its fields in the same captured transaction. */
+      resourceEdits?: Extract<ComponentEdit, { type: 'asset.add' }>[];
       /** Software-projected owner files commit with their implementation in the same transaction. */
       componentFiles?: Extract<import('../../../shared/contracts/component-platform/operations').ComponentEdit, { type: 'component.files.set' }>[] }
   | { kind: 'style'; style: JsonObject }
@@ -75,6 +77,8 @@ export type SurfaceApplyRequest =
 export interface CanonicalContentApplyRequest {
   intent: 'canonical'
   edits: ComponentEdit[]
+  /** Software-captured read dependencies, checked by the existing Session CAS. */
+  readPaths?: string[][]
   /** Captured file owner used by the existing Gateway to retain its writable scope. */
   target?: ContentApplyTarget
   editingContext?: { surfaceId: string; stateId: string | null }

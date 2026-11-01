@@ -7,14 +7,16 @@ import type { RecoverableDocumentFilePort } from '../../documentFiles/documentFi
 import type { LessonWorkspace } from '../../../shared/lessonWorkspace'
 import type { MediaFileEditorHandle } from '../../documentFiles/media/MediaFileEditor'
 import type { MediaFileDraftInput, MediaFileSnapshot, MediaFilesRequest } from '../../../shared/workbench/mediaFiles'
+import type { PptxPreviewSnapshot } from '../../../shared/workbench/officePreview'
 
 export type LessonFileTab = {
   id: string
   documentId?: string
   path: string
   name: string
-  kind: 'document' | 'material' | 'course' | 'media'
+  kind: 'document' | 'material' | 'course' | 'media' | 'presentation'
   mediaSnapshot?: MediaFileSnapshot
+  pptxSnapshot?: PptxPreviewSnapshot
   dirty: boolean
   lesson: LessonWorkspace | null
 }
@@ -53,6 +55,7 @@ export interface DocumentTabsController {
   mediaEditorRef(id: string): (editor: MediaFileEditorHandle | null) => void
   mediaFiles(request: MediaFilesRequest): Promise<MediaFileSnapshot>
   updateMediaSnapshot(id: string, snapshot: MediaFileSnapshot): void
+  reloadPptx(id: string): Promise<PptxPreviewSnapshot>
   updateDirty(path: string, dirty: boolean): void
   flushAll(): Promise<boolean>
   saveActiveDocument(): Promise<'course' | 'document' | 'none'>
@@ -172,7 +175,7 @@ export function useDocumentTabsController({ documentPort, courseDocuments, media
     const tab = tabsRef.current.find(item => item.id === activeTab)
     if (!tab) return 'none'
     if (tab.kind === 'course') return 'course'
-    if (tab.kind === 'material') return 'none'
+    if (tab.kind === 'material' || tab.kind === 'presentation') return 'none'
     if (tab.kind === 'media') {
       const editor = mediaEditors.current.get(tab.id)
       if (!editor) throw new Error('当前文件尚未就绪，请稍后重试保存')
@@ -232,12 +235,14 @@ export function useDocumentTabsController({ documentPort, courseDocuments, media
     const snapshot = tab.kind === 'document' ? await documentPort.documents?.open(tab.path) : undefined
     const mediaSnapshot = tab.kind === 'media' ? await requestMediaFiles({ type: 'media-file.open-path', path: tab.path }) : undefined
     if (tab.kind === 'document' && !snapshot) throw new Error('文档服务尚未连接')
-    const filename = mediaSnapshot?.binding.path ?? tab.path
-    const alreadyOpened = mediaSnapshot && tabsRef.current.find(item => normalized(item.path) === normalized(filename))
+    const pptxSnapshot = tab.kind === 'presentation' ? await window.desktopAPI?.pptxPreview?.({ type: 'pptx-preview.open', path: tab.path }) : undefined
+    if (tab.kind === 'presentation' && !pptxSnapshot) throw new Error('PPTX 预览服务尚未连接')
+    const filename = mediaSnapshot?.binding.path ?? pptxSnapshot?.binding.path ?? tab.path
+    const alreadyOpened = (mediaSnapshot || pptxSnapshot) && tabsRef.current.find(item => normalized(item.path) === normalized(filename))
     if (alreadyOpened) { if (ticket === navigation.current) setActiveTab(alreadyOpened.id); return }
     const id = snapshot?.documentId ?? crypto.randomUUID()
-    const opened = { ...tab, path: filename, id, documentId: snapshot?.documentId, mediaSnapshot, dirty: snapshot?.dirty ?? false }
-    if (mediaSnapshot) tabsRef.current = [...tabsRef.current, opened]
+    const opened = { ...tab, path: filename, id, documentId: snapshot?.documentId, mediaSnapshot, pptxSnapshot, dirty: snapshot?.dirty ?? false }
+    if (mediaSnapshot || pptxSnapshot) tabsRef.current = [...tabsRef.current, opened]
     setTabs(current => current.some(item => item.id === id) ? current : [...current, opened])
     if (ticket === navigation.current) setActive(id)
   }
@@ -330,7 +335,8 @@ export function useDocumentTabsController({ documentPort, courseDocuments, media
     for (const [id, editor] of mediaEditors.current) if (matches(editor.binding())) { editor.rebind(binding); rebound.add(id) }
     const relocate = (current: LessonFileTab[]) => current.map(tab => tab.kind === 'media' && tab.mediaSnapshot && (rebound.has(tab.id) || matches(tab.mediaSnapshot.binding))
       ? { ...tab, path: binding.path, name: binding.path.split(/[\\/]/).pop() ?? tab.name,
-        mediaSnapshot: { ...tab.mediaSnapshot, binding } } : tab)
+        mediaSnapshot: { ...tab.mediaSnapshot, binding } } : tab.kind === 'presentation' && tab.pptxSnapshot && matches(tab.pptxSnapshot.binding)
+      ? { ...tab, path: binding.path, name: binding.path.split(/[\\/]/).pop() ?? tab.name, pptxSnapshot: { ...tab.pptxSnapshot, binding } } : tab)
     tabsRef.current = relocate(tabsRef.current)
     setTabs(relocate)
   }), [])
@@ -360,6 +366,17 @@ export function useDocumentTabsController({ documentPort, courseDocuments, media
   function updateMediaSnapshot(id: string, snapshot: MediaFileSnapshot) {
     setTabs(current => current.map(tab => tab.id === id ? { ...tab, mediaSnapshot: snapshot, path: snapshot.binding.path, name: snapshot.binding.path.split(/[\\/]/).pop() ?? tab.name, dirty: false } : tab))
   }
+  async function reloadPptx(id: string): Promise<PptxPreviewSnapshot> {
+    const tab = tabsRef.current.find(item => item.id === id)
+    if (!tab?.pptxSnapshot || !window.desktopAPI?.pptxPreview) throw new Error('PPTX 预览已关闭或服务未连接')
+    const expected = tab.pptxSnapshot
+    const snapshot = await window.desktopAPI.pptxPreview({ type: 'pptx-preview.reload', binding: expected.binding })
+    if (tabsRef.current.find(item => item.id === id)?.pptxSnapshot !== expected) throw new Error('文件标签或位置已改变，请在当前标签重新载入')
+    const update = (current: LessonFileTab[]) => current.map(item => item.id === id
+      ? { ...item, pptxSnapshot: snapshot, path: snapshot.binding.path, name: snapshot.binding.path.split(/[\\/]/).pop() ?? item.name, dirty: false } : item)
+    tabsRef.current = update(tabsRef.current); setTabs(update)
+    return snapshot
+  }
   function updateDirty(path: string, dirty: boolean) {
     setTabs(current => current.some(tab => tab.id === path && tab.dirty !== dirty)
       ? current.map(tab => tab.id === path ? { ...tab, dirty } : tab) : current)
@@ -384,6 +401,8 @@ export function useDocumentTabsController({ documentPort, courseDocuments, media
         event.stopPropagation()
         const editor = documents.current.get(tab.id)
         if (editor) void (event.shiftKey ? editor.saveAs() : editor.flush())
+      } else if (key === 's' && tab.kind === 'presentation') {
+        event.preventDefault(); event.stopPropagation()
       } else if (key === 's' && tab.kind === 'media') {
         event.preventDefault(); event.stopPropagation()
         void mediaEditors.current.get(tab.id)?.flush()
@@ -414,7 +433,7 @@ export function useDocumentTabsController({ documentPort, courseDocuments, media
     }
     return drafts
   }
-  return { tabs, activeTab, captureNavigationIdentity: () => String(navigation.current), cancelNavigation, showCurrentCourse, isCourseActive: tabs.some(tab => tab.id === activeTab && tab.kind === 'course'), createMarkdown, createText, setActiveTab, focusDocument, openTab, closeTab, removeTab, registerEditor, editorRef, mediaEditorRef, mediaFiles: requestMediaFiles, updateMediaSnapshot, updateDirty, flushAll, saveActiveDocument, drainAll, captureMediaDrafts, preserveAll, hasDirtyInputs, suspendForClose, resumeAfterCloseCancelled, closeAll, disposeDocuments, activeDocumentTarget, selectionChanged, sendContextualCommand }
+  return { tabs, activeTab, captureNavigationIdentity: () => String(navigation.current), cancelNavigation, showCurrentCourse, isCourseActive: tabs.some(tab => tab.id === activeTab && tab.kind === 'course'), createMarkdown, createText, setActiveTab, focusDocument, openTab, closeTab, removeTab, registerEditor, editorRef, mediaEditorRef, mediaFiles: requestMediaFiles, updateMediaSnapshot, reloadPptx, updateDirty, flushAll, saveActiveDocument, drainAll, captureMediaDrafts, preserveAll, hasDirtyInputs, suspendForClose, resumeAfterCloseCancelled, closeAll, disposeDocuments, activeDocumentTarget, selectionChanged, sendContextualCommand }
 }
 
 function normalized(value: string) { return value.replace(/\\/g, '/').toLowerCase() }

@@ -233,6 +233,11 @@ export function componentContainerBuiltinKey(kind: ComponentContainerAuthoring['
 export type ComponentContainerReadModel = Pick<CourseProjectV11, 'instances' | 'definitions'>
 export type ComponentRootReadModel = ComponentContainerReadModel & Pick<CourseProjectV11, 'rootIds'>
 
+/** A formal work root can be a container or a program; descendants are not root locations. */
+export function componentRootInstance(project: ComponentRootReadModel, instanceId: string): Readonly<ComponentInstance> | undefined {
+  return project.rootIds.includes(instanceId) ? project.instances[instanceId] : undefined
+}
+
 /** A read-only snapshot view. Nested configuration is borrowed, never copied or edited here. */
 export function componentSurface(project: ComponentContainerReadModel, instanceId: string): Readonly<ComponentSurface> | undefined {
   const instance = project.instances[instanceId]

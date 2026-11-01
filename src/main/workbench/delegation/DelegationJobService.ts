@@ -15,6 +15,7 @@ import { delegationArtifactClosure } from './delegationArtifactClosure'
 import { taskTargetDeclaration } from '../../../shared/workbench/taskTargetContext'
 import { DEFAULT_NATIVE_CONCURRENCY_LIMIT, MAX_NATIVE_CONCURRENCY_LIMIT } from '../../../shared/workbench/executionSettings'
 import { NativeTaskCapacity } from './NativeTaskCapacity'
+import type { NativeCollaborationPeer, NativeDelegationMessage } from '../../../shared/workbench/delegation'
 
 export interface DelegationJobInput {
   runId: string
@@ -64,6 +65,8 @@ export interface DelegationJobSnapshot {
   requestId?: string
   candidateComplete?: boolean
   childRunId?: string
+  /** Durable native executor admission. False proves no child executor was entered; true is conservative after interruption. */
+  executionStarted?: boolean
   goal?: string
   target?: NativeDelegationIntent['target']
   targetContext?: unknown
@@ -85,7 +88,7 @@ export interface DelegationJobSnapshot {
 export interface DelegationJobLog { entries: readonly { cursor: number; time: number; kind: DelegationEvent['kind'] | 'system'; message: string }[]; nextCursor: number }
 type Stored = DelegationJobSnapshot & { version: 1; copyRoot: string; expectedArtifacts: readonly string[];
   logs: DelegationJobLog['entries']; nextLogCursor: number; nativeIntent?: NativeDelegationIntent;
-  pendingNativeMessages?: Array<{ submissionId: string; senderRunId: string; text: string }> }
+  pendingNativeMessages?: Array<NativeDelegationMessage & { submissionId: string }> }
 type NativeScope = { rootRunId: string; limit: number }
 type Active = { runId: string; kind: NonNullable<DelegationJobSnapshot['executionKind']>; controller: AbortController; work: Promise<void>;
   native?: NativeScope & { release?: () => void; childRunId?: string; ready?: boolean; waits: number } }
@@ -152,6 +155,8 @@ export class DelegationJobService {
     if (typeof jobId !== 'string' || !jobId) throw new DelegationJobError('invalid-job', '委派作业身份无效')
     return path.join(this.directory, digest(jobId))
   }
+  /** Local command prerequisites do not decide whether native delegation is available. */
+  localAvailability(): Promise<{ available: boolean; reason?: string }> { return this.localRunner.availability() }
   private stateFile(jobId: string): string { return path.join(this.folder(jobId), 'state.json') }
   private serial<T>(jobId: string, action: () => Promise<T>): Promise<T> {
     return this.serialStateFile(this.stateFile(jobId), action)
@@ -261,7 +266,30 @@ export class DelegationJobService {
     // copy when that is the intended result, rather than inheriting input bytes.
     let prefix = 'inputs'
     for (let index = 2; outputs.some(output => overlaps(prefix, output)); index++) prefix = `inputs-${index}`
-    return sources.map(source => ({ ...source, name: `${prefix}/${source.name}` }))
+    const relocated = new Map(sources.map(source => [source.name, `${prefix}/${source.name}`]))
+    return sources.map(source => {
+      const named = { ...source, name: relocated.get(source.name)! }
+      if (!source.source.startsWith('task-target:')) return named
+      const context = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(source.bytes)) as {
+        inputs?: { entry: { path: string; read: { tool: string; path: string } }; files: Array<{ path: string }> }
+      }
+      if (!context.inputs) return named
+      const inputPath = (name: string) => {
+        const actual = relocated.get(name)
+        if (!actual) throw new DelegationJobError('invalid-materials', '目标输入引用不在已冻结的来源中')
+        return actual
+      }
+      // These are candidate file locators, not the parent project's logical paths.
+      // Keep the inline context and the on-disk context identical after a source/output collision.
+      context.inputs = { ...context.inputs,
+        entry: { ...context.inputs.entry, path: inputPath(context.inputs.entry.path),
+          read: { ...context.inputs.entry.read, path: inputPath(context.inputs.entry.read.path) } },
+        files: context.inputs.files.map(file => ({ ...file, path: inputPath(file.path) })),
+      }
+      const text = JSON.stringify(context)
+      return { ...named, bytes: new TextEncoder().encode(text), version: documentDigest(context),
+        ...(source.modelRepresentation ? { modelRepresentation: { ...source.modelRepresentation, text } } : {}) }
+    })
   }
   private sourcePreparation(input: TaskSourcePreparation): (signal: AbortSignal) => Promise<readonly PreparedTaskSource[]> {
     if (input.sources !== undefined && input.prepareSources)
@@ -430,6 +458,9 @@ export class DelegationJobService {
     let resumeRunId: string | undefined
     return this.startExecution(task, requestDigest, 'native', async signal => {
       signal.throwIfAborted()
+      // Preserve the request even when its source owner fails before a child exists.
+      await this.update(input.jobId, job => { job.nativeIntent = input.intent; job.goal = input.intent.goal;
+        job.target = input.intent.target; job.role = input.intent.role })
       sources = this.nativeTaskSources(await prepareSources(signal), task.expectedArtifacts)
       const targetSource = sources.find(source => source.source.startsWith('task-target:'))
       const targetContext = targetSource ? JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(targetSource.bytes)) as unknown : undefined
@@ -439,10 +470,26 @@ export class DelegationJobService {
       if (!from) return this.createTaskCopy(copyRoot, sources, true, signal)
       const previous = await this.serial(from.jobId, () => this.load(from.jobId))
       signal.throwIfAborted()
-      if (!previous || previous.runId !== from.runId || previous.executionKind !== 'native' || !previous.childRunId)
-        throw new DelegationJobError('resume-not-authorized', '原生子任务来源或真实运行身份无法核实')
+      if (!previous || previous.runId !== from.runId || previous.executionKind !== 'native')
+        throw new DelegationJobError('resume-not-authorized', '原生子任务来源身份无法核实')
       if (this.active.has(from.jobId) || !terminal(previous.status))
         throw new DelegationJobError('resume-running', '原子任务尚未结束；请先等待或停止后再续接')
+      if (!previous.childRunId) {
+        // Older source failures predate executionStarted. In that implementation
+        // nativeIntent was saved only after source preparation, before any copy or
+        // runner entry. Require that whole pre-execution shape, not merely a missing ID.
+        const oldPreparationFailure = previous.executionStarted === undefined && !previous.nativeIntent
+          && !previous.actualModel && !previous.requestId && !previous.threadId && !previous.usage
+          && !previous.artifacts.length && previous.logs.every(entry => entry.kind === 'system')
+          && await fs.lstat(previous.copyRoot).then(() => false, (error: NodeJS.ErrnoException) => error.code === 'ENOENT')
+        if (previous.status !== 'failed' || previous.stopped || previous.executionStarted !== false && !oldPreparationFailure)
+          throw new DelegationJobError('resume-execution-unknown', '原子任务没有可核实的子运行身份，且不能证明尚未执行；未自动重跑，请先核对原作业')
+        if (input.sources === undefined && !input.prepareSources)
+          throw new DelegationJobError('resume-sources-required', '原子任务在准备阶段失败，尚未启动子运行；请从父任务提供 sources 重新准备，不能恢复不存在的子会话')
+        await this.update(input.jobId, job => { job.logs = [...job.logs, { cursor: ++job.nextLogCursor, time: Date.now(), kind: 'system',
+          message: `重新准备原生作业 ${from.runId}/${from.jobId}：原作业尚未启动子运行；本次将使用当前授权来源新建子运行，不恢复不存在的历史。` }] })
+        return this.createTaskCopy(copyRoot, sources, true, signal)
+      }
       const original = await this.scopedCopy(previous.copyRoot)
       signal.throwIfAborted()
       const actual = await this.createTaskCopy(copyRoot, [], false, signal)
@@ -460,8 +507,9 @@ export class DelegationJobService {
         if (!targetSource) job.targetContext = previous.targetContext })
       signal.throwIfAborted()
       return actual
-    }, (active, onEvent, actual) => {
-      const request: NativeTaskRequest = { ...input, sources, copyRoot: actual, resumeRunId, userInitiatedResume }
+    }, async (active, onEvent, actual) => {
+      const peers = (await this.collaborationPeers(input.runId)).filter(peer => peer.job !== input.jobId)
+      const request: NativeTaskRequest = { ...input, sources, copyRoot: actual, resumeRunId, userInitiatedResume, peers }
       return this.nativeRunner!.run(request, { signal: active.controller.signal, onEvent,
         onPrepared: async record => { if (active.native) active.native.childRunId = record.runId;
           await this.update(input.jobId, job => { job.childRunId = record.runId }); childPrepared?.() },
@@ -474,7 +522,9 @@ export class DelegationJobService {
             active.controller.signal.throwIfAborted()
             try {
               await this.nativeRunner!.message(active.native!.childRunId!, message.submissionId,
-                { senderRunId: message.senderRunId, text: message.text })
+                { senderRunId: message.senderRunId, text: message.text,
+                  ...(message.replyJob ? { replyJob: message.replyJob } : {}),
+                  ...(message.senderRole ? { senderRole: message.senderRole } : {}) })
               await this.update(input.jobId, job => { job.pendingNativeMessages = job.pendingNativeMessages?.filter(value => value.submissionId !== message.submissionId) })
             } catch (error) {
               // Acceptance into the job queue is not a forged Engine receipt. If
@@ -523,19 +573,23 @@ export class DelegationJobService {
     if (!this.nativeRunner) throw new DelegationJobError('unconfigured', '原生子任务执行引擎未接入')
     const job = await this.serial(jobId, () => this.load(jobId))
     this.assertRunning(runId)
-    if (!job || job.executionKind !== 'native' || job.stopped)
-      throw new DelegationJobError('message-unavailable', '该原生子任务尚未就绪或已停止，不能投递新消息')
+    if (!job) throw new DelegationJobError('unknown-job', '未找到该作业；请使用实际返回的 job 编号')
+    if (runId !== job.runId && runId !== job.childRunId && !await this.nativeRunner.related?.(runId, job.runId))
+      throw new DelegationJobError('job-not-authorized', '协作消息不属于当前运行的协作任务树')
+    if (job.executionKind !== 'native') throw new DelegationJobError('message-not-native', '该作业不是可接收协作消息的原生子任务')
+    if (job.stopped) throw new DelegationJobError('message-stopped', '该原生子任务已停止，不能投递新消息')
+    const origin = await this.messageOrigin(runId, job)
     if (!job.terminal && (!job.childRunId || this.active.get(jobId)?.native?.ready === false)) {
-      if (runId !== job.runId && !await this.nativeRunner.related?.(runId, job.runId))
-        throw new DelegationJobError('job-not-authorized', '协作消息不属于当前运行的协作任务树')
       const identity = `delegation:${jobId}:${runId}:${submissionId}`
       const queued = await this.serial(jobId, async () => {
         if (this.active.get(jobId)?.native?.ready) return false
         const value = await this.load(jobId)
-        if (!value || value.stopped || terminal(value.status)) throw new DelegationJobError('message-unavailable', '该原生子任务已结束或停止，不能投递新消息')
+        if (!value) throw new DelegationJobError('unknown-job', '未找到该作业')
+        if (value.stopped) throw new DelegationJobError('message-stopped', '该原生子任务已停止，不能投递新消息')
+        if (terminal(value.status)) throw new DelegationJobError('message-terminal', '该原生子任务已结束；需要继续修改时请续接该作业')
         const prior = value.pendingNativeMessages?.find(message => message.submissionId === identity)
         if (prior && prior.text !== text) throw new DelegationJobError('message-conflict', '该协作消息身份已绑定另一正文')
-        if (!prior) (value.pendingNativeMessages ??= []).push({ submissionId: identity, senderRunId: runId, text })
+        if (!prior) (value.pendingNativeMessages ??= []).push({ submissionId: identity, senderRunId: runId, text, ...origin })
         await this.save(value)
         return true
       })
@@ -543,12 +597,49 @@ export class DelegationJobService {
       job.childRunId = this.active.get(jobId)?.native?.childRunId
     }
     if (!job.childRunId) throw new DelegationJobError('message-unavailable', '该原生子任务没有可投递的运行身份')
-    const targetRunId = runId === job.runId ? job.childRunId : runId === job.childRunId ? job.runId
-      : await this.nativeRunner.related?.(runId, job.runId) ? job.childRunId : undefined
-    if (!targetRunId) throw new DelegationJobError('job-not-authorized', '协作消息不属于当前运行的协作任务树')
+    const targetRunId = runId === job.childRunId ? job.runId : job.childRunId
     this.assertRunning(job.runId)
-    await this.nativeRunner.message(targetRunId, `delegation:${jobId}:${runId}:${submissionId}`, { senderRunId: runId, text })
+    try {
+      // Engine checks durable submission identity before terminal state. A lost
+      // receipt remains recoverable even if the child finished after acceptance.
+      await this.nativeRunner.message(targetRunId, `delegation:${jobId}:${runId}:${submissionId}`, { senderRunId: runId, text, ...origin })
+    } catch (error) {
+      if (job.terminal && (error as { code?: string }).code === 'steering-terminal')
+        throw new DelegationJobError('message-terminal', '该原生子任务已结束；需要继续修改时请续接该作业')
+      throw error
+    }
     return { status: 'accepted', job: jobId, submissionId, senderRunId: runId, targetRunId }
+  }
+
+  private async messageOrigin(runId: string, target: Stored): Promise<Pick<NativeDelegationMessage, 'replyJob' | 'senderRole'>> {
+    // The current edge is already an exact reverse route for parent/child messages.
+    if (runId === target.childRunId) return { replyJob: target.jobId, ...(target.role ? { senderRole: target.role } : {}) }
+    if (runId === target.runId) return { replyJob: target.jobId, senderRole: '父任务' }
+    const identity = (await this.nativeRunner?.context?.(runId))?.delegatedBy
+    if (!identity) return {} // An ancestor root has no owning job; do not invent a reverse route.
+    const sender = await this.serial(identity.jobId, () => this.load(identity.jobId))
+    if (!sender || sender.executionKind !== 'native' || sender.runId !== identity.runId || sender.childRunId !== runId)
+      throw new DelegationJobError('message-source-invalid', '协作消息来源与当前委派身份不一致')
+    return { replyJob: sender.jobId, ...(sender.role ? { senderRole: sender.role } : {}) }
+  }
+
+  /** Re-read durable job facts so late-starting peers become visible without a batch registry. */
+  async collaborationPeers(runId: string): Promise<NativeCollaborationPeer[]> {
+    const context = await this.nativeRunner?.context?.(runId)
+    if (!context) return []
+    let folders: string[]
+    try { folders = await fs.readdir(this.directory) }
+    catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return []; throw error }
+    const peers: NativeCollaborationPeer[] = []
+    for (const folder of folders) {
+      const filename = path.join(this.directory, folder, 'state.json')
+      let stored: Stored
+      try { stored = await this.serialStateFile(filename, async () => JSON.parse(await fs.readFile(filename, 'utf8')) as Stored) }
+      catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') continue; throw error }
+      if (stored.executionKind !== 'native' || stored.childRunId === runId || stored.nativeTreeRoot !== context.rootRunId) continue
+      peers.push({ job: stored.jobId, ...(stored.role ? { role: stored.role } : {}), status: stored.status })
+    }
+    return peers.sort((a, b) => a.job.localeCompare(b.job))
   }
 
   /** Read the existing durable jobs; no second child registry is maintained. */
@@ -731,6 +822,7 @@ export class DelegationJobService {
       const job: Stored = { version: 1, runId: input.runId, jobId: input.jobId, requestDigest,
         status: 'preparing', terminal: false, stopped: false, goal: input.goal, createdAt: time, updatedAt: time,
         executionKind, ...(executionKind === 'codex' ? { configuredModel: 'gpt-6-luna', configuredSpeed: 'priority' } : {}), billedAmount: null,
+        ...(executionKind === 'native' ? { executionStarted: false } : {}),
         ...(nativeScope ? { nativeTreeRoot: nativeScope.rootRunId, nativeConcurrencyLimit: nativeScope.limit, scheduling: 'queued' as const } : {}),
         copyRoot: input.copyRoot, expectedArtifacts: input.expectedArtifacts, artifacts: [], logs: [], nextLogCursor: 0 }
       const active: Active = { runId: input.runId, kind: executionKind, controller: new AbortController(), work: Promise.resolve(),
@@ -771,7 +863,9 @@ export class DelegationJobService {
       }
       const copyRoot = await prepare(active.controller.signal)
       active.controller.signal.throwIfAborted()
-      await this.update(jobId, job => { job.copyRoot = copyRoot; job.expectedArtifacts = input.expectedArtifacts; if (!job.stopped) job.status = 'running' })
+      await this.update(jobId, job => { job.copyRoot = copyRoot; job.expectedArtifacts = input.expectedArtifacts;
+        if (!job.stopped) job.status = 'running'
+        if (active.kind === 'native') job.executionStarted = true })
       active.controller.signal.throwIfAborted()
       executionStarted = true
       result = await execute(active, event => { void this.update(jobId, job => {
@@ -814,7 +908,9 @@ export class DelegationJobService {
         if (job.stopped && result!.status === 'verified') job.reason = '作业已停止；执行已结束，迟到候选未采用'
       })
     } catch (error) {
-      const message = error instanceof Error ? error.message : '委派作业失败'
+      const detail = error instanceof Error ? error.message : '委派作业失败'
+      const message = active.kind === 'native' && !executionStarted && !active.controller.signal.aborted
+        ? `原生子任务准备失败，尚未启动子运行：${detail}` : detail
       await this.update(jobId, job => {
         job.stopped ||= active.controller.signal.aborted
         job.status = active.controller.signal.aborted

@@ -121,7 +121,17 @@ it('selects a V10 formatted reference, awaits its captured ACK and creates one e
   ])
   expect(componentSurfaces(next)[0]).toEqual(componentSurfaces(before)[0])
   expect(next.instances.text).toEqual(before.instances.text)
-  expect(next.instances[copySurface.childIds[1]!]!.data).toEqual(before.instances.mixed!.data)
+  const copiedMixed = next.instances[copySurface.childIds[1]!]!
+  const expectedMixed = structuredClone(before.instances.mixed!.data) as unknown as ReturnType<typeof createTextComponentData>
+  const originalFormula = expectedMixed.content.inlines.find(inline => inline.type === 'math')
+  const copiedFormula = textComponentDataSchema.parse(copiedMixed.data).content.inlines.find(inline => inline.type === 'math')
+  if (originalFormula?.type !== 'math' || copiedFormula?.type !== 'math') throw new Error('Expected the preserved formula in both instances')
+  // Formal copying gives the formula an independent identity while preserving every other field.
+  expect(copiedFormula.formulaId).not.toBe(originalFormula.formulaId)
+  expect(new Set([originalFormula.formulaId, copiedFormula.formulaId]).size).toBe(2)
+  originalFormula.formulaId = copiedFormula.formulaId
+  expect(copiedMixed.data).toEqual(expectedMixed)
+  expect(next.instances.mixed).toEqual(before.instances.mixed)
   expect(snapshot).toMatchObject({ revision: before.revision + 1, undoDepth: 1 })
   const driver = new CourseV10Driver()
   expect(driver.load(driver.serialize(snapshot.model))).toEqual(snapshot.model)
@@ -186,6 +196,15 @@ it('keeps the source unchanged for missing or stale slots and allows long replac
   if (!result.ok || !result.step) throw new Error(result.ok ? 'Expected clone step' : result.reason)
   const inserted = result.step.edits.find(edit => edit.type === 'instance.insert')
   if (inserted?.type !== 'instance.insert') throw new Error('Expected editable instances')
-  expect(inserted.instances[0]!.frame).toEqual(before.instances.text!.frame)
+  const rootIds = inserted.rootIds ?? []
+  expect(rootIds).toHaveLength(1)
+  const copiedRoot = inserted.instances.find(instance => instance.id === rootIds[0])
+  const copiedText = inserted.instances.find(instance => instance.id === copiedRoot?.childIds?.[0])
+  if (!copiedText) throw new Error('Expected the text child of the copied root')
+  expect(copiedText.id).not.toBe(before.instances.text!.id)
+  expect(copiedText.definitionId).toBe(before.instances.text!.definitionId)
+  expect(copiedText.frame).toEqual(before.instances.text!.frame)
+  expect(textComponentDataSchema.parse(copiedText.data).content.inlines.map(inline => inline.type === 'text' ? inline.text : '').join(''))
+    .toBe('新'.repeat(150) + '头强调保留旧尾')
   expect(context.document).toEqual(before)
 })

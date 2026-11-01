@@ -11,6 +11,45 @@ import { createCrossSurfaceCommands, type CrossSurfaceCommandPorts } from '../..
 
 afterEach(cleanup)
 
+it('uses the same toolbar for a program root, mixed-root navigation and explicit runtime reset', async () => {
+  const project = createBlankCourseProjectV10('程序与页面'), slideId = project.rootIds[0]
+  project.definitions.program = { id: 'program', role: 'content', implementation: { kind: 'builtin', key: 'guoling.html-program' } }
+  project.instances.program = { id: 'program', definitionId: 'program', name: '程序', data: { html: '<button>实验</button>' } }
+  project.rootIds.unshift('program')
+  let current = 'program'
+  const reset = vi.fn(async () => {}), selectProgram = vi.fn(), report = vi.fn()
+  const owner = new ComponentNavigationOwner({ project: () => project, surfaceId: () => current,
+    interactive: () => false, select: id => { current = id } })
+  try {
+    render(<CourseEditorChromeContext.Provider value={{ documentId: 'current', mode: 'light', setMode: () => {} }}>
+      <CourseEditorFrame lightTools={<CourseNavigationToolbarHost mode="light" />}>
+        <main aria-label="程序画布"><CourseNavigationControls canvasMode="edit" onCanvasModeChange={() => {}}
+          navigation={owner.editorPort()} resetPlayback={reset} report={report}>
+          <button onClick={selectProgram}>选择程序</button>
+        </CourseNavigationControls></main>
+      </CourseEditorFrame>
+    </CourseEditorChromeContext.Provider>)
+    await waitFor(() => expect(screen.getByTestId('course-try-run-chrome').parentElement).toHaveAttribute('data-toolbar-mode', 'light'))
+    expect(screen.getByRole('main', { name: '程序画布' })).not.toContainElement(screen.getByTestId('course-try-run-chrome'))
+    expect(screen.getAllByTestId('course-try-run-chrome')).toHaveLength(1)
+    fireEvent.click(screen.getByRole('button', { name: '下一步' }))
+    await waitFor(() => expect(current).toBe(slideId))
+    fireEvent.click(screen.getByRole('button', { name: '上一步' }))
+    await waitFor(() => expect(current).toBe('program'))
+    expect(screen.getByRole('button', { name: '回到初始画面' })).not.toBeDisabled()
+    fireEvent.click(screen.getByRole('button', { name: '回到初始画面' }))
+    await waitFor(() => expect(reset).toHaveBeenCalledExactlyOnceWith(false))
+    fireEvent.click(screen.getByRole('button', { name: '选择程序' }))
+    expect(selectProgram).toHaveBeenCalledOnce()
+    project.rootIds = ['program']; owner.changed()
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: '上一步' })).toBeDisabled()
+      expect(screen.getByRole('button', { name: '下一步' })).toBeDisabled()
+    })
+    expect(report).not.toHaveBeenCalled()
+  } finally { owner.dispose() }
+})
+
 it('keeps five controls in edit/run, advances actual steps before pages, and resets only the current paused page', async () => {
   const project = createBlankCourseProjectV10('共同导航'), first = componentSurfaces(project)[0]
   testContainerInstance(project, 0).container!.presentation = { states: [{ id: 'first-step', title: '第一步', overrides: {} }, { id: 'last-step', title: '第二步', overrides: {} }] }

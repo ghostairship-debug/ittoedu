@@ -93,12 +93,12 @@ export class DocumentHostService {
   private readonly pendingSourceSaveObservations = new WeakMap<DocumentSession, PublishedSourceObservation & { epoch: string }>()
 
   constructor(directory: string, fileDependencies: Pick<WorkspaceFilesDependencies, 'trashItem' | 'showItemInFolder' | 'fileOperations'> = {},
-    options: { artifactDeliveryDirectory?: string; legacyFlowRecoveryDirectory?: string } = {}) {
+    options: { artifactDeliveryDirectory?: string; legacyFlowRecoveryDirectory?: string; readOnlyFileRoots?: readonly string[] } = {}) {
     this.inputs = new DocumentInputRecovery(path.join(directory, 'authoring-drafts'), options.legacyFlowRecoveryDirectory
       ?? (typeof app?.getPath === 'function' ? path.join(app.getPath('userData'), 'flow-document-recovery', 'v1') : undefined))
     this.drivers = [createMarkdownDriver(), createTextDriver(), createDocumentArchiveDriver()]
     this.journal = createDocumentJournal({ directory, isLive: documentId => this.registry?.has(documentId) ?? false,
-      currentSource: filename => this.currentSource(filename),
+      currentSource: (filename, heldVersion) => this.currentSource(filename, heldVersion),
       observeSourcePublication: documentId => {
         if (!this.registry.has(documentId)) return
         const session = this.registry.get(documentId), epoch = session.readIdentity().epoch
@@ -112,6 +112,12 @@ export class DocumentHostService {
       onClosed: () => { if (this.registry.size === 0) this.compilation.clear() } })
     this.compilation = new InMemoryComponentCompilation(createEsbuildComponentCompiler())
     this.tools = new DocumentToolGateway(this.registry, this.drivers, randomUUID, { prepareImage: prepareImageResource, prepareMedia: prepareMediaResource,
+      resolveFilePath: (from, fileAccess, runId) => {
+        if (!fileAccess?.workspaceRoot) throw new Error('观察相对 HTML 路径需要本任务的工作空间范围')
+        return this.agentFiles.resolveReadPath({ runId, workspaceRoot: fileAccess.workspaceRoot, permission: fileAccess.permission ?? 'workspace',
+          assemblyRoot: fileAccess.assemblyRoot, readOnlyRoots: fileAccess.assemblyReadRoots,
+          boundPaths: Object.values(fileAccess.boundPaths ?? {}) }, from)
+      },
       prepareInput: documentId => this.prepareDocumentInput(documentId),
       measureExistingLayout: async request=>{
         const measured=await (await import('./contentApply/measurement/ElectronHtmlDesignMeasurement.js')).measureHtmlAtDesignViewport({html:request.html,viewport:request.viewport,layoutSlots:request.slots,resourceUrls:request.resourceUrls,framing:'viewport'})
@@ -169,7 +175,7 @@ export class DocumentHostService {
           if (snapshot.binding.kind !== 'file' || canonicalKey(snapshot.binding.path) !== canonicalKey(observed.binding.path)) throw new Error('复制期间当前稿文件位置已变化')
           const driver = this.drivers.find(driver => driver.kind === snapshot.model.kind)
           if (!driver) throw new Error('当前稿格式没有可用的保存编码器')
-          const copyModel = await captureDocumentSaveModel(snapshot.model, snapshot.binding, { currentSource: filename => this.currentSource(filename) })
+          const copyModel = await captureDocumentSaveModel(snapshot.model, snapshot.binding, { currentSource: (filename, heldVersion) => this.currentSource(filename, heldVersion) })
           captured.push({ sourcePath: snapshot.binding.path, relativePath: kind === 'file' ? '' : relative,
             bytes: await driver.serialize(copyModel), ...(snapshot.model.kind === 'markdown'
               ? { markdown: { source: snapshot.model.source, resources: copyModel.resources } } : {}) })
@@ -179,7 +185,7 @@ export class DocumentHostService {
         return captured
       } })
     this.artifacts = new FileArtifactService(this)
-    this.agentFiles = new AgentFileService(this)
+    this.agentFiles = new AgentFileService(this, options.readOnlyFileRoots)
     this.artifactDeliveries = new HostArtifactDeliveryService({
       journalDirectory: options.artifactDeliveryDirectory ?? path.join(directory, 'artifact-deliveries'),
       withFileOperation: work => this.fileCoordinator.withFileOperation(work),
@@ -360,9 +366,10 @@ export class DocumentHostService {
     return snapshot
   }
 
-  private async currentSource(filename: string): Promise<string | undefined> {
+  private async currentSource(filename: string, heldVersion?: string): Promise<string | undefined> {
     const snapshot = await this.readOpenedSource(filename)
-    return snapshot && isSourceDocumentModel(snapshot.model) ? snapshot.model.source : undefined
+    if (snapshot && isSourceDocumentModel(snapshot.model)) return snapshot.model.source
+    return heldVersion === undefined ? undefined : this.fileCoordinator.acknowledgedSource(filename, heldVersion)
   }
 
   /** Replan only known local reads; Session still performs the final CAS and durable commit. */

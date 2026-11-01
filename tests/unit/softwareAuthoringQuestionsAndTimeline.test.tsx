@@ -54,7 +54,10 @@ it('does not merge across prose, user decisions, or a terminal error', () => {
     item('two', 'tool', 3), item('question', 'tool', 4, { question: { text: '继续吗？', multiple: false, options: [{ label: '继续' }] }, status: 'waiting' }),
     item('usage', 'usage', 5), item('failure', 'tool', 6, { status: 'failed', error: '必须修正目标' }), item('end', 'run.end', 7, { status: 'partial' }),
   ] }
-  expect(executionTimelineEntries(projection, []).map(entry => entry.kind)).toEqual(['tools', 'item', 'tools', 'item', 'tools', 'item', 'item'])
+  const entries = executionTimelineEntries(projection, [])
+  expect(entries.map(entry => entry.kind)).toEqual(['tools', 'item', 'tools', 'item', 'tools', 'item', 'tools'])
+  // The error stays independently visible; the following end receipt uses the ordinary group.
+  expect(entries[5]!.kind === 'item' && entries[5]!.item.itemId).toBe('failure')
 })
 
 it('reads the current phase from all history and never turns a heartbeat into thinking or an ended run into working', () => {

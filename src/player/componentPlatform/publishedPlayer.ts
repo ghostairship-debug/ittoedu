@@ -25,6 +25,8 @@ export interface PublishedComponentPlayerOptions {
   /** Session-only Spatial path selection; authored path order stays in the formal surface. */
   initialSpatialPaths?: Readonly<Record<string, string | null>>
   capture?: boolean
+  /** False for isolated observation sessions whose storage is intentionally discarded. */
+  progressPersistence?: boolean
   keyboardNavigation?: boolean
   /** A package host may supply captured local bytes; the existing runtime owns their URLs and lifetime. */
   preparedAssetBytes?: Readonly<Record<string, Uint8Array>>
@@ -167,7 +169,7 @@ export async function mountPublishedCourseV4(value: unknown, root: HTMLElement, 
     selectState: async (id, containerId, signal, onCommit) => { if (stopped || signal?.aborted) return false; if (containerId === surfaceId) stateId = id; onCommit?.(); await player.update(renderModel()) },
   })
   const teacherController = navigation.teacherPort()
-  player = mountV10Model({ model: renderModel(), root, mode: options.capture ? 'capture' : 'play', runScopeId: `published:${payload.id}:${nanoid()}`,
+  player = mountV10Model({ model: renderModel(), root, mode: options.capture ? 'capture' : 'play', progressPersistence: options.progressPersistence, runScopeId: `published:${payload.id}:${nanoid()}`,
     teacherController, studentNavigation: navigation, report: options.report, initialSurfaceId: activeRootId ?? undefined,
     resolveAssetUrl, isAssetPending: id => pendingAssets.has(id), fontFaceCss: options.fontFaceCss,
     waitForAsset: async (id, signal) => {
@@ -258,4 +260,3 @@ export async function mountPublishedCourseV4(value: unknown, root: HTMLElement, 
 
 /** Existing internal callers share the current Published V4 reader. */
 export const mountPublishedCourseV3 = mountPublishedCourseV4
-

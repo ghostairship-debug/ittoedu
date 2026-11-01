@@ -1,5 +1,5 @@
 {
-  "description": "把创建、状态或等待返回的 source，或 image.fetch 返回的 resource 原样传入，保存当前任务已获授权且 ready 的图片、生成媒体或计算/委派成果为工作空间新文件。语音使用 media.start 返回的 job.resources[].source。仅指定来源和目的地，不拼接身份或选择 kind；目标已存在时拒绝覆盖。ready 与已保存分别有回执。",
+  "description": "把创建、状态或等待返回的 source，或 image.fetch 返回的 resource 原样传入，保存当前任务已获授权且 ready 的图片、生成媒体或计算/委派成果为新文件。计算/委派文件省略 destination 时，软件放入本运行内部装配目录并保留同作业相对目录关系，返回实际 path 可供 file.read/write 或 from 采用；同组成果可直接 from 时无需先落盘。用户要交付的文件显式填 destination，相对路径仍从工作空间根解析；图片/媒体需明确目的地。语音使用 media.start 返回的 job.resources[].source。不拼接身份或选择 kind；目标已存在时拒绝覆盖。ready、内部装配、已交付分别判断。",
   "inputSchema": {
     "$schema": "https://json-schema.org/draft/2020-12/schema",
     "additionalProperties": false,
@@ -15,8 +15,7 @@
       }
     },
     "required": [
-      "source",
-      "destination"
+      "source"
     ],
     "type": "object"
   },

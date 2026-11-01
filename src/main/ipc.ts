@@ -15,6 +15,8 @@ import { trashWorkspaceWithDialog } from './workbench/workspaceTrashDialog'
 import { workspaceFilesRequestSchema } from '../shared/workbench/workspaceFiles'
 import { mediaFilesRequestSchema, mediaFileDraftInputSchema, fileArtifactBindingSchema } from '../shared/workbench/mediaFiles'
 import { operateMediaFiles } from './workbench/mediaFilesDesktopService'
+import { pptxPreviewRequestSchema } from '../shared/workbench/officePreview'
+import { readPptxPreview } from './workbench/officePreviewDesktopService'
 import { operateExternalMcp, closeExternalMcpService, attachExternalMcpWindow } from './workbench/external/externalDesktopService'
 import { operateExecutionSettings } from './workbench/providers/executionSettingsService'
 import { operatePixabaySettings } from './workbench/assetSources/pixabayDesktopService'
@@ -475,7 +477,7 @@ export function registerIpcHandlers(context: IpcContext): void {
       const window = context.getMainWindow()
       if (window && !window.isDestroyed()) window.webContents.send(channel, event)
     }
-    service.setSinks(event => send(IPC_CHANNELS.executionEvent, event), event => send(IPC_CHANNELS.executionEdit, event))
+    service.setSinks(event => send(IPC_CHANNELS.executionEvent, event), event => send(IPC_CHANNELS.executionEdit, event), event => send(IPC_CHANNELS.acpEvent, event))
     return service.operate(input, client)
   })
   registerSafeHandler(IPC_CHANNELS.executionSettings, context, {
@@ -649,6 +651,10 @@ export function registerIpcHandlers(context: IpcContext): void {
     code: 'COMPONENT_COMPILE_FAILED', title: '组件源码未能编译',
     message: '源码和参数已保留。', suggestion: '请查看组件诊断并修复源码。',
   }, async (_event, args) => documents.compilation.compile(componentCompilationInputSchema.parse(requireSingleArgument(args))))
+  registerSafeHandler(IPC_CHANNELS.pptxPreview, context, {
+    code: 'PPTX_PREVIEW_FAILED', title: 'PPTX 预览未能打开',
+    message: '原文件保持不变。', suggestion: '请检查文件，或用系统应用打开原件。',
+  }, async (_event, args) => readPptxPreview(pptxPreviewRequestSchema.parse(requireSingleArgument(args))))
   registerSafeHandler(IPC_CHANNELS.mediaFiles, context, {
     code: 'MEDIA_FILE_OPERATION_FAILED', title: '媒体文件操作未完成',
     message: '当前修改已保留。', suggestion: '请查看具体原因后重试。',

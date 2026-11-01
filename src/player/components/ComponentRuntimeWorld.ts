@@ -26,6 +26,7 @@ import { isGlobalTeacherController } from '../../shared/teacherControllerViewpor
 import { instanceContainerId, instanceWorkRootId, isWithinContainer, runtimeInstanceOwner } from './runtime/containerScopes'
 import { measureComponentGeometry } from './runtime/componentGeometry'
 import { isContentProgramImplementation } from '../../shared/contentProgramImplementation'
+import { ComponentProgressStore } from './runtime/ComponentProgressStore'
 
 type Listener = (value: JsonValue | undefined) => void
 const snapshotValue = <Value extends JsonValue | undefined>(value: Value): Value => value !== null && typeof value === 'object' ? structuredClone(value) : value
@@ -42,6 +43,7 @@ export interface ComponentProjectionAttachment {
 /** A run owns transient state and leases. It never writes author data or History. */
 export class ComponentRuntimeWorld {
   readonly host: ComponentRuntimeHost
+  private readonly progress = new ComponentProgressStore()
   private project?: CourseProjectV10
   private documentResources?: DocumentResources
   private readonly readCompilationInput = createComponentCompilationInputReader()
@@ -126,6 +128,8 @@ export class ComponentRuntimeWorld {
     /** Host-owned bundled faces for isolated content documents; not author theme data. */
     fontFaceCss?: string
     mode?: 'edit' | 'play' | 'capture'
+    /** Ephemeral observation hosts explicitly disable durable learner-progress promises. */
+    progressPersistence?: boolean
     authoring?:boolean
     readInstanceData?(instance:ComponentInstance):JsonValue
     fixedViewport?(instance:ComponentInstance):boolean|undefined
@@ -305,7 +309,9 @@ export class ComponentRuntimeWorld {
           return { ...mounted, update: next => { current = next; return mounted.update(next) } }
         } }
       },
-      ports: (_scope, instanceId) => ({
+      ports: (_scope, instanceId, signal) => ({
+        ...(this.mode === 'play' && options.progressPersistence !== false && this.project ? { progress: this.progress.port(this.project.id, signal,
+          ((workId: string) => () => !this.retired && this.project?.id === workId)(this.project.id)) } : {}),
         target: reference => this.target(reference),
         measure: async references => measureComponentGeometry(references, {
           target: reference => this.target(reference),
@@ -1160,6 +1166,7 @@ export class ComponentRuntimeWorld {
     return this.disposal = this.disposeWorld()
   }
   private async disposeWorld(): Promise<void> {
+    this.progress.dispose()
     this.project = undefined; this.documentResources = undefined
     this.stopNavigation?.(); this.disconnectNavigationRuntime?.(); this.spots.clear(); this.spotPreviews.clear(); this.notifySpots(); this.spotListeners.clear()
     this.interactions.dispose(); this.audioManager?.destroy(); this.audioEvents.dispose(); this.resumeMedia = undefined

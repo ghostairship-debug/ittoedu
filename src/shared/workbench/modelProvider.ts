@@ -70,12 +70,31 @@ export interface ModelFinishDetails {
   /** Present only when the provider distinguishes output exhaustion from context exhaustion. */
   limit?: 'output' | 'context'
 }
+/** Local adapter observations in Unix milliseconds; body reads are not network-arrival timestamps. */
+export interface ModelProviderTiming {
+  startedAt: number
+  credentialReadyAt?: number
+  fetchStartedAt?: number
+  headersReceivedAt?: number
+  firstBodyReadAt?: number
+  firstSseFrameAt?: number
+  firstNormalizedEventAt?: number
+  firstToolNameAt?: number
+  firstReasoningAt?: number
+  firstContentAt?: number
+  terminalEventAt?: number
+}
+export interface ModelStreamOptions {
+  signal?: AbortSignal
+  /** Synchronous, credential-free diagnostic snapshots. Never changes the provider request or model context. */
+  onTiming?: (timing: Readonly<ModelProviderTiming>) => void
+}
 /** One frozen, credential-free wire payload, shared by budgeting and its actual transport. */
 export interface PreparedModelRequest {
   readonly serialized: string
   /** Host estimate of this exact prepared JSON body; never a provider/wire field. */
   readonly tokens?: number
-  stream(requestId: string, options?: { signal?: AbortSignal }): AsyncIterable<ModelEvent>
+  stream(requestId: string, options?: ModelStreamOptions): AsyncIterable<ModelEvent>
 }
 /** Fixed transport categories only; excludes exception text, URLs and response bytes. */
 export interface ModelTransportDiagnostic {
@@ -123,5 +142,5 @@ export interface ModelProvider {
   /** Optional request-scoped preparation; never a cache across changing messages, tools or selections. */
   prepare?(request: Omit<ModelRequest, 'requestId'>, options?: ModelPreparationOptions): PreparedModelRequest
   /** Exactly one request, no implicit retry, provider fallback, tool execution or document mutation. */
-  stream(request: ModelRequest, options?: { signal?: AbortSignal }): AsyncIterable<ModelEvent>
+  stream(request: ModelRequest, options?: ModelStreamOptions): AsyncIterable<ModelEvent>
 }

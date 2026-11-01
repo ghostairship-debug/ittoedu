@@ -232,6 +232,13 @@
             "none"
           ]
         },
+        "hostNavigation": {
+          "type": "string",
+          "enum": [
+            "auto",
+            "intentionally-hidden"
+          ]
+        },
         "keyboardNavigation": {
           "type": "boolean"
         },
@@ -1322,6 +1329,11 @@
                   "left",
                   "right"
                 ]
+              },
+              "widthPercent": {
+                "type": "number",
+                "exclusiveMinimum": 0,
+                "maximum": 100
               },
               "caption": {
                 "type": "object",

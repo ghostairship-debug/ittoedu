@@ -6,7 +6,7 @@ import type { BrowserWindow } from 'electron'
 import type { DocumentHostService } from '../../src/main/workbench/DocumentHostService'
 import type { DocumentSnapshot } from '../../src/shared/workbench/document'
 import { saveDocumentWithDialog } from '../../src/main/workbench/documentSaveDialog'
-import { explorerContextCommands, explorerNewCommands, type ExplorerCommandPorts } from '../../src/renderer/lessonWorkspace/view/explorerCommands'
+import { explorerContextCommands, type ExplorerCommandPorts } from '../../src/renderer/lessonWorkspace/view/explorerCommands'
 import { HtmlDocumentEditor, type HtmlDocumentEditorHandle } from '../../src/renderer/documentFiles/html/HtmlDocumentEditor'
 import { WorkspaceFilesTree } from '../../src/renderer/lessonWorkspace/view/WorkspaceFilesTree'
 import type { WorkspaceFilesAPI, WorkspaceFilesRequest } from '../../src/shared/workbench/workspaceFiles'
@@ -200,7 +200,7 @@ it('keeps a conflicting draft accessible when its source text changes and blocks
   mounted.unmount(); cleanup()
 })
 
-it('opens an HTML file in the workbench on double click and keeps browser open explicit', async () => {
+it('opens an HTML file in the workbench on double click and keeps system opening explicit', async () => {
   const onFile = vi.fn(), operation = vi.fn().mockResolvedValue({ opened: true })
   const files = vi.fn(async (request: WorkspaceFilesRequest) => {
     if (request.type === 'root') return { workspaceId: 'space', rootEntryId: 'root', resolvedPath: '/lesson' }
@@ -215,7 +215,7 @@ it('opens an HTML file in the workbench on double click and keeps browser open e
   await waitFor(() => expect(onFile).toHaveBeenCalledWith({ name: 'page.htm', kind: 'file', path: '/lesson/page.htm' }))
   expect(operation).not.toHaveBeenCalled()
   fireEvent.contextMenu(row)
-  fireEvent.click(within(screen.getByRole('menu', { name: '文件菜单' })).getByRole('menuitem', { name: '用浏览器打开' }))
+  fireEvent.click(within(screen.getByRole('menu', { name: '文件菜单' })).getByRole('menuitem', { name: '使用系统默认应用打开' }))
   await waitFor(() => expect(operation).toHaveBeenCalledWith({ operation: 'open-external', path: '/lesson/page.htm' }))
   cleanup()
 })
@@ -242,17 +242,15 @@ it('creates an HTML file through the existing file service request and opens its
   cleanup()
 })
 
-it('offers HTML creation and browser opening without replacing the import action', () => {
-  const ports: ExplorerCommandPorts = { create: vi.fn(), importHtml: vi.fn(), openHtmlExternal: vi.fn(),
+it('offers system opening without replacing the HTML import action', () => {
+  const ports: ExplorerCommandPorts = { create: vi.fn(), importHtml: vi.fn(), openExternal: vi.fn(),
     rename: vi.fn(), copy: vi.fn(), cut: vi.fn(), paste: vi.fn(), copyTo: vi.fn(), moveTo: vi.fn(), trash: vi.fn(), copyPath: vi.fn(), reveal: vi.fn() }
-  explorerNewCommands(null, ports).find(item => item.id === 'file.new-html')?.run()
-  expect(ports.create).toHaveBeenCalledWith('create-html')
-  const commands = explorerContextCommands({ blocked: null, selected: 1, pptx: false, htmlImport: 'selected', htmlFile: true, clipboard: 0 }, ports)
-  commands.find(item => item.id === 'file.open-html-browser')?.run()
+  const commands = explorerContextCommands({ blocked: null, selected: 1, pptx: false, htmlImport: 'selected', externalFile: true, clipboard: 0 }, ports)
+  commands.find(item => item.id === 'file.open-external')?.run()
   commands.find(item => item.id === 'file.import-html')?.run()
-  expect(ports.openHtmlExternal).toHaveBeenCalledOnce()
+  expect(ports.openExternal).toHaveBeenCalledOnce()
   expect(ports.importHtml).toHaveBeenCalledOnce()
-  expect(explorerContextCommands({ blocked: null, selected: 1, pptx: false, htmlImport: null, htmlFile: false, clipboard: 0 }, ports).some(item => item.id === 'file.open-html-browser')).toBe(false)
+  expect(explorerContextCommands({ blocked: null, selected: 1, pptx: false, htmlImport: null, externalFile: false, clipboard: 0 }, ports).some(item => item.id === 'file.open-external')).toBe(false)
 })
 
 it.each(['page.html', 'page.htm', 'notes.txt'])('Save As keeps the current text extension for %s', async name => {

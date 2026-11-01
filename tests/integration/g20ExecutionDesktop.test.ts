@@ -2,7 +2,7 @@
 import { componentSurfaces } from '../../src/shared/contracts/component-platform/project'
 import { testContainerInstance, setRootContainers } from '../helpers/glxWorkFixture'
 import { modelToolWireName } from '../../src/main/workbench/providers/OpenAIChatProvider'
-import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto'
+import { createCipheriv, createDecipheriv, randomBytes, randomUUID } from 'node:crypto'
 import { promises as fs } from 'node:fs'
 import { createServer as createHttpServer, type Server } from 'node:http'
 import os from 'node:os'
@@ -22,6 +22,7 @@ import type { DocumentSnapshot } from '../../src/shared/workbench/document'
 import type { ElementChangeView } from '../../src/shared/workbench/executionDesktop'
 import type { ToolTarget } from '../../src/shared/workbench/tools'
 import type { ConversationRecord } from '../../src/shared/workbench/conversations'
+import type { AcpSessionSegment } from '../../src/shared/workbench/acp'
 import type { ExecutionRunRecord } from '../../src/shared/workbench/execution'
 import { continueDocumentTargets } from '../../src/main/workbench/execution/continuationTargets'
 
@@ -64,6 +65,53 @@ async function fixture(fetch?: typeof globalThis.fetch) {
   const service = new ExecutionDesktopService({ directory: path.join(root, 'desktop'), documents, settings, authorizeWorkspaceRoot, fetch })
   return { root, workspace, filename, documents, document, settings, authorizeWorkspaceRoot, service }
 }
+
+describe('ACP unpersisted native session history', () => {
+  async function history() {
+    const { service } = await fixture()
+    const conversationId = 'native-history'
+    const segment: AcpSessionSegment = { id: 'codex-first', agentId: 'codex', nativeSessionId: 'codex-native', startedAt: new Date().toISOString() }
+    const appendRun = (runId: string) => service.events.append({ eventId: randomUUID(), conversationId, runId, taskId: runId,
+      itemId: 'state', time: Date.now(), source: 'external-mcp', type: 'run.state', update: 'snapshot', data: { status: 'running' } })
+    const appendSegment = (value: AcpSessionSegment) => service.events.append({ eventId: randomUUID(), conversationId, runId: value.id, taskId: value.id,
+      itemId: 'native-session', time: Date.now(), source: 'external-mcp', type: 'run.state', update: 'snapshot',
+      data: { output: JSON.stringify({ kind: 'acp-session-segment', ...value }) } })
+    const owner = service as unknown as {
+      externalRunsPrecedeAcpSession(conversationId: string, acceptedRunIds: readonly string[], recovery: AcpSessionSegment): Promise<boolean>
+    }
+    return { service, segment, appendRun, appendSegment,
+      empty: (acceptedRunIds: string[], recovery = segment) => owner.externalRunsPrecedeAcpSession(conversationId, acceptedRunIds, recovery) }
+  }
+
+  it('allows an empty Codex history when another Agent accepted its tasks before that native session existed', async () => {
+    const h = await history()
+    await h.appendSegment({ ...h.segment, id: 'claude-first', agentId: 'claude', nativeSessionId: 'claude-native' })
+    await h.appendRun('older-claude-task')
+    await h.appendSegment(h.segment)
+    expect(await h.empty(['older-claude-task'])).toBe(true)
+    await h.service.shutdown()
+  })
+
+  it('rejects a task accepted in an earlier segment of the same native session', async () => {
+    const h = await history()
+    await h.appendSegment(h.segment)
+    await h.appendRun('codex-task')
+    const resumed = { ...h.segment, id: 'codex-resumed' }
+    await h.appendSegment(resumed)
+    expect(await h.empty(['codex-task'], resumed)).toBe(false)
+    await h.service.shutdown()
+  })
+
+  it('keeps missing task events or a missing native-session boundary unknown', async () => {
+    const h = await history()
+    await h.appendRun('older-claude-task')
+    await h.appendSegment(h.segment)
+    expect(await h.empty(['older-claude-task', 'missing-task'])).toBe(false)
+    expect(await h.empty(['older-claude-task'], { ...h.segment, nativeSessionId: 'missing-native' })).toBe(false)
+    await h.service.shutdown()
+  })
+})
+
 it('retains only live timeline consumers and closes a stale sender without releasing an active run', async () => {
   const { service } = await fixture()
   const client = { id: 'window:1', isCurrent: () => true }

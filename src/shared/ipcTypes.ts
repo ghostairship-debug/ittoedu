@@ -134,6 +134,7 @@ export interface DesktopAPI {
   pixabaySettings?: import('./workbench/pixabaySettingsDesktop').PixabaySettingsAPI
   workspaceFiles?: import('./workbench/workspaceFiles').WorkspaceFilesAPI
   skillCatalog?: import('./workbench/skillCatalogDesktop').SkillCatalogAPI
+  pptxPreview?(input: import('./workbench/officePreview').PptxPreviewRequest): Promise<import('./workbench/officePreview').PptxPreviewSnapshot>
   mediaFiles?(input: import('./workbench/mediaFiles').MediaFilesRequest): Promise<import('./workbench/mediaFiles').MediaFileSnapshot>
   releaseMediaFileDraft?(binding: import('./workbench/mediaFiles').FileArtifactBinding): Promise<void>
   onWorkspaceFilesChanged?(listener: (event: import('./workbench/workspaceFiles').WorkspaceFilesChange) => void): () => void
@@ -250,11 +251,13 @@ export const IPC_CHANNELS = {
   execution: 'execution:operate',
   dynamicContentTargets: 'dynamic-content:publish-targets',
   executionEvent: 'execution:event',
+  acpEvent: 'execution:acp-event',
   executionEdit: 'execution:edit',
   executionSettings: 'execution-settings:operate',
   pixabaySettings: 'pixabay-settings:operate',
   workspaceFiles: 'workspace-files:operate',
   skillCatalog: 'skills:catalog',
+  pptxPreview: 'pptx-preview:read',
   mediaFiles: 'media-files:operate',
   mediaFileRelease: 'media-files:release-draft',
   workspaceFilesChanged: 'workspace-files:changed',

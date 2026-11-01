@@ -16,7 +16,7 @@ import bundledSkills from '../../shared/generated/bundledSkills.json'
 import { nativeContentInputSchemaByType } from '../../shared/contracts/native-v1/schema'
 import { z } from 'zod'
 import type { ModelToolCall, ToolDefinition, ToolResult } from '../../shared/workbench/tools'
-import { textFormatInputSchema, objectUpdateInputSchema, objectConvertInputSchema, courseConfigureInputSchema, surfaceConfigureInputSchema, objectStructureInputSchema, objectPlaceInputSchema, objectAuthorInputSchema, interactionUpdateInputSchema, courseLogicInputSchema, courseMediaInputSchema, surfaceRecipeInputSchema, courseProductivityInputSchema, surfaceRemixInputSchema, objectInsertInputSchema, objectLayoutInputSchema, teacherEnsureInputSchema } from './toolSchemas'
+import { textFormatInputSchema, objectUpdateInputSchema, objectConvertInputSchema, courseConfigureInputSchema, surfaceConfigureInputSchema, objectStructureInputSchema, objectPlaceInputSchema, objectAuthorInputSchema, interactionUpdateInputSchema, courseLogicInputSchema, courseMediaInputSchema, surfaceRecipeInputSchema, courseProductivityInputSchema, surfaceDuplicateInputSchema, surfaceRemixInputSchema, objectInsertInputSchema, objectLayoutInputSchema, teacherEnsureInputSchema } from './toolSchemas'
 import { coursePresentationInputSchema } from './coursePresentationEdits'
 import { componentFrameSchema } from '../../shared/contracts/component-platform/schema'
 import { handleToolTarget, hasRunDocument, hasRunWrite, hasRunDelivery, projectToolTarget, registeredEffectNames,
@@ -117,8 +117,8 @@ export const canonicalMutationTools = [
     inputSchema: courseMediaInputSchema, manual: { label: '课程媒体', group: 'edit', targetKinds: ['document'] } },
   { capability: 'write', effect: 'document-edit', family: 'media', supports: context => hasRunWrite(context, ['document'], 'course-v10'), targets: handleToolTarget,
     handler: (context, input) => context.mutate({ name: 'course.media', input }) }),
-  registerCanonical({ name: 'surface.duplicate', description: '复制已观察页面及完整对象、展示状态、规则、判题、空间镜头和内部引用；共享素材/定义继续复用，全局可见范围继承原页。软件维护新页面和对象身份，一次可撤销事务；需要整课写入授权。',
-    inputSchema: z.object({ target }).strict(), manual: { label: '复制页面', group: 'edit', targetKinds: ['course-surface'] } },
+  registerCanonical({ name: 'surface.duplicate', description: '复制已观察页面及完整对象、展示状态、规则、判题、空间镜头和内部引用；共享素材/定义继续复用，全局可见范围继承原页。可同次指定新页 title 与 placement=end，省去复制后的改名和移动；省略时仍放在参考页后。软件维护新页面和对象身份，一次可撤销事务；需要整课写入授权。',
+    inputSchema: surfaceDuplicateInputSchema, manual: { label: '复制页面', group: 'edit', targetKinds: ['course-surface'] } },
   { capability: 'write', effect: 'document-edit', family: 'navigation', supports: context => hasRunWrite(context, ['document'], 'course-v10'), targets: handleToolTarget,
     handler: (context, input) => context.mutate({ name: 'surface.duplicate', input }) }),
   registerCanonical({ name: 'surface.recipe', description: '应用 course.recipes 实际返回的可深改预置。选择反馈含单选/多选，揭示分步，拖拽匹配/排序，continuous-variable-v1连续变量联动；内容配方在已观察页后创建可编辑页面。static-background-v1/dynamic-background-v1仅添加单份全局底层，不新建页，可选current/include/exclude/all范围、图像/颜色/运动强度与内容联动，不抢前景输入。软件装配正式组件、配置、依赖和身份，一次撤销；需要整课写入授权。',
@@ -129,7 +129,7 @@ export const canonicalMutationTools = [
     inputSchema: courseProductivityInputSchema, manual: { label: '批量内容与颜色', group: 'edit', targetKinds: ['course-surface'] } },
   { capability: 'write', effect: 'document-edit', family: 'content', supports: context => hasRunWrite(context, ['course-surface'], 'course-v10'), targets: handleToolTarget,
     handler: (context, input) => context.mutate({ name: 'course.productivity', input }) }),
-  registerCanonical({ name: 'surface.remix', description: '完整复制已观察参考页，再替换 surface.remix.inspect 返回的正文槽位。保留人工布局、富文本、互动、展示状态与内部引用，软件维护复制身份；需要整课写入授权。',
+  registerCanonical({ name: 'surface.remix', description: '完整复制已观察参考页，再替换 surface.remix.inspect 返回的正文槽位。可同次指定新页 title 与 placement=end，省去复制后的改名和移动；省略时仍放在参考页后。保留人工布局、富文本、互动、展示状态与内部引用，软件维护复制身份；需要整课写入授权。',
     inputSchema: surfaceRemixInputSchema, manual: { label: '参考页面改写', group: 'edit', targetKinds: ['course-surface'] } },
   { capability: 'write', effect: 'document-edit', family: 'content', supports: context => hasRunWrite(context, ['document'], 'course-v10'), targets: handleToolTarget,
     handler: (context, input) => context.mutate({ name: 'surface.remix', input }) }),
@@ -207,13 +207,15 @@ export function isCourseAuthoringTool(name: string): boolean {
 export const toolFamilyDescriptions: Record<ToolFamily, string> = {
   content: '组件专业内容与文档正文', layout: '组件属性与表面布局', navigation: '页面、表面、状态与位置结构',
   interaction: '交互规则、输入题和答案', media: '图片、视频、声音与图像生成', build: '文档导出',
-  jobs: '受限计算、有限委派与作业状态、等待、日志和取消', office: 'Word、Excel、PowerPoint 原格式内容创建、读取和局部编辑；软件组装与保存',
+  jobs: '受限计算、子任务协作与作业状态、等待、日志和取消', office: 'Word、Excel、PowerPoint 原格式内容创建、读取和局部编辑；软件组装与保存',
   external: '公开网页搜索与读取、已授权外部 MCP 工具和资源；配置及调用权限以真实回执为准',
 }
-/** Describe only capabilities actually allowed by this run's frozen grant. */
+/** Describe connected registered capabilities; execution still enforces the run's frozen grant. */
 export function describeToolFamily(family: ToolFamily, allowedNames: readonly string[], _scopes: readonly RunToolScope[] = []): string {
   const names = allowedNames.filter(name => toolRegistration(name)?.family === family)
-  return `${toolFamilyDescriptions[family]}。可用工具：${names.join('、')}。具体参数见已加载的工具定义，所需正文、Source与共享API可直接按实际路径读取。`
+  const collaboration = family === 'jobs' && names.includes('delegate.agent')
+    ? ' 可独立交付、只需少量共同约定的创作单元可用 delegate.agent 并行；子任务在隔离副本产出，父任务审阅封存成果后采用。短小修改或相互强依赖的工作直接完成，无需固定作者数量。' : ''
+  return `${toolFamilyDescriptions[family]}。可用工具：${names.join('、')}。${collaboration}具体参数见已加载的工具定义，所需正文、Source与共享API可直接按实际路径读取。`
 }
 export function familyOfTool(name: string): ToolFamily | null { return toolRegistration(name)?.family ?? null }
 export type InitialToolProfile = 'general' | 'text' | 'content-edit'
@@ -248,7 +250,7 @@ export const gatewayToolRegistrations = [
   registerGateway({ name: 'course.recipes', description: '读取现有教学配方及各正文槽位的名称、说明和默认示例；与人工界面共用同一目录。', inputSchema: z.object({}).strict(), manual: { label: '教学配方目录', group: 'read', targetKinds: ['document'] } },
     { capability: 'read', effect: null, family: 'content', supports: context => hasRunDocument(context, 'course-v10'), targets: () => [],
       handler: context => context.readRecipes() }),
-  registerGateway({ name: 'surface.remix.inspect', description: '读取参考页可替换的正文槽位、原文及局部问题。后续 surface.remix 使用返回的槽位引用，不需提供对象身份或字段路径。', inputSchema: z.object({ target }).strict(), manual: { label: '读取参考页槽位', group: 'read', targetKinds: ['course-surface'] } },
+  registerGateway({ name: 'surface.remix.inspect', description: '读取参考页可替换的正文槽位、原文及局部问题。capacity 仅说明原框尺寸或原排版，不是文字适配检查结果。后续 surface.remix 使用返回的槽位引用，不需提供对象身份或字段路径。', inputSchema: z.object({ target }).strict(), manual: { label: '读取参考页槽位', group: 'read', targetKinds: ['course-surface'] } },
     { capability: 'read', effect: null, family: 'content', supports: context => hasRunDocument(context, 'course-v10'), targets: handleToolTarget,
       handler: (context, input) => context.inspectRemix(input) }),
   registerGateway({ name: 'read', description: '直接读取已知目标的语义正文，省略detail不附工程目录或源码；detail=object显式读取完整目标属性。返回 data.target 对应本次读取的当前基线。nextCursor 续读仍配原调用的 target。本任务已回执的修改由软件续接既有目标，目标未改变、未冲突时不需为每次操作重读或刷新句柄；外部修改仍明确冲突。', inputSchema: z.object({ ...page, detail: z.enum(['semantic', 'object']).optional() }).strict(), manual: { label: '读取', group: 'read', targetKinds: readableKinds } },

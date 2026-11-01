@@ -11,14 +11,15 @@ const record = (value: unknown): value is Record<string, unknown> =>
   !!value && typeof value === 'object' && !Array.isArray(value)
 
 /** Job receipts expose work and readable results; request accounting stays in the internal journal. */
-export function projectModelJobSnapshot(value: unknown): unknown {
+export function projectModelJobSnapshot(value: unknown, options: { includeTaskContext?: boolean } = {}): unknown {
   if (!record(value)) return value
   const projected: Record<string, unknown> = {}
-  for (const key of ['job', 'jobId', 'runId', 'requestDigest', 'status', 'terminal', 'stopped', 'executionKind', 'childRunId',
+  for (const key of ['job', 'jobId', 'runId', 'requestDigest', 'status', 'terminal', 'stopped', 'executionKind', 'executionStarted', 'childRunId',
     'candidateComplete', 'resumedFrom', 'summary', 'reason', 'failure', 'error', 'exitCode', 'artifacts', 'resources',
     'goal', 'target', 'targetContext', 'role', 'nextCursor', 'read', 'source', 'outputNames', 'outputDiagnostics',
     'locations', 'inputs', 'documentId', 'operation', 'retryAt'] as const)
-    if (Object.hasOwn(value, key)) projected[key] = value[key]
+    if (Object.hasOwn(value, key) && (options.includeTaskContext !== false || key !== 'goal' && key !== 'targetContext'))
+      projected[key] = value[key]
   return projected
 }
 
@@ -322,7 +323,8 @@ export const serviceToolOutcome = (name: string, result?: ToolResult): ServiceTo
     return { status: 'failed', message: typeof data.reason === 'string' ? data.reason : '当前文档交付尚未完成' }
   }
   if (name === 'artifact.save') {
-    if (data.status === 'written') return { status: 'written', message: '作业成果已保存为新文件' }
+    if (data.status === 'written') return { status: 'written', message: data.purpose === 'assembly'
+      ? '内部装配文件已写入；尚未作为用户文件交付' : '作业成果已保存为新文件' }
     if (data.status === 'unknown') return { status: 'unknown', message: '成果交付回执未知，请核对目标文件，不要重试同一操作' }
     if (data.status === 'rejected' || data.status === 'conflict' || data.status === 'stopped') return { status: 'failed', message: typeof data.message === 'string' ? data.message : '成果未保存' }
   }

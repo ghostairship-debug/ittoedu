@@ -1,4 +1,5 @@
 import path from 'node:path'
+import { Buffer } from 'node:buffer'
 import type { FileArtifactBinding } from '../../../shared/workbench/mediaFiles'
 import type { WorkspaceOperationResult } from '../../../shared/workbench/workspaceFiles'
 import { validateWorkspaceEntryName } from '../WorkspaceFiles'
@@ -81,6 +82,12 @@ export class OfficeFileService {
     this.active(context)
     const prepared = await applyOfficeContentOffThread(current, request, context.signal)
     this.active(context)
+    if (Buffer.from(current).equals(prepared.bytes)) {
+      // Revalidate through the physical owner, but do not manufacture a new file version for a no-op.
+      const { inspection } = await this.inspect(binding, request.format, context)
+      return { status: 'saved', binding, inspection, diagnostics: prepared.diagnostics,
+        ...(prepared.calculation ? { calculation: prepared.calculation } : {}) }
+    }
     const saved = await this.host.artifacts.replace(binding, prepared.bytes, context.signal, () => this.active(context))
     let inspection: OfficeContentInspection
     try { inspection = await inspectOfficeContentOffThread(await this.host.artifacts.read(saved), request.format) }

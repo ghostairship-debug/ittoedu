@@ -29,6 +29,7 @@ import { taskTargetDeclaration } from '../../shared/workbench/taskTargetContext'
 import { BUILTIN_DISCOVERY_ENTRIES, createRecipeDiscoveryEntries, createWorkAssetDiscoveryEntry, searchDiscoveryEntries, type ComponentDiscoveryEntry } from '../../shared/componentDiscovery'
 import { RECIPE_CATALOG } from '../course/courseRecipeEdits'
 import { builtInWorkAssetMetadata, loadBuiltInWorkAsset } from '../components/library/workAssets'
+import { fileResourceMime } from '../../shared/document/fileResourceMime'
 
 /** Main supplies real services. Neither their implementations nor credentials enter core. */
 export interface HostToolServices {
@@ -53,6 +54,8 @@ export interface HostToolServices {
     readResource(input: { runId: string; resourceId: string }): Promise<{ mimeType: string; bytes: Uint8Array }>
   }
   artifacts?: {
+    /** Named job files default to this run's internal assembly; explicit destinations bypass it. */
+    assemblyDestination?(input: { grant: ToolRunGrant; job: string; name: string }): Promise<string> | string
     preflight?(input: { grant: ToolRunGrant; destination: string }): Promise<{ path: string; parent: string; outsideWorkspace: boolean; approvalRequired: boolean }>
     lookup(runId: string, operationId: string): Promise<unknown | null>
     save(input: { grant: ToolRunGrant; operationId: string; source: HostArtifactResolvedSource; bytes: Uint8Array;
@@ -86,6 +89,7 @@ export interface HostToolServices {
   }
   delegation?: {
     availability(): { ready: boolean; reason: string }
+    localAvailability?(): Promise<{ available: boolean; reason?: string }>
     models?(runId: string): unknown | Promise<unknown>
     prepareLocal?(input: { runId: string; jobId: string; taskId: string; intent: LocalToolRunIntent } & HostTaskSourcePreparation): Promise<LocalToolRunPreview>
     authorizeLocal?(input: { runId: string; jobId: string; taskId: string; intent: LocalToolRunIntent }): void | Promise<void>
@@ -204,6 +208,8 @@ interface HostAuthority {
   projectDiscovery?(runId: string): Promise<readonly ComponentDiscoveryEntry[]>
   /** Current file/selection projection, resolved by the existing Gateway owner. */
   taskTargetContext?(runId: string, target?: DelegationTarget, resumeContext?: unknown): Promise<unknown | null>
+  prepareTaskTargetInputs?(runId: string, target: DelegationTarget | undefined, resumeContext: unknown,
+    existingSources: readonly PreparedTaskSource[]): Promise<{ context: unknown; sources: readonly PreparedTaskSource[] }>
   resolveImage(runId: string, target: string): Promise<{ snapshot: DocumentSnapshot; target: ToolTarget }>
   active(runId: string, documentId: string, epoch: string): void
   ownsDocument(runId: string, documentId: string): boolean
@@ -230,10 +236,15 @@ export class HostToolCoordinator {
   private readonly reissuedImages = new Map<string, { runId: string; promise: Promise<string> }>()
   private readonly approvedPaths = new Map<string, { runId: string; paths: readonly string[] }>()
   private readonly htmlResources = new Map<string, Set<string>>()
+  private localToolsAvailable?: boolean
   constructor(private services: HostToolServices, private readonly registry: DocumentRegistry, private readonly authority: HostAuthority) {}
-  configure(services: HostToolServices) { this.services = services }
+  configure(services: HostToolServices) { this.services = services; this.localToolsAvailable = undefined }
   async beginRun(grant: ToolRunGrant) {
     await this.services.beginRun?.(structuredClone(grant))
+    if (this.services.delegation?.localAvailability) {
+      const availability = await this.services.delegation.localAvailability().catch(() => ({ available: false }))
+      this.localToolsAvailable = availability.available
+    }
     this.runs.set(grant.runId, { grant: structuredClone(grant), stopped: false, computeJobs: new Set(), pendingCompute: new Set(), continuationReads: new Set(),
       delegationJobs: new Set(), pendingDelegation: new Set() })
   }
@@ -312,7 +323,7 @@ export class HostToolCoordinator {
     if (!service) return this.serviceUnavailable('成果文件保存服务尚未接入')
     const previous = await service.lookup(runId, operationId)
     if (previous) return { kind: 'read', data: previous }
-    const resolved = resolveArtifactSource(input)
+    const resolved = resolveArtifactSource(await this.artifactSaveInput(runId, input))
     const source = resolved.kind === 'media-resource' ? await this.readMediaSource(runId, resolved.resource)
       : resolved.kind === 'image' ? await this.readGeneratedImageReference(runId, input.source)
       : resolved.kind === 'image-resource' ? await this.readImageReference(runId, resolved.resource)
@@ -325,9 +336,19 @@ export class HostToolCoordinator {
   async preflightArtifactSave(runId: string, input: HostArtifactSaveInput) {
     const run = this.writableRun(runId)
     if (!this.services.artifacts?.preflight) throw new Error('成果文件保存服务尚未接入路径预检')
-    const result = await this.services.artifacts.preflight({ grant: run.grant, destination: input.destination })
+    const resolved = await this.artifactSaveInput(runId, input)
+    const result = await this.services.artifacts.preflight({ grant: run.grant, destination: resolved.destination })
     this.writableRun(runId)
     return result
+  }
+  private async artifactSaveInput(runId: string, input: HostArtifactSaveInput): Promise<Required<HostArtifactSaveInput>> {
+    if (input.destination !== undefined) return { source: input.source, destination: input.destination }
+    const run = this.writableRun(runId), reference = resolveJobArtifactSource(input.source)
+    if (!reference) throw new Error('图片和媒体交付需要明确 destination；只有具名计算或委派文件可以默认内部装配')
+    if (!this.services.artifacts?.assemblyDestination) throw new Error('当前运行没有内部装配目录，请明确 destination')
+    const destination = await this.services.artifacts.assemblyDestination({ grant: run.grant, job: reference.job, name: reference.name })
+    this.writableRun(runId)
+    return { source: input.source, destination }
   }
   supportContext(): ToolSupportContext {
     return { pptxImport: !!this.services.pptxImport, htmlActions: !!this.services.htmlActions, office: !!this.services.office, materials: !!this.services.materials, artifacts: !!this.services.artifacts,
@@ -336,6 +357,7 @@ export class HostToolCoordinator {
       viewActions: !!(this.services.observations?.actionIdentity && this.services.observations.click && this.services.observations.input),
       projectFiles: !!this.services.projectFiles, jobs: !!this.services.jobs,
       compute: !!this.services.compute, delegation: !!this.services.delegation, web: !!this.services.web,
+      localTools: !!this.services.delegation?.prepareLocal && this.localToolsAvailable !== false,
       mcp: !!this.services.mcp, media: !!this.services.media, openImages: !!this.services.openImages, assetLibrary: !!this.services.assetLibrary }
   }
   describeSearch(runId: string) { return this.services.web?.describe?.(runId) }
@@ -486,7 +508,7 @@ export class HostToolCoordinator {
           catch (cause) { if ((cause as { code?: string }).code === 'job-not-authorized') continue; throw cause }
           const snapshot = view.snapshot as { status: string; stopped: boolean; executionKind?: string; childRunId?: string }
           const nativeResume = options?.nativeResume && input.kind === 'delegation'
-            && view.terminal && snapshot.executionKind === 'native' && !!snapshot.childRunId
+            && view.terminal && snapshot.executionKind === 'native'
           const diagnostic = options?.diagnostic && view.terminal
           if (!nativeResume && !diagnostic && (snapshot.status !== 'ready' || snapshot.stopped)) throw new Error('原作业不是可读取的已完成成果')
           this.builtInRun(runId)
@@ -558,7 +580,8 @@ export class HostToolCoordinator {
     }
     if (view.kind === 'delegation') {
       const snapshot = view.snapshot as HostDelegationSnapshot
-      return { ...view, snapshot: projectModelJobSnapshot({ ...snapshot, artifacts: this.delegationArtifacts(snapshot) }) }
+      return { ...view, snapshot: projectModelJobSnapshot({ ...snapshot, artifacts: this.delegationArtifacts(snapshot) },
+        { includeTaskContext: false }) }
     }
     return view
   }
@@ -635,14 +658,17 @@ export class HostToolCoordinator {
       signal.throwIfAborted(); this.builtInRun(runId)
       const frozen = sources.length ? await this.services.taskInputs!.freeze(runId, sources, { signal, sourceVersion }) : []
       signal.throwIfAborted(); this.builtInRun(runId)
-      const context = resumeContext === null && !target ? null : await this.authority.taskTargetContext?.(runId, target, resumeContext)
+      const prepared = resumeContext === null && !target ? { context: null, sources: [] }
+        : (target || resumeContext) && this.authority.prepareTaskTargetInputs ? await this.authority.prepareTaskTargetInputs(runId, target, resumeContext, frozen)
+          : { context: await this.authority.taskTargetContext?.(runId, target, resumeContext), sources: [] }
       signal.throwIfAborted(); this.builtInRun(runId)
-      if (context === undefined || context === null) return frozen
+      const context = prepared.context, inputs = [...frozen, ...prepared.sources]
+      if (context === undefined || context === null) return inputs
       const text = JSON.stringify(context)
-      const usedNames = new Set(frozen.map(source => source.name))
+      const usedNames = new Set(inputs.map(source => source.name))
       let name = '__task_target_context.json', serial = 1
       while (usedNames.has(name)) name = `__task_target_context-${serial++}.json`
-      return [...frozen, { source: `task-target:${runId}`, name, mimeType: 'application/json', bytes: new TextEncoder().encode(text),
+      return [...inputs, { source: `task-target:${runId}`, name, mimeType: 'application/json', bytes: new TextEncoder().encode(text),
         version: documentDigest(context), modelRepresentation: { mimeType: 'application/json', text } }]
     }
   }
@@ -841,7 +867,7 @@ export class HostToolCoordinator {
     return this.services.openImages ? { kind: 'read', data: await this.services.openImages.search({ runId, ...input, signal }) }
       : this.serviceUnavailable('开放图库服务尚未配置')
   }
-  async imagePreview(runId: string, input: { images: readonly string[] }, signal?: AbortSignal): Promise<ToolResult> {
+  async imagePreview(runId: string, input: { images: readonly string[]; representation?: 'model' | 'original' }, signal?: AbortSignal): Promise<ToolResult> {
     this.builtInRun(runId)
     const previews: { image: string; resourceId: string; mimeType: string; byteLength: number }[] = []
     const failures: { image: string; reason: string }[] = [], candidates: string[] = []
@@ -857,7 +883,7 @@ export class HostToolCoordinator {
       else {
         const result = await this.services.openImages.preview({ runId, images: candidates, signal })
         // Preserve the existing library receipt, including its partial-result diagnostics.
-        if (!previews.length && !failures.length) return this.previewImageResult(result)
+        if (!previews.length && !failures.length) return this.previewImageResult(result, input.representation)
         const library = result as { previews?: typeof previews; failures?: typeof failures; reason?: string }
         previews.push(...library.previews ?? [])
         failures.push(...library.failures ?? (library.reason ? candidates.map(image => ({ image, reason: library.reason! })) : []))
@@ -865,13 +891,14 @@ export class HostToolCoordinator {
     }
     this.builtInRun(runId)
     return this.previewImageResult(previews.length ? { status: 'prepared', previews, ...(failures.length ? { failures } : {}) }
-      : { status: 'failed', reason: '没有取得可查看的图片', failures })
+      : { status: 'failed', reason: '没有取得可查看的图片', failures }, input.representation)
   }
-  private previewImageResult(data: unknown): ToolResult {
+  private previewImageResult(data: unknown, representation?: 'model' | 'original'): ToolResult {
     const prepared = data as { status?: string; previews?: { image: string; resourceId: string; mimeType: string; byteLength: number }[] }
     const images: ToolResultImage[] = prepared?.status === 'prepared' ? (prepared.previews ?? []).map(image => ({
       kind: 'image', source: 'preview', resourceId: image.resourceId, mimeType: image.mimeType,
       byteLength: image.byteLength, label: `图片 ${image.image}：`,
+      ...(representation === 'original' ? { detail: 'high' as const } : {}),
     })) : []
     return { kind: 'read', data, ...(images.length ? { images } : {}) }
   }
@@ -885,7 +912,11 @@ export class HostToolCoordinator {
     return result
   }
   isImageSource(source: string): boolean {
-    return !!this.parseStandaloneImageReference(source) || /^(?:workspace-image:|material:|mcp:|compute-[^@\s]+@)/.test(source)
+    const artifact = resolveJobArtifactSource(source)
+    // Job identities can name HTML/code groups as well as images. Keep non-image
+    // entries on readArtifactGroup so their sealed siblings and owner checks survive.
+    return !!this.parseStandaloneImageReference(source) || !!artifact && fileResourceMime(artifact.name).startsWith('image/')
+      || /^(?:workspace-image:|material:|mcp:)/.test(source)
   }
   /** Existing resource owners validate the source; application still registers bytes in its one canonical transaction. */
   private async readResourceSource(runId: string, source: string): Promise<HostMediaInput | null> {
@@ -904,11 +935,16 @@ export class HostToolCoordinator {
     let file: { bytes: Uint8Array; mimeType: string } | undefined, filename: string | undefined
     if (source.startsWith('material:')) file = await this.readObservationResource({ runId, resourceId: source })
     else if (source.startsWith('mcp:')) file = await this.readMcpResource(runId, source.slice(4))
-    else if (source.startsWith('compute-') && source.includes('@')) {
-      const reference = resolveArtifactSource({ source, destination: '' })
-      if (reference.kind !== 'compute') return null
-      const result = await this.readComputeArtifact(runId, reference.job, reference.name)
-      file = { bytes: result.bytes, mimeType: result.artifact.mimeType }; filename = result.artifact.name
+    else {
+      const reference = resolveJobArtifactSource(source)
+      if (reference?.kind === 'compute') {
+        const result = await this.readComputeArtifact(runId, reference.job, reference.name)
+        file = { bytes: result.bytes, mimeType: result.artifact.mimeType }; filename = result.artifact.name
+      } else if (reference?.kind === 'delegation') {
+        // Reuse the sealed artifact owner: a parseable source is never itself authorization.
+        const result = await this.readDelegationArtifact(runId, reference.job, reference.name)
+        file = { bytes: result.bytes, mimeType: fileResourceMime(result.artifact.name) }; filename = result.artifact.name
+      }
     }
     if (!file) return null
     this.serviceRun(runId)
@@ -1167,9 +1203,10 @@ export class HostToolCoordinator {
   }
   private async imageResult(job: ImageJob, snapshot: ImageJobSnapshot): Promise<ToolResult> {
     if (snapshot.jobId !== job.jobId || snapshot.runId !== (job.sourceRunId ?? job.runId) || snapshot.documentId !== (job.sourceDocumentId ?? job.documentId)) throw new Error('图像服务返回了不同任务的结果')
-    // A stopped operation may finish remotely. Retain its immutable candidate
-    // references without recreating handles or document write authority.
-    if (job.controller.signal.aborted) return { kind: 'read', data: { job: job.jobId, status: snapshot.status, stopped: true,
+    // A stopped operation may finish remotely. Its immutable receipt remains
+    // readable through lookup, but the late live call must not become a success.
+    if (job.controller.signal.aborted) return { kind: 'error', code: 'run-stopped', message: '任务已停止，迟到图片候选保留，未恢复任务授权',
+      data: { job: job.jobId, status: snapshot.status, stopped: true,
       resources: this.imageSources(snapshot), provenance: snapshot.provenance, ...(snapshot.failure ? { failure: snapshot.failure } : {}) } }
     if (job.scope === 'workspace') this.workspaceImageScope(job.runId)
     else this.authority.active(job.runId, job.documentId, job.epoch)

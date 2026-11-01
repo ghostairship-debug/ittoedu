@@ -68,6 +68,12 @@ function uncovered(patterns: string[], relativePaths: string[]): string[] {
 }
 
 describe('packaged runtime file boundary', () => {
+  it('excludes debug maps, the second player and Python payloads from the product', async () => {
+    const patterns = await readPackagedFilePatterns()
+    expect(['dist-player/player.iife.js', 'dist-player/vendor/compute-runtime/pyodide/pyodide.asm.wasm',
+      'dist-renderer/vendor/compute-runtime/manifest.json', 'dist-renderer/assets/main.js.map',
+      'dist-electron/main/index.js.map'].filter(file => coveredBy(patterns, file))).toEqual([])
+  })
   it('matches glob patterns the way electron-builder does', () => {
     // 反例控制：确保匹配器不是「永远为真」，否则下面的断言会空过。
     expect(patternToRegExp('.agents/**').test('.agents/skills/orchestrate-courseware/references/main-progression.md')).toBe(true)

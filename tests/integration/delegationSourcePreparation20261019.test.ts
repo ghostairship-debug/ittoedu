@@ -1,6 +1,7 @@
 // @vitest-environment node
 import { afterEach, expect, it, vi } from 'vitest'
 import { promises as fs } from 'node:fs'
+import { createHash } from 'node:crypto'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { DelegationJobService } from '../../src/main/workbench/delegation/DelegationJobService'
@@ -51,7 +52,7 @@ async function fixture(options: Omit<ConstructorParameters<typeof DelegationJobS
   await fs.mkdir(workspaceRoot)
   const service = new DelegationJobService({ directory: path.join(root, 'jobs'), copyRootBase, ...options })
   services.push(service)
-  return { service, copyRootBase, workspaceRoot }
+  return { service, copyRootBase, workspaceRoot, directory: path.join(root, 'jobs') }
 }
 const identity = (jobId: string) => ({ runId: 'parent', jobId, taskId: jobId })
 const nativeInput = (jobId: string) => ({ ...identity(jobId), permission: 'workspace' as const,
@@ -224,6 +225,68 @@ it('owns resumed native source preparation in the new job before copying the old
   expect(await service.wait('parent', input.jobId, 5000)).toMatchObject({ status: 'ready',
     resumedFrom: { runId: 'parent', jobId: 'original-native', childRunId: 'original-child-run' } })
   expect(run).toHaveBeenCalledTimes(2)
+})
+
+it.each([false, true])('reprepares a never-started native job as one fresh child without inventing history (legacy=%s)', async legacy => {
+  const run = vi.fn<NativeTaskRunner['run']>(async request => {
+    expect(request.resumeRunId).toBeUndefined()
+    expect(await fs.readFile(path.join(request.copyRoot, 'current.html'), 'utf8')).toBe('new authorized source')
+    await fs.writeFile(path.join(request.copyRoot, 'candidate.md'), 'fresh candidate')
+    return complete(request.taskId, { childRunId: 'fresh-child' })
+  })
+  const { service, directory } = await fixture({ nativeRunner: { available: () => true, run, message: async () => {} } })
+  await service.startNative({ ...nativeInput('failed-source'), prepareSources: async () => { throw new Error('文件位置已改变，请重新打开') } })
+  expect(await service.wait('parent', 'failed-source', 5000)).toMatchObject({ status: 'failed', executionStarted: false,
+    reason: expect.stringContaining('尚未启动子运行') })
+  expect(run).not.toHaveBeenCalled()
+  const stateFile = path.join(directory, createHash('sha256').update('failed-source').digest('hex'), 'state.json')
+  const state = JSON.parse(await fs.readFile(stateFile, 'utf8'))
+  expect(state.nativeIntent.goal).toBe(nativeInput('failed-source').intent.goal)
+  if (legacy) {
+    delete state.executionStarted; delete state.nativeIntent
+    await fs.writeFile(stateFile, JSON.stringify(state))
+  }
+  const prepareSources = vi.fn(async () => [source('new authorized source')])
+  const retry = { ...nativeInput('retry-source'), sourceRunId: 'parent', sourceJobId: 'failed-source', prepareSources }
+  await service.resumeNative(retry)
+  const result = await service.wait('parent', 'retry-source', 5000)
+  expect(result).toMatchObject({ status: 'ready', childRunId: 'fresh-child', executionStarted: true })
+  expect(result.resumedFrom).toBeUndefined()
+  expect((await service.logs('parent', 'retry-source')).entries.some(entry => entry.message.includes('不恢复不存在的历史'))).toBe(true)
+  expect(await service.resumeNative(retry)).toMatchObject({ status: 'ready', childRunId: 'fresh-child' })
+  expect(prepareSources).toHaveBeenCalledOnce()
+  expect(run).toHaveBeenCalledOnce()
+})
+
+it('does not restart a childless job after executor entry or an unknown outcome', async () => {
+  const run = vi.fn<NativeTaskRunner['run']>(async () => { throw new Error('executor interrupted before identity receipt') })
+  const { service, directory } = await fixture({ nativeRunner: { available: () => true, run, message: async () => {} } })
+  await service.startNative({ ...nativeInput('entered-runner'), sources: [source()] })
+  expect(await service.wait('parent', 'entered-runner', 5000)).toMatchObject({ status: 'failed', executionStarted: true })
+  await service.resumeNative({ ...nativeInput('reject-rerun'), sourceRunId: 'parent', sourceJobId: 'entered-runner', sources: [source()] })
+  expect(await service.wait('parent', 'reject-rerun', 5000)).toMatchObject({ status: 'failed', reason: expect.stringContaining('未自动重跑') })
+  expect(run).toHaveBeenCalledOnce()
+  await service.startNative({ ...nativeInput('unknown-source'), prepareSources: async () => { throw new Error('source failed') } })
+  await service.wait('parent', 'unknown-source', 5000)
+  const stateFile = path.join(directory, createHash('sha256').update('unknown-source').digest('hex'), 'state.json')
+  const state = JSON.parse(await fs.readFile(stateFile, 'utf8'))
+  state.status = 'unknown'; delete state.executionStarted; delete state.nativeIntent
+  await fs.writeFile(stateFile, JSON.stringify(state))
+  await service.resumeNative({ ...nativeInput('reject-unknown'), sourceRunId: 'parent', sourceJobId: 'unknown-source', sources: [source()] })
+  expect(await service.wait('parent', 'reject-unknown', 5000)).toMatchObject({ status: 'failed', reason: expect.stringContaining('未自动重跑') })
+  expect(run).toHaveBeenCalledOnce()
+})
+
+it('requires the authorized source owner and explicit source preparation for a childless retry', async () => {
+  const run = vi.fn<NativeTaskRunner['run']>(async request => complete(request.taskId))
+  const { service } = await fixture({ nativeRunner: { available: () => true, run, message: async () => {} } })
+  await service.startNative({ ...nativeInput('source-owner'), prepareSources: async () => { throw new Error('source failed') } })
+  await service.wait('parent', 'source-owner', 5000)
+  await service.resumeNative({ ...nativeInput('wrong-owner'), sourceRunId: 'unrelated-parent', sourceJobId: 'source-owner', sources: [source()] })
+  expect(await service.wait('parent', 'wrong-owner', 5000)).toMatchObject({ status: 'failed', reason: expect.stringContaining('来源身份无法核实') })
+  const userRetry = await service.resumeFromUser({ runId: 'parent', jobId: 'source-owner', submissionId: 'retry-click', text: '继续', permission: 'workspace' })
+  expect(userRetry).toMatchObject({ status: 'failed', reason: expect.stringContaining('从父任务提供 sources') })
+  expect(run).not.toHaveBeenCalled()
 })
 
 it('seals reachable entry dependencies while keeping a missing dependency as a local diagnostic', async () => {

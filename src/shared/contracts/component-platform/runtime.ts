@@ -60,6 +60,17 @@ export interface ComponentGeometrySnapshot {
   }[]
 }
 
+export type ComponentProgressSnapshot =
+  | { status: 'empty'; revision: string | null }
+  | { status: 'ready'; revision: string; schemaVersion: number; value: JsonValue }
+  | { status: 'incompatible'; revision: string; schemaVersion: number }
+/** Optional host persistence. Restore before writing; clear explicitly restarts this namespace. */
+export interface ComponentProgressPort {
+  read(namespace: string, schemaVersion: number): Promise<ComponentProgressSnapshot>
+  write(namespace: string, schemaVersion: number, value: JsonValue, expectedRevision: string | null): Promise<{ revision: string }>
+  clear(namespace: string, schemaVersion: number, expectedRevision: string | null): Promise<{ revision: string }>
+}
+
 /** Every mounted implementation receives a fresh scope; state never writes author data. */
 export interface ComponentRuntimeScope {
   readonly runScopeId: string
@@ -69,6 +80,8 @@ export interface ComponentRuntimeScope {
   /** Whether this mount survives; temporary offscreen pause does not revoke it. */
   isActive(): boolean
   cleanup(dispose: () => void): void
+  /** Available only in an actual player; author previews/capture never mutate learner progress. */
+  progress?: ComponentProgressPort
   target(reference: ComponentTarget): ComponentRuntimeTarget | null
   /** Batch fresh layout facts; no author transaction, retained layout cache, or independent animation clock. */
   measure?(references: readonly ComponentTarget[]): Promise<ComponentGeometrySnapshot | null>

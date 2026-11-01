@@ -7,6 +7,7 @@ import type { createDocumentJournal } from './documentJournal'
 import type { WorkspaceAroundMutation, WorkspaceMutationAction } from './WorkspaceFiles'
 import { FileAccessQueue } from './FileAccessQueue'
 import { readDocumentFileVersion } from './documentJournal'
+import { readUtf8File } from './readUtf8File'
 
 type FileBinding = Extract<DocumentBinding, { kind: 'file' }>
 interface BindingIntent { schemaVersion: 1; operationId: string; source: string; target?: string; kind: 'rename' | 'move' | 'trash'; action?: WorkspaceMutationAction;
@@ -29,6 +30,8 @@ export function relocatedDocumentPath(action: WorkspaceMutationAction, filename:
 export class DocumentFileCoordinator {
   private readonly access = new FileAccessQueue()
   private readonly relocationListeners = new Set<(action: WorkspaceMutationAction) => Promise<void>>()
+  /** Acknowledged disk-write versions, not source bytes or another document authority. */
+  private readonly sourceWrites = new Map<string, { bases: Set<string>; version: string }>()
   private needsRepair = true
   private readonly unresolved = new Map<string, { paths: string[]; documentIds: string[]; message: string }>()
   get recoveryIssues(): string[] { return [...this.unresolved.values()].map(value => value.message) }
@@ -44,6 +47,32 @@ export class DocumentFileCoordinator {
   subscribeRelocations(listener: (action: WorkspaceMutationAction) => Promise<void>): () => void {
     this.relocationListeners.add(listener)
     return () => { this.relocationListeners.delete(listener) }
+  }
+
+  /** Called inside the successful source writer's file-operation lease. */
+  acknowledgeSourceWrite(filename: string, beforeVersion: string, afterVersion: string): void {
+    const normalize = (value: string) => value.replace(/^sha256:/, '')
+    const before = normalize(beforeVersion), after = normalize(afterVersion)
+    if (!/^[a-f0-9]{64}$/.test(before) || !/^[a-f0-9]{64}$/.test(after)) return
+    const filenameKey = key(filename), previous = this.sourceWrites.get(filenameKey)
+    const bases = previous?.version === before ? new Set(previous.bases) : new Set<string>()
+    bases.add(before)
+    this.sourceWrites.set(filenameKey, { bases, version: after })
+  }
+
+  /** Save/copy already holds the file-access lease. Unknown external edits never replace held bytes. */
+  async acknowledgedSource(filename: string, heldVersion: string): Promise<string | undefined> {
+    const written = this.sourceWrites.get(key(filename))
+    if (!written?.bases.has(heldVersion.replace(/^sha256:/, ''))) return undefined
+    try {
+      const stat = await fs.lstat(filename)
+      if (!stat.isFile() || stat.isSymbolicLink() || key(await fs.realpath(path.dirname(filename))) !== key(path.dirname(filename))) return undefined
+      const current = await readUtf8File(filename)
+      return current.version === `sha256:${written.version}` ? current.text : undefined
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined
+      throw error
+    }
   }
 
   async withFileAccess<T>(work: () => Promise<T>): Promise<T> {

@@ -40,6 +40,35 @@ export class ExecutionRunStore {
     if (!runId || runId.length > 512) throw new Error('运行编号无效')
     return path.join(this.directory, `${createHash('sha256').update(runId).digest('hex')}.json`)
   }
+  /** A deterministic child of the existing run owner, not another workspace or
+   * journal. Completion never deletes it: unfinished adoption/Continue can still
+   * refer to these bytes. Historical runs are not migrated. */
+  async assemblyDirectory(runId: string): Promise<string> {
+    const runName = path.basename(this.file(runId), '.json')
+    await fs.mkdir(this.directory, { recursive: true, mode: 0o700 })
+    let current = await fs.realpath(this.directory)
+    for (const segment of [`${runName}.work`, 'assembly']) {
+      current = path.join(current, segment)
+      try { await fs.mkdir(current, { mode: 0o700 }) }
+      catch (error) { if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error }
+      const stat = await fs.lstat(current)
+      if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error('运行装配目录不是普通内部目录')
+      const actual = await fs.realpath(current)
+      if (fileKey(actual) !== fileKey(current)) throw new Error('运行装配目录经过符号链接')
+    }
+    return current
+  }
+  /** Only an existing expected directory can become an ancestor read grant. */
+  async readAssemblyDirectory(runId: string): Promise<string | null> {
+    const runName = path.basename(this.file(runId), '.json')
+    try {
+      const expected = path.join(await fs.realpath(this.directory), `${runName}.work`, 'assembly')
+      const actual = await fs.realpath(expected), stat = await fs.lstat(expected)
+      if (!stat.isDirectory() || stat.isSymbolicLink() || fileKey(actual) !== fileKey(expected))
+        throw new Error('历史运行装配目录身份已改变')
+      return actual
+    } catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null; throw error }
+  }
   private validate(value: ExecutionRunRecord, filename: string, expected?: string): ExecutionRunRecord {
     if (value.schemaVersion !== 1 || expected && value.runId !== expected || !Number.isSafeInteger(value.version)
       || !value.input || typeof value.input.conversationId !== 'string' || !Array.isArray(value.input.documents)

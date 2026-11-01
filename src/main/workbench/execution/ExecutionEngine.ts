@@ -13,7 +13,7 @@ import { isSourceDocumentModel, type DocumentEvent, type DocumentOperationResult
 import type { EditEvent } from '../../../shared/workbench/editSession'
 import { executionAdvancementMode as effectiveAdvancementMode, type ExecutionDocumentBinding, type ExecutionRunRecord, type ExecutionStart, type ExecutionToolRecord } from '../../../shared/workbench/execution'
 import type { ExecutionEvent, ExecutionEventInput } from '../../../shared/workbench/executionEvents'
-import type { ModelChatMessage, ModelEvent, ModelJsonObject, ModelProvider, ModelToolDefinition, PreparedModelRequest } from '../../../shared/workbench/modelProvider'
+import type { ModelChatMessage, ModelEvent, ModelJsonObject, ModelProvider, ModelToolDefinition, PreparedModelRequest, ModelStreamOptions } from '../../../shared/workbench/modelProvider'
 import { modelAcceptsImages } from '../../../shared/workbench/modelProvider'
 import { effectiveModelProtocol } from '../../../shared/workbench/modelRouting'
 import { captureMainTiming, ExecutionEventStore, type ExecutionTimingMark, type ExecutionTimingStage } from './ExecutionEventStore'
@@ -63,6 +63,9 @@ import { executionAdvancementModeSchema, type ExecutionAdvancementMode } from '.
 import { programmaticExecuteInputSchema, programmaticReadInputSchema } from '../../../shared/workbench/programmatic'
 import { ProgrammaticToolRunner, readProgrammaticResult } from './ProgrammaticToolRunner'
 import { programmaticTools } from '../../../core/tools/ProgrammaticTools'
+import type { NativeCollaborationPeer, NativeDelegationMessage, NativeRunIdentity } from '../../../shared/workbench/delegation'
+import { hostWorkFactSignature } from './hostWorkFacts'
+import { ExecutionModelImageProjection } from './ExecutionModelImageProjection'
 
 interface EditProjectionPort {
   begin(input: { runId: string; editId: string; toolCallId?: string; targetHandle: string }): Promise<unknown>
@@ -96,6 +99,8 @@ export interface ExecutionEngineOptions {
   visualAnalysis?: VisualAnalysisPort
   changeReview?: ExecutionChangeReviewService
   artifacts?: HostArtifactDeliveryService
+  /** Current projection from the existing job owner; not another peer registry. */
+  collaborationPeers?(runId: string): Promise<readonly NativeCollaborationPeer[]>
   /** Persistence facts enter the run journal directly, independently of view events. */
   subscribeSaves?(listener: (fact: DocumentSaveFact) => Promise<void>): () => void
   /** File moves and journal recovery publish the same formal session snapshots as the UI. */
@@ -125,6 +130,9 @@ interface ActiveRun {
   forceCompaction: boolean
   contextMessages: ModelChatMessage[]
   contextImageSources: Map<ModelChatMessage, string[]>
+  modelImages: ExecutionModelImageProjection
+  assemblyRoot?: string
+  assemblyReadRoots: readonly string[]
   contextPreparation?: { messages: ModelChatMessage[]; initialCount: number; retainedMessages: number;
     historySources: Map<number, string>; metadata: ContextProjectionMetadata; tokens: PreparedPayloadTokenEstimator }
   record: ExecutionRunRecord; controller: AbortController; stopped: boolean
@@ -556,6 +564,12 @@ export class ExecutionEngine {
     const live = this.active.get(runId)
     return live ? structuredClone(live.record) : this.options.runs.read(runId)
   }
+  /** Peer refreshes need a few identities, not a cloned conversation with pixels. */
+  async delegationIdentity(runId: string): Promise<NativeRunIdentity | null> {
+    const record = this.active.get(runId)?.record ?? this.preparingRecords.get(runId) ?? await this.options.runs.read(runId)
+    return record ? { runId: record.runId, ...(record.delegatedBy ? { delegatedBy: { ...record.delegatedBy } } : {}),
+      ...(record.input.nativeConcurrencyLimit !== undefined ? { maxConcurrentNative: record.input.nativeConcurrencyLimit } : {}) } : null
+  }
   /** Main's persistence fact updates the current record, never a stale externally read whole-run copy. */
   async recordDocumentBinding(runId: string, documentId: string, binding: ExecutionDocumentBinding): Promise<void> {
     const record = this.active.get(runId)?.record ?? this.preparingRecords.get(runId) ?? await this.options.runs.read(runId)
@@ -922,6 +936,11 @@ export class ExecutionEngine {
       for (const [index, filename] of (frozen.boundReadPaths ?? []).entries()) boundPaths[`material:${index}`] = filename
       const fileReadPaths = [...new Set(Object.values(boundPaths))]
       options?.signal?.throwIfAborted()
+      const assemblyRoot = frozen.workspaceRoot && recordedPermissionMode(frozen.permission) !== 'read-only'
+        ? await this.options.runs.assemblyDirectory(runId) : undefined
+      const assemblyReadRoots = (await Promise.all((verifiedLineage ?? []).filter(prior => prior.assemblyRoot && continuationReads.includes(prior.runId))
+        .map(prior => this.options.runs.readAssemblyDirectory(prior.runId)))).filter((root): root is string => !!root)
+      options?.signal?.throwIfAborted()
       await this.options.gateway.beginRun({ runId, actor: 'agent', documents: frozen.documents, searchSelection: frozen.selection,
         speechSelection: structuredClone(frozen.speechSelection),
         ...(options?.delegatedBy ? { delegatedBy: structuredClone(options.delegatedBy) } : {}),
@@ -929,6 +948,7 @@ export class ExecutionEngine {
         ...(frozen.webAuthorization ? { webAuthorization: frozen.webAuthorization } : {}),
         ...(frozen.inputContext?.attachments.length ? { materialIds: frozen.inputContext.attachments.map(item => item.attachmentId) } : {}),
         fileAccess: { permission: recordedPermissionMode(frozen.permission), boundPaths,
+          ...(assemblyRoot ? { assemblyRoot } : {}), ...(assemblyReadRoots.length ? { assemblyReadRoots } : {}),
           ...(frozen.workspaceRoot ? { workspaceRoot: frozen.workspaceRoot } : {}),
           ...(frozen.conversationHomeRoot ? { conversationHomeRoot: frozen.conversationHomeRoot } : {}),
           ...(frozen.conversationHome ? { conversationHome: frozen.conversationHome } : {}) },
@@ -1096,6 +1116,7 @@ export class ExecutionEngine {
       const record: ExecutionRunRecord = { schemaVersion: 1, runId, version: 0, input: frozen, status: 'queued',
         createdAt: time, updatedAt: time, messages, initialMessageCount: messages.length, requests: [], tools: [],
         ...(options?.delegatedBy ? { delegatedBy: structuredClone(options.delegatedBy) } : {}),
+        ...(assemblyRoot ? { assemblyRoot } : {}),
         workingNote: verifiedLineage?.at(-1)?.input.instruction === frozen.instruction
           ? continuedWorkingNote(verifiedLineage.at(-1)!, frozen) : initialWorkingNote(frozen),
         ...(Object.keys(documentPaths).length ? { documentPaths } : {}),
@@ -1117,7 +1138,9 @@ export class ExecutionEngine {
       await onPrepared?.(structuredClone(record))
       options?.signal?.throwIfAborted()
       if (this.closing) throw new Error('应用正在关闭；已保留准备记录，未发送模型请求')
-      const active: ActiveRun = { record, contextScale: 1, forceCompaction: false, contextMessages: [], contextImageSources: new Map(), controller: new AbortController(), stopped: false, streams: new Map(), completion: Promise.resolve(), tools,
+      const active: ActiveRun = { record, contextScale: 1, forceCompaction: false, contextMessages: [], contextImageSources: new Map(),
+        modelImages: new ExecutionModelImageProjection(), assemblyRoot, assemblyReadRoots,
+        controller: new AbortController(), stopped: false, streams: new Map(), completion: Promise.resolve(), tools,
         ...(contentOutput ? { contentOutput: { targetHandle: contentOutput.targetHandle } } : {}),
         ...(acknowledgedTaskStatus ? { acknowledgedTaskStatus } : {}),
         boundPaths: fileReadPaths, unresolvedToolNames: new Set(continuation?.unresolvedToolNames ?? []), unresolvedEffects: continuation?.unresolvedEffects ?? [], permission, outsideDocuments, documentNames, approveAll: false,
@@ -1194,11 +1217,13 @@ export class ExecutionEngine {
     return this.acceptSteering(runId, submissionId, text, advancementMode)
   }
   /** Main-owned collaboration message; never becomes a user grant or preference. */
-  async message(runId: string, submissionId: string, input: { senderRunId: string; text: string }): Promise<ExecutionRunRecord> {
+  async message(runId: string, submissionId: string, input: NativeDelegationMessage): Promise<ExecutionRunRecord> {
     if (!input.senderRunId || input.senderRunId === runId) throw new Error('协作消息缺少有效来源')
-    return this.acceptSteering(runId, submissionId, input.text, undefined, input.senderRunId)
+    return this.acceptSteering(runId, submissionId, input.text, undefined, input.senderRunId,
+      { ...(input.replyJob ? { replyJob: input.replyJob } : {}), ...(input.senderRole ? { senderRole: input.senderRole } : {}) })
   }
-  private async acceptSteering(runId: string, submissionId: string, text: string, advancementMode?: ExecutionAdvancementMode, senderRunId?: string): Promise<ExecutionRunRecord> {
+  private async acceptSteering(runId: string, submissionId: string, text: string, advancementMode?: ExecutionAdvancementMode,
+    senderRunId?: string, identity?: Pick<NativeDelegationMessage, 'replyJob' | 'senderRole'>): Promise<ExecutionRunRecord> {
     if (!text.trim()) throw new Error('调整当前任务需要补充文字')
     const active = this.active.get(runId)
     await active?.steeringAcceptance?.catch(() => undefined)
@@ -1206,14 +1231,17 @@ export class ExecutionEngine {
     const record = active?.record ?? await this.read(runId)
     const previous = record?.steering?.find(value => value.submissionId === submissionId)
     if (previous) {
-      if (previous.text !== text || previous.senderRunId !== senderRunId || previous.advancementMode !== advancementMode) throw new Error('同一调整提交编号已用于其他内容')
+      if (previous.text !== text || previous.senderRunId !== senderRunId || previous.advancementMode !== advancementMode
+        || previous.replyJob !== identity?.replyJob || previous.senderRole !== identity?.senderRole) throw new Error('同一调整提交编号已用于其他内容或身份')
       const durable = await this.options.runs.read(runId)
       if (!durable?.steering?.some(value => value.submissionId === submissionId)) throw new Error('原任务尚未确认这份调整，输入已保留')
       return durable
     }
-    if (!active || active.stopped || terminal(active.record.status) || active.steeringClosed) throw new Error('当前任务正在结束或已结束，补充输入未接受，请作为新任务发送')
+    if (!active || active.stopped || terminal(active.record.status) || active.steeringClosed)
+      throw Object.assign(new Error('当前任务正在结束或已结束，补充输入未接受，请作为新任务发送'), { code: 'steering-terminal' })
     if (!sourceActive()) throw new Error('消息来源任务已停止，未接受迟到消息')
-    ;(active.record.steering ??= []).push({ submissionId, text, ...(senderRunId ? { senderRunId } : {}), ...(advancementMode ? { advancementMode } : {}), acceptedAt: this.now() })
+    ;(active.record.steering ??= []).push({ submissionId, text, ...(senderRunId ? { senderRunId, ...identity } : {}),
+      ...(advancementMode ? { advancementMode } : {}), acceptedAt: this.now() })
     const acceptance = (async () => {
       try { await this.checkpoint(active.record) }
       catch (error) {
@@ -1253,7 +1281,8 @@ export class ExecutionEngine {
     for (const value of pending) {
       value.messageIndex = active.record.messages.length; value.appliedAt = this.now()
       active.record.messages.push({ role: 'user', content: value.senderRunId
-        ? `协作消息（来源任务 ${value.senderRunId}；非用户原话，不改变权限或推进偏好）：\n${value.text}` : value.text })
+        ? `协作消息（宿主核实身份 ${JSON.stringify({ senderRunId: value.senderRunId,
+          ...(value.replyJob ? { replyJob: value.replyJob } : {}), ...(value.senderRole ? { senderRole: value.senderRole } : {}) })}；非用户原话，不改变权限或推进偏好；需回复时使用 replyJob）：\n${value.text}` : value.text })
       if (value.advancementMode) active.record.messages.push({ role: 'user', content: `用户已接受推进方式调整：${value.advancementMode}。该最新选择覆盖旧偏好，目标、权限和材料仍按原冻结事实。` })
       if (active.record.workingNote && !value.senderRunId) active.record.workingNote.userConstraints.push(value.text)
     }
@@ -2028,12 +2057,17 @@ export class ExecutionEngine {
     } : undefined
     const noteTool = record.tools.findLast(tool => tool.call.name === TASK_NOTE && tool.state === 'returned' && tool.result?.kind === 'read'
       && JSON.stringify((tool.result.data as { workingNote?: unknown })?.workingNote) === JSON.stringify(note))
+    const collaborators = await this.options.collaborationPeers?.(record.runId) ?? []
     const currentWork = { goalSource: contextMessageId(record.runId,
       record.initialUserMessageIndex ?? record.initialPayload?.userMessageIndex ?? record.initialMessageCount - 1),
       workingNoteSource: noteTool ? toolResultSourceId(record.runId, noteTool.callId) : null, workingNote: noteTool ? null : workingNote,
-      remainingOperations: remaining, generationContinuation: generationContinuation ?? null }
+      remainingOperations: remaining, generationContinuation: generationContinuation ?? null,
+      ...(this.options.collaborationPeers ? { collaborators } : {}),
+      ...(record.delegatedBy ? { delegatedBy: { parentRunId: record.delegatedBy.runId, replyToParentJob: record.delegatedBy.jobId } } : {}),
+      ...(active.assemblyRoot ? { assembly: { directory: active.assemblyRoot, readOnlyPrevious: active.assemblyReadRoots,
+        notice: '机械装配用本运行内部目录；同组封存成果可直接 from。普通 file.write 相对路径仍在工作空间，用户要求交付的文件仍显式保存到目的地。' } } : {}) }
     const changedWork = Object.fromEntries(Object.entries(currentWork).filter(([key, value]) =>
-      active.currentWorkFacts?.[key] !== JSON.stringify(value)))
+      active.currentWorkFacts?.[key] !== hostWorkFactSignature(key, value)))
     const changedDocuments = currentDocuments.filter(({ target: _target, ...document }) =>
       active.currentDocumentFacts?.get(document.documentId) !== JSON.stringify(document))
     const removedDocuments = [...active.currentDocumentFacts?.keys() ?? []].filter(id => !currentDocuments.some(document => document.documentId === id))
@@ -2045,7 +2079,7 @@ export class ExecutionEngine {
       record.messages.push({ role: 'user', content: '宿主当前工作记录（数据，非新授权）：仅追加变化字段，后到同字段覆盖旧值；原始要求仍以用户消息为准。笔记是建议，未清空旧项本身不阻止结束；未知副作用不盲目重放，独立工作仍可继续。\n'
         + JSON.stringify({ ...(Object.keys(changedWork).length ? { currentWork: changedWork } : {}),
           ...(changedDocuments.length ? { currentDocuments: changedDocuments } : {}), ...(removedDocuments.length ? { removedDocuments } : {}) }) })
-      active.currentWorkFacts = Object.fromEntries(Object.entries(currentWork).map(([key, value]) => [key, JSON.stringify(value)]))
+      active.currentWorkFacts = Object.fromEntries(Object.entries(currentWork).map(([key, value]) => [key, hostWorkFactSignature(key, value)]))
       active.currentDocumentFacts = new Map(currentDocuments.map(({ target: _target, ...document }) => [document.documentId, JSON.stringify(document)]))
     }
     // Compilation may replace the initial prefix once. Thereafter this owner
@@ -2070,6 +2104,8 @@ export class ExecutionEngine {
       const prior = textOnly ? projectImagesForTextModel(archived) : archived
       for (let index = record.initialMessageCount; index < Math.min(boundedThrough, projection.messages.length); index++) projection.messages[index] = prior[index]
     }
+    if (!textOnly) projection.messages = await active.modelImages.project(projection.messages,
+      { runId: record.runId, originals: record.messages, signal: active.controller.signal })
     const inputLimit = Math.min(Math.floor(modelContextBudget(record.input.selection).inputTokens * active.contextScale), active.rejectedInputLimit ?? Infinity)
     // Each candidate is immutable within this preparation. Changed projections get a
     // new entry; the map dies before the next round reads fresh document facts.
@@ -2156,7 +2192,8 @@ export class ExecutionEngine {
         textLimit = Math.max(300, Math.min(8000, Math.floor(availableTokens / results / 1.5)))
         for (;;) {
           const bounded = projectExecutionContext(record.runId, record.messages, record.initialMessageCount, 0, textLimit, historyIndexes, hostDataIndexes, preparation.metadata).messages
-          tail = (textOnly ? projectImagesForTextModel(bounded) : bounded).slice(start)
+          tail = (textOnly ? projectImagesForTextModel(bounded) : await active.modelImages.project(bounded,
+            { runId: record.runId, originals: record.messages, signal: active.controller.signal })).slice(start)
           candidate = [...header, ...tail]; cost = measure(candidate)
           if (fits(cost) || textLimit <= 300) break
           // Measure the actual adapter payload again: native arguments and tool
@@ -2291,6 +2328,7 @@ export class ExecutionEngine {
     let filePreflightError: string | undefined
     if (tool.state !== 'returned' && fileMutationNames.has(tool.call.name) && this.options.files && record.input.workspaceRoot) try {
       filePreflight = await this.options.files.preflightMutation({ runId: record.runId, workspaceRoot: record.input.workspaceRoot,
+        assemblyRoot: active.assemblyRoot, readOnlyRoots: active.assemblyReadRoots,
         conversationHomeRoot: record.input.conversationHomeRoot, conversationHome: record.input.conversationHome,
         permission: active.permission, boundPaths: active.boundPaths }, tool.call.name as typeof agentFileMutationNames[number], tool.call.input)
       tool.effectPaths = filePreflight.paths
@@ -2300,6 +2338,7 @@ export class ExecutionEngine {
     }
     if (tool.state !== 'returned' && isOfficeContentTool(tool.call.name) && this.options.files?.preflightOffice && record.input.workspaceRoot) try {
       filePreflight = await this.options.files.preflightOffice({ runId: record.runId, workspaceRoot: record.input.workspaceRoot,
+        assemblyRoot: active.assemblyRoot, readOnlyRoots: active.assemblyReadRoots,
         conversationHomeRoot: record.input.conversationHomeRoot, conversationHome: record.input.conversationHome,
         permission: active.permission, boundPaths: active.boundPaths }, tool.call.name, tool.call.input)
       if (tool.call.name !== 'office.inspect') tool.effectPaths = filePreflight.paths
@@ -2349,8 +2388,7 @@ export class ExecutionEngine {
           ? await this.options.gateway.preflightBatch(record.runId, tool.call.input) : null
         if (tool.call.name === 'artifact.save' && this.options.artifacts && record.input.workspaceRoot) try {
           const input = hostArtifactSaveSchema.parse(tool.call.input)
-          artifactPreflight = await this.options.artifacts.preflight({ workspaceRoot: record.input.workspaceRoot,
-            permission: active.permission, destination: input.destination })
+          artifactPreflight = await this.options.gateway.preflightArtifactSave(record.runId, input)
         } catch (error) { preflightError = error instanceof Error ? error.message : String(error) }
         let browserApprovalError: string | undefined, browserTaskAuthorized = false
         const browserWrite = this.browserWrite(tool)
@@ -2484,6 +2522,11 @@ export class ExecutionEngine {
                 }
                 read.modelMessage = { role: 'user', content: [{ type: 'text', text: `原观察的捕获时图片，不代表当前活动页，不恢复旧句柄或权限。来源=${input.sourceId}\n${read.data.text}` }, ...parts] }
               }
+              if (input.imageIndexes?.length && read.modelMessage && Array.isArray(read.modelMessage.content))
+                read.modelMessage = { ...read.modelMessage, content: read.modelMessage.content.map(part =>
+                  part && typeof part === 'object' && !Array.isArray(part) && part.type === 'image_url'
+                    && part.image_url && typeof part.image_url === 'object' && !Array.isArray(part.image_url)
+                    ? { ...part, image_url: { ...part.image_url, detail: 'high' } } : part) }
               if (read.modelMessage && !record.input.visionSelection && !modelAcceptsImages(record.input.selection.connection.capabilities.vision))
                 throw new Error('当前冻结模型不支持图片；可读取文本来源，本轮没有发送图片')
               tool.result = { kind: 'read', data: { ...read.data,
@@ -2596,6 +2639,7 @@ export class ExecutionEngine {
                   name: tool.call.name, paths: filePreflight.paths, toolInput: tool.call.input })
               tool.result = await agentFileRegistration(tool.call.name)!.handler({ execute: async (name, input) => {
                 const outcome = await this.options.files!.execute({ runId: record.runId, workspaceRoot: record.input.workspaceRoot!,
+                  assemblyRoot: active.assemblyRoot, readOnlyRoots: active.assemblyReadRoots,
                   conversationHomeRoot: record.input.conversationHomeRoot, conversationHome: record.input.conversationHome,
                   permission: active.permission, boundPaths: active.boundPaths,
                   ...(filePreflight?.outside && (reason || active.approveAll) && (decision === 'allow' || decision === 'allow-all')
@@ -3033,39 +3077,36 @@ export class ExecutionEngine {
     }
     return facts
   }
-  /** The existing owner wait is event-driven and bounded. Only terminal facts go
-   * back to the model; timeout pages never require another model polling turn. */
+  /** One event-driven owner wait may replace immediate status polling. A
+   * nonterminal receipt returns control for diagnosis, cancellation or another wait. */
   private async waitForRunningJobs(active: ActiveRun, requestId: string): Promise<boolean> {
     const settled = await this.settlementRecord(active.record)
     const jobs = runningExecutionJobs(settled).filter(job => {
-      const last = active.record.tools.findLast(tool => ['job.wait', 'job.status', 'job.cancel'].includes(tool.call.name)
+      const last = active.record.tools.findLast(tool => ['job.wait', 'job.status', 'job.cancel', 'image.status'].includes(tool.call.name)
         && (tool.call.input as { job?: unknown })?.job === job.job)
-      // A known owner wait error belongs in the model's next decision. Do not
-      // immediately repeat the same automatic wait every time it replies.
-      return !(last?.origin === 'host' && last.result?.kind === 'error')
+      // A returned wait is already the outcome of one bounded decision. Do not
+      // renew it implicitly after a final reply or independent work. A new
+      // status observation can request another automatic wait on the same job.
+      return !(last?.state === 'returned' && (last.call.name === 'job.wait'
+        || last.origin === 'host' && last.result?.kind === 'error'))
     })
     if (!jobs.length || active.stopped) return false
     await this.event(active.record, 'run-state', 'run.state', { status: 'waiting', label: '等待原作业完成' })
     for (const job of jobs) {
-      let observation: ExecutionToolRecord | undefined
-      while (!active.stopped) {
-        const sequence = active.record.tools.filter(tool => tool.origin === 'host'
-          && tool.call.name === 'job.wait' && (tool.call.input as { job?: unknown })?.job === job.job).length
-        observation = await this.executeHost(active, `${active.record.runId}:wait:${job.callId}:${sequence}`, requestId,
-          { name: 'job.wait', input: { job: job.job, milliseconds: 30_000 } })
-        if (observation.result?.kind !== 'read') {
-          break
-        }
-        const data = observation.result.data as { terminal?: boolean; status?: unknown }
-        if (data.terminal === true || !['preparing', 'running'].includes(String(data.status))) break
-        if (active.record.steering?.some(value => value.messageIndex === undefined)) break
-      }
+      if (active.stopped || active.record.steering?.some(value => value.messageIndex === undefined)) break
+      const sequence = active.record.tools.filter(tool => tool.origin === 'host'
+        && tool.call.name === 'job.wait' && (tool.call.input as { job?: unknown })?.job === job.job).length
+      const observation = await this.executeHost(active, `${active.record.runId}:wait:${job.callId}:${sequence}`, requestId,
+        { name: 'job.wait', input: { job: job.job, milliseconds: 30_000 } })
       if (active.stopped) break
-      if (observation?.result) {
+      if (observation.result) {
         ;(active.record.hostDataMessageIndexes ??= []).push(active.record.messages.length)
         active.record.messages.push({ role: 'user', content:
           `宿主已等待原作业，没有重发生产请求。原作业 ${job.job} 的实际结果：${JSON.stringify(observation.result)}。需要正文或成果字节时读取该原作业的成果；按真实结果继续或如实回复。` })
       }
+      if (observation.result?.kind !== 'read') break
+      const data = observation.result.data as { terminal?: boolean; status?: unknown }
+      if (data.terminal !== true && ['preparing', 'running'].includes(String(data.status))) break
       if (active.record.steering?.some(value => value.messageIndex === undefined)) break
     }
     await this.checkpoint(active.record)
@@ -3096,6 +3137,7 @@ export class ExecutionEngine {
         await this.applySteering(active)
         await this.waitForBrowser(active)
         if (active.stopped) break
+        const preparationStartedAt = this.now()
         await this.refreshTools(active)
         const context = await this.prepareContext(active, tools), workingMessages = context.messages
         const changedContentFacts = this.visibleChangedContentFacts(workingMessages)
@@ -3109,7 +3151,9 @@ export class ExecutionEngine {
         const serialized = context.serialized
         const payloadDigest = createHash('sha256').update(serialized).digest('hex')
         if (initial && record.initialPayload && payloadDigest !== record.initialPayload.payloadDigest) throw new Error('首次最终请求与编译清单不一致，未发送')
-        const requestId = `${logicalRoundId}.attempt-${attempts + 1}`, request: ExecutionRunRecord['requests'][number] = { requestId, state: 'sending', payload: { phase: initial ? 'initial' : 'dynamic', digest: payloadDigest, serializedBytes: Buffer.byteLength(serialized, 'utf8') } }
+        const requestId = `${logicalRoundId}.attempt-${attempts + 1}`, request: ExecutionRunRecord['requests'][number] = { requestId, state: 'sending',
+          timing: { preparationStartedAt, preparationFinishedAt: this.now() },
+          payload: { phase: initial ? 'initial' : 'dynamic', digest: payloadDigest, serializedBytes: Buffer.byteLength(serialized, 'utf8') } }
         if (this.options.diagnoseRequestPrefix && active.previousRequest) {
           const previous = active.previousRequest, before = Buffer.from(previous.serialized), after = Buffer.from(serialized)
           let stableBytes = 0
@@ -3143,79 +3187,89 @@ export class ExecutionEngine {
         await this.event(record, 'run-state', 'run.state', { status: 'running', phase: 'waiting-response', requestId, label: '等待模型响应' })
         this.timing(record, `${record.runId}:${requestId}:dispatched`, 'request.dispatched', { requestId })
         const dispatchedAt = this.now()
-        const stream = context.prepared ? context.prepared.stream(requestId, { signal: active.controller.signal })
+        request.timing!.adapterEnteredAt = dispatchedAt
+        const streamOptions: ModelStreamOptions = { signal: active.controller.signal,
+          onTiming: timing => { request.timing!.provider = { ...timing } } }
+        const stream = context.prepared ? context.prepared.stream(requestId, streamOptions)
           : this.options.provider.stream({ requestId, selection,
             messages: structuredClone(finalPayload?.messages ?? workingMessages), tools: finalPayload?.tools ?? tools,
-            sessionAffinity: { key: `conversation:${record.input.conversationId}:main` } }, { signal: active.controller.signal })
+            sessionAffinity: { key: `conversation:${record.input.conversationId}:main` } }, streamOptions)
         for await (const event of stream) {
-          // A stopped adapter may still report a trusted not-sent/unknown terminal fact.
-          // Never process content or tool calls after stop.
-          if (active.stopped && event.type !== 'response.failed') break
-          if (event.requestId !== requestId) throw new Error('模型响应不属于当前请求')
-          // A local adapter failure (including missing credentials) is not a Provider event.
-          if (!firstProviderEvent && event.type !== 'response.failed' && event.type !== 'response.activity') {
-            firstProviderEvent = true
-            request.firstEventWaitMs = Math.max(0, this.now() - dispatchedAt)
-            // Promote only exact pending facts in the payload accepted by the
-            // backend. Merely preparing or failing to send is not observation.
-            if (changedContentFacts.length) this.options.gateway.acknowledgeContentFacts(record.runId, changedContentFacts)
-            this.timing(record, `${record.runId}:${requestId}:first-event`, 'provider.first-event', { requestId,
-              detail: { eventType: event.type } })
-          }
-          if (!firstContent && (event.type === 'text.delta' && event.text.length > 0
-            || event.type === 'tool.delta' && event.argumentsDelta.length > 0
-            || event.type === 'response.completed' && (typeof event.assistant.content === 'string' && event.assistant.content.length > 0
-              || event.toolCalls.some(call => call.argumentsText.length > 0)))) {
-            firstContent = true
-            request.firstContentWaitMs = Math.max(0, this.now() - dispatchedAt)
-            this.timing(record, `${record.runId}:${requestId}:first-content`, 'provider.first-content', { requestId,
-              detail: { contentKind: event.type === 'tool.delta' ? 'tool-arguments'
-                : event.type === 'response.completed' ? typeof event.assistant.content === 'string' && event.assistant.content.length > 0
-                  ? 'assistant.final' : 'tool-arguments.final' : 'text' } })
-          }
-          if (event.type === 'response.started') {
-            request.actualModel = event.actualModel; request.responseId = event.responseId
-            await this.event(record, 'run-state', 'run.state', { status: 'running', phase: 'generating', requestId, label: '正在生成', lastReceivedAt: this.now(), receivedSource: 'data' })
-            if (initial && record.initialPayload && record.initialPayload.delivery.status !== 'sent') { record.initialPayload = markPayloadSent(record.initialPayload, { kind: 'backend-accepted', requestId, payloadDigest, acceptedAt: this.now() }); await this.checkpoint(record) }
-          }
-          else if (event.type === 'response.activity') {
-            await this.event(record, 'run-state', 'run.state', { status: 'running', requestId,
-              phase: request.responseId || readableTextStarted ? 'generating' : 'waiting-response',
-              label: request.responseId || readableTextStarted ? '正在接收模型响应' : '仍在等待模型响应',
-              lastReceivedAt: event.receivedAt, receivedSource: event.source })
-          }
-          else if (event.type === 'usage.reported') {
-            request.usage = structuredClone(event.usage)
-            const { raw: _raw, ...usage } = event.usage
-            request.inputTokens = usage.inputTokens; request.outputTokens = usage.outputTokens
-            await this.event(record, `${requestId}:usage`, 'usage', { usage })
-          }
-          else if (event.type === 'text.delta' || event.type === 'reasoning.delta') {
-            if (!readableTextStarted) {
-              readableTextStarted = true
-              await this.event(record, 'run-state', 'run.state', { status: 'running', phase: 'generating', requestId, label: event.type === 'reasoning.delta' ? '正在思考' : '正在生成', lastReceivedAt: this.now(), receivedSource: 'data' })
+          const consumptionStartedAt = this.now()
+          try {
+            // A stopped adapter may still report a trusted not-sent/unknown terminal fact.
+            // Never process content or tool calls after stop.
+            if (active.stopped && event.type !== 'response.failed') break
+            if (event.requestId !== requestId) throw new Error('模型响应不属于当前请求')
+            // A local adapter failure (including missing credentials) is not a Provider event.
+            if (!firstProviderEvent && event.type !== 'response.failed' && event.type !== 'response.activity') {
+              firstProviderEvent = true
+              request.firstEventWaitMs = Math.max(0, this.now() - dispatchedAt)
+              // Promote only exact pending facts in the payload accepted by the
+              // backend. Merely preparing or failing to send is not observation.
+              if (changedContentFacts.length) this.options.gateway.acknowledgeContentFacts(record.runId, changedContentFacts)
+              this.timing(record, `${record.runId}:${requestId}:first-event`, 'provider.first-event', { requestId,
+                detail: { eventType: event.type } })
             }
-            await this.display(record, `${requestId}:${event.type}`, event.type === 'text.delta' ? 'text' : 'reasoning', { text: event.text, status: 'running' }, 'append')
-          }
-          else if (event.type === 'tool.delta') {
-            if (!readableTextStarted) {
-              readableTextStarted = true
-              await this.event(record, 'run-state', 'run.state', { status: 'running', phase: 'generating', requestId, label: '正在准备操作', lastReceivedAt: this.now(), receivedSource: 'data' })
+            if (!firstContent && (event.type === 'text.delta' && event.text.length > 0
+              || event.type === 'tool.delta' && event.argumentsDelta.length > 0
+              || event.type === 'response.completed' && (typeof event.assistant.content === 'string' && event.assistant.content.length > 0
+                || event.toolCalls.some(call => call.argumentsText.length > 0)))) {
+              firstContent = true
+              request.firstContentWaitMs = Math.max(0, this.now() - dispatchedAt)
+              this.timing(record, `${record.runId}:${requestId}:first-content`, 'provider.first-content', { requestId,
+                detail: { contentKind: event.type === 'tool.delta' ? 'tool-arguments'
+                  : event.type === 'response.completed' ? typeof event.assistant.content === 'string' && event.assistant.content.length > 0
+                    ? 'assistant.final' : 'tool-arguments.final' : 'text' } })
             }
-            await this.preview(active, requestId, event)
-          }
-          else if (event.type === 'response.failed') {
-            finishRequest(requestId, event.failure.outcome)
-            request.state = 'failed'
-            // A local adapter failure that sent nothing stays not-sent even after stop.
-            request.failure = active.stopped && event.failure.outcome !== 'not-sent'
-              ? { outcome: 'unknown', kind: 'aborted', code: 'stopped-in-flight', message: '已停止等待模型；上游请求结果未知，未自动重发' }
-              : event.failure
-            await this.checkpoint(record); break
-          } else if (event.type === 'response.completed') {
-            finishRequest(requestId, 'completed')
-            if (initial && record.initialPayload && record.initialPayload.delivery.status !== 'sent') record.initialPayload = markPayloadSent(record.initialPayload, { kind: 'backend-accepted', requestId, payloadDigest, acceptedAt: this.now() })
-            completed = event; break
+            if (event.type === 'response.started') {
+              request.actualModel = event.actualModel; request.responseId = event.responseId
+              await this.event(record, 'run-state', 'run.state', { status: 'running', phase: 'generating', requestId, label: '正在生成', lastReceivedAt: this.now(), receivedSource: 'data' })
+              if (initial && record.initialPayload && record.initialPayload.delivery.status !== 'sent') { record.initialPayload = markPayloadSent(record.initialPayload, { kind: 'backend-accepted', requestId, payloadDigest, acceptedAt: this.now() }); await this.checkpoint(record) }
+            }
+            else if (event.type === 'response.activity') {
+              await this.event(record, 'run-state', 'run.state', { status: 'running', requestId,
+                phase: request.responseId || readableTextStarted ? 'generating' : 'waiting-response',
+                label: request.responseId || readableTextStarted ? '正在接收模型响应' : '仍在等待模型响应',
+                lastReceivedAt: event.receivedAt, receivedSource: event.source })
+            }
+            else if (event.type === 'usage.reported') {
+              request.usage = structuredClone(event.usage)
+              const { raw: _raw, ...usage } = event.usage
+              request.inputTokens = usage.inputTokens; request.outputTokens = usage.outputTokens
+              await this.event(record, `${requestId}:usage`, 'usage', { usage })
+            }
+            else if (event.type === 'text.delta' || event.type === 'reasoning.delta') {
+              if (!readableTextStarted) {
+                readableTextStarted = true
+                await this.event(record, 'run-state', 'run.state', { status: 'running', phase: 'generating', requestId, label: event.type === 'reasoning.delta' ? '正在思考' : '正在生成', lastReceivedAt: this.now(), receivedSource: 'data' })
+              }
+              await this.display(record, `${requestId}:${event.type}`, event.type === 'text.delta' ? 'text' : 'reasoning', { text: event.text, status: 'running' }, 'append')
+            }
+            else if (event.type === 'tool.delta') {
+              if (!readableTextStarted) {
+                readableTextStarted = true
+                await this.event(record, 'run-state', 'run.state', { status: 'running', phase: 'generating', requestId, label: '正在准备操作', lastReceivedAt: this.now(), receivedSource: 'data' })
+              }
+              await this.preview(active, requestId, event)
+            }
+            else if (event.type === 'response.failed') {
+              finishRequest(requestId, event.failure.outcome)
+              request.state = 'failed'
+              // A local adapter failure that sent nothing stays not-sent even after stop.
+              request.failure = active.stopped && event.failure.outcome !== 'not-sent'
+                ? { outcome: 'unknown', kind: 'aborted', code: 'stopped-in-flight', message: '已停止等待模型；上游请求结果未知，未自动重发' }
+                : event.failure
+              await this.checkpoint(record); break
+            } else if (event.type === 'response.completed') {
+              finishRequest(requestId, 'completed')
+              if (initial && record.initialPayload && record.initialPayload.delivery.status !== 'sent') record.initialPayload = markPayloadSent(record.initialPayload, { kind: 'backend-accepted', requestId, payloadDigest, acceptedAt: this.now() })
+              completed = event; break
+            }
+          } finally {
+            const elapsed = Math.max(0, this.now() - consumptionStartedAt)
+            const consumption = request.timing!.consumption ??= { events: 0, totalMs: 0, maxMs: 0 }
+            consumption.events++; consumption.totalMs += elapsed; consumption.maxMs = Math.max(consumption.maxMs, elapsed)
           }
         }
         if (active.stopped) {
@@ -3385,7 +3439,7 @@ export class ExecutionEngine {
         })
         await this.deliverObservationRound(active, calls.slice(observationsDeliveredThrough))
         if (await this.applySteering(active)) continue
-        if (!limited && calls.length && calls.every(tool => ['job.status', 'job.wait', 'image.status'].includes(tool.call.name)))
+        if (!limited && calls.length && calls.every(tool => ['job.status', 'image.status'].includes(tool.call.name)))
           await this.waitForRunningJobs(active, requestId)
         for (const [index, tool] of calls.entries()) {
           if (tool.call.name !== 'text.replace' || !committed(tool.result)) continue
@@ -3428,46 +3482,64 @@ export class ExecutionEngine {
   /** Called once after DocumentHost restores its journals. Never sends a model request or repeats a tool. */
   readonly recoveryIssues = new Map<string, string>()
   async recover(onlyRunId?: string): Promise<ExecutionRunRecord[]> {
-    const recovered: ExecutionRunRecord[] = []
+    const recovered = new Map<string, ExecutionRunRecord>()
     const records = onlyRunId ? [await this.options.runs.read(onlyRunId)].filter((record): record is ExecutionRunRecord => record !== null) : await this.options.runs.list()
+    const conversations = new Map<string, ExecutionRunRecord[]>()
     for (const record of records) {
-      if (this.active.has(record.runId)) continue
+      const group = conversations.get(record.input.conversationId) ?? []
+      group.push(record); conversations.set(record.input.conversationId, group)
+    }
+    // Reuse the existing event projection for one conversation's receipt checks, then release it.
+    // Holding only the current group avoids keeping the whole history resident during recovery.
+    for (const [conversationId, group] of conversations) {
+      const consumer = `recovery:${randomUUID()}`
+      let retained = false
       try {
-      this.recoveryIssues.delete(record.runId)
-      // Terminal runs only need the idempotent end event; reconcileReceipts/publishCommit were speculative
-      // error paths that priced startup in proportion to terminal run count. They are deferred to resume().
-      if (terminal(record.status)) {
-        await this.publishEnd(record)
-        continue
-      }
-      this.options.gateway.recoverRun({ runId: record.runId, actor: 'agent',
-        documents: trustedRunDocumentIds(record).map(documentId => ({ documentId, writable: [] })) })
-      await this.reconcileReceipts(record)
-      for (const request of record.requests) if (request.state === 'sending') {
-        request.state = 'failed'; request.failure = { outcome: 'unknown', kind: 'transport', code: 'interrupted-request', message: '应用中断前的模型结果未知，未自动重发' }
-      }
-      // A question open at the crash stays unanswered; restarting never shows it again as answerable.
-      const unanswered = record.tools.filter(tool => tool.call.name === USER_QUESTION_TOOL && tool.state !== 'returned')
-      for (const tool of unanswered) {
-        tool.state = 'returned'; tool.receiptTime = this.now()
-        tool.result = { kind: 'error', code: 'question-unanswered', message: '应用中断时问题尚未回答' }
-      }
-      record.status = 'interrupted'; record.failure = { code: 'application-interrupted', message: '上次运行已中断；已查询正式提交，继续前将重新观察文档', outcome: record.requests.some(request => request.failure?.outcome === 'unknown') ? 'unknown' : undefined }
-      await this.checkpoint(record)
-      for (const tool of unanswered) {
-        const asked = userQuestionInputSchema.safeParse(tool.call.input)
-        await this.event(record, tool.callId, 'tool', { toolName: USER_QUESTION_TOOL, label: toolLabel(USER_QUESTION_TOOL), status: 'cancelled',
-          text: asked.success ? asked.data.question : '应用中断时问题尚未回答', ...(asked.success ? { question: userQuestionView(asked.data) } : {}),
-          error: '应用中断时问题尚未回答' }, 'snapshot', `${record.runId}:${tool.callId}:unanswered`, tool.receiptTime)
-      }
-      for (const tool of record.tools) await this.publishCommit(record, tool)
-      await this.publishEnd(record)
-      recovered.push(structuredClone(record))
-      } catch (error) {
-        this.recoveryIssues.set(record.runId, `历史运行 ${record.runId} 恢复未完成，原记录保留。请在原会话查看任务回执并核对当前文件后再显式继续；未确认的操作不会自动重发。`)
-        if (onlyRunId) throw error
+        for (const record of group) {
+          if (this.active.has(record.runId)) continue
+          try {
+            // Keep invalid historical identities inside the same per-run error boundary.
+            if (!retained) { this.options.events.retain(conversationId, consumer); retained = true }
+            this.recoveryIssues.delete(record.runId)
+            // Terminal runs only need the idempotent end event; reconcileReceipts/publishCommit were speculative
+            // error paths that priced startup in proportion to terminal run count. They are deferred to resume().
+            if (terminal(record.status)) {
+              await this.publishEnd(record)
+              continue
+            }
+            this.options.gateway.recoverRun({ runId: record.runId, actor: 'agent',
+              documents: trustedRunDocumentIds(record).map(documentId => ({ documentId, writable: [] })) })
+            await this.reconcileReceipts(record)
+            for (const request of record.requests) if (request.state === 'sending') {
+              request.state = 'failed'; request.failure = { outcome: 'unknown', kind: 'transport', code: 'interrupted-request', message: '应用中断前的模型结果未知，未自动重发' }
+            }
+            // A question open at the crash stays unanswered; restarting never shows it again as answerable.
+            const unanswered = record.tools.filter(tool => tool.call.name === USER_QUESTION_TOOL && tool.state !== 'returned')
+            for (const tool of unanswered) {
+              tool.state = 'returned'; tool.receiptTime = this.now()
+              tool.result = { kind: 'error', code: 'question-unanswered', message: '应用中断时问题尚未回答' }
+            }
+            record.status = 'interrupted'; record.failure = { code: 'application-interrupted', message: '上次运行已中断；已查询正式提交，继续前将重新观察文档', outcome: record.requests.some(request => request.failure?.outcome === 'unknown') ? 'unknown' : undefined }
+            await this.checkpoint(record)
+            for (const tool of unanswered) {
+              const asked = userQuestionInputSchema.safeParse(tool.call.input)
+              await this.event(record, tool.callId, 'tool', { toolName: USER_QUESTION_TOOL, label: toolLabel(USER_QUESTION_TOOL), status: 'cancelled',
+                text: asked.success ? asked.data.question : '应用中断时问题尚未回答', ...(asked.success ? { question: userQuestionView(asked.data) } : {}),
+                error: '应用中断时问题尚未回答' }, 'snapshot', `${record.runId}:${tool.callId}:unanswered`, tool.receiptTime)
+            }
+            for (const tool of record.tools) await this.publishCommit(record, tool)
+            await this.publishEnd(record)
+            recovered.set(record.runId, structuredClone(record))
+          } catch (error) {
+            this.recoveryIssues.set(record.runId, `历史运行 ${record.runId} 恢复未完成，原记录保留。请在原会话查看任务回执并核对当前文件后再显式继续；未确认的操作不会自动重发。`)
+            if (onlyRunId) throw error
+          }
+        }
+      } finally {
+        if (retained) await this.options.events.release(conversationId, consumer)
       }
     }
-    return recovered
+    // Grouping independent conversations does not change the caller's original record order.
+    return records.filter(record => recovered.has(record.runId)).map(record => recovered.get(record.runId)!)
   }
 }

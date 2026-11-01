@@ -244,6 +244,9 @@ function managedMediaType(type: string): boolean {
   return /^(image|audio|video|font)\//.test(type) || type.includes('font') || type.includes('woff')
 }
 
+/** Source-file capture shares the same admitted media types as HTML resource preparation. */
+export const isManagedHtmlMediaPath = (reference: string): boolean => managedMediaType(mediaTypeForPath(reference))
+
 function resolveRelative(baseDir: string, reference: string): string | null {
   let raw = reference.trim()
   if (!raw || raw.startsWith('#') || raw.startsWith('//') || /^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(raw)) return null
@@ -697,7 +700,7 @@ function rewriteJavaScript(code: string, sourceType: 'script' | 'module', baseDi
   const outputSink = sink
   if (preserveScript) {
     addDiagnostic(sink, 'warning', closureProof.frameworkError ? 'unsupported-framework-resource-input' : 'unsupported-dynamic-url-sink',
-      '无法静态证明该脚本的资源引用闭合，已原样保留；脚本里的本地文件引用不会被打包，请内联资源或改为可解析的静态媒体引用')
+      '无法静态证明该脚本的全部资源引用闭合；可识别的静态资源仍会收集，其余动态引用保留原代码并在运行时核查')
     // Unknown operations remain diagnostic. Independent literal resource sinks
     // still have a concrete closure and are captured by the traversal below.
   }
@@ -733,6 +736,23 @@ function rewriteJavaScript(code: string, sourceType: 'script' | 'module', baseDi
     }
   }
   const declarations = new Map<string, number>(), ambiguous = new Set<string>()
+  const isMetaUrl = (value: Node | undefined): boolean => {
+    if (value?.type !== 'MemberExpression') return false
+    const object = value.object as Node | undefined, property = value.property as Node | undefined
+    return object?.type === 'MetaProperty' && (object.meta as Node | undefined)?.name === 'import'
+      && (object.property as Node | undefined)?.name === 'meta'
+      && (value.computed ? property?.type === 'Literal' && property.value === 'url' : property?.type === 'Identifier' && property.name === 'url')
+  }
+  const writesMetaUrl = (target: Node | undefined): boolean => {
+    if (!target) return false
+    if (isMetaUrl(target)) return true
+    if (target.type === 'ArrayPattern') return (target.elements as Array<Node | null>).some(value => value && writesMetaUrl(value))
+    if (target.type === 'ObjectPattern') return (target.properties as Node[]).some(value => writesMetaUrl((value.type === 'RestElement' ? value.argument : value.value) as Node))
+    if (target.type === 'RestElement') return writesMetaUrl(target.argument as Node)
+    if (target.type === 'AssignmentPattern') return writesMetaUrl(target.left as Node)
+    return false
+  }
+  let mutableMetaUrl = false
   const identifiers = new Set<string>(), dynamicUrls = new Map<string, string>()
   sink.javascriptSerial = (sink.javascriptSerial ?? 0) + 1
   let dynamicResolver = `__cwLocalMedia${sink.javascriptSerial}_0`
@@ -752,6 +772,12 @@ function rewriteJavaScript(code: string, sourceType: 'script' | 'module', baseDi
       declarations.set(name, (declarations.get(name) ?? 0) + 1)
     if (node.type === 'AssignmentExpression') for (const name of patternNames(node.left as Node)) ambiguous.add(name)
     if (node.type === 'UpdateExpression') for (const name of patternNames(node.argument as Node)) ambiguous.add(name)
+    if (['FunctionDeclaration', 'FunctionExpression', 'ClassDeclaration', 'ClassExpression'].includes(node.type))
+      for (const name of patternNames(node.id as Node | undefined)) declarations.set(name, (declarations.get(name) ?? 0) + 1)
+    if (node.type === 'ImportDeclaration') for (const specifier of node.specifiers as Node[])
+      for (const name of patternNames(specifier.local as Node)) declarations.set(name, (declarations.get(name) ?? 0) + 1)
+    if (['AssignmentExpression', 'ForInStatement', 'ForOfStatement'].includes(node.type)) mutableMetaUrl ||= writesMetaUrl(node.left as Node)
+    if (node.type === 'UpdateExpression' || node.type === 'UnaryExpression' && node.operator === 'delete') mutableMetaUrl ||= writesMetaUrl(node.argument as Node)
     if (['FunctionDeclaration', 'FunctionExpression', 'ArrowFunctionExpression'].includes(node.type))
       for (const param of node.params as Node[]) for (const name of patternNames(param)) ambiguous.add(name)
     if (node.type === 'CatchClause') for (const name of patternNames(node.param as Node | undefined)) ambiguous.add(name)
@@ -872,7 +898,25 @@ function rewriteJavaScript(code: string, sourceType: 'script' | 'module', baseDi
     if (/^data:/i.test(url.trim())) return rewriteEmbedded(url, 'js-string', baseDir, sink, siblings, { url: true, remote: true }, false)
     return rewriteSingleUrl(url, 'js-string', baseDir, sink, siblings, false, usage).value
   }
+  const moduleMediaUrl = (value: Node): boolean => {
+    const node = value.type === 'MemberExpression' && memberName(value) === 'href' ? value.object as Node : value
+    if (sourceType !== 'module' || mutableMetaUrl || declarations.has('URL') || ambiguous.has('URL')
+      || node.type !== 'NewExpression' || (node.callee as Node)?.type !== 'Identifier' || (node.callee as Node).name !== 'URL') return false
+    const args = node.arguments as Node[], first = args[0]
+    if (!first || !isMetaUrl(args[1])) return false
+    const reference = staticString(first)
+    if (reference === null) return false
+    const relative = resolveRelative(baseDir, reference)
+    if (!relative || !managedMediaType(mediaTypeForPath(relative))) return false
+    if (handled.has(first)) return true
+    const mediaType = mediaTypeForPath(relative)
+    const usage: Usage = mediaType.startsWith('image/') ? 'image' : mediaType.startsWith('font/') ? 'font' : 'media'
+    // The constructor and its URL-object semantics stay intact; only its known local asset is bound.
+    writeString(first, rewriteUrl(reference, 'URL', usage))
+    return true
+  }
   const urlSink = (value: Node, name: string, usage: Usage = 'unknown') => {
+    if (moduleMediaUrl(value)) return
     const url = literalValue(value) ?? (value.type === 'Identifier' ? constants.get(String(value.name)) ?? null : null)
     if (url === null) {
       const proof = closureProof.urlInput(value)
@@ -897,6 +941,7 @@ function rewriteJavaScript(code: string, sourceType: 'script' | 'module', baseDi
   }
   const visit = (node: Node, withinInertPolyfill = false) => {
     if (handled.has(node)) return
+    moduleMediaUrl(node)
     // An authored HTML image template can name an actual local directory while
     // its filename comes from a callback or dataset. Capture only that explicit
     // media directory; do not infer arbitrary strings or execute the program.

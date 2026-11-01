@@ -65,7 +65,7 @@ function receipt(result: ToolResult) {
   return result.data as { enhancementPath?: string; files?: { path: string; content?: string }[]; diagnostics?: { code: string; message: string }[] }
 }
 
-it('applies business-only enhancement through the observed main Source, returning its real dependency content in one undo', async () => {
+it('applies business-only enhancement with a compact receipt and an explicitly readable dependency in one undo', async () => {
   const h = await fixture(), before = h.session.read(), business = 'export default ({scope}) => { scope.state.set("score", 8); };'
   expect(await h.call('project.read', { path: h.file.path })).toMatchObject({ kind: 'read', data: { content: h.file.content } })
   const data = receipt(await h.call('project.apply', { path: h.file.path, intent: 'enhance', content: business }))
@@ -81,8 +81,9 @@ it('applies business-only enhancement through the observed main Source, returnin
   expect(h.model().project.definitions[dependencyId].implementation).toMatchObject({ kind: 'source', source: business })
   const actual = componentProjectFiles(h.model().project, h.model().resources).find(file => file.authorSource?.dependencyId === dependencyId && file.binding?.kind === 'instance-source' && file.binding.instanceId === 'a')!
   expect(data.enhancementPath).toBe(actual.path)
-  expect(data.files).toContainEqual(expect.objectContaining({ path: actual.path, content: business }))
-  expect(await h.call('project.read', { path: data.enhancementPath! })).toMatchObject({ kind: 'read', data: { content: business } })
+  expect(data.files).toContainEqual(expect.objectContaining({ path: actual.path, complete: false }))
+  expect(data.files?.find(file => file.path === actual.path)).not.toHaveProperty('content')
+  expect(await h.call('project.read', { path: data.enhancementPath!, full: true })).toMatchObject({ kind: 'read', data: { content: business } })
   expect((await h.compiler.compile(componentCompilationInput(h.model().project, implementation, h.model().resources))).status).toBe('ready')
   const current = h.session.read()
   await h.session.execute({ documentId: current.documentId, epoch: current.epoch, baseRevision: current.revision,
@@ -110,7 +111,9 @@ it('admits an enhancement from a real module/resource closure and compiles its p
     expect(new TextDecoder().decode(files[dependency.workspace.entry])).toBe(business)
     expect(new TextDecoder().decode(files['helper.js'])).toBe('export const value = 11;')
     expect(new TextDecoder().decode(files['picture.svg'])).toBe(image)
-    expect(data.files).toContainEqual(expect.objectContaining({ path: data.enhancementPath, content: business }))
+    expect(data.files).toContainEqual(expect.objectContaining({ path: data.enhancementPath, complete: false }))
+    expect(data.files?.find(file => file.path === data.enhancementPath)).not.toHaveProperty('content')
+    expect(await h.call('project.read', { path: data.enhancementPath!, full: true })).toMatchObject({ kind: 'read', data: { content: business } })
     const compiled = await h.compiler.compile(componentCompilationInput(h.model().project, wrapper, h.model().resources))
     expect(compiled, JSON.stringify(compiled.status === 'failed' ? compiled.diagnostics : compiled.status)).toMatchObject({ status: 'ready' })
     expect(h.commands).toHaveLength(1)

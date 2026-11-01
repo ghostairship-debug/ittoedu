@@ -112,8 +112,8 @@ export function sourceDocumentFormat(model: DocumentModel, binding: DocumentBind
 }
 
 export interface CaptureDocumentSourceOptions {
-  /** Already-authorized, settled source snapshots; this port does not grant file access. */
-  currentSource?(filename: string): Promise<string | undefined>
+  /** Settled source snapshots, or a confirmed disk-write successor of heldVersion; never a new file grant. */
+  currentSource?(filename: string, heldVersion?: string): Promise<string | undefined>
   /** The caller selects the source format once, before any temporary path exists. */
   format?: DocumentSourcePublication['format']
   /** First report the read attempt (including missing directories), then the
@@ -153,8 +153,8 @@ function retainPackage(resources: DocumentResources, held: DocumentResources, re
   return directory
 }
 
-/** Formats keep their real parsers. Authorized current source sessions precede
- * held dependency snapshots; held binary bytes still precede disk. */
+/** Formats keep their real parsers. Current source sessions and exact acknowledged
+ * disk-write successors precede held snapshots; unknown disk changes do not. */
 export async function prepareDocumentSave(model: DocumentModel, binding: DocumentBinding,
   options: CaptureDocumentSourceOptions = {}): Promise<PreparedDocumentSave> {
   const format = options.format ?? sourceDocumentFormat(model, binding)
@@ -165,8 +165,8 @@ export async function prepareDocumentSave(model: DocumentModel, binding: Documen
   let references: string[]
   if (format === 'html') {
     const held = sourceResourceFiles(model.resources)
-    if (binding.kind === 'file' && options.currentSource) for (const relative of held.keys()) {
-      const current = await options.currentSource(path.resolve(path.dirname(binding.path), relative))
+    if (binding.kind === 'file' && options.currentSource) for (const [relative, bytes] of held) {
+      const current = await options.currentSource(path.resolve(path.dirname(binding.path), relative), digest(bytes))
       if (current !== undefined) held.set(relative, new TextEncoder().encode(current))
     }
     const closure = await captureHtmlClosure({ html: model.source, siblingFiles: held, extractResources: analyzeHtmlResources,

@@ -1,5 +1,5 @@
 {
-  "description": "修改已读工程路径，由唯一正式事务提交，可撤销并进入恢复稿，不自动存盘。content/from/edits三选一；edits.old须在当前已读源文唯一命中，全部成功才提交。普通content保留原对象frame、顺序及邻居；style改外观/CSS，redo重做明确范围。insert向页面或容器添加HTML/CSS/SVG，或对象草稿JSON {kind:\"objects\",objects:[{definitionId,data,...}或{builtinKey,data?,...}]}；builtinKey支持guoling.text/formula/shape/table/chart/input并由软件提供专业默认，已有definitionId须配data；身份由软件维护。children为子稿，无frame原生group可用grid/flex及普通CSS，文字随列宽增高。完整程序用entry.html + intent:program.set，后续仍沿同一根实例增改；主Source enhance可追加JS/TS模块。operations在同工程成批准备已有路径并一次提交；pages+surface.add支持各页首稿。from可直接采用计算或子任务同组来源，软件收齐依赖、资源和已有assetId；局部region/frame/viewport保人工定位。源码实例覆盖只作用当前实例，共享定义作用全部引用。project.json改作品设置，theme.css改主题，body改连续正文，spatial.json改旅程，container.json改容器；按需读取references中的布局/API示例。成功files给后续路径与提交版本，complete区分实际全文和目录；失败保留输入并给局部修复入口，staleSnapshot重读当前稿，unknown先查原操作。 project省略时使用本任务当前课件；明确file.create/file.open后接续该课件。显式project可参考或修改另一课，不改变当前课件。",
+  "description": "修改已读工程路径，由唯一正式事务提交，可撤销并进入恢复稿，不自动存盘。content/from/edits三选一；edits.old须在当前已读源文唯一命中，全部成功才提交。普通content保留原对象frame、顺序及邻居；style改外观/CSS，redo重做明确范围。insert向页面或容器添加HTML/CSS/SVG，或对象草稿JSON {kind:\"objects\",objects:[{definitionId,data,...}或{builtinKey,data?,...}]}；builtinKey支持guoling.text/formula/shape/table/chart/input并由软件提供专业默认，已有definitionId须配data；身份由软件维护。children为子稿，无frame原生group可用grid/flex及普通CSS，文字随列宽增高。完整程序用entry.html + intent:program.set，后续仍沿同一根实例增改；主Source enhance可追加JS/TS模块；.modules/路径直接局改一个Web作者模块，保留其他模块与组件实现。operations在同工程成批准备已有路径并一次提交；pages+surface.add支持各页首稿。from可直接采用计算或子任务同组来源，软件收齐依赖、资源和已有assetId；局部region/frame/viewport保人工定位。源码实例覆盖只作用当前实例，共享定义作用全部引用。project.json改作品设置，theme.css改主题，body改连续正文，spatial.json改旅程，container.json改容器；按需读取references中的布局/API示例。成功files给后续路径与提交版本，complete区分实际全文和目录；失败保留输入并给局部修复入口，staleSnapshot重读当前稿，unknown先查原操作。 source.imports 用 imports:{源码import名称:已读components共享Source主入口路径或null}连接/解除一个既有共享定义；仅改指定绑定，保留源码、资源与人工字段，真实编译和并发检查随同次事务完成。 project省略时使用本任务当前课件；明确file.create/file.open后接续该课件。显式project可参考或修改另一课，不改变当前课件。",
   "inputSchema": {
     "$defs": {
       "__schema0": {
@@ -88,6 +88,56 @@
           }
         ]
       },
+      "__schema10": {
+        "additionalProperties": false,
+        "properties": {
+          "new": {
+            "type": "string"
+          },
+          "old": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "old",
+          "new"
+        ],
+        "type": "object"
+      },
+      "__schema11": {
+        "additionalProperties": false,
+        "properties": {
+          "before": {
+            "$ref": "#/$defs/__schema2"
+          },
+          "content": {
+            "type": "string"
+          },
+          "from": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "slide",
+              "flow",
+              "spatial"
+            ],
+            "type": "string"
+          },
+          "region": {
+            "$ref": "#/$defs/__schema3"
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind"
+        ],
+        "type": "object"
+      },
       "__schema2": {
         "minLength": 1,
         "type": "string"
@@ -169,54 +219,19 @@
         "type": "object"
       },
       "__schema8": {
-        "additionalProperties": false,
-        "properties": {
-          "new": {
-            "type": "string"
-          },
-          "old": {
-            "minLength": 1,
-            "type": "string"
-          }
-        },
-        "required": [
-          "old",
-          "new"
-        ],
-        "type": "object"
+        "minLength": 1,
+        "type": "string"
       },
       "__schema9": {
-        "additionalProperties": false,
-        "properties": {
-          "before": {
-            "$ref": "#/$defs/__schema2"
-          },
-          "content": {
-            "type": "string"
-          },
-          "from": {
+        "anyOf": [
+          {
             "minLength": 1,
             "type": "string"
           },
-          "kind": {
-            "enum": [
-              "slide",
-              "flow",
-              "spatial"
-            ],
-            "type": "string"
-          },
-          "region": {
-            "$ref": "#/$defs/__schema3"
-          },
-          "title": {
-            "type": "string"
+          {
+            "type": "null"
           }
-        },
-        "required": [
-          "kind"
-        ],
-        "type": "object"
+        ]
       }
     },
     "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -297,6 +312,37 @@
       {
         "additionalProperties": false,
         "properties": {
+          "imports": {
+            "additionalProperties": {
+              "$ref": "#/$defs/__schema9"
+            },
+            "description": "局部连接：键为源码中 import 的原始名称，值为已读取的 components 共享 Source 主入口路径；null 解除该名称的显式连接，恢复原工作区解析。由软件维护身份，不接收 definitionId/ownerId。",
+            "propertyNames": {
+              "$ref": "#/$defs/__schema8"
+            },
+            "type": "object"
+          },
+          "intent": {
+            "const": "source.imports",
+            "type": "string"
+          },
+          "path": {
+            "$ref": "#/$defs/__schema2"
+          },
+          "project": {
+            "$ref": "#/$defs/__schema0"
+          }
+        },
+        "required": [
+          "path",
+          "intent",
+          "imports"
+        ],
+        "type": "object"
+      },
+      {
+        "additionalProperties": false,
+        "properties": {
           "content": {
             "type": "string"
           },
@@ -353,7 +399,7 @@
         "properties": {
           "edits": {
             "items": {
-              "$ref": "#/$defs/__schema8"
+              "$ref": "#/$defs/__schema10"
             },
             "minItems": 1,
             "type": "array"
@@ -436,7 +482,7 @@
           },
           "pages": {
             "items": {
-              "$ref": "#/$defs/__schema9"
+              "$ref": "#/$defs/__schema11"
             },
             "minItems": 1,
             "type": "array"

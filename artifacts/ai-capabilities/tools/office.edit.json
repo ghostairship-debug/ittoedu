@@ -132,31 +132,79 @@
         ],
         "type": "object"
       },
+      "__schema10": {
+        "$ref": "#/$defs/__schema11",
+        "description": "原样沿用 inspect 返回的 partVersion，不能自行生成或复用旧值"
+      },
+      "__schema11": {
+        "pattern": "^[a-f0-9]{64}$",
+        "type": "string"
+      },
+      "__schema12": {
+        "type": "string"
+      },
+      "__schema13": {
+        "maximum": 9007199254740991,
+        "minimum": 0,
+        "type": "integer"
+      },
       "__schema2": {
         "properties": {
           "paragraph": {
-            "maximum": 9007199254740991,
-            "minimum": 0,
-            "type": "integer"
+            "$ref": "#/$defs/__schema13"
+          },
+          "part": {
+            "$ref": "#/$defs/__schema8"
+          },
+          "partVersion": {
+            "$ref": "#/$defs/__schema10"
           },
           "shape": {
-            "type": "string"
+            "$ref": "#/$defs/__schema4"
+          },
+          "shapeId": {
+            "$ref": "#/$defs/__schema6"
           },
           "slide": {
-            "maximum": 9007199254740991,
-            "minimum": 0,
-            "type": "integer"
+            "$ref": "#/$defs/__schema3"
           },
           "text": {
-            "type": "string"
+            "$ref": "#/$defs/__schema12"
           }
         },
         "required": [
           "slide",
-          "shape",
           "text"
         ],
         "type": "object"
+      },
+      "__schema3": {
+        "maximum": 9007199254740991,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "__schema4": {
+        "$ref": "#/$defs/__schema5",
+        "description": "兼容按唯一名称定位；重名时请使用 inspect 返回的 shapeId"
+      },
+      "__schema5": {
+        "type": "string"
+      },
+      "__schema6": {
+        "$ref": "#/$defs/__schema7",
+        "description": "inspect 返回的原件形状标识；提供时优先于名称定位"
+      },
+      "__schema7": {
+        "minLength": 1,
+        "type": "string"
+      },
+      "__schema8": {
+        "$ref": "#/$defs/__schema9",
+        "description": "原样沿用 inspect 返回的幻灯片 part，防止幻灯片顺序变化后误改"
+      },
+      "__schema9": {
+        "minLength": 1,
+        "type": "string"
       }
     },
     "$schema": "https://json-schema.org/draft/2020-12/schema",

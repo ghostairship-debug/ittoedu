@@ -5,7 +5,7 @@ import { build } from 'esbuild'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { chromium, type Browser } from '@playwright/test'
-import { JSDOM } from 'jsdom'
+import { JSDOM, VirtualConsole } from 'jsdom'
 import { createBlankCourseProjectV10 } from '../../src/core/course/createCourseProjectV10'
 import { buildPublishedCourseV3 } from '../../src/core/publish/componentPlatform/buildPublishedCourseV3'
 import { compileCoursePlayback } from '../../src/core/publish/componentPlatform/compileCoursePlayback'
@@ -46,24 +46,48 @@ async function record(name: string, value: unknown) {
   await writeFile(resolve(directory, `F01-${name}-${process.env.CREATION_BOUNDARY_PHASE || 'latest'}.json`), JSON.stringify(value, null, 2))
 }
 
-it('keeps a retained nonblocking diagnostic visible while the real compiled export mounts successfully', async () => {
+it('keeps reports and browser diagnostics out of the real compiled export while bottom content remains clickable', async () => {
   const page = await browser.newPage()
+  const messages: string[] = []
+  page.on('console', message => messages.push(message.text()))
   try {
     await page.setContent(buildCompiledSingleHtml(artifact, runtimeBundle))
     const result = await page.evaluate(async () => {
       await Reflect.get(window, 'coursePlayerReady')
+      const button = document.createElement('button')
+      button.id = 'bottom-action'; button.textContent = '底部操作'
+      Object.assign(button.style, { position: 'fixed', bottom: '0', left: '0', width: '100%', height: '28px' })
+      button.onclick = () => { button.textContent = '底部操作已完成' }
+      document.getElementById('course-root')!.append(button)
+      const report = Reflect.get(window, '__coursePlaybackDiagnostic')
+      for (let index = 0; index < 5; index++) report('导航通路缺失；普通诊断不进入画面')
+      report('可选脚本局部失败', { severity: 'error', code: 'optional-component' })
+      window.dispatchEvent(new ErrorEvent('error', { message: '局部事件处理失败', error: new Error('局部事件处理失败') }))
+      const rejection = new Event('unhandledrejection')
+      Object.defineProperty(rejection, 'reason', { value: new Error('可选异步任务失败') })
+      window.dispatchEvent(rejection)
+      const resource = document.createElement('script'); resource.src = 'data:text/javascript,'
+      document.body.append(resource); resource.dispatchEvent(new Event('error'))
       const diagnostic = document.getElementById('course-diagnostic')!
       const result = { playerReady: Boolean(Reflect.get(window, 'coursePlayer')), hidden: diagnostic.hidden,
-        diagnostic: diagnostic.textContent, fatal: Reflect.get(window, '__coursePlaybackError') }
-      await Reflect.get(window, 'coursePlayer').dispose()
+        diagnostic: diagnostic.textContent, fatal: Reflect.get(window, '__coursePlaybackError'),
+        bottomHit: document.elementFromPoint(innerWidth / 2, innerHeight - 4)?.id }
       return result
     })
+    await page.getByRole('button', { name: '底部操作', exact: true }).click()
+    expect(await page.locator('#bottom-action').textContent()).toBe('底部操作已完成')
     await record('warning', result)
     expect(result.playerReady).toBe(true)
-    expect(result.hidden).toBe(false)
-    expect(result.diagnostic).toContain(artifact.diagnostics[0]!.message)
-    expect(result.diagnostic).not.toContain('课件加载失败')
+    expect(result.hidden).toBe(true)
+    expect(result.diagnostic).toBe('')
     expect(result.fatal).toBeUndefined()
+    expect(result.bottomHit).toBe('bottom-action')
+    expect(messages.some(message => message.includes(artifact.diagnostics[0]!.message))).toBe(true)
+    expect(messages.some(message => message.includes('[optional-component]'))).toBe(true)
+    expect(messages.some(message => message.includes('局部事件处理失败'))).toBe(true)
+    expect(messages.some(message => message.includes('可选异步任务失败'))).toBe(true)
+    expect(messages.some(message => message.includes('脚本资源加载失败'))).toBe(true)
+    await page.evaluate(() => Reflect.get(window, 'coursePlayer').dispose())
   } finally { await page.close() }
 })
 
@@ -88,20 +112,34 @@ it('keeps a real compiled entry rejection prominent and traceable', async () => 
   } finally { await page.close() }
 })
 
-it('keeps falsey fatal reasons visible after mount resolves and a later warning arrives', async () => {
+it('does not promote unrelated rejections during mounting into a course failure', async () => {
+  const bundle = `var CoursewareCompiledPlayer={mountCompiledCourse:function(course,root){
+    var event=new Event('unhandledrejection');Object.defineProperty(event,'reason',{value:'optional task'});
+    window.dispatchEvent(event);root.textContent='健康正文';return Promise.resolve({});
+  }};`
+  const dom = new JSDOM(buildCompiledSingleHtml(artifact, bundle), { runScripts: 'dangerously', virtualConsole: new VirtualConsole() })
+  try {
+    await Reflect.get(dom.window, 'coursePlayerReady')
+    expect(dom.window.document.getElementById('course-root')!.textContent).toBe('健康正文')
+    expect(dom.window.document.getElementById('course-diagnostic')!.hidden).toBe(true)
+    expect(Reflect.get(dom.window, '__coursePlaybackFailed')).toBeUndefined()
+  } finally { dom.window.close() }
+})
+
+it('keeps falsey entry rejection reasons visible when a later warning arrives', async () => {
   const results: unknown[] = []
   for (const reason of [undefined, null, 0, false, '']) {
     const literal = reason === undefined ? 'undefined' : JSON.stringify(reason)
-    // Only the generated early-script consumer is under test here. The stub
-    // dispatches the browser event explicitly; it is not a runtime execution.
+    // A real rejected entry is fatal even when JavaScript allows a falsey reason.
     const bundle = `var CoursewareCompiledPlayer={mountCompiledCourse:function(course,root,options){
       window.F01Report=options.report;
-      var event=new Event('unhandledrejection');Object.defineProperty(event,'reason',{value:${literal}});
-      window.dispatchEvent(event);return Promise.resolve({});
+      return Promise.reject(${literal});
     }};`
-    const dom = new JSDOM(buildCompiledSingleHtml(artifact, bundle), { runScripts: 'dangerously' })
+    const dom = new JSDOM(buildCompiledSingleHtml(artifact, bundle), { runScripts: 'dangerously', virtualConsole: new VirtualConsole() })
     try {
-      await Reflect.get(dom.window, 'coursePlayerReady')
+      let rejected = false
+      try { await Reflect.get(dom.window, 'coursePlayerReady') } catch { rejected = true }
+      expect(rejected).toBe(true)
       const diagnostic = dom.window.document.getElementById('course-diagnostic')!
       const firstMessage = `课件加载失败：${String(reason)}`
       expect(diagnostic.hidden).toBe(false)

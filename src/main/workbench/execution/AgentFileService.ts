@@ -5,7 +5,7 @@ import { FileGrepPages } from './FileGrepPages'
 import { AgentFileText } from './AgentFileText'
 import { sourceFileKind } from '../../../shared/workbench/sourceFileKind'
 import path from 'node:path'
-import { promises as fs } from 'node:fs'
+import { promises as fs, realpathSync } from 'node:fs'
 import type { AgentFileContext, AgentFileMutationName, AgentFileOutcome, AgentFileService as AgentFilePort, AgentFileToolName } from '../../../core/tools/AgentFileTools'
 import { AgentFileMissingParent, AgentFileOutcomeUnknown, agentFileSchemas } from '../../../core/tools/AgentFileTools'
 import { officeContentSchemas, type OfficeContentToolName } from '../../../core/tools/OfficeContentTools'
@@ -54,7 +54,16 @@ export class AgentFileService implements AgentFilePort {
   private readonly officeBindings = new Map<string, Map<string, FileArtifactBinding>>()
   /** Only the tuple from an explicit comparison is retained, never a second disk model. */
   private readonly fileObservations = new Map<string, Map<string, { documentId: string; epoch: string; baseRevision: number; bindingVersion: number; version: string | null }>>()
-  constructor(private readonly host: DocumentHostService) { this.text = new AgentFileText(host) }
+  private readonly hostReadOnlyRoots: readonly string[]
+  constructor(private readonly host: DocumentHostService, readOnlyRoots: readonly string[] = []) {
+    // Main supplies only the actual installed reference library. Canonical roots
+    // survive callers that omit per-run roots and cannot be bypassed by a file alias.
+    this.hostReadOnlyRoots = Object.freeze([...new Set(readOnlyRoots.map(root => realpathSync(root)))])
+    this.text = new AgentFileText(host)
+  }
+  private readOnlyRoots(context: AgentFileContext): readonly string[] {
+    return [...this.hostReadOnlyRoots, ...(context.readOnlyRoots ?? [])]
+  }
   releaseRun(runId: string): void { this.pages.releaseRun(runId); this.grepPages.releaseRun(runId); this.text.releaseRun(runId); this.officeBindings.delete(runId); this.fileObservations.delete(runId) }
   private officeService(): Promise<OfficeFileService> { return this.office ??= import('../office/OfficeFileService.js').then(module => new module.OfficeFileService(this.host)) }
   private officeKey(filename: string): string { return process.platform === 'win32' ? filename.toLowerCase() : filename }
@@ -63,20 +72,25 @@ export class AgentFileService implements AgentFilePort {
     if (!bindings) { bindings = new Map(); this.officeBindings.set(runId, bindings) }
     bindings.set(this.officeKey(binding.path), binding)
   }
+  private inWriteRoot(context: AgentFileContext, resolved: string): boolean {
+    return isInsideRoot(context.workspaceRoot, resolved)
+      || !!context.assemblyRoot && isInsideRoot(context.assemblyRoot, resolved)
+  }
   private async mayRead(context: AgentFileContext, resolved: string): Promise<boolean> {
-    if (context.permission === 'full' || isInsideRoot(context.workspaceRoot, resolved)) return true
+    if (context.permission === 'full' || this.inWriteRoot(context, resolved)) return true
     for (const candidate of context.boundPaths ?? []) {
       const filename = await fs.realpath(candidate).catch(() => null)
       if (filename && this.officeKey(filename) === this.officeKey(resolved)) return true
     }
-    for (const candidate of context.readOnlyRoots ?? []) {
+    for (const candidate of this.readOnlyRoots(context)) {
       const root = await fs.realpath(candidate).catch(() => null)
       if (root && isInsideRoot(root, resolved)) return true
     }
     return false
   }
   private mayWrite(context: AgentFileContext, resolved: string): boolean {
-    return context.permission !== 'read-only' && (context.permission === 'full' || isInsideRoot(context.workspaceRoot, resolved)
+    if (this.readOnlyRoots(context).some(root => isInsideRoot(root, resolved))) return false
+    return context.permission !== 'read-only' && (context.permission === 'full' || this.inWriteRoot(context, resolved)
       || (context.approvedOutsidePaths ?? []).some(approved => isInsideRoot(approved, resolved)))
   }
   private async directory(context: AgentFileContext, raw?: string, allowOutside = false): Promise<{ directory: string; fallback: boolean }> {
@@ -103,13 +117,20 @@ export class AgentFileService implements AgentFilePort {
     else sourceFileKind(filename) // Binary and structured formats use their actual importers.
     return filename
   }
+  /** Canonical path lookup for an existing authorized source; no content read or new grant. */
+  async resolveReadPath(context: AgentFileContext, raw: string): Promise<string> {
+    context.assertActive?.()
+    const filename = await this.filename(context, raw)
+    context.assertActive?.()
+    return filename
+  }
   async preflightCreate(context: AgentFileContext, raw: unknown): Promise<{ directory: string; outside: boolean }> {
     const input = creationInput(raw)
     if (context.permission === 'read-only') throw new Error('只读任务不能创建文件')
     validateWorkspaceEntryName(input.name)
     createKind(input.name, input.kind)
     const { directory } = await this.directory(context, input.path, true)
-    return { directory, outside: !isInsideRoot(context.workspaceRoot, directory) }
+    return { directory, outside: !this.inWriteRoot(context, directory) }
   }
   async preflightMutation(context: AgentFileContext, name: AgentFileMutationName, raw: unknown): Promise<{ paths: string[]; outside: boolean }> {
     if (context.permission === 'read-only') throw new Error('只读任务不能修改文件')
@@ -153,7 +174,7 @@ export class AgentFileService implements AgentFilePort {
       const destination = (await this.directory(context, input.destination, true)).directory
       paths = [...sources, ...sources.map(source => path.join(destination, path.basename(source)))]
     }
-    return { paths, outside: paths.some(value => !isInsideRoot(context.workspaceRoot, value)) }
+    return { paths, outside: paths.some(value => !this.inWriteRoot(context, value)) }
   }
   private async filenameOrDirectory(context: AgentFileContext, raw: string, forWrite: boolean): Promise<string> {
     const value = await fs.realpath(path.resolve(context.workspaceRoot, raw))
@@ -163,10 +184,14 @@ export class AgentFileService implements AgentFilePort {
       : !await this.mayRead(context, value)) throw new Error('当前权限不允许访问工作空间外文件')
     return value
   }
-  private async requireMutationScope(context: AgentFileContext, paths: string[], copySources = 0): Promise<void> {
+  private async requireMutationScope(context: AgentFileContext, paths: string[], copySources = 0, destructiveSources = 0): Promise<void> {
     if (context.permission === 'read-only') throw new Error('只读任务不能修改文件')
     for (let i = 0; i < paths.length; i++) {
       if (i < copySources && await this.mayRead(context, paths[i]!)) continue
+      // Renaming, moving or trashing a directory also mutates its protected
+      // descendants. A normal create/copy target in their parent does not.
+      if (i < destructiveSources && this.readOnlyRoots(context).some(root => isInsideRoot(paths[i]!, root)))
+        throw new Error('当前操作不能移动、重命名或删除包含只读资料的目录')
       if (!this.mayWrite(context, paths[i]!)) throw new Error('工作空间外修改需要当前操作的明确批准')
     }
   }
@@ -248,9 +273,8 @@ export class AgentFileService implements AgentFilePort {
           ancestor = path.dirname(ancestor)
         }
       }
-      const root = await fs.realpath(context.workspaceRoot)
       const bound = (context.boundPaths ?? []).some(value => this.officeKey(path.resolve(value)) === this.officeKey(requested))
-      if (context.permission !== 'full' && !isInsideRoot(root, actual) && !bound)
+      if (!await this.mayRead(context, actual) && !bound)
         throw new Error('当前权限不允许访问工作空间外文件')
       context.assertActive?.()
       return requested
@@ -258,6 +282,49 @@ export class AgentFileService implements AgentFilePort {
     if (!await this.mayRead(context, actual)) throw new Error('当前权限不允许访问工作空间外文件')
     context.assertActive?.()
     return actual
+  }
+  /** Enumerate task inputs without sending a directory to the single-file artifact owner. */
+  async taskInputDirectory(context: AgentFileContext, raw: string, signal?: AbortSignal): Promise<{
+    files: readonly string[]; verify(): Promise<void>
+  } | undefined> {
+    const active = () => { signal?.throwIfAborted(); context.assertActive?.() }
+    active()
+    const root = await this.authorizeTaskInput(context, raw)
+    const initial = await fs.lstat(root).catch((error: NodeJS.ErrnoException) => {
+      if (error.code === 'ENOENT') return undefined // An opened current draft may no longer exist on disk.
+      throw error
+    })
+    active()
+    if (!initial?.isDirectory()) return undefined
+    if (this.officeKey(path.resolve(context.workspaceRoot, raw)) !== this.officeKey(root))
+      throw new Error('目录来源包含链接或位置已改变；未冻结来源')
+    const scan = async () => {
+      const files: string[] = [], entries: string[] = []
+      const visit = async (filename: string): Promise<void> => {
+        active()
+        const stat = await fs.lstat(filename, { bigint: true })
+        const resolved = await fs.realpath(filename)
+        if (stat.isSymbolicLink() || !isInsideRoot(root, resolved)
+          || this.officeKey(resolved) !== this.officeKey(filename))
+          throw new Error('目录来源包含链接或越界成员；未冻结来源')
+        if (!stat.isDirectory() && !stat.isFile()) throw new Error('目录来源只支持普通文件和目录')
+        if (!await this.mayRead(context, resolved)) throw new Error('当前权限不允许读取目录来源成员')
+        entries.push(JSON.stringify([path.relative(root, filename), stat.isDirectory() ? 'directory' : 'file',
+          String(stat.dev), String(stat.ino), String(stat.size), String(stat.mtimeNs), String(stat.ctimeNs)]))
+        if (stat.isDirectory()) {
+          for (const name of (await fs.readdir(filename)).sort()) await visit(path.join(filename, name))
+        } else files.push(filename)
+        active()
+      }
+      await visit(root)
+      return { files, identity: entries.join('\n') }
+    }
+    const before = await scan()
+    return { files: before.files, verify: async () => {
+      const after = await scan()
+      if (before.identity !== after.identity) throw new Error('目录来源在冻结期间改变；请重新读取后重试')
+      active()
+    } }
   }
   async readAuthorizedFile(context: AgentFileContext, raw: string): Promise<{ path: string; name: string; version: string; bytes: Uint8Array }> {
     context.assertActive?.()
@@ -280,9 +347,18 @@ export class AgentFileService implements AgentFilePort {
       filename = await this.filename(context, input.path, name === 'office.inspect' ? 'read' : 'write', name !== 'office.inspect', true)
       if (name === 'office.edit' && officeFormat(filename) !== officeContentSchemas['office.edit'].parse(raw).content.format) throw new Error('Office 文件原格式与修改内容不符')
     }
-    return { paths: [filename], outside: !isInsideRoot(context.workspaceRoot, filename) }
+    return { paths: [filename], outside: !this.inWriteRoot(context, filename) }
+  }
+  private assemblyOutcome(context: AgentFileContext, outcome: AgentFileOutcome): AgentFileOutcome {
+    const data = outcome.data
+    return context.assemblyRoot && data && typeof data === 'object' && 'path' in data && typeof data.path === 'string'
+      && isInsideRoot(context.assemblyRoot, data.path)
+      ? { ...outcome, data: { ...data, purpose: 'assembly' as const } } : outcome
   }
   async executeOffice(context: AgentFileContext, name: OfficeContentToolName, raw: unknown, operationId: string): Promise<AgentFileOutcome> {
+    return this.assemblyOutcome(context, await this.executeOfficeWithinScope(context, name, raw, operationId))
+  }
+  private async executeOfficeWithinScope(context: AgentFileContext, name: OfficeContentToolName, raw: unknown, operationId: string): Promise<AgentFileOutcome> {
     if (!context.workspaceRoot || !path.isAbsolute(context.workspaceRoot)) throw new Error('任务缺少已冻结的工作空间位置')
     context.assertActive?.()
     const scope = await this.preflightOffice(context, name, raw)
@@ -313,6 +389,9 @@ export class AgentFileService implements AgentFilePort {
     return { data: { ...saved, path: saved.binding.path, saved: true } }
   }
   async execute(context: AgentFileContext, name: AgentFileToolName, raw: unknown, operationId: string): Promise<AgentFileOutcome> {
+    return this.assemblyOutcome(context, await this.executeWithinScope(context, name, raw, operationId))
+  }
+  private async executeWithinScope(context: AgentFileContext, name: AgentFileToolName, raw: unknown, operationId: string): Promise<AgentFileOutcome> {
     context = { ...context, operationCall: { name, input: structuredClone(raw) } }
     if (name === 'file.write' || name === 'file.patch') this.host.tools.captureHostOperation(context.runId, operationId, context.operationCall!)
     if (!context.workspaceRoot || !path.isAbsolute(context.workspaceRoot)) throw new Error('任务缺少已冻结的工作空间位置')
@@ -328,10 +407,8 @@ export class AgentFileService implements AgentFilePort {
     if (name === 'file.open') {
       const input = agentFileSchemas[name].parse(raw), filename = await this.filename(context, input.path)
       const snapshot = await this.host.open(filename)
-      return { data: { path: filename, documentId: snapshot.documentId, kind: snapshot.model.kind }, opened: {
-        documentId: snapshot.documentId, kind: snapshot.model.kind, name: filename,
-        writable: context.permission !== 'read-only' && (context.permission === 'full' || isInsideRoot(context.workspaceRoot, filename)),
-      } }
+      return { data: { path: filename, documentId: snapshot.documentId, kind: snapshot.model.kind },
+        opened: this.openedFile(context, filename, snapshot) }
     }
     if (name === 'file.observe') return this.observeFile(context, raw)
     if (name === 'file.reconcile') return this.reconcileFile(context, raw)
@@ -372,7 +449,9 @@ export class AgentFileService implements AgentFilePort {
     if (name === 'file.mkdir' || name === 'file.copy' || name === 'file.move' || name === 'file.rename' || name === 'file.trash') {
       const scope = await this.preflightMutation(context, name, raw)
       const sourceCount = name === 'file.copy' ? agentFileSchemas[name].parse(raw).sources.length : 0
-      await this.requireMutationScope(context, scope.paths, sourceCount)
+      const destructiveSources = name === 'file.rename' ? 1 : name === 'file.trash' ? scope.paths.length
+        : name === 'file.move' ? agentFileSchemas[name].parse(raw).sources.length : 0
+      await this.requireMutationScope(context, scope.paths, sourceCount, destructiveSources)
       return this.organize(context, name, raw, operationId, scope.paths)
     }
     const input = creationInput(raw)
@@ -408,6 +487,11 @@ export class AgentFileService implements AgentFilePort {
     if (preflight.outside && context.permission !== 'full' && context.approvedOutsideDirectory !== directory
       && !(context.approvedOutsidePaths ?? []).some(approved => isInsideRoot(approved, path.join(directory, input.name))))
       throw new Error('工作空间外新建文件需要明确批准')
+    const target = path.join(directory, input.name)
+    // Preserve the existing exact-directory approval for this creation only,
+    // then use the same final write boundary as patch/write/office operations.
+    await this.requireMutationScope(context.approvedOutsideDirectory === directory
+      ? { ...context, approvedOutsidePaths: [...(context.approvedOutsidePaths ?? []), target] } : context, [target])
     const root = await this.host.files.registerRoot(directory)
     context.assertActive?.()
     const receipt = await this.host.files.createFile({ operationId, workspaceId: root.workspaceId, targetDirectoryId: root.rootEntryId,
@@ -434,6 +518,8 @@ export class AgentFileService implements AgentFilePort {
   private async rootFor(context: AgentFileContext, paths: string[]) {
     const workspace = await fs.realpath(context.workspaceRoot)
     if (paths.every(value => isInsideRoot(workspace, value))) return this.host.files.registerRoot(workspace)
+    if (context.assemblyRoot && paths.every(value => isInsideRoot(context.assemblyRoot!, value)))
+      return this.host.files.registerRoot(context.assemblyRoot)
     const drive = path.parse(paths[0]!).root
     if (!paths.every(value => path.parse(value).root.toLowerCase() === drive.toLowerCase()))
       throw new Error('当前文件整理不支持跨磁盘复制或移动；请分别选择同一磁盘的目标')

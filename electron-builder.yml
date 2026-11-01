@@ -10,7 +10,11 @@ directories:
 files:
   - dist-electron/**
   - dist-renderer/**
-  - dist-player/**
+  # Export player code is embedded by the renderer build; do not ship it twice.
+  - "!**/*.map"
+  - "!dist-renderer/vendor/compute-runtime/**"
+  - "!dist-electron/main/workbench/compute/PyodideComputeBackend.js"
+  - "!dist-electron/preload/compute.js"
   - resources/icons/icon.png
   - resources/icons/icon.ico
   # Built-in catalog, packages and thumbnails are application resources.
@@ -20,6 +24,21 @@ files:
   - resources/built-in-components/components/**/thumbnail.svg
   - package.json
 extraResources:
+  # Preserve the real relative links; include useful references, not the development archive.
+  - from: .
+    to: reference-library
+    filter:
+      - creative-reference/README.md
+      - docs/creative-production/works/coffee-journey/runtime-first-system-20261025/METHOD.md
+      - docs/creative-production/works/coffee-journey/runtime-first-system-20261025/ASSET_INDEX.md
+      - docs/creative-production/works/coffee-journey/runtime-first-system-20261025/FEEDBACK.md
+      - docs/creative-production/works/coffee-journey/runtime-first-system-20261025/assets/continuous-background/*
+      - docs/creative-production/works/coffee-journey/design/v08-runtime-first/final-20261025/README.md
+      - docs/creative-production/works/coffee-journey/design/v08-runtime-first/final-20261025/coffee-journey-v08-runtime-first-final.glx
+      - docs/creative-production/works/coffee-journey/design/v08-runtime-first/final-20261025/coffee-journey-v08-runtime-first-final.html
+      - docs/creative-production/works/coffee-journey/design/v08-runtime-first/final-20261025/DELIVERY_MANIFEST.json
+      - docs/development-plan/20261028-productivity-acp/RESULT.md
+      - docs/development-plan/20261026-product-execution/RESULT.md
   - from: resources/mcp-bootstrap
     to: mcp-bootstrap
   - from: resources/file-publish/file-publish.exe

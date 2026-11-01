@@ -4,6 +4,7 @@ import { componentSurfaces } from '../../src/shared/contracts/component-platform
 import { expect, it } from 'vitest'
 import { createBlankCourseProjectV10 } from '../../src/core/course/createCourseProjectV10'
 import { componentAuthorSourceRuntimeNote } from '../../src/core/components/source/componentAuthorSource'
+import { loadBuiltinComponentSource } from '../../src/core/components/source/builtinSources'
 import { componentProjectApiReferencePath, componentProjectFiles, componentProjectScopeFiles } from '../../src/core/projectFiles/componentPlatform/projection'
 import { prepareComponentProjectFileSource } from '../../src/main/workbench/projectFiles/componentPlatformFileInput'
 
@@ -19,7 +20,8 @@ function fixture() {
   return { project, resources: { assets: {}, components: {} as Record<string, Record<string, Uint8Array>> } }
 }
 
-it('keeps the complete API in one directly readable reference instead of every Source note', () => {
+it('keeps the complete API in one directly readable reference instead of every Source note', async () => {
+  await loadBuiltinComponentSource('guoling.web')
   const { project, resources } = fixture()
   const before = structuredClone(project)
   const files = componentProjectFiles(project, resources)

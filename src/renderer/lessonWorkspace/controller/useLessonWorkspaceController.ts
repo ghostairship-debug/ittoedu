@@ -1,4 +1,5 @@
 import { isNativeProjectFilename } from '../../../shared/nativeProjectFile'
+import { fileCapabilities } from '../../../shared/workbench/sourceFileKind'
 import { useEffect, useRef, useState } from 'react'
 import { type LessonProject, type LessonWorkspace } from '../../../shared/lessonWorkspace'
 import type { LessonDesktopRequest, LessonDesktopResult, LessonDirectoryEntry } from '../../../shared/lessonDesktopContract'
@@ -207,8 +208,10 @@ export function useLessonWorkspaceController(props: LessonWorkspaceControllerPro
         }
         return
       }
-      // Markdown、纯文本与 HTML 都通过同一正式文档会话打开。
-      if (/\.(?:md|markdown|txt|html?)$/i.test(entry.name)) {
+      const capability = fileCapabilities(entry.name)
+      if (capability.openKind === 'blocked') throw new Error(`不能从果铃运行可执行文件或系统快捷方式：${entry.name}`)
+      // 代码、配置和无扩展名文本与 Markdown 共用正式文档会话；内容仍由 Driver 验证。
+      if (capability.openKind === 'document') {
         const lesson = current.current.lesson
         try {
           await props.tabs.openTab({ path: entry.path, name: entry.name, kind: 'document', lesson })
@@ -222,12 +225,17 @@ export function useLessonWorkspaceController(props: LessonWorkspaceControllerPro
         if (generation === workspaceGeneration.current) setMobilePane('workbench')
         return
       }
-      if (/\.(?:pdf|png|jpe?g|webp|avif|gif|svg)$/i.test(entry.name)) {
+      if (capability.openKind === 'presentation') {
+        await props.tabs.openTab({ path: entry.path, name: entry.name, kind: 'presentation', lesson: current.current.lesson })
+        if (generation === workspaceGeneration.current) setMobilePane('workbench')
+        return
+      }
+      if (capability.openKind === 'media') {
         await props.tabs.openTab({ path: entry.path, name: entry.name, kind: 'media', lesson: current.current.lesson })
         if (generation === workspaceGeneration.current) setMobilePane('workbench')
         return
       }
-      // 其余文件用系统默认应用打开；失败给出明确回执。
+      // 已知的其他文档、素材或二进制交给系统关联程序；不执行程序或快捷方式。
       const result = await props.lessonOperation({ operation: 'open-external', path: entry.path })
       if (result.opened === false) throw new Error(`无法用系统应用打开 ${entry.name}：${result.openError ?? '没有可用的关联程序'}`)
     })

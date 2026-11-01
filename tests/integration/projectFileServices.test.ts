@@ -7,10 +7,35 @@ import { createProjectFileServices } from '../../src/main/workbench/projectFiles
 import { DocumentHostService } from '../../src/main/workbench/DocumentHostService'
 import { CourseV10Driver } from '../../src/core/drivers/CourseV10Driver'
 import { createBlankCourseProjectV10 } from '../../src/core/course/createCourseProjectV10'
+import { readComponentProjectFileInput } from '../../src/main/workbench/projectFiles/componentPlatformFileInput'
 
 const roots: string[] = []
 afterEach(async () => {
   for (const root of roots.splice(0)) if (path.resolve(root).startsWith(path.resolve(os.tmpdir()) + path.sep)) await fs.rm(root, { recursive: true, force: true })
+})
+
+it('reads current and granted prior assembly sources while keeping each media closure inside its own run root', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'assembly-source-')); roots.push(root)
+  const workspace = path.join(root, 'workspace'), assembly = path.join(root, 'runs', 'current', 'assembly'), prior = path.join(root, 'runs', 'prior', 'assembly')
+  await fs.mkdir(workspace)
+  const code = 'export const own = new URL("./own.wav", import.meta.url); export const neighbor = new URL("../private.wav", import.meta.url);'
+  for (const directory of [assembly, prior]) {
+    await fs.mkdir(directory, { recursive: true })
+    await fs.writeFile(path.join(directory, 'main.js'), code)
+    await fs.writeFile(path.join(directory, 'own.wav'), new Uint8Array([1, 2, 3]))
+    await fs.writeFile(path.join(directory, '..', 'private.wav'), new Uint8Array([4, 5, 6]))
+    for (const permission of ['workspace', 'full'] as const) {
+      const captured = await readComponentProjectFileInput({ from: path.join(directory, 'main.js'),
+        fileAccess: { permission, workspaceRoot: workspace, assemblyRoot: assembly, assemblyReadRoots: [prior] } })
+      expect(captured.text).toBe(code)
+      expect(captured.siblingFiles?.get('own.wav')).toEqual(new Uint8Array([1, 2, 3]))
+      expect([...captured.siblingFiles!.keys()]).not.toContain('../private.wav')
+      expect(captured.diagnostics).toEqual(expect.arrayContaining([expect.objectContaining({ reference: '../private.wav' })]))
+    }
+  }
+  expect((await readComponentProjectFileInput({ from: 'main.js', fileAccess: { permission: 'workspace', assemblyRoot: assembly } })).text).toBe(code)
+  await expect(readComponentProjectFileInput({ from: path.join(prior, 'main.js'),
+    fileAccess: { permission: 'workspace', workspaceRoot: workspace, assemblyRoot: assembly } })).rejects.toThrow('授权工作空间外')
 })
 
 it('opens real V10 courses under the frozen path grant, preserving read-only authority and rejecting directory and symlink escapes', async () => {

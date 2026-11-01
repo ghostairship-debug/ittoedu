@@ -8,6 +8,7 @@ import { WorkspaceDocumentTabs } from './WorkspaceDocumentTabs'
 import { WorkspaceDocumentStatus } from './WorkspaceDocumentStatus'
 import { LessonDocumentEditor } from '../../documentFiles/LessonDocumentEditor'
 import { MediaFileEditor } from '../../documentFiles/media/MediaFileEditor'
+import { PptxFilePreview } from '../../documentFiles/office/PptxFilePreview'
 import { usePptxPicker } from './usePptxPicker'
 import { CourseImportMenu } from '../../ui/CourseImportMenu'
 function relativeFile(lesson: LessonWorkspace, filename: string) {
@@ -150,6 +151,19 @@ export function WorkspaceContentHost({ props, layout, editorFocus, enterEditor, 
                 onContextualCommand={(instruction, target) => tabs.sendContextualCommand(tab.id, instruction, target)}
               />
             )
+          ) : tab.kind === 'presentation' && tab.pptxSnapshot ? (
+            <PptxFilePreview bytes={tab.pptxSnapshot.bytes} name={tab.name} active={tabs.activeTab === tab.id && !layout.prefs.contentClosed}
+              onReload={async () => { await tabs.reloadPptx(tab.id) }}
+              onOpenExternal={async () => {
+                const result = await props.operation({ operation: 'open-external', path: tab.path })
+                if (result.opened === false) throw new Error(result.openError ?? '没有可用的关联程序')
+              }}
+              onImportToCourse={async () => {
+                const snapshot = await tabs.reloadPptx(tab.id)
+                const file = new File([Uint8Array.from(snapshot.bytes)], snapshot.binding.path.split(/[\\/]/).pop() ?? tab.name,
+                  { type: 'application/vnd.openxmlformats-officedocument.presentationml.presentation' })
+                if (await actions.newCourseFromPptx(file)) { layout.setContentClosed(false); actions.setMobilePane('workbench') }
+              }} />
           ) : tab.kind === 'media' && tab.mediaSnapshot ? (
             <MediaFileEditor
               ref={tabs.mediaEditorRef(tab.id)}

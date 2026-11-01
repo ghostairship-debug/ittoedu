@@ -24,23 +24,23 @@ function completed(request: ModelRequest, name?: string, input?: unknown): Extra
   const calls = name ? [{ id: `${name}-${request.requestId}`, type: 'function' as const, function: { name, arguments: JSON.stringify(input) } }] : []
   return { requestId: request.requestId, sequence: 1, type: 'response.completed', responseId: `r-${request.requestId}`, actualModel: 'fixture', nativeResponse: {},
     finishReason: calls.length ? 'tool_calls' : 'stop', toolCalls: calls.map(call => ({ id: call.id, name: call.function.name, argumentsText: call.function.arguments })),
-    assistant: { role: 'assistant', content: '', ...(calls.length ? { tool_calls: calls } : {}) } }
+    assistant: { role: 'assistant', content: calls.length ? '' : '已完成指定修改。', ...(calls.length ? { tool_calls: calls } : {}) } }
 }
 
-it('directly exposes object styling in the first wire request and preserves frozen text, read-only and graph authority', async () => {
+it('keeps selected-object disclosure compact, resolves exact styling calls and preserves frozen text, read-only and graph authority', async () => {
   const directory = await mkdtemp(path.join(tmpdir(), 'g20-family-route-')); cleanup.push(directory)
   const host = new DocumentHostService(path.join(directory, 'documents'))
   const { model } = createCurrentSelectionFixture()
   const original = structuredClone(model)
   const snapshot = await host.internalAPI.create(model, 'mixed.glx')
   const selected: ToolTarget = { kind: 'course-instance', surfaceId: 'page', instanceId: 'scene-text' }
-  const firstWire: any[] = [], requestNames: string[][] = []
+  const wires: any[][] = [], requestNames: string[][] = []
   const provider: ModelProvider = { async *stream(request) {
     const index = requestNames.length
     requestNames.push(request.tools?.map(tool => tool.name) ?? [])
+    const wire = JSON.parse(serializeModelRequest(request)) as { tools: any[] }
+    wires.push(wire.tools)
     if (index === 0) {
-      const wire = JSON.parse(serializeModelRequest(request)) as { tools: any[] }
-      firstWire.push(...wire.tools)
       const refs = JSON.parse(String(request.messages[1]!.content).split('：')[1]) as { selection: { writableTarget?: string }[] }[]
       expect(refs[0]!.selection[0]!.writableTarget).toBeTruthy()
       yield completed(request, 'object.update', { target: refs[0]!.selection[0]!.writableTarget,
@@ -52,11 +52,16 @@ it('directly exposes object styling in the first wire request and preserves froz
   const run = await engine.wait((await engine.start({ conversationId: 'c', taskId: 'style', instruction: '把选中标题改成蓝色，文字不变', selection,
     documents: [{ documentId: snapshot.documentId, writable: [{ kind: 'document' }], selection: [selected] }] })).runId)
   expect(run.status).toBe('completed')
-  const update = firstWire.find(tool => tool.function.name === modelToolWireName('object.update'))
+  const firstWire = wires[0]!, nextWire = wires[1]!
+  // The captured single object now selects content-edit. Exact registered calls
+  // remain executable and expand the catalog without granting broader authority.
+  expect(firstWire.map(tool => tool.function.name)).not.toContain(modelToolWireName('object.update'))
+  expect(firstWire.map(tool => tool.function.name)).toContain(modelToolWireName('project.apply'))
+  const update = nextWire.find(tool => tool.function.name === modelToolWireName('object.update'))
   expect(update?.function.description).toContain('data/style')
   expect(update?.function.description).toContain('frame')
   expect(firstWire.find(tool => tool.function.name === modelToolWireName('text.replace'))?.function.description).toContain('替换')
-  expect(firstWire.map(tool => tool.function.name)).toContain(modelToolWireName('object.update'))
+  expect(nextWire.map(tool => tool.function.name)).toContain(modelToolWireName('object.update'))
   expect(requestNames).toHaveLength(2)
   expect(run.tools).toMatchObject([{ call: { name: 'object.update' }, result: { kind: 'document-operation', result: { status: 'applied' } } }])
   const current = host.registry.get(snapshot.documentId).read()
@@ -96,5 +101,15 @@ it('directly exposes object styling in the first wire request and preserves froz
   expect(graphTools).not.toContain('object.update')
   expect(graphTools).not.toContain('project.save')
   expect((await host.tools.availableToolFamilies('graph-only')).find(family => family.family === 'content')).toBeDefined()
-  expect((await host.tools.availableToolFamilies('graph-only')).find(family => family.family === 'layout')).toBeUndefined()
+  // Discovery may describe connected capabilities outside this initial profile;
+  // loading a family still cannot expand the frozen graph writer.
+  expect((await host.tools.availableToolFamilies('graph-only')).find(family => family.family === 'layout')).toBeDefined()
+  await host.tools.loadToolFamilies('graph-only', ['layout'])
+  const graphBefore = host.registry.get(graphDocument.documentId).read()
+  const graphObject = await host.tools.issueTarget('graph-only', graphDocument.documentId,
+    { kind: 'course-instance', surfaceId: 'spatial', instanceId: 'spatial-label' }, { readOnly: true })
+  expect(await host.tools.execute('graph-only', 'no-object-style-after-discovery', { name: 'object.update', input: {
+    target: graphObject, properties: { data: { appearance: { color: '#ff0000' } } },
+  } })).toMatchObject({ kind: 'error', code: 'not-authorized' })
+  expect(host.registry.get(graphDocument.documentId).read()).toEqual(graphBefore)
 })

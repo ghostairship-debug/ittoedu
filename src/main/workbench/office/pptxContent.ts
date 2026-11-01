@@ -37,12 +37,19 @@ function slideParts(pkg: OfficePackage): string[] {
   })
 }
 
-function shapes(pkg: OfficePackage, part: string): Array<{ name: string; node: Element; paragraphs: Element[] }> {
+function shapes(pkg: OfficePackage, part: string): Array<{ shapeId: string; name: string; node: Element; paragraphs: Element[] }> {
   // Text shapes can be nested inside groups. Do not flatten or regenerate the group.
   return descendants(pkg.xml(part), NS.slide, 'sp').map(node => ({
+    shapeId: descendants(node, NS.slide, 'cNvPr')[0]?.getAttribute('id') ?? '',
     name: descendants(node, NS.slide, 'cNvPr')[0]?.getAttribute('name') ?? '', node,
     paragraphs: descendants(node, NS.drawing, 'p'),
   }))
+}
+
+function paragraphText(paragraph: Element): string {
+  // Keep explicit DrawingML breaks visible in the inspected value, so removing one is an actual edit.
+  return descendants(paragraph, NS.drawing, '*')
+    .map(node => node.localName === 'br' ? '\n' : node.localName === 't' ? node.textContent ?? '' : '').join('')
 }
 
 export function editPptx(pkg: OfficePackage, request: OfficeRequest<'pptx', 'edit'>) {
@@ -50,8 +57,10 @@ export function editPptx(pkg: OfficePackage, request: OfficeRequest<'pptx', 'edi
   for (const edit of request.edits) {
     const part = parts[edit.slide]
     if (!part) throw new Error(`PPT 幻灯片不存在：${edit.slide}`)
-    const targets = shapes(pkg, part).filter(shape => shape.name === edit.shape)
-    if (targets.length !== 1) throw new Error(`PPT 文本形状须唯一：${edit.shape}（匹配 ${targets.length}）`)
+    if (edit.part !== undefined && edit.part !== part) throw new Error('PPT 幻灯片位置已改变，请重新读取原件后修改')
+    if (edit.partVersion !== undefined && edit.partVersion !== pkg.partVersion(part)) throw new Error('PPT 幻灯片内容已改变，请重新读取原件后修改')
+    const targets = shapes(pkg, part).filter(shape => edit.shapeId !== undefined ? shape.shapeId === edit.shapeId : shape.name === edit.shape)
+    if (targets.length !== 1) throw new Error(`PPT 文本形状须唯一：${edit.shapeId ?? edit.shape}（匹配 ${targets.length}）`)
     const shape = targets[0]
     let paragraphs = shape.paragraphs
     if (edit.paragraph !== undefined) {
@@ -60,6 +69,8 @@ export function editPptx(pkg: OfficePackage, request: OfficeRequest<'pptx', 'edi
       paragraphs = [paragraph]
     }
     if (!paragraphs.length) throw new Error('PPT 目标没有可编辑文本段落')
+    // An unchanged inspector value must not flatten runs, remove breaks, or rewrite a signed package.
+    if (paragraphs.map(paragraphText).join('\n') === edit.text.replace(/\r\n/g, '\n')) continue
     const lines = edit.text.split(/\r?\n/)
     const body = descendants(shape.node, NS.slide, 'txBody')[0]
     if (lines.length > paragraphs.length && edit.paragraph !== undefined) throw new Error('段落局部修改不能增加段落；请修改整个文本形状')
@@ -79,8 +90,8 @@ export function editPptx(pkg: OfficePackage, request: OfficeRequest<'pptx', 'edi
 }
 
 export function inspectPptx(pkg: OfficePackage): Extract<OfficeContentInspection, { format: 'pptx' }> {
-  return { format: 'pptx', slides: slideParts(pkg).map((part, index) => ({ index, shapes: shapes(pkg, part).map(shape => ({
-    name: shape.name, text: shape.paragraphs.map(paragraph => textOf(paragraph, NS.drawing)).join('\n'),
-    paragraphs: shape.paragraphs.map(paragraph => textOf(paragraph, NS.drawing)),
+  return { format: 'pptx', slides: slideParts(pkg).map((part, index) => ({ index, part, partVersion: pkg.partVersion(part), shapes: shapes(pkg, part).map(shape => ({
+    shapeId: shape.shapeId, name: shape.name, text: shape.paragraphs.map(paragraphText).join('\n'),
+    paragraphs: shape.paragraphs.map(paragraphText),
   })) })) }
 }

@@ -68,8 +68,10 @@ export function navigationCoverage(state: TeacherControllerSnapshot, facts: Navi
   const hasMaster=targets.some(target=>target.kind==='state')
   const previousTarget=stepIndex>0 ? hasMaster&&stepIndex===1 ? {type:'scene.go' as const,sceneId:state.locationId!} : targets[hasMaster?stepIndex-2:stepIndex-1]?.action : state.scenes[sceneIndex-1] ? {type:'scene.go' as const,sceneId:state.scenes[sceneIndex-1]!.id}:undefined
   const nextTarget=stepIndex<stepCount-1 ? targets[hasMaster?stepIndex:stepIndex+1]?.action : state.scenes[sceneIndex+1] ? {type:'scene.go' as const,sceneId:state.scenes[sceneIndex+1]!.id}:undefined
-  const previous=actions.some(a=>a.type==='step.previous'||a.type==='scene.previous'&&(natural||stepIndex===0)||previousTarget&&same(a,previousTarget))
-  const next=actions.some(a=>a.type==='step.next'||a.type==='scene.next'&&(natural||stepIndex>=stepCount-1)||nextTarget&&same(a,nextTarget))
+  // Authored page arrows may deliberately skip the page's internal steps. Their
+  // navigation remains complete; a fallback must not impose another sequence.
+  const previous=actions.some(a=>a.type==='step.previous'||a.type==='scene.previous'||previousTarget&&same(a,previousTarget))
+  const next=actions.some(a=>a.type==='step.next'||a.type==='scene.next'||nextTarget&&same(a,nextTarget))
   const directory=actions.some(a=>a.type==='scene.open-picker')||neededTargets.length>0&&neededTargets.every(target=>actions.some(a=>same(a,target)))
   // Sequential content navigation is complete without imposing an unrelated random-access menu.
   const needsDirectory=wantsDirectory&&(natural||!previous&&!next&&!directory)

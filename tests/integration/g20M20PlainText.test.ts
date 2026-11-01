@@ -107,7 +107,7 @@ it('gives direct source write targets when opening .txt and creating .html', asy
     const toolCalls = call ? [{ id: `call-${turn}`, name: call.name, argumentsText: JSON.stringify(call.input) }] : []
     return { requestId: request.requestId, sequence: 1, type: 'response.completed', responseId: `response-${turn}`,
       actualModel: 'fixture-model', nativeResponse: {}, finishReason: call ? 'tool_calls' : 'stop', toolCalls,
-      assistant: { role: 'assistant', content: '', ...(call ? { tool_calls: [{ id: `call-${turn}`, type: 'function' as const,
+      assistant: { role: 'assistant', content: call ? '' : '正文已写入当前稿，尚未保存。', ...(call ? { tool_calls: [{ id: `call-${turn}`, type: 'function' as const,
         function: { name: call.name, arguments: JSON.stringify(call.input) } }] } : {}) } }
   }
   for (const [index, intent] of (['open', 'create'] as const).entries()) {
@@ -145,6 +145,7 @@ it('gives direct source write targets when opening .txt and creating .html', asy
     // R3 之后 file.create 建立的 .html 新文件若 run 内未显式 file.save，run 状态为 partial（unconfirmedSave 门）；
     // 修改仍 applied 到宿主文档 session，由后续 host 端显式持久化（见下方 readFile 断言验证磁盘原文未变）。
     expect(run.status, JSON.stringify(run.tools.map(tool => tool.result))).toBe(intent === 'create' ? 'partial' : 'completed')
+    expect(run.failure).toBeUndefined()
     expect(run.tools[1]?.result).toMatchObject({ kind: 'document-operation', result: { status: 'applied' } })
     const documentId = (run.tools[0]!.result as { data: { documentId: string } }).data.documentId
     expect((await host.internalAPI.read(documentId)).model).toMatchObject({ kind: 'text',
@@ -225,4 +226,30 @@ it('M20-T02 refuses external overwrite and GBK bytes without modifying either di
   await fs.writeFile(gbk, bytes)
   await expect(host.open(gbk)).rejects.toMatchObject({ code: 'TEXT_ENCODING_UNSUPPORTED' })
   expect(await fs.readFile(gbk)).toEqual(bytes)
+})
+
+it.each(['invalid.json', 'comments.jsonc', 'main.ts', 'settings.yaml', '.env', 'README', 'notes.custom'])('opens, edits, saves and cold-opens %s as exact UTF-8 source', async filename => {
+  const { directory, host } = await setup()
+  const destination = path.join(directory, filename)
+  // Deliberately invalid JSON: editing must never parse, normalize or reserialize the source.
+  const source = '\ufeff{\r\n  // 保留注释与格式\r\n  "value": broken,\r\n}\r\n'
+  const edited = source.replace('broken', 'still_broken')
+  await fs.writeFile(destination, source, 'utf8')
+  const opened = await host.open(destination)
+  expect(opened.model).toMatchObject({ kind: 'text', source })
+  expect(await change(host, opened, 'edit-source', edited)).toMatchObject({ status: 'applied' })
+  await host.saveToPath(opened.documentId)
+  expect(new Uint8Array(await fs.readFile(destination))).toEqual(new TextEncoder().encode(edited))
+  const coldHost = new DocumentHostService(path.join(directory, 'cold-recovery'))
+  expect((await coldHost.open(destination)).model).toMatchObject({ kind: 'text', source: edited })
+})
+
+it('rejects binary and non-UTF-8 extensionless files without writing to them', async () => {
+  const { directory, host } = await setup()
+  for (const [name, bytes] of [['BINARY', Buffer.from([0x7f, 0x45, 0x4c, 0x46, 0])], ['NONUTF8', Buffer.from([0xff, 0xfe, 0x61, 0])]] as const) {
+    const destination = path.join(directory, name)
+    await fs.writeFile(destination, bytes)
+    await expect(host.open(destination)).rejects.toMatchObject({ code: 'TEXT_ENCODING_UNSUPPORTED' })
+    expect(await fs.readFile(destination)).toEqual(bytes)
+  }
 })

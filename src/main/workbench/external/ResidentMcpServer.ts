@@ -35,7 +35,7 @@ export class ResidentMcpServer {
   private server?: Server
   private port?: number
   private readonly sessions = new Map<string, TransportSession>()
-  constructor(private readonly handler: ResidentMcpHandler) {}
+  constructor(private readonly handler: ResidentMcpHandler, private readonly authToken?: string) {}
   get listeningPort(): number | undefined { return this.port }
 
   async start(port: number): Promise<ResidentMcpListenResult> {
@@ -86,6 +86,8 @@ export class ResidentMcpServer {
     if (!port || request.url !== '/mcp' || ![`127.0.0.1:${port}`, `localhost:${port}`].includes(request.headers.host ?? '')) return this.respond(response, 404)
     // Native clients send no browser Origin; web pages and preview frames get no access.
     if (request.headers.origin !== undefined || !LOOPBACK.includes(request.socket.remoteAddress ?? '')) return this.respond(response, 403)
+    // ACP-owned instances are private capabilities; ordinary explicitly enabled resident MCP stays unchanged.
+    if (this.authToken && request.headers.authorization !== `Bearer ${this.authToken}`) return this.respond(response, 403)
     if (request.method === 'GET') return this.respond(response, 405, undefined, { Allow: 'POST, DELETE' })
     const sessionId = typeof request.headers['mcp-session-id'] === 'string' ? request.headers['mcp-session-id'] : undefined
     if (request.method === 'DELETE') {

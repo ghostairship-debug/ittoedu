@@ -97,16 +97,14 @@ it.each(['already-returned', 'during-collection', 'new-run-during-collection'])(
   expect(await fs.readdir(path.join(directory, 'snapshots'))).toEqual([])
   expect(await fs.readdir(path.join(directory, 'blobs'))).toEqual([])
 })
-it('CA-081 ignores inherited dev variables for packaged attachment and compute workers, selecting installed resources', () => {
-  const app = { isPackaged: true, getAppPath: () => 'D:/installed/app.asar' }, taskProcess = { env: { VITE_DEV_SERVER_URL: 'not a valid URL' } }, resolveRendererEntryUrl = vi.fn(() => { throw new Error('Dev URL should not be parsed') })
+it('CA-081 ignores inherited dev variables and keeps native Python outside the installed app', () => {
+  const app = { isPackaged: true, getAppPath: () => 'D:/installed/app.asar', getPath: () => 'D:/profile' }, taskProcess = { env: { VITE_DEV_SERVER_URL: 'not a valid URL' } }, resolveRendererEntryUrl = vi.fn(() => { throw new Error('Dev URL should not be parsed') })
   const dependencies = { app, process: taskProcess, resolveRendererEntryUrl }
   const dev = expression('src/main/workbench/attachments/attachmentsDesktopService.ts', node => node.type === 'VariableDeclarator' && node.id.name === 'dev' ? node.init : undefined, dependencies)
-  const computeDevURL = expression('src/main/workbench/workbenchToolServices.ts', node => node.type === 'VariableDeclarator' && node.id.name === 'computeDevURL' ? node.init : undefined, dependencies)
-  expect(dev).toBeUndefined(); expect(computeDevURL).toBeUndefined(); expect(resolveRendererEntryUrl).not.toHaveBeenCalled()
-  const options = expression('src/main/workbench/workbenchToolServices.ts', node => node.type === 'NewExpression' && node.callee.name === 'PyodideComputeBackend' ? node.arguments[0] : undefined,
-    { app, path, __dirname: 'D:/installed/dist/main/workbench', computeDevURL })
-  expect(options.rendererFile.replaceAll('\\', '/')).toBe('D:/installed/app.asar/dist-renderer/compute.html')
-  expect(options.runtimeDirectory.replaceAll('\\', '/')).toBe('D:/installed/app.asar/dist-renderer/vendor/compute-runtime')
+  expect(dev).toBeUndefined(); expect(resolveRendererEntryUrl).not.toHaveBeenCalled()
+  const options = expression('src/main/workbench/workbenchToolServices.ts', node => node.type === 'NewExpression' && node.callee.name === 'NativePythonComputeBackend' ? node.arguments[0] : undefined,
+    { app, path, net: {} })
+  expect(options.directory.replaceAll('\\', '/')).toBe('D:/profile/runtimes/python')
 })
 it('CA-082 obtains a current activity count from checkpoint summaries and live runs without reading history bodies', async () => {
   const store = new ExecutionRunStore(await fixture()), run = { schemaVersion: 1, runId: 'r', version: 1, status: 'running', input: { conversationId: 'c', documents: [] }, messages: [], tools: [], requests: [] } as any

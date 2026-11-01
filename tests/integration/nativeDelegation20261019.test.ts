@@ -67,7 +67,8 @@ async function fixture(provider: ModelProvider, resolveSelection?: ConstructorPa
       readArtifact: (...args) => delegation.readArtifact(...args), cancel: (...args) => delegation.cancel(...args), cancelRun: runId => delegation.cancelRun(runId) },
   })
   const events = new ExecutionEventStore({ directory: path.join(root, 'events') })
-  engine = new ExecutionEngine({ registry: host.registry, gateway: host.tools, provider, files, runs, events })
+  engine = new ExecutionEngine({ registry: host.registry, gateway: host.tools, provider, files, runs, events,
+    collaborationPeers: runId => delegation.collaborationPeers(runId) })
   const projection = new ExecutionDelegationProjection({ readRun: runId => engine.read(runId), append: event => events.append(event) })
   const unsubscribe = events.subscribe(event => projection.enqueue(event))
   cleanups.push(() => fs.rm(root, { recursive: true, force: true, maxRetries: 8, retryDelay: 25 }))
@@ -94,7 +95,7 @@ it('uses the same Engine for a complete tool loop, source reading, revision, sea
     expect(request.selection).toEqual(selection)
     if (childRequest(request)) {
       expect(body(request)).not.toContain('PRIVATE_PARENT_HISTORY_MUST_NOT_BE_FORKED')
-      const parentJob = /"parentJob":"([^"]+)"/.exec(body(request))?.[1]
+      const parentJob = /"replyToParentJob":"([^"]+)"/.exec(body(request))?.[1]
       job ||= parentJob!
       expect(parentJob).toBe(job)
       const snapshot = await h.delegation.status(parentRunId, job)
@@ -139,7 +140,8 @@ it('uses the same Engine for a complete tool loop, source reading, revision, sea
   expect(child?.input.conversationId).not.toBe(parent.input.conversationId)
   expect(child?.tools.map(tool => tool.call.name)).toEqual(['file.read', 'delegate.message', 'file.write', 'file.patch', 'file.read'])
   expect(parent.workingNote?.userConstraints).not.toContain('子任务已核对来源，正在形成候选。')
-  expect(parent.steering).toEqual(expect.arrayContaining([expect.objectContaining({ senderRunId: childRunId })]))
+  expect(parent.steering).toEqual(expect.arrayContaining([expect.objectContaining({ senderRunId: childRunId,
+    replyJob: job, senderRole: '场景作者' })]))
   expect(await fs.readFile(path.join(h.workspaceRoot, 'input.txt'), 'utf8')).toBe('source = 7')
   expect(await fs.readFile(path.join(h.workspaceRoot, 'delivered.md'), 'utf8')).toBe('# 场景\nsource = 7\n已修订')
   const snapshot = await h.delegation.status(parent.runId, job)
@@ -189,7 +191,8 @@ it('resumes the child history in a new candidate directory, keeps intermediate f
   const originalRecord = await h.engine.read(childRunId)
   await h.host.tools.execute(parent.runId, 'to-child', { name: 'delegate.message', input: { job: originalJob, text: '继续保持独立来源记录' } })
   const received = await h.engine.read(childRunId)
-  expect(received?.steering).toEqual(expect.arrayContaining([expect.objectContaining({ senderRunId: parent.runId, text: '继续保持独立来源记录' })]))
+  expect(received?.steering).toEqual(expect.arrayContaining([expect.objectContaining({ senderRunId: parent.runId,
+    replyJob: originalJob, senderRole: '父任务', text: '继续保持独立来源记录' })]))
   await expect(h.delegation.message('unrelated-run', originalJob, 'bad', '不应投递')).rejects.toMatchObject({ code: 'job-not-authorized' })
   releaseChild.resolve()
   const original = await h.delegation.wait(parent.runId, originalJob, 30_000)
@@ -362,3 +365,132 @@ it('sends an explicit child model to the existing Provider and preserves it when
   expect(childSelections.every(value => JSON.stringify(value) === JSON.stringify(chosen))).toBe(true)
   expect(resolveSelection.mock.calls.at(-1)?.[1]).toEqual(chosen)
 })
+
+it('reprepares a failed-before-start child from a new authorized parent continuation', async () => {
+  let childTurns = 0
+  const provider: ModelProvider = { async *stream(request, options) {
+    if (!childRequest(request)) {
+      await new Promise<void>(resolve => {
+        if (options?.signal?.aborted) resolve()
+        else options?.signal?.addEventListener('abort', () => resolve(), { once: true })
+      })
+      return
+    }
+    const step = [
+      { name: 'file.read', input: { path: 'missing.txt' } },
+      { name: 'file.write', input: { mode: 'create', path: 'candidate.md', content: 'recovered candidate' } },
+    ][childTurns++]
+    yield completed(request, step ? [step] : [])
+  } }
+  const h = await fixture(provider), parent = await h.start()
+  const initial = await h.host.tools.execute(parent.runId, 'missing-source', { name: 'delegate.agent',
+    input: { goal: 'Prepare source and write candidate', sources: ['missing.txt'], outputs: ['candidate.md'] } })
+  if (initial.kind !== 'read') throw new Error(JSON.stringify(initial))
+  const job = (initial.data as { job: string }).job
+  const failed = await h.delegation.wait(parent.runId, job, 5000)
+  expect(failed).toMatchObject({ status: 'failed', executionStarted: false })
+  expect(failed.childRunId).toBeUndefined()
+  await h.engine.stop(parent.runId)
+  await fs.writeFile(path.join(h.workspaceRoot, 'missing.txt'), 'new authorized material')
+  const current = await h.engine.resume(parent.runId, { ...parent.input, instruction: '材料已恢复，继续原任务' })
+  const result = await h.host.tools.execute(current.runId, 'reprepare-source', { name: 'delegate.resume',
+    input: { job, goal: 'Prepare current material and finish', sources: ['missing.txt'], outputs: ['candidate.md'] } })
+  expect(result, JSON.stringify(result)).toMatchObject({ kind: 'read' })
+  if (result.kind !== 'read') throw new Error(JSON.stringify(result))
+  const retried = await h.delegation.wait(current.runId, (result.data as { job: string }).job, 5000)
+  expect(retried, retried.reason).toMatchObject({ status: 'ready', candidateComplete: true })
+  expect(retried.resumedFrom).toBeUndefined()
+  expect((await h.engine.read(retried.childRunId!))?.input.documents).toEqual([])
+  expect(await h.host.tools.execute(current.runId, 'no-old-cancel', { name: 'job.cancel', input: { kind: 'delegation', job } }))
+    .toMatchObject({ kind: 'error' })
+  expect(await h.delegation.status(parent.runId, job)).toMatchObject({ status: 'failed', executionStarted: false })
+  await h.engine.stop(current.runId)
+}, 20_000)
+
+it('discovers late peers and carries a usable reply identity through sibling messages', async () => {
+  const parentGate = deferred(), childGate = deferred(), enteredA = deferred(), enteredB = deferred()
+  let lateJob = ''
+  const provider: ModelProvider = { async *stream(request, options) {
+    const until = (gate: ReturnType<typeof deferred>) => Promise.race([gate.promise,
+      new Promise<void>(resolve => options?.signal?.addEventListener('abort', () => resolve(), { once: true }))])
+    if (!childRequest(request)) { await until(parentGate); if (!options?.signal?.aborted) yield completed(request); return }
+    const isA = body(request).includes('"rolePreference":"作者甲"')
+    ;(isA ? enteredA : enteredB).resolve()
+    await until(childGate)
+    if (options?.signal?.aborted) return
+    const written = data(request).some(value => value.saved === true)
+    if (written && isA) {
+      expect(body(request)).toContain(`"job":"${lateJob}"`)
+      expect(body(request)).toContain(`"replyJob":"${lateJob}"`)
+    }
+    yield completed(request, written ? [] : [{ name: 'file.write', input: { mode: 'create', path: 'candidate.md',
+      content: isA ? '作者甲的候选' : '作者乙的候选' } }])
+  } }
+  const h = await fixture(provider), parent = await h.start()
+  const start = async (name: string, role: string) => {
+    const result = await h.host.tools.execute(parent.runId, name, { name: 'delegate.agent',
+      input: { goal: '在独立候选中完成一个模块', role, outputs: ['candidate.md'] } })
+    if (result.kind !== 'read') throw new Error(JSON.stringify(result))
+    return (result.data as { job: string }).job
+  }
+  const a = await start('author-a', '作者甲')
+  await enteredA.promise
+  const aRun = (await h.delegation.status(parent.runId, a)).childRunId!
+  expect(await h.delegation.collaborationPeers(aRun)).toEqual([])
+  const b = await start('author-b', '作者乙')
+  lateJob = b
+  await enteredB.promise
+  const bRun = (await h.delegation.status(parent.runId, b)).childRunId!
+  expect(await h.delegation.collaborationPeers(aRun)).toEqual(expect.arrayContaining([
+    expect.objectContaining({ job: b, role: '作者乙', status: 'running' }),
+  ]))
+  await h.delegation.message(aRun, b, 'ask-coordinate', '请确认共享坐标的单位')
+  const question = (await h.engine.read(bRun))!.steering!.find(value => value.text === '请确认共享坐标的单位')!
+  expect(question).toMatchObject({ senderRunId: aRun, replyJob: a, senderRole: '作者甲' })
+  await h.delegation.message(bRun, question.replyJob!, 'reply-coordinate', '坐标单位为米')
+  expect((await h.engine.read(aRun))!.steering).toEqual(expect.arrayContaining([
+    expect.objectContaining({ senderRunId: bRun, replyJob: b, senderRole: '作者乙', text: '坐标单位为米' }),
+  ]))
+  await expect(h.delegation.message(aRun, 'parentJob', 'wrong-job', '不能把字段名当编号'))
+    .rejects.toMatchObject({ code: 'unknown-job' })
+  await h.delegation.message(parent.runId, a, 'accepted-before-completion', '保留原目标并完成候选')
+  childGate.resolve()
+  expect(await h.delegation.wait(parent.runId, a, 10_000)).toMatchObject({ status: 'ready' })
+  expect(await h.delegation.wait(parent.runId, b, 10_000)).toMatchObject({ status: 'ready' })
+  expect(await h.delegation.message(parent.runId, a, 'accepted-before-completion', '保留原目标并完成候选'))
+    .toMatchObject({ status: 'accepted', job: a })
+  await expect(h.delegation.message(parent.runId, a, 'accepted-before-completion', '用相同提交编号改写正文'))
+    .rejects.toThrow('同一调整提交编号')
+  await expect(h.delegation.message(parent.runId, a, 'new-after-terminal', '继续写'))
+    .rejects.toMatchObject({ code: 'message-terminal' })
+  parentGate.resolve()
+  await h.engine.stop(parent.runId)
+}, 30_000)
+
+it('retains a completed run assembly and reads it through an explicit same-task continuation', async () => {
+  const firstGate = deferred()
+  let oldSource = '', continuationTurns = 0, continuing = false
+  const provider: ModelProvider = { async *stream(request) {
+    if (!continuing) { await firstGate.promise; yield completed(request); return }
+    yield continuationTurns++ === 0 ? completed(request, [{ name: 'file.read', input: { path: oldSource } }]) : completed(request)
+  } }
+  const h = await fixture(provider), original = await h.start('第一轮保留装配输入')
+  expect(original.assemblyRoot).toBeTruthy()
+  expect(original.assemblyRoot).not.toBe(h.workspaceRoot)
+  oldSource = path.join(original.assemblyRoot!, 'recovery.md')
+  await fs.writeFile(oldSource, 'unfinished adoption input')
+  firstGate.resolve()
+  expect((await h.engine.wait(original.runId)).status).toBe('completed')
+  expect(await fs.readFile(oldSource, 'utf8')).toBe('unfinished adoption input')
+  continuing = true
+  const continued = await h.engine.resume(original.runId, original.input)
+  expect(continued.input.instruction).toBe(original.input.instruction)
+  expect(continued.assemblyRoot).not.toBe(original.assemblyRoot)
+  const final = await h.engine.wait(continued.runId)
+  expect(final.status).toBe('completed')
+  expect(final.tools.find(tool => tool.call.name === 'file.read')?.result)
+    .toMatchObject({ kind: 'read', data: { text: 'unfinished adoption input' } })
+  expect(final.messages.some(message => typeof message.content === 'string' && message.content.includes('readOnlyPrevious')
+    && message.content.includes(JSON.stringify(original.assemblyRoot!).slice(1, -1)))).toBe(true)
+  expect(await fs.readFile(oldSource, 'utf8')).toBe('unfinished adoption input')
+}, 15_000)

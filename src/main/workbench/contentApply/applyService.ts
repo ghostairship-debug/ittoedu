@@ -582,7 +582,7 @@ export class ContentApplyService {
     const compiled = await this.compileSources(compilationProject, resources, sourceImplementations, signal)
     signal?.throwIfAborted()
     const diagnostics = [...(request.diagnostics ?? []), ...compiled.diagnostics]
-    return { command: captureComponentOperation(project, edits, [], options), input: request,
+    return { command: captureComponentOperation(project, edits, request.readPaths ?? [], options), input: request,
       insertedIds: edits.flatMap(edit => edit.type === 'instance.insert' ? edit.rootIds : edit.type === 'surface.insert' ? [edit.surface.id] : []),
       diagnostics, usability: compiled.failed ? 'unusable' : diagnostics.some(item => item.level !== 'info') ? 'partial' : sourceImplementations.length ? 'unverified' : 'usable' }
   }

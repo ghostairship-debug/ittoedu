@@ -231,3 +231,16 @@ it('retains a child draft and unconfirmed submission identity after switching pa
   await screen.findByText('子任务B的回复')
   expect(screen.getByRole('textbox', { name: '给子任务补充消息' })).toHaveValue('父B子任务的新草稿')
 })
+
+it('explains how to retry a preparation failure without offering a nonexistent child session', async () => {
+  const child = view('A', 'failed'); delete child.childRunId
+  const { api } = fixture([child])
+  vi.mocked(api.delegationChild!).mockResolvedValue({ view: child, run: null, projection: emptyExecutionProjection('unstarted-child') })
+  mount(api)
+  fireEvent.click(await screen.findByRole('button', { name: /制作A场景.*失败/ }))
+  const composer = await screen.findByRole('textbox', { name: '子任务续接要求' })
+  fireEvent.change(composer, { target: { value: '重新准备来源后继续' } })
+  expect(screen.getByRole('button', { name: '继续这个子任务' })).toBeDisabled()
+  expect(screen.getByText(/请回到主对话，让果铃AI重新准备材料后重试/)).toBeVisible()
+  expect(api.delegationResume).not.toHaveBeenCalled()
+})

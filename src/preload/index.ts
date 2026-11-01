@@ -19,11 +19,13 @@ const IPC_CHANNELS = {
   execution: 'execution:operate',
   dynamicContentTargets: 'dynamic-content:publish-targets',
   executionEvent: 'execution:event',
+  acpEvent: 'execution:acp-event',
   executionEdit: 'execution:edit',
   executionSettings: 'execution-settings:operate',
   pixabaySettings: 'pixabay-settings:operate',
   workspaceFiles: 'workspace-files:operate',
   skillCatalog: 'skills:catalog',
+  pptxPreview: 'pptx-preview:read',
   mediaFiles: 'media-files:operate',
   mediaFileRelease: 'media-files:release-draft',
   workspaceFilesChanged: 'workspace-files:changed',
@@ -224,6 +226,13 @@ const desktopAPI = Object.freeze<DesktopAPI>({
     },
   },
   execution: {
+    acp: request => invoke(IPC_CHANNELS.execution, { type: 'acp', request }),
+    sendAcp: input => invoke(IPC_CHANNELS.execution, { type: 'acp-send', ...input }),
+    subscribeAcp: listener => {
+      const receive = (_event: Electron.IpcRendererEvent, event: import('../shared/workbench/acpDesktop').AcpSnapshotEvent) => listener(event)
+      ipcRenderer.on(IPC_CHANNELS.acpEvent, receive)
+      return () => { ipcRenderer.removeListener(IPC_CHANNELS.acpEvent, receive) }
+    },
     workspace: root => invoke(IPC_CHANNELS.execution, { type: 'workspace', root }),
     conversations: workspaceId => invoke(IPC_CHANNELS.execution, { type: 'conversations', workspaceId }),
     createConversation: (workspaceId, title, home, element) => invoke(IPC_CHANNELS.execution, { type: 'create-conversation', workspaceId, title, ...(home ? { home } : {}), ...(element ? { element } : {}) }),
@@ -354,6 +363,7 @@ const desktopAPI = Object.freeze<DesktopAPI>({
   },
   workspaceFiles: input => invoke(IPC_CHANNELS.workspaceFiles, input),
   skillCatalog: input => invoke(IPC_CHANNELS.skillCatalog, input),
+  pptxPreview: input => invoke(IPC_CHANNELS.pptxPreview, input),
   mediaFiles: input => invoke(IPC_CHANNELS.mediaFiles, input),
   releaseMediaFileDraft: binding => invoke(IPC_CHANNELS.mediaFileRelease, binding),
   onWorkspaceFilesChanged: listener => {

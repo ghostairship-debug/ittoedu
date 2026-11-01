@@ -79,7 +79,7 @@ export class ComputeJobService {
       const identity = `guoling-compute-${digest(jobId).slice(0, 32)}`
       if (job.jobId !== jobId || !job.runId || !job.requestDigest
         || !(job.version === 1 && job.containerName === identity
-          || job.version === 2 && job.executionId === identity && (job.backend === 'pyodide' || job.backend === 'podman')) || !Array.isArray(job.logs)
+          || job.version === 2 && job.executionId === identity && ['native-python', 'pyodide', 'podman'].includes(job.backend!)) || !Array.isArray(job.logs)
         || !Array.isArray(job.outputNames) || !Array.isArray(job.artifacts)) throw new Error()
       return job
     } catch { throw new ComputeJobError('job-corrupt', '计算作业记录损坏，未重新执行') }
@@ -151,7 +151,7 @@ export class ComputeJobService {
       const executionId = `guoling-compute-${digest(input.jobId).slice(0, 32)}`
       const job: StoredJob = { version: 2, executionId, backend: this.backend.kind ?? 'podman', jobId: input.jobId, runId: input.runId, requestDigest: frozen.requestDigest,
         status: 'preparing', createdAt: now, updatedAt: now, stopped: false, outputNames: frozen.outputNames, artifacts: [], logs: [],
-        locations: { input: '/job/input', work: '/job/work', output: '/job/output' },
+        locations: this.backend.locations?.(root) ?? { input: '/job/input', work: '/job/work', output: '/job/output' },
         inputs: frozen.inputs.map(file => ({ name: file.name, version: `sha256:${digest(file.bytes)}`, byteLength: file.bytes.byteLength })) }
       await this.save(job)
       const active: Active = { runId: input.runId, work: Promise.resolve(), starting: false, cancelled: false }
@@ -204,7 +204,9 @@ export class ComputeJobService {
       if (active.cancelled) return
       active.starting = true
       const process = await this.backend.start({ directory: root, program: frozen.program, argv: frozen.argv, executionId,
-        code: frozen.code, inputs: frozen.inputs })
+        code: frozen.code, inputs: frozen.inputs, onLog: line => {
+          void this.update(jobId, job => { job.logs = [...job.logs, ...this.logLines('system', line)] }).catch(() => undefined)
+        } })
       processStarted = true
       active.process = process; active.starting = false
       if (active.cancelled) await process.cancel()
@@ -246,10 +248,12 @@ export class ComputeJobService {
           job.reason = diagnostics.map(item => `${item.name}: ${item.message}`).join('；')
           job.logs = [...job.logs, ...this.logLines('system', job.reason)]
         }
-        if (job.stopped || active.cancelled || outcome.cancelled)
+        if (outcome.exitCode === null && !outcome.cancelled) {
+          job.status = 'unknown'
+          job.reason = active.cancelled || job.stopped ? '计算进程停止未获确认；未交付或重放。' : '计算进程未返回可确认的退出码；未交付或重放。'
+        } else if (job.stopped || active.cancelled || outcome.cancelled)
           job.status = outcome.cancelled && !artifacts.length ? 'cancelled' : 'unapplied'
         else if (outcome.exitCode === 0) job.status = diagnostics.length && !artifacts.length ? 'failed' : 'ready'
-        else if (outcome.exitCode === null) { job.status = 'unknown'; job.reason = '计算进程未返回可确认的退出码；未交付或重放。' }
         else { job.status = 'failed'; job.reason = `计算进程退出码 ${outcome.exitCode ?? 'unknown'}` }
       })
     } catch (error) {

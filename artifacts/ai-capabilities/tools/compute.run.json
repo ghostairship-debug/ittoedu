@@ -1,5 +1,5 @@
 {
-  "description": "运行内置 Python 计算，无需安装 WSL；已包含 NumPy、pandas、Matplotlib 和自动中文绘图字体。sources 点名本任务获授权的文件路径或材料来源，由软件冻结字节与版本，输入文件位于 /job/input。当前目录与成果目录均为 /job/output，/job/work 为同目录别名；GUOLING_INPUT_DIR、GUOLING_OUTPUT_DIR 也提供位置。可用 outputNames 点名成果，省略时软件发现实际产物；坏辅助文件逐项诊断，ready 仅表示列出的成果可用，未保存到用户文件。只执行 Python 源码，无宿主文件、网络、OS 子进程、动态 pip 安装或未预装的原生扩展；缺库时明确报告。",
+  "description": "运行原生 Python 计算，优先复用已有 Python；没有时按需自动下载，缺少 NumPy、pandas、Matplotlib 时补装到所用环境，保留已有库版本，冲突明确报告。以当前用户权限运行本地进程，不是浏览器沙箱。sources 点名本任务输入，软件冻结字节与版本。通过 os.environ['GUOLING_INPUT_DIR'] 和 os.environ['GUOLING_OUTPUT_DIR'] 获取真实输入/输出目录；当前目录即输出目录，不使用 /job 路径。可用 outputNames 点名成果，省略时发现实际产物。ready 仅表示成果可用，未保存到用户文件；最终交付沿 artifact.save。",
   "inputSchema": {
     "$schema": "https://json-schema.org/draft/2020-12/schema",
     "additionalProperties": false,

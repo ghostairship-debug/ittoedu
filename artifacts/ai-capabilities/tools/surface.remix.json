@@ -1,9 +1,25 @@
 {
-  "description": "完整复制已观察参考页，再替换 surface.remix.inspect 返回的正文槽位。保留人工布局、富文本、互动、展示状态与内部引用，软件维护复制身份；需要整课写入授权。",
+  "description": "完整复制已观察参考页，再替换 surface.remix.inspect 返回的正文槽位。可同次指定新页 title 与 placement=end，省去复制后的改名和移动；省略时仍放在参考页后。保留人工布局、富文本、互动、展示状态与内部引用，软件维护复制身份；需要整课写入授权。",
   "inputSchema": {
+    "$defs": {
+      "__schema0": {
+        "type": "string"
+      },
+      "__schema1": {
+        "enum": [
+          "after-reference",
+          "end"
+        ],
+        "type": "string"
+      }
+    },
     "$schema": "https://json-schema.org/draft/2020-12/schema",
     "additionalProperties": false,
     "properties": {
+      "placement": {
+        "$ref": "#/$defs/__schema1",
+        "description": "默认在参考页后插入；end 放到参考页所在容器末尾，保持其他页面顺序。"
+      },
       "replacements": {
         "additionalProperties": {
           "type": "string"
@@ -16,6 +32,10 @@
       "target": {
         "minLength": 1,
         "type": "string"
+      },
+      "title": {
+        "$ref": "#/$defs/__schema0",
+        "description": "新页面标题；省略时沿用此操作默认的副本标题。"
       }
     },
     "required": [

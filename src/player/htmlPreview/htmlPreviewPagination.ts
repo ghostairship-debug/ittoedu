@@ -1,8 +1,9 @@
 import type { HtmlSectionRef } from '../../shared/html/htmlSourceScanner'
-import { mountHtmlPreviewGeometry } from './htmlPreviewGeometry'
+import { classifyHtmlPreviewGeometry, mountHtmlPreviewGeometry } from './htmlPreviewGeometry'
 
 export type HtmlPreviewView = { pageIndex: number; perPageScroll: number }
 export type HtmlPreviewPagination = {
+  readonly pageCount: number
   navigate(index: number): void
   readView(): HtmlPreviewView
   restore(view: HtmlPreviewView): void
@@ -30,11 +31,15 @@ function editableTarget(target: EventTarget | null): boolean {
 }
 
 export function mountPagination(doc: Document, sections: readonly HtmlSectionRef[], onState: (state: HtmlPreviewView) => void): HtmlPreviewPagination {
-  const pages = pageElements(doc, sections)
+  const candidates = pageElements(doc, sections)
   const win = doc.defaultView
   // Authored visibility already selects pages (for example an .active navigation).
   // Keep that consumer in charge instead of pinning its pages behind a second hidden class.
-  const authorPagination = pages.some(page => page.hidden || win?.getComputedStyle(page).display === 'none')
+  const authorPagination = candidates.some(page => page.hidden || win?.getComputedStyle(page).display === 'none')
+  // Section is a document structure, not a pagination request. Preserve plain
+  // reading flow unless existing visibility or a bounded design page supplies
+  // page-layout evidence. A deck may also contain naturally scrolling pages.
+  const pages = authorPagination || candidates.some(page => classifyHtmlPreviewGeometry(page) !== 'flow') ? candidates : []
   const hiddenClass = `html-preview-hidden-page-${++paginationInstance}`
   const hiddenStyle = doc.createElement('style')
   hiddenStyle.textContent = `.${hiddenClass}{display:none!important}`
@@ -63,8 +68,8 @@ export function mountPagination(doc: Document, sections: readonly HtmlSectionRef
     emit()
   }
   const restore = (view: HtmlPreviewView) => {
-    if (destroyed || pages.length === 0 || authorPagination) return
-    const index = Number.isFinite(view.pageIndex) ? Math.max(0, Math.min(pages.length - 1, Math.trunc(view.pageIndex))) : 0
+    if (destroyed || authorPagination) return
+    const index = pages.length && Number.isFinite(view.pageIndex) ? Math.max(0, Math.min(pages.length - 1, Math.trunc(view.pageIndex))) : 0
     const scroll = Number.isFinite(view.perPageScroll) ? Math.max(0, view.perPageScroll) : 0
     pageIndex = index
     pageScroll.set(index, scroll)
@@ -72,7 +77,7 @@ export function mountPagination(doc: Document, sections: readonly HtmlSectionRef
     win?.scrollTo(0, scroll)
     emit()
   }
-  const onScroll = () => { if (pages.length) { pageScroll.set(pageIndex, win?.scrollY ?? 0); emit() } }
+  const onScroll = () => { pageScroll.set(pageIndex, win?.scrollY ?? 0); emit() }
   const onCompositionStart = () => { composing = true }
   const onCompositionEnd = () => { composing = false }
   const onKeyDown = (event: KeyboardEvent) => {
@@ -98,7 +103,7 @@ export function mountPagination(doc: Document, sections: readonly HtmlSectionRef
   if (pages.length) authorPagination ? syncAuthorPage() : show(pageIndex)
   emit()
   return {
-    navigate, readView, restore,
+    pageCount: pages.length, navigate, readView, restore,
     destroy: () => {
       if (destroyed) return
       destroyed = true

@@ -1,6 +1,6 @@
 import { _electron as electron, expect, type ElectronApplication, type Page, type TestInfo } from '@playwright/test'
 import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
-import { join, resolve } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 import { BACKGROUND_E2E_ENV } from '../../../src/main/windowVisibility'
 
 const root = resolve(__dirname, '../../..')
@@ -13,9 +13,38 @@ export function m20Fixture() {
 }
 
 export async function launchM20(fixture: ReturnType<typeof m20Fixture>) {
-  const app = await electron.launch({ cwd: root, args: ['.', `--user-data-dir=${fixture.profile}`],
-    env: { ...process.env, VITE_DEV_SERVER_URL: '', [BACKGROUND_E2E_ENV]: '1' } })
-  const page = await app.firstWindow(); page.setDefaultTimeout(15_000)
+  const packagedPath = process.env.COURSEWARE_E2E_PACKAGED_EXECUTABLE?.trim()
+  const executablePath = packagedPath ? resolve(packagedPath) : undefined
+  if (executablePath && !existsSync(executablePath)) throw new Error(`Packaged executable does not exist: ${executablePath}`)
+  const env = Object.fromEntries(Object.entries(process.env)
+    .filter((entry): entry is [string, string] => typeof entry[1] === 'string'))
+  Object.assign(env, { VITE_DEV_SERVER_URL: '', [BACKGROUND_E2E_ENV]: '1' })
+  if (executablePath) {
+    delete env.ELECTRON_RUN_AS_NODE
+    // As in the existing portability consumer, prove packaged resources work
+    // without inheriting a development catalog or the repository cwd.
+    env.COURSEWARE_COMPONENTS_DIR = join(fixture.directory, 'missing-packaged-components')
+  }
+  const app = await electron.launch({ cwd: executablePath ? fixture.directory : root,
+    args: [...(executablePath ? [] : ['.']), `--user-data-dir=${fixture.profile}`], env,
+    ...(executablePath ? { executablePath, timeout: 45_000 } : {}) })
+  let page: Page
+  try {
+    page = await app.firstWindow(executablePath ? { timeout: 45_000 } : undefined)
+    if (executablePath) {
+      const identity = await app.evaluate(({ app }) => ({ packaged: app.isPackaged, appPath: app.getAppPath(),
+        execPath: process.execPath, cwd: process.cwd(), userData: app.getPath('userData'),
+        configuredComponentDirectory: process.env.COURSEWARE_COMPONENTS_DIR ?? '', pid: process.pid }))
+      writeFileSync(join(fixture.directory, `packaged-launch-${identity.pid}.json`), JSON.stringify(identity, null, 2) + '\n')
+      const canonical = (filename: string) => process.platform === 'win32' ? resolve(filename).toLowerCase() : resolve(filename)
+      expect(identity.packaged).toBe(true)
+      expect(canonical(identity.execPath)).toBe(canonical(executablePath))
+      expect(canonical(identity.appPath)).toBe(canonical(join(dirname(executablePath), 'resources', 'app.asar')))
+      expect(canonical(identity.cwd)).toBe(canonical(fixture.directory))
+      expect(canonical(identity.userData)).toBe(canonical(fixture.profile))
+    }
+  } catch (error) { await closeM20(app); throw error }
+  page.setDefaultTimeout(15_000)
   await app.evaluate(({ BrowserWindow }) => { BrowserWindow.getAllWindows()[0]?.setContentSize(1600, 900) })
   return { app, page }
 }

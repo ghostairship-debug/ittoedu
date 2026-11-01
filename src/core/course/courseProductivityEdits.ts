@@ -4,8 +4,8 @@ import type { CourseProjectV10, JsonValue } from '../../shared/contracts/compone
 import { componentIsLocked, componentDefinitionBuiltinKey, resolveComponentPresentation } from '../../shared/contracts/component-platform/project'
 import type { ComponentEdit } from '../../shared/contracts/component-platform/operations'
 import { equalComponentValue } from '../../shared/componentValue'
-import { duplicateSurfaceEdits } from './courseSurfaceStructure'
-import { planTextRunRemap } from '../../shared/textRuns'
+import { duplicateSurfaceEdits, type CourseSurfaceCopyOptions } from './courseSurfaceStructure'
+import { applyTextRunEdits, planTextRunRemap } from '../../shared/textRuns'
 import type { TextRun } from '../../shared/contracts/native-v1/types'
 
 export type ProductivityScope = 'page' | 'surface' | 'course'
@@ -163,9 +163,9 @@ function referenceSurface(project: CourseProjectV10, surfaceId: string) {
   return surface
 }
 /** Reference clone is the formal surface copy use case, including its prepared identity map. */
-export function prepareCourseReferenceClone(project: CourseProjectV10, sourceSurfaceId: string, createId?: () => string) {
+export function prepareCourseReferenceClone(project: CourseProjectV10, sourceSurfaceId: string, createId?: () => string, options: CourseSurfaceCopyOptions = {}) {
   const source = referenceSurface(project, sourceSurfaceId)
-  const plan = duplicateSurfaceEdits(project, sourceSurfaceId, createId)
+  const plan = duplicateSurfaceEdits(project, sourceSurfaceId, createId, options)
   const instances = plan.edits.flatMap(edit => edit.type === 'instance.insert' ? edit.instances : [])
   return { source, surface: plan.surface, instances, ids: plan.ids, edits: plan.edits, readPaths: plan.readPaths }
 }
@@ -176,11 +176,24 @@ export function replaceCourseRemixText(content: FlowTextContent, text: string): 
     const value = inline.type === 'text' ? inline.text : '', start = offset; offset += Array.from(value).length
     return { start, end: offset, style: { ...inline.style } }
   })
-  const mapped = planTextRunRemap(content.inlines.map(inline => inline.type === 'text' ? inline.text : '').join(''), text, runs)
+  const original = content.inlines.map(inline => inline.type === 'text' ? inline.text : '').join('')
+  if (original === text) return structuredClone(content)
+  // A complete observed slot with identical inline attributes has no local
+  // formatting correspondence to infer. Use the existing exact-range owner;
+  // genuinely mixed formatting keeps all diff/ambiguity safety checks below.
+  const first = content.inlines[0]
+  const uniform = content.inlines.every(inline => equalComponentValue(
+    { ...inline, text: '' }, { ...first, text: '' }))
+  const mapped = uniform
+    ? applyTextRunEdits(original, runs, [{ start: 0, end: offset, original, replacement: text }])
+    : planTextRunRemap(original, text, runs)
   if (!mapped.ok) throw new Error(mapped.reason)
+  // A cleared uniform template slot retains its declared attributes for later filling.
+  if (uniform && text === '' && first?.type === 'text') return { inlines: [{ ...structuredClone(first), text: '' }] }
   const atoms = content.inlines.flatMap(inline => inline.type === 'text' ? Array.from(inline.text).map(text => ({ ...inline, text })) : [])
   for (const edit of [...mapped.edits].reverse()) {
-    const source = atoms[edit.start] ?? atoms[edit.start - 1] ?? { type: 'text' as const, text: '' }
+    const source = atoms[edit.start] ?? atoms[edit.start - 1]
+      ?? (uniform && first?.type === 'text' ? first : undefined) ?? { type: 'text' as const, text: '' }
     atoms.splice(edit.start, edit.end - edit.start, ...Array.from(edit.replacement).map(text => ({ ...source, text })))
   }
   return normalizeDocumentText({ inlines: atoms })
@@ -228,11 +241,12 @@ export function inspectCourseRemixSlots(project: CourseProjectV10, sourceSurface
   }) }
 }
 /** A public partial intent changes only supplied observed slots; an explicit empty string clears text. */
-export function planCourseStyleRemixEdits(project: CourseProjectV10, sourceSurfaceId: string, replacements: Readonly<Record<string, string>>, createId?: () => string) {
+export function planCourseStyleRemixEdits(project: CourseProjectV10, sourceSurfaceId: string, replacements: Readonly<Record<string, string>>, createId?: () => string,
+  options: CourseSurfaceCopyOptions = {}) {
   const checked = previewCourseStyleRemix(project, sourceSurfaceId, replacements)
   if (!checked.slots.length) throw new Error('没有可替换的文字槽位')
-  const clone = prepareCourseReferenceClone(project, sourceSurfaceId, createId)
-  clone.surface.title = `${clone.source.title} 改写`
+  const clone = prepareCourseReferenceClone(project, sourceSurfaceId, createId, options)
+  clone.surface.title = options.title === undefined ? `${clone.source.title} 改写` : options.title.trim()
   const root = clone.instances.find(instance => instance.id === clone.surface.id)
   if (root) root.name = clone.surface.title
   for (const slot of checked.slots.filter(slot => Object.hasOwn(replacements, slot.id))) {

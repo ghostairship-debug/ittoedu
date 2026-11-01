@@ -1,5 +1,5 @@
 {
-  "description": "在已核验可写的 Codex Luna 路由中，把点名的来源冻结到受管副本后提交一个持久委派作业。默认取当前打开稿；sourceVersion=disk显式选择磁盘版。未核验写权限时返回 blocked，不发模型请求。",
+  "description": "使用单独的旧 Codex Luna 路由，把点名的来源冻结到受管副本后提交持久委派作业。默认取当前打开稿；sourceVersion=disk显式选择磁盘版。此路由未核验写权限时返回 blocked，不发模型请求；这一状态不代表原生 delegate.agent/resume 被阻断，原生任务以各自回执为准。",
   "inputSchema": {
     "$defs": {
       "__schema0": {

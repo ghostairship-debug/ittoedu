@@ -130,6 +130,7 @@ function ChildDetail({ api, identity, view, pendingSubmissions, draft, busy, onD
       <label>{terminal ? '续接要求' : '补充消息'}<textarea aria-label={terminal ? '子任务续接要求' : '给子任务补充消息'} rows={2} disabled={busy} value={draft} onChange={event => { onDraft(event.target.value); setNotice('') }} /></label>
       <div><button type="submit" disabled={busy || !draft.trim() || (terminal ? !current.childRunId || !api.delegationResume : !api.delegationMessage)}>{terminal ? '继续这个子任务' : '发送给这个子任务'}</button>
         {!terminal && <button type="button" disabled={busy || !api.delegationStop} onClick={() => void perform('stop')}>停止这个子任务</button>}</div>
+      {terminal && !current.childRunId && <p className="execution-delegation__note">这项子任务尚未启动，无法继续子会话。请回到主对话，让果铃AI重新准备材料后重试。</p>}
       {notice && <p role="status">{notice}</p>}
     </form>
   </section>

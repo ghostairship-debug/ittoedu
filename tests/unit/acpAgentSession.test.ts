@@ -15,7 +15,7 @@ class FakeTransport implements AcpTransport {
   listeners = new Set<(message: Message) => void>();
   exits = new Set<(error: Error) => void>();
   closed = false;
-  config = configuration();
+  config: Array<{ id: string; category?: string; type?: string; currentValue: string | boolean; options?: Array<Record<string, unknown>> }> = configuration();
   capabilities: Record<string, unknown> = { mcpCapabilities: { http: true }, loadSession: true, sessionCapabilities: { resume: {} } };
   intercept?: (message: Message) => boolean;
   send(message: Message) {
@@ -27,7 +27,7 @@ class FakeTransport implements AcpTransport {
     else if (message.method === 'session/new') result = { sessionId: 'session-1', configOptions: this.config };
     else if (message.method === 'session/resume' || message.method === 'session/load') result = { configOptions: this.config };
     else if (message.method === 'session/set_config_option') {
-      this.config = this.config.map(option => option.id === message.params?.configId ? { ...option, currentValue: String(message.params.value) } : option);
+      this.config = this.config.map(option => option.id === message.params?.configId ? { ...option, currentValue: message.params.value as string | boolean } : option);
       result = { configOptions: this.config };
     } else if (message.method === 'session/close') result = {};
     else return;
@@ -56,6 +56,22 @@ async function ready(transport: FakeTransport, options: Omit<ConstructorParamete
 }
 
 describe('AcpAgentSession lifecycle', () => {
+  it('preserves an Agent RPC failure detail while leaving failed recovery initialized', async () => {
+    const transport = new FakeTransport(), session = new AcpAgentSession({ transport });
+    const rpcError = { code: -32603, message: 'Internal error', data: { details: 'no rollout found for thread id native-empty' } };
+    transport.intercept = message => {
+      if (message.method !== 'session/resume') return false;
+      transport.emit({ jsonrpc: '2.0', id: message.id, error: rpcError }); return true;
+    };
+    await session.initialize();
+    await assert.rejects(session.restore({ sessionId: 'native-empty', cwd: process.cwd(), mcpServers: [] }), error => {
+      assert.match((error as Error).message, /no rollout found/);
+      assert.deepEqual((error as Error & { rpcError?: unknown }).rpcError, rpcError); return true;
+    });
+    assert.equal(session.snapshot.phase, 'initialized');
+    await session.close();
+  });
+
   it('does not report initialization or recovery after a reply races with disconnect', async () => {
     for (const method of ['initialize', 'session/new', 'session/resume']) {
       const transport = new FakeTransport(), session = new AcpAgentSession({ transport });
@@ -81,7 +97,7 @@ describe('AcpAgentSession lifecycle', () => {
     const transport = new FakeTransport(), session = new AcpAgentSession({ transport });
     await session.initialize();
     await session.restore({ sessionId: 'session-1', cwd: process.cwd(), mcpServers: [], configOptions: configuration() });
-    await assert.rejects(session.prompt([{ type: 'text', text: 'continue' }]), /Verify exact model/);
+    await assert.rejects(session.prompt([{ type: 'text', text: 'continue' }]), /Verify the Agent configuration/);
     transport.intercept = message => {
       if (message.params?.configId !== 'reasoning_effort') return false;
       transport.reply(message.id!, { configOptions: configuration() }); transport.disconnect(); return true;
@@ -103,7 +119,7 @@ describe('AcpAgentSession lifecycle', () => {
     const session = new AcpAgentSession({ transport });
     await session.initialize(); await session.open({ cwd: process.cwd(), mcpServers: [] });
     await assert.rejects(session.configure({ modelId, effort: 'medium' }), /did not confirm model/);
-    await assert.rejects(session.prompt([{ type: 'text', text: 'edit' }]), /Verify exact model/);
+    await assert.rejects(session.prompt([{ type: 'text', text: 'edit' }]), /Verify the Agent configuration/);
     assert.equal(transport.sent.some(message => message.method === 'session/prompt'), false);
     await session.close();
   });
@@ -134,7 +150,7 @@ describe('AcpAgentSession lifecycle', () => {
     };
     await assert.rejects(session.configure({ modelId, effort: 'medium' }), /did not confirm model/);
     assert.equal(session.configuration[0].currentValue, 'gpt-6-luna');
-    await assert.rejects(session.prompt([{ type: 'text', text: 'edit' }]), /Verify exact model/);
+    await assert.rejects(session.prompt([{ type: 'text', text: 'edit' }]), /Verify the Agent configuration/);
     assert.equal(transport.sent.some(message => message.method === 'session/prompt'), false);
     await session.close();
   });
@@ -310,6 +326,89 @@ describe('AcpAgentSession lifecycle', () => {
     await session.configure({ modelId, effort: 'medium' });
     transport.emit({ jsonrpc: '2.0', method: 'session/update', params: { sessionId: 'session-1', update: { sessionUpdate: 'available_commands_update', availableCommands: [] } } });
     assert.equal(updates[1].replay, false); await session.close();
+  });
+
+  it('accepts an Agent without effort or any config options, without inventing a selection', async () => {
+    for (const config of [configuration().slice(0, 1), []]) {
+      const transport = new FakeTransport(); transport.config = config;
+      const session = new AcpAgentSession({ transport });
+      await session.initialize(); await session.open({ cwd: process.cwd(), mcpServers: [] });
+      await session.configure();
+      assert.equal(session.snapshot.effort, undefined);
+      assert.equal(session.snapshot.modelId, config.length ? modelId : undefined);
+      assert.equal(transport.sent.some(message => message.method === 'session/set_config_option'), false);
+      const running = session.prompt([{ type: 'text', text: 'hello' }]);
+      transport.reply(transport.promptId(), { stopReason: 'end_turn' });
+      await running; await session.close();
+    }
+  });
+
+  it('accepts grouped and boolean choices by their advertised IDs, including unknown categories', async () => {
+    const transport = new FakeTransport();
+    transport.config = [
+      { id: 'speed', category: '_custom', type: 'select', currentValue: 'normal', options: [{ group: 'g', options: [{ value: 'normal' }, { value: 'fast' }] }] },
+      { id: 'safe', type: 'boolean', currentValue: true },
+    ];
+    const session = new AcpAgentSession({ transport });
+    await session.initialize(); await session.open({ cwd: process.cwd(), mcpServers: [] });
+    await session.configureOptions({ speed: 'fast', safe: false });
+    assert.equal(session.configuration[0].currentValue, 'fast');
+    assert.equal(session.configuration[1].currentValue, false);
+    assert.equal(transport.sent.find(message => message.params?.configId === 'safe')?.params?.type, 'boolean');
+    await assert.rejects(session.configureOptions({ speed: 'invented' }), /not advertised/);
+    await session.close();
+  });
+
+  it('does not replace an unavailable explicitly requested effort with a fabricated level', async () => {
+    const transport = new FakeTransport(); transport.config = configuration().slice(0, 1);
+    const session = new AcpAgentSession({ transport });
+    await session.initialize(); await session.open({ cwd: process.cwd(), mcpServers: [] });
+    await assert.rejects(session.configure({ modelId, effort: 'high' }), /not advertised/);
+    assert.equal(transport.sent.some(message => message.method === 'session/prompt'), false);
+    await session.close();
+  });
+
+  it('cancels if an Agent silently changes a confirmed default model while prompting', async () => {
+    const transport = new FakeTransport(), session = new AcpAgentSession({ transport });
+    await session.initialize(); await session.open({ cwd: process.cwd(), mcpServers: [] }); await session.configure();
+    const running = session.prompt([{ type: 'text', text: 'hello' }]);
+    const rejected = assert.rejects(running, /did not confirm model/);
+    transport.config[0].currentValue = 'gpt-6-luna';
+    transport.emit({ jsonrpc: '2.0', method: 'session/update', params: { sessionId: 'session-1', update: { sessionUpdate: 'config_option_update', configOptions: transport.config } } });
+    await tick();
+    assert.equal(transport.sent.some(message => message.method === 'session/cancel'), true);
+    transport.reply(transport.promptId(), { stopReason: 'cancelled' });
+    await rejected; await session.close();
+  });
+
+  it('refuses an implicit model change when the user only selected another configuration option', async () => {
+    const transport = new FakeTransport(), session = await ready(transport);
+    transport.intercept = message => {
+      if (message.params?.configId !== 'reasoning_effort') return false;
+      transport.config[0].currentValue = 'gpt-6-luna';
+      transport.reply(message.id!, { configOptions: transport.config }); return true;
+    };
+    await assert.rejects(session.configureOptions({ reasoning_effort: 'medium' }), /did not confirm model/);
+    await assert.rejects(session.prompt([{ type: 'text', text: 'hello' }]), /Verify the Agent configuration/);
+    await session.close();
+  });
+
+  it('retains the initialized connection for native authentication after an open error', async () => {
+    const transport = new FakeTransport(), session = new AcpAgentSession({ transport });
+    let authenticated = false;
+    transport.intercept = message => {
+      if (message.method === 'initialize') { transport.reply(message.id!, { protocolVersion: 1, agentCapabilities: {}, authMethods: [{ id: 'native', name: 'Sign in' }] }); return true; }
+      if (message.method === 'session/new' && !authenticated) { transport.emit({ jsonrpc: '2.0', id: message.id, error: { code: -32000, message: 'Authentication required' } }); return true; }
+      if (message.method === 'authenticate') { authenticated = true; transport.reply(message.id!, {}); return true; }
+      return false;
+    };
+    await session.initialize();
+    await assert.rejects(session.open({ cwd: process.cwd(), mcpServers: [] }), /Authentication required/);
+    assert.equal(session.snapshot.phase, 'initialized');
+    await assert.rejects(session.authenticate('invented'), /did not advertise/);
+    await session.authenticate('native');
+    await session.open({ cwd: process.cwd(), mcpServers: [] });
+    assert.equal(session.snapshot.phase, 'ready'); await session.close();
   });
 
   it('uses the real stdio transport for a zero-model handshake and clean shutdown', async () => {

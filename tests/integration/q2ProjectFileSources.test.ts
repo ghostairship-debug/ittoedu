@@ -26,10 +26,46 @@ function model(snapshot: DocumentSnapshot) {
   return snapshot.model
 }
 
+// Every owner, including cold reopen readers, must finish its recovery writes before removal.
+const fixtureHosts = new Map<string, DocumentHostService[]>()
+function fixtureHost(root: string, directory = 'recovery'): DocumentHostService {
+  const host = new DocumentHostService(path.join(root, directory))
+  const owners = fixtureHosts.get(root) ?? []
+  owners.push(host)
+  fixtureHosts.set(root, owners)
+  return host
+}
+
+async function cleanupFixture(root: string, primaryFailure?: { error: unknown }): Promise<void> {
+  const cleanupErrors: unknown[] = []
+  for (const owner of fixtureHosts.get(root) ?? []) {
+    try {
+      const runIds = new Set(owner.registry.listIdentities().flatMap(document => owner.tools.runIdsForDocument(document.documentId)))
+      for (const runId of runIds) await owner.tools.stop(runId)
+      await owner.settleSaveObservations()
+      for (const document of owner.registry.listIdentities()) {
+        await owner.operate({ type: 'close', documentId: document.documentId, discardDirty: true })
+      }
+    } catch (error) { cleanupErrors.push(error) }
+  }
+  fixtureHosts.delete(root)
+  // Keep the directory if any owner could still write; report every cleanup error.
+  if (!cleanupErrors.length) {
+    try { await fs.rm(root, { recursive: true, force: true }) }
+    catch (error) { cleanupErrors.push(error) }
+  }
+  if (cleanupErrors.length) {
+    if (primaryFailure) cleanupErrors.unshift(primaryFailure.error)
+    if (cleanupErrors.length === 1) throw cleanupErrors[0]
+    throw new AggregateError(cleanupErrors, 'Fixture operation and owner cleanup failed')
+  }
+}
+
 it('uses compact opaque handles and names the same uniquely observed page through Session and Undo', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'guoling-unique-page-'))
+  let primaryFailure: { error: unknown } | undefined
   try {
-    const host = new DocumentHostService(path.join(root, 'recovery')), project = createBlankCourseProjectV10('原课')
+    const host = fixtureHost(root), project = createBlankCourseProjectV10('原课')
     project.definitions[TEXT_DEFINITION.id] = TEXT_DEFINITION
     project.instances.text = { id: 'text', definitionId: TEXT_DEFINITION.id, data: textDataEdit('text', createTextComponentData('原内容')).value, frame }
     testContainerInstance(project, 0).childIds = ['text']
@@ -47,19 +83,24 @@ it('uses compact opaque handles and names the same uniquely observed page throug
     expect(await host.tools.execute('unique', 'title', { name: 'project.apply', input: { path: 'pages', intent: 'surface.title', title: '第一课' } })).toMatchObject({ kind: 'read', data: { commit: 'committed' } })
     const after = await host.internalAPI.read(original.documentId)
     expect(componentSurfaces(model(after).project)).toEqual([{ ...componentSurfaces(project)[0], title: '第一课' }])
-    expect(model(after).project.instances).toEqual(project.instances)
+    const container = testContainerInstance(project, 0)
+    expect(model(after).project.instances).toEqual({ ...project.instances, [container.id]: { ...container, name: '第一课' } })
     expect(after.revision).toBe(original.revision + 1)
     await host.internalAPI.dispatch({ documentId: after.documentId, epoch: after.epoch, baseRevision: after.revision,
       actor: 'human', operationId: 'undo-title', mutation: { type: 'undo' } })
-    expect(componentSurfaces(model(await host.internalAPI.read(original.documentId)).project)).toEqual(componentSurfaces(project))
+    const undone = model(await host.internalAPI.read(original.documentId)).project
+    expect(componentSurfaces(undone)).toEqual(componentSurfaces(project))
+    expect(undone.instances).toEqual(project.instances)
     await host.tools.stop('unique'); await host.tools.stop('foreign')
-  } finally { await fs.rm(root, { recursive: true, force: true }) }
+  } catch (error) { primaryFailure = { error }; throw error }
+  finally { await cleanupFixture(root, primaryFailure) }
 })
 
 it('refuses ambiguous or human-expanded pages title and preserves observed title conflicts', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'guoling-page-title-conflict-'))
+  let primaryFailure: { error: unknown } | undefined
   try {
-    const host = new DocumentHostService(path.join(root, 'recovery')), project = createBlankCourseProjectV10('原课')
+    const host = fixtureHost(root), project = createBlankCourseProjectV10('原课')
     const original = await host.internalAPI.create({ kind: 'course-v10', project, resources: { assets: {}, components: {} } }, 'lesson.h5lesson')
     await host.tools.beginRun({ runId: 'observed', actor: 'agent', documents: [{ documentId: original.documentId, writable: [{ kind: 'document' }] }] })
     await host.tools.execute('observed', 'list', { name: 'project.list', input: {} })
@@ -75,13 +116,15 @@ it('refuses ambiguous or human-expanded pages title and preserves observed title
     expect(await host.tools.execute('human', 'ambiguous-fresh', { name: 'project.apply', input: { path: 'pages', intent: 'surface.title', title: '猜第一页' } })).toMatchObject({ kind: 'error', code: 'target-not-found' })
     expect((await host.internalAPI.read(original.documentId)).revision).toBe(expanded.revision)
     await host.tools.stop('observed'); await host.tools.stop('human')
-  } finally { await fs.rm(root, { recursive: true, force: true }) }
+  } catch (error) { primaryFailure = { error }; throw error }
+  finally { await cleanupFixture(root, primaryFailure) }
 })
 
 it('absorbs project metadata through the shared settings owner, retains structural identity, and keeps manual conflict and field settlement scopes', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'guoling-project-settings-'))
+  let primaryFailure: { error: unknown } | undefined
   try {
-    const host = new DocumentHostService(path.join(root, 'recovery')), project = createBlankCourseProjectV10('原课')
+    const host = fixtureHost(root), project = createBlankCourseProjectV10('原课')
     const original = await host.internalAPI.create({ kind: 'course-v10', project, resources: { assets: {}, components: {} } }, 'settings.h5lesson')
     await host.tools.beginRun({ runId: 'settings', actor: 'agent', documents: [{ documentId: original.documentId, writable: [{ kind: 'document' }] }], fileAccess: { permission: 'workspace', workspaceRoot: root } })
     await host.tools.execute('settings', 'read', { name: 'project.read', input: { path: 'project.json' } })
@@ -101,13 +144,15 @@ it('absorbs project metadata through the shared settings owner, retains structur
     expect(await host.tools.execute('settings', 'stale-title', call)).toMatchObject({ kind: 'read', data: { commit: 'not_committed' } })
     const filename = path.join(root, 'settings.h5lesson')
     await host.internalAPI.save(original.documentId, filename)
-    expect(model(await new DocumentHostService(path.join(root, 'cold')).internalAPI.open(filename)).project.title).toBe('人工标题')
+    expect(model(await fixtureHost(root, 'cold').internalAPI.open(filename)).project.title).toBe('人工标题')
     await host.tools.stop('settings')
-  } finally { await fs.rm(root, { recursive: true, force: true }) }
+  } catch (error) { primaryFailure = { error }; throw error }
+  finally { await cleanupFixture(root, primaryFailure) }
 })
 
 it('reads the complete mixed page and edits native text through the captured group without losing image, frame, formula or undo', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'guoling-mixed-source-'))
+  let primaryFailure: { error: unknown } | undefined
   try {
     const project = createBlankCourseProjectV10('Mixed page')
     for (const definition of [WEB_DEFINITION, TEXT_DEFINITION, IMAGE_DEFINITION]) project.definitions[definition.id] = definition
@@ -119,18 +164,25 @@ it('reads the complete mixed page and edits native text through the captured gro
     ] })).value, frame: { ...frame, transform: [1, 0, 0, 1, 7, 9] } }
     project.instances.image = { id: 'image', definitionId: IMAGE_DEFINITION.id, data: { ...createImageData('photo', '原照片'), flipX: true, crop: { left: 0.1, top: 0, right: 0, bottom: 0 } }, frame }
     testContainerInstance(project, 0).childIds = ['group']
-    const host = new DocumentHostService(path.join(root, 'recovery'))
+    const host = fixtureHost(root)
     const original = await host.internalAPI.create({ kind: 'course-v10', project, resources: { assets: { photo: encode(svg) }, components: {} } }, 'mixed.h5lesson')
     await host.tools.beginRun({ runId: 'mixed', actor: 'agent', documents: [{ documentId: original.documentId, writable: [{ kind: 'document' }] }], fileAccess: { permission: 'workspace', workspaceRoot: root } })
     const page = componentProjectFiles(project, model(original).resources).find(file => file.kind === 'page')!
     expect(page.content).toContain('旧标题')
-    expect(page.content).toContain('assets/photo.svg')
     const read = await host.tools.execute('mixed', 'read', { name: 'project.read', input: { path: page.path } })
     expect(read).toMatchObject({ kind: 'read' })
-    const content = (read as { kind: 'read'; data: { content: string } }).data.content.replace('旧标题', '新标题')
+    const sourceContent = (read as { kind: 'read'; data: { content: string } }).data.content
+    const imageSource = /<img\b[^>]*\bsrc="([^"]+)"/.exec(sourceContent)?.[1]
+    expect(imageSource).toBe(`cw-resource:${project.assets.photo.id}`)
+    const assetFile = componentProjectFiles(model(original).project, model(original).resources)
+      .find(file => file.binding?.kind === 'asset' && file.binding.assetId === project.assets.photo.id)!
+    expect(await host.tools.execute('mixed', 'read-projected-image', { name: 'project.read', input: { path: assetFile.path } }))
+      .toMatchObject({ kind: 'read', data: { content: svg, complete: true } })
+    const content = sourceContent.replace('旧标题', '新标题')
     expect(await host.tools.execute('mixed', 'edit', { name: 'project.apply', input: { path: page.path, content } })).toMatchObject({ kind: 'read', data: { commit: 'committed', usability: 'usable' } })
     const changed = await host.internalAPI.read(original.documentId)
     expect(model(changed).project.instances.image).toEqual(project.instances.image)
+    expect(model(changed).resources.assets.photo).toEqual(encode(svg))
     expect(model(changed).project.instances.group).toEqual(project.instances.group)
     expect(model(changed).project.instances.text!.frame).toEqual(project.instances.text!.frame)
     expect(model(changed).project.instances.text!.data).toMatchObject({ content: { inlines: [
@@ -160,25 +212,29 @@ it('reads the complete mixed page and edits native text through the captured gro
     const added = await host.tools.execute('mixed', 'add-copy', { name: 'project.apply', input: { path: 'pages', intent: 'surface.add', kind: 'slide', title: '源码副本' } })
     if (added.kind !== 'read') throw new Error(JSON.stringify(added))
     const copy = await host.tools.execute('mixed', 'copy-source', { name: 'project.apply', input: {
-      path: (added.data as { path: string }).path, intent: 'insert', content: page.content!,
+      path: (added.data as { path: string }).path, intent: 'insert', content: sourceContent,
     } })
     expect(copy).toMatchObject({ kind: 'read', data: { commit: 'committed' } })
     expect((copy as { data: { diagnostics: { code: string }[] } }).data.diagnostics.some(issue => ['image-resource-unavailable', 'missing-local-resource', 'local-resource-unavailable'].includes(issue.code))).toBe(false)
     const saved = await host.internalAPI.read(original.documentId)
     const filename = path.join(root, 'mixed.h5lesson')
     await host.internalAPI.save(original.documentId, filename)
-    expect(model(await new DocumentHostService(path.join(root, 'cold')).internalAPI.open(filename)).project.instances).toEqual(model(saved).project.instances)
+    expect(model(await fixtureHost(root, 'cold').internalAPI.open(filename)).project.instances).toEqual(model(saved).project.instances)
     await host.tools.stop('mixed')
-  } finally { await fs.rm(root, { recursive: true, force: true }) }
+  } catch (error) { primaryFailure = { error }; throw error }
+  finally { await cleanupFixture(root, primaryFailure) }
 })
 
 it('resolves a ready run image in HTML and accepts the observed page path for media insertion without admitting a foreign resource', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'guoling-html-result-source-'))
+  let primaryFailure: { error: unknown } | undefined
   try {
-    const host = new DocumentHostService(path.join(root, 'recovery'))
+    const host = fixtureHost(root)
     const project = createBlankCourseProjectV10('Ready HTML image')
     const original = await host.internalAPI.create({ kind: 'course-v10', project, resources: { assets: {}, components: {} } }, 'images.h5lesson')
-    const begin = (runId: string) => host.tools.beginRun({ runId, actor: 'agent', documents: [{ documentId: original.documentId, writable: [{ kind: 'document' }] }], fileAccess: { permission: 'workspace', workspaceRoot: root } })
+    const begin = async (runId: string) => {
+      await host.tools.beginRun({ runId, actor: 'agent', documents: [{ documentId: original.documentId, writable: [{ kind: 'document' }] }], fileAccess: { permission: 'workspace', workspaceRoot: root } })
+    }
     await begin('images')
     const page = componentProjectFiles(project, model(original).resources).find(file => file.kind === 'structure')!
     await host.tools.execute('images', 'read-page', { name: 'project.read', input: { path: page.path } })
@@ -188,33 +244,45 @@ it('resolves a ready run image in HTML and accepts the observed page path for me
     const content = `<!doctype html><html><body><img src="${reference}" alt="实物"><button id="switch">开关</button><script>document.querySelector('#switch').onclick=()=>document.body.dataset.on='true';</script></body></html>`
     const applied = await host.tools.execute('images', 'html-image', { name: 'project.apply', input: { path: page.path, intent: 'insert', content } })
     expect(applied).toMatchObject({ kind: 'read', data: { commit: 'committed' } })
+    expect((applied as { data: { diagnostics: { level: string }[] } }).data.diagnostics.filter(issue => issue.level === 'error')).toEqual([])
     const current = await host.internalAPI.read(original.documentId)
     expect(Object.values(model(current).resources.assets).some(value => Buffer.from(value).equals(bytes)), JSON.stringify({ applied,
       assets: Object.values(model(current).project.assets), resourceSizes: Object.entries(model(current).resources.assets).map(([key, value]) => [key, value.length]) })).toBe(true)
     expect(JSON.stringify(model(current).project.instances)).not.toContain('cw-result:')
     const pagePath = componentProjectFiles(model(current).project, model(current).resources).find(file => file.kind === 'structure')!.path
     expect(await host.tools.execute('images', 'media-path', { name: 'media.insert', input: { target: pagePath, resource } })).toMatchObject({ kind: 'document-operation', result: { status: 'applied' } })
+    await host.tools.execute('images', 'read-for-denials', { name: 'project.read', input: { path: pagePath } })
+    const beforeDenied = await host.internalAPI.read(original.documentId)
     await begin('foreign')
     await host.tools.execute('foreign', 'foreign-read', { name: 'project.read', input: { path: pagePath } })
     expect(await host.tools.execute('foreign', 'foreign-resource', { name: 'project.apply', input: { path: pagePath, intent: 'insert', content } })).toMatchObject({ kind: 'error' })
+    const unknownContent = content.replace(reference, `cw-result:${encodeURIComponent(resource + '-unknown')}`)
+    expect(await host.tools.execute('images', 'unknown-resource', { name: 'project.apply', input: { path: pagePath, intent: 'insert', content: unknownContent } })).toMatchObject({ kind: 'error' })
+    expect(await host.internalAPI.read(original.documentId)).toEqual(beforeDenied)
     await host.tools.stop('images')
+    const afterStop = await host.internalAPI.read(original.documentId)
     expect(await host.tools.execute('images', 'after-stop', { name: 'media.insert', input: { path: pagePath, resource } })).toMatchObject({ kind: 'error' })
+    expect(await host.tools.execute('images', 'after-stop-html', { name: 'project.apply', input: { path: pagePath, intent: 'insert', content } })).toMatchObject({ kind: 'error' })
+    expect(await host.internalAPI.read(original.documentId)).toEqual(afterStop)
     await host.tools.stop('foreign')
     const filename = path.join(root, 'images.h5lesson')
     await host.internalAPI.save(original.documentId, filename)
-    expect(model(await new DocumentHostService(path.join(root, 'cold')).internalAPI.open(filename)).resources.assets).toEqual(model(await host.internalAPI.read(original.documentId)).resources.assets)
-  } finally { await fs.rm(root, { recursive: true, force: true }) }
+    const cold = fixtureHost(root, 'cold')
+    expect(model(await cold.internalAPI.open(filename)).resources.assets).toEqual(model(await host.internalAPI.read(original.documentId)).resources.assets)
+  } catch (error) { primaryFailure = { error }; throw error }
+  finally { await cleanupFixture(root, primaryFailure) }
 })
 
 it('uses live project tools for shared/private source, confined relative imports, conflict ACK and resource save/cold reopen', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'guoling-q2-source-'))
+  let primaryFailure: { error: unknown } | undefined
   try {
     const project = createBlankCourseProjectV10('Source files')
     project.definitions.custom = { id: 'custom', title: '程序', role: 'content', version: 'one', dataSchema: { type: 'object' },
       implementation: { kind: 'source', language: 'javascript', workspace: { ownerId: 'shared', entry: 'main.js' } } }
     for (const id of ['a', 'b']) project.instances[id] = { id, definitionId: 'custom', data: { value: id }, frame }
     testContainerInstance(project, 0).childIds = ['a', 'b']
-    const host = new DocumentHostService(path.join(root, 'recovery'))
+    const host = fixtureHost(root)
     const initial = await host.internalAPI.create({ kind: 'course-v10', project,
       resources: { assets: {}, components: { shared: { 'main.js': encode(source), 'helper.js': encode('export const value=1;'), 'a.bin': Uint8Array.of(255, 1), 'b.bin': Uint8Array.of(255, 2), 'opaque.bin': Uint8Array.of(255, 0, 128) } } } }, 'sources.h5lesson')
     await host.tools.beginRun({ runId: 'source', actor: 'agent', documents: [{ documentId: initial.documentId, writable: [{ kind: 'document' }] }],
@@ -294,7 +362,7 @@ it('uses live project tools for shared/private source, confined relative imports
     expect((await history('redo')).status).toBe('applied')
     const filename = path.join(root, 'saved.h5lesson')
     await host.internalAPI.save(initial.documentId, filename)
-    const reopened = model(await new DocumentHostService(path.join(root, 'cold')).internalAPI.open(filename))
+    const reopened = model(await fixtureHost(root, 'cold').internalAPI.open(filename))
     const sharedImplementation = reopened.project.definitions.custom.implementation
     if (sharedImplementation.kind !== 'source' || !sharedImplementation.workspace) throw new Error('Shared source entry missing')
     expect(sharedImplementation.workspace.entry).toBe('main.js')
@@ -309,11 +377,13 @@ it('uses live project tools for shared/private source, confined relative imports
     expect(reopened.resources.components[privateImplementation.workspace.ownerId]['b.bin']).toEqual(Uint8Array.of(255, 4))
     expect(reopened.project.definitions.custom.title).toBe('人工名称')
     await host.tools.stop('source')
-  } finally { await fs.rm(root, { recursive: true, force: true }) }
+  } catch (error) { primaryFailure = { error }; throw error }
+  finally { await cleanupFixture(root, primaryFailure) }
 })
 
 it('round-trips HTML/Markdown professional body and software-owned spatial targets without touching floats or private files', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'guoling-q2-body-'))
+  let primaryFailure: { error: unknown } | undefined
   try {
     const project = createBlankCourseProjectV10('Body files'), text = createTextComponentData()
     project.definitions[TEXT_DEFINITION.id] = TEXT_DEFINITION
@@ -324,7 +394,7 @@ it('round-trips HTML/Markdown professional body and software-owned spatial targe
     project.instances.spatial = { id: 'spatial', definitionId: TEXT_DEFINITION.id, data: textDataEdit('spatial', text).value, frame }
     appendRootContainers(project, { id: 'flow', kind: 'flow', title: '讲义', childIds: ['paragraph', 'opaque', 'float'], flow: { layout: { readingWidth: 800, wideContentWidth: 1000 } } }, { id: 'spatial-page', kind: 'spatial', title: '空间', childIds: ['spatial'], spatial: { home: { x: 0, y: 0, zoom: 1 },
         frames: [{ id: 'camera', pose: { x: 50, y: 40, zoom: 1 }, targetInstanceId: 'spatial' }] } })
-    const host = new DocumentHostService(path.join(root, 'recovery'))
+    const host = fixtureHost(root)
     const initial = await host.internalAPI.create({ kind: 'course-v10', project, resources: { assets: {}, components: {} } }, 'body.h5lesson')
     await host.tools.beginRun({ runId: 'body', actor: 'agent', documents: [{ documentId: initial.documentId, writable: [{ kind: 'document' }] }], fileAccess: { permission: 'workspace', workspaceRoot: root } })
     await host.tools.loadToolFamilies('body', ['content'])
@@ -358,7 +428,7 @@ it('round-trips HTML/Markdown professional body and software-owned spatial targe
     expect(await tool('project.apply', { path: spatial.path, content: JSON.stringify(camera) })).toMatchObject({ kind: 'read', data: { commit: 'committed' } })
     const filename = path.join(root, 'body.h5lesson')
     await host.internalAPI.save(initial.documentId, filename)
-    const reopened = model(await new DocumentHostService(path.join(root, 'cold')).internalAPI.open(filename))
+    const reopened = model(await fixtureHost(root, 'cold').internalAPI.open(filename))
     expect(reopened.project.instances.paragraph.data).toMatchObject({ content: { inlines: [{ type: 'text', text: 'Markdown正文' }] } })
     expect(reopened.project.instances.float).toEqual(project.instances.float)
     expect(reopened.project.instances.opaque.frame).toEqual(frame)
@@ -366,15 +436,17 @@ it('round-trips HTML/Markdown professional body and software-owned spatial targe
       { id: 'camera', targetInstanceId: 'spatial', pose: { zoom: 2 } }, { title: '新镜头' }])
     expect(Object.values(reopened.project.assets).filter(asset => asset.mimeType === 'image/svg+xml')).toHaveLength(2)
     await host.tools.stop('body')
-  } finally { await fs.rm(root, { recursive: true, force: true }) }
+  } catch (error) { primaryFailure = { error }; throw error }
+  finally { await cleanupFixture(root, primaryFailure) }
 })
 
 it('admits usable HTML body with a missing local media diagnostic and keeps its recoverable source', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'guoling-q2-partial-'))
+  let primaryFailure: { error: unknown } | undefined
   try {
     const project = createBlankCourseProjectV10('Partial body')
     appendRootContainers(project, { id: 'flow', kind: 'flow', title: '讲义', childIds: [] })
-    const host = new DocumentHostService(path.join(root, 'recovery'))
+    const host = fixtureHost(root)
     const initial = await host.internalAPI.create({ kind: 'course-v10', project, resources: { assets: {}, components: {} } }, 'partial.h5lesson')
     await host.tools.beginRun({ runId: 'partial', actor: 'agent', documents: [{ documentId: initial.documentId, writable: [{ kind: 'document' }] }], fileAccess: { permission: 'workspace', workspaceRoot: root } })
     await host.tools.loadToolFamilies('partial', ['content'])
@@ -388,11 +460,13 @@ it('admits usable HTML body with a missing local media diagnostic and keeps its 
     const original = Object.values(current.project.assets).find(asset => asset.mimeType === 'text/html')!
     expect(current.resources.assets[original.id]).toEqual(encode(html))
     await host.tools.stop('partial')
-  } finally { await fs.rm(root, { recursive: true, force: true }) }
+  } catch (error) { primaryFailure = { error }; throw error }
+  finally { await cleanupFixture(root, primaryFailure) }
 })
 
 it('applies precise source edits sequentially as one undoable commit and saves the original frame, neighbours and source files', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'guoling-q2-precise-'))
+  let primaryFailure: { error: unknown } | undefined
   try {
     const project = createBlankCourseProjectV10('Precise source')
     project.definitions[WEB_DEFINITION.id] = WEB_DEFINITION
@@ -403,7 +477,7 @@ it('applies precise source edits sequentially as one undoable commit and saves t
     project.instances.material = { id: 'material', definitionId: WEB_DEFINITION.id, data: { html }, frame, style: { opacity: 0.9 } }
     project.instances.neighbour = { id: 'neighbour', definitionId: WEB_DEFINITION.id, data: { html: '<button>原互动</button>' }, frame }
     testContainerInstance(project, 0).childIds = ['material', 'neighbour']
-    const host = new DocumentHostService(path.join(root, 'recovery'))
+    const host = fixtureHost(root)
     const initial = await host.internalAPI.create({ kind: 'course-v10', project,
       resources: { assets: {}, components: { shared: { 'main.js': encode(authoredSource), 'helper.js': encode('export const value=1;'), 'opaque.bin': Uint8Array.of(255, 0, 128) } } } }, 'precise.h5lesson')
     await host.tools.beginRun({ runId: 'precise', actor: 'agent', documents: [{ documentId: initial.documentId, writable: [{ kind: 'document' }] }] })
@@ -446,23 +520,25 @@ it('applies precise source edits sequentially as one undoable commit and saves t
     ] })).toMatchObject({ kind: 'read', data: { commit: 'committed' } })
     const filename = path.join(root, 'saved.h5lesson')
     await host.internalAPI.save(initial.documentId, filename)
-    const reopened = model(await new DocumentHostService(path.join(root, 'cold')).internalAPI.open(filename))
+    const reopened = model(await fixtureHost(root, 'cold').internalAPI.open(filename))
     expect(reopened.project.instances).toEqual(model(changed).project.instances)
     expect(reopened.resources.components.shared).toEqual({ 'main.js': encode(authoredSource.replace('旧caption😺', () => literalCaption).replace('mount()', 'value:2,mount()')), 'helper.js': encode('export const value=1;'), 'opaque.bin': Uint8Array.of(255, 0, 128) })
     expect(reopened.project.definitions.custom).toEqual(project.definitions.custom)
     await host.tools.stop('precise')
-  } finally { await fs.rm(root, { recursive: true, force: true }) }
+  } catch (error) { primaryFailure = { error }; throw error }
+  finally { await cleanupFixture(root, primaryFailure) }
 })
 
 it('rejects unobserved, binary, missing and ambiguous precise edits without a partial write', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'guoling-q2-precise-errors-'))
+  let primaryFailure: { error: unknown } | undefined
   try {
     const project = createBlankCourseProjectV10('Precise errors')
     project.definitions[WEB_DEFINITION.id] = WEB_DEFINITION
     project.definitions.custom = { id: 'custom', role: 'content', implementation: { kind: 'source', language: 'javascript', workspace: { ownerId: 'shared', entry: 'main.js' } } }
     project.instances.material = { id: 'material', definitionId: WEB_DEFINITION.id, data: { html: '<p>aaa 重复 重复 唯一</p>' }, frame }
     testContainerInstance(project, 0).childIds = ['material']
-    const host = new DocumentHostService(path.join(root, 'recovery'))
+    const host = fixtureHost(root)
     const initial = await host.internalAPI.create({ kind: 'course-v10', project,
       resources: { assets: {}, components: { shared: { 'main.js': encode(source), 'opaque.bin': Uint8Array.of(255, 0, 128) } } } }, 'precise-errors.h5lesson')
     await host.tools.beginRun({ runId: 'precise-errors', actor: 'agent', documents: [{ documentId: initial.documentId, writable: [{ kind: 'document' }] }] })
@@ -493,17 +569,19 @@ it('rejects unobserved, binary, missing and ambiguous precise edits without a pa
     expect(after.revision).toBe(initial.revision)
     expect(after.model).toEqual(initial.model)
     await host.tools.stop('precise-errors')
-  } finally { await fs.rm(root, { recursive: true, force: true }) }
+  } catch (error) { primaryFailure = { error }; throw error }
+  finally { await cleanupFixture(root, primaryFailure) }
 })
 
 it('keeps same-field human HTML changes protected when precise edits still match the latest text', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'guoling-q2-precise-cas-'))
+  let primaryFailure: { error: unknown } | undefined
   try {
     const project = createBlankCourseProjectV10('Precise CAS')
     project.definitions[WEB_DEFINITION.id] = WEB_DEFINITION
     project.instances.material = { id: 'material', definitionId: WEB_DEFINITION.id, data: { html: '<svg><text>原图注</text></svg>' }, frame }
     testContainerInstance(project, 0).childIds = ['material']
-    const host = new DocumentHostService(path.join(root, 'recovery'))
+    const host = fixtureHost(root)
     const initial = await host.internalAPI.create({ kind: 'course-v10', project, resources: { assets: {}, components: {} } }, 'precise-cas.h5lesson')
     await host.tools.beginRun({ runId: 'precise-cas', actor: 'agent', documents: [{ documentId: initial.documentId, writable: [{ kind: 'document' }] }] })
     await host.tools.loadToolFamilies('precise-cas', ['content'])
@@ -522,5 +600,6 @@ it('keeps same-field human HTML changes protected when precise edits still match
     expect(after.revision).toBe(human.revision)
     expect(after.model).toEqual(human.model)
     await host.tools.stop('precise-cas')
-  } finally { await fs.rm(root, { recursive: true, force: true }) }
+  } catch (error) { primaryFailure = { error }; throw error }
+  finally { await cleanupFixture(root, primaryFailure) }
 })

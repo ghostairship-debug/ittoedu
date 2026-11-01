@@ -10,7 +10,7 @@ import type { ContentApplyIntent, ContentApplySource } from '../../../core/conte
 import type { ComponentImplementation } from '../../../shared/contracts/component-platform'
 import { readHtmlClosure, resolveSourceInputPath } from '../htmlImport/readHtmlClosure'
 import { readComponentSourceClosure } from './componentSourceClosure'
-import { prepareContentResources, prepareImageResource } from '../contentApply/resources/contentResources'
+import { prepareContentResources, prepareImageResource, type PreparedContentResource } from '../contentApply/resources/contentResources'
 import { assetReferencePath, cssUrlReferences, projectReferencePath } from '../../../shared/composition/projectReferences'
 import { parse, serialize, type DefaultTreeAdapterTypes } from 'parse5'
 import type { HostImageInput } from '../../../core/tools/imageResource'
@@ -20,6 +20,73 @@ export { decodeComponentHtmlSource }
 
 const TEXT = new Set(['.html', '.htm', '.css', '.js', '.mjs', '.cjs', '.ts', '.tsx', '.jsx', '.json', '.md', '.markdown', '.txt', '.svg'])
 const SOURCE = new Set(['.js', '.mjs', '.cjs', '.ts', '.tsx', '.jsx'])
+
+/** Author modules remain data leaves. Only newly needed dependencies and their admitted media accompany one edit. */
+async function prepareWebModuleSource(input: ComponentProjectFileInput, file: ComponentProjectFile,
+  references: ReadonlyMap<string, { bytes: Uint8Array; mediaType: string }>): Promise<ContentApplySource> {
+  const target = file.webModule!, entry = path.posix.normalize(target.path)
+  const suppliedEntry = input.sourceEntry ?? path.basename(input.filename)
+  const supplied = new Map<string, Uint8Array>()
+  for (const [name, bytes] of input.siblingFiles ?? []) supplied.set(path.posix.normalize(path.posix.join(path.posix.dirname(entry),
+    path.posix.relative(path.posix.dirname(suppliedEntry), name))), bytes)
+  const siblings = new Map(supplied), names = new Map<string, string>()
+  for (const [name, code] of Object.entries(target.modules)) {
+    const normalized = path.posix.normalize(name)
+    if (names.has(normalized)) throw new Error(`作者模块路径重复：${name}；请先在对象数据中核对重复模块。`)
+    names.set(normalized, name)
+    // A neighboring disk draft must not overwrite a module already owned by this captured document.
+    siblings.set(normalized, new TextEncoder().encode(code))
+  }
+  siblings.set(entry, new TextEncoder().encode(input.text!))
+  for (const asset of Object.values(input.assetContext?.assets ?? {})) {
+    const bytes = input.assetContext?.bytes[asset.id]
+    if (bytes && !siblings.has(asset.path)) siblings.set(asset.path, bytes)
+  }
+  const sourcePath = `./${entry}`.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;')
+  const prepared = await prepareContentResources({ html: `<script type="module" src="${sourcePath}"></script>`,
+    siblingFiles: siblings, resourceReferences: references }, randomUUID)
+  input.diagnostics = [...input.diagnostics ?? [], ...prepared.diagnostics.map(issue => ({ ...issue, repairable: true }))]
+  const changed = Object.entries({ [entry]: input.text!, ...prepared.modules }).filter(([name]) => name === entry || !names.has(name))
+  const source: Extract<ContentApplySource, { kind: 'data' }> = { kind: 'data', fields: [], resourceEdits: [] }
+  for (const [name, code] of changed) {
+    const original = name === entry ? target.path : name
+    if (target.modules[original] !== code) source.fields.push({ path: ['modules', original], value: code })
+  }
+  const bindings: Record<string, string> = Object.create(null)
+  for (const resource of [...prepared.resources, ...prepared.unresolvedResources] as PreparedContentResource[]) {
+    const tokens = [...new Set([`cw-resource:${resource.key}`, ...resource.origins.map(origin => origin.reference)
+      .filter(reference => reference.startsWith('cw-resource:'))])].filter(token => changed.some(([, code]) => code.includes(token)))
+    if (!tokens.length) continue
+    const existing = resource.origins.map(origin => {
+      const id = input.assetContext?.references?.[origin.reference]
+        ?? (origin.reference.startsWith('cw-resource:') ? origin.reference.slice('cw-resource:'.length) : undefined)
+      return id && input.assetContext?.assets[id] && input.assetContext.bytes[id] ? input.assetContext.assets[id] : undefined
+    }).find(Boolean) ?? Object.values(input.assetContext?.assets ?? {}).find(asset => {
+      const bytes = input.assetContext?.bytes[asset.id]
+      return bytes?.byteLength === resource.bytes.byteLength && bytes.every((value, index) => value === resource.bytes[index])
+    })
+    const id = existing?.id ?? resource.image?.id ?? randomUUID()
+    if (!existing) {
+      const extension = resource.image?.path.split('.').at(-1) ?? resource.mediaType.split('/').at(-1)?.replace(/[^a-z0-9]/gi, '') ?? 'bin'
+      source.resourceEdits!.push({ type: 'asset.add', asset: { id, path: `assets/${id}.${extension}`, mimeType: resource.mediaType,
+        byteLength: resource.bytes.byteLength, ...(resource.image ? { kind: 'image' as const, width: resource.image.width, height: resource.image.height } : {}) }, bytes: resource.bytes })
+    }
+    for (const token of tokens) {
+      const held = input.assetContext?.references?.[token]
+      if (held) {
+        const bytes = input.assetContext?.bytes[held]
+        if (!bytes || bytes.byteLength !== resource.bytes.byteLength || bytes.some((value, index) => value !== resource.bytes[index]))
+          throw new Error(`模块资源引用 ${token} 与当前对象的其他资源冲突；原稿已保留。`)
+      } else bindings[token] = id
+    }
+  }
+  if (Object.keys(bindings).length) {
+    if (input.assetContext?.references) for (const [token, id] of Object.entries(bindings))
+      source.fields.push({ path: ['resourceBindings', token], value: id })
+    else source.fields.push({ path: ['resourceBindings'], value: bindings })
+  }
+  return source
+}
 
 /** Read-only source admission shares the task's actual file access and realpath closure. */
 export async function readComponentProjectFileInput(input: {
@@ -31,11 +98,19 @@ export async function readComponentProjectFileInput(input: {
   signal?: AbortSignal
 }): Promise<ComponentProjectFileInput> {
   const { fileAccess, signal } = input
-  if (!fileAccess?.workspaceRoot) throw new Error('按路径应用内容需要本任务的工作空间。')
+  const relativeRoot = fileAccess?.workspaceRoot ?? fileAccess?.assemblyRoot
+  if (!fileAccess || !relativeRoot && (!fileAccess.assemblyReadRoots?.length || !path.isAbsolute(input.from)))
+    throw new Error('按路径应用内容需要本任务的工作空间或装配目录。')
   signal?.throwIfAborted()
-  const root = (await resolveSourceInputPath(fileAccess.workspaceRoot)).filename
-  const selected = await resolveSourceInputPath(path.resolve(fileAccess.workspaceRoot, input.from)), filename = selected.filename
-  if (fileAccess.permission !== 'full' && !isInsideRoot(root, filename)) throw new Error('内容源文件位于本任务授权工作空间外。')
+  const root = fileAccess.workspaceRoot ? (await resolveSourceInputPath(fileAccess.workspaceRoot)).filename : undefined
+  const selected = await resolveSourceInputPath(relativeRoot ? path.resolve(relativeRoot, input.from) : input.from), filename = selected.filename
+  const assemblyRoots = await Promise.all([...new Set([fileAccess.assemblyRoot, ...fileAccess.assemblyReadRoots ?? []]
+    .filter((value): value is string => !!value))].map(async directory => (await resolveSourceInputPath(directory)).filename))
+  const assemblyRoot = assemblyRoots.filter(directory => isInsideRoot(directory, filename)).sort((left, right) => right.length - left.length)[0]
+  // These grants name individual run roots. Never join them through the common runs directory.
+  const resourceRoot = assemblyRoot ?? (fileAccess.permission === 'full' ? path.parse(filename).root
+    : root && isInsideRoot(root, filename) ? root : undefined)
+  if (!resourceRoot) throw new Error('内容源文件位于本任务授权工作空间外，且不属于已提供的装配目录。')
   const extension = path.extname(filename).toLowerCase()
   const html = extension === '.html' || extension === '.htm'
   const opened = TEXT.has(extension) && (!html || input.sourceHtml === undefined || selected.missing)
@@ -45,20 +120,20 @@ export async function readComponentProjectFileInput(input: {
   const bytes = current === undefined ? new Uint8Array(await fs.readFile(filename)) : new TextEncoder().encode(current)
   const text = current ?? (html ? decodeComponentHtmlSource(bytes).text : TEXT.has(extension) ? new TextDecoder('utf-8', { fatal: true }).decode(bytes) : undefined)
   if (extension === '.html' || extension === '.htm') {
-    const closure = await readHtmlClosure({ htmlPath: filename, rootDir: fileAccess.permission === 'full' ? path.parse(filename).root : root,
+    const closure = await readHtmlClosure({ htmlPath: filename, rootDir: resourceRoot,
       sourceHtml: text, currentSource: input.currentSource })
     signal?.throwIfAborted()
     return { filename, bytes, text, siblingFiles: closure.siblingFiles, diagnostics: closure.diagnostics.map(issue => ({ ...issue, repairable: true })) }
   }
   if (extension === '.css' || extension === '.md' || extension === '.markdown') {
-    const closure = await readHtmlClosure({ htmlPath: filename, rootDir: fileAccess.permission === 'full' ? path.parse(filename).root : root,
+    const closure = await readHtmlClosure({ htmlPath: filename, rootDir: resourceRoot,
       sourceHtml: extension === '.css' ? `<style>${text ?? ''}</style>` : await marked.parse(text ?? '', { async: false }), currentSource: input.currentSource })
     signal?.throwIfAborted()
     return { filename, bytes, text, siblingFiles: closure.siblingFiles, diagnostics: closure.diagnostics.map(issue => ({ ...issue, repairable: true })) }
   }
   if (SOURCE.has(extension) && text !== undefined) {
     const closure = await readComponentSourceClosure({ filename,
-      rootDir: fileAccess.permission === 'full' ? path.parse(filename).root : root, bytes, text, signal, currentSource: input.currentSource })
+      rootDir: resourceRoot, bytes, text, signal, currentSource: input.currentSource })
     signal?.throwIfAborted()
     return { filename, bytes, text, sourceEntry: closure.entry, siblingFiles: closure.files, diagnostics: closure.diagnostics.map(issue => ({ ...issue, repairable: true })) }
   }
@@ -70,8 +145,11 @@ export async function readComponentProjectFileInput(input: {
 export async function prepareComponentProjectFileSource(input: ComponentProjectFileInput, file: ComponentProjectFile,
   _intent: ContentApplyIntent, resources?: { readImage(source: string): Promise<HostImageInput | null> }): Promise<ContentApplySource> {
   const extension = path.extname(input.filename).toLowerCase()
-  if (extension === '.json' && file.kind === 'structure' && input.text !== undefined && ['insert', 'redo'].includes(_intent))
-    return componentFileContentSource(file, input.text, input)
+  if (extension === '.json' && file.kind === 'structure' && input.text !== undefined && ['insert', 'redo'].includes(_intent)) {
+    const source = componentFileContentSource(file, input.text, input)
+    // A structure.json target can receive inline HTML; it still needs resource admission below.
+    if (source.kind !== 'html') return source
+  }
   const cssSource = file.binding?.kind === 'theme' && extension === '.css'
   const projectReferences = new Map<string, { bytes: Uint8Array; mediaType: string }>()
   const canonicalReferences = Object.values(input.assetContext?.assets ?? {}).map(asset => [`cw-resource:${asset.id}`, asset.id])
@@ -80,6 +158,10 @@ export async function prepareComponentProjectFileSource(input: ComponentProjectF
     ? [...localReferences, ...canonicalReferences] : [...canonicalReferences, ...localReferences]) {
     const asset = input.assetContext?.assets[id!], bytes = input.assetContext?.bytes[id!]
     if (asset && bytes) projectReferences.set(reference!, { bytes, mediaType: asset.mimeType ?? 'application/octet-stream' })
+  }
+  if (file.webModule) {
+    if (_intent !== 'content' || input.text === undefined) throw new Error('作者模块需要文本内容；修改只作用当前模块。')
+    return prepareWebModuleSource(input, file, projectReferences)
   }
   const resourceReference = (reference: string) => reference.startsWith('cw-result:')
     ? decodeURIComponent(reference.slice('cw-result:'.length))

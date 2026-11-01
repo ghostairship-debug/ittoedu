@@ -145,6 +145,7 @@ export function planContentApply(input: PlanContentApplyInput, options: ContentA
   if (request.intent === 'content' && request.source.kind === 'html') htmlContentTargetIds(project, request)
   const diagnostics = [...input.diagnostics ?? []]
   const edits: ComponentEdit[] = [...input.edits ?? []]
+  if (request.source.kind === 'data') edits.push(...request.source.resourceEdits ?? [])
   if (request.source.kind === 'objects' || request.source.kind === 'data') edits.push(...request.source.componentFiles ?? [])
   const insertedIds: string[] = []
   if (request.intent === 'insert' || request.intent === 'redo') {

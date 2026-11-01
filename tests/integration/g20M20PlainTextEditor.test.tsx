@@ -1,4 +1,5 @@
 import { EditorView } from '@codemirror/view'
+import { syntaxTree } from '@codemirror/language'
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { createRef } from 'react'
 import { afterEach, expect, it, vi } from 'vitest'
@@ -12,8 +13,8 @@ import { authoringDraftRecoverySchema, type AuthoringDraftRecovery, type Documen
 
 afterEach(cleanup)
 
-it('M20-T02 mounted document editor commits its exact source through DocumentSession and saves it', async () => {
-  const path = '/lesson/notes.txt', ref = { kind: 'file' as const, path }
+it.each(['notes.txt', 'invalid.json', 'comments.jsonc', 'main.ts', 'README'])('mounted %s editor commits exact source through DocumentSession and saves it', async filename => {
+  const path = `/lesson/${filename}`, ref = { kind: 'file' as const, path }
   const original = '\ufeffone\r\ntwo\r\n'
   let disk = original, version = 'v1'
   const saveDocument = vi.fn<NonNullable<RecoverableDocumentFilePort['saveDocument']>>(async request => {
@@ -100,4 +101,25 @@ it('M20-T02 IME completion reconciles visible text against untouched mixed line 
   fireEvent.compositionEnd(view.contentDOM)
   await waitFor(() => expect(draft).toHaveBeenLastCalledWith('first\r\nsecond\nTHIRD\rrest'))
   expect(ref.current?.flush()).toEqual({ ready: true, source: 'first\r\nsecond\nTHIRD\rrest' })
+})
+
+it('loads optional JSON coloring without changing invalid JSON, BOM, CRLF or the pending draft', async () => {
+  const source = '\ufeff{\r\n  // comment\r\n  "value": broken,\r\n}\r\n'
+  const draft = vi.fn(), ref = createRef<PlainTextDocumentEditorHandle>()
+  const props = { filename: 'settings.jsonc', source, revision: 1, onDraft: draft, onUndo: vi.fn(), onRedo: vi.fn() }
+  const mounted = render(<PlainTextDocumentEditor ref={ref} {...props} />)
+  const view = EditorView.findFromDOM(screen.getByRole('textbox', { name: '纯文本编辑' }))
+  if (!view) throw new Error('CodeMirror did not mount')
+  await waitFor(() => expect(syntaxTree(view.state).length).toBeGreaterThan(0))
+  expect(draft).not.toHaveBeenCalled()
+  expect(ref.current?.flush()).toEqual({ ready: true, source })
+  const from = view.state.doc.toString().indexOf('broken')
+  act(() => view.dispatch({ changes: { from, to: from + 'broken'.length, insert: 'still_broken' } }))
+  const edited = source.replace('broken', 'still_broken')
+  expect(draft).toHaveBeenLastCalledWith(edited)
+  expect(ref.current?.flush().source).toBe(edited)
+  mounted.rerender(<PlainTextDocumentEditor ref={ref} {...props} filename="settings.yaml" source={edited} revision={2} />)
+  await waitFor(() => expect(syntaxTree(view.state).length).toBe(0))
+  expect(ref.current?.flush().source).toBe(edited)
+  expect(draft).toHaveBeenCalledOnce()
 })

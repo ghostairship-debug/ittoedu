@@ -7,9 +7,11 @@ import { prepareDocumentTextEdit } from '../document/documentSelectionCommands'
 import { SelectionQuickBar } from '../editing/quickbar/SelectionQuickBar'
 import { cancelEditPreview, useEditPreviews } from '../workbench/EditPreviewProjection'
 import { sourcePreviewEffect, sourcePreviewExtensions } from '../document/editPreviewWidgets'
-import { EditorState } from '@codemirror/state'
+import { Compartment, EditorState } from '@codemirror/state'
+import { defaultHighlightStyle, syntaxHighlighting } from '@codemirror/language'
 import { EditorView, keymap } from '@codemirror/view'
 import { applyEditorChanges, editorText, reconcileEditorText, sourceOffset, editorOffset } from './plainTextSourceMapping'
+import { loadSourceLanguage } from './sourceLanguage'
 
 export interface PlainTextDocumentEditorHandle {
   flush(): { ready: boolean; source: string }
@@ -17,6 +19,7 @@ export interface PlainTextDocumentEditorHandle {
   revealRange(target: { revision: number; from: number; to: number }): boolean
 }
 export interface PlainTextDocumentEditorProps {
+  filename?: string
   documentId?: string
   documentEpoch?: string
   snapshot?: DocumentSnapshot
@@ -29,7 +32,7 @@ export interface PlainTextDocumentEditorProps {
   onSelectionRange?(range: { revision: number; from: number; to: number } | null): void
 }
 
-/** Plain text only: wrapping source view, no Markdown parsing or formatting toolbar. */
+/** Exact source editing with optional language coloring; source text is always authoritative. */
 export const PlainTextDocumentEditor = forwardRef<PlainTextDocumentEditorHandle, PlainTextDocumentEditorProps>(function PlainTextDocumentEditor(props, ref) {
   const latest = useRef(props); latest.current = props
   const host = useRef<HTMLDivElement>(null)
@@ -40,6 +43,8 @@ export const PlainTextDocumentEditor = forwardRef<PlainTextDocumentEditorHandle,
   const draft = useRef(props.source)
   const syncing = useRef(false)
   const composing = useRef(false)
+  const language = useRef(new Compartment())
+  const filename = props.filename ?? (props.snapshot?.binding.kind === 'file' ? props.snapshot.binding.path : props.snapshot?.binding.suggestedName) ?? ''
   useImperativeHandle(ref, () => ({ flush: () => ({ ready: !composing.current, source: draft.current }), revealRange: target => {
     const current = view.current
     if (!current || composing.current || target.revision !== latest.current.revision || draft.current !== latest.current.source
@@ -55,6 +60,8 @@ export const PlainTextDocumentEditor = forwardRef<PlainTextDocumentEditorHandle,
     if (!parent) return
     const editor = new EditorView({ parent, state: EditorState.create({ doc: draft.current, extensions: [
       EditorView.lineWrapping,
+      language.current.of([]),
+      syntaxHighlighting(defaultHighlightStyle),
       sourcePreviewExtensions(() => setIssue('正在生成的范围暂时只读，请先停止这一处生成。')),
       EditorView.contentAttributes.of({ 'aria-label': '纯文本编辑' }),
       keymap.of([
@@ -86,6 +93,16 @@ export const PlainTextDocumentEditor = forwardRef<PlainTextDocumentEditorHandle,
     view.current = editor
     return () => { editor.destroy(); if (view.current === editor) view.current = null; composing.current = false }
   }, [])
+  useEffect(() => {
+    const editor = view.current
+    if (!editor) return
+    let live = true
+    editor.dispatch({ effects: language.current.reconfigure([]) })
+    void loadSourceLanguage(filename).then(extension => {
+      if (live && view.current === editor) editor.dispatch({ effects: language.current.reconfigure(extension) })
+    }).catch(() => { /* Coloring is optional; source editing and saving remain available. */ })
+    return () => { live = false }
+  }, [filename])
   useEffect(() => {
     if (composing.current) return
     const text = props.source

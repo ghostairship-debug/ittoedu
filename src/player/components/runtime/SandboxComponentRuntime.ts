@@ -22,6 +22,8 @@ import { webRuntimeTargetProfile, type RuntimeTargetProfile, type WebRuntimeData
 import { refreshWebResourceReferences } from '../../../components/web/resources'
 import { createWebResourceUrlLease } from '../../../components/web/resourceUrlLease'
 import { installCourseNavigationReady } from '../../../components/web/courseNavigation'
+import { installCourseProgressReady } from '../../../components/web/courseProgress'
+import type { ComponentProgressPort } from '../../../shared/contracts/component-platform'
 import { createDomAuthoring, domAuthoringFactorySource } from '../../../components/web/authoringDom'
 import { installOwnedDocumentAuthoring, installAuthoringInputArbitration, authoringCaretOffset, type OwnedDocumentBlobCarriers } from '../../../components/web/ownedDocumentAuthoring'
 import { createAuthoringFrameGeometry } from '../../../components/web/authoringFrame'
@@ -53,9 +55,11 @@ export function componentAuthorPaintAtPoint(root: Element, x: number, y: number)
 }
 
 /** Serialized trusted bridge only. Author code arrives through its dedicated port. */
-function contentRealmBridge(nonce: string, fragmentBox: { navigationBinder: typeof createNavigationControlBinder; resourceFactory: typeof createWebResourceUrlLease; navigationReady: typeof installCourseNavigationReady; isMeasured: typeof isMeasuredWebFragmentBox; extent: typeof measuredFragmentExtent; refreshResources: typeof refreshWebResourceReferences; fragments: typeof createComponentFragmentProjection; authoring: typeof createDomAuthoring; paintAt: typeof componentAuthorPaintAtPoint; clientMatrix: typeof componentClientMatrix; ownedAuthoring: typeof installOwnedDocumentAuthoring; input: typeof installAuthoringInputArbitration; caret: typeof authoringCaretOffset; frameGeometry: typeof createAuthoringFrameGeometry; textOverrides(roots: readonly Node[], rules: readonly LightEditTextOverride[]): DomTextOverrideController }, authoredDocument?: { release(): void; resourceLease?: ReturnType<typeof createWebResourceUrlLease>; blobCarriers?: OwnedDocumentBlobCarriers; transportFragment?: boolean; setActivity?(value: { active: boolean; visible: boolean; playing: boolean }): void; onDiagnostic?(listener: (message: string) => void): () => void }) {
-  const resourceLease = authoredDocument?.resourceLease ?? fragmentBox.resourceFactory(window)
+function contentRealmBridge(nonce: string, fragmentBox: { navigationBinder: typeof createNavigationControlBinder; resourceFactory: typeof createWebResourceUrlLease; navigationReady: typeof installCourseNavigationReady; progressReady: typeof installCourseProgressReady; isMeasured: typeof isMeasuredWebFragmentBox; extent: typeof measuredFragmentExtent; refreshResources: typeof refreshWebResourceReferences; fragments: typeof createComponentFragmentProjection; authoring: typeof createDomAuthoring; paintAt: typeof componentAuthorPaintAtPoint; clientMatrix: typeof componentClientMatrix; ownedAuthoring: typeof installOwnedDocumentAuthoring; input: typeof installAuthoringInputArbitration; caret: typeof authoringCaretOffset; frameGeometry: typeof createAuthoringFrameGeometry; textOverrides(roots: readonly Node[], rules: readonly LightEditTextOverride[]): DomTextOverrideController }, authoredDocument?: { release(): void; resourceLease?: ReturnType<typeof createWebResourceUrlLease>; blobCarriers?: OwnedDocumentBlobCarriers; transportFragment?: boolean; setActivity?(value: { active: boolean; visible: boolean; playing: boolean }): void; onDiagnostic?(listener: (message: string) => void): () => void }) {
+  let resourceLease = authoredDocument?.resourceLease ?? fragmentBox.resourceFactory(window)
+  const retiredResourceLeases = new Set<ReturnType<typeof createWebResourceUrlLease>>()
   const navigationReady = fragmentBox.navigationReady(window)
+  const progressReady = fragmentBox.progressReady(window)
   const runtimeInstance = (value: ComponentInstance): ComponentInstance => ({ ...value, data: JSON.parse(resourceLease.project(JSON.stringify(value.data))) })
   // This fixed loader is created only inside the content realm. Keeping import's
   // syntax in its string prevents Vite from inserting a parent lexical helper.
@@ -210,6 +214,16 @@ function contentRealmBridge(nonce: string, fragmentBox: { navigationBinder: type
   const motionTasks = new Map<number, { start(reducedMotion: boolean): void; settle(outcome: ComponentMotionOutcome): void }>()
   const motionRequests = new Map<number, { taskId: number; method: string; resolve(value: unknown): void }>()
   let geometrySequence = 0
+  let progressSequence = 0
+  const progressRequests = new Map<number, { resolve(value: any): void; reject(error: Error): void }>()
+  const progressRequest = <T>(method: string, namespace: string, schemaVersion: number, value?: JsonValue, expectedRevision?: string | null): Promise<T> => {
+    if (!active) return Promise.reject(Object.assign(new Error('当前进度作用域已结束'), { code: 'progress-cancelled' }))
+    const requestId = ++progressSequence
+    return new Promise((resolve, reject) => {
+      progressRequests.set(requestId, { resolve, reject })
+      send({ type: 'progress.request', requestId, method, namespace, schemaVersion, value, expectedRevision })
+    })
+  }
   const geometryRequests = new Map<number, (value: ComponentGeometrySnapshot | null) => void>()
   let serviceSequence = 0
   const serviceRequests = new Map<number, (value: boolean) => void>()
@@ -279,6 +293,15 @@ function contentRealmBridge(nonce: string, fragmentBox: { navigationBinder: type
   installInput()
   const nativeDiagnostics: string[] = []
   const adoptDocument = (next: NonNullable<typeof authoredDocument>) => {
+    if (next.resourceLease && next.resourceLease !== resourceLease) {
+      // Source can request a parser document after preparation. Its asset URLs
+      // belong to the parser lease, so authoring must reverse and resolve in
+      // that same owner. Prepared CSS/modules may still hold the earlier URLs;
+      // keep their lease alive until this component's normal cancellation.
+      retiredResourceLeases.add(resourceLease)
+      resourceLease = next.resourceLease
+      resourceUrls = resourceLease.urls
+    }
     authoredDocument = next
     installInput()
     document.head.append(courseStyle)
@@ -325,7 +348,12 @@ function contentRealmBridge(nonce: string, fragmentBox: { navigationBinder: type
     for (const resolve of serviceRequests.values()) resolve(false)
     serviceRequests.clear(); mediaCommands.clear(); interactionListeners.clear()
     authorPreviewCallbacks.clear()
-    resourceLease.release(); navigationReady.dispose()
+    for (const pending of progressRequests.values()) pending.reject(Object.assign(new Error('当前进度作用域已结束'), { code: 'progress-cancelled' }))
+    progressRequests.clear()
+    resourceLease.release()
+    for (const lease of retiredResourceLeases) lease.release()
+    retiredResourceLeases.clear()
+    navigationReady.dispose(); progressReady.dispose()
     authoredDocument?.release()
     if (!authoredDocument && Object.getOwnPropertyDescriptor(window, '__guolingRuntimeActivity')?.get === activitySnapshot)
       Reflect.deleteProperty(window, '__guolingRuntimeActivity')
@@ -455,7 +483,13 @@ function contentRealmBridge(nonce: string, fragmentBox: { navigationBinder: type
         for (const message of nativeDiagnostics.splice(0)) send({ type: 'event.emit', name: 'component.diagnostic', value: { instanceId: instance.id, message } })
         teacher = message.teacher as typeof teacher
         interaction = message.interaction as typeof interaction
+        const progress: ComponentProgressPort | undefined = message.progress ? {
+          read: (namespace, version) => progressRequest('read', namespace, version),
+          write: (namespace, version, value, revision) => progressRequest('write', namespace, version, value, revision),
+          clear: (namespace, version, revision) => progressRequest('clear', namespace, version, undefined, revision),
+        } : undefined
         const scope = {
+          ...(progress ? { progress } : {}),
           runScopeId: message.runScopeId, instanceId: instance.id, generation, signal: controller.signal,
           isActive: () => active,
           cleanup: (cleanup: () => void) => { if (active) cleanups.add(cleanup); else cleanup() },
@@ -520,7 +554,8 @@ function contentRealmBridge(nonce: string, fragmentBox: { navigationBinder: type
             || teacher!.snapshot.scenes.some(scene => scene.id === action.sceneId)),
           execute: (action: TeacherControllerAction, signal?: AbortSignal) => teacherRequest('execute', { action }, signal),
           bindControl:(element:HTMLElement,action:TeacherControllerAction)=>{
-            if(!root||!root.contains(element))throw new Error('导航按钮必须位于当前组件内容中')
+            // The shared binder validates ownership through ShadowRoot hosts too.
+            if(!root)throw new Error('导航按钮必须位于当前组件内容中')
             if(!navigationBinder){
               navigationBinder=fragmentBox.navigationBinder({root,live:()=>active,read:()=>teacher!.snapshot,
                 canExecute:(action:TeacherControllerAction)=>Boolean(teacher?.allowed[action.type]),execute:(action:TeacherControllerAction)=>teacherRequest('execute',{action}),
@@ -537,6 +572,7 @@ function contentRealmBridge(nonce: string, fragmentBox: { navigationBinder: type
           resetView: () => { void teacherRequest('resetView').catch(() => {}) },
         } : undefined
         navigationReady.connect(teacherController)
+        progressReady.connect(progress)
         hitAuthor = (x, y) => {
           const top = contentAuthoring?.paintedElementAt(x, y)
           if (!root || !top || !root.contains(top)) return undefined
@@ -1006,6 +1042,14 @@ function contentRealmBridge(nonce: string, fragmentBox: { navigationBinder: type
         refreshSourcePaint?.()
         if (teacher) teacher.viewport = { left: 0, top: 0, right: sourceViewport!.right - sourceViewport!.left, bottom: sourceViewport!.bottom - sourceViewport!.top }
         return
+      } else if (message.type === 'progress.reply') {
+        if (!active || message.generation !== generation) return
+        const pending = progressRequests.get(message.requestId as number)
+        if (!pending) return
+        progressRequests.delete(message.requestId as number)
+        if (message.error) pending.reject(Object.assign(new Error(String(message.error)), { code: message.code }))
+        else pending.resolve(message.value)
+        return
       } else if (message.type === 'state.applied') {
         if (!active || message.generation !== generation || typeof message.name !== 'string') return
         const pending = pendingStateWrites.get(message.name)
@@ -1129,13 +1173,15 @@ export async function preparePublishedNativeComponent(artifact: CompiledComponen
   iframe.name = leaseId
   iframe.setAttribute('sandbox', 'allow-scripts')
   iframe.setAttribute('title', '组件内容')
-  Object.assign(iframe.style, { border: '0', width: '100%', height: '100%' })
+  // A realm fills its owned box. Inline replaced elements reserve a text
+  // baseline below a 100%-height frame, creating a second host scrollbar.
+  Object.assign(iframe.style, { display: 'block', border: '0', width: '100%', height: '100%' })
   // Main's existing preview protocol supplies the desktop document, without its
   // parent's CSP or Blob storage key. Standalone HTML owns this inline document.
   // The author module still arrives over a dedicated port and is loaded by the child.
   const realmClientMatrix = componentClientMatrixRealmSource()
   const bridge = (programs?: import('../../../components/web/authoredDocumentBootstrap').AuthoredDocumentPrograms) =>
-    `(function(){${programs ? `const authored=${authoredDocumentProgramsSource(programs)};` : ''}(${contentRealmBridge.toString()})(${JSON.stringify(nonce)}, {navigationBinder:(${createNavigationControlBinder.toString()}),resourceFactory:(${createWebResourceUrlLease.toString()}),navigationReady:(${installCourseNavigationReady.toString()}),isMeasured:(${isMeasuredWebFragmentBox.toString()}),extent:(${measuredFragmentExtent.toString()}),fragments:(${createComponentFragmentProjection.toString()}),refreshResources:(${refreshWebResourceReferences.toString()}),authoring:${domAuthoringFactorySource()},paintAt:(root,x,y)=>(${componentPaintStack.toString()})(root,x,y).length>0,clientMatrix:${realmClientMatrix},ownedAuthoring:(${installOwnedDocumentAuthoring.toString()}),input:(${installAuthoringInputArbitration.toString()}),caret:(${authoringCaretOffset.toString()}),frameGeometry:(${createAuthoringFrameGeometry.toString()}),textOverrides:(roots,rules)=>{${domTextOverrideRealmSource()}return createPageTextOverrides(roots,rules)}}${programs ? ',authored' : ''})})()`
+    `(function(){${programs ? `const authored=${authoredDocumentProgramsSource(programs)};` : ''}(${contentRealmBridge.toString()})(${JSON.stringify(nonce)}, {navigationBinder:(${createNavigationControlBinder.toString()}),resourceFactory:(${createWebResourceUrlLease.toString()}),navigationReady:(${installCourseNavigationReady.toString()}),progressReady:(${installCourseProgressReady.toString()}),isMeasured:(${isMeasuredWebFragmentBox.toString()}),extent:(${measuredFragmentExtent.toString()}),fragments:(${createComponentFragmentProjection.toString()}),refreshResources:(${refreshWebResourceReferences.toString()}),authoring:${domAuthoringFactorySource()},paintAt:(root,x,y)=>(${componentPaintStack.toString()})(root,x,y).length>0,clientMatrix:${realmClientMatrix},ownedAuthoring:(${installOwnedDocumentAuthoring.toString()}),input:(${installAuthoringInputArbitration.toString()}),caret:(${authoringCaretOffset.toString()}),frameGeometry:(${createAuthoringFrameGeometry.toString()}),textOverrides:(roots,rules)=>{${domTextOverrideRealmSource()}return createPageTextOverrides(roots,rules)}}${programs ? ',authored' : ''})})()`
   let runtimeBuiltinKey = snapshots.builtinKey, sourceWebDocument = false
   const pendingDocumentKeys: Record<string, string> = {}
   const readAuthorHtml = (instance: ComponentInstance | undefined): string | undefined => {
@@ -1359,6 +1405,33 @@ export async function preparePublishedNativeComponent(artifact: CompiledComponen
       return
     }
     if (!scope?.isActive() || message?.generation !== scope.generation) return
+    if (message.type === 'progress.request' && Number.isSafeInteger(message.requestId) && message.requestId > 0) {
+      const currentScope = scope
+      void (async () => {
+        if (!currentScope.progress) throw Object.assign(new Error('当前载体未启用学习进度'), { code: 'progress-disabled' })
+        if (typeof message.namespace !== 'string' || !Number.isSafeInteger(message.schemaVersion))
+          throw Object.assign(new Error('进度请求格式错误'), { code: 'progress-invalid' })
+        let value: unknown
+        if (message.method === 'read') value = await currentScope.progress.read(message.namespace, message.schemaVersion)
+        else {
+          if (message.expectedRevision !== null && typeof message.expectedRevision !== 'string')
+            throw Object.assign(new Error('进度提交缺少已确认版本'), { code: 'progress-invalid' })
+          if (message.method === 'write') {
+            const parsed = jsonValueSchema.safeParse(message.value)
+            if (!parsed.success) throw Object.assign(new Error('进度快照不是 JSON 数据'), { code: 'progress-invalid' })
+            value = await currentScope.progress.write(message.namespace, message.schemaVersion, parsed.data, message.expectedRevision)
+          } else if (message.method === 'clear') value = await currentScope.progress.clear(message.namespace, message.schemaVersion, message.expectedRevision)
+          else throw Object.assign(new Error('未知进度操作'), { code: 'progress-invalid' })
+        }
+        if (!disposed && currentScope.isActive() && scope === currentScope)
+          port.postMessage({ type: 'progress.reply', requestId: message.requestId, generation: currentScope.generation, value })
+      })().catch(error => {
+        if (!disposed && currentScope.isActive() && scope === currentScope)
+          port.postMessage({ type: 'progress.reply', requestId: message.requestId, generation: currentScope.generation,
+            error: error instanceof Error ? error.message : String(error), code: error?.code ?? 'progress-unavailable' })
+      })
+      return
+    }
     if (message.type === 'geometry.measure' && Number.isInteger(message.requestId)) {
       const references: ReturnType<typeof componentTargetSchema.safeParse>[] | null = Array.isArray(message.references)
         ? message.references.map((value: unknown) => componentTargetSchema.safeParse(value)) : null
@@ -1871,7 +1944,7 @@ export async function preparePublishedNativeComponent(artifact: CompiledComponen
           visual: Boolean(context.root), state: snapshots.state(), targets: targetsFor(projected), teacher: teacherSnapshot(), htmlAuthoring: snapshots.htmlAuthoring,
           media: Boolean(mediaPort), interaction: interactionSnapshot(),
           inline: Boolean(inlinePort && context.root),
-          measure: Boolean(scope.measure),
+          measure: Boolean(scope.measure), progress: Boolean(scope.progress),
           layout: layoutPort?.read(),
           sourceViewport,
           fragmentStateKey: componentFragmentStateKey(context.instance.id), themeCss: snapshots.themeCss?.(), resources: snapshots.resources?.(), resourceBindings: snapshots.resourceBindings,

@@ -1,15 +1,17 @@
 import type { PublishedCourseV4 } from '../../shared/contracts/component-platform/published'
-import { mountPublishedCourseV4 } from './publishedPlayer'
+import { mountPublishedCourseV4, type PublishedComponentPlayerOptions } from './publishedPlayer'
 import { publishedComponentModel } from './publishedProjection'
 import { componentSurfaceGeometryTargets } from './spatialTargets'
 import { spatialFramePose } from '../surfaces/spatial/componentPlatform/graph'
-import { componentDefinitionBuiltinKey, componentSurface } from '../../shared/contracts/component-platform/project'
+import { componentDefinitionBuiltinKey, componentRootInstance, componentSurface } from '../../shared/contracts/component-platform/project'
 
 export interface ComponentOutputImage { dataUrl: string; width: number; height: number }
 export interface ComponentOutputCaptureOptions {
   payload: PublishedCourseV4
   root: HTMLElement
   staticExport?: true
+  /** Restricted capture hosts reuse their existing sandbox bootstrap transport. */
+  componentBootstrap?: PublishedComponentPlayerOptions['componentBootstrap']
   screenshot(rect: { x: number; y: number; width: number; height: number }): Promise<ComponentOutputImage>
 }
 
@@ -19,8 +21,9 @@ export async function prepareComponentOutputRegion(input: {
   surfaceId: string; instanceId?: string; spatialFrameId?: string; staticExport?: true;
 }): Promise<{ x: number; y: number; width: number; height: number }> {
   const { payload, root, player, surfaceId, instanceId, spatialFrameId } = input
-  const surface = componentSurface(publishedComponentModel(payload).project, surfaceId)
-  if (!surface) throw new Error(`捕获表面已不存在：${surfaceId}`)
+  const project = publishedComponentModel(payload).project
+  const surface = componentSurface(project, surfaceId)
+  if (!surface && !componentRootInstance(project, surfaceId)) throw new Error(`捕获位置已不存在：${surfaceId}`)
   const omitted = new Set<string>()
   if (input.staticExport === true) {
     for (const instance of Object.values(payload.instances)) {
@@ -32,9 +35,9 @@ export async function prepareComponentOutputRegion(input: {
     }
   }
   if (spatialFrameId) {
-    const frame = surface.spatial?.frames.find(value => value.id === spatialFrameId), camera = player.camera(surfaceId)
+    const frame = surface?.spatial?.frames.find(value => value.id === spatialFrameId), camera = player.camera(surfaceId)
     if (!frame || !camera) throw new Error(`捕获镜头已不存在：${spatialFrameId}`)
-    camera.set(spatialFramePose(frame, player.viewport(surfaceId) ?? surface.designSize ?? { width: 960, height: 640 }, componentSurfaceGeometryTargets(publishedComponentModel(payload).project, surfaceId)))
+    camera.set(spatialFramePose(frame, player.viewport(surfaceId) ?? surface?.designSize ?? { width: 960, height: 640 }, componentSurfaceGeometryTargets(project, surfaceId)))
   }
   const instance = instanceId ? payload.instances[instanceId] : undefined
   const container = Boolean(instance?.container)
@@ -127,9 +130,10 @@ export async function prepareComponentOutputCapture(options: ComponentOutputCapt
   const capture = (surfaceId: string, instanceId?: string, spatialFrameId?: string): Promise<ComponentOutputImage> => {
     const work = queue.then(async () => {
       if (disposed) throw new Error('输出捕获已结束')
-      const surface = componentSurface(publishedComponentModel(options.payload).project, surfaceId)
-      if (!surface) throw new Error(`捕获表面已不存在：${surfaceId}`)
-      current = await mountPublishedCourseV4(options.payload, options.root, { initialSurfaceId: surfaceId, capture: true, keyboardNavigation: false })
+      const project = publishedComponentModel(options.payload).project
+      if (!componentSurface(project, surfaceId) && !componentRootInstance(project, surfaceId)) throw new Error(`捕获位置已不存在：${surfaceId}`)
+      current = await mountPublishedCourseV4(options.payload, options.root, { initialSurfaceId: surfaceId, capture: true,
+        keyboardNavigation: false, componentBootstrap: options.componentBootstrap, progressPersistence: false })
       try {
         if (disposed) throw new Error('输出捕获已结束')
         const rect = await prepareComponentOutputRegion({ payload: options.payload, root: options.root, player: current,

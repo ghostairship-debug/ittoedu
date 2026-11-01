@@ -3,6 +3,7 @@ import { defineConfig } from 'vite'
 import compatibility from './src/shared/browser/compatibilityTarget.json'
 
 export default defineConfig({
+  publicDir: false,
   build: {
     target: compatibility.target,
     outDir: 'dist-player',

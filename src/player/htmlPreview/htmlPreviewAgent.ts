@@ -662,7 +662,7 @@ export function mountHtmlPreviewAgent(doc: Document, inheritedTracking?: Runtime
       if (!message.leaseId || !message.loadId || leaseId) return
       leaseId = message.leaseId
       loadId = message.loadId
-      send({ event: 'ready', sectionCount: indexed.sections.length, sectionsAmbiguous: indexed.sectionsAmbiguous })
+      send({ event: 'ready', sectionCount: pagination.pageCount, sectionsAmbiguous: indexed.sectionsAmbiguous })
       return
     }
     if (!loadId || message.loadId !== loadId) return

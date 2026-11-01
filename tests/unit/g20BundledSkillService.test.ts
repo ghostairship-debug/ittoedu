@@ -21,6 +21,13 @@ const bundle: BundledSkillBundle = {
 }
 
 describe('BundledSkillService', () => {
+  it('returns the actual installed reference root without depending on the workspace', async () => {
+    const installed = { ...bundle, files: { ...bundle.files,
+      'skills/orchestrate-courseware/SKILL.md': '{{CREATIVE_REFERENCE_ROOT}}/creative-reference/README.md' } }
+    const service = new BundledSkillService(installed, { referenceRoot: 'C:\\Installed\\reference-library' })
+    expect(await service.read({ skill: 'orchestrate-courseware', path: 'SKILL.md', offset: 0, limit: 1000 }))
+      .toMatchObject({ status: 'read', content: 'C:/Installed/reference-library/creative-reference/README.md' })
+  })
   it('reads only embedded, registered Skill and direct reference files', async () => {
     const service = new BundledSkillService(bundle)
     expect(await service.catalog()).toEqual([

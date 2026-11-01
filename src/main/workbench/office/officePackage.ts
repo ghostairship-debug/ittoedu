@@ -1,4 +1,5 @@
 import path from 'node:path'
+import { createHash } from 'node:crypto'
 import { unzipSync, zipSync, strFromU8, strToU8 } from 'fflate'
 import { DOMParser, XMLSerializer } from '@xmldom/xmldom'
 
@@ -25,7 +26,13 @@ export class OfficePackage {
   readonly parts: Record<string, Uint8Array>
   readonly changed = new Set<string>()
   private readonly documents = new Map<string, Document>()
-  constructor(bytes: Uint8Array) { this.parts = unzipSync(bytes) }
+  private readonly original: Uint8Array
+  constructor(bytes: Uint8Array) { this.original = Uint8Array.from(bytes); this.parts = unzipSync(bytes) }
+  partVersion(name: string): string {
+    const bytes = this.parts[name]
+    if (!bytes) throw new Error(`Office 文件缺少部件：${name}`)
+    return createHash('sha256').update(bytes).digest('hex')
+  }
   xml(name: string): Document {
     const cached = this.documents.get(name)
     if (cached) return cached
@@ -55,6 +62,8 @@ export class OfficePackage {
     return path.posix.normalize(target.startsWith('/') ? target.slice(1) : path.posix.join(path.posix.dirname(part), target))
   }
   save(): Uint8Array {
+    // Parsing a package is not an edit. Preserve ZIP metadata and signatures when nothing changed.
+    if (this.changed.size === 0) return Uint8Array.from(this.original)
     for (const name of this.changed) if (this.parts[name]) this.parts[name] = strToU8(new XMLSerializer().serializeToString(this.xml(name)))
     return zipSync(this.parts)
   }

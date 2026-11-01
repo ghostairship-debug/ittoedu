@@ -43,6 +43,46 @@ function deferred() {
 }
 
 describe('Office files share the existing physical owner', () => {
+  it('does not replace unchanged PPTX bytes and cold-opens the original binding content', async () => {
+    const f = await fixture()
+    const created = await f.office.create(f.destination('pptx'), createRequests.pptx)
+    if (created.inspection.format !== 'pptx') throw new Error('wrong format')
+    const slide = created.inspection.slides[0]
+    const shape = slide.shapes.find(value => value.name === 'title')!
+    const before = await fs.readFile(created.binding.path)
+    const beforeStat = await fs.stat(created.binding.path)
+    const replace = vi.spyOn(f.host.artifacts, 'replace')
+    const unchanged = await f.office.edit(created.binding, { format: 'pptx', operation: 'edit', edits: [{
+      slide: slide.index, part: slide.part, partVersion: slide.partVersion, shapeId: shape.shapeId, text: shape.text,
+    }] })
+    expect(replace).not.toHaveBeenCalled()
+    expect(unchanged.binding).toEqual(created.binding)
+    expect(await fs.readFile(created.binding.path)).toEqual(before)
+    expect((await fs.stat(created.binding.path)).mtimeMs).toBe(beforeStat.mtimeMs)
+    const coldHost = new DocumentHostService(path.join(path.dirname(f.workspace), 'cold-owner'))
+    const coldBinding = await coldHost.artifacts.bind(created.binding.path)
+    const cold = await new OfficeFileService(coldHost).inspect(coldBinding, 'pptx')
+    expect(cold.inspection).toEqual(created.inspection)
+  })
+
+  it('rechecks the physical owner even when a PPTX text edit is unchanged', async () => {
+    const f = await fixture()
+    const created = await f.office.create(f.destination('pptx'), createRequests.pptx)
+    const external = await applyOfficeContent(await fs.readFile(created.binding.path), editRequests.pptx)
+    const read = f.host.artifacts.read.bind(f.host.artifacts)
+    vi.spyOn(f.host.artifacts, 'read').mockImplementationOnce(async (...args) => {
+      const bytes = await read(...args)
+      await fs.writeFile(created.binding.path, external.bytes)
+      return bytes
+    })
+    const replace = vi.spyOn(f.host.artifacts, 'replace')
+    await expect(f.office.edit(created.binding, { format: 'pptx', operation: 'edit', edits: [{
+      slide: 0, shape: 'title', text: 'Before',
+    }] })).rejects.toThrow('磁盘文件已改变')
+    expect(replace).not.toHaveBeenCalled()
+    expect(await fs.readFile(created.binding.path)).toEqual(Buffer.from(external.bytes))
+  })
+
   it.each(['docx', 'xlsx', 'pptx'] as const)('creates, edits and reopens saved %s bytes with a new binding', async format => {
     const f = await fixture()
     const created = await f.office.create(f.destination(format), createRequests[format])
@@ -65,6 +105,10 @@ describe('Office files share the existing physical owner', () => {
     if (inspection.format === 'pptx') {
       expect(inspection.slides[0].shapes.find(shape => shape.name === 'title')?.text).toBe('After')
       expect(inspection.slides[1].shapes.find(shape => shape.name === 'title')?.text).toBe('Keep this slide')
+      const coldHost = new DocumentHostService(path.join(path.dirname(f.workspace), 'cold-owner'))
+      const coldBinding = await coldHost.artifacts.bind(edited.binding.path)
+      const cold = await new OfficeFileService(coldHost).inspect(coldBinding, 'pptx')
+      expect(cold.inspection).toEqual(inspection)
     }
     await expect(f.office.edit(created.binding, editRequests[format])).rejects.toThrow('文件绑定已失效')
     expect(await fs.readdir(f.workspace)).toEqual([`lesson.${format}`])

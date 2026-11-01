@@ -69,7 +69,8 @@ export function composeComponentEnhancement(baseModule, enhancementModule) {
           const callback = (event) => {
             if (!alive()) return
             if (typeof selector === 'function') { selector(event, event.target instanceof Element ? event.target : null); return }
-            const element = event.composedPath().find(node => node instanceof Element && node.matches(selector) && root.contains(node))
+            const path = event.composedPath(), boundary = path.indexOf(root)
+            const element = boundary < 0 ? undefined : path.slice(0, boundary + 1).find(node => node instanceof Element && node.matches(selector))
             if (element) listener?.(event, element)
           }
           root.addEventListener(type, callback)

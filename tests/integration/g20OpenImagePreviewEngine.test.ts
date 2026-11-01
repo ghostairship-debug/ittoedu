@@ -154,3 +154,46 @@ it('answers vision-unavailable without downloading previews when the run has no 
   expect(final.tools[0]?.result).toMatchObject({ kind: 'read', data: { status: 'vision-unavailable', reason: expect.stringContaining('相关度') } })
   expect(JSON.stringify(requests[1]!.messages)).not.toContain('image_url')
 })
+
+it('sends a derived working image and restores original bytes for explicit context.read without rewriting history', async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), 'model-image-original-'))
+  cleanup.push(() => rm(directory, { recursive: true, force: true, maxRetries: 8, retryDelay: 25 }))
+  const png = await sharp({ create: { width: 1024, height: 768, channels: 4, background: '#276a58' } }).png({ compressionLevel: 0 }).toBuffer()
+  const originalUrl = `data:image/png;base64,${png.toString('base64')}`
+  const requests: ModelRequest[] = []
+  const provider: ModelProvider = { async *stream(request) {
+    requests.push(request)
+    if (requests.length === 1) { yield complete(request, [{ id: 'preview', name: 'image.preview', argumentsText: JSON.stringify({ images: ['img1'] }) }]); return }
+    const parts = request.messages.flatMap(message => Array.isArray(message.content) ? message.content : []) as Array<{
+      type?: string; text?: string; image_url?: { url: string; detail?: string } }>
+    if (requests.length === 2) {
+      const note = parts.find(part => part.text?.startsWith('模型观察图的表示信息'))?.text
+      expect(note).toBeTruthy()
+      const facts = JSON.parse(note!.slice(note!.indexOf('{')))
+      const pixels = parts.find(part => part.type === 'image_url')!.image_url!.url
+      expect(pixels).not.toBe(originalUrl)
+      expect(Buffer.from(pixels.split(',')[1]!, 'base64').byteLength).toBe(facts.byteLength)
+      yield complete(request, [{ id: 'original', name: 'context.read', argumentsText: JSON.stringify(facts.originalRead) }]); return
+    }
+    expect(parts.some(part => part.image_url?.url === originalUrl && part.image_url.detail === 'high')).toBe(true)
+    yield complete(request)
+  } }
+  const driver = new MarkdownDriver(), registry = new DocumentRegistry({ drivers: [driver],
+    persistence: createDocumentJournal({ directory: path.join(directory, 'documents') }), createId: randomUUID, bindingKey: binding => binding.path })
+  const gateway = new DocumentToolGateway(registry, [driver], randomUUID, { services: { openImages: {
+    search: async () => ({}), preview: async () => ({ status: 'prepared', previews: [{ image: 'img1', resourceId: 'original-1',
+      mimeType: 'image/png', width: 1024, height: 768, byteLength: png.byteLength }] }),
+    readPreview: () => ({ mimeType: 'image/png', bytes: png }), fetch: async () => ({ status: 'failed', reason: 'Unused' }),
+  } } })
+  const engine = new ExecutionEngine({ registry, gateway, edits: new EditSessionService(registry, gateway),
+    runs: new ExecutionRunStore(path.join(directory, 'runs')), events: new ExecutionEventStore({ directory: path.join(directory, 'events') }), provider })
+  cleanup.push(() => engine.shutdown())
+  const start = await engine.start({ conversationId: 'images', taskId: 'inspect', instruction: '查看图片，需要细节时回读原图',
+    selection: selection('supported'), documents: [], workspaceRoot: directory, permission: 'workspace' })
+  const final = await engine.wait(start.runId)
+  expect(final.status).toBe('completed')
+  expect(requests).toHaveLength(3)
+  const history = JSON.stringify(final.messages)
+  expect(history).toContain(originalUrl)
+  expect(history).not.toContain('model-image:')
+})

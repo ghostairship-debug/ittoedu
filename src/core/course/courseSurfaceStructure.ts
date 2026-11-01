@@ -31,8 +31,10 @@ export function assertCourseSurfaceRemoval(project: CourseProjectV10, surfaceId?
   if (project.rootIds.length <= 1) throw new Error(LAST_COURSE_PAGE_REASON)
 }
 
+export interface CourseSurfaceCopyOptions { title?: string; placement?: 'after-reference' | 'end' }
+
 /** Copies the owned graph once. Definitions/assets remain shared; internal targets follow the copy. */
-export function duplicateSurfaceEdits(project: CourseProjectV10, surfaceId: string, createId: () => string = () => crypto.randomUUID()): { edits: ComponentEdit[]; surface: ComponentSurface; surfaceId: string; ids: ReadonlyMap<string, string>; readPaths: string[][] } {
+export function duplicateSurfaceEdits(project: CourseProjectV10, surfaceId: string, createId: () => string = () => crypto.randomUUID(), options: CourseSurfaceCopyOptions = {}): { edits: ComponentEdit[]; surface: ComponentSurface; surfaceId: string; ids: ReadonlyMap<string, string>; readPaths: string[][] } {
   const source = componentSurface(project, surfaceId)
   if (!source) throw new Error('页面已经不存在')
   const ids = new Map<string, string>()
@@ -147,7 +149,7 @@ export function duplicateSurfaceEdits(project: CourseProjectV10, surfaceId: stri
       })) } : {}),
     }
   })
-  const surface: ComponentSurface = { ...structuredClone(source), id: copiedSurfaceId, title: source.title + ' 副本', childIds: [...source.childIds, ...localExternalIds].map(id => ids.get(id)!) }
+  const surface: ComponentSurface = { ...structuredClone(source), id: copiedSurfaceId, title: options.title === undefined ? source.title + ' 副本' : options.title.trim(), childIds: [...source.childIds, ...localExternalIds].map(id => ids.get(id)!) }
   if (surface.presentation) surface.presentation = { ...surface.presentation,
     ...(surface.presentation.initialStateId ? { initialStateId: stateId(surface.presentation.initialStateId) } : {}),
     ...(surface.presentation.thumbnailStateId ? { thumbnailStateId: stateId(surface.presentation.thumbnailStateId) } : {}),
@@ -185,7 +187,7 @@ export function duplicateSurfaceEdits(project: CourseProjectV10, surfaceId: stri
   const owner = owningContainer(project, surfaceId)
   if (!owner) throw new Error('容器归属已经不存在')
   const edits: ComponentEdit[] = [{ type: 'instance.insert', container: owner,
-    index: containerChildIds(project, owner).indexOf(surfaceId) + 1, instances, rootIds: [copiedSurfaceId] }]
+    index: options.placement === 'end' ? containerChildIds(project, owner).length : containerChildIds(project, owner).indexOf(surfaceId) + 1, instances, rootIds: [copiedSurfaceId] }]
   for (const [id, family] of external) if (family.target.kind === 'project') {
     const rebound = interactionRules({ ...family.instance, data: rebindData({ ...family.instance, data: { rules: familyRules(id) } as unknown as ComponentInstance['data'] }) })
     edits.push({ type: 'data.set', instanceId: id, path: ['rules'], value: JSON.parse(JSON.stringify([...interactionRules(family.instance), ...rebound])) })

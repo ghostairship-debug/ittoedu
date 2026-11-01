@@ -20,6 +20,28 @@ const input = { runId: 'run', requestId: 'call', documentId: 'd', epoch: 'e', re
 const captured = { identity, png, width: 1, height: 1, structure: ['Second'], diagnostics: [] }
 
 describe('view.observe', () => {
+  it('observes a formal program root while rejecting invented presentation states and removed roots', async () => {
+    const source = structuredClone(snapshot)
+    if (source.model.kind !== 'course-v10') throw new Error('Expected component project')
+    const project = source.model.project
+    project.definitions.program = { id: 'program', role: 'content', implementation: { kind: 'builtin', key: 'guoling.html-program' } }
+    project.instances.program = { id: 'program', definitionId: 'program', name: '交互程序', data: { html: '<button>继续</button>' } }
+    project.rootIds.push('program')
+    const original = structuredClone(source)
+    const rootIdentity = { ...identity, locationId: 'program' }
+    const isolated = vi.fn(async () => ({ ...captured, identity: rootIdentity, structure: ['交互程序', 'program'] }))
+    const service = new ViewObservationService({ snapshot: async () => source, captureIsolated: isolated,
+      images: new ObservationImageStore() })
+    const receipt = await service.observe({ ...input, locationId: 'program' })
+    expect(receipt.identity.locationId).toBe('program')
+    expect(receipt.structure).toEqual(['交互程序', 'program'])
+    expect(source).toEqual(original)
+    await expect(service.observe({ ...input, locationId: 'program', stateId: 'invented-state' })).rejects.toThrow()
+    project.rootIds = project.rootIds.filter(id => id !== 'program')
+    await expect(service.observe({ ...input, locationId: 'program' })).rejects.toThrow()
+    expect(isolated).toHaveBeenCalledOnce()
+  })
+
   it('captures a non-current page in an isolated frozen snapshot, without changing the document', async () => {
     const images = new ObservationImageStore(), original = structuredClone(snapshot)
     const live = vi.fn(async () => ({ ...captured, identity: { ...identity, locationId: 'first', viewGeneration: 'generation-7' } }))

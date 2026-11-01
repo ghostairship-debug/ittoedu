@@ -6,8 +6,8 @@ import { CourseV10Driver } from '../../src/core/drivers/CourseV10Driver'
 import type { CourseProjectV10 } from '../../src/shared/contracts/component-platform/project'
 import type { ChartData } from '../../src/components/chart/data'
 
-const root=resolve(__dirname,'../..'),out=resolve(root,'output/creation-editing-completion-20261029/resume-market-chart-ui')
-const chartId='instance_11rTV8cnAc2Ye21Lkjhvv',originalTitle='各摊位营业额 / 元',changedTitle='各摊位营业额 · 人工复核 / 元',changedFont=22
+const root=resolve(__dirname,'../..'),out=resolve(root,process.env.GUOLING_MARKET_CHART_EVIDENCE||'output/creation-editing-completion-20261029/resume-market-chart-ui')
+const chartId=process.env.GUOLING_MARKET_CHART_ID||'instance_11rTV8cnAc2Ye21Lkjhvv',originalTitle=process.env.GUOLING_MARKET_CHART_TITLE??'各摊位营业额 / 元',changedTitle='各摊位营业额 · 人工复核 / 元',changedFont=22
 const chartSelector='svg[data-native-chart-id="'+chartId+'"]',titleSelector=chartSelector+' text[data-chart-text="title"]'
 const hash=(bytes:Uint8Array)=>createHash('sha256').update(bytes).digest('hex')
 type Model=Awaited<ReturnType<CourseV10Driver['load']>>
@@ -64,10 +64,11 @@ async function dashboard(page:Page){
 async function title(page:Page){return(await visibleFrame(page,chartSelector)).locator(titleSelector)}
 async function chartView(page:Page){
  const frame=await visibleFrame(page,chartSelector)
- return frame.locator(chartSelector).evaluate(element=>({title:element.querySelector('[data-chart-text="title"]')?.textContent,fontSize:element.querySelector('[data-chart-text="title"]')?.getAttribute('font-size'),values:[...element.querySelectorAll('[data-chart-data-label]')].map(node=>node.textContent)}))
+ return frame.locator(chartSelector).evaluate(element=>({title:element.querySelector('[data-chart-text="title"]')?.textContent??'',fontSize:element.querySelector('[data-chart-text="title"]')?.getAttribute('font-size'),values:[...element.querySelectorAll('[data-chart-data-label]')].map(node=>node.textContent)}))
 }
-async function expectPresentation(page:Page,expectedTitle:string,fontSize:number){await expect.poll(()=>chartView(page)).toMatchObject({title:expectedTitle,fontSize:String(fontSize)})}
+async function expectPresentation(page:Page,expectedTitle:string,fontSize:number){await expect.poll(()=>chartView(page)).toMatchObject({title:expectedTitle,...(expectedTitle?{fontSize:String(fontSize)}:{})})}
 async function editTitle(page:Page){
+ if(!originalTitle){await mode(page,'编辑');const frame=await visibleFrame(page,chartSelector),point=await pointerPoint(page,frame.locator(chartSelector+' [data-chart-data-label]').first());await page.keyboard.down('Control');try{await page.mouse.click(point.x,point.y)}finally{await page.keyboard.up('Control')}const panel=await chartProperties(page),input=panel.getByLabel('图表标题',{exact:true});await input.fill(changedTitle);await input.press('Enter');await input.blur();await expect(await title(page)).toHaveText(changedTitle);return}
  await mode(page,'编辑');let label=await title(page);await expect(label).toHaveText(originalTitle)
  // Explicit deep selection is a real user gesture, including when the chart is in an ordinary group.
  let point=await pointerPoint(page,label);await page.keyboard.down('Control');try{await page.mouse.click(point.x,point.y)}finally{await page.keyboard.up('Control')}
@@ -79,7 +80,7 @@ async function editTitle(page:Page){
 }
 async function chartProperties(page:Page){
  const panel=page.getByTestId('properties-tab'),opener=page.getByRole('button',{name:'属性与素材',exact:true});if(!await panel.isVisible()&&await opener.isVisible())await opener.click()
- const tab=page.getByRole('tab',{name:'属性',exact:true});if(await tab.isVisible())await tab.click()
+ const tab=page.getByRole('tab',{name:'属性',exact:true});if(!await panel.isVisible()&&await tab.isVisible())await tab.click()
  const owner=panel.getByRole('button',{name:/^选择整体：/});if(await owner.isVisible())await owner.click()
  const chartPanel=panel.getByTestId('chart-properties');await expect(chartPanel).toBeVisible();return chartPanel
 }
@@ -134,4 +135,26 @@ test('market Source chart keeps real author title and font edits through live re
   writeFileSync(join(run,'result.json'),JSON.stringify(facts,null,2));writeFileSync(join(out,'latest-manual.json'),JSON.stringify(facts,null,2))
  }catch(error){await current.page.screenshot({path:join(run,'failure.png')}).catch(()=>{});Object.assign(facts,{status:'failed',error:String(error),errors,ui:await current.page.evaluate(()=>({active:document.activeElement?.outerHTML.slice(0,1500),editors:[...document.querySelectorAll('[data-component-professional-editor],[data-testid="canvas-plain-text-editor"]')].map(node=>node.outerHTML.slice(0,4000)),spots:[...document.querySelectorAll('[data-author-spot]')].map(node=>({id:node.getAttribute('data-author-spot'),label:node.getAttribute('aria-label'),rect:node.getBoundingClientRect().toJSON()}))})).catch(()=>null)});writeFileSync(join(run,'failure.json'),JSON.stringify(facts,null,2));throw error}
  finally{await close(current.app)}
+})
+test('current D1 native cover title and main image remain editable with history and cold save',async()=>{
+ test.skip(!process.env.GUOLING_MARKET_COVER_INPUT,'Explicit current D1 cover evidence only');test.setTimeout(120000)
+ const source=resolve(process.env.GUOLING_MARKET_COVER_INPUT!),sourceHash=hash(readFileSync(source)),evidence=resolve(root,'output/creation-editing-completion-20261029/resume-root/closure-20261029/d1-cover-current'),titleId='4cccb2e1-4cad-4e96-a539-92927d41b57d',imageId='784a7a8f-bb76-4a55-a894-ae7841b09d67',changed='雨后周末新集',replacement=resolve(root,'output/audit-remediation-20261027/benchmark/assets/platform-alt.png')
+ mkdirSync(evidence,{recursive:true});const run=mkdtempSync(join(evidence,'manual-')),workspace=join(run,'workspace'),name='cover-manual.glx',file=join(workspace,name);mkdirSync(workspace);copyFileSync(source,file)
+ const errors:string[]=[],started=Date.now();let current=await launch(join(run,'profile'),workspace,name,errors)
+ const native=(page:Page,id:string)=>page.locator('.course-editor-frame:visible .canvas-stage [data-component-instance="'+id+'"]').first()
+ const select=async(page:Page,id:string)=>{const point=await pointerPoint(page,native(page,id));await page.keyboard.down('Control');try{await page.mouse.click(point.x,point.y)}finally{await page.keyboard.up('Control')}}
+ const panelFor=async(page:Page)=>{const panel=page.getByTestId('properties-tab');if(!await panel.isVisible())await page.getByRole('tab',{name:'属性',exact:true}).click();await expect(panel).toBeVisible();return panel}
+ try{
+  const {page,documentId}=current,baseline=await read(page,documentId);await mode(page,'编辑');await select(page,titleId);let panel=await panelFor(page)
+  await panel.getByRole('button',{name:'编辑局部文字格式',exact:true}).click();const editor=page.locator('[data-component-professional-editor] [contenteditable="true"]').first();await editor.click();await page.keyboard.press('Control+a');await page.keyboard.insertText(changed);await editor.press('Control+Enter');await expect(editor).toHaveCount(0)
+  const titleText=(p:CourseProjectV10)=>(p.instances[titleId].data as any).content.inlines.map((x:any)=>x.text||'').join('');await expect.poll(async()=>titleText((await read(page,documentId)).model.project)).toBe(changed)
+  await select(page,imageId);panel=await panelFor(page);await current.app.evaluate(({dialog},p)=>{dialog.showOpenDialog=async()=>({canceled:false,filePaths:[p]})},replacement);await panel.getByRole('button',{name:'替换图片',exact:true}).click();await panel.getByLabel('显示方式',{exact:true}).selectOption('cover')
+  const imageBefore=await read(page,documentId),crop=panel.getByRole('slider',{name:'左裁剪',exact:true});await crop.focus();await crop.press('Home');for(let i=0;i<8;i++)await crop.press('ArrowRight');await crop.blur();const cropped=await read(page,documentId);expect((cropped.model.project.instances[imageId].data as any).crop.left).toBe(.08)
+  const cropEntries=cropped.undoDepth-imageBefore.undoDepth;expect(cropEntries).toBeGreaterThan(0);for(let i=0;i<cropEntries;i++)await page.getByRole('button',{name:'撤销',exact:true}).click();await expect.poll(async()=>(await read(page,documentId)).model.project.instances[imageId]).toEqual(imageBefore.model.project.instances[imageId]);for(let i=0;i<cropEntries;i++)await page.getByRole('button',{name:'重做',exact:true}).click();await expect.poll(async()=>(await read(page,documentId)).model.project.instances[imageId]).toEqual(cropped.model.project.instances[imageId])
+  const edited=await read(page,documentId);for(const[id,value]of Object.entries(baseline.model.project.instances))if(id!==titleId&&id!==imageId)expect(edited.model.project.instances[id],id).toEqual(value)
+  const {content:_a,...oldAppearance}=baseline.model.project.instances[titleId].data as any,{content:_b,...newAppearance}=edited.model.project.instances[titleId].data as any;expect(newAppearance).toEqual(oldAppearance)
+  await page.getByRole('button',{name:'保存',exact:true}).click();await expect.poll(async()=>(await read(page,documentId)).dirty).toBe(false);const saved=await read(page,documentId),disk=await new CourseV10Driver().load(readFileSync(file));if(disk.kind!=='course-v10')throw Error('Wrong saved kind');const assetId=(disk.project.instances[imageId].data as any).assetId;expect(Buffer.from(disk.resources.assets[assetId])).toEqual(readFileSync(replacement));expect(disk.resources.components).toEqual(baseline.model.resources.components);for(const[id,bytes]of Object.entries(baseline.model.resources.assets))expect(disk.resources.assets[id]).toEqual(bytes);await page.screenshot({path:join(run,'edited-cover.png')})
+  await close(current.app);current=await launch(join(run,'cold-profile'),workspace,name,errors);const cold=await read(current.page,current.documentId);expect(cold.model.project).toEqual(saved.model.project);expect(titleText(cold.model.project)).toBe(changed);await expect(native(current.page,imageId)).toBeVisible();await current.page.screenshot({path:join(run,'cold-cover.png')});expect(hash(readFileSync(source))).toBe(sourceHash);expect(errors).toEqual([])
+  const facts={status:'passed',source,sourceHash,file,startedAt:new Date(started).toISOString(),completedAt:new Date().toISOString(),elapsedMs:Date.now()-started,coldRevision:cold.revision,titleAndImageOnly:true,sourceAndOriginalResourcesPreserved:true,originalUnchanged:true,errors};writeFileSync(join(run,'result.json'),JSON.stringify(facts,null,2));writeFileSync(join(evidence,'latest.json'),JSON.stringify(facts,null,2))
+ }catch(e){await current.page.screenshot({path:join(run,'failure.png')}).catch(()=>{});writeFileSync(join(run,'failure.json'),JSON.stringify({error:String(e),errors,body:await current.page.locator('body').innerText()},null,2));throw e}finally{await close(current.app)}
 })

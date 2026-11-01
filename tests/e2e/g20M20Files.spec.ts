@@ -148,6 +148,99 @@ test('M20-T02 UI edits literal text without Markdown rendering and preserves BOM
   finally { await closeM20(app) }
 })
 
+test('T1 general files open from tree, save exact source and survive a cold App restart', async ({}, info) => {
+  test.skip(process.platform !== 'win32', 'General file acceptance uses Windows Electron.')
+  test.setTimeout(180_000)
+  const fixture = m20Fixture(), evidence: Record<string, unknown> = { case: 'T1 general files', workspace: fixture.workspace }
+  const samples = [
+    { name: 'settings.json', source: '\ufeff{"value":"BEFORE",\r\n  "unfinished":\r\n}\r\n', enter: false },
+    { name: 'comments.jsonc', source: '\ufeff{"value":"BEFORE", // keep comment\r\n}\r\n', enter: true },
+    { name: 'main.ts', source: '\ufeffexport const value: string = "BEFORE";\r\n// 原样代码\r\n', enter: false },
+    { name: 'README', source: '\ufeffBEFORE\r\n无扩展名原文\r\n', enter: true },
+  ]
+  for (const sample of samples) writeFileSync(join(fixture.workspace, sample.name), sample.source, 'utf8')
+  writeFileSync(join(fixture.workspace, 'sample.bin'), Buffer.from([0, 1, 2, 3]))
+  writeFileSync(join(fixture.workspace, 'program.exe'), Buffer.from([0x4d, 0x5a, 0]))
+  writeFileSync(join(fixture.workspace, 'run.cmd'), '@echo isolated fixture\r\n')
+  const nonUtf8 = Buffer.from([0xd6, 0xd0, 0xce, 0xc4])
+  writeFileSync(join(fixture.workspace, 'invalid-encoding.json'), nonUtf8)
+  let { app, page } = await launchM20(fixture)
+  const errors: string[] = [], network: string[] = []
+  const observe = (current: typeof page) => {
+    current.on('pageerror', error => errors.push(error.message))
+    current.on('request', request => { if (/^https?:/.test(request.url())) network.push(request.url()) })
+  }
+  observe(page)
+  try {
+    await chooseM20Workspace(app, page, fixture.workspace)
+    const initialPid = app.process().pid
+    evidence.initialPid = initialPid
+    for (const sample of samples) {
+      const row = m20Row(page, sample.name)
+      if (sample.enter) { await row.click(); await row.press('Enter') }
+      else await row.dblclick()
+      const editor = m20VisibleTextEditor(page)
+      await expect(editor).toHaveCount(1)
+      await expect(editor).toContainText('BEFORE')
+      await expect.poll(async () => (await m20Snapshot(page, join(fixture.workspace, sample.name)))?.model).toMatchObject({ kind: 'text', source: sample.source })
+      // Change the first line through the actual editor, leaving its BOM and all following line endings untouched.
+      await editor.click(); await page.keyboard.press('Control+Home'); await page.keyboard.press('ArrowRight'); await page.keyboard.press('Shift+End')
+      await page.keyboard.insertText(sample.source.split('\r\n')[0]!.slice(1).replace('BEFORE', 'AFTER'))
+      const expected = sample.source.replace('BEFORE', 'AFTER'), filename = join(fixture.workspace, sample.name)
+      const region = page.getByRole('region', { name: `教学文档 ${sample.name}`, exact: true })
+      await region.getByRole('button', { name: '保存', exact: true }).click()
+      await expect.poll(() => readFileSync(filename).equals(Buffer.from(expected, 'utf8'))).toBe(true)
+      await expect.poll(async () => (await m20Snapshot(page, filename))?.dirty).toBe(false)
+    }
+    await page.screenshot({ path: join(fixture.directory, 't1-saved.png'), fullPage: true })
+
+    // Exercise the real UI and IPC path while keeping the fixture from launching any external program.
+    await app.evaluate(({ shell }) => {
+      const state = globalThis as unknown as { __t1ExternalPaths: string[] }
+      state.__t1ExternalPaths = []
+      shell.openPath = async filename => { state.__t1ExternalPaths.push(filename); return 'fixture: no associated application' }
+    })
+    await m20Row(page, 'settings.json').click({ button: 'right' })
+    await page.getByRole('menu', { name: '文件菜单' }).getByRole('menuitem', { name: '使用系统默认应用打开', exact: true }).click()
+    await expect(page.locator('.workspace-files-tree').getByRole('alert')).toContainText('无法用系统应用打开 settings.json：fixture: no associated application')
+    await m20Row(page, 'run.cmd').click({ button: 'right' })
+    await expect(page.getByRole('menu', { name: '文件菜单' }).getByRole('menuitem', { name: '使用系统默认应用打开', exact: true })).toBeDisabled()
+    await page.keyboard.press('Escape')
+    await m20Row(page, 'sample.bin').dblclick()
+    await expect(page.getByRole('alert').filter({ hasText: '无法用系统应用打开 sample.bin' }).first()).toBeVisible()
+    expect(await m20Snapshot(page, join(fixture.workspace, 'sample.bin'))).toBeUndefined()
+    await m20Row(page, 'program.exe').dblclick()
+    await expect(page.getByRole('alert').filter({ hasText: '不能从果铃运行' }).first()).toBeVisible()
+    await m20Row(page, 'invalid-encoding.json').dblclick()
+    await expect(page.getByRole('alert').filter({ hasText: 'UTF-8' }).first()).toBeVisible()
+    expect(readFileSync(join(fixture.workspace, 'invalid-encoding.json'))).toEqual(nonUtf8)
+    const externalPaths = await app.evaluate(() => (globalThis as unknown as { __t1ExternalPaths: string[] }).__t1ExternalPaths)
+    expect(externalPaths).toEqual([join(fixture.workspace, 'settings.json'), join(fixture.workspace, 'sample.bin')])
+    evidence.externalPaths = externalPaths
+
+    await closeM20(app)
+    ;({ app, page } = await launchM20(fixture))
+    observe(page)
+    expect(app.process().pid).not.toBe(initialPid)
+    evidence.coldPid = app.process().pid
+    await chooseM20Workspace(app, page, fixture.workspace)
+    for (const sample of samples) {
+      await m20OpenFile(page, sample.name, 'text')
+      const expected = sample.source.replace('BEFORE', 'AFTER'), filename = join(fixture.workspace, sample.name)
+      await expect(m20VisibleTextEditor(page)).toContainText('AFTER')
+      expect(await m20Snapshot(page, filename)).toMatchObject({ model: { kind: 'text', source: expected }, dirty: false })
+      expect(readFileSync(filename)).toEqual(Buffer.from(expected, 'utf8'))
+    }
+    expect(errors).toEqual([])
+    expect(network).toEqual([])
+    evidence.status = 'saved-and-cold-opened'
+    evidence.files = samples.map(sample => ({ name: sample.name, bytes: readFileSync(join(fixture.workspace, sample.name)).byteLength }))
+    evidence.errors = errors; evidence.network = network
+    await m20Evidence(info, fixture, page, evidence)
+  } catch (error) { await m20Evidence(info, fixture, page, evidence, error); throw error }
+  finally { await closeM20(app) }
+})
+
 test('M20-T04 conversation homes show type, full location, missing state and Explorer reveal without rebinding', async ({}, info) => {
   test.skip(process.platform !== 'win32', 'Conversation location acceptance uses Windows Electron.')
   test.setTimeout(180_000)

@@ -23,6 +23,19 @@ export type TableContentInput = z.infer<typeof tableContentInputSchema>
 const native = tableNativeContentObjectSchema
 const cell = native.shape.rows.element.shape.cells.element
 const richCell = cell.omit({text:true}).extend({content:documentTextContentSchema}).strict()
+// Source supplies JavaScript objects: an optional content slot may be explicitly
+// undefined. Normalize only these two slots; real conflicts and unknown keys stay strict.
+const tableCellSchema = z.preprocess(value => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return value
+  const input = value as Record<string, unknown>
+  const emptyText = Object.hasOwn(input, 'text') && input.text === undefined
+  const emptyContent = Object.hasOwn(input, 'content') && input.content === undefined
+  if (!emptyText && !emptyContent) return value
+  const normalized = { ...input }
+  if (emptyText) delete normalized.text
+  if (emptyContent) delete normalized.content
+  return normalized
+}, z.union([cell, richCell]))
 export function tableCellContent(value: TableCell): FlowTextContent { return value.content ?? {inlines:[{type:'text',text:value.text}]} }
 /** Resolve only this table cell's authored text slot, including its rich-text upgrade. */
 export function tableCellTextField(data: unknown, path: readonly string[]): { path: string[]; cell: TableCell } | null {
@@ -54,7 +67,7 @@ export function toNativeTableData(data:TableData, includeHeaders=true):NativeTab
   return {columns:data.columns.map(({header,...column})=>column),rows,headerRowCount:headers ? data.headerRowCount+1 : data.headerRowCount,style:data.style,...(data.merges ? {merges:data.merges}:{})}
 }
 export const tableDataSchema=z.object({...native.shape,columns:z.array(native.shape.columns.element.extend({header:documentTextContentSchema.optional()}).strict()).min(1).max(100),
-  rows:z.array(native.shape.rows.element.extend({cells:z.array(z.union([cell,richCell])).min(1).max(100)}).strict()).max(1000),caption:documentTextContentSchema.optional(),headerEnabled:z.boolean().optional()}).strict().superRefine((data,ctx)=>{
+  rows:z.array(native.shape.rows.element.extend({cells:z.array(tableCellSchema).min(1).max(100)}).strict()).max(1000),caption:documentTextContentSchema.optional(),headerEnabled:z.boolean().optional()}).strict().superRefine((data,ctx)=>{
   // The synthetic column header is a view row, outside the authored body capacity.
   const projectionSchema=tableNativeContentObjectSchema.safeExtend({rows:z.array(native.shape.rows.element).min(0).max(1001)})
   const result=projectionSchema.safeParse(toNativeTableData(data as TableData))

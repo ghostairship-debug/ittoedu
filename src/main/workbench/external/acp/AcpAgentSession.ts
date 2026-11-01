@@ -39,6 +39,7 @@ export interface AcpSessionOptions {
   beforeCancelTimeoutMs?: number;
   onSessionUpdate?: (event: { sessionId: string; update: JsonObject; replay: boolean }) => void;
   requestTimeoutMs?: number;
+  authenticationTimeoutMs?: number;
   cancellationTimeoutMs?: number;
   /** Optional silence detection, reset by progress. This is not a total task limit. */
   promptIdleTimeoutMs?: number;
@@ -78,7 +79,7 @@ export class AcpAgentSession {
   private permissions = new Map<RpcId, Permission>();
   private initialized: JsonObject = {};
   private config: AcpConfigOption[] = [];
-  private expected?: { modelId: string; effort: string; modelKey: string; effortKey: string };
+  private expected?: { values: Record<string, string | boolean>; modelId?: string; effort?: string };
   private sessionId?: string;
   private turn?: Turn;
   private replay = false;
@@ -103,15 +104,33 @@ export class AcpAgentSession {
 
   get configuration(): AcpConfigOption[] { return structuredClone(this.config); }
 
+  /** A native history may only be reopened through a capability the Agent declared. */
+  get recoveryMethod(): 'session/resume' | 'session/load' | undefined {
+    const caps = object(this.initialized.agentCapabilities);
+    return declared(object(caps.sessionCapabilities).resume) ? 'session/resume'
+      : caps.loadSession === true ? 'session/load' : undefined;
+  }
+
   async initialize(): Promise<JsonObject> {
     this.requirePhase('created');
-    const result = await this.request('initialize', { protocolVersion: 1, clientCapabilities: {},
+    const result = await this.request('initialize', { protocolVersion: 1, clientCapabilities: { session: { configOptions: { boolean: {} } } },
       clientInfo: { name: 'guoling-workbench', version: '1.0.0' } });
     this.requirePhase('created');
     if (result.protocolVersion !== 1) throw this.fail(new AcpSessionError('protocol_version', 'Unsupported ACP protocol version'));
     this.initialized = result;
     this.phase = 'initialized';
     return structuredClone(result);
+  }
+
+  /** Only an Agent-advertised native method may authenticate; credentials stay with the Agent. */
+  async authenticate(methodId: string): Promise<void> {
+    this.requirePhase('initialized');
+    const methods = Array.isArray(this.initialized.authMethods) ? this.initialized.authMethods.map(object) : [];
+    const method = methods.find(method => method.id === methodId);
+    if (!method) throw new AcpSessionError('auth_method', 'Agent did not advertise this authentication method');
+    if (method.type === 'terminal') throw new AcpSessionError('auth_terminal', 'Complete authentication in the native CLI terminal, then reconnect');
+    await this.request('authenticate', { methodId }, this.options.authenticationTimeoutMs ?? 180000);
+    this.requirePhase('initialized');
   }
 
   async open(input: { cwd: string; mcpServers: JsonObject[] }): Promise<JsonObject> {
@@ -121,9 +140,7 @@ export class AcpAgentSession {
   async restore(input: { sessionId: string; cwd: string; mcpServers: JsonObject[]; configOptions?: AcpConfigOption[] }): Promise<JsonObject> {
     this.requirePhase('initialized');
     if (!input.sessionId) throw new AcpSessionError('session_id', 'A native session ID is required for recovery');
-    const caps = object(this.initialized.agentCapabilities);
-    const method = declared(object(caps.sessionCapabilities).resume) ? 'session/resume'
-      : caps.loadSession === true ? 'session/load' : undefined;
+    const method = this.recoveryMethod;
     if (!method) throw new AcpSessionError('recovery_unsupported', 'Agent did not advertise resume or load support');
     return this.setup(method, input);
   }
@@ -154,38 +171,82 @@ export class AcpAgentSession {
       this.phase = 'ready';
       for (const update of this.earlyUpdates.splice(0)) this.receive(update);
       return { ...result, sessionId, recoveryMethod: input.sessionId ? method : undefined };
-    } catch (error) { throw this.fail(errorOf(error)); }
-    finally { this.replay = false; }
+    } catch (error) {
+      // Application errors (including auth_required) leave initialization usable for native authentication.
+      if (error instanceof AcpSessionError && error.code === 'rpc_error' && this.phase === 'opening') {
+        this.phase = 'initialized'; this.sessionId = undefined; this.earlyUpdates = [];
+        throw error;
+      }
+      throw this.fail(errorOf(error));
+    } finally { this.replay = false; }
   }
 
-  /** Verify authoritative currentValue after each change; never fall back to a label or previous value. */
-  async configure(input: { modelId: string; effort: string }): Promise<AcpConfigOption[]> {
+  /** Explicit choices must be advertised. Omitted knobs retain the Agent's authoritative defaults. */
+  async configure(input: { modelId?: string; effort?: string } = {}): Promise<AcpConfigOption[]> {
     this.requirePhase('ready');
+    this.expected = undefined;
+    const values: Record<string, string> = {};
+    if (input.modelId !== undefined) {
+      const model = this.identityOption('model');
+      if (!model) throw new AcpSessionError('model_unavailable', `Exact model ${input.modelId} is not advertised`);
+      values[model.id] = input.modelId;
+    }
+    if (input.effort !== undefined) {
+      const effort = this.identityOption('effort');
+      if (!effort) throw new AcpSessionError('effort_unavailable', `Exact effort ${input.effort} is not advertised`);
+      values[effort.id] = input.effort;
+    }
+    return this.configureOptions(values);
+  }
+
+  /** Use IDs and values from configOptions; never manufacture models, levels, or a fallback. */
+  async configureOptions(values: Record<string, string | boolean>): Promise<AcpConfigOption[]> {
+    this.requirePhase('ready');
+    const priorModel = this.identityOption('model');
+    const pinnedModel = priorModel && typeof priorModel.currentValue === 'string' && !(priorModel.id in values)
+      ? { id: priorModel.id, value: priorModel.currentValue } : undefined;
     this.expected = undefined;
     this.phase = 'configuring';
     try {
-      const model = this.config.find(option => option.category === 'model' || option.id === 'model');
-      if (!model || !this.values(model.options).includes(input.modelId)) throw new AcpSessionError('model_unavailable', `Exact model ${input.modelId} is not advertised`);
-      await this.request('session/set_config_option', { sessionId: this.sessionId, configId: model.id, value: input.modelId });
-      this.requirePhase('configuring');
-      this.assertValue(model.id, input.modelId);
-      const effort = this.config.find(option => option.category === 'thought_level' || /reasoning.*effort|^thought_level$/.test(option.id));
-      if (!effort || !this.values(effort.options).includes(input.effort)) throw new AcpSessionError('effort_unavailable', `Exact effort ${input.effort} is not advertised`);
-      await this.request('session/set_config_option', { sessionId: this.sessionId, configId: effort.id, value: input.effort });
-      this.requirePhase('configuring');
-      this.assertValue(model.id, input.modelId);
-      this.assertValue(effort.id, input.effort);
-      this.expected = { ...input, modelKey: model.id, effortKey: effort.id };
+      for (const [id, value] of Object.entries(values)) {
+        const option = this.config.find(candidate => candidate.id === id);
+        const valid = option && (option.type === 'boolean' ? typeof value === 'boolean'
+          : (option.type === undefined || option.type === 'select') && typeof value === 'string' && this.values(option.options).includes(value));
+        if (!valid) throw new AcpSessionError('configuration_unavailable', `Exact value for ${id} is not advertised`);
+        await this.request('session/set_config_option', { sessionId: this.sessionId, configId: id, value,
+          ...(option.type === 'boolean' ? { type: 'boolean' } : {}) });
+        this.requirePhase('configuring');
+        this.assertValue(id, value);
+      }
+      // A later setting may change the available options; confirm every explicit choice once more.
+      for (const [id, value] of Object.entries(values)) this.assertValue(id, value);
+      if (pinnedModel) this.assertValue(pinnedModel.id, pinnedModel.value);
+      const model = this.identityOption('model'), effort = this.identityOption('effort');
+      const confirmed = { ...values };
+      for (const option of [model, effort]) {
+        if (option && (typeof option.currentValue === 'string' || typeof option.currentValue === 'boolean')) confirmed[option.id] = option.currentValue;
+      }
+      this.expected = { values: confirmed,
+        modelId: typeof model?.currentValue === 'string' ? model.currentValue : undefined,
+        effort: typeof effort?.currentValue === 'string' ? effort.currentValue : undefined };
       return this.configuration;
     } finally { if (this.phase === 'configuring') this.phase = 'ready'; }
+  }
+
+  private identityOption(kind: 'model' | 'effort'): AcpConfigOption | undefined {
+    return this.config.find(option => kind === 'model' ? option.category === 'model' || option.id === 'model'
+      : option.category === 'thought_level' || /reasoning.*effort|^thought_level$/.test(option.id));
+  }
+
+  private assertConfiguration(): void {
+    if (!this.expected) throw new AcpSessionError('configuration_unverified', 'Verify the Agent configuration before prompting');
+    for (const [id, value] of Object.entries(this.expected.values)) this.assertValue(id, value);
   }
 
   async prompt(prompt: JsonObject[]): Promise<JsonObject> {
     this.requirePhase('ready');
     if (!prompt.length) throw new AcpSessionError('empty_prompt', 'ACP prompt must contain content');
-    if (!this.expected) throw new AcpSessionError('configuration_unverified', 'Verify exact model and effort before prompting');
-    this.assertValue(this.expected.modelKey, this.expected.modelId);
-    this.assertValue(this.expected.effortKey, this.expected.effort);
+    this.assertConfiguration();
     const caps = object(object(this.initialized.agentCapabilities).promptCapabilities);
     for (const block of prompt) {
       const capability = block.type === 'resource' ? 'embeddedContext' : block.type;
@@ -271,7 +332,11 @@ export class AcpAgentSession {
       const pending = typeof message.id === 'number' ? this.pending.get(message.id) : undefined;
       if (!pending) return;
       this.pending.delete(message.id as number); clearTimeout(pending.timer);
-      if (message.error) pending.reject(Object.assign(new AcpSessionError('rpc_error', String(object(message.error).message ?? 'ACP request failed')), { rpcError: message.error }));
+      if (message.error) {
+        const rpcError = object(message.error), details = object(rpcError.data).details;
+        pending.reject(Object.assign(new AcpSessionError('rpc_error', String(rpcError.message ?? 'ACP request failed')
+          + (typeof details === 'string' && details ? `: ${details}` : '')), { rpcError: message.error }));
+      }
       else if ('result' in message) {
         const result = object(message.result);
         try {
@@ -291,7 +356,7 @@ export class AcpAgentSession {
       if (update.sessionUpdate === 'config_option_update') {
         this.config = this.readConfig(update.configOptions);
         if (this.turn && this.expected) {
-          try { this.assertValue(this.expected.modelKey, this.expected.modelId); this.assertValue(this.expected.effortKey, this.expected.effort); }
+          try { this.assertConfiguration(); }
           catch (error) { this.turn.failure = errorOf(error); void this.beginCancel(this.turn, 'configuration_changed').catch(() => undefined); }
         }
       }
@@ -355,10 +420,11 @@ export class AcpAgentSession {
   private arm(pending: Pending, timeoutMs: number, callback: () => void): void { clearTimeout(pending.timer); pending.timer = setTimeout(callback, timeoutMs); }
   private values(options?: JsonObject[]): string[] { return (options ?? []).flatMap(option => Array.isArray(option.options) ? this.values(option.options.map(object)) : typeof option.value === 'string' ? [option.value] : []); }
   private readConfig(value: unknown): AcpConfigOption[] {
-    if (!Array.isArray(value) || value.some(option => typeof object(option).id !== 'string' || !('currentValue' in object(option)))) throw new AcpSessionError('configuration_invalid', 'ACP must return complete configuration with current values');
+    if (!Array.isArray(value) || value.some(option => typeof object(option).id !== 'string' || !object(option).id || !('currentValue' in object(option)))) throw new AcpSessionError('configuration_invalid', 'ACP must return complete configuration with current values');
+    if (new Set(value.map(option => object(option).id)).size !== value.length) throw new AcpSessionError('configuration_invalid', 'ACP configuration IDs must be unique');
     return structuredClone(value) as AcpConfigOption[];
   }
-  private assertValue(id: string, value: string): void {
+  private assertValue(id: string, value: string | boolean): void {
     if (this.config.find(option => option.id === id)?.currentValue !== value) throw new AcpSessionError('configuration_mismatch', `ACP did not confirm ${id}=${value}`);
   }
   private requirePhase(phase: Phase): void {
@@ -395,8 +461,8 @@ export class AcpAgentSession {
 }
 
 /** Stdio is the only transport this consumer currently needs. Own and stop only the launched process tree. */
-export function createStdioAcpTransport(options: { command: string; args: string[]; cwd: string; env?: NodeJS.ProcessEnv; onStderr?: (text: string) => void }): AcpTransport {
-  const child = spawn(options.command, options.args, { cwd: options.cwd, env: options.env ?? process.env, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
+export function createStdioAcpTransport(options: { command: string; args: string[]; cwd: string; env?: NodeJS.ProcessEnv; windowsVerbatimArguments?: boolean; onStderr?: (text: string) => void }): AcpTransport {
+  const child = spawn(options.command, options.args, { cwd: options.cwd, env: options.env ?? process.env, windowsVerbatimArguments: options.windowsVerbatimArguments, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
   const messages = new Set<(message: RpcMessage) => void>(), exits = new Set<(error: Error) => void>();
   let ended: Error | undefined, closing: Promise<void> | undefined;
   const lines = createInterface({ input: child.stdout });

@@ -24,6 +24,10 @@ export interface ArtifactDeliveryInput {
   operationId: string
   /** Frozen canonical workspace root and permission from the accepted run. */
   workspaceRoot: string
+  /** Canonical current-run assembly root, frozen by the run owner. */
+  assemblyRoot?: string
+  /** Frozen reference/ancestor roots cannot be mutated by an artifact delivery either. */
+  readOnlyRoots?: readonly string[]
   permission: ExecutionPermissionMode
   /** User-selected path. Relative paths resolve from the frozen workspace root. */
   destination: string
@@ -50,6 +54,8 @@ export interface ArtifactDeliveryResult {
   sourceId: string
   byteLength: number
   version: string
+  /** Physical writing is real, but an internal assembly is not user delivery. */
+  purpose?: 'assembly'
   /** Unknown means bytes may have appeared; never automatically retry this operation. */
   observed?: 'matching' | 'missing' | 'different'
   message?: string
@@ -67,6 +73,7 @@ function publicReceipt(record: DeliveryRecord, status: ArtifactDeliveryResult['s
   observed?: ArtifactDeliveryResult['observed']): ArtifactDeliveryResult {
   return { operationId: record.operationId, status, path: record.path, sourceKind: record.sourceKind,
     sourceId: record.sourceId, byteLength: record.byteLength, version: record.version,
+    ...(record.purpose ? { purpose: record.purpose } : {}),
     ...(observed ? { observed } : {}), ...(record.message ? { message: record.message } : {}) }
 }
 export interface HostArtifactDeliveryOptions {
@@ -90,6 +97,31 @@ async function verifyNoSymlinkDirectory(directory: string): Promise<string> {
   return canonical
 }
 
+/** Preview a missing internal parent without writing during approval. Creation
+ * later uses the same no-link walk and checks the run before each new directory. */
+async function assemblyParent(root: string, parent: string, create?: () => void): Promise<string> {
+  const canonical = await verifyNoSymlinkDirectory(root)
+  if (!inside(canonical, parent)) throw new Error('装配目标离开当前运行目录')
+  let current = canonical
+  const segments = path.relative(canonical, parent).split(path.sep).filter(Boolean)
+  for (let index = 0; index < segments.length; index++) {
+    current = path.join(current, segments[index]!)
+    let stat
+    try { stat = await fs.lstat(current) }
+    catch (error) {
+      if (!missing(error)) throw error
+      if (!create) return path.join(current, ...segments.slice(index + 1))
+      create()
+      try { await fs.mkdir(current, { mode: 0o700 }) }
+      catch (cause) { if (code(cause) !== 'EEXIST') throw cause }
+      stat = await fs.lstat(current)
+    }
+    if (stat.isSymbolicLink() || !stat.isDirectory()) throw new Error('装配目标父路径包含符号链接或非目录')
+    if (!samePath(await fs.realpath(current), current)) throw new Error('装配目标父路径经过符号链接')
+  }
+  return current
+}
+
 /** Create-only delivery of verified image/compute bytes into a user-authorized workspace path. */
 export class HostArtifactDeliveryService {
   private readonly inFlight = new Map<string, { runId: string; requestDigest: string; result: Promise<ArtifactDeliveryResult> }>()
@@ -98,16 +130,29 @@ export class HostArtifactDeliveryService {
     if (!path.isAbsolute(options.journalDirectory)) throw new Error('成果回执目录必须是绝对路径')
   }
 
-  async preflight(input: Pick<ArtifactDeliveryInput, 'workspaceRoot' | 'permission' | 'destination' | 'approvedTargetPath'>): Promise<ArtifactDeliveryPreflight> {
+  /** One source group gets one stable base, so sibling relative URLs remain valid
+   * and equal filenames from unrelated jobs cannot overwrite each other. */
+  assemblyDestination(input: { assemblyRoot: string; job: string; name: string }): string {
+    if (!path.isAbsolute(input.assemblyRoot) || !input.job) throw new Error('当前运行没有有效装配目录')
+    if (!input.name || path.isAbsolute(input.name) || input.name.includes('\\')) throw new Error('装配来源必须是作业内相对文件')
+    const segments = input.name.split('/')
+    for (const segment of segments) validateWorkspaceEntryName(segment)
+    return path.join(input.assemblyRoot, hash(Buffer.from(input.job)), ...segments)
+  }
+
+  async preflight(input: Pick<ArtifactDeliveryInput, 'workspaceRoot' | 'assemblyRoot' | 'readOnlyRoots' | 'permission' | 'destination' | 'approvedTargetPath'>): Promise<ArtifactDeliveryPreflight> {
     if (!path.isAbsolute(input.workspaceRoot)) throw new Error('任务缺少已冻结的绝对工作空间根')
     if (!input.destination || input.destination.includes('\0')) throw new Error('成果目标路径无效')
     if (input.permission === 'read-only') throw new Error('只读任务不能交付文件')
     const root = await verifyNoSymlinkDirectory(input.workspaceRoot)
     const wanted = path.resolve(root, input.destination)
     validateWorkspaceEntryName(path.basename(wanted))
-    const parent = await verifyNoSymlinkDirectory(path.dirname(wanted))
+    const assembly = input.assemblyRoot && path.isAbsolute(input.assemblyRoot) && inside(input.assemblyRoot, wanted)
+      && !samePath(input.assemblyRoot, wanted) ? input.assemblyRoot : undefined
+    const parent = assembly ? await assemblyParent(assembly, path.dirname(wanted)) : await verifyNoSymlinkDirectory(path.dirname(wanted))
     const target = path.join(parent, path.basename(wanted))
-    const outsideWorkspace = !inside(root, target)
+    if (input.readOnlyRoots?.some(readOnly => inside(readOnly, target))) throw new Error('只读来源目录不能交付新文件')
+    const outsideWorkspace = !inside(root, target) && !(assembly && inside(assembly, target))
     const approvalRequired = input.permission === 'ask' || input.permission === 'workspace' && outsideWorkspace
     if (input.approvedTargetPath !== undefined && (!path.isAbsolute(input.approvedTargetPath)
       || !samePath(input.approvedTargetPath, target)))
@@ -206,7 +251,8 @@ export class HostArtifactDeliveryService {
     }
     const prepared: DeliveryRecord = { schemaVersion: 1, operationId: input.operationId, runId: input.runId,
       requestDigest, status: 'prepared', path: scope.path, sourceKind: input.sourceKind,
-      sourceId: input.sourceId, byteLength: bytes.byteLength, version: `sha256:${digest}` }
+      sourceId: input.sourceId, byteLength: bytes.byteLength, version: `sha256:${digest}`,
+      ...(input.assemblyRoot && inside(input.assemblyRoot, scope.path) ? { purpose: 'assembly' as const } : {}) }
     const result = this.perform(input, prepared, bytes)
     this.inFlight.set(input.operationId, { runId: input.runId, requestDigest, result })
     try { return await result }
@@ -224,6 +270,8 @@ export class HostArtifactDeliveryService {
         await this.options.assertTarget?.(scope.path)
         if (!samePath(scope.path, prepared.path)) throw new Error('成果目标在提交前改变')
         this.assertLive(input)
+        if (input.assemblyRoot && inside(input.assemblyRoot, scope.path))
+          await assemblyParent(input.assemblyRoot, scope.parent, () => this.assertLive(input))
         const temporary = path.join(scope.parent, `.${path.basename(scope.path)}.${randomUUID()}.tmp`)
         let owned = false
         try {

@@ -5,7 +5,8 @@ import { isInsideRoot } from '../../../shared/workbench/executionPermission'
 import { moduleImportReferences } from '../contentApply/compilation/compileHtmlModules'
 import { componentModuleFileExtensions, componentModuleSpecifier } from '../../../core/components/source/moduleSpecifier'
 import { loadRuntimeEsbuild } from '../componentCompilerRuntime'
-import { readHtmlClosure, resolveSourceInputPath } from '../htmlImport/readHtmlClosure'
+import { captureHtmlClosure, readHtmlClosure, resolveSourceInputPath } from '../htmlImport/readHtmlClosure'
+import { isManagedHtmlMediaPath } from '../htmlImport/extractHtmlResources'
 import type { ImportDiagnostic } from '../htmlImport/types'
 
 const codeLoaders: Record<string, Loader> = { '.js': 'js', '.mjs': 'js', '.cjs': 'js', '.jsx': 'jsx', '.ts': 'ts', '.tsx': 'tsx' }
@@ -21,6 +22,7 @@ export async function readComponentSourceClosure(input: {
   if (!isInsideRoot(root, filename)) throw new Error('组件源码入口位于授权资源根目录外')
   if (selected.missing && await input.currentSource?.(filename) === undefined) throw selected.missing
   const entry = slash(path.relative(root, filename)), files = new Map<string, Uint8Array>([[entry, input.bytes]])
+  const analysisSources = new Map<string, Uint8Array>()
   const pending = [entry], diagnostics: ImportDiagnostic[] = []
   while (pending.length) {
     input.signal?.throwIfAborted()
@@ -39,13 +41,15 @@ export async function readComponentSourceClosure(input: {
     if (!loader) continue
     let references: ReturnType<typeof moduleImportReferences>
     try {
-      const text = name === entry ? input.text : new TextDecoder('utf-8', { fatal: true }).decode(bytes)
+      let text = name === entry ? input.text : new TextDecoder('utf-8', { fatal: true }).decode(bytes)
       try { references = moduleImportReferences(text, { commonJs: true }) }
       catch {
         const { transform } = await loadRuntimeEsbuild()
         const output = await transform(text, { loader, format: 'esm', target: 'es2022', sourcefile: name })
-        references = moduleImportReferences(output.code, { commonJs: true })
+        text = output.code
+        references = moduleImportReferences(text, { commonJs: true })
       }
+      analysisSources.set(name, new TextEncoder().encode(text))
     } catch {
       // Syntax/encoding failures remain in original bytes and are diagnosed by compilation.
       continue
@@ -77,6 +81,22 @@ export async function readComponentSourceClosure(input: {
       if (!captured) diagnostics.push({ level: 'warning', code: 'missing-source-dependency', reference,
         message: `无法读取组件源码 ${name} 的相对依赖 ${reference}；原源码与其他可用依赖已保留，可补充或修正该文件后继续采用` })
     }
+  }
+  if (analysisSources.size) {
+    const html = [...analysisSources.keys()].map(name => `<script type="module" src="./${name.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;')}"></script>`).join('')
+    const media = await captureHtmlClosure({ html, siblingFiles: new Map([...files, ...analysisSources]), readRelative: async reference => {
+      if (!isManagedHtmlMediaPath(reference)) return undefined
+      input.signal?.throwIfAborted()
+      const requested = path.resolve(root, reference)
+      if (!isInsideRoot(root, requested)) return undefined
+      const actual = await resolveSourceInputPath(requested)
+      if (!isInsideRoot(root, actual.filename)) return undefined
+      const current = await input.currentSource?.(actual.filename)
+      return current === undefined ? new Uint8Array(await fs.readFile(actual.filename)) : new TextEncoder().encode(current)
+    } })
+    // Analysis may use transpiled text, but the admitted owner keeps every original source byte.
+    for (const [name, bytes] of media.siblingFiles) if (!files.has(name) && isManagedHtmlMediaPath(name)) files.set(name, bytes)
+    diagnostics.push(...media.diagnostics.filter(issue => issue.reference && isManagedHtmlMediaPath(issue.reference)))
   }
   return { entry, files, diagnostics }
 }

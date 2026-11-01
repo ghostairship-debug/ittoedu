@@ -38,10 +38,15 @@ async function setup(modelKnowledge?: ConstructorParameters<typeof ExecutionSett
 const configuration = (baseURL: string) => ({ provider: 'fixture', protocol: 'openai-chat', baseURL, accountId: 'test-account', authKind: 'api-key', billing: { kind: 'unknown' } } as const)
 
 it.each([
-  { kind: 'rejected', code: 'oauth-http-401', detail: 'HTTP 401', recovery: '重新登录' },
-  { kind: 'unavailable', code: 'oauth-http-503', detail: 'HTTP 503', recovery: '稍后重试' },
-  { kind: 'network', code: 'oauth-request-failed', detail: '更新请求未完成', recovery: '检查网络' },
-  { kind: 'unknown', code: 'oauth-operation-failed', detail: '登录操作未完成', recovery: '重试' },
+  // HTTP 401 alone is not evidence that the refresh token was revoked. Only
+  // the client's allowed machine classification can select that recovery path.
+  { kind: 'rejected', machineError: null, code: 'oauth-http-401', detail: 'HTTP 401', recovery: '本次未取得足够的服务端错误分类' },
+  { kind: 'invalid-grant', machineError: 'invalid_grant', code: 'oauth-invalid_grant', detail: 'HTTP 401', recovery: '请由作者在原连接中重新授权' },
+  { kind: 'reused-refresh', machineError: 'refresh_token_reused', code: 'oauth-refresh_token_reused', detail: 'HTTP 401', recovery: '请由作者在原连接中重新授权' },
+  { kind: 'invalid-client', machineError: 'invalid_client', code: 'oauth-invalid_client', detail: 'HTTP 401', recovery: '请先核对客户端配置' },
+  { kind: 'unavailable', machineError: null, code: 'oauth-http-503', detail: 'HTTP 503', recovery: '稍后重试' },
+  { kind: 'network', machineError: null, code: 'oauth-request-failed', detail: '更新请求未完成', recovery: '检查网络' },
+  { kind: 'unknown', machineError: null, code: 'oauth-operation-failed', detail: '登录操作未完成', recovery: '重试' },
 ] as const)('reports $kind OAuth refresh failures through the real credential owner without changing settings or leaking tokens', async scenario => {
   const { store, directory } = await setup()
   const saved = await store.saveConnection({ connection: { provider: 'openai', protocol: 'chatgpt-responses',
@@ -71,6 +76,8 @@ it.each([
       error.message = `untrusted response ${accessToken} ${refreshToken}`
       throw error
     }
+    if (scenario.machineError) return Response.json({ error: { code: scenario.machineError,
+      message: `untrusted response ${accessToken} ${refreshToken}` }, error_description: `private detail ${refreshToken}` }, { status: 401 })
     return new Response(`response body ${accessToken} ${refreshToken}`, { status: scenario.kind === 'rejected' ? 401 : 503 })
   } })
   const catalog = vi.fn(async () => Response.json({ models: [{ slug: 'must-not-select-this-model' }] }))
@@ -78,6 +85,9 @@ it.each([
   const failure = await service.operate({ type: 'discover-models', id: connected.connection.id, revision: connected.connection.revision })
     .then(() => { throw new Error('Expected refresh failure before catalog discovery') }, error => error)
   expect(failure).toMatchObject({ code: scenario.code, message: expect.stringContaining(scenario.detail), suggestion: expect.stringContaining(scenario.recovery) })
+  if (scenario.machineError) expect(failure.message).toContain(scenario.machineError)
+  if (scenario.kind === 'rejected' || scenario.kind === 'invalid-client')
+    expect(failure.suggestion).not.toContain('请由作者在原连接中重新授权')
   expect(String(failure)).not.toContain('系统安全存储')
   expect(refreshRequests).toBe(1)
   expect(catalog).not.toHaveBeenCalled()
@@ -89,6 +99,7 @@ it.each([
   const status = await service.operate({ type: 'oauth-login-status', loginId: 'connected-fixture' })
   expect(status).toMatchObject({ status: 'connected', modelDirectoryError: expect.stringContaining(scenario.detail) })
   expect((status as { modelDirectoryError: string }).modelDirectoryError).toContain(scenario.recovery)
+  if (scenario.machineError) expect((status as { modelDirectoryError: string }).modelDirectoryError).toContain(scenario.machineError)
   expect(refreshRequests).toBe(2)
   expect(catalog).not.toHaveBeenCalled()
   const after = await store.read(), storedAfter = await fs.readFile(file, 'utf8')

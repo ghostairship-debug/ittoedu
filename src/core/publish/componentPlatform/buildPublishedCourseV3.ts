@@ -70,16 +70,23 @@ export async function buildPublishedCourseV4(
   const definitions: Record<string, PublishedDefinition> = {}
   const instances: Record<string, PublishedInstance> = {}
   const usedDefinitions = new Set(Object.values(project.instances).map(instance => instance.definitionId))
+  // Delivery does not consume editor debugging maps. Ask the same compiler for
+  // a separate cached artifact; never strip authored code or change its snapshot.
+  const compilation = options.compilation && {
+    compile: (input: ComponentCompilationInput) => options.compilation!.compile({
+      ...input, options: { ...input.options, sourceMap: false },
+    }, options.signal, options.onProgress),
+  }
 
   async function implementation(value: ComponentImplementation, path: Array<string | number>): Promise<PublishedImplementation> {
     check()
     if (value.kind === 'builtin') return value
-    if (!options.compilation) {
+    if (!compilation) {
       diagnostics.push({ code: 'source-not-compiled', message: '源码已保留；独立运行所需的编译服务尚未连接', path })
       return value
     }
     try {
-      const result = await options.compilation.compile(componentCompilationInput(project, value, { assets: sources.assetBytes, components: sources.componentFiles ?? {} }), options.signal, options.onProgress)
+      const result = await compilation.compile(componentCompilationInput(project, value, { assets: sources.assetBytes, components: sources.componentFiles ?? {} }))
       check()
       if (result.status === 'failed') {
         for (const issue of result.diagnostics) diagnostics.push({
@@ -110,8 +117,7 @@ export async function buildPublishedCourseV4(
     let runtimeInstance = instance
     if (isContentProgramImplementation(effective) && hasWebContentData(instance.data)) {
       try {
-        if (options.compilation) {
-          const compilation = options.compilation
+        if (compilation) {
           const reported = new Set<string>()
           const note = (issue: ComponentCompilationDiagnostic, paths?: Readonly<Record<string, string>>, fallbackPath?: string) => {
             const sourcePath = issue.file ? paths ? paths[issue.file] ?? fallbackPath : issue.file : fallbackPath
@@ -122,9 +128,9 @@ export async function buildPublishedCourseV4(
             if (!reported.has(key)) { reported.add(key); diagnostics.push(diagnostic) }
             return diagnostic.message
           }
-          runtimeInstance = await projectWebModuleGraph(instance, input => compilation.compile(input, options.signal, options.onProgress), (_message, _severity, issue) => { note(issue) })
+          runtimeInstance = await projectWebModuleGraph(instance, input => compilation.compile(input), (_message, _severity, issue) => { note(issue) })
           const expanded = await projectPublishedWebRuntimeModules(runtimeInstance.data as unknown as WebRuntimeData,
-            input => compilation.compile(input, options.signal, options.onProgress), (_message, _severity, issue) => { note(issue) })
+            input => compilation.compile(input), (_message, _severity, issue) => { note(issue) })
           const { publishedDocumentBundles: _previousDocumentBundles, ...data } = expanded
           type Recovery = Parameters<typeof publishedWebModuleCompilationInput>[1]
           const prepareDocument = async (documentPath: string) => {
@@ -138,7 +144,7 @@ export async function buildPublishedCourseV4(
                 return { status: 'failed', message: note({ stage: 'compile', severity: 'error', message: error instanceof Error ? error.message : String(error) }, undefined, fallbackPath) }
               }
               if (!prepared) return undefined
-              const result = await compilation.compile(prepared.input, options.signal, options.onProgress)
+              const result = await compilation.compile(prepared.input)
               check()
               const issues = result.status === 'ready' ? result.artifact.diagnostics : result.diagnostics
               const messages = issues.map(issue => note(issue, prepared.modulePaths, fallbackPath))
@@ -184,7 +190,7 @@ export async function buildPublishedCourseV4(
           } as unknown as JsonObject }
           const preparedData = runtimeInstance.data as unknown as WebRuntimeData
           runtimeInstance = { ...runtimeInstance, data: { ...preparedData,
-            html: await prepareBrowserScripts(preparedData.html, input => compilation.compile(input, options.signal, options.onProgress), issue => { note(issue) }),
+            html: await prepareBrowserScripts(preparedData.html, input => compilation.compile(input), issue => { note(issue) }),
           } as unknown as JsonObject }
         }
         else if (webModuleCompilationInput(instance.data as WebData)) diagnostics.push({

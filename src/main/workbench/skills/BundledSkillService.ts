@@ -30,7 +30,7 @@ interface SkillEntry {
 export class BundledSkillService implements SkillServicePort {
   private readonly entries = new Map<string, SkillEntry>()
 
-  constructor(bundle: BundledSkillBundle) {
+  constructor(bundle: BundledSkillBundle, options: { referenceRoot?: string } = {}) {
     for (const entry of bundle.manifest.skills) {
       if (!validRelativePath(entry.name) || entry.name.includes('/') || !entry.description.trim()
         || !entry.version.trim() || this.entries.has(entry.name)) throw new Error('Invalid bundled Skill manifest')
@@ -41,7 +41,7 @@ export class BundledSkillService implements SkillServicePort {
         const relative = key.slice(prefix.length)
         if (!validRelativePath(relative) || readable.has(relative) || typeof bundle.files[key] !== 'string')
           throw new Error('Invalid bundled Skill file key')
-        const source = bundle.files[key]
+        const source = options.referenceRoot ? bundle.files[key].replaceAll('{{CREATIVE_REFERENCE_ROOT}}', options.referenceRoot.replaceAll('\\', '/')) : bundle.files[key]
         readable.set(relative, { source, version: `sha256:${createHash('sha256').update(key).update(source).digest('hex')}` })
       }
       if (entry.path !== `${prefix}SKILL.md`) throw new Error('Missing bundled SKILL.md')

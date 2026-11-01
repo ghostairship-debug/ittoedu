@@ -50,7 +50,7 @@ it('preserves authored active-page navigation and waits for original startup and
 })
 
 it('uses only indexed direct sections and retains DOM, handlers and script state across navigation', async () => {
-  const source = `<!doctype html><body><script>window.runs=(window.runs||0)+1</script>
+  const source = `<!doctype html><style>body>section{width:800px;height:500px;overflow:hidden}</style><body><script>window.runs=(window.runs||0)+1</script>
     <!-- <section id="fake"> -->
     <section id="one" style="color:red"><button id="button">click</button><section id="nested">nested</section></section>
     <section id="two" style="display:grid"><p>second</p></section>
@@ -79,14 +79,22 @@ it('uses only indexed direct sections and retains DOM, handlers and script state
   } finally { await page.close() }
 })
 
-it('keeps unpaginated documents intact and restores page index and scrolling', async () => {
+it('keeps ordinary direct sections in natural flow, preserves scrolling and leaves arrow keys alone', async () => {
   const source = '<!doctype html><body><main><section id="first" style="height:1000px">first</section><section id="second" style="height:1000px">second</section></main></body>'
   const page = await mounted(source)
   try {
     await page.evaluate(() => { (window as any).testPages.instance.restore({ pageIndex: 1, perPageScroll: 240 }) })
-    expect(await page.evaluate(() => (window as any).testPages.instance.readView())).toEqual({ pageIndex: 1, perPageScroll: 240 })
-    expect(await page.locator('#first').evaluate(node => getComputedStyle(node).display)).toBe('none')
-    await page.evaluate(() => { (window as any).testPages.instance.navigate(0) })
+    expect(await page.evaluate(() => (window as any).testPages.instance.readView())).toEqual({ pageIndex: 0, perPageScroll: 240 })
+    expect(await page.evaluate(() => (window as any).testPages.instance.pageCount)).toBe(0)
+    expect(await page.locator('#first').isVisible()).toBe(true)
+    expect(await page.locator('#second').isVisible()).toBe(true)
+    expect(await page.locator('#first').evaluate(node => (node as HTMLElement).style.zoom)).toBe('')
+    expect(await page.evaluate(() => {
+      const event = new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true, cancelable: true })
+      window.dispatchEvent(event)
+      return event.defaultPrevented
+    })).toBe(false)
+    await page.evaluate(() => { (window as any).testPages.instance.navigate(1) })
     expect(await page.evaluate(() => (window as any).testPages.instance.readView().pageIndex)).toBe(0)
   } finally { await page.close() }
   const unpaged = await mounted('<!doctype html><body><article id="whole">whole<section>nested</section></article></body>')
@@ -96,8 +104,44 @@ it('keeps unpaginated documents intact and restores page index and scrolling', a
   } finally { await unpaged.close() }
 })
 
+it('does not shrink a tall clipped responsive section or treat its absolute decoration as a fixed stage', async () => {
+  const source = '<!doctype html><style>#content{position:relative;width:100%;height:auto;max-width:700px;overflow:hidden}#long{height:1600px}</style><body><main><section id="content"><span style="position:absolute;right:0">装饰</span><div id="long">自然阅读内容</div></section></main></body>'
+  const page = await mounted(source)
+  try {
+    expect(await page.evaluate(() => (window as any).testPages.instance.pageCount)).toBe(0)
+    const content = await page.locator('#content').evaluate(node => ({ zoom: (node as HTMLElement).style.zoom,
+      width: node.getBoundingClientRect().width, height: node.getBoundingClientRect().height }))
+    expect(content.zoom).toBe('')
+    expect(content.width).toBe(700)
+    expect(content.height).toBe(1600)
+    expect(await page.evaluate(() => document.documentElement.scrollHeight)).toBeGreaterThan(1500)
+  } finally { await page.close() }
+})
+
+it.each([
+  ['specificity', '#responsive{width:100%;height:auto}section{width:1200px;height:600px}'],
+  ['active media override', 'section{width:1200px;height:600px}@media (min-width:1px){section{width:100%;height:auto}}'],
+  ['percentage calculation', 'section{width:1200px;height:600px}#responsive{width:calc(100% - 10px);height:var(--reading-height,auto)}'],
+])('uses final responsive dimensions after %s instead of obsolete fixed declarations', async (_case, dimensions) => {
+  const page = await mounted(`<!doctype html><style>body{margin:0}section{max-width:700px;overflow:hidden}${dimensions}</style><body><section id="responsive"><div style="height:1600px">自然阅读内容</div></section></body>`)
+  try {
+    expect(await page.evaluate(() => (window as any).testPages.instance.pageCount)).toBe(0)
+    expect(await page.locator('#responsive').evaluate(node => ({ zoom: (node as HTMLElement).style.zoom,
+      width: node.getBoundingClientRect().width, height: node.getBoundingClientRect().height })))
+      .toEqual({ zoom: '', width: 700, height: 1600 })
+  } finally { await page.close() }
+})
+
+it('fits final fixed dimensions when a more specific rule overrides a responsive rule', async () => {
+  const page = await mounted('<!doctype html><style>body{margin:0}#fixed{width:400px;height:200px}section{width:100%;height:auto}</style><body><section id="fixed">实际固定页面</section></body>')
+  try {
+    expect(await page.evaluate(() => (window as any).testPages.instance.pageCount)).toBe(1)
+    expect(await page.locator('#fixed').evaluate(node => Number((node as HTMLElement).style.zoom))).toBeCloseTo(2, 3)
+  } finally { await page.close() }
+})
+
 it('does not steal arrow keys from inputs, composing text or consumed page events', async () => {
-  const source = '<!doctype html><body><section><input id="edit"><button id="plain">go</button></section><section>two</section><script>document.addEventListener("keydown",e=>{if(window.consume)e.preventDefault()},{capture:true})</script></body>'
+  const source = '<!doctype html><style>body>section{width:800px;height:500px}</style><body><section><input id="edit"><button id="plain">go</button></section><section>two</section><script>document.addEventListener("keydown",e=>{if(window.consume)e.preventDefault()},{capture:true})</script></body>'
   const page = await mounted(source)
   try {
     await page.locator('#edit').focus()
@@ -190,7 +234,7 @@ it('renders missing media descriptions without removing selectable original node
 })
 
 it('defers fallback dimensions for a CSS-sized image on a hidden page until it is visible', async () => {
-  const source = '<!doctype html><style>#late{width:320px;height:180px}</style><body><section>first</section><section><img id="late" alt="后页图"></section></body>'
+  const source = '<!doctype html><style>body{margin:0}body>section{width:800px;height:500px}#late{width:320px;height:180px}</style><body><section>first</section><section><img id="late" alt="后页图"></section></body>'
   const page = await mounted(source)
   try {
     await page.evaluate(() => { (window as any).placeholders = (window as any).HtmlPages.mountPlaceholders(document) })

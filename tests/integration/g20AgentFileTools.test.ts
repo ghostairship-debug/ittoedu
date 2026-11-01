@@ -37,6 +37,13 @@ async function fixture(fileDependencies: WorkspaceFilesDependencies = {}) {
 }
 
 describe('general agent file tools', () => {
+  it('keeps bundled reference roots readable but never opens or edits their originals as writable, even at full permission', async () => {
+    const h = await fixture(), filename = path.join(h.outside, 'external.md')
+    const context = { ...h.context, permission: 'full' as const, readOnlyRoots: [h.outside] }
+    expect((await h.files.execute(context, 'file.open', { path: filename }, 'reference-open')).opened).toMatchObject({ writable: false })
+    await expect(h.files.execute(context, 'file.patch', { path: filename, oldText: '外部', newText: '覆盖' }, 'reference-write')).rejects.toThrow()
+    expect(await readFile(filename, 'utf8')).toBe('外部')
+  })
   it('keeps missing-parent create refused and completes only after mkdir and the same real write', async () => {
     const h = await fixture(), input = { path: 'new-lesson/plan.md', mode: 'create', content: '教学策划' }
     const filename = path.join(h.workspace, input.path)
@@ -366,10 +373,17 @@ it('infers file.create kind from the extension and rejects utf-8 or incompatible
 it('M27 binary and structured files are not misrepresented as editable source', async () => {
   const h = await fixture()
   const binary = path.join(h.workspace, 'lesson', 'binary.dat'), document = path.join(h.workspace, 'lesson', 'report.pdf')
+  const unknown = path.join(h.workspace, 'lesson', 'opaque-source.unknown')
   await writeFile(binary, Buffer.from([65, 0, 66])); await writeFile(document, '%PDF-1.7\n')
-  await expect(h.files.execute(h.context, 'file.open', { path: binary }, 'binary')).rejects.toMatchObject({ code: 'TEXT_ENCODING_UNSUPPORTED' })
+  await writeFile(unknown, Buffer.from([65, 0, 66]))
+  // Known binary formats are refused by the shared classifier before decoding;
+  // unknown extensions still reach TextDriver and must reject binary bytes.
+  await expect(h.files.execute(h.context, 'file.open', { path: binary }, 'binary')).rejects.toThrow('相应的文档、素材或二进制入口')
+  await expect(h.files.execute(h.context, 'file.open', { path: unknown }, 'unknown-binary')).rejects.toMatchObject({ code: 'TEXT_ENCODING_UNSUPPORTED' })
   await expect(h.files.execute(h.context, 'file.open', { path: document }, 'pdf')).rejects.toThrow('相应的文档')
   expect(await readFile(binary)).toEqual(Buffer.from([65, 0, 66]))
+  expect(await readFile(unknown)).toEqual(Buffer.from([65, 0, 66]))
+  expect(await readFile(document, 'utf8')).toBe('%PDF-1.7\n')
   await expect(h.files.execute(h.context, 'file.create', { name: 'fake.pdf', kind: 'text' }, 'fake')).rejects.toThrow()
   await expect(h.files.execute(h.context, 'file.create', { name: 'wrong.md', kind: 'text' }, 'wrong')).rejects.toThrow('格式不符')
 })
@@ -442,6 +456,40 @@ it('M27 file read, versioned replace and unique patch preserve UTF-8 BOM, emoji 
   expect(await readFile(path.join(h.workspace, 'lesson', 'new.json'), 'utf8')).toBe('{"ok":true}\n')
   await expect(h.files.execute(h.context, 'file.write', { mode: 'create', path: 'lesson/new.json', content: 'overwrite' }, 'duplicate'))
     .resolves.toMatchObject({ data: { operation: { status: 'failed' } } })
+})
+
+it('saves two HTML owners with the acknowledged current version of their shared unopened module', async () => {
+  const h = await fixture(), module = path.join(h.workspace, 'lesson', 'shared.js')
+  const html = '<script type="module" src="./shared.js"></script>'
+  await writeFile(module, 'export const value = 1;')
+  const owners = []
+  for (const name of ['first.html', 'second.html']) {
+    const filename = path.join(h.workspace, 'lesson', name)
+    await writeFile(filename, html)
+    owners.push(await h.host.open(filename))
+  }
+  expect((await h.files.execute(h.context, 'file.patch', { path: module, oldText: 'value = 1', newText: 'value = 2' }, 'shared-module-edit')).data)
+    .toMatchObject({ saved: true, dirty: false })
+  for (const owner of owners) {
+    expect(await h.host.saveToPath(owner.documentId)).toMatchObject({ dirty: false })
+    expect(await readFile(owner.binding.kind === 'file' ? owner.binding.path : '', 'utf8')).toBe(html)
+  }
+  expect(await readFile(module, 'utf8')).toBe('export const value = 2;')
+  const cold = new DocumentHostService(path.join(h.root, 'shared-cold'))
+  const reopened = await cold.open(path.join(h.workspace, 'lesson', 'second.html'))
+  expect(Buffer.from(reopened.model.resources.assets['shared.js']!).toString('utf8')).toBe('export const value = 2;')
+})
+
+it('keeps unknown external module edits protected after an acknowledged source patch', async () => {
+  const h = await fixture(), module = path.join(h.workspace, 'lesson', 'shared.js'), filename = path.join(h.workspace, 'lesson', 'owner.html')
+  const html = '<script type="module" src="./shared.js"></script>'
+  await writeFile(module, 'export const value = 1;'); await writeFile(filename, html)
+  const owner = await h.host.open(filename)
+  await h.files.execute(h.context, 'file.patch', { path: module, oldText: 'value = 1', newText: 'value = 2' }, 'known-before-external')
+  await writeFile(module, 'export const value = 3;')
+  await expect(h.host.saveToPath(owner.documentId)).rejects.toThrow('shared.js')
+  expect(await readFile(module, 'utf8')).toBe('export const value = 3;')
+  expect(await readFile(filename, 'utf8')).toBe(html)
 })
 
 it('M27 an opened dirty file stays under DocumentSession and selected targets do not widen', async () => {
@@ -742,30 +790,40 @@ it('CA-101 rename checks Stop after asynchronous coordination and immediately be
 })
 
 it.each([10, 12])('CA-103 adopts disk revision %s with truthful dirty/save facts and a cold reopen', async diskRevision => {
-  const h = await fixture(), filename = path.join(h.workspace, 'lesson/course.glx')
+  const traceStarted = performance.now()
+  const trace = (phase: string, state: 'begin' | 'end' | 'error') => {
+    if (process.env.GUOLING_CA103_TRACE === '1') process.stdout.write(`${JSON.stringify({ probe: 'CA-103', diskRevision,
+      phase, state, elapsedMs: Math.round((performance.now() - traceStarted) * 1000) / 1000 })}\n`)
+  }
+  const step = async <T>(phase: string, action: () => T | Promise<T>): Promise<T> => {
+    trace(phase, 'begin')
+    try { const value = await action(); trace(phase, 'end'); return value }
+    catch (error) { trace(phase, 'error'); throw error }
+  }
+  const h = await step('fixture', () => fixture()), filename = path.join(h.workspace, 'lesson/course.glx')
   const project = { ...createBlankCourseProjectV10('local title', randomUUID), revision: 10 }, resources = { assets: {}, components: {} }
-  await writeFile(filename, createCourseProjectV10Archive({ project, resources }))
-  const opened = await h.host.open(filename), session = h.host.registry.get(opened.documentId)
-  await writeFile(filename, createCourseProjectV10Archive({ project: { ...project, title: 'external title', revision: diskRevision }, resources }))
-  await h.files.execute(h.context, 'file.observe', { path: filename }, 'compare-course')
-  const adopted = (await h.files.execute(h.context, 'file.reconcile', { path: filename, choice: 'disk' }, 'adopt-course')).data
+  await step('write-initial-archive', () => writeFile(filename, createCourseProjectV10Archive({ project, resources })))
+  const opened = await step('initial-open', () => h.host.open(filename)), session = h.host.registry.get(opened.documentId)
+  await step('write-external-archive', () => writeFile(filename, createCourseProjectV10Archive({ project: { ...project, title: 'external title', revision: diskRevision }, resources })))
+  await step('observe', () => h.files.execute(h.context, 'file.observe', { path: filename }, 'compare-course'))
+  const adopted = (await step('reconcile', () => h.files.execute(h.context, 'file.reconcile', { path: filename, choice: 'disk' }, 'adopt-course'))).data
   const adoptedRevision = Math.max(11, diskRevision)
   expect(adopted).toMatchObject({ status: 'reconciled', revision: adoptedRevision, dirty: diskRevision < adoptedRevision, undoDepth: 1 })
   expect(session.read()).toMatchObject({ revision: adoptedRevision, model: { project: { title: 'external title', revision: adoptedRevision } } })
   expect(session.committedChangesSince(10)).toMatchObject([{ result: { beforeRevision: 10, revision: adoptedRevision } }])
   const coldBeforeSave = new DocumentHostService(path.join(h.root, 'cold-before-save'))
-  expect(await coldBeforeSave.open(filename)).toMatchObject({ revision: diskRevision, dirty: false, model: { project: { title: 'external title', revision: diskRevision } } })
-  const saved = await session.save()
+  expect(await step('cold-open-before-save', () => coldBeforeSave.open(filename))).toMatchObject({ revision: diskRevision, dirty: false, model: { project: { title: 'external title', revision: diskRevision } } })
+  const saved = await step('save', () => session.save())
   expect(saved).toMatchObject({ revision: adoptedRevision, dirty: false })
-  expect(openCourseProjectV10Archive(await readFile(filename)).project).toMatchObject({ title: 'external title', revision: adoptedRevision })
+  expect((await step('read-and-decode-saved-archive', async () => openCourseProjectV10Archive(await readFile(filename)))).project).toMatchObject({ title: 'external title', revision: adoptedRevision })
   const coldSaved = new DocumentHostService(path.join(h.root, 'cold-saved'))
-  expect(await coldSaved.open(filename)).toMatchObject({ revision: adoptedRevision, dirty: false })
-  const undo = await session.execute({ documentId: session.documentId, epoch: saved.epoch, baseRevision: adoptedRevision,
-    operationId: 'undo-adoption', actor: 'human', mutation: { type: 'undo' } })
+  expect(await step('cold-open-after-save', () => coldSaved.open(filename))).toMatchObject({ revision: adoptedRevision, dirty: false })
+  const undo = await step('undo', () => session.execute({ documentId: session.documentId, epoch: saved.epoch, baseRevision: adoptedRevision,
+    operationId: 'undo-adoption', actor: 'human', mutation: { type: 'undo' } }))
   expect(undo).toMatchObject({ status: 'applied', revision: adoptedRevision + 1 })
   expect(session.read()).toMatchObject({ dirty: true, model: { project: { title: 'local title' } } })
-  const redo = await session.execute({ documentId: session.documentId, epoch: saved.epoch, baseRevision: adoptedRevision + 1,
-    operationId: 'redo-adoption', actor: 'human', mutation: { type: 'redo' } })
+  const redo = await step('redo', () => session.execute({ documentId: session.documentId, epoch: saved.epoch, baseRevision: adoptedRevision + 1,
+    operationId: 'redo-adoption', actor: 'human', mutation: { type: 'redo' } }))
   expect(redo).toMatchObject({ status: 'applied', revision: adoptedRevision + 2 })
   expect(session.read()).toMatchObject({ model: { project: { title: 'external title' } } })
 })
@@ -776,7 +834,7 @@ it.each([
 ] as const)('commits one approved opened outside file in $permission mode (readFirst=$readFirst) without widening authority', async ({ permission, readFirst }) => {
   const h = await fixture(), filename = path.join(h.outside, 'external.md')
   const snapshot = await h.host.open(filename), session = h.host.registry.get(snapshot.documentId)
-  const context = { ...h.context, permission, readOnlyRoots: [h.outside] }
+  const context = { ...h.context, permission, boundPaths: [filename] }
   await h.host.tools.beginRun({ runId: context.runId, actor: 'agent', documents: [] })
   if (readFirst) {
     expect((await h.files.execute(context, 'file.read', { path: filename }, 'outside-read')).data).toMatchObject({ text: '外部' })

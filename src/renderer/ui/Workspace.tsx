@@ -23,6 +23,7 @@ import { selectionHandleGesture, SlideLayerSelectionOverlay } from './workspaces
 import { OBJECT_EDIT_EVENT, requestImageEdit } from '../editing/commands/objectContextMenu'
 import { useSlideNativeTextEditor } from './workspaces/useSlideNativeTextEditor'
 import { componentInstanceDisplayName } from './properties/componentDefinitionPresentation'
+import { CourseNavigationControls } from './workspaces/CourseNavigationControls'
 
 interface WorkspaceProps {
   onAddImage(x?: number, y?: number): void
@@ -319,14 +320,17 @@ function ProgramWorkspace({ rootInstanceId, onSelectImageAsset }: { rootInstance
       authorSpot={authorInteraction.selectedSpot} authorBounds={authorInteraction.authorBounds} bounds={id => {
         const rect = targetElement(id)?.getBoundingClientRect(); return rect ? { left: rect.left, top: rect.top, width: rect.width, height: rect.height } : null
       }} />
-    <div style={{ display: 'flex', gap: 8, flex: '0 0 auto', padding: '6px 10px' }}>
-      {(['edit', 'run'] as const).map(mode => <button key={mode} type="button" aria-pressed={canvasMode === mode} onClick={() => {
+    <CourseNavigationControls canvasMode={canvasMode} navigation={runtime.navigation.editorPort()}
+      beforeNavigate={() => state().commitTextEdit()} onCanvasModeChange={mode => {
         void useEditorStore.getState().commitTextEdit().then(() => useEditorStore.getState().setCanvasMode(mode))
           .catch(error => useEditorStore.getState().setError(String(error)))
-      }}>{mode === 'edit' ? '编辑' : '试运行'}</button>)}
-      {canvasMode === 'edit' && <span role="status">单击选中，拖动对象；双击编辑，Esc 完成编辑</span>}
+      }} resetPlayback={async playing => {
+        await state().commitTextEdit()
+        await runtime.resetPlayback(playing)
+      }} report={message => state().setError(message)}>
       <button type="button" onClick={() => runtime.selectInstances([rootInstanceId])}>选择程序</button>
-    </div>
+      {canvasMode === 'edit' && <span role="status">单击选中，拖动对象；双击编辑，Esc 完成编辑</span>}
+    </CourseNavigationControls>
     <div ref={viewport} data-program-viewport="" style={{ position: 'relative', flex: 1, minWidth: 0, minHeight: 0, overflow: 'hidden' }}>
       {runtime.project.global.underlay.map(id => runtime.renderInstance(id, shownProject, 'free'))}
       {runtime.renderInstance(rootInstanceId, shownProject, 'program')}

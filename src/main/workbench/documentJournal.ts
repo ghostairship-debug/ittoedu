@@ -272,7 +272,7 @@ async function saveFile(input: Parameters<DocumentPersistence['save']>[0],
       for (const [relative, bytes] of files) {
         const target = await resourcePath(root, relative)
         if (fileKey(target) === fileKey(filename)) throw new Error('附件不能覆盖正文文件')
-        try { if (digest(await fs.readFile(target)) !== digest(bytes)) throw new DocumentJournalError('resource-conflict', '附件已存在且内容不同，请使用新的文件名') }
+        try { if (digest(await fs.readFile(target)) !== digest(bytes)) throw new DocumentJournalError('resource-conflict', `附件 ${relative} 已存在且内容不同，当前稿已保留；请核对该附件版本。只改正文文件名不能解决附件冲突`) }
         catch (error) { if (!missing(error)) throw error; absent.push([relative, bytes]) }
       }
       for (const [relative, bytes] of absent) {
@@ -828,4 +828,3 @@ export function createDocumentJournal(options: { directory: string; isLive?(docu
     savePrepared(input) { return saveCaptured(input, true) },
   }
 }
-

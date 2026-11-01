@@ -38,8 +38,11 @@ it('controls:none no longer suppresses missing fallback, grace prevents flashes,
  vi.useFakeTimers();const h=mounted()
  expect(h.root.querySelector('[data-playback-chrome]')).toBeNull()
  await vi.advanceTimersByTimeAsync(21)
- expect(h.root.querySelector('[data-fallback-control="next"]')).not.toBeNull()
- expect((h.root.querySelector('[data-fallback-control="next"]') as HTMLButtonElement).disabled).toBe(true)
+ const chrome=h.root.querySelector<HTMLElement>('[data-playback-chrome="navigation"]')!
+ expect(chrome.style.width).toBe('52px');expect(chrome.style.pointerEvents).toBe('none')
+ expect(chrome.querySelectorAll('button')).toHaveLength(1)
+ ;(chrome.querySelector('[data-control="collapse"]') as HTMLButtonElement).click()
+ expect((chrome.querySelector('[data-control="next"]') as HTMLButtonElement).disabled).toBe(true)
  expect(h.content.style.cssText).toBe('')
  const off=h.bindings.register({actions:[{type:'step.next'}],present:()=>true});await Promise.resolve()
  expect(h.root.querySelector('[data-playback-chrome]')).toBeNull()
@@ -49,6 +52,18 @@ it('controls:none no longer suppresses missing fallback, grace prevents flashes,
 it('explicit opt-out stays hidden and authored-command fallback dispatches content command instead of changing scenes',async()=>{
  vi.useFakeTimers();const hidden=mounted({hostNavigation:'intentionally-hidden'});await vi.advanceTimersByTimeAsync(30);expect(hidden.root.querySelector('[data-playback-chrome]')).toBeNull();hidden.chrome.destroy()
  const h=mounted({presenter:'authored-command'});await vi.advanceTimersByTimeAsync(30)
- ;(h.root.querySelector('[data-fallback-control="next"]') as HTMLButtonElement).click();await Promise.resolve()
+ ;(h.root.querySelector('[data-control="collapse"]') as HTMLButtonElement).click()
+ ;(h.root.querySelector('[data-control="next"]') as HTMLButtonElement).click();await Promise.resolve()
  expect(h.authored).toHaveBeenCalledWith('next');expect(h.execute).not.toHaveBeenCalled();h.chrome.destroy()
+})
+it('a full-size authored iframe still gets only a folded controller and produces no placement diagnostic',async()=>{
+ vi.useFakeTimers();const h=mounted(),iframe=document.createElement('iframe');h.content.append(iframe)
+ vi.spyOn(iframe,'getBoundingClientRect').mockReturnValue(h.root.getBoundingClientRect())
+ await vi.advanceTimersByTimeAsync(30)
+ const chrome=h.root.querySelector<HTMLElement>('[data-playback-chrome="navigation"]')!
+ expect(chrome.querySelectorAll('button')).toHaveLength(1);expect(chrome.style.width).toBe('52px')
+ expect(h.content.style.cssText).toBe('')
+ h.chrome.sync();h.chrome.sync();expect(h.root.querySelectorAll('[data-playback-chrome="navigation"]')).toHaveLength(1)
+ expect(h.bindings.read().actions).toEqual([])
+ h.chrome.destroy()
 })
