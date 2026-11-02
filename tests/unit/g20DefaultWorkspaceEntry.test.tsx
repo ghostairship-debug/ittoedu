@@ -79,6 +79,7 @@ describe('G20 default workspace entry has no embedded CLI dependency', () => {
       registerEditor: vi.fn(), editorRef: () => () => {}, mediaEditorRef: () => () => {},
       mediaFiles: async () => { throw new Error('Media is outside this workspace entry check') },
       reloadPptx: async () => { throw new Error('PPTX preview is outside this workspace entry check') },
+      editPptx: vi.fn(), movePptxHistory: vi.fn(), reloadDocx: vi.fn(),
       updateMediaSnapshot: vi.fn(), updateDirty: vi.fn(), flushAll: vi.fn(async () => true),
       captureMediaDrafts: vi.fn(() => []), hasDirtyInputs: vi.fn(() => false), suspendForClose: vi.fn(), resumeAfterCloseCancelled: vi.fn(),
       saveActiveDocument: vi.fn(async (): Promise<'course'> => 'course'), drainAll: vi.fn(async () => true),

@@ -138,7 +138,9 @@ async function ownerGeometry(child: WebFrameMain, point?: { x: number; y: number
           const style=getComputedStyle(node),matrix=new DOMMatrixReadOnly(style.transform);
           if(style.display==='none'||style.visibility==='hidden')reason='not-visible';
           if(!matrix.is2D||Math.abs(matrix.b)>0.00001||Math.abs(matrix.c)>0.00001||matrix.a<=0||matrix.d<=0)reason='unsupported-frame-transform';
-          if(node===owner)continue;
+          // display:contents contributes no box: its zero rect cannot clip
+          // visible descendants even if overflow computes to hidden or auto.
+          if(node===owner||style.display==='contents')continue;
           const clip=node.getBoundingClientRect();
           if(/(hidden|clip|scroll|auto)/.test(style.overflowX)){left=Math.max(left,clip.left);right=Math.min(right,clip.right)}
           if(/(hidden|clip|scroll|auto)/.test(style.overflowY)){top=Math.max(top,clip.top);bottom=Math.min(bottom,clip.bottom)}
@@ -159,7 +161,14 @@ async function ownerGeometry(child: WebFrameMain, point?: { x: number; y: number
       };addEventListener('message',receive);
     });window[key].cancel=cancel;return true;
   })()`), cleanup)
-    await read('frame-owner-handshake', () => child.executeJavaScript(`parent.postMessage(${JSON.stringify(key)},'*')`))
+    await read('frame-owner-handshake', () => child.executeJavaScript(`(()=>{
+      // Compiled authored srcdoc keeps a local parent facade. The observer
+      // obtains the native same-origin owner without exposing it to the program.
+      const owner=window.frameElement;
+      const receiver=owner&&owner.contentWindow===window?owner.ownerDocument.defaultView:window.parent;
+      if(!receiver||typeof receiver.postMessage!=='function')throw new Error('Frame owner transport unavailable');
+      receiver.postMessage(${JSON.stringify(key)},'*');
+    })()`))
     return await read('frame-owner-geometry', () => parent.executeJavaScript(`window[${JSON.stringify(key)}]`)) as FrameGeometry | null
   } finally {
     if (deadline?.signal.aborted) void cleanup()

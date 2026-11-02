@@ -41,6 +41,7 @@ export class ResidentMcpServer {
   async start(port: number): Promise<ResidentMcpListenResult> {
     await this.stop()
     const server = createServer((request, response) => { void this.receive(request, response).catch(() => {
+      if (response.destroyed || request.socket.destroyed) return
       if (!response.headersSent) this.respond(response, 500, rpcError(null, -32603, 'MCP 请求未完成'))
       else response.end()
     }) })
@@ -142,18 +143,23 @@ export class ResidentMcpServer {
     if (message.method === 'ping') return this.respond(response, 200, { jsonrpc: '2.0', id, result: {} })
     let settled = false, settle!: (delivered: boolean) => void
     const delivery = new Promise<boolean>(resolve => { settle = delivered => { if (!settled) { settled = true; resolve(delivered) } } })
-    response.once('close', () => settle(response.writableFinished))
+    // finish is a live transport write, not an application-level ACK. Once a
+    // disconnect or cancellation settles false, a later end() cannot reverse it.
+    response.once('finish', () => settle(!response.destroyed && !request.socket.destroyed))
+    response.once('close', () => settle(false))
     session.inflight.set(id, settle)
     const notifications: unknown[] = []
     try {
       const result = await this.handler.request(sessionId, { requestId: id, method: message.method, params, delivery,
         notify: (method, value) => { notifications.push({ jsonrpc: '2.0', method, ...(value ? { params: value } : {}) }) } })
+      if (response.destroyed || request.socket.destroyed) { settle(false); return }
       const reply = { jsonrpc: '2.0', id, result }
       if (!notifications.length) return this.respond(response, 200, reply)
       // Streamable HTTP lets a POST reply carry server notifications ahead of the result as an SSE stream.
       response.writeHead(200, { 'Cache-Control': 'no-store', 'Content-Type': 'text/event-stream' })
       response.end([...notifications, reply].map(item => `event: message\ndata: ${JSON.stringify(item)}\n\n`).join(''))
     } catch (cause) {
+      if (response.destroyed || request.socket.destroyed) { settle(false); return }
       this.respond(response, 200, rpcError(id, cause instanceof McpProtocolError ? cause.code : -32603, cause instanceof Error ? cause.message : '请求未完成'))
     } finally { if (session.inflight.get(id) === settle) session.inflight.delete(id) }
   }

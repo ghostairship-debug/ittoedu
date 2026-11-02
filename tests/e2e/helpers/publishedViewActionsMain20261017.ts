@@ -255,3 +255,129 @@ export default { document: 'web', mount({root,instance}) {
     return { ...attempts.at(-1), attempts, snapshots }
   } finally { actions.stopRun('rain-range-run'); published.dispose() }
 })
+
+Reflect.set(globalThis, 'runPublishedContentsFrameRegression', async () => {
+  await app.whenReady()
+  const lifecycle: unknown[] = []
+  const onCreated = (_event: Electron.Event, contents: Electron.WebContents) => {
+    contents.on('console-message', event => { if (['warning', 'error'].includes(event.level)) lifecycle.push({ type: 'console', level: event.level, message: event.message }) })
+    contents.on('did-fail-load', (_event, code, description, url) => lifecycle.push({ type: 'load-failed', code, description, url }))
+    contents.on('did-finish-load', () => lifecycle.push({ type: 'load-finished', url: contents.getURL() }))
+  }
+  app.on('web-contents-created', onCreated)
+  const project = createBlankCourseProjectV10('Display contents frame regression')
+  const surface = testContainerInstance(project, 0)
+  project.definitions.lab = { id: 'lab', role: 'content', implementation: { kind: 'source', language: 'javascript', source: `
+export default { document: 'web', mount({root}) {
+  root.style.cssText='position:relative;width:700px;height:350px;background:white';
+  const contents=document.createElement('div');contents.style.cssText='display:contents;overflow:hidden';
+  const make=(label,x)=>{const frame=document.createElement('iframe');frame.style.cssText='position:absolute;left:'+x+'px;top:40px;width:150px;height:80px;border:0';
+    frame.srcdoc='<button aria-label="'+label+'">'+label+'</button>';return frame};
+  contents.append(make('contents-visible',20));root.append(contents);
+  const hidden=document.createElement('div');hidden.dataset.testHidden='';hidden.append(make('hidden-frame',190));root.append(hidden);
+  const clip=document.createElement('div');clip.dataset.testClip='';clip.style.cssText='position:absolute;left:360px;top:40px;width:150px;height:80px;overflow:hidden';
+  const clipped=make('clipped-frame',0);clipped.style.top='0';clip.append(clipped);root.append(clip);
+  const covered=make('covered-frame',530);root.append(covered);
+  return {update(){},dispose(){root.replaceChildren()}};
+}};` } }
+  project.instances.lab = { id: 'lab', definitionId: 'lab', data: {}, frame: { width: 700, height: 350, transform: [1, 0, 0, 1, 25, 25] } }
+  surface.childIds = ['lab']
+  const snapshot: ViewObservationSnapshot = { documentId: 'contents-frame-fixture', epoch: 'fixture-epoch', revision: project.revision,
+    model: { kind: 'course-v10', project, resources: { assets: {}, components: {} } }, binding: { kind: 'untitled', suggestedName: 'fixture.h5lesson' },
+    dirty: false, saving: false, recoverable: true, undoDepth: 0, redoDepth: 0 }
+  const published = new ViewObservationDesktopService({ rendererEntryUrl: 'courseware-editor://app/index.html', snapshot: async () => snapshot })
+  const actions = new HtmlActionService({ preview: { async automationContext() { throw new Error('No HTML preview in fixture') },
+    async automationContextForDocument() { throw new Error('No HTML preview in fixture') } },
+    published, frames: new HtmlActionDesktopPort(), images: new ObservationImageStore(directory) })
+  const target = { snapshot, identity: { documentId: snapshot.documentId, epoch: snapshot.epoch, revision: snapshot.revision,
+    projectId: project.id, locationId: surface.id, stateId: null } }
+  let stage = 'first-observation'
+  const preTimeout = async (seconds: number) => {
+    const readFrame = async (frame: Electron.WebFrameMain) => {
+      const query = Promise.resolve().then(() => frame.executeJavaScript(`(() => ({url:location.href,readyState:document.readyState,
+        visibility:document.visibilityState,fonts:document.fonts?.status,player:typeof window.coursePlayer,ready:typeof window.coursePlayerReady,
+        frames:Array.from(document.querySelectorAll('iframe')).map(node=>{const r=node.getBoundingClientRect(),s=getComputedStyle(node);
+          return {src:node.getAttribute('src'),srcdoc:node.hasAttribute('srcdoc'),x:r.x,y:r.y,width:r.width,height:r.height,display:s.display,visibility:s.visibility}})}))()`))
+      return Promise.race([query.catch(cause => ({ error: String(cause) })), new Promise(resolve => setTimeout(() => resolve({ error: 'diagnostic-timeout' }), 2000))])
+    }
+    const windows = await Promise.all(BrowserWindow.getAllWindows().filter(window => !window.isDestroyed()).map(async window => ({
+      url: window.webContents.getURL(), frames: await Promise.all(window.webContents.mainFrame.framesInSubtree.map(async frame => ({
+        frameId: frame.frameTreeNodeId, url: frame.url, parentId: frame.parent?.frameTreeNodeId, detail: await readFrame(frame) }))) }))).catch(cause => [{ error: String(cause) }])
+    await fs.writeFile(path.join(directory, `contents-frame-pre-timeout-${seconds}.json`), JSON.stringify({ stage, lifecycle, windows }, null, 2)).catch(() => {})
+  }
+  const captures: Promise<void>[] = []
+  const timers = [8, 14].map(seconds => setTimeout(() => { captures.push(preTimeout(seconds)) }, seconds * 1000))
+  try {
+    const first = await actions.observePublished('contents-frame-run', target)
+    stage = 'inspect-frames'
+    const labels = first.elements.map(element => element.label)
+    const window = BrowserWindow.getAllWindows().find(value => !value.isDestroyed())!
+    const frames = await Promise.all(window.webContents.mainFrame.framesInSubtree.map(async frame => ({ frame,
+      label: await frame.executeJavaScript('document.querySelector("button")?.getAttribute("aria-label") ?? null').catch(() => null) })))
+    const scopeFor = (observation: PublishedActionObservation, label: string) => {
+      const found = frames.find(value => value.label === label)?.frame
+      return observation.observationScope?.frames.find(item => item.frameId === found?.frameTreeNodeId)
+    }
+    const visible = frames.find(value => value.label === 'contents-visible')?.frame
+    if (!visible) throw new Error('Visible srcdoc frame missing')
+    const actualGeometry = await visible.parent!.executeJavaScript(`(() => {
+      const owner=Array.from(document.querySelectorAll('iframe')).find(frame=>frame.srcdoc.includes('contents-visible'));
+      const wrapper=owner?.parentElement, rect=wrapper?.getBoundingClientRect();
+      return {display:wrapper&&getComputedStyle(wrapper).display,overflow:wrapper&&getComputedStyle(wrapper).overflowX,width:rect?.width,height:rect?.height};
+    })()`)
+    await visible.executeJavaScript(`window.__trusted=false;document.querySelector('button').addEventListener('click',event=>{window.__trusted=event.isTrusted})`)
+    const button = first.elements.find(element => element.label === 'contents-visible')
+    if (!button) return { labels, actualGeometry, visibleFrameObserved: false }
+    stage = 'visible-click'
+    await actions.clickPublished('contents-frame-run', { operationId: 'visible-click', handle: button.handle })
+    const trusted = await visible.executeJavaScript('window.__trusted')
+    const fixtureFrame = visible.parent!
+    await fixtureFrame.executeJavaScript(`(() => {
+      const hidden=document.querySelector('[data-test-hidden]'),clip=document.querySelector('[data-test-clip]');
+      if(!hidden||!clip)throw new Error('Visibility fixtures missing');
+      hidden.style.display='none';clip.style.width='0';clip.style.height='0';
+    })()`)
+    stage = 'covered-observation'
+    const again = await actions.observePublished('contents-frame-run', target)
+    const finalLabels = again.elements.map(element => element.label)
+    const covered = again.elements.find(element => element.label === 'covered-frame')
+    const coveredFrame = frames.find(value => value.label === 'covered-frame')?.frame
+    if (!coveredFrame?.parent) throw new Error('Covered-test frame missing')
+    // Add the blocker only after paint/observation, so the fixture does not
+    // require a fully occluded iframe to produce animation frames for capture.
+    await coveredFrame.parent.executeJavaScript(`(() => {
+      const owner=Array.from(document.querySelectorAll('iframe')).find(frame=>frame.srcdoc.includes('covered-frame'));
+      if(!owner)throw new Error('Covered-test owner missing');
+      const overlay=document.createElement('div');overlay.style.cssText='position:absolute;left:530px;top:40px;width:150px;height:80px;background:black';owner.parentElement.append(overlay);
+    })()`)
+    let coveredError: { message: string; dispatch?: string; application?: string } | undefined
+    if (covered) {
+      stage = 'covered-click'
+      try { await actions.clickPublished('contents-frame-run', { operationId: 'covered-click', handle: covered.handle }) }
+      catch (error) {
+        const receipt = (error as { actionReceipt?: { dispatch?: string; application?: string } }).actionReceipt
+        coveredError = { message: error instanceof Error ? error.message : String(error), dispatch: receipt?.dispatch, application: receipt?.application }
+      }
+    }
+    return { labels: finalLabels, actualGeometry, visibleFrameObserved: true, trusted, coveredObserved: Boolean(covered), coveredError,
+      hiddenScope: scopeFor(again, 'hidden-frame'), clippedScope: scopeFor(again, 'clipped-frame') }
+  } catch (error) {
+    const diagnostic = async (frame: Electron.WebFrameMain) => {
+      const details = Promise.resolve().then(() => frame.executeJavaScript(`(() => ({url:location.href,readyState:document.readyState,visibility:document.visibilityState,
+        fonts:document.fonts?.status,player:typeof window.coursePlayer,ready:typeof window.coursePlayerReady,
+        frames:Array.from(document.querySelectorAll('iframe')).map(node=>{const rect=node.getBoundingClientRect(),style=getComputedStyle(node);
+          return {src:node.getAttribute('src'),srcdoc:node.hasAttribute('srcdoc'),width:rect.width,height:rect.height,display:style.display,visibility:style.visibility}})}))()`))
+      return Promise.race([details.catch(cause => ({ error: String(cause) })), new Promise(resolve => setTimeout(() => resolve({ error: 'frame-diagnostic-timeout' }), 2000))])
+    }
+    const windows = await Promise.all(BrowserWindow.getAllWindows().filter(window => !window.isDestroyed()).map(async window => ({
+      url: window.webContents.getURL(), frames: await Promise.all(window.webContents.mainFrame.framesInSubtree.map(async frame => ({
+        frameId: frame.frameTreeNodeId, url: frame.url, parentId: frame.parent?.frameTreeNodeId, detail: await diagnostic(frame) }))) }))).catch(cause => [{ diagnosticError: String(cause) }])
+    await fs.writeFile(path.join(directory, 'contents-frame-failure.json'), JSON.stringify({ stage, error: String(error),
+      stack: error instanceof Error ? error.stack : undefined, cause: error instanceof Error ? String(error.cause ?? '') : '', lifecycle, windows }, null, 2)).catch(() => {})
+    throw error
+  } finally {
+    for (const timer of timers) clearTimeout(timer)
+    await Promise.allSettled(captures)
+    app.off('web-contents-created', onCreated); actions.stopRun('contents-frame-run'); published.dispose()
+  }
+})

@@ -10,7 +10,7 @@ import { authorizeWorkspaceFilesRoot, operateWorkspaceFiles } from '../workspace
 import { ExternalMcpService, type ExternalApproval } from './ExternalMcpService'
 import { ResidentMcpSettingsStore } from './ResidentMcpSettings'
 import type { AcpDomainBinding } from './acp/AcpAgentHost'
-import type { AcpStructuredHandoff } from '../../../shared/workbench/acp'
+import type { AcpHandoffReadInput, AcpStructuredHandoff } from '../../../shared/workbench/acp'
 import type { ExecutionPermissionMode } from '../../../shared/workbench/executionPermission'
 
 let singleton: Promise<ExternalMcpService> | undefined
@@ -115,6 +115,7 @@ export async function bindHeadlessMcpWorkspace(directory: string): Promise<strin
 /** A selected ACP Agent gets an ephemeral private endpoint backed by the same domain implementation. */
 export async function createAcpDomainBinding(input: {
   workspaceId: string; conversationId: string; segmentId: string; handoff: AcpStructuredHandoff;
+  readHandoff?(input: AcpHandoffReadInput): Promise<unknown>;
   permission(): ExecutionPermissionMode;
   pending(operations: string[]): void;
   linkRun(input: { runId: string; portId: string }): Promise<string>;
@@ -132,7 +133,7 @@ export async function createAcpDomainBinding(input: {
     workspaceRoot: async root => (await operateWorkspaceFiles({ type: 'root', directory: root })).resolvedPath,
     uiState: () => uiState?.() ?? Promise.resolve(null), appendEvent: event => execution.appendExternalEvent(event),
     recordingState: () => execution.events.getPendingState(), confirm: confirmExternalChange, transportToken: token,
-    managedConversation: { workspaceId: input.workspaceId, conversationId: input.conversationId, linkRun: input.linkRun },
+    managedConversation: { workspaceId: input.workspaceId, conversationId: input.conversationId, linkRun: input.linkRun, readHandoff: input.readHandoff },
   });
   const status = await service.start();
   if (status.state !== 'running') { await service.close(); throw new Error(status.message ?? 'ACP 领域连接未能启动') }

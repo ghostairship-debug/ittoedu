@@ -41,6 +41,14 @@ extraResources:
       - docs/development-plan/20261026-product-execution/RESULT.md
   - from: resources/mcp-bootstrap
     to: mcp-bootstrap
+  - from: resources/office-extractor/win-x64
+    to: office-extractor/win-x64
+    filter:
+      - 7z.exe
+      - 7z.dll
+      - License.txt
+      - readme.txt
+      - release.json
   - from: resources/file-publish/file-publish.exe
     to: file-publish/file-publish.exe
   - from: resources/clipboard-file-list/clipboard-file-list.exe

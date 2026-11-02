@@ -26,6 +26,9 @@ const IPC_CHANNELS = {
   workspaceFiles: 'workspace-files:operate',
   skillCatalog: 'skills:catalog',
   pptxPreview: 'pptx-preview:read',
+  docxPreview: 'docx-preview:read',
+  docxPreviewCancel: 'docx-preview:cancel',
+  docxPreviewProgress: 'docx-preview:progress',
   mediaFiles: 'media-files:operate',
   mediaFileRelease: 'media-files:release-draft',
   workspaceFilesChanged: 'workspace-files:changed',
@@ -364,6 +367,13 @@ const desktopAPI = Object.freeze<DesktopAPI>({
   workspaceFiles: input => invoke(IPC_CHANNELS.workspaceFiles, input),
   skillCatalog: input => invoke(IPC_CHANNELS.skillCatalog, input),
   pptxPreview: input => invoke(IPC_CHANNELS.pptxPreview, input),
+  docxPreview: input => invoke(IPC_CHANNELS.docxPreview, input),
+  cancelDocxPreview: input => invoke(IPC_CHANNELS.docxPreviewCancel, input),
+  onDocxPreviewProgress: handler => {
+    const listener = (_event: Electron.IpcRendererEvent, progress: import('../shared/workbench/officePreview').DocxPreviewProgress) => handler(progress)
+    ipcRenderer.on(IPC_CHANNELS.docxPreviewProgress, listener)
+    return () => { ipcRenderer.removeListener(IPC_CHANNELS.docxPreviewProgress, listener) }
+  },
   mediaFiles: input => invoke(IPC_CHANNELS.mediaFiles, input),
   releaseMediaFileDraft: binding => invoke(IPC_CHANNELS.mediaFileRelease, binding),
   onWorkspaceFilesChanged: listener => {

@@ -6,17 +6,23 @@ import type { LessonDocumentEditorHandle } from '../../documentFiles/LessonDocum
 import type { RecoverableDocumentFilePort } from '../../documentFiles/documentFileSession'
 import type { LessonWorkspace } from '../../../shared/lessonWorkspace'
 import type { MediaFileEditorHandle } from '../../documentFiles/media/MediaFileEditor'
-import type { MediaFileDraftInput, MediaFileSnapshot, MediaFilesRequest } from '../../../shared/workbench/mediaFiles'
-import type { PptxPreviewSnapshot } from '../../../shared/workbench/officePreview'
+import type { FileArtifactBinding, MediaFileDraftInput, MediaFileSnapshot, MediaFilesRequest } from '../../../shared/workbench/mediaFiles'
+import type { DocxPreviewSnapshot, PptxPreviewRequest, PptxPreviewSnapshot } from '../../../shared/workbench/officePreview'
+import type { PptxObjectEdit } from '../../../shared/workbench/officeFiles'
 
 export type LessonFileTab = {
   id: string
   documentId?: string
   path: string
   name: string
-  kind: 'document' | 'material' | 'course' | 'media' | 'presentation'
+  kind: 'document' | 'material' | 'course' | 'media' | 'presentation' | 'word'
   mediaSnapshot?: MediaFileSnapshot
   pptxSnapshot?: PptxPreviewSnapshot
+  docxSnapshot?: DocxPreviewSnapshot
+  officePending?: boolean
+  officeStale?: boolean
+  officeMessage?: string
+  officeError?: string
   dirty: boolean
   lesson: LessonWorkspace | null
 }
@@ -56,6 +62,9 @@ export interface DocumentTabsController {
   mediaFiles(request: MediaFilesRequest): Promise<MediaFileSnapshot>
   updateMediaSnapshot(id: string, snapshot: MediaFileSnapshot): void
   reloadPptx(id: string): Promise<PptxPreviewSnapshot>
+  editPptx(id: string, edits: PptxObjectEdit[]): Promise<void>
+  movePptxHistory(id: string, action: 'undo' | 'redo'): Promise<void>
+  reloadDocx(id: string): Promise<DocxPreviewSnapshot>
   updateDirty(path: string, dirty: boolean): void
   flushAll(): Promise<boolean>
   saveActiveDocument(): Promise<'course' | 'document' | 'none'>
@@ -142,6 +151,10 @@ export function useDocumentTabsController({ documentPort, courseDocuments, media
   const mediaEditors = useRef(new Map<string, MediaFileEditorHandle>())
   const mediaEditorRefs = useRef(new Map<string, (editor: MediaFileEditorHandle | null) => void>())
   const mediaFilesRef = useRef(mediaFiles); mediaFilesRef.current = mediaFiles
+  const officeReadTokens = useRef(new Map<string, number>())
+  const docxRequests = useRef(new Map<string, string>())
+  const latestOfficeBindings = useRef(new Map<string, FileArtifactBinding>())
+  const officeMutations = useRef(new Map<string, Promise<void>>())
   const requestMediaFiles = async (request: MediaFilesRequest) => {
     const api = mediaFilesRef.current ?? window.desktopAPI?.mediaFiles
     if (!api) throw new Error('图片和 PDF 文件服务尚未连接')
@@ -158,6 +171,7 @@ export function useDocumentTabsController({ documentPort, courseDocuments, media
   }
 
   async function flushAll() {
+    if (!await drainOfficeInputs()) return false
     // 保存期间的重渲染会删/增注册表键，按 await 前的快照遍历，一次调用只判一次。
     for (const [filename, editor] of [...documents.current]) {
       if (!(await editor.flush())) { setActiveTab(tabsRef.current.find(tab => tab.id === filename)?.id ?? filename); return false }
@@ -175,7 +189,7 @@ export function useDocumentTabsController({ documentPort, courseDocuments, media
     const tab = tabsRef.current.find(item => item.id === activeTab)
     if (!tab) return 'none'
     if (tab.kind === 'course') return 'course'
-    if (tab.kind === 'material' || tab.kind === 'presentation') return 'none'
+    if (tab.kind === 'material' || tab.kind === 'presentation' || tab.kind === 'word') return 'none'
     if (tab.kind === 'media') {
       const editor = mediaEditors.current.get(tab.id)
       if (!editor) throw new Error('当前文件尚未就绪，请稍后重试保存')
@@ -189,12 +203,14 @@ export function useDocumentTabsController({ documentPort, courseDocuments, media
   }
   async function disposeDocuments() {
     cancelNavigation()
+    for (const id of docxRequests.current.keys()) cancelOfficeRead(id)
+    officeReadTokens.current.clear(); latestOfficeBindings.current.clear()
     for (const editor of documents.current.values()) editor.session.dispose()
     documents.current.clear()
     mediaEditors.current.clear()
     for (const stop of subscriptions.current.values()) stop()
     subscriptions.current.clear()
-    setTabs([])
+    tabsRef.current = []; setTabs([])
     setActive('')
   }
   async function closeAll() {
@@ -203,6 +219,7 @@ export function useDocumentTabsController({ documentPort, courseDocuments, media
     return true
   }
   async function preserveAll(mode: 'save' | 'preserve' = 'preserve', documentIds?: readonly string[]) {
+    if (!documentIds && !await drainOfficeInputs()) return false
     // 同 flushAll：preserveDraft 期间的重渲染会删/增注册表键，必须按 await 前的快照遍历。
     for (const [filename, editor] of [...documents.current]) {
       if (documentIds && (!editor.session.documentId || !documentIds.includes(editor.session.documentId))) continue
@@ -232,17 +249,26 @@ export function useDocumentTabsController({ documentPort, courseDocuments, media
     const ticket = ++navigation.current
     const existing = tabsRef.current.find(item => tab.path && normalized(item.path) === normalized(tab.path))
     if (existing) { setActiveTab(existing.id); return }
+    if (tab.kind === 'presentation' || tab.kind === 'word') {
+      const id = crypto.randomUUID()
+      const opened: LessonFileTab = { ...tab, id, dirty: false, officePending: true,
+        officeMessage: tab.kind === 'word' ? '正在准备 Word 原件分页预览…' : '正在载入演示文稿…' }
+      tabsRef.current = [...tabsRef.current, opened]
+      setTabs(current => current.some(item => item.id === id) ? current : [...current, opened])
+      if (ticket === navigation.current) setActive(id)
+      // Keep the tab and its retry/close controls visible during first-use setup.
+      await readOfficeTab(id).catch(() => {})
+      return
+    }
     const snapshot = tab.kind === 'document' ? await documentPort.documents?.open(tab.path) : undefined
     const mediaSnapshot = tab.kind === 'media' ? await requestMediaFiles({ type: 'media-file.open-path', path: tab.path }) : undefined
     if (tab.kind === 'document' && !snapshot) throw new Error('文档服务尚未连接')
-    const pptxSnapshot = tab.kind === 'presentation' ? await window.desktopAPI?.pptxPreview?.({ type: 'pptx-preview.open', path: tab.path }) : undefined
-    if (tab.kind === 'presentation' && !pptxSnapshot) throw new Error('PPTX 预览服务尚未连接')
-    const filename = mediaSnapshot?.binding.path ?? pptxSnapshot?.binding.path ?? tab.path
-    const alreadyOpened = (mediaSnapshot || pptxSnapshot) && tabsRef.current.find(item => normalized(item.path) === normalized(filename))
+    const filename = mediaSnapshot?.binding.path ?? tab.path
+    const alreadyOpened = mediaSnapshot && tabsRef.current.find(item => normalized(item.path) === normalized(filename))
     if (alreadyOpened) { if (ticket === navigation.current) setActiveTab(alreadyOpened.id); return }
     const id = snapshot?.documentId ?? crypto.randomUUID()
-    const opened = { ...tab, path: filename, id, documentId: snapshot?.documentId, mediaSnapshot, pptxSnapshot, dirty: snapshot?.dirty ?? false }
-    if (mediaSnapshot || pptxSnapshot) tabsRef.current = [...tabsRef.current, opened]
+    const opened = { ...tab, path: filename, id, documentId: snapshot?.documentId, mediaSnapshot, dirty: snapshot?.dirty ?? false }
+    if (mediaSnapshot) tabsRef.current = [...tabsRef.current, opened]
     setTabs(current => current.some(item => item.id === id) ? current : [...current, opened])
     if (ticket === navigation.current) setActive(id)
   }
@@ -287,6 +313,7 @@ export function useDocumentTabsController({ documentPort, courseDocuments, media
     return false
   }
   async function closeTab(tab: LessonFileTab) {
+    if (tab.kind === 'presentation' && !await drainOfficeInputs(tab.id)) return false
     if (tab.kind === 'course') {
       if (!courseRef.current || !await courseRef.current.close(tab.id)) return false
     } else if (tab.kind === 'media') {
@@ -302,11 +329,12 @@ export function useDocumentTabsController({ documentPort, courseDocuments, media
     return true
   }
   function removeTab(id: string) {
+    cancelOfficeRead(id); latestOfficeBindings.current.delete(id)
     mediaEditors.current.delete(id)
     editorRefs.current.delete(id); mediaEditorRefs.current.delete(id)
     documents.current.delete(id); subscriptions.current.get(id)?.(); subscriptions.current.delete(id)
     const remaining = tabsRef.current.filter(item => item.id !== id)
-    setTabs(remaining)
+    tabsRef.current = remaining; setTabs(remaining)
     if (activeTabRef.current === id) setActiveTab(remaining.at(-1)?.id ?? '')
   }
   function registerEditor(id: string, editor: LessonDocumentEditorHandle | null) {
@@ -333,14 +361,35 @@ export function useDocumentTabsController({ documentPort, courseDocuments, media
       && current.fileVersion === before.fileVersion && current.bindingVersion === before.bindingVersion
     const rebound = new Set<string>()
     for (const [id, editor] of mediaEditors.current) if (matches(editor.binding())) { editor.rebind(binding); rebound.add(id) }
-    const relocate = (current: LessonFileTab[]) => current.map(tab => tab.kind === 'media' && tab.mediaSnapshot && (rebound.has(tab.id) || matches(tab.mediaSnapshot.binding))
-      ? { ...tab, path: binding.path, name: binding.path.split(/[\\/]/).pop() ?? tab.name,
-        mediaSnapshot: { ...tab.mediaSnapshot, binding } } : tab.kind === 'presentation' && tab.pptxSnapshot && matches(tab.pptxSnapshot.binding)
-      ? { ...tab, path: binding.path, name: binding.path.split(/[\\/]/).pop() ?? tab.name, pptxSnapshot: { ...tab.pptxSnapshot, binding } } : tab)
+    const affected = tabsRef.current.filter(tab => (tab.kind === 'presentation' || tab.kind === 'word')
+      && normalized(tab.path) === normalized(before.path))
+    for (const tab of affected) latestOfficeBindings.current.set(tab.id, binding)
+    const ids = new Set(affected.map(tab => tab.id)), contentChanged = before.fileVersion !== binding.fileVersion
+    const relocate = (current: LessonFileTab[]) => current.map(tab => {
+      if (tab.kind === 'media' && tab.mediaSnapshot && (rebound.has(tab.id) || matches(tab.mediaSnapshot.binding)))
+        return { ...tab, path: binding.path, name: binding.path.split(/[\\/]/).pop() ?? tab.name, mediaSnapshot: { ...tab.mediaSnapshot, binding } }
+      if (!ids.has(tab.id)) return tab
+      // A changed file needs new bytes/inspection as one snapshot. Never attach
+      // the new writer version to the old rendered or editable content.
+      return { ...tab, path: binding.path, name: binding.path.split(/[\\/]/).pop() ?? tab.name,
+        ...(contentChanged ? { officeStale: true } : {
+          ...(tab.pptxSnapshot ? { pptxSnapshot: { ...tab.pptxSnapshot, binding } } : {}),
+          ...(tab.docxSnapshot ? { docxSnapshot: { ...tab.docxSnapshot, binding } } : {}),
+        }) }
+    })
     tabsRef.current = relocate(tabsRef.current)
     setTabs(relocate)
+    for (const tab of affected) if (contentChanged && !officeMutations.current.has(tab.id)) void readOfficeTab(tab.id).catch(() => {})
   }), [])
-  useEffect(() => () => { cancelNavigation(); for (const stop of subscriptions.current.values()) stop() }, [])
+  useEffect(() => window.desktopAPI?.onDocxPreviewProgress?.(({ requestId, message }) => {
+    const id = [...docxRequests.current].find(([, current]) => current === requestId)?.[0]
+    if (id) updateOfficeTab(id, tab => ({ ...tab, officeMessage: message }))
+  }), [])
+  useEffect(() => () => {
+    cancelNavigation()
+    for (const id of docxRequests.current.keys()) cancelOfficeRead(id)
+    for (const stop of subscriptions.current.values()) stop()
+  }, [])
   /**
    * 每个 path 一个身份稳定的 ref 回调。内联 `ref={editor => registerEditor(tab.path, editor)}` 每次
    * 重渲染都是新函数，React 会先用 null 调旧回调（delete）再用实例调新回调（set）——同键被删后重新插入，
@@ -366,20 +415,119 @@ export function useDocumentTabsController({ documentPort, courseDocuments, media
   function updateMediaSnapshot(id: string, snapshot: MediaFileSnapshot) {
     setTabs(current => current.map(tab => tab.id === id ? { ...tab, mediaSnapshot: snapshot, path: snapshot.binding.path, name: snapshot.binding.path.split(/[\\/]/).pop() ?? tab.name, dirty: false } : tab))
   }
-  async function reloadPptx(id: string): Promise<PptxPreviewSnapshot> {
-    const tab = tabsRef.current.find(item => item.id === id)
-    if (!tab?.pptxSnapshot || !window.desktopAPI?.pptxPreview) throw new Error('PPTX 预览已关闭或服务未连接')
-    const expected = tab.pptxSnapshot
-    const snapshot = await window.desktopAPI.pptxPreview({ type: 'pptx-preview.reload', binding: expected.binding })
-    if (tabsRef.current.find(item => item.id === id)?.pptxSnapshot !== expected) throw new Error('文件标签或位置已改变，请在当前标签重新载入')
-    const update = (current: LessonFileTab[]) => current.map(item => item.id === id
-      ? { ...item, pptxSnapshot: snapshot, path: snapshot.binding.path, name: snapshot.binding.path.split(/[\\/]/).pop() ?? item.name, dirty: false } : item)
+  function updateOfficeTab(id: string, change: (tab: LessonFileTab) => LessonFileTab) {
+    const update = (current: LessonFileTab[]) => {
+      const next = current.map(tab => tab.id === id ? change(tab) : tab)
+      return next.some((tab, index) => tab !== current[index]) ? next : current
+    }
     tabsRef.current = update(tabsRef.current); setTabs(update)
-    return snapshot
+  }
+  function cancelOfficeRead(id: string) {
+    officeReadTokens.current.set(id, (officeReadTokens.current.get(id) ?? 0) + 1)
+    const requestId = docxRequests.current.get(id)
+    docxRequests.current.delete(id)
+    if (requestId) void window.desktopAPI?.cancelDocxPreview?.({ requestId }).catch(() => {})
+  }
+  function publishOfficeSnapshot(id: string, snapshot: PptxPreviewSnapshot | DocxPreviewSnapshot) {
+    const tab = tabsRef.current.find(item => item.id === id), latest = latestOfficeBindings.current.get(id)
+    if (!tab || normalized(tab.path) !== normalized(snapshot.binding.path)
+      || latest && latest.bindingVersion > snapshot.binding.bindingVersion) throw new Error('文件标签或版本已改变，请重新载入当前原件')
+    latestOfficeBindings.current.set(id, snapshot.binding)
+    updateOfficeTab(id, current => ({ ...current,
+      ...('pdfBytes' in snapshot ? { docxSnapshot: snapshot } : { pptxSnapshot: snapshot }),
+      path: snapshot.binding.path, name: snapshot.binding.path.split(/[\\/]/).pop() ?? current.name,
+      officeStale: false, officeError: undefined,
+    }))
+  }
+  async function readOfficeTab(id: string): Promise<PptxPreviewSnapshot | DocxPreviewSnapshot> {
+    const tab = tabsRef.current.find(item => item.id === id)
+    if (!tab || tab.kind !== 'presentation' && tab.kind !== 'word') throw new Error('Office 文件标签已关闭')
+    cancelOfficeRead(id)
+    const ticket = officeReadTokens.current.get(id)!, requestId = tab.kind === 'word' ? crypto.randomUUID() : undefined
+    if (requestId) docxRequests.current.set(id, requestId)
+    updateOfficeTab(id, current => ({ ...current, officePending: true, officeError: undefined,
+      officeMessage: tab.kind === 'word' ? '正在准备 Word 原件分页预览…' : '正在载入演示文稿…' }))
+    try {
+      const snapshot = tab.kind === 'word'
+        ? await window.desktopAPI?.docxPreview?.({ type: 'docx-preview.open', path: tab.path, requestId })
+        : await window.desktopAPI?.pptxPreview?.({ type: 'pptx-preview.open', path: tab.path })
+      if (!snapshot) throw new Error('Office 原件服务尚未连接')
+      if (officeReadTokens.current.get(id) !== ticket) throw new Error('此载入已被更新的请求取代')
+      publishOfficeSnapshot(id, snapshot)
+      return snapshot
+    } catch (reason) {
+      if (officeReadTokens.current.get(id) === ticket) updateOfficeTab(id, current => ({ ...current,
+        officeError: `${current.pptxSnapshot || current.docxSnapshot ? '未能取得最新原件，当前仍显示上一次内容。' : ''}${reason instanceof Error ? reason.message : String(reason)}`,
+      }))
+      throw reason
+    } finally {
+      if (officeReadTokens.current.get(id) === ticket) {
+        docxRequests.current.delete(id)
+        updateOfficeTab(id, current => ({ ...current, officePending: false, officeMessage: undefined }))
+      }
+    }
+  }
+  async function reloadPptx(id: string): Promise<PptxPreviewSnapshot> {
+    if (tabsRef.current.find(tab => tab.id === id)?.kind !== 'presentation') throw new Error('演示文稿标签已关闭')
+    return await readOfficeTab(id) as PptxPreviewSnapshot
+  }
+  async function reloadDocx(id: string): Promise<DocxPreviewSnapshot> {
+    if (tabsRef.current.find(tab => tab.id === id)?.kind !== 'word') throw new Error('Word 文件标签已关闭')
+    return await readOfficeTab(id) as DocxPreviewSnapshot
+  }
+  async function mutatePptx(id: string, request: Extract<PptxPreviewRequest, { type: 'pptx-preview.edit' | 'pptx-preview.undo' | 'pptx-preview.redo' }>): Promise<void> {
+    if (officeMutations.current.has(id)) throw new Error('上一项原件修改尚未完成，请稍后重试')
+    const tab = tabsRef.current.find(item => item.id === id)
+    if (!tab?.pptxSnapshot || tab.officePending || tab.officeStale || !window.desktopAPI?.pptxPreview)
+      throw new Error('请等原件最新版本载入后再修改；当前输入已保留')
+    cancelOfficeRead(id)
+    updateOfficeTab(id, current => ({ ...current, officePending: true, officeError: undefined, officeMessage: '正在保存演示文稿原件…' }))
+    // Install the pending owner before invoking IPC: its binding event can arrive
+    // before the invoke response and must not launch a competing reload.
+    const work = Promise.resolve().then(async () => {
+      try { publishOfficeSnapshot(id, await window.desktopAPI!.pptxPreview!(request)) }
+      catch (reason) {
+        updateOfficeTab(id, current => ({ ...current, officeStale: true,
+          officeError: reason instanceof Error ? reason.message : String(reason) }))
+        throw reason
+      } finally {
+        officeMutations.current.delete(id)
+        updateOfficeTab(id, current => ({ ...current, officePending: false, officeMessage: undefined }))
+      }
+    })
+    officeMutations.current.set(id, work)
+    try { await work }
+    catch (reason) {
+      // Unknown receipts or external changes must be recoverable from the same
+      // authorized tab; retain the action error in the object editor itself.
+      await readOfficeTab(id).catch(() => {})
+      throw reason
+    }
+  }
+  async function editPptx(id: string, edits: PptxObjectEdit[]) {
+    const binding = tabsRef.current.find(tab => tab.id === id)?.pptxSnapshot?.binding
+    if (!binding) throw new Error('演示文稿尚未就绪')
+    await mutatePptx(id, { type: 'pptx-preview.edit', binding, content: { format: 'pptx', edits } })
+  }
+  async function movePptxHistory(id: string, action: 'undo' | 'redo') {
+    const binding = tabsRef.current.find(tab => tab.id === id)?.pptxSnapshot?.binding
+    if (!binding) throw new Error('演示文稿尚未就绪')
+    await mutatePptx(id, { type: action === 'undo' ? 'pptx-preview.undo' : 'pptx-preview.redo', binding })
+  }
+  async function drainOfficeInputs(id?: string): Promise<boolean> {
+    for (const [currentId, pending] of [...officeMutations.current]) if (!id || id === currentId) {
+      try { await pending } catch { setActiveTab(currentId); return false }
+    }
+    const dirty = tabsRef.current.find(tab => tab.kind === 'presentation' && tab.dirty && (!id || id === tab.id))
+    if (!dirty) return true
+    updateOfficeTab(dirty.id, tab => ({ ...tab, officeError: '请先应用或取消对象面板中的修改，再关闭或切换工作空间。' }))
+    setActiveTab(dirty.id); return false
   }
   function updateDirty(path: string, dirty: boolean) {
-    setTabs(current => current.some(tab => tab.id === path && tab.dirty !== dirty)
-      ? current.map(tab => tab.id === path ? { ...tab, dirty } : tab) : current)
+    updateOfficeTab(path, tab => {
+      const clearNotice = !dirty && tab.officeError === '请先应用或取消对象面板中的修改，再关闭或切换工作空间。'
+      return tab.dirty === dirty && !clearNotice ? tab : { ...tab, dirty, ...(clearNotice ? { officeError: undefined } : {}) }
+    })
   }
   function activeDocumentTarget(): ActiveDocumentTarget | undefined {
     const tab = tabs.find(item => item.id === activeTab && item.kind === 'document')
@@ -401,7 +549,7 @@ export function useDocumentTabsController({ documentPort, courseDocuments, media
         event.stopPropagation()
         const editor = documents.current.get(tab.id)
         if (editor) void (event.shiftKey ? editor.saveAs() : editor.flush())
-      } else if (key === 's' && tab.kind === 'presentation') {
+      } else if (key === 's' && (tab.kind === 'presentation' || tab.kind === 'word')) {
         event.preventDefault(); event.stopPropagation()
       } else if (key === 's' && tab.kind === 'media') {
         event.preventDefault(); event.stopPropagation()
@@ -412,6 +560,7 @@ export function useDocumentTabsController({ documentPort, courseDocuments, media
     return () => window.removeEventListener('keydown', keydown, true)
   }, [activeTab, courseDocuments])
   const drainAll = async (documentIds?: readonly string[]) => {
+    if (!documentIds && !await drainOfficeInputs()) return false
     for (const editor of [...documents.current.values()]) {
       if (documentIds && !documentIds.includes(editor.session.documentId ?? '')) continue
       if (!await editor.session.drain()) return false
@@ -433,7 +582,7 @@ export function useDocumentTabsController({ documentPort, courseDocuments, media
     }
     return drafts
   }
-  return { tabs, activeTab, captureNavigationIdentity: () => String(navigation.current), cancelNavigation, showCurrentCourse, isCourseActive: tabs.some(tab => tab.id === activeTab && tab.kind === 'course'), createMarkdown, createText, setActiveTab, focusDocument, openTab, closeTab, removeTab, registerEditor, editorRef, mediaEditorRef, mediaFiles: requestMediaFiles, updateMediaSnapshot, reloadPptx, updateDirty, flushAll, saveActiveDocument, drainAll, captureMediaDrafts, preserveAll, hasDirtyInputs, suspendForClose, resumeAfterCloseCancelled, closeAll, disposeDocuments, activeDocumentTarget, selectionChanged, sendContextualCommand }
+  return { tabs, activeTab, captureNavigationIdentity: () => String(navigation.current), cancelNavigation, showCurrentCourse, isCourseActive: tabs.some(tab => tab.id === activeTab && tab.kind === 'course'), createMarkdown, createText, setActiveTab, focusDocument, openTab, closeTab, removeTab, registerEditor, editorRef, mediaEditorRef, mediaFiles: requestMediaFiles, updateMediaSnapshot, reloadPptx, editPptx, movePptxHistory, reloadDocx, updateDirty, flushAll, saveActiveDocument, drainAll, captureMediaDrafts, preserveAll, hasDirtyInputs, suspendForClose, resumeAfterCloseCancelled, closeAll, disposeDocuments, activeDocumentTarget, selectionChanged, sendContextualCommand }
 }
 
 function normalized(value: string) { return value.replace(/\\/g, '/').toLowerCase() }

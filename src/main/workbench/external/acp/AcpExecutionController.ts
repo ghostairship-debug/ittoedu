@@ -1,11 +1,11 @@
 import { randomUUID } from 'node:crypto';
 import type { ConversationPatch, ConversationRecord } from '../../../../shared/workbench/conversations';
-import type { ExecutionEventInput } from '../../../../shared/workbench/executionEvents';
+import type { ExecutionBlobRef, ExecutionEventInput, ExecutionProjection } from '../../../../shared/workbench/executionEvents';
 import type { AcpDesktopRequest, AcpDesktopResult, AcpSendInput } from '../../../../shared/workbench/acpDesktop';
-import type { AcpHostEvent, AcpHostSnapshot, AcpSessionSegment, AcpStructuredHandoff } from '../../../../shared/workbench/acp';
+import type { AcpHandoffReadInput, AcpHostEvent, AcpHostSnapshot, AcpSessionSegment, AcpStructuredHandoff } from '../../../../shared/workbench/acp';
 import type { ExecutionPermissionMode } from '../../../../shared/workbench/executionPermission';
 import { AcpAgentHost, type AcpDomainBinding } from './AcpAgentHost';
-import { emptyAcpHandoff } from './AcpHandoff';
+import { AcpHandoffFacts } from './AcpHandoffFacts';
 
 type Identity = { workspaceId: string; conversationId: string };
 interface Turn { runId: string; taskId: string; text: string; finalText: string; startedAt: number }
@@ -16,6 +16,8 @@ export interface AcpExecutionControllerOptions extends Identity {
   read(): Promise<ConversationRecord>;
   /** Existing event-store projection, scoped to this product conversation. */
   readSegments?(): Promise<AcpSessionSegment[]>;
+  readExecution?(): Promise<ExecutionProjection>;
+  readExecutionBlob?(ref: ExecutionBlobRef): Promise<Uint8Array>;
   /** Refine nonempty conversation history using the existing durable event sequence. */
   canReplaceUnpersistedSession?(segment: AcpSessionSegment, acceptedRunIds: readonly string[]): Promise<boolean>;
   /** Prepare current document scopes only for a new submission, never for an ACK lookup. */
@@ -28,6 +30,7 @@ export interface AcpExecutionControllerOptions extends Identity {
   openDocumentation(url: string): Promise<void>;
   artifactFacts(): AcpStructuredHandoff['artifacts'];
   createBinding(input: { segmentId: string; handoff: AcpStructuredHandoff; permission(): ExecutionPermissionMode;
+    readHandoff(input: AcpHandoffReadInput): Promise<unknown>;
     pending(operations: string[]): void; linkRun(input: { runId: string; portId: string }): Promise<string> }): Promise<AcpDomainBinding>;
 }
 
@@ -42,10 +45,14 @@ export class AcpExecutionController {
   private permission: ExecutionPermissionMode = 'read-only';
   private unsettled: string[] = [];
   private disposed = false;
+  private readonly handoffFacts: AcpHandoffFacts;
 
   constructor(private readonly options: AcpExecutionControllerOptions) {
+    this.handoffFacts = new AcpHandoffFacts({ read: options.read, artifacts: options.artifactFacts,
+      execution: options.readExecution, blob: options.readExecutionBlob });
     this.host = new AcpAgentHost({ cwd: options.cwd, runtimeDirectory: options.runtimeDirectory, beforeSwitch: async () => { await this.settlingTurn; await options.stopBuiltin(); },
       createBinding: async ({ segmentId }) => options.createBinding({ segmentId, handoff: await this.handoff(),
+        readHandoff: input => this.handoffFacts.read(input),
         permission: () => this.permission, pending: operations => { this.unsettled = operations; },
         linkRun: async ({ runId, portId }) => {
           const current = await options.update(record => ({ runIndex: { ...record.runIndex,
@@ -192,11 +199,9 @@ export class AcpExecutionController {
   }
 
   private async handoff(): Promise<AcpStructuredHandoff> {
-    const current = await this.options.read();
-    return { ...emptyAcpHandoff(), goal: current.messages.findLast(message => message.role === 'user')?.text,
-      userInstructions: current.messages.filter(message => message.role === 'user').slice(-4).map(message => message.text),
-      latestPublicReply: current.messages.findLast(message => message.role === 'assistant')?.text,
-      artifacts: this.options.artifactFacts(), unsettledOperations: [...this.unsettled] };
+    const handoff = await this.handoffFacts.project();
+    return { ...handoff, unsettledOperations: [...handoff.unsettledOperations,
+      ...this.unsettled.map(value => `${value}（旧连接传输提示；使用 handoff.read 核对持久事实，旧 ticket 不可跨连接重放）`)] };
   }
 
   private async recordSegment(segment: AcpSessionSegment): Promise<void> {

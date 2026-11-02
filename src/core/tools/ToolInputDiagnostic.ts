@@ -34,7 +34,9 @@ export function compactToolInputError(error: z.ZodError, call?: Pick<ModelToolCa
   const field = fieldPath.map(String).join('.') || 'input'
   const expected = issue?.message ?? '参数需符合工具支持的形状'
   const read = typeof input?.target === 'string' ? { name: 'read', input: { target: input.target, ...(tool?.startsWith('text.') ? {} : { detail: 'object' }) } }
-    : typeof input?.path === 'string' ? { name: 'project.read', input: { ...(typeof (input.project ?? root?.project) === 'string' ? { project: input.project ?? root?.project } : {}), path: input.path } } : undefined
+    : typeof input?.path === 'string' ? tool?.startsWith('office.')
+      ? { name: 'office.inspect', input: { path: input.path } }
+      : { name: 'project.read', input: { ...(typeof (input.project ?? root?.project) === 'string' ? { project: input.project ?? root?.project } : {}), path: input.path } } : undefined
   const label = `${operationIndex === undefined ? '' : `operations[${operationIndex}] `}${tool ?? '工具'}`
   return { kind: 'error', code: 'invalid-input',
     message: `${label}${target ? ` target=${target}` : ''} ${field}: ${expected}${read ? `；局部读取 ${read.name} ${JSON.stringify(read.input)}` : ''}`,

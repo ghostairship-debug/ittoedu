@@ -8,7 +8,7 @@
 - 子 Agent 接收目标、实际写域、必要证据和直接源码；不用复制主会话历史。并行生产按独立工作划分，共享文件由一个集成者写入。
 - 改到数据、保存、表面布局、Runtime、权限或执行生命周期时，只查 [架构合同](docs/development-plan/ARCHITECTURE_CONTRACT.md) 对应条目与实际消费者；协调、验证和交付细节按需查 [操作参考](docs/development-plan/WORKING_PROTOCOL.md)。
 - 跨会话接手先查 [任务板](docs/development-plan/TASK_BOARD.md) 的实际写域。任务板是协调摘要，旧 active 标签和研究报告中的“下一步”不等于当前有人执行或获得新授权。
-- 中断恢复同时读取 [执行检查点](docs/development-plan/EXECUTION_CHECKPOINT.json)，运行 `node scripts/execution-checkpoint.mjs reconcile` 核对进程、退出结果与 Git；命令按 [恢复操作](docs/development-plan/WORKING_PROTOCOL.md#8-中断恢复) 持久执行，不按旧状态盲重放。
+- 中断恢复同时读取 [执行检查点](docs/development-plan/EXECUTION_CHECKPOINT.json)，运行 `node scripts/execution-checkpoint.mjs reconcile` 核对进程、退出结果与 Git；接续/收口用 `goal-audit` 核对未完目标及去向，阶段完成不替代产品目标完成。命令按 [恢复操作](docs/development-plan/WORKING_PROTOCOL.md#8-中断恢复) 持久执行，不按旧状态盲重放。
 
 ## 内容任务入口
 

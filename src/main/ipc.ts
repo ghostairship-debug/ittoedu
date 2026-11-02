@@ -15,8 +15,10 @@ import { trashWorkspaceWithDialog } from './workbench/workspaceTrashDialog'
 import { workspaceFilesRequestSchema } from '../shared/workbench/workspaceFiles'
 import { mediaFilesRequestSchema, mediaFileDraftInputSchema, fileArtifactBindingSchema } from '../shared/workbench/mediaFiles'
 import { operateMediaFiles } from './workbench/mediaFilesDesktopService'
-import { pptxPreviewRequestSchema } from '../shared/workbench/officePreview'
-import { readPptxPreview } from './workbench/officePreviewDesktopService'
+import { docxPreviewCancelSchema, docxPreviewRequestSchema, pptxPreviewRequestSchema } from '../shared/workbench/officePreview'
+import { WordPreviewError } from './workbench/office/WordPreviewError'
+import { UserFacingError } from '../shared/errors'
+import { readDocxPreview, readPptxPreview } from './workbench/officePreviewDesktopService'
 import { operateExternalMcp, closeExternalMcpService, attachExternalMcpWindow } from './workbench/external/externalDesktopService'
 import { operateExecutionSettings } from './workbench/providers/executionSettingsService'
 import { operatePixabaySettings } from './workbench/assetSources/pixabayDesktopService'
@@ -321,6 +323,7 @@ let workspaceFileEventGeneration = 0
 let stopExportBuildListeners: (() => void) | undefined
 let frozenDeliveryBuilds: FrozenDocumentExportService | undefined
 const pptxImportJobs = new Map<string, AbortController>()
+const docxPreviewJobs = new Map<string, AbortController>()
 const pdfExportJobs = new Map<string, AbortController>()
 let htmlPreview: HtmlPreviewService | undefined
 let htmlPreviewClosedCleanup: (() => void) | undefined
@@ -652,9 +655,38 @@ export function registerIpcHandlers(context: IpcContext): void {
     message: '源码和参数已保留。', suggestion: '请查看组件诊断并修复源码。',
   }, async (_event, args) => documents.compilation.compile(componentCompilationInputSchema.parse(requireSingleArgument(args))))
   registerSafeHandler(IPC_CHANNELS.pptxPreview, context, {
-    code: 'PPTX_PREVIEW_FAILED', title: 'PPTX 预览未能打开',
-    message: '原文件保持不变。', suggestion: '请检查文件，或用系统应用打开原件。',
+    code: 'PPTX_PREVIEW_FAILED', title: 'PPTX 操作未完成',
+    message: '请保留当前输入并核查原件最新状态。', suggestion: '请查看具体原因后重新载入。',
   }, async (_event, args) => readPptxPreview(pptxPreviewRequestSchema.parse(requireSingleArgument(args))))
+  registerSafeHandler(IPC_CHANNELS.docxPreview, context, {
+    code: 'DOCX_PREVIEW_FAILED', title: 'Word 分页预览未完成',
+    message: '原件保持不变。', suggestion: '请查看具体原因后重新载入。',
+  }, async (event, args) => {
+    const input = docxPreviewRequestSchema.parse(requireSingleArgument(args)), requestId = input.requestId ?? randomUUID()
+    const key = `${event.sender.id}:${requestId}`
+    if (docxPreviewJobs.has(key)) throw new Error('Word 预览请求编号重复')
+    const controller = new AbortController(), destroyed = () => controller.abort(new Error('Word 预览窗口已关闭'))
+    docxPreviewJobs.set(key, controller); event.sender.once('destroyed', destroyed)
+    if (event.sender.isDestroyed()) destroyed()
+    try {
+      return await readDocxPreview(input, { signal: controller.signal, log: message => {
+        if (!event.sender.isDestroyed()) event.sender.send(IPC_CHANNELS.docxPreviewProgress, { requestId, message })
+      } })
+    } catch (error) {
+      if (error instanceof WordPreviewError) throw new UserFacingError('Word 分页预览未完成', error.message, '原件保持不变，可重新载入或用系统应用核对。', { cause: error })
+      throw error
+    } finally {
+      event.sender.removeListener('destroyed', destroyed)
+      if (docxPreviewJobs.get(key) === controller) docxPreviewJobs.delete(key)
+    }
+  })
+  registerSafeHandler(IPC_CHANNELS.docxPreviewCancel, context, {
+    code: 'DOCX_PREVIEW_CANCEL_FAILED', title: 'Word 预览停止未完成',
+    message: '原件保持不变。', suggestion: '请查看具体原因。',
+  }, async (event, args) => {
+    const input = docxPreviewCancelSchema.parse(requireSingleArgument(args))
+    docxPreviewJobs.get(`${event.sender.id}:${input.requestId}`)?.abort(new Error('Word 预览已取消'))
+  })
   registerSafeHandler(IPC_CHANNELS.mediaFiles, context, {
     code: 'MEDIA_FILE_OPERATION_FAILED', title: '媒体文件操作未完成',
     message: '当前修改已保留。', suggestion: '请查看具体原因后重试。',
@@ -1298,6 +1330,8 @@ export function unregisterIpcHandlers(): void {
   frozenDeliveryBuilds?.dispose(); frozenDeliveryBuilds = undefined
   for (const controller of pptxImportJobs.values()) controller.abort(new Error('PPTX 导入服务已关闭'))
   pptxImportJobs.clear()
+  for (const controller of docxPreviewJobs.values()) controller.abort(new Error('Word 预览服务已关闭'))
+  docxPreviewJobs.clear()
   for (const controller of pdfExportJobs.values()) controller.abort(new Error('PDF 导出服务已关闭'))
   pdfExportJobs.clear()
   stopExportBuildListeners?.(); stopExportBuildListeners = undefined

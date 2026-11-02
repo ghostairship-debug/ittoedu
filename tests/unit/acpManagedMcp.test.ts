@@ -13,12 +13,12 @@ import { emptyAcpHandoff } from '../../src/main/workbench/external/acp/AcpHandof
 function deferred() { let resolve!: () => void; const promise = new Promise<void>(done => { resolve = done; }); return { promise, resolve }; }
 const call = (name: string, args: Record<string, unknown> = {}): ResidentMcpCall => ({ requestId: 1, method: 'tools/call', params: { name, arguments: args }, delivery: Promise.resolve(true), notify: () => undefined });
 
-function managedFixture() {
+function managedFixture(readHandoff?: NonNullable<ExternalMcpServiceOptions['managedConversation']>['readHandoff']) {
   const events: ExecutionEventInput[] = [], begun: string[] = [], stopped: string[] = [];
   let beforeBegin: (() => Promise<void>) | undefined;
   let beforeWrite: (() => Promise<void>) | undefined;
   let beforeStop: (() => Promise<void>) | undefined;
-  let contents = 'teacher version';
+  let contents = 'teacher version', writeCount = 0;
   const workspace = { workspaceId: 'space', rootPath: process.cwd(), revision: 1, managed: false, authorization: 'user-selected', createdAt: 1, updatedAt: 1 };
   const options = {
     settings: { read: async () => ({ enabled: true, port: 0, permission: 'workspace', closeAction: 'ask' }), update: async () => { throw new Error('must not change user settings'); } },
@@ -27,20 +27,174 @@ function managedFixture() {
     registry: { list: () => [] },
     gateway: { beginRun: async ({ runId }: { runId: string }) => { begun.push(runId); await beforeBegin?.(); },
       stop: async (runId: string) => { stopped.push(runId); await beforeStop?.(); }, subscribeCatalogChanges: () => () => undefined,
-      describeRun: async () => [], availableToolFamilies: async () => [], runFileAccess: () => ({ boundPaths: {} }),
+      describe: async () => [], describeRun: async () => [], availableToolFamilies: async () => [], runFileAccess: () => ({ boundPaths: {} }),
       captureHostOperation: () => undefined, operationIdentity: (_run: string, ticket: string) => ticket },
     files: { preflightMutation: async () => ({ paths: [process.cwd()], outside: false }), releaseRun: () => undefined,
-      execute: async (context: { assertActive(): void }) => { await beforeWrite?.(); context.assertActive(); contents = 'agent version'; return { data: { saved: true } }; } },
+      execute: async (context: { assertActive(): void }) => { await beforeWrite?.(); context.assertActive(); writeCount++; contents = 'agent version'; return { data: { saved: true } }; } },
     workspaceRoot: async () => process.cwd(), uiState: async () => null, appendEvent: async (event: ExecutionEventInput) => { events.push(event); }, confirm: async () => true,
-    transportToken: 'private-test-token', managedConversation: { workspaceId: 'space', conversationId: 'chosen-conversation', linkRun: async () => 'chosen-conversation' },
+    transportToken: 'private-test-token', managedConversation: { workspaceId: 'space', conversationId: 'chosen-conversation', linkRun: async () => 'chosen-conversation', readHandoff },
   } as unknown as ExternalMcpServiceOptions;
-  return { service: new ExternalMcpService(options), events, begun, stopped,
+  return { service: new ExternalMcpService(options), options, events, begun, stopped,
+    setAppend: (append: ExternalMcpServiceOptions['appendEvent']) => { options.appendEvent = append; }, writeCount: () => writeCount,
     gateBegin: (callback?: () => Promise<void>) => { beforeBegin = callback; }, gateWrite: (callback?: () => Promise<void>) => { beforeWrite = callback; },
     gateStop: (callback?: () => Promise<void>) => { beforeStop = callback; },
     setTeacherVersion: (text: string) => { contents = text; }, contents: () => contents };
 }
 
+function deliveryDeferred() {
+  let resolve!: (value: boolean) => void, reject!: (error: Error) => void;
+  const promise = new Promise<boolean>((done, fail) => { resolve = done; reject = fail; });
+  return { promise, resolve, reject };
+}
+const receiptCall = (ticket: string, delivery: Promise<boolean>) => {
+  const c = call('file.write', { path: 'x', content: 'x' });
+  return { ...c, params: { ...c.params, _meta: { 'guoling/ticket': ticket } }, delivery };
+};
+const transportFacts = (f: ReturnType<typeof managedFixture>, ticket: string) =>
+  f.events.filter(event => event.itemId === ticket && event.data.transportDelivery).map(event => event.data.transportDelivery);
+const startManaged = async (f: ReturnType<typeof managedFixture>) => {
+  await f.service.start();
+  const { sessionId } = await f.service.initialize({ name: 'native', version: '1' });
+  await f.service.activateManaged();
+  return sessionId;
+};
+const flushDelivery = () => new Promise<void>(resolve => setImmediate(resolve));
+
+describe('ACP durable transport facts', () => {
+  it('does not execute a side effect if its initial unknown marker cannot persist', async () => {
+    const f = managedFixture();
+    try {
+      const session = await startManaged(f);
+      f.setAppend(async event => { if (event.data.transportDelivery === 'unknown') throw Error('marker unavailable'); f.events.push(event); });
+      await assert.rejects(f.service.request(session, receiptCall('marker', Promise.resolve(true))), /marker unavailable/);
+      assert.equal(f.writeCount(), 0); assert.equal(f.contents(), 'teacher version');
+      assert.deepEqual(transportFacts(f, 'marker'), []);
+    } finally { await f.service.close(); }
+  });
+
+  it('retains a committed result when its terminal record fails, and never claims delivery', async () => {
+    const f = managedFixture();
+    try {
+      const session = await startManaged(f);
+      f.setAppend(async event => { if (event.itemId === 'terminal' && event.data.status === 'completed') throw Error('terminal unavailable'); f.events.push(event); });
+      const original = await f.service.request(session, receiptCall('terminal', Promise.resolve(true))) as { structuredContent: { ticket: string; result: unknown } };
+      assert.equal(original.structuredContent.ticket, 'terminal'); assert.equal(f.writeCount(), 1);
+      await assert.rejects(f.service.settleManaged(), /terminal unavailable/);
+      assert.deepEqual(transportFacts(f, 'terminal'), ['unknown']);
+      const receipt = await f.service.request(session, call('operation.read', { ticket: 'terminal' }));
+      assert.match(JSON.stringify(receipt), /saved/); assert.equal(f.writeCount(), 1);
+      const replay = await f.service.request(session, receiptCall('terminal', Promise.resolve(false))) as { structuredContent: { ticket: string; replayed: boolean; result: unknown } };
+      assert.equal(replay.structuredContent.replayed, true); assert.deepEqual(replay.structuredContent.result, original.structuredContent.result);
+      await assert.rejects(f.service.settleManaged(), /terminal unavailable/);
+      assert.equal(f.writeCount(), 1); assert.ok(transportFacts(f, 'terminal').every(value => value === 'unknown'));
+    } finally { await assert.rejects(f.service.close(), /terminal unavailable/); }
+  });
+
+  it('settles domain work while a reply remains pending, preserving durable unknown', async () => {
+    const f = managedFixture(), delivery = deliveryDeferred();
+    try {
+      const session = await startManaged(f);
+      await f.service.request(session, receiptCall('pending', delivery.promise));
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      try { assert.equal(await Promise.race([f.service.settleManaged().then(() => true), new Promise<false>(resolve => { timer = setTimeout(() => resolve(false), 1000); })]), true); }
+      finally { if (timer) clearTimeout(timer); }
+      assert.equal(f.writeCount(), 1); assert.deepEqual(transportFacts(f, 'pending'), ['unknown']);
+      delivery.resolve(false); await flushDelivery(); await f.service.settleManaged();
+      assert.equal(transportFacts(f, 'pending').at(-1), 'undelivered');
+    } finally { delivery.resolve(false); await f.service.close(); }
+  });
+
+  it('records fresh uncertainty before replying with an existing ticket, without executing twice', async () => {
+    const f = managedFixture(), delivery = deliveryDeferred();
+    try {
+      const session = await startManaged(f);
+      await f.service.request(session, receiptCall('retry', Promise.resolve(false))); await flushDelivery(); await f.service.settleManaged();
+      assert.equal(transportFacts(f, 'retry').at(-1), 'undelivered');
+      const replay = await f.service.request(session, receiptCall('retry', delivery.promise)) as { structuredContent: { ticket: string; replayed: boolean } };
+      assert.equal(replay.structuredContent.ticket, 'retry'); assert.equal(replay.structuredContent.replayed, true);
+      assert.equal(f.writeCount(), 1); assert.equal(transportFacts(f, 'retry').at(-1), 'unknown');
+      delivery.resolve(true); await flushDelivery(); await f.service.settleManaged();
+      assert.deepEqual(transportFacts(f, 'retry'), ['unknown', 'undelivered', 'unknown', 'delivered']); assert.equal(f.writeCount(), 1);
+    } finally { delivery.resolve(false); await f.service.close(); }
+  });
+
+  for (const oldOutcome of ['false', 'reject'] as const) it('ignores a late ' + oldOutcome + ' from an older response attempt', async () => {
+    const f = managedFixture(), old = deliveryDeferred();
+    try {
+      const session = await startManaged(f);
+      await f.service.request(session, receiptCall('same', old.promise));
+      await f.service.request(session, receiptCall('same', Promise.resolve(true))); await flushDelivery(); await f.service.settleManaged();
+      oldOutcome === 'false' ? old.resolve(false) : old.reject(Error('old transport failure'));
+      await flushDelivery(); await f.service.settleManaged();
+      assert.equal(transportFacts(f, 'same').at(-1), 'delivered'); assert.equal(f.writeCount(), 1);
+    } finally { old.resolve(false); await f.service.close(); }
+  });
+
+  it('reports delivery persistence failure while retaining unknown and the original result', async () => {
+    const f = managedFixture();
+    try {
+      const session = await startManaged(f);
+      f.setAppend(async event => { if (event.data.transportDelivery === 'undelivered') throw Error('delivery store unavailable'); f.events.push(event); });
+      await f.service.request(session, receiptCall('lost', Promise.resolve(false))); await flushDelivery();
+      await assert.rejects(f.service.settleManaged(), /delivery store unavailable/);
+      assert.deepEqual(transportFacts(f, 'lost'), ['unknown']); assert.equal(f.writeCount(), 1);
+    } finally { await assert.rejects(f.service.close(), /delivery store unavailable/); }
+  });
+
+  it('keeps an undelivered receipt when a retry marker fails, then recovers without repeating the write', async () => {
+    const f = managedFixture();
+    try {
+      const session = await startManaged(f);
+      await f.service.request(session, receiptCall('retry-marker', Promise.resolve(false))); await flushDelivery(); await f.service.settleManaged();
+      f.setAppend(async event => { if (event.data.transportDelivery === 'unknown') throw Error('retry marker unavailable'); f.events.push(event); });
+      await assert.rejects(f.service.request(session, receiptCall('retry-marker', Promise.resolve(true))), /retry marker unavailable/);
+      assert.equal(f.writeCount(), 1); assert.equal(f.service.managedOperations().find(op => op.ticket === 'retry-marker')?.delivered, false);
+      f.setAppend(async event => { f.events.push(event); });
+      const replay = await f.service.request(session, receiptCall('retry-marker', Promise.resolve(true))) as { structuredContent: { replayed: boolean } };
+      assert.equal(replay.structuredContent.replayed, true); await flushDelivery(); await f.service.settleManaged();
+      assert.equal(transportFacts(f, 'retry-marker').at(-1), 'delivered'); assert.equal(f.writeCount(), 1);
+    } finally { await f.service.close(); }
+  });
+
+  for (const managed of [true, false]) it('does not turn a large readonly reply rejection into a managed record failure: ' + managed, async () => {
+    const f = managedFixture(), delivery = deliveryDeferred();
+    f.options.files.execute = async () => ({ data: { value: 'x'.repeat(200000) } });
+    if (!managed) f.options.managedConversation = undefined;
+    try {
+      await f.service.start(); const { sessionId } = await f.service.initialize({ name: 'native', version: '1' });
+      if (managed) await f.service.activateManaged();
+      await f.service.request(sessionId, { ...call('file.read', { path: 'x' }), delivery: delivery.promise });
+      delivery.reject(Error('read reply disappeared')); await flushDelivery(); await f.service.settleManaged();
+      assert.equal(f.writeCount(), 0); assert.equal(f.events.some(e => e.data.transportDelivery), false);
+    } finally { delivery.resolve(false); await f.service.close(); }
+  });
+});
+
 describe('ACP managed MCP authority', () => {
+  it('advertises the scoped handoff reader only when installed and applies the same active-turn authority to it', async () => {
+    const reads: unknown[] = [];
+    const f = managedFixture(async input => { reads.push(input); return { instructions: [{ messageId: 'old-user', text: '保留原标题' }] }; });
+    const without = managedFixture();
+    try {
+      await f.service.start(); const connected = await f.service.initialize({ name: 'native', version: '1' });
+      const listed = await f.service.request(connected.sessionId, { ...call(''), method: 'tools/list' }) as { tools: Array<{ name: string }> };
+      assert.ok(listed.tools.some(tool => tool.name === 'handoff.read'));
+      await assert.rejects(f.service.request(connected.sessionId, call('handoff.read', { section: 'instructions' })), /没有活动任务/);
+      assert.equal(reads.length, 0);
+      await f.service.activateManaged();
+      const result = await f.service.request(connected.sessionId, call('handoff.read', { section: 'instructions' }));
+      assert.match(JSON.stringify(result), /保留原标题/); assert.equal(reads.length, 1);
+      const forbidden = await f.service.request(connected.sessionId, call('handoff.read', { section: 'instructions', conversationId: 'someone-else' })) as { isError: boolean };
+      assert.equal(forbidden.isError, true); assert.equal(reads.length, 1);
+      assert.equal(f.contents(), 'teacher version');
+      await f.service.suspendManaged();
+      await assert.rejects(f.service.request(connected.sessionId, call('handoff.read', { section: 'work' })), /没有活动任务/);
+      await without.service.start(); const other = await without.service.initialize({ name: 'native', version: '1' });
+      const uninstalled = await without.service.request(other.sessionId, { ...call(''), method: 'tools/list' }) as { tools: Array<{ name: string }> };
+      assert.equal(uninstalled.tools.some(tool => tool.name === 'handoff.read'), false);
+    } finally { await f.service.close(); await without.service.close(); }
+  });
+
   it('requires the private bearer on initialization and on every session request', async () => {
     let initialized = 0, requests = 0;
     const server = new ResidentMcpServer({ initialize: async () => { initialized++; return { sessionId: 'session', instructions: '' }; },
@@ -98,6 +252,8 @@ describe('ACP managed MCP authority', () => {
       fixture.gateWrite(async () => { entered.resolve(); await released.promise; });
       const pending = service.request(sessionId, call('file.write', { path: 'a.txt', text: 'old agent edit' }));
       await entered.promise;
+      assert.ok(fixture.events.some(event => event.type === 'tool' && event.data.status === 'running'
+        && event.data.input === JSON.stringify({ path: 'a.txt', text: 'old agent edit' })));
       let settled = false; const stopping = service.suspendManaged().then(() => { settled = true; });
       fixture.setTeacherVersion('new human edit');
       await new Promise<void>(resolve => setImmediate(resolve)); assert.equal(settled, false);

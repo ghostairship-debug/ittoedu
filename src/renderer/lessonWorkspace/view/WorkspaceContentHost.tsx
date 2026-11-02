@@ -9,6 +9,8 @@ import { WorkspaceDocumentStatus } from './WorkspaceDocumentStatus'
 import { LessonDocumentEditor } from '../../documentFiles/LessonDocumentEditor'
 import { MediaFileEditor } from '../../documentFiles/media/MediaFileEditor'
 import { PptxFilePreview } from '../../documentFiles/office/PptxFilePreview'
+import { DocxFilePreview } from '../../documentFiles/office/DocxFilePreview'
+import './officeFileView.css'
 import { usePptxPicker } from './usePptxPicker'
 import { CourseImportMenu } from '../../ui/CourseImportMenu'
 function relativeFile(lesson: LessonWorkspace, filename: string) {
@@ -151,19 +153,53 @@ export function WorkspaceContentHost({ props, layout, editorFocus, enterEditor, 
                 onContextualCommand={(instruction, target) => tabs.sendContextualCommand(tab.id, instruction, target)}
               />
             )
-          ) : tab.kind === 'presentation' && tab.pptxSnapshot ? (
-            <PptxFilePreview bytes={tab.pptxSnapshot.bytes} name={tab.name} active={tabs.activeTab === tab.id && !layout.prefs.contentClosed}
-              onReload={async () => { await tabs.reloadPptx(tab.id) }}
-              onOpenExternal={async () => {
-                const result = await props.operation({ operation: 'open-external', path: tab.path })
-                if (result.opened === false) throw new Error(result.openError ?? '没有可用的关联程序')
-              }}
-              onImportToCourse={async () => {
-                const snapshot = await tabs.reloadPptx(tab.id)
-                const file = new File([Uint8Array.from(snapshot.bytes)], snapshot.binding.path.split(/[\\/]/).pop() ?? tab.name,
-                  { type: 'application/vnd.openxmlformats-officedocument.presentationml.presentation' })
-                if (await actions.newCourseFromPptx(file)) { layout.setContentClosed(false); actions.setMobilePane('workbench') }
-              }} />
+          ) : tab.kind === 'presentation' || tab.kind === 'word' ? (
+            <div className="office-file-view">
+              {tab.officePending && <p className="office-file-view__message" role="status">
+                {tab.officeMessage}{tab.officeStale ? ' 当前仍显示上一版本，载入完成后更新。' : ''}
+              </p>}
+              {tab.officeError && <p className="office-file-view__message" role="alert">{tab.officeError}</p>}
+              {tab.pptxSnapshot?.editingError && <p className="office-file-view__message" role="alert">{tab.pptxSnapshot.editingError}</p>}
+              {tab.kind === 'presentation' && tab.pptxSnapshot ? <PptxFilePreview
+                bytes={tab.pptxSnapshot.bytes} name={tab.name} active={tabs.activeTab === tab.id && !layout.prefs.contentClosed}
+                inspection={tab.pptxSnapshot.inspection} history={tab.pptxSnapshot.history}
+                onEdit={!tab.pptxSnapshot.editingError ? edits => tabs.editPptx(tab.id, edits) : undefined}
+                onUndo={() => tabs.movePptxHistory(tab.id, 'undo')} onRedo={() => tabs.movePptxHistory(tab.id, 'redo')}
+                onDraftDirtyChange={dirty => tabs.updateDirty(tab.id, dirty)}
+                onReload={async () => { await tabs.reloadPptx(tab.id) }}
+                onOpenExternal={async () => {
+                  const result = await props.operation({ operation: 'open-external', path: tab.path })
+                  if (result.opened === false) throw new Error(result.openError ?? '没有可用的关联程序')
+                }}
+                onImportToCourse={async () => {
+                  const snapshot = await tabs.reloadPptx(tab.id)
+                  const file = new File([Uint8Array.from(snapshot.bytes)], snapshot.binding.path.split(/[\\/]/).pop() ?? tab.name,
+                    { type: 'application/vnd.openxmlformats-officedocument.presentationml.presentation' })
+                  if (await actions.newCourseFromPptx(file)) { layout.setContentClosed(false); actions.setMobilePane('workbench') }
+                }} /> : tab.kind === 'word' && tab.docxSnapshot ? <DocxFilePreview
+                  bytes={tab.docxSnapshot.pdfBytes} name={tab.name} pageCount={tab.docxSnapshot.pageCount}
+                  sourceSha256={tab.docxSnapshot.sourceSha256} engine={tab.docxSnapshot.engine} notices={tab.docxSnapshot.notices}
+                  active={tabs.activeTab === tab.id && !layout.prefs.contentClosed}
+                  onReload={async () => { await tabs.reloadDocx(tab.id) }}
+                  onOpenExternal={async () => {
+                    const result = await props.operation({ operation: 'open-external', path: tab.path })
+                    if (result.opened === false) throw new Error(result.openError ?? '没有可用的关联程序')
+                  }} /> : <section className="office-file-view__pending" aria-label={`${tab.name} 原件载入`}>
+                    <h2>{tab.name}</h2>
+                    <p>{tab.kind === 'word' ? 'Word 原件分页预览' : '演示文稿原件'}</p>
+                    <div className="lesson-chat-empty-actions">
+                      <button type="button" disabled={tab.officePending} onClick={() => void actions.run(async () => {
+                        if (tab.kind === 'word') await tabs.reloadDocx(tab.id)
+                        else await tabs.reloadPptx(tab.id)
+                      })}>重新载入</button>
+                      <button type="button" onClick={() => void actions.run(async () => {
+                        const result = await props.operation({ operation: 'open-external', path: tab.path })
+                        if (result.opened === false) throw new Error(result.openError ?? '没有可用的关联程序')
+                      })}>用系统应用打开</button>
+                      {tab.officePending && <button type="button" onClick={() => { void tabs.closeTab(tab) }}>取消并关闭</button>}
+                    </div>
+                  </section>}
+            </div>
           ) : tab.kind === 'media' && tab.mediaSnapshot ? (
             <MediaFileEditor
               ref={tabs.mediaEditorRef(tab.id)}

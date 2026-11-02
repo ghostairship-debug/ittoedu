@@ -7,6 +7,8 @@ import { readDocumentFileVersion } from './documentJournal'
 import { AgentFileOutcomeUnknown } from '../../core/tools/AgentFileTools'
 import { relocatedDocumentPath } from './DocumentFileCoordinator'
 import { prepareMediaFileContent, MediaFilesService } from './mediaFiles/MediaFilesService'
+import { FileArtifactHistory, type ArtifactHistoryMetadata } from './FileArtifactHistory'
+import type { OfficeHistorySnapshot } from '../../shared/workbench/officeFiles'
 
 /** Binary formats share the existing physical file owner, without a second document writer. */
 export class FileArtifactService {
@@ -15,8 +17,11 @@ export class FileArtifactService {
   private issued = new Map<string, FileArtifactBinding>()
   private nextBindingVersion = 0
   private bindingListeners = new Set<(event: MediaArtifactBindingChanged) => void>()
-  constructor(private readonly host: DocumentHostService) {
+  private readonly histories?: FileArtifactHistory
+  constructor(private readonly host: DocumentHostService, historyDirectory?: string) {
+    if (historyDirectory) this.histories = new FileArtifactHistory(historyDirectory)
     host.fileCoordinator.subscribeRelocations(async action => {
+      await this.histories?.relocateMatching(filename => relocatedDocumentPath(action, filename))
       for (const before of [...this.bindings.values()]) {
         const destination = relocatedDocumentPath(action, before.path)
         if (!destination) continue
@@ -91,8 +96,62 @@ export class FileArtifactService {
     }
     return captured
   }
-  async replace(binding: FileArtifactBinding, bytes: Uint8Array, signal?: AbortSignal, beforeCommit?: () => void): Promise<FileArtifactBinding> {
+  private historyOwner(binding: FileArtifactBinding): FileArtifactHistory {
+    if (path.extname(binding.path).toLowerCase() !== '.pptx') throw new Error('此共同编辑历史入口仅支持 PPTX 原件')
+    if (!this.histories) throw new Error('文件历史存储未配置；原件未修改')
+    return this.histories
+  }
+  async history(binding: FileArtifactBinding, signal?: AbortSignal): Promise<OfficeHistorySnapshot> {
     return this.host.fileCoordinator.withFileOperation(async () => {
+      const current = await this.assertBinding(binding), bytes = await this.readBound(current, signal)
+      return this.historyOwner(current).snapshot(current.path, bytes)
+    })
+  }
+  private notifyChange(before: FileArtifactBinding, binding: FileArtifactBinding): void {
+    for (const listener of this.bindingListeners) {
+      try { listener({ before: { ...before }, binding: { ...binding } }) }
+      catch { /* A closed renderer cannot change the result of an accepted file write. */ }
+    }
+  }
+  async replace(binding: FileArtifactBinding, bytes: Uint8Array, signal?: AbortSignal, beforeCommit?: () => void, metadata?: ArtifactHistoryMetadata): Promise<FileArtifactBinding> {
+    return this.host.fileCoordinator.withFileOperation(async () => {
+      if (!metadata) return this.replaceBound(binding, bytes, signal, beforeCommit)
+      const current = await this.assertBinding(binding), before = await this.readBound(current, signal)
+      if (before.length === bytes.length && before.every((value, index) => value === bytes[index])) return { ...current }
+      const history = this.historyOwner(current)
+      const prepared = await history.prepareWrite(current.path, before, bytes, metadata)
+      let saved: FileArtifactBinding
+      try { saved = await this.replaceBound(current, bytes, signal, beforeCommit) }
+      catch (error) {
+        if (!(error instanceof AgentFileOutcomeUnknown)) await history.cancelPrepared(current.path, prepared)
+        throw error
+      }
+      // Publication and history acknowledgement are distinct facts. Renderers must be able to
+      // reopen the new binding even if the following history acknowledgement is interrupted.
+      this.notifyChange(current, saved)
+      try { await history.confirm(saved.path, bytes) }
+      catch (cause) { throw new AgentFileOutcomeUnknown(`文件已写入，但共同编辑历史结算尚未确认；请重新读取原件，不要重发修改：${cause instanceof Error ? cause.message : String(cause)}`) }
+      return saved
+    })
+  }
+  async moveHistory(binding: FileArtifactBinding, action: 'undo' | 'redo', signal?: AbortSignal, beforeCommit?: () => void): Promise<FileArtifactBinding> {
+    return this.host.fileCoordinator.withFileOperation(async () => {
+      const current = await this.assertBinding(binding), bytes = await this.readBound(current, signal), history = this.historyOwner(current)
+      const candidate = await history.prepareMove(current.path, bytes, action)
+      let saved: FileArtifactBinding
+      try { saved = await this.replaceBound(current, candidate.bytes, signal, beforeCommit) }
+      catch (error) {
+        if (!(error instanceof AgentFileOutcomeUnknown)) await history.cancelPrepared(current.path, candidate.token)
+        throw error
+      }
+      this.notifyChange(current, saved)
+      try { await history.confirm(saved.path, candidate.bytes) }
+      catch (cause) { throw new AgentFileOutcomeUnknown(`文件撤销/重做已写入，但历史结算尚未确认；请重新读取原件：${cause instanceof Error ? cause.message : String(cause)}`) }
+      return saved
+    })
+  }
+  /** The caller holds the existing file operation lock, including History preparation/confirmation. */
+  private async replaceBound(binding: FileArtifactBinding, bytes: Uint8Array, signal?: AbortSignal, beforeCommit?: () => void): Promise<FileArtifactBinding> {
       signal?.throwIfAborted(); binding = await this.assertBinding(binding)
       const directory = await fs.realpath(path.dirname(binding.path))
       const temporary = path.join(directory, `.${path.basename(binding.path)}.${randomUUID()}.tmp`)
@@ -120,6 +179,5 @@ export class FileArtifactService {
           throw new AgentFileOutcomeUnknown(`文件已写入，但保存回执未确认；请重新读取原件后继续：${cause instanceof Error ? cause.message : String(cause)}`)
         }
       } finally { await fs.rm(temporary, { force: true }).catch(() => {}) }
-    })
   }
 }

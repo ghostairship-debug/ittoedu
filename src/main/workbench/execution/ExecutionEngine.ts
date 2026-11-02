@@ -33,6 +33,7 @@ import { executionContentOutputSchema } from '../../../shared/workbench/executio
 import type { AttachmentService } from '../attachments/AttachmentService'
 import { projectExecutionContext, contextMessageId, contextSourceIndex, projectImagesForTextModel, initialHistorySources, ContextProjectionMetadata, projectCurrentToolResult, executionContextToolProfile } from './ExecutionContextProjection'
 import { contextReadSchema, contextReadTool, readContextMessage } from './ContextReadTool'
+import { isFrozenHistorySource } from './ConversationHistoryIndex'
 import { DisplayEventBuffer } from './DisplayEventBuffer'
 import { appendObservationModelMessages, type ObservationModelInput } from './observationModelInput'
 import { isViewObservationTool } from '../../../shared/workbench/viewObservation'
@@ -2478,7 +2479,7 @@ export class ExecutionEngine {
                 if (index >= 0) { identity = { runId: ancestor.runId, index }; input.sourceId = contextMessageId(ancestor.runId, index); break }
               }
               if (!identity) throw new Error('上下文引用无效，请使用宿主给出的 sourceId')
-              const knownHistory = record.input.inputContext?.context.some(item => item.provenance.kind === 'history' && item.provenance.id === input.sourceId)
+              const knownHistory = isFrozenHistorySource(record.input.inputContext?.context, input.sourceId)
               const source = lineage.find(candidate => candidate.runId === identity.runId)
                 ?? (knownHistory ? await this.options.runs.read(identity.runId) : null)
               if (!source || source.input.conversationId !== record.input.conversationId) throw new Error('该上下文不属于当前运行、明确继续链或宿主冻结的历史来源')

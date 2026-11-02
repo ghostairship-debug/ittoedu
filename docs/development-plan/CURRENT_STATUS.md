@@ -1,27 +1,25 @@
 # 当前状态
 
-更新：2026-11-02。11 月 1 日综合方案 T1—T8 已收口，后续 ACP 连接与界面反馈已修；HEAD 仍为 `8b1e540f`，成果保持未提交。证据统一见 [RESULT](20261101-comprehensive-execution/RESULT.md)，机器状态见 [执行检查点](EXECUTION_CHECKPOINT.json)。
+更新：2026-11-02。本轮直接执行[目标纠偏方案](../../果铃工作台-目标偏移审计与开发纠偏方案-2026-11-02.md)，M0、D1—D5的已授权、有界确定性工作均已 verified。**任务完成不等于产品全部完成：G01—G13中8项 achieved、5项 partial。**
 
-ACP 现在在输入框正上方用“当前 Agent ⇄”切换，顶栏只显示对话名；缺入口显示安装、完成后自动连接。模型与强度在底部分开，选项保持单行并按可用宽度缩小；加号和发送在灰色输入框内。Codex、Claude 和 OpenCode 已有真实 App 连接及原生配置证据，全程零模型消息，不外推为完整创作验收。
+实库 HEAD 仍为 `e0c74f7c6ba14c1af811584a69be3c860fefa083`，已有 Office、ACP、目标机制及本轮增量均保持未提交。任务、实际运行和目标条件以[执行检查点](EXECUTION_CHECKPOINT.json)为准，详细结果见[本轮结果](20261102-goal-correction/RESULT.md)，未完目标去向见[NEXT](NEXT_EXECUTION.md)。
 
-## 已完成范围
+## 当前交付与验收
 
-普通文本/代码文件的打开、编辑、保存与冷开；HTML 子任务来源和生成图片装配；已有作业等待/恢复；Source 发布减重；轻量 ACP；PPTX 只读播放与既有窄改；安装参考和 Skill 分发，均有对应消费者或定向回归。ACP 的真实协议验证为零模型 prompt，不代表所有外部 Agent 创作能力。
+当前隔离包：`output/goal-correction-20261102/package-current-0727/win-unpacked/guoling-workbench.exe`。buildId 为 `2026-11-02T07-17-54-112Z-e0c74f7c6ba1`，app.asar SHA-256 为 `a4aa74c7bf47e6abfcd7109ac36f92aadceded9c126e7704e6d19390a4882ef0`。45份 dirty 源码和参考资源与包身份一致；123项回归、三目标类型检查及构建通过。
 
-内置 AI《月光的几何》最终 r9 与主 Agent + MCP 的 A2 r12，均已有实际视觉、交互、独立目录包冷开和同版离线交付证据。1440×900、900×650 的关键内容和操作通过；390 宽仅观察。原 r4、r10/r11、人工接力稿及历史失败均保留；原 C 续改 run 仍为 stopped，不改写成首次自主创作即合格。
+当前包真实Claude执行一次PPT局改，保存后单次丢回执、正常UI停止；独立新进程的产品记录同时保留 completed / saved 与 transportDelivery=undelivered，真实Codex从正式handoff回读早期要求、人工27号样式及当前原件，没有重放写入。干净profile的GLX Runtime冷开39项和实际画面通过，0网络请求、0页面错误；全部本轮App已退出、无未决监督任务，临时内置AI角色已恢复。证据：`output/goal-correction-20261102/d3-current-package-final-review.json`。
 
-11 月 1 日生产构建、隔离目录包及必要回归通过；Python runner 取消缺陷亦已闭合。后续 ACP 修复已重新构建并实机验证，旧目录包不含这些新 UI/安装改动，本次未重制发行包。未重跑作品创作或全套测试。
+PPT常见对象编辑、严格同对象“人工样式→AI窄改”、共享History、保存冷开、独立LibreOffice视觉，以及中文DOCX分页/原件保全/刷新/离线/首次运行时准备均在明确版本通过。完整Office矩阵为2202/0354/0540等已记录版本；0727包另验实际PPT窄改和冷开，未冒称全矩阵重新运行。
 
-## 剩余限制
+## 目标差额
 
-同质量创作速度、十分钟首次合格、较重任务的并行净提速与三路线整体视觉等价仍未证明。本轮功能通过不替代这些产品目标，也不据此继续无限熟题试验。
+已达成：G03、G06、G07、G08、G09、G10、G11、G12，均限各自记录的验收范围。
 
-Windows 父进程已退出后，不能通过原 PID 可靠终止所有残存后代；取消释放自身管道并及时结算，停止未确认时作业返回 unknown、禁止交付和重放。跨设备、完整首次 OAuth 和签名发行仍需相应环境与授权；目录验证包不等于发行包。
+仍为partial：G01首次授权完整旅程；G02首次合格速度及持续改善；G04中央双侧绕排；G05上下文/往返净改善；G13独立设备、首次授权及安装交付边界。新平均数作品首次合格637934ms，超过600000ms门槛，失败保留；不能以新的参考作品成功或局改功能通过消除效果目标。
 
-## 保全与接续
+## 恢复与授权
 
-用户原窗口、内置模型角色、已有凭据与作品保留；ACP 安装只新增用户目录下 `workbench-v2/acp`，配置操作在隔离验证会话中进行。未重放未决写入。先前一次续改的 `workspaceRestored=false` 对应启动前即“选择工作空间”，不能写成已恢复某个原目录，也没有证据表明原目录丢失。
+恢复时先读 `AGENTS.md`、`DEVELOPMENT.md`、方案、检查点及原始回执，核实际进程/Git后再 `reconcile`；运行 `goal-audit` 继承全部未完条件。不重发已经保存或结果未知的写入，不按滞后的六项类型错误阻塞。
 
-未 reset、commit、push、替换安装版或发布。后续直接按 [NEXT_EXECUTION](NEXT_EXECUTION.md) 接新任务；如需恢复本批，先运行 `node scripts/execution-checkpoint.mjs reconcile`，核实际结果，不按旧失败或 active 标签重放操作。
-
-此前能力、授权与失败证据按需查 [10 月 31 日结果](20261031-creation-audit-execution/RESULT.md)、[原生 Python 与参考分发](20261030-native-python-packaging/RESULT.md)、[创作编辑结果](20261028-creation-editing-execution/RESULT.md)。这些历史工作不重新进入当前待办。
+未执行commit/push/reset/clean、替换安装版、正式发布、新增授权或复制私密凭据。未知文件/镜像、旧失败与非本轮进程保留。外部原生Agent只作为正式App的ACP被测通道，核心开发与整合由root承担。

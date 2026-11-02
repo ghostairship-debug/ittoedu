@@ -130,12 +130,53 @@ it('reports whether each reply reached the client, including aborted requests an
   f.release('slow-2')
 })
 
+it.each(['json', 'sse'] as const)('does not report delivery after real socket destruction following a committed write (%s)', async mode => {
+  const directory = await mkdtemp(path.join(tmpdir(), 'mcp-delivery-after-write-'))
+  cleanups.push(() => rm(directory, { recursive: true, force: true, maxRetries: 8, retryDelay: 25 }))
+  const filename = path.join(directory, 'committed.txt')
+  let response: import('node:http').ServerResponse | undefined
+  const observedCalls: ResidentMcpCall[] = []
+  const server = new ResidentMcpServer({
+    async initialize() { return { sessionId: 'after-write-session', instructions: '' } },
+    terminate() {},
+    async request(_sessionId, call) {
+      if (call.method !== 'tools/call') return { tools: [] }
+      observedCalls.push(call)
+      await writeFile(filename, 'already committed')
+      if (mode === 'sse') call.notify('notifications/tools/list_changed')
+      expect(response).toBeDefined()
+      expect(response!.writableFinished).toBe(false)
+      response!.destroy()
+      return { content: [{ type: 'text', text: 'committed' }] }
+    },
+  })
+  cleanups.push(() => server.stop())
+  const started = await server.start(0)
+  if (started.state !== 'running') throw new Error('not running')
+  const { transport } = await connect(started.port)
+  const nodeServer = (server as unknown as { server: import('node:http').Server }).server
+  const capture = (request: import('node:http').IncomingMessage, reply: import('node:http').ServerResponse) => {
+    if (request.headers['x-ni-delivery-test'] === 'target') response = reply
+  }
+  nodeServer.on('request', capture)
+  try {
+    const pending = post(started.port, { 'MCP-Session-Id': transport.sessionId!, 'MCP-Protocol-Version': transport.protocolVersion!,
+      'x-ni-delivery-test': 'target' }, { jsonrpc: '2.0', id: 'after-write', method: 'tools/call',
+      params: { name: 'real-file-write', arguments: {} } })
+    await expect(pending).rejects.toThrow()
+    expect(await readFile(filename, 'utf8')).toBe('already committed')
+    expect(observedCalls[0]?.requestId).toBe('after-write')
+    expect(await observedCalls[0]!.delivery).toBe(false)
+  } finally { nodeServer.off('request', capture) }
+})
+
+
 it('defaults off, preserves legacy preferences and persists only explicit tokenless enablement', async () => {
   const directory = await mkdtemp(path.join(tmpdir(), 'g20-resident-settings-'))
   cleanups.push(() => rm(directory, { recursive: true, force: true }))
   const store = new ResidentMcpSettingsStore({ directory })
   expect(await store.read()).toEqual(DEFAULT_EXTERNAL_MCP_SETTINGS)
-  expect(DEFAULT_EXTERNAL_MCP_SETTINGS).toMatchObject({ enabled: false, port: 45123, permission: 'workspace', closeAction: 'ask' })
+  expect(DEFAULT_EXTERNAL_MCP_SETTINGS).toMatchObject({ enabled: false, port: 45123, permission: 'full', closeAction: 'ask' })
   await writeFile(path.join(directory, 'settings.json'), JSON.stringify({ enabled: true, port: 46001, permission: 'full', closeAction: 'tray' }))
   expect(await store.read()).toMatchObject({ enabled: false, port: 46001, permission: 'full', closeAction: 'tray' })
   await store.update({ port: 46002 })

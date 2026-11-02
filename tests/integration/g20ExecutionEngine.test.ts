@@ -21,6 +21,7 @@ import { HostArtifactDeliveryService } from '../../src/main/workbench/execution/
 import { artifactDeliverySource } from '../../src/core/tools/HostArtifactTools'
 import { runEndSummary } from '../../src/main/workbench/execution/executionOutcome'
 import { ExecutionRunStore } from '../../src/main/workbench/execution/ExecutionRunStore'
+import { conversationHistoryIndex } from '../../src/main/workbench/execution/ConversationHistoryIndex'
 import { ExecutionEventStore } from '../../src/main/workbench/execution/ExecutionEventStore'
 import { EditSessionService } from '../../src/main/workbench/execution/EditSessionService'
 import { StreamingEditArguments } from '../../src/core/execution/StreamingEditArguments'
@@ -93,6 +94,63 @@ const refsOf = (request: Pick<ModelRequest, 'messages'>) => JSON.parse(String(re
 }[]
 
 describe('G20 canonical model execution loop', () => {
+// Insert into the existing execution engine integration suite. Add an import for
+// conversationHistoryIndex from src/main/workbench/execution/ConversationHistoryIndex.
+it('reads an advertised exact historical operation and rejects its sibling and cross-conversation use', async () => {
+  let phase: 'make' | 'read' = 'make', turns = 0
+  let advertised = '', sibling = ''
+  const provider: ModelProvider = { async *stream(request) {
+    turns++
+    if (phase === 'make') {
+      if (turns === 1) {
+        const target = refsOf(request)[0]!.writable[0]!.target
+        yield complete(request, [{ id: 'old-committed', name: 'text.replace', argumentsText: JSON.stringify({ target, content: 'historical edit' }) }]); return
+      }
+      yield complete(request, [], '历史操作已完成'); return
+    }
+    if (turns === 1) {
+      yield complete(request, [
+        { id: 'advertised-read', name: 'context.read', argumentsText: JSON.stringify({ sourceId: advertised }) },
+        { id: 'unadvertised-sibling', name: 'context.read', argumentsText: JSON.stringify({ sourceId: sibling }) },
+      ]); return
+    }
+    yield complete(request)
+  } }
+  const h = await fixture(provider)
+  const previous = await h.engine.start(h.input)
+  const old = await h.engine.wait(previous.runId)
+  expect(old.tools[0]?.result).toMatchObject({ kind: 'document-operation', result: { status: 'applied' } })
+  const conversation = { conversationId: h.input.conversationId, workspaceId: 'fixture-workspace', title: 'fixture',
+    messages: [{ messageId: 'old-user', role: 'user' as const, text: h.input.instruction, attachmentIds: [], runId: old.runId, createdAt: 0 },
+      { messageId: 'old-assistant', role: 'assistant' as const, text: '历史操作已完成', attachmentIds: [], runId: old.runId, createdAt: 1 }],
+    attachmentIds: [], runIndex: { builtinRunIds: [old.runId], externalRunIds: [], externalPortIds: [] },
+    inputDraft: '', inputAttachments: [], frozenContextRefs: [], revision: 0, createdAt: 0, updatedAt: 0 }
+  const indexed = await conversationHistoryIndex(conversation, async runId => runId === old.runId ? old : null)
+  const wrapper = JSON.parse(String(indexed.context.at(-1)!.message.content))
+  advertised = wrapper.continuity.completedOperations.find((item: { name: string }) => item.name === 'text.replace').sourceId
+  expect(indexed.context.at(-1)!.provenance.historySourceIds).toContain(advertised)
+  const allowed = new Set(indexed.context.flatMap(item => [item.provenance.id, ...(item.provenance.historySourceIds ?? [])]))
+  const siblingIndex = old.messages.findIndex((_, index) => !allowed.has(`run:${old.runId}:${index}`))
+  expect(siblingIndex).toBeGreaterThanOrEqual(0)
+  sibling = `run:${old.runId}:${siblingIndex}`
+  const inputContext = { id: 'history-fixture', capturedAt: 0, instruction: '读取历史回执', attachments: [], context: indexed.context }
+  phase = 'read'; turns = 0
+  const same = await h.engine.start({ ...h.input, taskId: 'history-reader', instruction: '读取历史回执', inputContext })
+  const sameFinal = await h.engine.wait(same.runId)
+  expect(sameFinal.tools[0]?.result).toMatchObject({ kind: 'read', data: { sourceId: advertised } })
+  const receipt = sameFinal.tools[0]?.result
+  expect(receipt).toMatchObject({ kind: 'read', data: { text: expect.stringContaining('applied') } })
+  expect(sameFinal.tools[1]?.result).toMatchObject({ kind: 'error', code: 'context-read-failed' })
+  // This direct fixture deliberately gives another conversation the identical frozen metadata;
+  // it tests the independent conversation guard, not a renderer-supplied real grant.
+  turns = 0
+  const foreign = await h.engine.start({ ...h.input, conversationId: 'other-conversation', taskId: 'foreign-reader',
+    instruction: '读取历史回执', inputContext })
+  const foreignFinal = await h.engine.wait(foreign.runId)
+  expect(foreignFinal.tools[0]?.result).toMatchObject({ kind: 'error', code: 'context-read-failed',
+    message: expect.stringContaining('不属于当前运行') })
+})
+
   it('feeds the accumulated unnamed prefix once and then parses only new text.replace deltas', async () => {
     const snapshot = vi.spyOn(StreamingEditArguments.prototype, 'snapshot'), push = vi.spyOn(StreamingEditArguments.prototype, 'push')
     let turns = 0

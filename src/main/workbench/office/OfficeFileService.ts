@@ -5,13 +5,18 @@ import type { WorkspaceOperationResult } from '../../../shared/workbench/workspa
 import { validateWorkspaceEntryName } from '../WorkspaceFiles'
 import { AgentFileOutcomeUnknown } from '../../../core/tools/AgentFileTools'
 import { applyOfficeContentOffThread, inspectOfficeContentOffThread } from './officeContentWorker'
-import { officeContentRequestSchema, type OfficeCalculation, type OfficeContentInspection, type OfficeContentRequest, type OfficeDiagnostic, type OfficeFormat } from '../../../shared/workbench/officeFiles'
+import { officeContentRequestSchema, type OfficeCalculation, type OfficeContentInspection, type OfficeContentRequest, type OfficeDiagnostic, type OfficeFormat, type OfficeHistorySnapshot } from '../../../shared/workbench/officeFiles'
+import type { ArtifactHistoryMetadata } from '../FileArtifactHistory'
 
 export interface OfficeFileContext {
   signal?: AbortSignal
   expectedVersion?: string
   /** Supplied by the frozen task owner; checked again at the physical commit. */
   assertActive?(): void
+  /** Trusted entry point supplies actor/label; the format request cannot impersonate a human edit. */
+  actor?: 'human' | 'ai'
+  historyLabel?: string
+  operationId?: string
 }
 export interface OfficeFileDestination {
   workspaceId: string
@@ -30,7 +35,9 @@ export interface OfficeFileHost {
   artifacts: {
     bind(path: string): Promise<FileArtifactBinding>
     read(binding: FileArtifactBinding, signal?: AbortSignal): Promise<Uint8Array>
-    replace(binding: FileArtifactBinding, bytes: Uint8Array, signal?: AbortSignal, beforeCommit?: () => void): Promise<FileArtifactBinding>
+    replace(binding: FileArtifactBinding, bytes: Uint8Array, signal?: AbortSignal, beforeCommit?: () => void, metadata?: ArtifactHistoryMetadata): Promise<FileArtifactBinding>
+    history?(binding: FileArtifactBinding, signal?: AbortSignal): Promise<OfficeHistorySnapshot>
+    moveHistory?(binding: FileArtifactBinding, action: 'undo' | 'redo', signal?: AbortSignal, beforeCommit?: () => void): Promise<FileArtifactBinding>
   }
   files: {
     createFile(input: OfficeFileDestination & { format: 'file'; bytes: Uint8Array }, beforeCommit?: () => void): Promise<WorkspaceOperationResult>
@@ -88,11 +95,30 @@ export class OfficeFileService {
       return { status: 'saved', binding, inspection, diagnostics: prepared.diagnostics,
         ...(prepared.calculation ? { calculation: prepared.calculation } : {}) }
     }
-    const saved = await this.host.artifacts.replace(binding, prepared.bytes, context.signal, () => this.active(context))
+    const metadata: ArtifactHistoryMetadata | undefined = request.format === 'pptx' && path.extname(binding.path).toLowerCase() === '.pptx' ? {
+      actor: context.actor ?? 'ai', label: context.historyLabel ?? (context.actor === 'human' ? '手动编辑演示文稿' : 'AI 编辑演示文稿'),
+      ...(context.operationId ? { operationId: context.operationId } : {}),
+    } : undefined
+    const saved = await this.host.artifacts.replace(binding, prepared.bytes, context.signal, () => this.active(context), metadata)
     let inspection: OfficeContentInspection
     try { inspection = await inspectOfficeContentOffThread(await this.host.artifacts.read(saved), request.format) }
     catch (cause) { throw new AgentFileOutcomeUnknown(`Office 修改已写入，但回读结果未确认；请先读取原件后继续：${cause instanceof Error ? cause.message : String(cause)}`) }
     return { status: 'saved', binding: saved, inspection, diagnostics: prepared.diagnostics,
       ...(prepared.calculation ? { calculation: prepared.calculation } : {}) }
+  }
+  async history(binding: FileArtifactBinding, context: OfficeFileContext = {}): Promise<OfficeHistorySnapshot> {
+    this.active(context)
+    if (!this.host.artifacts.history) throw new Error('当前文件 owner 尚未提供共同编辑历史')
+    return this.host.artifacts.history(binding, context.signal)
+  }
+  async moveHistory(binding: FileArtifactBinding, action: 'undo' | 'redo', context: OfficeFileContext = {}): Promise<OfficeFileResult> {
+    this.active(context)
+    if (context.expectedVersion !== undefined && context.expectedVersion !== binding.fileVersion) throw new Error('Office 文件版本已改变，请重新读取后操作')
+    if (!this.host.artifacts.moveHistory) throw new Error('当前文件 owner 尚未提供共同编辑历史')
+    const saved = await this.host.artifacts.moveHistory(binding, action, context.signal, () => this.active(context))
+    let inspection: OfficeContentInspection
+    try { inspection = await inspectOfficeContentOffThread(await this.host.artifacts.read(saved), 'pptx') }
+    catch (cause) { throw new AgentFileOutcomeUnknown(`PPT 撤销/重做已写入，但回读未确认；请重新读取原件：${cause instanceof Error ? cause.message : String(cause)}`) }
+    return { status: 'saved', binding: saved, inspection, diagnostics: [] }
   }
 }

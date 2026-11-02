@@ -225,8 +225,8 @@ export function useLessonWorkspaceController(props: LessonWorkspaceControllerPro
         if (generation === workspaceGeneration.current) setMobilePane('workbench')
         return
       }
-      if (capability.openKind === 'presentation') {
-        await props.tabs.openTab({ path: entry.path, name: entry.name, kind: 'presentation', lesson: current.current.lesson })
+      if (capability.openKind === 'presentation' || capability.openKind === 'word') {
+        await props.tabs.openTab({ path: entry.path, name: entry.name, kind: capability.openKind, lesson: current.current.lesson })
         if (generation === workspaceGeneration.current) setMobilePane('workbench')
         return
       }

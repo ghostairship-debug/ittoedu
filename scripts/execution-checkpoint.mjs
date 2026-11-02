@@ -3,6 +3,7 @@ import path from 'node:path'
 import crypto from 'node:crypto'
 import { spawn, spawnSync, execFileSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
+import { goalSummary, mergeGoals, requireTaskEvidence, validateGoals } from './execution-goals.mjs'
 
 // Development recovery only. This never owns product state or replays a command.
 const script = fileURLToPath(import.meta.url)
@@ -106,6 +107,7 @@ function summary(state) {
     processes: Object.values(state.runs).filter(r => ['starting', 'running', 'orphaned'].includes(r.status)),
     lastSuccessfulOperation: state.lastSuccessfulOperation,
     checkpoint: relative(stateFile),
+    ...goalSummary(state),
   }
 }
 
@@ -268,15 +270,34 @@ try {
   } else if (command === 'task') {
     const patch = json(path.resolve(root, input))
     if (!patch.id || !states.has(patch.status)) throw new Error('Task patch needs id and pending/in_progress/verified/blocked status.')
-    if (patch.status === 'verified' && !patch.evidence?.length) throw new Error('Verified task requires evidence references.')
+    if (patch.status === 'verified') requireTaskEvidence(root, patch.evidence)
     const state = await update(state => {
       if (patch.status === 'verified' && Object.values(state.runs).some(r => r.taskId === patch.id && ['starting', 'running', 'orphaned'].includes(r.status))) throw new Error('Cannot verify with an unresolved process.')
+      if (state.goals && !patch.supportOnly && !(patch.goalRefs ?? state.tasks[patch.id]?.goalRefs)?.length) throw new Error('New task updates must preserve linked goals, or explicitly declare supportOnly.')
       Object.assign(task(state, patch.id), patch, { updatedAt: now() })
+      if (state.goals) validateGoals(state, root, { evidence: false })
       state.workspace = workspace()
       if (patch.status === 'verified') state.lastSuccessfulOperation = { taskId: patch.id, status: 'verified', at: now(), evidence: patch.evidence }
       return state
     })
     console.log(JSON.stringify({ task: state.tasks[patch.id], lastSavedAt: state.lastSavedAt }))
+  } else if (command === 'goals') {
+    const state = await update(state => mergeGoals(state, json(path.resolve(root, input)), root))
+    console.log(JSON.stringify(goalSummary(state)))
+  } else if (command === 'goal-audit') {
+    console.log(JSON.stringify(validateGoals(readState(), root)))
+  } else if (command === 'closeout') {
+    if (!['stage', 'product'].includes(input)) throw new Error('closeout needs stage or product')
+    const state = await update(state => {
+      if (Object.values(state.runs).some(r => ['starting', 'running', 'orphaned'].includes(r.status))) throw new Error('Cannot close a stage with an unresolved process.')
+      if (!state.goals) throw new Error('Seed confirmed goals before closeout.')
+      const checked = validateGoals(state, root)
+      if (input === 'product' && !checked.productComplete) throw new Error('Product goals remain incomplete: ' + checked.incompleteGoalIds.join(', '))
+      state.lastCloseout = { at: now(), mode: input, incompleteGoalIds: checked.incompleteGoalIds }
+      state.workspace = workspace()
+      return state
+    })
+    console.log(JSON.stringify({ closeout: state.lastCloseout, ...goalSummary(state) }))
   } else if (command === 'run') await run(input)
   else if (command === '_supervise') await supervise(input)
   else if (command === 'resolve-run') console.log(JSON.stringify(summary(await resolveRun(input))))
@@ -292,7 +313,7 @@ try {
     await update(() => ({ ...backup, recovery: { at: now(), source: relative(previousFile), damaged: relative(damaged), instruction: 'Run reconcile and inspect Git/logs; no command has been replayed.' } }))
     console.log(JSON.stringify(summary(await reconcile())))
   } else {
-    throw new Error('Usage: node scripts/execution-checkpoint.mjs [--root dir] init <batch> | task <patch.json> | run <spec.json> | resolve-run <resolution.json> | status | reconcile | restore-previous')
+    throw new Error('Usage: node scripts/execution-checkpoint.mjs [--root dir] init <batch> | task <patch.json> | run <spec.json> | resolve-run <resolution.json> | goals <patch.json> | goal-audit | closeout stage|product | status | reconcile | restore-previous')
   }
 } catch (error) { console.error(error.stack ?? error); process.exitCode = 1 }
 

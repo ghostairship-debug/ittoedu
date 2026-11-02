@@ -73,10 +73,47 @@ it('does not roll a newly saved document association back when an older initiali
   })
   const initializing = reopened.forDocument('old-document')
   await entered
-  await reopened.save({ ...prior, version: 2, input: { ...prior.input, documents: [{ documentId: 'new-document', writable: [] }] } })
-  release()
+  let published = false
+  const saving = reopened.save({ ...prior, version: 2, input: { ...prior.input, documents: [{ documentId: 'new-document', writable: [] }] } })
+    .then(() => { published = true })
+  try {
+    await new Promise<void>(resolve => setImmediate(resolve))
+    expect(published).toBe(false) // The same file's read owns the queue until released.
+  } finally { release() }
+  await saving
   expect(await initializing).toEqual([])
   expect((await reopened.forDocument('new-document')).map(value => value.runId)).toEqual([prior.runId])
+})
+
+it('reads each generation checkpoint once, including a committed tail, and serializes a competing store publication', async () => {
+  const h = await fixture()
+  const updated = { ...h.record, version: 2, updatedAt: 2 }
+  await h.store.save(updated)
+  const tail = await currentTail(h.filename), originalRead = fs.readFile.bind(fs)
+  let enter!: () => void, release!: () => void, held = true
+  const entered = new Promise<void>(resolve => { enter = resolve }), resumed = new Promise<void>(resolve => { release = resolve })
+  const paths: string[] = []
+  vi.spyOn(fs, 'readFile').mockImplementation(async (filename, options) => {
+    paths.push(String(filename))
+    const bytes = await originalRead(filename, options)
+    if (String(filename) === h.filename && held) { held = false; enter(); await resumed }
+    return bytes
+  })
+  const reader = new ExecutionRunStore(h.directory), writer = new ExecutionRunStore(h.directory)
+  const loading = reader.read(h.record.runId)
+  await entered
+  let published = false
+  const next = { ...updated, version: 3, updatedAt: 3 }
+  const saving = writer.save(next).then(() => { published = true })
+  try {
+    await new Promise<void>(resolve => setImmediate(resolve))
+    expect(published).toBe(false)
+  } finally { release() }
+  expect(await loading).toEqual(updated)
+  await saving
+  expect(paths.filter(filename => filename === h.filename)).toHaveLength(1)
+  expect(paths.filter(filename => filename === tail)).toHaveLength(1)
+  expect(await new ExecutionRunStore(h.directory).read(h.record.runId)).toEqual(next)
 })
 
 it('republishes the same complete Windows checkpoint once after EPERM without rewriting its bytes', async () => {
@@ -273,8 +310,11 @@ it('loads legacy JSON, then keeps terminal receipts through later cold saves', a
   const h = await fixture()
   await h.store.save({ ...h.record, status: 'completed' })
   await fs.writeFile(h.filename, JSON.stringify(h.record))
-  const reopened = new ExecutionRunStore(h.directory)
+  const reopened = new ExecutionRunStore(h.directory), originalRead = fs.readFile.bind(fs)
+  const readFile = vi.spyOn(fs, 'readFile').mockImplementation((filename, options) => originalRead(filename, options))
   expect(await reopened.read(h.record.runId)).toEqual(h.record)
+  expect(readFile.mock.calls.filter(([filename]) => String(filename) === h.filename)).toHaveLength(1)
+  readFile.mockRestore()
   const terminal = { ...h.record, status: 'interrupted', version: 2, tools: [{ callId: 'unknown', providerCallId: 'unknown', requestId: 'one',
     call: { name: 'file.write', input: {} }, state: 'executing', effectPaths: ['D:/synthetic-output'] }] } as unknown as ExecutionRunRecord
   await reopened.save(terminal)

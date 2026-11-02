@@ -293,7 +293,9 @@ it('serves a resident session in the current workspace with the built-in tool se
   const builtin = await f.host.tools.describeRun('builtin-like')
   expect(names).toEqual(expect.arrayContaining([...builtin.map(tool => tool.name), ...agentFileTools.map(tool => tool.name),
     'course.createFromHtml', 'workspace.list', 'workspace.switch', 'workbench.state', 'operation.recent']))
-  for (const tool of builtin) expect(listed.find(item => item.name === tool.name)!.inputSchema).toEqual(tool.schema)
+  // MCP exposes additive root properties for native discovery; every canonical
+  // branch and execution constraint must remain in the transport descriptor.
+  for (const tool of builtin) expect(listed.find(item => item.name === tool.name)!.inputSchema).toMatchObject(tool.schema)
   // Selection, not passthrough: course editing tools need an opened course document first.
   expect((await f.host.tools.describe()).some(tool => tool.name === 'object.update')).toBe(true)
   expect(names).not.toContain('object.update')

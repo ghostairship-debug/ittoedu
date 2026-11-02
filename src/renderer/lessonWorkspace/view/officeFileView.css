@@ -1,0 +1,6 @@
+.office-file-view { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+.office-file-view > .pptx-file-preview, .office-file-view > .docx-file-preview { flex: 1; height: auto; min-height: 0; }
+.office-file-view__message { flex: none; margin: 0; padding: 8px 16px; font-size: 12px; background: var(--surface-secondary, #f1f3f6); }
+.office-file-view__message[role="alert"] { color: var(--danger-color, #a42b2b); }
+.office-file-view__pending { margin: auto; padding: 24px; text-align: center; }
+.office-file-view__pending h2 { overflow-wrap: anywhere; }

@@ -17,8 +17,12 @@ export function captureFramePaintInRealm(token: string, action: 'install' | 'sta
   let disposed = false, animationFrame = 0
   let resolveDisposed!: () => void
   const disposal = new Promise<void>(resolve => { resolveDisposed = resolve })
+  // Authored srcdoc can replace its parent property with a local facade.
+  // Keep source validation against the native owner inside this observer only.
+  const owner = window.frameElement as HTMLIFrameElement | HTMLFrameElement | null
+  const parentWindow = owner && owner.contentWindow === window ? owner.ownerDocument.defaultView : window.parent
   const receive = (event: MessageEvent) => {
-    if (event.source !== parent || event.data?.type !== 'guoling.capture.paint' || event.data.token !== token) return
+    if (event.source !== parentWindow || event.data?.type !== 'guoling.capture.paint' || event.data.token !== token) return
     resolveVisible(event.data.visible === true)
     window.removeEventListener('message', receive)
   }

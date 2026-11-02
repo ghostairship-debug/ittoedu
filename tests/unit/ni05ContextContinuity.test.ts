@@ -39,6 +39,17 @@ async function fixture(provider: ModelProvider) {
   return { registry, gateway, engine, session, runs }
 }
 
+// Use only the source exposed in the exact bounded result delivered to the model.
+function deliveredSource(request: ModelRequest, callId: string): string {
+  const message = request.messages.find(item => item.role === 'tool' && item.tool_call_id === callId)
+  expect(message).toBeDefined()
+  const receipt = JSON.parse(String(message!.content))
+  const source = receipt.modelDelivery?.source?.sourceId
+  expect(source).toEqual(expect.any(String))
+  expect(receipt.modelDelivery.complete).toBe(false)
+  return source
+}
+
 it('NI05 repeated production compaction keeps short decisions, long result tails, source coverage, and committed work without replay', async () => {
   let turns = 0
   const sourceParts: Array<{ sourceId: string; offset: number; to: number; text: string }> = []
@@ -57,7 +68,12 @@ it('NI05 repeated production compaction keeps short decisions, long result tails
     turns++
     if (turns === 1) { yield complete(request, [{ id: 'commit-once', name: 'text.replace', argumentsText: JSON.stringify({ target: refs[0].writable[0].target, content: 'NEW' }) }], '否决重生'); return }
     if (turns === 2) { yield complete(request, [{ id: 'long-read', name: 'read', argumentsText: JSON.stringify({ target: refs[0].target, limit: 1000 }) }]); return }
-    if (turns === 3 || turns === 4) { yield complete(request, [{ id: `inspect-${turns}`, name: 'inspect', argumentsText: JSON.stringify({ target: refs[0].target }) }], '过程数据' + 'y'.repeat(180_000)); return }
+    if (turns === 3) {
+      const sourceId = deliveredSource(request, 'long-read')
+      yield complete(request, [{ id: 'tail-page', name: 'context.read', argumentsText: JSON.stringify({ sourceId, offset: 61_000, maxChars: 2000 }) }]); return
+    }
+    if (turns === 4) expect(String(request.messages.find(message => message.role === 'tool' && message.tool_call_id === 'tail-page')?.content)).toContain('TAIL_FACT=42')
+    if (turns === 4 || turns === 5) { yield complete(request, [{ id: `inspect-${turns}`, name: 'inspect', argumentsText: JSON.stringify({ target: refs[0].target }) }], '过程数据' + 'y'.repeat(180_000)); return }
     yield complete(request)
   } }
   const h = await fixture(provider)
@@ -73,6 +89,8 @@ it('NI05 repeated production compaction keeps short decisions, long result tails
   const intervals = sourceParts.map(source => `${source.sourceId}:${source.offset}:${source.to}`)
   expect(new Set(intervals).size).toBe(intervals.length)
   expect(modelPayloads.at(-1)).toContain('禁止改图')
+  expect(JSON.stringify(final.tools.find(tool => tool.call.name === 'read')?.result)).toContain('TAIL_FACT=42')
+  expect(JSON.stringify(final.tools.find(tool => tool.providerCallId === 'tail-page')?.result)).toContain('TAIL_FACT=42')
   expect(final.tools.filter(tool => tool.call.name === 'text.replace')).toHaveLength(1)
   expect((await h.session.drain()).undoDepth).toBe(1)
   expect((await h.session.drain()).model).toMatchObject({ source: 'NEW\n' + 'x'.repeat(62_000) + '\nTAIL_FACT=42' })
@@ -81,12 +99,21 @@ it('NI05 repeated production compaction keeps short decisions, long result tails
 })
 
 it('NI05 summary failure keeps the prior note and never advances uncompleted source coverage', async () => {
-  let turns = 0, summaryCalls = 0
+  let turns = 0, summaryCalls = 0, tailReachedModel = false
   const provider: ModelProvider = { retrySafety: 'pure-generation', async *stream(request) {
     if (!request.tools?.length) { summaryCalls++; yield { type: 'response.failed', requestId: request.requestId, sequence: 1,
       failure: { outcome: 'rejected', kind: 'protocol', code: 'summary-rejected', message: 'summary unavailable' } }; return }
     const refs = JSON.parse(String(request.messages[1]!.content).split('：')[1]!)
-    if (++turns <= 3) { yield complete(request, [{ id: `read-${turns}`, name: 'read', argumentsText: JSON.stringify({ target: refs[0].target, limit: 1000 }) }], 'z'.repeat(180_000)); return }
+    turns++
+    if (turns === 2) {
+      const sourceId = deliveredSource(request, 'read-1')
+      yield complete(request, [{ id: 'failure-tail-page', name: 'context.read', argumentsText: JSON.stringify({ sourceId, offset: 61_000, maxChars: 2000 }) }]); return
+    }
+    if (turns === 3) {
+      tailReachedModel = String(request.messages.find(message => message.role === 'tool' && message.tool_call_id === 'failure-tail-page')?.content).includes('TAIL_FACT=42')
+      expect(tailReachedModel).toBe(true)
+    }
+    if (turns === 1 || turns === 3 || turns === 4) { yield complete(request, [{ id: `read-${turns}`, name: 'read', argumentsText: JSON.stringify({ target: refs[0].target, limit: 1000 }) }], 'z'.repeat(180_000)); return }
     yield complete(request)
   } }
   const h = await fixture(provider)
@@ -96,7 +123,10 @@ it('NI05 summary failure keeps the prior note and never advances uncompleted sou
   expect(final.status).toBe('completed')
   expect(summaryCalls).toBeGreaterThan(0)
   expect(final.compacted?.summaryThroughMessage).toBeUndefined()
+  expect(tailReachedModel).toBe(true)
   expect(final.messages.some(message => String(message.content).includes('TAIL_FACT=42'))).toBe(true)
+  expect(JSON.stringify(final.tools.find(tool => tool.providerCallId === 'read-1')?.result)).toContain('TAIL_FACT=42')
+  expect(JSON.stringify(final.tools.find(tool => tool.providerCallId === 'failure-tail-page')?.result)).toContain('TAIL_FACT=42')
   expect(final.requests.filter(request => request.kind === 'context-summary').every(request => request.state === 'failed')).toBe(true)
   expect((await h.session.drain()).undoDepth).toBe(0)
 })

@@ -62,6 +62,7 @@ Windows worktree 的共享依赖若为 junction/symlink，清理只移除本轮�
 `EXECUTION_CHECKPOINT.json` 记录本轮任务、实际修改、验证、进程、日志与下一动作；它不拥有产品数据，也不代替 Git/文件/真实验收。主 Agent 集成任务状态，后台命令由 `scripts/execution-checkpoint.mjs` 自动登记、每 10 秒落盘、结束记录退出码。写入使用排他锁、同步临时文件和原子替换；上一份保留在 `output/execution-checkpoints/previous.json`。
 
 - 新批次首次用 `node scripts/execution-checkpoint.mjs init <batch-id>`，已有状态不覆盖。恢复先 `reconcile`，再 `status`；存活不代表有进展，未知结果不能直接重跑。
+- 接续/收口用 `goal-audit` 核对目标与证据；任务通过不自动提升产品完成。目标更新用 `goals <patch.json>`，阶段/产品收口用 `closeout stage|product`；未完条件及后续去向须保留，CURRENT/NEXT只同步该差额。
 - 工作单元开始/完成/受阻时调用 `task <patch.json>`；patch 包含 `id`、`status`（pending/in_progress/verified/blocked）、`modifiedFiles`、`changes`、`nextAction`、必要的 `blockers`；verified 必须附 `evidence`。只在重要里程碑同步状态页和执行方案。
 - 测试、构建及可独立执行的确定性操作用 `run <spec.json>`：`{"taskId":"T1-check","label":"定向回归","command":["node","node_modules/vitest/vitest.mjs","run","tests/unit/example.test.ts"],"timeoutMs":120000,"nextAction":"核对行为结果"}`。真实 executable/参数数组、无隐式 shell；Windows npm 可通过 `node` 执行 npm CLI。调用立即返回后台 supervisor PID、日志和结果文件，命令不依赖当前工具连接持续存活。
 - 单次命令成功只登记 passed，不自动把产品任务标为合格；失败自动受阻并保留日志。已有未结算进程会拒绝同任务重启。子进程丢失时保留 unknown/orphaned，先核对实际副作用；脚本从不自动重放。

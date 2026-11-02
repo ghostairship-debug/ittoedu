@@ -25,6 +25,9 @@ import { createCourseFromHtml } from '../htmlImport/CreateCourseFromHtml'
 import { McpProtocolError, ResidentMcpServer, type ResidentMcpCall, type ResidentMcpClientInfo, type ResidentMcpHandler } from './ResidentMcpServer'
 import type { ResidentMcpSettingsStore } from './ResidentMcpSettings'
 import type { ExecutionEventPendingState } from '../execution/ExecutionEventStore'
+import type { AcpHandoffReadInput } from '../../../shared/workbench/acp'
+import { acpHandoffReadSchema } from './acp/AcpHandoffFacts'
+import { mcpObjectInputSchema } from './mcpObjectInputSchema'
 
 export interface ExternalApproval {
   clientName: string; label: string; reason: 'ask' | 'outside-workspace'; paths?: readonly string[]
@@ -58,6 +61,8 @@ export interface ExternalMcpServiceOptions {
     workspaceId: string
     conversationId: string
     linkRun(input: { runId: string; portId: string }): Promise<string>
+    /** Already scoped to this product conversation; never accepts a caller-selected conversation ID. */
+    readHandoff?(input: AcpHandoffReadInput): Promise<unknown>
   }
 }
 type ToolKind = 'gateway' | 'file' | 'course' | 'load' | 'service'
@@ -78,6 +83,11 @@ interface Operation {
   result?: Promise<ToolResult>
   summary?: OperationSummary
   delivered?: boolean
+  deliveryAttempt?: number
+  deliveryContext?: { conversationId: string; taskId: string }
+  deliveryWrite?: Promise<void>
+  recordError?: unknown
+  terminalError?: unknown
 }
 interface Session {
   sessionId: string; clientName: string; permission: ExecutionPermissionMode
@@ -99,6 +109,7 @@ const serviceSchemas = {
   'workspace.list': z.object({}).strict(),
   'workspace.switch': z.object({ workspaceId: z.string().min(1) }).strict(),
   'workbench.state': z.object({}).strict(),
+  'handoff.read': acpHandoffReadSchema,
   'operation.recent': z.object({ limit: z.number().int().min(1).optional() }).strict(),
   'operation.read': z.object({ ticket: z.string().min(1), path: z.array(z.union([z.string(), z.number().int().nonnegative()])).optional(),
     offset: z.number().int().nonnegative().optional(), limit: z.number().int().positive().optional() }).strict(),
@@ -107,9 +118,12 @@ const serviceTools: HostTool[] = [
   { name: 'workspace.list', label: '列出工作空间', description: '列出果铃中已登记的工作空间及本会话当前绑定的空间。', read: true },
   { name: 'workspace.switch', label: '切换工作空间', description: '把本会话切换到另一个已登记的工作空间。之前打开的文档句柄随之失效，需在新空间按路径重新打开。', read: true },
   { name: 'workbench.state', label: '查看当前界面', description: '只读：用户在果铃中当前打开的文档、前台文档和选中内容。选中内容带可用的目标句柄，不修改任何内容。', read: true },
+  { name: 'handoff.read', label: '读取交接事实', description: '只读当前产品会话的持久用户指令和公开执行事实；instructions按页或messageId读原文，work列执行项，item按runId/itemId读正文。跨Agent或重启后核对目标、提交/保存及未决结果；不会执行或重放旧操作，不读取原生Agent私有历史。', read: true },
   { name: 'operation.recent', label: '最近操作结果', description: '只读：本会话最近的修改、资源获取和新发起任务的正式结果及回复是否送达。用于连接中断后核对，不会执行或重放工具。', read: true },
   { name: 'operation.read', label: '读取原操作结果', description: '只读当前授权范围内的原票据结果；path选择JSON字段，offset/limit按字符串、数组或对象键续页。来源冻结，不重新执行原调用，大单项也有界。', read: true },
-].map(tool => ({ ...tool, kind: 'service' as const, schema: z.toJSONSchema(serviceSchemas[tool.name as keyof typeof serviceSchemas]) as Record<string, unknown> }))
+// MCP requires an object root even when Zod represents object variants as oneOf.
+// Keep every branch and its strict validation; discovery must not reject the entire catalog.
+].map(tool => ({ ...tool, kind: 'service' as const, schema: { ...z.toJSONSchema(serviceSchemas[tool.name as keyof typeof serviceSchemas]), type: 'object' } as Record<string, unknown> }))
 const fileLabels: Record<AgentFileToolName, string> = { 'file.list': '列出文件', 'file.search': '搜索文件', 'file.open': '打开文件', 'file.create': '新建文件',
   'file.observe': '比较磁盘版本', 'file.reconcile': '处理文件变化',
   'file.read': '读取文件', 'file.grep': '搜索正文', 'file.write': '写入文件', 'file.patch': '修改文件', 'file.mkdir': '新建文件夹', 'file.copy': '复制文件',
@@ -148,6 +162,8 @@ export class ExternalMcpService implements ResidentMcpHandler {
   private initialWorkspaceId?: string
   private lastWorkspaceId?: string
   private readonly requests = new Set<Promise<unknown>>()
+  private readonly deliveryWrites = new Set<Promise<void>>()
+  private readonly failedOperationRecords = new Set<Operation>()
   private sessionGeneration = 0
   private detachCatalog?: () => void
   private readonly now: () => number
@@ -237,6 +253,7 @@ export class ExternalMcpService implements ResidentMcpHandler {
     // Transport disposal is not completion of the received tool calls or their event/journal ACKs.
     await Promise.allSettled([...this.requests])
     this.detachCatalog?.(); this.detachCatalog = undefined
+    await this.settleDeliveryWrites()
   }) }
 
   /** ACP prompts rotate real domain runs. Idle native sessions can list tools but cannot execute them. */
@@ -276,6 +293,7 @@ export class ExternalMcpService implements ResidentMcpHandler {
     await Promise.allSettled([...this.managedRevocations])
     await Promise.allSettled([...this.toolQueues.values()])
     await Promise.allSettled([...this.sessions.values()].flatMap(session => session.operations.flatMap(operation => operation.result ? [operation.result] : [])))
+    await this.settleDeliveryWrites()
   }
   managedOperations(): Array<{ ticket: string; tool: string; status: string; delivered: boolean | undefined }> {
     return [...this.sessions.values()].flatMap(session => session.operations.map(operation => ({ ticket: operation.ticket, tool: operation.tool,
@@ -379,10 +397,13 @@ export class ExternalMcpService implements ResidentMcpHandler {
     session.listChanged = false
     this.sessions.set(session.sessionId, session)
     return { sessionId: session.sessionId, instructions: [
-      `已连接到正在运行的果铃。本会话绑定工作空间「${session.workspaceName}」（${session.workspaceRoot}），权限为「${permissionLabels[session.permission]}」，由果铃主进程执行。`,
+      this.options.managedConversation
+        ? `已连接到正在运行的果铃，本连接用于工作空间「${session.workspaceName}」（${session.workspaceRoot}）内的 ACP 任务。工具清单仅声明宿主已接通的能力；每轮工具调用仍受当前用户任务、权限和文档范围约束，空闲或撤权时不可执行。`
+        : `已连接到正在运行的果铃。本会话绑定工作空间「${session.workspaceName}」（${session.workspaceRoot}），权限为「${permissionLabels[session.permission]}」，由果铃主进程执行。`,
       '用 file.* 按路径在空间内打开、新建、读写文件与文档；打开后用返回的 target 句柄调用读取和编辑工具。宿主按当前文档接入可用能力；tools.load 可用于手动浏览其他工具族。',
       'workspace.list / workspace.switch 查看和切换空间；workbench.state 只读查看用户当前打开的文档与选中内容。',
       '操作票据由果铃自动编号，不需要填写 ticket。同一授权范围内，未送达修改可原样重发取回回执。切空间/调权后重试原操作须带原 ticket 与 _meta[guoling/operation]=operationScope；普通新调用在新范围执行。operation.recent 可核对最近事实。',
+      ...(this.options.managedConversation?.readHandoff ? ['跨Agent或重启后的旧指令与执行事实用 handoff.read 回读；operation.read 的旧连接票据不能当作跨连接回执。先核对当前版本，不重放未知操作。'] : []),
       '果铃只记录收到的工具调用；你自己的对话、用量与磁盘操作不由果铃管理。',
     ].join('\n') }
   }
@@ -402,8 +423,8 @@ export class ExternalMcpService implements ResidentMcpHandler {
     if (call.method === 'tools/list') {
       session.listChanged = false
       await session.authority
-      return { tools: (await this.catalog(this.scope(session, true))).map(tool => ({ name: tool.name, title: tool.label, description: tool.description,
-        inputSchema: tool.schema,
+      return { tools: (await this.catalog(this.scope(session, true), !!this.options.managedConversation)).map(tool => ({ name: tool.name, title: tool.label, description: tool.description,
+        inputSchema: mcpObjectInputSchema(tool.schema),
         ...(tool.read ? { annotations: { readOnlyHint: true } } : {}) })) }
     }
     if (call.method !== 'tools/call') throw new McpProtocolError(-32601, '不支持此 MCP 方法')
@@ -421,23 +442,30 @@ export class ExternalMcpService implements ResidentMcpHandler {
     return result
   }
 
-  /** Same selection as a built-in task in this space: Gateway catalog for the run, file tools by permission, family loading. */
-  private async catalog(scope: CallScope): Promise<HostTool[]> {
-    const domain = await this.options.gateway.describeRun(scope.runId)
-    const families = await this.options.gateway.availableToolFamilies(scope.runId)
+  /** Calls always use the current run's authority. ACP clients may freeze tools/list
+   * during initialization, before any task has a permission or document binding.
+   * For that discovery only, disclose connected capabilities without granting them;
+   * a later tools/call still resolves against its active run and the real owners. */
+  private async catalog(scope: CallScope, managedDiscovery = false): Promise<HostTool[]> {
+    const domain = managedDiscovery ? await this.options.gateway.describe() : await this.options.gateway.describeRun(scope.runId)
+    const families = managedDiscovery ? [] : await this.options.gateway.availableToolFamilies(scope.runId)
     const tools: HostTool[] = domain.map(tool => ({ name: tool.name, description: tool.description, schema: tool.schema, read: tool.manual.group === 'read', label: tool.manual.label, kind: 'gateway' }))
     for (const tool of agentFileTools) {
       const mutation = (agentFileMutationNames as readonly string[]).includes(tool.name)
-      if (!mutation || scope.permission !== 'read-only') tools.push({ name: tool.name, description: tool.description, schema: tool.inputSchema, read: !mutation, label: fileLabels[tool.name], kind: 'file' })
+      if (managedDiscovery || !mutation || scope.permission !== 'read-only') tools.push({ name: tool.name, description: tool.description, schema: tool.inputSchema, read: !mutation, label: fileLabels[tool.name], kind: 'file' })
     }
-    if (scope.permission !== 'read-only') tools.push({ name: createCourseFromHtmlTool.name, description: createCourseFromHtmlTool.description,
+    if (managedDiscovery || scope.permission !== 'read-only') tools.push({ name: createCourseFromHtmlTool.name, description: createCourseFromHtmlTool.description,
       schema: z.toJSONSchema(createCourseFromHtmlInputSchema) as Record<string, unknown>, read: false, label: createCourseFromHtmlTool.manual.label, kind: 'course' })
-    if (families.length) tools.push({ name: loadToolsDefinition.name, label: '展开工具', read: true, kind: 'load', schema: z.toJSONSchema(loadToolsSchema) as Record<string, unknown>,
-      description: `${loadToolsDefinition.description} 展开后请重新获取工具列表。当前可展开：${families.map(item => `${item.family} ${item.description}`).join('；')}。` })
-    return [...tools, ...serviceTools]
+    if (managedDiscovery || families.length) tools.push({ name: loadToolsDefinition.name, label: '展开工具', read: true, kind: 'load', schema: z.toJSONSchema(loadToolsSchema) as Record<string, unknown>,
+      description: managedDiscovery ? loadToolsDefinition.description
+        : `${loadToolsDefinition.description} 展开后请重新获取工具列表。当前可展开：${families.map(item => `${item.family} ${item.description}`).join('；')}。` })
+    return [...tools, ...serviceTools.filter(tool => tool.name !== 'handoff.read' || this.options.managedConversation?.readHandoff)]
   }
 
   private async callTool(session: Session, call: ResidentMcpCall): Promise<unknown> {
+    // A disconnected transport may settle before the owner finishes its write.
+    // Consume a rejected delivery here; track records uncertainty once identity exists.
+    void call.delivery.catch(() => undefined)
     await session.authority
     const scope = this.scope(session)
     const name = typeof call.params.name === 'string' ? call.params.name : ''
@@ -456,7 +484,7 @@ export class ExternalMcpService implements ResidentMcpHandler {
       if (!prior) return this.reply(session, failure('unknown-operation', '本连接没有该原范围的操作回执；未执行。'))
       if (prior.tool !== name || prior.digest !== callDigest(name, input))
         return this.reply(session, failure('operation-payload-mismatch', '原操作身份已用于其他参数；未执行。'))
-      this.track(prior, call.delivery)
+      await this.retryDelivery(prior, call.delivery)
       return this.reply(session, await prior.result!, prior.ticket, true, prior.tool, prior.runId, prior)
     }
     let tool = (await this.catalog(scope)).find(item => item.name === name)
@@ -498,8 +526,7 @@ export class ExternalMcpService implements ResidentMcpHandler {
     const undelivered = clientTicket === undefined ? [...session.operations].reverse()
       .find(item => item.runId === scope.runId && item.tool === tool.name && item.digest === digest && item.delivered === false && item.result) : undefined
     if (undelivered) {
-      undelivered.delivered = undefined
-      this.track(undelivered, call.delivery)
+      await this.retryDelivery(undelivered, call.delivery)
       return this.reply(session, await undelivered.result!, undelivered.ticket, true, tool.name, scope.runId, undelivered)
     }
     const ticket = clientTicket === undefined ? randomUUID() : /^[A-Za-z0-9_.:-]{1,200}$/.test(clientTicket)
@@ -507,18 +534,83 @@ export class ExternalMcpService implements ResidentMcpHandler {
     const prior = clientTicket ? session.operations.find(item => item.ticket === ticket && item.runId === scope.runId) : undefined
     if (prior) {
       if (prior.tool !== tool.name || prior.digest !== digest) return this.reply(session, failure('operation-payload-mismatch', '操作身份已用于其他参数；未执行。'))
-      this.track(prior, call.delivery)
+      await this.retryDelivery(prior, call.delivery)
       return this.reply(session, await prior.result!, prior.ticket, true, tool.name, prior.runId, prior)
     }
-    const operation: Operation = { ticket, runId: scope.runId, workspaceId: scope.workspaceId, workspaceRoot: scope.workspaceRoot, tool: tool.name, label: tool.label, digest, time: this.now() }
-    operation.result = this.traced(session, scope, tool, ticket, input, () => this.execute(session, scope, tool, ticket, input))
+    let deliveryContext: Operation['deliveryContext']
+    if (this.options.managedConversation) {
+      const conversationId = await this.conversation(session, scope)
+      if (conversationId !== this.options.managedConversation.conversationId) throw new Error('ACP 操作记录会话不匹配；未执行')
+      deliveryContext = { conversationId, taskId: scope.taskId }
+    }
+    const operation: Operation = { ticket, runId: scope.runId, workspaceId: scope.workspaceId, workspaceRoot: scope.workspaceRoot, tool: tool.name, label: tool.label, digest, time: this.now(), deliveryContext }
+    // No side effect starts before its uncertainty marker is durable.
+    const attempt = await this.prepareDelivery(operation)
+    operation.result = this.traced(session, scope, tool, ticket, input, () => this.execute(session, scope, tool, ticket, input), operation)
       .then(result => { operation.summary = summarize(tool.name, result); return result })
     session.operations.push(operation)
-    this.track(operation, call.delivery)
+    this.track(operation, call.delivery, attempt)
     return this.reply(session, await operation.result, ticket, false, tool.name, scope.runId, operation)
   }
-  private track(operation: Operation, delivery: Promise<boolean>): void {
-    void delivery.then(delivered => { operation.delivered = delivered })
+  private deliveryRecord(operation: Operation, transportDelivery: 'unknown' | 'undelivered' | 'delivered'): Promise<unknown> {
+    const context = operation.deliveryContext!
+    return this.options.appendEvent({ eventId: randomUUID(), conversationId: context.conversationId, taskId: context.taskId,
+      runId: operation.runId, itemId: operation.ticket, source: 'external-mcp', type: 'tool', time: this.now(),
+      update: 'append', data: { toolName: operation.tool, label: operation.label, transportDelivery } })
+  }
+  private queueDeliveryWrite(operation: Operation, work: () => Promise<void>): Promise<void> {
+    const write = (operation.deliveryWrite ?? Promise.resolve()).catch(() => undefined).then(work)
+    operation.deliveryWrite = write
+    this.deliveryWrites.add(write)
+    void write.finally(() => this.deliveryWrites.delete(write)).catch(() => undefined)
+    return write
+  }
+  private async prepareDelivery(operation: Operation): Promise<number> {
+    const attempt = operation.deliveryAttempt = (operation.deliveryAttempt ?? 0) + 1
+    if (operation.deliveryContext) await this.queueDeliveryWrite(operation, async () => {
+      await this.deliveryRecord(operation, 'unknown')
+    })
+    operation.delivered = undefined
+    return attempt
+  }
+  private async retryDelivery(operation: Operation, delivery: Promise<boolean>): Promise<void> {
+    try { this.track(operation, delivery, await this.prepareDelivery(operation)) }
+    catch (error) {
+      if (operation.deliveryContext) { operation.recordError = error; this.failedOperationRecords.add(operation) }
+      // Keep the original result and ticket even when the new marker cannot be written.
+      throw error
+    }
+  }
+  private track(operation: Operation, delivery: Promise<boolean>, attempt = operation.deliveryAttempt = (operation.deliveryAttempt ?? 0) + 1): void {
+    void delivery.then(delivered => {
+      if (attempt !== operation.deliveryAttempt) return
+      operation.delivered = delivered
+      if (!operation.deliveryContext) return
+      const write = this.queueDeliveryWrite(operation, async () => {
+        await operation.result
+        if (attempt !== operation.deliveryAttempt) return
+        if (operation.terminalError) throw operation.terminalError
+        await this.deliveryRecord(operation, delivered ? 'delivered' : 'undelivered')
+        if (attempt !== operation.deliveryAttempt) return
+        operation.recordError = undefined
+        this.failedOperationRecords.delete(operation)
+      })
+      void write.catch(error => {
+        if (attempt === operation.deliveryAttempt) { operation.recordError = error; this.failedOperationRecords.add(operation) }
+      })
+    }, error => {
+      if (operation.deliveryContext && attempt === operation.deliveryAttempt) {
+        operation.recordError = error; this.failedOperationRecords.add(operation)
+      }
+    }).catch(() => undefined)
+  }
+  private async settleDeliveryWrites(): Promise<void> {
+    // Pending HTTP replies retain durable unknown. Waiting for them here would
+    // deadlock the response that cannot finish until the domain request returns.
+    await Promise.resolve()
+    while (this.deliveryWrites.size) await Promise.allSettled([...this.deliveryWrites])
+    const failed = [...this.failedOperationRecords][0]
+    if (failed) throw new Error(`ACP 操作记录未完整持久化（${failed.ticket}）；请核对原操作结果，不能重放：${String(failed.terminalError ?? failed.recordError)}`)
   }
   private async reply(session: Session, result: ToolResult, ticket?: string, replayed = false, toolName = '', runId = session.runId, operation?: OperationScope) {
     const publicResult = modelToolResult(toolName, result,
@@ -662,6 +754,13 @@ export class ExternalMcpService implements ResidentMcpHandler {
       ...(opened.kind === 'markdown' ? { markdown: opened.source } : opened.kind === 'text' ? { text: opened.source } : {}) } }
   }
   private async service(session: Session, scope: CallScope, name: string, raw: unknown): Promise<unknown> {
+    if (name === 'handoff.read') {
+      const managed = this.options.managedConversation
+      if (!managed?.readHandoff || managed.workspaceId !== scope.workspaceId) throw new Error('当前连接无权读取该交接记录')
+      const result = await managed.readHandoff(serviceSchemas['handoff.read'].parse(raw))
+      this.assertActive(session, scope.runId)
+      return result
+    }
     if (name === 'workspace.list') {
       serviceSchemas['workspace.list'].parse(raw)
       return { current: scope.workspaceId, workspaces: (await this.options.conversations.listWorkspaces()).map(workspace => ({
@@ -771,29 +870,37 @@ export class ExternalMcpService implements ResidentMcpHandler {
     session.conversation = pending
     return pending
   }
-  private async emit(scope: CallScope, conversationId: string | undefined, itemId: string, type: ExecutionEventInput['type'], data: ExecutionEventInput['data'], update: ExecutionEventInput['update'] = 'snapshot') {
-    if (!conversationId) return
+  private async emit(scope: CallScope, conversationId: string | undefined, itemId: string, type: ExecutionEventInput['type'], data: ExecutionEventInput['data'], update: ExecutionEventInput['update'] = 'snapshot', strict = false) {
+    if (!conversationId) { if (strict) throw new Error('ACP 操作结果缺少持久会话身份'); return }
     try {
       await this.options.appendEvent({ eventId: randomUUID(), conversationId, taskId: scope.taskId, runId: scope.runId,
         itemId, time: this.now(), source: 'external-mcp', type, update, data })
-    } catch { /* The timeline is a projection; a failed event never changes the tool outcome. */ }
+    } catch (error) { if (strict) throw error /* Never change an already committed domain result. */ }
   }
-  private async traced(session: Session, scope: CallScope, tool: HostTool, ticket: string, input: unknown, run: () => Promise<ToolResult>): Promise<ToolResult> {
-    if (tool.kind === 'service') return run()
-    const conversationId = await this.conversation(session, scope).catch(() => undefined)
-    await this.emit(scope, conversationId, ticket, 'tool', { toolName: tool.name, label: tool.label, status: 'running', text: '已收到外部工具请求。' }, 'append')
+  private async traced(session: Session, scope: CallScope, tool: HostTool, ticket: string, input: unknown, run: () => Promise<ToolResult>, operation?: Operation): Promise<ToolResult> {
+    const strict = !!operation?.deliveryContext
+    if (tool.kind === 'service' && !strict) return run()
+    const conversationId = operation?.deliveryContext?.conversationId ?? await this.conversation(session, scope).catch(() => undefined)
+    await this.emit(scope, conversationId, ticket, 'tool', { toolName: tool.name, label: tool.label, status: 'running',
+      input: JSON.stringify(input), text: '已收到外部工具请求。' }, 'append')
     await this.emit(scope, conversationId, ticket, 'tool', { status: 'running', text: '正在调用正式工具。' }, 'append')
     const result = await run()
     const receipt = committedFact(tool.name, result), saved = saveFact(tool.name, result)
     const outcome = serviceToolOutcome(tool.name, result)
     const pending = outcome?.status === 'pending'
-    await this.emit(scope, conversationId, ticket, 'tool', { toolName: tool.name, label: tool.label, status: pending ? 'pending' : toolFailed(tool.name, result) ? 'failed' : 'completed',
-      input: JSON.stringify(input), output: JSON.stringify(result), webSources: webSearchSources(tool.name, result),
-      ...(pending ? { text: outcome.message } : result.kind === 'error' ? { error: result.message } : toolFailed(tool.name, result) && outcome ? { error: outcome.message } : {}),
-      ...applicationEventFacts(tool.name, result),
-      ...(saved ? { saveStatus: currentSave(saved) ? 'saved' : 'failed' } : {}) })
-    if (receipt) await this.emit(scope, conversationId, `${ticket}:commit`, 'document.commit', {
-      documentId: receipt.documentId, operationId: receipt.operationId, revision: receipt.revision, status: receipt.status, label: '外部工具修改已应用' })
+    try {
+      await this.emit(scope, conversationId, ticket, 'tool', { toolName: tool.name, label: tool.label, status: pending ? 'pending' : toolFailed(tool.name, result) ? 'failed' : 'completed',
+        input: JSON.stringify(input), output: JSON.stringify(result), webSources: webSearchSources(tool.name, result),
+        ...(pending ? { text: outcome.message } : result.kind === 'error' ? { error: result.message } : toolFailed(tool.name, result) && outcome ? { error: outcome.message } : {}),
+        ...applicationEventFacts(tool.name, result),
+        ...(saved ? { saveStatus: currentSave(saved) ? 'saved' : 'failed' } : {}) }, 'snapshot', strict)
+      if (receipt) await this.emit(scope, conversationId, `${ticket}:commit`, 'document.commit', {
+        documentId: receipt.documentId, operationId: receipt.operationId, revision: receipt.revision, status: receipt.status, label: '外部工具修改已应用' }, 'snapshot', strict)
+    } catch (error) {
+      // The side effect already has its owner result. Retain it for exact-ticket
+      // recovery, keep transport unknown, and surface the record failure at settlement.
+      if (operation) { operation.terminalError = error; this.failedOperationRecords.add(operation) }
+    }
     return result
   }
 }

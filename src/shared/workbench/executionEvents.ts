@@ -16,6 +16,7 @@ const eventData = {
   documentName: z.string().optional(), targetLabel: z.string().optional(),
   applicationStatus: z.enum(['applied', 'unchanged', 'conflict', 'denied', 'cancelled', 'failed']).optional(),
   saveStatus: z.enum(['saving', 'saved', 'failed']).optional(),
+  transportDelivery: z.enum(['unknown', 'undelivered', 'delivered']).optional(),
   toolName: id.optional(), operationId: id.optional(), documentId: id.optional(), revision: count.optional(),
   jobId: id.optional(), resourceIds: z.array(id).optional(),
   /** A display reference to the original child interaction. Only that run may accept its user decision. */

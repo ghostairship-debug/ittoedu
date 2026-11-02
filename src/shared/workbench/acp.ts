@@ -48,12 +48,31 @@ export interface AcpStructuredHandoff {
   userInstructions?: string[];
   latestPublicReply?: string;
   confirmedDecisions: string[];
-  artifacts: Array<{ path: string; revision?: string; summary?: string }>;
+  artifacts: Array<{ path: string; documentId?: string; revision?: string; dirty?: boolean;
+    undoHead?: { operationId: string; actor?: 'human' | 'agent' | 'external' }; summary?: string }>;
   unfinishedWork: string[];
   unsettledOperations: string[];
   /** Describes protected edits; it never authorizes overwriting them. */
   humanChanges: string[];
+  /** Read-only projections of the existing conversation/event owners, not old MCP connection tickets. */
+  history?: {
+    instructionCount: number;
+    includedInstructions: number;
+    workItemCount: number;
+    confirmedDecisionCount: number;
+    includedDecisions: number;
+    unfinishedRunCount: number;
+    pendingOperationCount: number;
+    eventCursor?: number;
+    instructions: { tool: 'handoff.read'; input: { section: 'instructions'; offset: number } };
+    work: { tool: 'handoff.read'; input: { section: 'work'; offset: number } };
+  };
 }
+
+export type AcpHandoffReadInput =
+  | { section: 'instructions'; offset?: number; limit?: number; messageId?: string; textOffset?: number }
+  | { section: 'work'; offset?: number; limit?: number }
+  | { section: 'item'; runId: string; itemId: string; field?: 'input' | 'output' | 'diff' | 'error' | 'text' | 'decision' | 'facts'; offset?: number; limit?: number };
 
 export interface AcpHostSnapshot {
   selectedAgentId: AcpAgentId;

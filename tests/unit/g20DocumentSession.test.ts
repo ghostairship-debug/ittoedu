@@ -36,6 +36,20 @@ async function newMarkdown(persistence = memoryPersistence()) {
 }
 
 describe('G20 S02/S03 authoritative document session', () => {
+  it('handoff identity reports unsaved human changes from the same current owner revision', async () => {
+    const persistence = memoryPersistence()
+    const registry = new DocumentRegistry({ drivers: [createMarkdownDriver()], createId: () => 'handoff-owner', bindingKey: binding => binding.path, persistence: persistence.port })
+    const session = await registry.open({ kind: 'file', path: '/human.md', version: 'initial', bindingVersion: 1 }, async () => md('saved'))
+    expect(registry.listIdentities()[0]).toMatchObject({ revision: 0, dirty: false })
+    await session.execute(operation(session, 'human-edit', 'keep this human change'))
+    expect(registry.listIdentities()[0]).toMatchObject({ revision: 1, dirty: true })
+    expect(registry.listIdentities()[0]).not.toHaveProperty('model')
+    await registry.save(session.documentId)
+    expect(registry.listIdentities()[0]).toMatchObject({ revision: 1, dirty: false })
+    await session.execute(history(session, 'undo-saved-human-edit', 'undo'))
+    expect(registry.listIdentities()[0]).toMatchObject({ revision: 2, dirty: true })
+  })
+
   it('reads only detached identity facts after the current canonical operation has settled', async () => {
     const { session, persistence } = await newMarkdown()
     let release!: () => void, entered!: () => void

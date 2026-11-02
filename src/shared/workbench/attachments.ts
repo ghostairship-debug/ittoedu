@@ -43,6 +43,8 @@ export interface AttachmentReader {
 export interface InputContextProvenance {
   kind: 'history' | 'document' | 'selection' | 'runtime'
   id: string
+  /** Exact additional history message sources advertised by the main-process index. */
+  historySourceIds?: readonly string[]
   documentId?: string
   revision?: number
   range?: { from: number; to: number }

@@ -422,6 +422,8 @@ export class ExecutionDesktopService {
         runtimeDirectory: path.join(this.options.directory, 'acp'),
         read: () => this.required(input.workspaceId, input.conversationId),
         readSegments: () => this.readAcpSegments(input.conversationId),
+        readExecution: async () => { await this.events.flushPending(); return this.events.snapshot(input.conversationId) },
+        readExecutionBlob: ref => this.events.readBlob(input.conversationId, ref),
         canReplaceUnpersistedSession: (segment, acceptedRunIds) => this.externalRunsPrecedeAcpSession(input.conversationId, acceptedRunIds, segment),
         prepareDocuments: request => this.serial(request.conversationId, () => this.prepareDocuments(request)),
         update: change => this.serial(input.conversationId, async () => {
@@ -441,8 +443,9 @@ export class ExecutionDesktopService {
         append: event => this.appendExternalEvent(event), flush: () => this.events.flushPending(),
         onSnapshot: snapshot => this.acpSink?.({ ...input, snapshot }),
         openDocumentation: async url => { await (await import('electron')).shell.openExternal(url) },
-        artifactFacts: () => this.options.documents.registry.list().flatMap(snapshot => snapshot.binding.kind === 'file' && isInsideRoot(cwd, snapshot.binding.path)
-          ? [{ path: snapshot.binding.path, revision: `${snapshot.epoch}:${snapshot.revision}` }] : []),
+        artifactFacts: () => this.options.documents.registry.listIdentities().flatMap(snapshot => snapshot.binding.kind === 'file' && isInsideRoot(cwd, snapshot.binding.path)
+          ? [{ path: snapshot.binding.path, documentId: snapshot.documentId, revision: `${snapshot.epoch}:${snapshot.revision}`,
+            dirty: snapshot.dirty }] : []),
         createBinding: async binding => (await import('../external/externalDesktopService.js')).createAcpDomainBinding({ ...input, ...binding }),
       })
       return controller

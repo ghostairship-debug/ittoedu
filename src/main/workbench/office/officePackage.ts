@@ -16,7 +16,7 @@ export function descendants(node: Document | Element, namespace: string, name: s
   return Array.from(node.getElementsByTagNameNS(namespace, name))
 }
 export function children(node: Element, namespace: string, name: string): Element[] {
-  return Array.from(node.childNodes).filter((value): value is Element => value.nodeType === 1 && (value as Element).namespaceURI === namespace && (value as Element).localName === name)
+  return Array.from(node.childNodes).filter((value): value is Element => value.nodeType === 1 && (value as Element).namespaceURI === namespace && (name === '*' || (value as Element).localName === name))
 }
 export function textOf(node: Document | Element, namespace: string, name = 't'): string {
   return descendants(node, namespace, name).map(value => value.textContent ?? '').join('')
@@ -26,6 +26,7 @@ export class OfficePackage {
   readonly parts: Record<string, Uint8Array>
   readonly changed = new Set<string>()
   private readonly documents = new Map<string, Document>()
+  private readonly binaryChanges = new Set<string>()
   private readonly original: Uint8Array
   constructor(bytes: Uint8Array) { this.original = Uint8Array.from(bytes); this.parts = unzipSync(bytes) }
   partVersion(name: string): string {
@@ -44,8 +45,16 @@ export class OfficePackage {
     this.documents.set(name, xml)
     return xml
   }
-  write(name: string) { this.changed.add(name) }
-  remove(name: string) { delete this.parts[name]; this.documents.delete(name); this.changed.add(name) }
+  write(name: string) { this.binaryChanges.delete(name); this.changed.add(name) }
+  /** Raw assets are package parts too; do not route their bytes through an XML serializer. */
+  setBinary(name: string, bytes: Uint8Array): void {
+    const previous = this.parts[name]
+    if (previous?.length === bytes.length && previous.every((value, index) => value === bytes[index])) return
+    this.parts[name] = Uint8Array.from(bytes)
+    this.documents.delete(name)
+    this.binaryChanges.add(name); this.changed.add(name)
+  }
+  remove(name: string) { delete this.parts[name]; this.documents.delete(name); this.binaryChanges.delete(name); this.changed.add(name) }
   main(): string {
     const relation = descendants(this.xml('_rels/.rels'), NS.relationship, 'Relationship').find(value => value.getAttribute('Type')?.endsWith('/officeDocument'))
     if (!relation) throw new Error('文件没有 Office 主文档关系')
@@ -64,7 +73,7 @@ export class OfficePackage {
   save(): Uint8Array {
     // Parsing a package is not an edit. Preserve ZIP metadata and signatures when nothing changed.
     if (this.changed.size === 0) return Uint8Array.from(this.original)
-    for (const name of this.changed) if (this.parts[name]) this.parts[name] = strToU8(new XMLSerializer().serializeToString(this.xml(name)))
+    for (const name of this.changed) if (this.parts[name] && !this.binaryChanges.has(name)) this.parts[name] = strToU8(new XMLSerializer().serializeToString(this.xml(name)))
     return zipSync(this.parts)
   }
 }

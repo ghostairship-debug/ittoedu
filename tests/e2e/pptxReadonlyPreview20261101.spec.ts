@@ -8,7 +8,7 @@ import { OfficeFileService } from '../../src/main/workbench/office/OfficeFileSer
 import { chooseM20Workspace, closeM20, launchM20, m20Evidence, m20Row, m20VisibleTextEditor } from './helpers/g20M20Harness'
 
 const sha256 = (filename: string) => createHash('sha256').update(readFileSync(filename)).digest('hex')
-const previewFor = (page: Page, name: string) => page.locator(`.pptx-file-preview[aria-label=${JSON.stringify(`${name} PPTX 只读预览`)}]`)
+const previewFor = (page: Page, name: string) => page.locator(`.pptx-file-preview:is([aria-label=${JSON.stringify(`${name} PPTX 只读预览`)}],[aria-label=${JSON.stringify(`${name} PPTX 对象共编`)}])`)
 const fileTab = (page: Page, name: string) => page.locator('.workspace-document-tabs').getByRole('tab', { name, exact: true })
 
 test('T6 original PPTX preview, animation, lifecycle, failure and cold reopen use the real App without writing the file', async ({}, info) => {
@@ -94,7 +94,7 @@ test('T6 original PPTX preview, animation, lifecycle, failure and cold reopen us
       state.__t6FastClose = { closed: false, observedLoading: false }
       const observer = new MutationObserver(() => {
         const region = Array.from(document.querySelectorAll<HTMLElement>('.pptx-file-preview'))
-          .find(node => node.getAttribute('aria-label') === input.label)
+          .find(node => input.labels.includes(node.getAttribute('aria-label') ?? ''))
         const close = Array.from(document.querySelectorAll<HTMLButtonElement>('.workspace-document-tabs button'))
           .find(node => node.getAttribute('aria-label') === input.closeLabel)
         if (!region || !close || !state.__t6FastClose) return
@@ -102,7 +102,7 @@ test('T6 original PPTX preview, animation, lifecycle, failure and cold reopen us
         observer.disconnect(); close.click(); state.__t6FastClose.closed = true
       })
       observer.observe(document.body, { childList: true, subtree: true })
-    }, { label: `${fastName} PPTX 只读预览`, closeLabel: `关闭 ${fastName}` })
+    }, { labels: [`${fastName} PPTX 只读预览`, `${fastName} PPTX 对象共编`], closeLabel: `关闭 ${fastName}` })
     await m20Row(page, fastName).dblclick()
     await expect.poll(() => page.evaluate(() => (globalThis as unknown as { __t6FastClose?: unknown }).__t6FastClose))
       .toEqual({ closed: true, observedLoading: true })

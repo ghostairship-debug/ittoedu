@@ -194,10 +194,9 @@ export class ExecutionRunStore {
     return this.validate(restored.record, filename, expected)
   }
   private async load(filename: string, expected?: string): Promise<ExecutionRunRecord> {
-    // Atomic legacy JSON reads may finish after a save, as before. Incremental
-    // state is always reread in the same queue as append and partial-tail repair.
-    const checkpoint = decodeRunCheckpoint(await fs.readFile(filename, 'utf8'))
-    return checkpoint.generation ? queued(filename, () => this.loadUnlocked(filename, expected)) : this.validate(checkpoint.record, filename, expected)
+    // The same per-file queue serializes checkpoint and tail reads, partial-tail
+    // repair and publication. Decode the checkpoint once, including legacy JSON.
+    return queued(filename, () => this.loadUnlocked(filename, expected))
   }
   /** Current process facts from the existing checkpoint owner; no history body reads for a close prompt. */
   activeRunIds(): string[] { return [...this.activity].filter(([, status]) => ['queued', 'running', 'stopping'].includes(status)).map(([id]) => id) }

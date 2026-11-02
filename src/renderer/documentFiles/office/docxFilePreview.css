@@ -1,0 +1,72 @@
+.docx-file-preview {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: 100%;
+  color: var(--text-primary, #24252b);
+  background: var(--surface-primary, #fff);
+}
+.docx-file-preview[hidden] { display: none; }
+.docx-file-preview__toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border-color, #e4e5e9);
+}
+.docx-file-preview__identity { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.docx-file-preview__identity strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.docx-file-preview__identity span, .docx-file-preview__footer { color: var(--text-secondary, #626570); font-size: 12px; }
+.docx-file-preview__actions, .docx-file-preview__navigation { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.docx-file-preview__actions { justify-content: flex-end; }
+.docx-file-preview button {
+  padding: 6px 10px;
+  border: 1px solid var(--border-color, #d9dce3);
+  border-radius: 6px;
+  color: inherit;
+  background: var(--surface-primary, #fff);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.docx-file-preview button:disabled { opacity: .45; cursor: default; }
+.docx-file-preview button:focus-visible, .docx-file-preview input:focus-visible, .docx-file-preview__viewport:focus-visible {
+  outline: 2px solid var(--accent-color, #466fd5);
+  outline-offset: 2px;
+}
+.docx-file-preview__navigation { padding: 8px 16px; border-bottom: 1px solid var(--border-color, #e4e5e9); font-size: 13px; }
+.docx-file-preview__jump { display: flex; align-items: center; gap: 6px; margin-left: auto; }
+.docx-file-preview__jump input {
+  width: 64px;
+  padding: 4px;
+  border: 1px solid var(--border-color, #d9dce3);
+  border-radius: 4px;
+  color: inherit;
+  background: var(--surface-primary, #fff);
+}
+.docx-file-preview__messages { padding: 4px 16px; font-size: 12px; }
+.docx-file-preview__messages p { margin: 4px 0; }
+.docx-file-preview__messages [role="alert"] { color: var(--danger-color, #a42b2b); }
+.docx-file-preview__viewport {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 20px;
+  background: var(--surface-secondary, #e9ebef);
+}
+.docx-file-preview__paper {
+  width: min(100%, 960px);
+  min-height: 120px;
+  margin: 0 auto;
+  background: #fff;
+  box-shadow: 0 2px 12px #0000001a;
+}
+.docx-file-preview__paper canvas { display: block; width: 100%; height: auto; }
+.docx-file-preview__paper[data-ready="false"] canvas { visibility: hidden; }
+.docx-file-preview__paper [role="alert"] { padding: 12px; color: #a42b2b; }
+.docx-file-preview__footer { padding: 4px 16px; border-top: 1px solid var(--border-color, #e4e5e9); }
+@media (max-width: 620px) {
+  .docx-file-preview__toolbar { align-items: flex-start; flex-direction: column; }
+  .docx-file-preview__actions { justify-content: flex-start; }
+  .docx-file-preview__viewport { padding: 10px; }
+}

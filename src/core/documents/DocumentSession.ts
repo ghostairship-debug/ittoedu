@@ -277,7 +277,8 @@ export class DocumentSession {
   /** Identity-only reads never clone the document or its resources. */
   readIdentity() {
     return { documentId: this.state.documentId, epoch: this.state.epoch, revision: this.state.revision,
-      binding: structuredClone(this.state.binding), kind: this.state.model.kind }
+      binding: structuredClone(this.state.binding), kind: this.state.model.kind,
+      dirty: this.state.savedRevision !== this.state.revision }
   }
 
   /** Internal view validation waits for the canonical operation, then reads the same light facts. */

@@ -135,6 +135,9 @@ export interface DesktopAPI {
   workspaceFiles?: import('./workbench/workspaceFiles').WorkspaceFilesAPI
   skillCatalog?: import('./workbench/skillCatalogDesktop').SkillCatalogAPI
   pptxPreview?(input: import('./workbench/officePreview').PptxPreviewRequest): Promise<import('./workbench/officePreview').PptxPreviewSnapshot>
+  docxPreview?(input: import('./workbench/officePreview').DocxPreviewRequest): Promise<import('./workbench/officePreview').DocxPreviewSnapshot>
+  cancelDocxPreview?(input: { requestId: string }): Promise<void>
+  onDocxPreviewProgress?(handler: (progress: import('./workbench/officePreview').DocxPreviewProgress) => void): () => void
   mediaFiles?(input: import('./workbench/mediaFiles').MediaFilesRequest): Promise<import('./workbench/mediaFiles').MediaFileSnapshot>
   releaseMediaFileDraft?(binding: import('./workbench/mediaFiles').FileArtifactBinding): Promise<void>
   onWorkspaceFilesChanged?(listener: (event: import('./workbench/workspaceFiles').WorkspaceFilesChange) => void): () => void
@@ -258,6 +261,9 @@ export const IPC_CHANNELS = {
   workspaceFiles: 'workspace-files:operate',
   skillCatalog: 'skills:catalog',
   pptxPreview: 'pptx-preview:read',
+  docxPreview: 'docx-preview:read',
+  docxPreviewCancel: 'docx-preview:cancel',
+  docxPreviewProgress: 'docx-preview:progress',
   mediaFiles: 'media-files:operate',
   mediaFileRelease: 'media-files:release-draft',
   workspaceFilesChanged: 'workspace-files:changed',

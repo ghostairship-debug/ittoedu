@@ -87,3 +87,30 @@ test('Published rainfall range reaches 40 with its real shared-state repaint loo
     }
   } finally { await app.close() }
 })
+
+test('Published observation sees a frame inside display contents while retaining hidden, clipped and covered boundaries', async () => {
+  test.setTimeout(90_000)
+  const root = path.resolve(__dirname, '../..'), base = path.join(root, 'output/authoring-followup-20261017/contents-frame-electron')
+  await mkdir(base, { recursive: true })
+  const directory = await mkdtemp(path.join(base, 'run-'))
+  await symlink(path.join(root, 'dist-renderer'), path.join(directory, 'dist-renderer'), 'junction')
+  await build({ entryPoints: [path.join(__dirname, 'helpers/publishedViewActionsMain20261017.ts')], outfile: path.join(directory, 'main.cjs'),
+    bundle: true, platform: 'node', format: 'cjs', packages: 'external' })
+  const env = Object.fromEntries(Object.entries(process.env).filter((entry): entry is [string, string] => typeof entry[1] === 'string'))
+  delete env.ELECTRON_RUN_AS_NODE
+  const app = await electron.launch({ args: [path.join(directory, 'main.cjs')], env: { ...env, VIEW_ACTIONS_FIXTURE_DIR: directory } })
+  try {
+    const facts = await app.evaluate(async () => Reflect.get(globalThis, 'runPublishedContentsFrameRegression')())
+    await writeFile(path.join(directory, 'facts.json'), JSON.stringify(facts, null, 2))
+    expect(facts.actualGeometry).toEqual({ display: 'contents', overflow: 'hidden', width: 0, height: 0 })
+    expect(facts.visibleFrameObserved).toBe(true)
+    expect(facts.labels).toContain('contents-visible')
+    expect(facts.labels).not.toContain('hidden-frame')
+    expect(facts.labels).not.toContain('clipped-frame')
+    expect(facts.hiddenScope).toMatchObject({ status: 'not-visible' })
+    expect(facts.clippedScope).toMatchObject({ status: 'not-visible' })
+    expect(facts.trusted).toBe(true)
+    expect(facts.coveredObserved).toBe(true)
+    expect(facts.coveredError).toMatchObject({ message: expect.stringContaining('covered-frame'), dispatch: 'dispatched', application: 'not_applied' })
+  } finally { await app.close() }
+})

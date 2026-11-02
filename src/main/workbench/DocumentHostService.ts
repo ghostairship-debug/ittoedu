@@ -184,7 +184,7 @@ export class DocumentHostService {
         if (media.length) captured.push(...await this.artifacts.captureCopyContent(source, kind, media))
         return captured
       } })
-    this.artifacts = new FileArtifactService(this)
+    this.artifacts = new FileArtifactService(this, path.join(directory, 'artifact-history'))
     this.agentFiles = new AgentFileService(this, options.readOnlyFileRoots)
     this.artifactDeliveries = new HostArtifactDeliveryService({
       journalDirectory: options.artifactDeliveryDirectory ?? path.join(directory, 'artifact-deliveries'),

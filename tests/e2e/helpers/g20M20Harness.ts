@@ -18,7 +18,9 @@ export async function launchM20(fixture: ReturnType<typeof m20Fixture>) {
   if (executablePath && !existsSync(executablePath)) throw new Error(`Packaged executable does not exist: ${executablePath}`)
   const env = Object.fromEntries(Object.entries(process.env)
     .filter((entry): entry is [string, string] => typeof entry[1] === 'string'))
-  Object.assign(env, { VITE_DEV_SERVER_URL: '', [BACKGROUND_E2E_ENV]: '1' })
+  // Packaged acceptance runs on-screen; an off-screen Windows compositor can
+  // stall screenshot capture while the actual document is already ready.
+  Object.assign(env, { VITE_DEV_SERVER_URL: '', [BACKGROUND_E2E_ENV]: executablePath ? '0' : '1' })
   if (executablePath) {
     delete env.ELECTRON_RUN_AS_NODE
     // As in the existing portability consumer, prove packaged resources work
