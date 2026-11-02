@@ -50,6 +50,12 @@ test('Published observation uses trusted click/fill/range in one persistent task
     expect(bootstrapReports.length).toBeGreaterThan(0)
     for (const value of bootstrapReports) expect(new URL(value).searchParams.has('html')).toBe(false)
     expect(facts.reopened).toBe(facts.first)
+    expect(facts.resizeFacts).toMatchObject({ actual: { visible: false },
+      state: facts.adjusted, sameWorker: true, oneWindow: true, staleAfterResize: true, spentAfterResize: true })
+    expect(Math.abs(facts.resizeFacts.actual.observed.width-600)).toBeLessThanOrEqual(1)
+    expect(Math.abs(facts.resizeFacts.actual.observed.height-400)).toBeLessThanOrEqual(1)
+    expect(facts.resizeFacts.requested).toEqual(facts.resizeFacts.actual.observed)
+    expect(facts.resizeFacts.actual.contentSize).toEqual([facts.resizeFacts.actual.observed.width,facts.resizeFacts.actual.observed.height])
   } finally { await app.close() }
 })
 

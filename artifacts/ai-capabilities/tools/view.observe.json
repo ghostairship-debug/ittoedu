@@ -1,8 +1,46 @@
 {
-  "description": "观察已授权课件或 HTML 的真实画面、结构和元素 handle；软件按 target/path 的载体分发，view.click/input 操作最近观察。课件用 project.list 的页面/对象 path 与可选 project，或 target；HTML 用已打开文件 target/path，已通过 file.open 固定唯一 HTML 后可省略目标。HTML 支持 query/offset/limit/cursor，cursor 续同次观察；课件局部画面用 clip:{x,y,width,height}（viewport CSS 像素），结构仍为全 viewport，元素保留原坐标。回执 source/identity/coverage 说明版本与范围；同一版本隔离会话保留运行状态，源码变化后重建。观察和输入不改作者工程或用户现场。purpose 默认 required；可选诊断用 diagnostic，不可用时明确未验证。",
+  "description": "可用 viewport:{width,height} 指定隔离预览的 CSS 尺寸检查窄屏；不改变用户窗口，同版本保留运行状态，后续省略沿用，尺寸变更须新捕获并使用新句柄。观察已授权课件或 HTML 的真实画面、结构和元素 handle；软件按 target/path 的载体分发，view.click/input 操作最近观察。课件用 project.list 的页面/对象 path 与可选 project，或 target；HTML 用已打开文件 target/path，已通过 file.open 固定唯一 HTML 后可省略目标。HTML 支持 query/offset/limit/cursor，cursor 续同次观察；课件局部画面用 clip:{x,y,width,height}（viewport CSS 像素），结构仍为全 viewport，元素保留原坐标。回执 source/identity/coverage 说明版本与范围；同一版本隔离会话保留运行状态，源码变化后重建。观察和输入不改作者工程或用户现场。purpose 默认 required；可选诊断用 diagnostic，不可用时明确未验证。",
   "inputSchema": {
     "$defs": {
       "__schema0": {
+        "additionalProperties": false,
+        "properties": {
+          "clip": {
+            "$ref": "#/$defs/__schema9"
+          },
+          "cursor": {
+            "$ref": "#/$defs/__schema8"
+          },
+          "detail": {
+            "$ref": "#/$defs/__schema1"
+          },
+          "limit": {
+            "$ref": "#/$defs/__schema7"
+          },
+          "offset": {
+            "$ref": "#/$defs/__schema6"
+          },
+          "purpose": {
+            "$ref": "#/$defs/__schema10"
+          },
+          "query": {
+            "$ref": "#/$defs/__schema5"
+          },
+          "target": {
+            "maxLength": 200,
+            "minLength": 1,
+            "type": "string"
+          },
+          "viewport": {
+            "$ref": "#/$defs/__schema2"
+          }
+        },
+        "required": [
+          "target"
+        ],
+        "type": "object"
+      },
+      "__schema1": {
         "enum": [
           "auto",
           "low",
@@ -10,24 +48,130 @@
         ],
         "type": "string"
       },
-      "__schema1": {
+      "__schema10": {
+        "enum": [
+          "required",
+          "diagnostic"
+        ],
         "type": "string"
       },
+      "__schema11": {
+        "additionalProperties": false,
+        "properties": {
+          "clip": {
+            "$ref": "#/$defs/__schema9"
+          },
+          "cursor": {
+            "$ref": "#/$defs/__schema8"
+          },
+          "detail": {
+            "$ref": "#/$defs/__schema1"
+          },
+          "limit": {
+            "$ref": "#/$defs/__schema7"
+          },
+          "offset": {
+            "$ref": "#/$defs/__schema6"
+          },
+          "path": {
+            "maxLength": 500,
+            "minLength": 1,
+            "type": "string"
+          },
+          "project": {
+            "maxLength": 1000,
+            "minLength": 1,
+            "type": "string"
+          },
+          "purpose": {
+            "$ref": "#/$defs/__schema10"
+          },
+          "query": {
+            "$ref": "#/$defs/__schema5"
+          },
+          "viewport": {
+            "$ref": "#/$defs/__schema2"
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "type": "object"
+      },
+      "__schema12": {
+        "additionalProperties": false,
+        "properties": {
+          "clip": {
+            "$ref": "#/$defs/__schema9"
+          },
+          "cursor": {
+            "$ref": "#/$defs/__schema8"
+          },
+          "detail": {
+            "$ref": "#/$defs/__schema1"
+          },
+          "limit": {
+            "$ref": "#/$defs/__schema7"
+          },
+          "offset": {
+            "$ref": "#/$defs/__schema6"
+          },
+          "purpose": {
+            "$ref": "#/$defs/__schema10"
+          },
+          "query": {
+            "$ref": "#/$defs/__schema5"
+          },
+          "viewport": {
+            "$ref": "#/$defs/__schema2"
+          }
+        },
+        "type": "object"
+      },
       "__schema2": {
+        "additionalProperties": false,
+        "properties": {
+          "height": {
+            "$ref": "#/$defs/__schema4"
+          },
+          "width": {
+            "$ref": "#/$defs/__schema3"
+          }
+        },
+        "required": [
+          "width",
+          "height"
+        ],
+        "type": "object"
+      },
+      "__schema3": {
+        "maximum": 4096,
+        "minimum": 240,
+        "type": "integer"
+      },
+      "__schema4": {
+        "maximum": 4096,
+        "minimum": 200,
+        "type": "integer"
+      },
+      "__schema5": {
+        "type": "string"
+      },
+      "__schema6": {
         "maximum": 9007199254740991,
         "minimum": 0,
         "type": "integer"
       },
-      "__schema3": {
+      "__schema7": {
         "exclusiveMinimum": 0,
         "maximum": 9007199254740991,
         "type": "integer"
       },
-      "__schema4": {
+      "__schema8": {
         "minLength": 1,
         "type": "string"
       },
-      "__schema5": {
+      "__schema9": {
         "additionalProperties": false,
         "properties": {
           "height": {
@@ -52,118 +196,18 @@
           "height"
         ],
         "type": "object"
-      },
-      "__schema6": {
-        "enum": [
-          "required",
-          "diagnostic"
-        ],
-        "type": "string"
       }
     },
     "$schema": "https://json-schema.org/draft/2020-12/schema",
     "anyOf": [
       {
-        "additionalProperties": false,
-        "properties": {
-          "clip": {
-            "$ref": "#/$defs/__schema5"
-          },
-          "cursor": {
-            "$ref": "#/$defs/__schema4"
-          },
-          "detail": {
-            "$ref": "#/$defs/__schema0"
-          },
-          "limit": {
-            "$ref": "#/$defs/__schema3"
-          },
-          "offset": {
-            "$ref": "#/$defs/__schema2"
-          },
-          "purpose": {
-            "$ref": "#/$defs/__schema6"
-          },
-          "query": {
-            "$ref": "#/$defs/__schema1"
-          },
-          "target": {
-            "maxLength": 200,
-            "minLength": 1,
-            "type": "string"
-          }
-        },
-        "required": [
-          "target"
-        ],
-        "type": "object"
+        "$ref": "#/$defs/__schema0"
       },
       {
-        "additionalProperties": false,
-        "properties": {
-          "clip": {
-            "$ref": "#/$defs/__schema5"
-          },
-          "cursor": {
-            "$ref": "#/$defs/__schema4"
-          },
-          "detail": {
-            "$ref": "#/$defs/__schema0"
-          },
-          "limit": {
-            "$ref": "#/$defs/__schema3"
-          },
-          "offset": {
-            "$ref": "#/$defs/__schema2"
-          },
-          "path": {
-            "maxLength": 500,
-            "minLength": 1,
-            "type": "string"
-          },
-          "project": {
-            "maxLength": 1000,
-            "minLength": 1,
-            "type": "string"
-          },
-          "purpose": {
-            "$ref": "#/$defs/__schema6"
-          },
-          "query": {
-            "$ref": "#/$defs/__schema1"
-          }
-        },
-        "required": [
-          "path"
-        ],
-        "type": "object"
+        "$ref": "#/$defs/__schema11"
       },
       {
-        "additionalProperties": false,
-        "properties": {
-          "clip": {
-            "$ref": "#/$defs/__schema5"
-          },
-          "cursor": {
-            "$ref": "#/$defs/__schema4"
-          },
-          "detail": {
-            "$ref": "#/$defs/__schema0"
-          },
-          "limit": {
-            "$ref": "#/$defs/__schema3"
-          },
-          "offset": {
-            "$ref": "#/$defs/__schema2"
-          },
-          "purpose": {
-            "$ref": "#/$defs/__schema6"
-          },
-          "query": {
-            "$ref": "#/$defs/__schema1"
-          }
-        },
-        "type": "object"
+        "$ref": "#/$defs/__schema12"
       }
     ],
     "type": "object"

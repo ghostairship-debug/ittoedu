@@ -23,7 +23,7 @@ export type TaskFinishDelivery = z.infer<typeof taskFinishDeliverySchema>
 export const documentDeliveryTools = [
   { name: 'file.save' as const, description: '保存已打开文档的当前正式内容。target 使用宿主返回的文档短句柄，destination 仅用于另存为。返回确切保存版本与脏状态。', inputSchema: fileSaveInputSchema,
     manual: { label: '保存文件', group: 'edit' as const, targetKinds: ['document'] as const } },
-  { name: 'document.export' as const, description: '将已授权课件的当前内容导出；省略 format 默认离线单 HTML，保留互动并可直接运行。也可明确选择 html-online、web-package、pptx、pdf 或 Flow 讲义 docx；PPTX/PDF/DOCX 是静态格式，不承载自编程序互动。相对 destination 使用任务工作空间根目录。消费与人工导出相同的 V10 格式生产器。返回 generated 或 written 的真实状态。同任务同文档的既有导出未被修改时可原位更新，其他同名文件不覆盖。', inputSchema: documentExportInputSchema,
+  { name: 'document.export' as const, description: '将已授权课件的当前内容导出；省略 format 默认离线单 HTML，保留互动并可直接运行。也可明确选择 html-online、web-package、pptx、pdf 或 Flow 讲义 docx；PPTX/PDF/DOCX 是静态格式，不承载自编程序互动。相对 destination 使用任务工作空间根目录。消费与人工导出相同的 V10 格式生产器。返回 generated 或 written 的真实状态。同任务同文档的既有导出未被修改时可原位更新；新一轮修改也可通过明确 destination 更新当前仍打开文档的原导出，软件核实文件归属与版本。其他同名文件或已外改文件不覆盖。', inputSchema: documentExportInputSchema,
     manual: { label: '导出文档', group: 'edit' as const, targetKinds: ['document'] as const } },
 ]
 

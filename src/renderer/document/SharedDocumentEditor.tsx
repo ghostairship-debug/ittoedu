@@ -185,7 +185,7 @@ export interface SharedDocumentEditorProps {
   readOnly?: boolean
   blockMoveDisabledReason?(blockId: string): string | null
   objectLayout?: {
-    read(id:string):{wrap:'none'|'left'|'right';widthPercent?:number}|null
+    read(id:string):{wrap:'none'|'left'|'right'|'both';widthPercent?:number}|null
     begin(id:string):Promise<(drop:FlowObjectDrop)=>Promise<void>>
   }
   renderTextActions?(selection: DocumentSelection | null): ReactNode
@@ -287,7 +287,7 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
   const flowObjectSelection = props.target === 'flow' && (!props.contentScope || props.contentScope === 'document')
   const inputGeneration = useRef(0)
   const bodyDrag = useRef<{ pointerId: number; blockId: string; start: { x: number; y: number }; moved: boolean; capture: HTMLElement | null; ready: boolean; latest: { x: number; y: number }; ended: boolean; canceled: boolean } | null>(null)
-  const flowDrag=useRef<{sourceId:string;rects:Map<string,DOMRect>;widthPercent?:number;height:number;commit:Promise<((drop:FlowObjectDrop)=>Promise<void>)|null>;preview:FlowObjectDropPreview|null}|null>(null)
+  const flowDrag=useRef<{sourceId:string;rects:Map<string,DOMRect>;wrap:'none'|'left'|'right'|'both';widthPercent?:number;height:number;commit:Promise<((drop:FlowObjectDrop)=>Promise<void>)|null>;preview:FlowObjectDropPreview|null}|null>(null)
   const objectPreviewPlugin=useMemo(()=>flowObjectDropPreviewPlugin(),[])
   const documentScope = (props.contentScope ?? 'document') === 'document'
   const [format, setFormat] = useState<ReturnType<typeof readDocumentFormatting>>({ color: undefined, highlightColor: undefined, paragraphType: '', fontFamily: undefined, fontSize: undefined, flags: { bold: false, italic: false, underline: false, strike: false, emphasis: false } })
@@ -1495,7 +1495,7 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
     const source=nodes.find(node=>node.dataset.flowBlockId===id),rect=source?.getBoundingClientRect()
     if(!source||!rect)return
     const scale=source.offsetWidth>0?rect.width/source.offsetWidth:1
-    flowDrag.current={sourceId:id,rects:new Map(nodes.map(node=>[node.dataset.flowBlockId!,node.getBoundingClientRect()])),widthPercent:info.widthPercent,
+    flowDrag.current={sourceId:id,rects:new Map(nodes.map(node=>[node.dataset.flowBlockId!,node.getBoundingClientRect()])),wrap:info.wrap,widthPercent:info.widthPercent,
       height:rect.height/Math.max(.001,scale),commit:owner.begin(id).catch(error=>{fail(String(error));return null}),preview:null}
   }
   function clearFlowObjectPreview(){if(layout.current)showFlowObjectDropPreview(layout.current.view,null)}
@@ -1503,16 +1503,16 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
     const drag=flowDrag.current,editor=layout.current
     if(!drag||drag.sourceId!==sourceId||!editor||!target)return target
     const element=editor.view.dom.querySelector<HTMLElement>('[data-flow-block-id="'+CSS.escape(target.targetId)+'"]'),bounds=drag.rects.get(target.targetId)
-    let wrap:'none'|'left'|'right'='none',side=target.side
+    let wrap:'none'|'left'|'right'|'both'='none',side=target.side
     if(element&&bounds&&element.matches('p,h1,h2,h3,h4,h5,h6,blockquote')&&point.y>=bounds.top-12&&point.y<=bounds.bottom+12){
       const relative=(point.x-bounds.left)/Math.max(1,bounds.width)
-      if(relative<.32)wrap='left';else if(relative>.68)wrap='right'
+      if(relative<.32)wrap='left';else if(relative>.68)wrap='right';else if(drag.wrap==='both')wrap='both'
       if(wrap!=='none')side='before'
     }
     const widthPercent=drag.widthPercent??(wrap==='none'?100:48)
     // A narrow lane uses the same standalone-row rule as the final projection.
     const laneWidth=(bounds?.width??target.width)/(element?.offsetWidth&&bounds?bounds.width/element.offsetWidth:1)
-    if(wrap!=='none'&&laneWidth*(1-widthPercent/100)-20<160)wrap='none'
+    if(wrap!=='none'&&laneWidth*(1-widthPercent/100)/(wrap==='both'?2:1)-20<160)wrap='none'
     const preview:FlowObjectDropPreview={sourceId,targetId:target.targetId,side,wrap,widthPercent:wrap==='none'&&drag.widthPercent===undefined?100:widthPercent,height:drag.height}
     drag.preview=preview;showFlowObjectDropPreview(editor.view,preview)
     return {...target,side}

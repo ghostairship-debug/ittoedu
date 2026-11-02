@@ -88,7 +88,7 @@ export type FlowComponentInsertPlacement = FlowSharedOwnership
 export interface FlowBodyDestination {
   readonly parentBlockId: string | null
   readonly index: number
-  readonly wrap?: 'none' | 'left' | 'right'
+  readonly wrap?: 'none' | 'left' | 'right' | 'both'
 }
 
 export interface FlowComponentDocumentConversionOptions extends FlowCommandOptions {

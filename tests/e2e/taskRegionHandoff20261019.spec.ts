@@ -10,6 +10,8 @@ test('one frozen task region drives real candidate preview and formal adoption w
   const directory = await mkdtemp(path.join(base, 'run-'))
   await build({ entryPoints: [path.join(__dirname, 'helpers/taskRegionHandoffMain20261019.ts')], outfile: path.join(directory, 'main.cjs'),
     bundle: true, platform: 'node', format: 'cjs', packages: 'external' })
+  await build({ entryPoints: [path.join(root, 'src/main/workbench/htmlImport/htmlResourceAnalysisWorker.ts')], outfile: path.join(directory, 'htmlResourceAnalysisWorker.cjs'),
+    bundle: true, platform: 'node', format: 'cjs', packages: 'external' })
   const env = Object.fromEntries(Object.entries(process.env).filter((entry): entry is [string, string] => typeof entry[1] === 'string'))
   delete env.ELECTRON_RUN_AS_NODE
   const app = await electron.launch({ args: [path.join(directory, 'main.cjs')], env: { ...env,
@@ -30,6 +32,9 @@ test('one frozen task region drives real candidate preview and formal adoption w
     expect(facts.undo).toBe('applied')
     expect(facts.undoPreservedHeading).toBe(true)
     expect(facts.windowsRestored).toBe(true)
+    expect(facts.resizeFacts).toEqual({ viewport: { width:400,height:300 }, repeatedViewport: { width:400,height:300 },
+      actual: { width:400,height:300,feedback:'运行完成，反馈可见' }, oldHandleRejected:true,spentRejected:true,sameContext:true })
+    expect(facts.viewportRecovery).toEqual({ resizeFailureRetired:true, recovered:{width:500,height:320}, afterRevision:{width:500,height:320} })
   } finally { await app.close() }
   console.log(`Task region evidence: ${directory}`)
 })

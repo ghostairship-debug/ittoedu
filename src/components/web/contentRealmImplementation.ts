@@ -252,6 +252,11 @@ export async function mountWebContent(context: ComponentRuntimeContext<WebRuntim
       if (disposed || !scope.isActive()) return
       const layout = context.layout!.read()
       if (layout.mode !== 'flow-content') return
+      // A retained iframe can stay connected in hidden parking during a view
+      // transition. Its missing layout box is not a real zero-height result;
+      // an asynchronous report could otherwise collapse the restored host.
+      // A visible empty root still has a client rect and may report zero.
+      if (!root.getClientRects().length) return
       const extent = fragmentBox.extent(root, { width: layout.inlineSize, height: 0 }, 'flow-content')
       context.layout!.reportSize({ inlineSize: layout.inlineSize, blockSize: extent.height })
     }

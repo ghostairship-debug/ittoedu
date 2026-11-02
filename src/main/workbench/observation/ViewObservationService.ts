@@ -1,5 +1,5 @@
 import type { DocumentSnapshot } from '../../../shared/workbench/document'
-import type { ObservationClip, ObservationResult, ObservationServicePort } from '../../../shared/workbench/toolPorts'
+import type { ObservationClip, ObservationResult, ObservationServicePort, ObservationViewport } from '../../../shared/workbench/toolPorts'
 import sharp from 'sharp'
 import { observationSnapshotMatches, sameObservationIdentity, sameObservationTarget,
   type ViewObservationCapture, type ViewObservationIdentity, type ViewObservationSnapshot } from '../../../shared/workbench/viewObservation'
@@ -13,11 +13,11 @@ export interface ViewObservationServiceOptions {
   /** Return null unless the mounted host has the exact requested identity. */
   captureLive?(input: { identity: ViewObservationIdentity; signal?: AbortSignal }): Promise<ViewObservationCapture | null>
   captureIsolated(input: { identity: ViewObservationIdentity; snapshot: ViewObservationSnapshot;
-    signal?: AbortSignal }): Promise<ViewObservationCapture>
+    viewport?: ObservationViewport; signal?: AbortSignal }): Promise<ViewObservationCapture>
   images: ObservationImageStore
   /** One persistent Published player owns both the pixels and action handles. */
   observeInteractive?(input: { runId: string; identity: ViewObservationIdentity; snapshot: ViewObservationSnapshot;
-    projectId: string; signal?: AbortSignal }): Promise<ObservationResult>
+    projectId: string; viewport?: ObservationViewport; signal?: AbortSignal }): Promise<ObservationResult>
 }
 
 function assertFresh(snapshot: DocumentSnapshot, identity: ViewObservationIdentity, projectId: string): asserts snapshot is ViewObservationSnapshot {
@@ -47,7 +47,7 @@ export class ViewObservationService implements ObservationServicePort {
     assertFresh(snapshot, identity, input.projectId)
     if (this.options.observeInteractive) {
       const observation = await this.options.observeInteractive({ runId: input.runId, identity, snapshot: structuredClone(snapshot),
-        projectId: input.projectId, signal: input.signal })
+        projectId: input.projectId, viewport: input.viewport, signal: input.signal })
       if (input.signal?.aborted || this.stopped.has(input.runId)) throw new Error('观察已取消')
       // Interactive playback has its own host generation, distinct from an editor view token.
       if (!sameObservationTarget(observation.identity, identity))
@@ -61,11 +61,11 @@ export class ViewObservationService implements ObservationServicePort {
     let capture: ViewObservationCapture | null = null
     let source: ObservationResult['source'] = 'isolated-published'
     // A missing generation cannot prove the mounted host belongs to this view.
-    if (identity.viewGeneration && this.options.captureLive) {
+    if (!input.viewport && identity.viewGeneration && this.options.captureLive) {
       const candidate = await this.options.captureLive({ identity, signal: input.signal })
       if (candidate && sameObservationIdentity(candidate.identity, identity)) { capture = candidate; source = 'live' }
     }
-    if (!capture) capture = await this.options.captureIsolated({ identity, snapshot: structuredClone(snapshot), signal: input.signal })
+    if (!capture) capture = await this.options.captureIsolated({ identity, snapshot: structuredClone(snapshot), viewport: input.viewport, signal: input.signal })
     if (input.signal?.aborted || this.stopped.has(input.runId)) throw new Error('观察已取消')
     if (!sameObservationIdentity(capture.identity, identity)) throw new Error('捕获画面的宿主身份与请求目标不符')
     await this.assertCurrent(identity, input.projectId)

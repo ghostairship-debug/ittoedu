@@ -20,6 +20,7 @@ import { resolveExportDestination, workbenchExportWriter } from '../../src/main/
 import { buildDocumentExport } from '../../src/renderer/workbench/delivery/buildDocumentExport'
 
 vi.mock('../../src/renderer/export/loadPlayerBundle', () => ({ loadPlayerBundle: () => { throw new Error('PPTX sample does not require Player capture') } }))
+vi.mock('../../src/renderer/export/loadCompiledPlayerBundle', () => ({ loadCompiledPlayerBundle: () => { throw new Error('PPTX sample does not require compiled Player capture') } }))
 
 const roots: string[] = []
 afterEach(async () => { vi.restoreAllMocks(); for (const root of roots.splice(0)) await fs.rm(root, { recursive: true, force: true }) })
@@ -74,7 +75,7 @@ async function fixture() {
   return { root, host, document, service, operations, stop, current, context, saveWithFact, authorize, build }
 }
 
-it('saves the current V10 target once and reopens its real archive; normal save and project.save use the same owner', async () => {
+it('saves the current V10 target once and reopens its real archive through the formal save owner', async () => {
   const f = await fixture(), destination = path.join(f.root, '选择的文件.h5lesson')
   const first = await executeTaskFinishDelivery(f.service, f.context('finish:delivery'), { destination })
   expect(first).toMatchObject({ kind: 'read', data: { status: 'saved', path: destination, savedRevision: 0, dirty: false } })
@@ -175,7 +176,7 @@ it('delivers current V10 content from a created handle after canonical edits whi
   expect(await gateway.execute('run', 'save-old-target', { name: 'file.save', input: { target: oldTarget, destination } }))
     .toMatchObject({ kind: 'read', data: { status: 'saved', savedRevision: 4, currentRevision: 4, dirty: false } })
   expect(prepared).toBe(true)
-  expect(await gateway.execute('run', 'project-save-old-target', { name: 'project.save', input: { project: oldTarget } }))
+  expect(await gateway.execute('run', 'save-current-old-target', { name: 'file.save', input: { target: oldTarget } }))
     .toMatchObject({ kind: 'read', data: { status: 'saved', savedRevision: 4 } })
   const exported = path.join(f.root, '旧句柄当前内容.pptx')
   expect(await gateway.execute('run', 'export-old-target', { name: 'document.export', input: {

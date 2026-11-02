@@ -1,5 +1,5 @@
 {
-  "description": "将已授权课件的当前内容导出；省略 format 默认离线单 HTML，保留互动并可直接运行。也可明确选择 html-online、web-package、pptx、pdf 或 Flow 讲义 docx；PPTX/PDF/DOCX 是静态格式，不承载自编程序互动。相对 destination 使用任务工作空间根目录。消费与人工导出相同的 V10 格式生产器。返回 generated 或 written 的真实状态。同任务同文档的既有导出未被修改时可原位更新，其他同名文件不覆盖。",
+  "description": "将已授权课件的当前内容导出；省略 format 默认离线单 HTML，保留互动并可直接运行。也可明确选择 html-online、web-package、pptx、pdf 或 Flow 讲义 docx；PPTX/PDF/DOCX 是静态格式，不承载自编程序互动。相对 destination 使用任务工作空间根目录。消费与人工导出相同的 V10 格式生产器。返回 generated 或 written 的真实状态。同任务同文档的既有导出未被修改时可原位更新；新一轮修改也可通过明确 destination 更新当前仍打开文档的原导出，软件核实文件归属与版本。其他同名文件或已外改文件不覆盖。",
   "inputSchema": {
     "$defs": {
       "__schema0": {

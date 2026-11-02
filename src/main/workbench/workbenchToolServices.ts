@@ -294,8 +294,8 @@ export function installWorkbenchToolServices(context: { getMainWindow(): Browser
   const observations = new ViewObservationService({
     snapshot: documentId => host.registry.get(documentId).drain(),
     currentIdentity: documentId => host.registry.get(documentId).drainIdentity(),
-    observeInteractive: ({ runId, identity, snapshot, projectId, signal }) =>
-      htmlActionServices!.actions.observePublished(runId, { identity: { ...identity, projectId }, snapshot, signal }),
+    observeInteractive: ({ runId, identity, snapshot, projectId, viewport, signal }) =>
+      htmlActionServices!.actions.observePublished(runId, { identity: { ...identity, projectId }, snapshot, viewport, signal }),
     captureIsolated: input => {
       const entry = context.getRendererEntryUrl()
       if (!entry) throw new Error('当前没有可用的画面观察入口')

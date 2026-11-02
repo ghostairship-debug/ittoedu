@@ -1,25 +1,27 @@
 # 当前状态
 
-更新：2026-11-02。本轮直接执行[目标纠偏方案](../../果铃工作台-目标偏移审计与开发纠偏方案-2026-11-02.md)，M0、D1—D5的已授权、有界确定性工作均已 verified。**任务完成不等于产品全部完成：G01—G13中8项 achieved、5项 partial。**
+更新：2026-11-02。本轮从 HEAD `6aaff775` 直接续接，剩余产品能力与真实效率增量已完成集成验收。**13项目标中11项 achieved、2项 partial（G01/G13）。** 任务完成、实验裁决和外部阻塞不再替代产品能力。提交身份以本轮 Git 记录为准。
 
-实库 HEAD 仍为 `e0c74f7c6ba14c1af811584a69be3c860fefa083`，已有 Office、ACP、目标机制及本轮增量均保持未提交。任务、实际运行和目标条件以[执行检查点](EXECUTION_CHECKPOINT.json)为准，详细结果见[本轮结果](20261102-goal-correction/RESULT.md)，未完目标去向见[NEXT](NEXT_EXECUTION.md)。
+任务、原始监督回执、目标合同和未完条件以[执行检查点](EXECUTION_CHECKPOINT.json)为准；具体结果见[RESULT](20261102-goal-correction/RESULT.md)，接续条件见[NEXT](NEXT_EXECUTION.md)。聚合实证：`output/product-goals-20261102/product-final-review.json`。
 
-## 当前交付与验收
+## 真正完成的增量
 
-当前隔离包：`output/goal-correction-20261102/package-current-0727/win-unpacked/guoling-workbench.exe`。buildId 为 `2026-11-02T07-17-54-112Z-e0c74f7c6ba1`，app.asar SHA-256 为 `a4aa74c7bf47e6abfcd7109ac36f92aadceded9c126e7704e6d19390a4882ef0`。45份 dirty 源码和参考资源与包身份一致；123项回归、三目标类型检查及构建通过。
+- **G02**：新《打折与满减》首次合格587211ms（9分47.211秒），包含全部检查、失败定位和冷开复验；与旧《平均数》637934ms沿相同质量类别对照。围栏1325663ms及旧超时保留。当前包真人加注后AI局改22193ms、4请求/4工具，非目标精确保全并保存冷开。不同题目不推导因果墙钟提速，也不是普遍十分钟SLA。
+- **G05**：修复同页+唯一子对象误入general的披露；同输入、授权、注册表和消息重放，首轮63工具/87551字节→14工具/24242字节，工具载荷下降72.31%。实际局改首轮schema归因4611tokens。明确同文件导出可跨正常后续消息续写，并保留文件版本/权限/未决写入保护；导航回执、计算短输出和独立观察视口由软件承担机械工作。
+- **G04**：中央对象左右同时正文绕排已实现。真实编辑、逻辑选区、共享History、原生composition、动态增高/改宽、窄屏回退、3次冷开和正式离线导出通过。额外修复真实转场中隐藏iframe无布局框误报零高；同宽恢复、人输保留和可见空内容合法零高均通过。1145包原失败转场29门通过，初始70/70字、展开168/167字，均零重叠，运行时无History追加。没有冒称IME候选窗口已验。
 
-当前包真实Claude执行一次PPT局改，保存后单次丢回执、正常UI停止；独立新进程的产品记录同时保留 completed / saved 与 transportDelivery=undelivered，真实Codex从正式handoff回读早期要求、人工27号样式及当前原件，没有重放写入。干净profile的GLX Runtime冷开39项和实际画面通过，0网络请求、0页面错误；全部本轮App已退出、无未决监督任务，临时内置AI角色已恢复。证据：`output/goal-correction-20261102/d3-current-package-final-review.json`。
+## 当前交付与验证边界
 
-PPT常见对象编辑、严格同对象“人工样式→AI窄改”、共享History、保存冷开、独立LibreOffice视觉，以及中文DOCX分页/原件保全/刷新/离线/首次运行时准备均在明确版本通过。完整Office矩阵为2202/0354/0540等已记录版本；0727包另验实际PPT窄改和冷开，未冒称全矩阵重新运行。
+隔离目录包：`output/product-goals-20261102/package-current-1145/win-unpacked/guoling-workbench.exe`。buildId：`2026-11-02T11-42-28-933Z-6aaff775e5ae`；app.asar：`2a82105252018477bdaac32d7ea6f11c2486f2925f8a29ce6ebddec13ca75c81`。43份源码和56个包内文件绑定当前构建，三目标类型检查、生成资源校验及受影响消费者通过。
 
-## 目标差额
+便携单文件：`output/product-goals-20261102/delivery-current-1210/guoling-workbench-portable-0.0.1.exe`，由上述目录包按既定配置生成。已实际干净profile启动、核对运行中ASAR/原生依赖相同、Main图片解码与正常退出；从启动至核实主界面与载荷约20.54秒。完整身份及启动回执见 `portable-consumer-final/report.json`。
 
-已达成：G03、G06、G07、G08、G09、G10、G11、G12，均限各自记录的验收范围。
+安装包：`output/product-goals-20261102/installer-current-1215/guoling-workbench-0.0.1-x64.exe`。仅完成生成及全部嵌入文件核验；未执行安装，证据为 `installer-review.json`。
 
-仍为partial：G01首次授权完整旅程；G02首次合格速度及持续改善；G04中央双侧绕排；G05上下文/往返净改善；G13独立设备、首次授权及安装交付边界。新平均数作品首次合格637934ms，超过600000ms门槛，失败保留；不能以新的参考作品成功或局改功能通过消除效果目标。
+1110包真实人机接力与1145包之间902个Electron文件相同，仅构建身份和Web生成源码变化；后者已用当前包实际转场复验。Office/ACP旧完整矩阵保持各自版本边界，资源身份继续核对，没有重复或冒称最新全矩阵。
 
-## 恢复与授权
+## 实质未完与现场恢复
 
-恢复时先读 `AGENTS.md`、`DEVELOPMENT.md`、方案、检查点及原始回执，核实际进程/Git后再 `reconcile`；运行 `goal-audit` 继承全部未完条件。不重发已经保存或结果未知的写入，不按滞后的六项类型错误阻塞。
+**G01**干净profile的首次模型授权与完整创作旅程未验；**G13**独立设备与安装后使用未验；NSIS安装包已生成并核对全部载荷，尚未执行安装。当前便携包、本机干净配置和已有授权旅程不能代替。既定目标继续保留，具体触发条件见NEXT。
 
-未执行commit/push/reset/clean、替换安装版、正式发布、新增授权或复制私密凭据。未知文件/镜像、旧失败与非本轮进程保留。外部原生Agent只作为正式App的ACP被测通道，核心开发与整合由root承担。
+本轮App与便携启动器已正常关闭；临时模型角色恢复revision78，其他设置与原工作空间保留。全部失败、原件、人工修改、未知未跟踪文件及测试证据保留。仅本地Git提交；未push、发布或替换用户安装版，也未新增授权/复制凭据。

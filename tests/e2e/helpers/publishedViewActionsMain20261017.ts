@@ -124,6 +124,14 @@ export default { document: 'web', mount({root}) {
     const returnedColor = await paintedColor(returned), returnedPaintedPower7 = green(returnedColor)
     const sameWorker = first.identity.viewGeneration === second.identity.viewGeneration && first.identity.viewGeneration === returned.identity.viewGeneration
     const oneWindowForPages = windowCount === BrowserWindow.getAllWindows().length
+    const resized = await actions.observePublished('fixture-run', { ...target(), viewport: { width: 600, height: 400 } })
+    const resizedAgain = await actions.observePublished('fixture-run', target())
+    let staleAfterResize = false, spentAfterResize = false
+    try { await actions.clickPublished('fixture-run', { operationId: 'stale-size', handle: returned.elements.find(element => element.label === 'Add')!.handle }) } catch { staleAfterResize = true }
+    try { await actions.clickPublished('fixture-run', { operationId: 'add-once', handle: resizedAgain.elements.find(element => element.label === 'Add')!.handle }) } catch { spentAfterResize = true }
+    const resizeFacts = { actual: await viewport(resizedAgain), requested: resized.observationScope?.viewport,
+      state: state(resizedAgain), sameWorker: resized.identity.viewGeneration === returned.identity.viewGeneration,
+      oneWindow: windowCount === BrowserWindow.getAllWindows().length, staleAfterResize, spentAfterResize }
     published.releaseDocument(snapshot.documentId)
     let closedTargetRejected = false
     try { await actions.clickPublished('fixture-run', { operationId: 'closed-target', handle: returned.elements.find(element => element.tag === 'button' && element.label === 'Add')!.handle }) }
@@ -141,7 +149,7 @@ export default { document: 'web', mount({root}) {
     return { source: first.source, first: state(first), clicked: state(clicked), adjusted: state(adjusted), returned: state(returned), reopened: state(reopened),
       secondLocation: second.identity.locationId, returnedLocation: returned.identity.locationId,
       secondMarkerVisible, firstControlsHidden, secondPaintedBlue, secondColor, surfaceLayout, firstSurfaceOutOfLayout, secondSurfaceInViewport, knownFrameOwners,
-      sameWorker, oneWindowForPages, paintedPower7, paintedColor: color, returnedPaintedPower7, returnedColor,
+      sameWorker, oneWindowForPages, paintedPower7, paintedColor: color, returnedPaintedPower7, returnedColor, resizeFacts,
       firstImage: first.coverage, secondImage: second.coverage, returnedImageSize: returned.coverage,
       viewports: { first: firstViewport, second: secondViewport, returned: returnedViewport },
       repeatedOnlyOnce: repeat.generation === clicked.generation, newWorkerAfterClose: reopened.identity.viewGeneration !== first.identity.viewGeneration,

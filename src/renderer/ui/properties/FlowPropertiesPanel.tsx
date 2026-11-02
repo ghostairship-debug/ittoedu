@@ -279,14 +279,14 @@ function FlowMediaBlockProperties({
         onChange={(layout) => patchMedia({ layout })}
       />
       <div data-testid="flow-media-wrap">
-        <SelectField<'none' | 'left' | 'right'>
+        <SelectField<'none' | 'left' | 'right' | 'both'>
           label="文字环绕"
           disabled={Boolean(context.structureDisabledReason)}
           value={block.wrap ?? 'none'}
           options={[
             { value: 'none', label: '不环绕（独占一行）' },
             { value: 'left', label: '居左环绕' },
-            { value: 'right', label: '居右环绕' },
+            { value: 'right', label: '居右环绕' }, { value: 'both', label: '中央双侧环绕' },
           ]}
           onChange={(wrap) => patchMedia({ wrap })}
         />
@@ -517,14 +517,14 @@ function FlowBlockProperties({ context }: { context: FlowPropertiesContext }) {
               </button>
             </div>
             <div data-testid="flow-component-wrap">
-              <SelectField<'none' | 'left' | 'right'>
+              <SelectField<'none' | 'left' | 'right' | 'both'>
                 label="文字环绕"
                 disabled={Boolean(context.structureDisabledReason)}
                 value={block.wrap ?? 'none'}
                 options={[
                   { value: 'none', label: '不环绕（独占一行）' },
                   { value: 'left', label: '居左环绕' },
-                  { value: 'right', label: '居右环绕' },
+                  { value: 'right', label: '居右环绕' }, { value: 'both', label: '中央双侧环绕' },
                 ]}
                 onChange={(wrap) => commands.patchSelectedBlock({ wrap })}
               />
@@ -537,14 +537,14 @@ function FlowBlockProperties({ context }: { context: FlowPropertiesContext }) {
             <BufferedInput label="标题" value={block.title ?? ''} onCommit={(title) => commitBlockProperties(commands, { title })} />
             <BufferedInput label="高度" type="number" min={80} max={4000} value={block.height ?? FLOW_COMPONENT_BLOCK_HEIGHT}
               onCommit={(value) => { const height = Number(value); if (height >= 80 && height <= 4000) return commitBlockProperties(commands, { height }) }} />
-            <SelectField<'none' | 'left' | 'right'>
+            <SelectField<'none' | 'left' | 'right' | 'both'>
               label="文字环绕"
               disabled={Boolean(context.structureDisabledReason)}
               value={block.wrap ?? 'none'}
               options={[
                 { value: 'none', label: '不环绕（独占一行）' },
                 { value: 'left', label: '居左环绕' },
-                { value: 'right', label: '居右环绕' },
+                { value: 'right', label: '居右环绕' }, { value: 'both', label: '中央双侧环绕' },
               ]}
               onChange={(wrap) => commands.patchSelectedBlock({ wrap })}
             />
@@ -712,7 +712,7 @@ function flowDestinationChoices(view: FlowPropertiesView): FlowDestinationChoice
 function FlowComponentConversionControls({ context }: { context: FlowPropertiesContext }) {
   const choices = useMemo(() => flowDestinationChoices(context.view), [context.view])
   const [choiceKey, setChoiceKey] = useState(() => choices.at(-1)?.key ?? '')
-  const [wrap, setWrap] = useState<'none' | 'left' | 'right'>('none')
+  const [wrap, setWrap] = useState<'none' | 'left' | 'right' | 'both'>('none')
   const [pending, setPending] = useState(false)
   const controllerRef = useRef<AbortController | null>(null)
   useEffect(() => () => controllerRef.current?.abort(), [])
@@ -745,14 +745,14 @@ function FlowComponentConversionControls({ context }: { context: FlowPropertiesC
         options={choices.map((choice) => ({ value: choice.key, label: choice.label }))}
         onChange={setChoiceKey}
       />
-      <SelectField<'none' | 'left' | 'right'>
+      <SelectField<'none' | 'left' | 'right' | 'both'>
         label="文字环绕"
         disabled={Boolean(context.structureDisabledReason)}
         value={wrap}
         options={[
           { value: 'none', label: '不环绕（独占一行）' },
           { value: 'left', label: '居左环绕' },
-          { value: 'right', label: '居右环绕' },
+          { value: 'right', label: '居右环绕' }, { value: 'both', label: '中央双侧环绕' },
         ]}
         onChange={setWrap}
       />
@@ -792,8 +792,8 @@ export function FlowPropertiesPanel({ context }: { context: FlowPropertiesContex
             <SelectField<'content-width' | 'wide' | 'full-width'> label="版式" value={context.flowLayout?.width ?? 'content-width'} disabled={Boolean(context.structureDisabledReason)}
               options={[{ value: 'content-width', label: '正文宽' }, { value: 'wide', label: '较宽' }, { value: 'full-width', label: '全宽' }]}
               onChange={layout => context.commands.patchSelectedBlock({ layout })} />
-            <SelectField<'none' | 'left' | 'right'> label="文字环绕" value={context.flowLayout?.wrap ?? 'none'} disabled={Boolean(context.structureDisabledReason)}
-              options={[{ value: 'none', label: '不环绕（独占一行）' }, { value: 'left', label: '居左环绕' }, { value: 'right', label: '居右环绕' }]}
+            <SelectField<'none' | 'left' | 'right' | 'both'> label="文字环绕" value={context.flowLayout?.wrap ?? 'none'} disabled={Boolean(context.structureDisabledReason)}
+              options={[{ value: 'none', label: '不环绕（独占一行）' }, { value: 'left', label: '居左环绕' }, { value: 'right', label: '居右环绕' }, { value: 'both', label: '中央双侧环绕' }]}
               onChange={wrap => context.commands.patchSelectedBlock({ wrap })} />
             <BufferedInput label="正文占宽（%）" type="number" value={context.flowLayout?.widthPercent ?? (context.flowLayout?.wrap && context.flowLayout.wrap!=='none' ? 48 : 100)} min={1} max={100} step={1}
               onCommit={value=>commitBlockProperties(context.commands,{widthPercent:Number(value)})} />

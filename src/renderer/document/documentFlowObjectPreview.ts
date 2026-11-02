@@ -1,6 +1,6 @@
 import {Plugin,PluginKey,type EditorState} from 'prosemirror-state'
 import {Decoration,DecorationSet,type EditorView} from 'prosemirror-view'
-export interface FlowObjectDropPreview {sourceId:string;targetId:string;side:'before'|'after'|'inside';wrap:'none'|'left'|'right';widthPercent:number;height:number}
+export interface FlowObjectDropPreview {sourceId:string;targetId:string;side:'before'|'after'|'inside';wrap:'none'|'left'|'right'|'both';widthPercent:number;height:number}
 const key=new PluginKey<{value:FlowObjectDropPreview|null;decorations:DecorationSet}>('flow-object-drop-preview')
 function decorations(state:EditorState,value:FlowObjectDropPreview|null):DecorationSet {
  if(!value)return DecorationSet.empty
@@ -10,8 +10,9 @@ function decorations(state:EditorState,value:FlowObjectDropPreview|null):Decorat
  const position=value.side==='inside'?target.pos+1:value.side==='after'?target.pos+target.size:target.pos
  const preview=Decoration.widget(position,view=>{
   const ghost=view.dom.ownerDocument.createElement('div');ghost.dataset.flowLayoutPreview='';ghost.contentEditable='false';ghost.setAttribute('aria-hidden','true')
-  ghost.textContent=value.wrap==='none'?'放在正文中':value.wrap==='left'?'居左，文字绕排':'居右，文字绕排'
+  ghost.textContent=value.wrap==='none'?'放在正文中':value.wrap==='both'?'居中，两侧文字绕排':value.wrap==='left'?'居左，文字绕排':'居右，文字绕排'
   Object.assign(ghost.style,{boxSizing:'border-box',pointerEvents:'none',width:value.widthPercent+'%',height:Math.max(32,value.height)+'px',float:value.wrap,margin:value.wrap==='left'?'8px 20px 8px 0':value.wrap==='right'?'8px 0 8px 20px':'16px auto',border:'2px dashed #2563eb',background:'#eff6ff',color:'#1d4ed8',padding:'10px',font:'14px sans-serif',overflow:'hidden'})
+  if(value.wrap==='both'){ghost.style.float='left';ghost.style.clear='both';ghost.style.margin=`8px ${-(100+value.widthPercent)/2}% 8px ${(100-value.widthPercent)/2}%`;ghost.style.setProperty('--flow-bilateral','1')}
   return ghost
  },{side:-1,key:JSON.stringify(value),ignoreSelection:true})
  return DecorationSet.create(state.doc,[Decoration.node(source.pos,source.pos+source.size,{style:'display:none', 'data-flow-preview-source':''}),preview])

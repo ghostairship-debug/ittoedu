@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { shortJobOutput } from './shortJobOutput'
 import type { DocumentSnapshot } from '../../shared/workbench/document'
 import type { ToolResult, ToolTarget, ToolRunGrant, ToolResultImage, PreparedToolImage } from '../../shared/workbench/tools'
 import type { ImageGenerationRequest, ImageJobSnapshot, ImageModelSelection } from '../../shared/workbench/images'
@@ -539,9 +540,15 @@ export class HostToolCoordinator {
   async jobWait(runId: string, input: Omit<HostJobRef, 'runId'> & { milliseconds: number }, signal?: AbortSignal): Promise<ToolResult> {
     this.builtInRun(runId)
     if (!this.services.jobs) return this.serviceUnavailable('通用作业服务尚未配置')
-    const data = this.jobResult(await this.services.jobs.wait({ ...input, ...await this.readableJobRef(runId, input), callerRunId: runId, signal }))
+    const owner = await this.readableJobRef(runId, input)
+    const data = this.jobResult(await this.services.jobs.wait({ ...input, ...owner, callerRunId: runId, signal }))
     this.builtInRun(runId)
-    return { kind: 'read', data }
+    if (data.kind !== 'compute' || !data.terminal) return { kind: 'read', data }
+    let output: unknown
+    try { output = shortJobOutput(await this.services.jobs.logs({ ...owner, after: 0, limit: 33 }), input.jobId) }
+    catch { output = { complete: false, unavailable: true, source: { tool: 'job.logs', input: { job: input.jobId, after: 0 } } } }
+    this.builtInRun(runId)
+    return { kind: 'read', data: { ...data, output } }
   }
   async jobLogs(runId: string, input: Omit<HostJobRef, 'runId'> & { after?: number; limit?: number }): Promise<ToolResult> {
     this.builtInRun(runId)

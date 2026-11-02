@@ -4,7 +4,11 @@ import type { DocumentModel, DocumentSnapshot } from './document'
 import type { ObservationResult } from './toolPorts'
 
 const identity = z.string().trim().min(1).max(200)
+export const observationViewportSchema = z.object({ width: z.number().int().min(240).max(4096),
+  height: z.number().int().min(200).max(4096) }).strict()
+  .refine(value => value.width * value.height <= 4_194_304, '观察视口总面积不能超过 4194304 CSS 像素')
 const observeOptions = { detail: z.enum(['auto', 'low', 'high']).optional(),
+  viewport: observationViewportSchema.optional(),
   query: z.string().optional(), offset: z.number().int().nonnegative().optional(),
   limit: z.number().int().positive().optional(), cursor: z.string().min(1).optional(),
   clip: z.object({ x: z.number().finite(), y: z.number().finite(),
@@ -14,7 +18,7 @@ export const viewObserveInputSchema = z.union([
   z.object({ target: identity, ...observeOptions }).strict(),
   z.object({ project: z.string().min(1).max(1000).optional(), path: z.string().min(1).max(500), ...observeOptions }).strict(),
   z.object(observeOptions).strict(),
-])
+]).refine(value => !(value.cursor && value.viewport), '改变观察尺寸请省略 cursor 并重新观察')
 export type ViewObserveInput = z.infer<typeof viewObserveInputSchema>
 export const isViewObservationTool = (name: string): boolean =>
   name === 'view.observe' || name === 'view.click' || name === 'view.input'

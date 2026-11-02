@@ -13,7 +13,7 @@ import { isViewObservationTool } from '../../../shared/workbench/viewObservation
 import { projectProgrammaticModelResult } from './ProgrammaticToolRunner'
 
 /** Initial disclosure follows the captured focus, independently of write grants.
- * Default page/document references and multiple targets keep the general profile;
+ * Default page/document references and multiple independent targets keep the general profile;
  * precise edits can expand the same authorized catalog with tools.load. */
 function targetContextToolProfile(target?: ToolTarget): 'general' | 'text' | 'content-edit' {
   if (target?.kind === 'markdown-range' || target?.kind === 'text-selection') return 'text'
@@ -28,14 +28,61 @@ function targetContextToolProfile(target?: ToolTarget): 'general' | 'text' | 'co
 export function executionContextToolProfile(input: Pick<ExecutionStart, 'documents' | 'contentOutput'>): 'general' | 'text' | 'content-edit' {
   if (input.contentOutput) return targetContextToolProfile(input.contentOutput.target)
   const reference = input.documents.length === 1 ? input.documents[0] : undefined
-  return targetContextToolProfile(reference?.selection?.length === 1 ? reference.selection[0] : undefined)
+  const selection = reference?.selection ?? []
+  if (selection.length === 1) return targetContextToolProfile(selection[0])
+  // The canvas captures the active page together with its selected object.
+  // That page is context for the same focus, not a second editing target. Keep
+  // the captured selection and grants intact; only initial schema disclosure changes.
+  const objects = selection.filter((target): target is Extract<ToolTarget, { kind: 'course-instance' }> => target.kind === 'course-instance')
+  const focus = objects.length === 1 ? objects[0] : undefined
+  if (focus && selection.every(target => target === focus || target.kind === 'course-surface'
+    && target.surfaceId === focus.surfaceId && (target.stateId ?? null) === (focus.stateId ?? null)))
+    return targetContextToolProfile(focus)
+  return 'general'
 }
 
 /** Project a completed tool's working value; execution and original receipts stay with their owners. */
+export function projectContentApplyNavigation(result: ToolResult, sourceId: string): ToolResult {
+  if (result.kind !== 'read' || !result.data || typeof result.data !== 'object' || Array.isArray(result.data)) return result
+  const data = result.data as Record<string, unknown>
+  if (!['committed', 'unchanged'].includes(String(data.commit)) || !Array.isArray(data.insertedIds)) return result
+  if (Array.isArray(data.operations)) {
+    const targets = data.operations.flatMap((item, operationIndex) => {
+      const operation = item as ToolResult
+      if (operation.kind !== 'read' || !operation.data || typeof operation.data !== 'object' || Array.isArray(operation.data)) return []
+      const value = operation.data as Record<string, unknown>
+      if (!['committed', 'unchanged'].includes(String(value.commit))
+        || typeof value.path !== 'string' && typeof value.currentPath !== 'string') return []
+      return [{ operationIndex: value.operationIndex ?? operationIndex, path: value.path, currentPath: value.currentPath, commit: value.commit,
+        frame: value.frame, viewport: value.viewport }]
+    })
+    const { targets: previousTargets, ...rest } = data
+    return { ...result, data: { targets, fileDetailsSource: { sourceId, read: { tool: 'context.read', input: { sourceId } } },
+      ...rest, ...(previousTargets === undefined ? {} : { originalTargets: previousTargets }),
+      operations: data.operations.map(item => projectContentApplyNavigation(item as ToolResult, sourceId)) } }
+  }
+  if (!Array.isArray(data.files)) return result
+  let reduced = false
+  const files = data.files.map(value => {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return value
+    const file = value as Record<string, unknown>
+    if (!['source', 'style'].includes(String(file.type)) || typeof file.path !== 'string'
+      || file.path === data.path || file.path === data.currentPath || 'complete' in file || 'content' in file) return value
+    reduced = true
+    // Every real path remains discoverable. Repeated outer geometry and builtin
+    // implementation instructions are available in the unchanged tool journal.
+    const { frame: _frame, viewport: _viewport, summary: _summary, ...retained } = file
+    return retained
+  })
+  return reduced ? { ...result, data: { ...data, files, fileDetailsSource: { sourceId,
+    read: { tool: 'context.read', input: { sourceId } }, notice: '保留所有实际文件路径；源码/样式的重复目录元数据按需回读，正文未因列出路径而视为已读取。' } } } : result
+}
+
 export function projectCurrentToolResult(tool: ProgrammaticJournalEntry, records: readonly ProgrammaticJournalEntry[], sourceId: string): ToolResult | undefined {
   if (!tool.result) return tool.result
   let projected = modelToolResult(tool.call.name, tool.call.name === 'programmatic.execute'
-    ? projectProgrammaticModelResult(tool, records)! : tool.result, { sourceId })
+    ? projectProgrammaticModelResult(tool, records)! : tool.call.name === 'project.apply'
+      ? projectContentApplyNavigation(tool.result, sourceId) : tool.result, { sourceId })
   if (projected.kind === 'read' && projected.data && typeof projected.data === 'object'
     && (isViewObservationTool(tool.call.name) || isHtmlActionTool(tool.call.name)))
     projected = { ...projected, data: { ...projected.data, fullObservationSource: { sourceId,

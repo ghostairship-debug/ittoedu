@@ -19,7 +19,7 @@ export type FlowBlockFormatSpec =
 export interface FlowBodyDestination {
   readonly parentBlockId: string | null
   readonly index: number
-  readonly wrap?: 'none' | 'left' | 'right'
+  readonly wrap?: 'none' | 'left' | 'right' | 'both'
 }
 
 export const FLOW_TEXT_REJECT_SHARED_DOCUMENT = '请在正文编辑器中编辑此内容'

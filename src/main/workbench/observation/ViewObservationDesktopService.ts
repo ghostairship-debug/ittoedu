@@ -15,6 +15,7 @@ import { observationSnapshotMatches } from '../../../shared/workbench/viewObserv
 import { observationDocumentIdentityMatches, type ViewObservationDocumentIdentity } from './observationSourceIdentity'
 import type { PublishedActionPreviewPort, PublishedActionTarget } from './HtmlActionService'
 import type { PublishedActionAutomationContext } from './HtmlActionDesktopPort'
+import type { ObservationViewport } from '../../../shared/workbench/toolPorts'
 type ObservationWorkerResult = Awaited<ReturnType<PublishedActionPreviewPort['readState']>> & { rect?: { x: number; y: number; width: number; height: number } }
 
 export interface ViewObservationDesktopOptions {
@@ -30,6 +31,7 @@ export interface ViewObservationDesktopOptions {
 
 interface PublishedCaptureTarget {
   locationId: string; stateId?: string | null; instanceId?: string; spatialFrameId?: string; staticExport?: true; signal?: AbortSignal; interactive?: true
+  viewport?: ObservationViewport
 }
 type PublishedCapture = Omit<ViewObservationCapture, 'identity'>
 
@@ -55,7 +57,7 @@ export interface PublishedObservationCaptureJob {
 }
 
 export class ViewObservationDesktopService implements PublishedActionPreviewPort {
-  private readonly owned = new Map<string, { context: PublishedActionAutomationContext; host: PreparedObservationHost }>()
+  private readonly owned = new Map<string, { context: PublishedActionAutomationContext; host: PreparedObservationHost; viewport?: ObservationViewport }>()
   private readonly stopped = new Set<string>()
   private readonly compilation: Pick<InMemoryComponentCompilation, 'compile'>
   constructor(private readonly options: ViewObservationDesktopOptions) {
@@ -68,9 +70,9 @@ export class ViewObservationDesktopService implements PublishedActionPreviewPort
     this.options.liveCapture ? this.options.liveCapture(input) : null
 
   captureIsolated = async (input: { identity: ViewObservationIdentity; snapshot: ViewObservationSnapshot;
-    signal?: AbortSignal }): Promise<ViewObservationCapture> => {
+    viewport?: ObservationViewport; signal?: AbortSignal }): Promise<ViewObservationCapture> => {
     const { project, resources } = input.snapshot.model
-    const capture = await this.capturePrepared({ ...input.identity, signal: input.signal }, async resource => {
+    const capture = await this.capturePrepared({ ...input.identity, viewport: input.viewport, signal: input.signal }, async resource => {
       const publication = await buildPublishedCourseV3({ project, assetBytes: resources.assets, componentFiles: resources.components }, { compilation: this.compilation,
         assetUrl: (asset, content) => resource(content, asset.mimeType ?? 'application/octet-stream').url })
       return { payload: publication.payload, diagnostics: publication.diagnostics.map(diagnostic => diagnostic.message) }
@@ -137,6 +139,8 @@ export class ViewObservationDesktopService implements PublishedActionPreviewPort
     if (!observationSnapshotMatches(input.snapshot, input.identity, input.identity.projectId)) throw new Error('课件观察来源与正式文档不符')
     await this.assertCurrentSource(input.identity)
     const previous = this.owned.get(input.runId)
+    const viewport = input.viewport ?? (previous?.context.identity.documentId === input.identity.documentId
+      && previous.context.identity.epoch === input.identity.epoch ? previous.viewport : undefined)
     const sameSource = previous && previous.context.identity.documentId === input.identity.documentId
       && previous.context.identity.epoch === input.identity.epoch && previous.context.identity.revision === input.identity.revision
       && previous.context.identity.projectId === input.identity.projectId && !previous.host.worker.isDestroyed()
@@ -145,7 +149,7 @@ export class ViewObservationDesktopService implements PublishedActionPreviewPort
     else {
       if (previous) { this.owned.delete(input.runId); await previous.host.close() }
       const { project, resources } = input.snapshot.model
-      host = await this.openPrepared({ ...input.identity, interactive: true, signal: input.signal }, async resource => {
+      host = await this.openPrepared({ ...input.identity, viewport, interactive: true, signal: input.signal }, async resource => {
         const publication = await buildPublishedCourseV3({ project, assetBytes: resources.assets, componentFiles: resources.components }, {
           compilation: this.compilation, assetUrl: (asset, content) => resource(content, asset.mimeType ?? 'application/octet-stream').url })
         return { payload: publication.payload, diagnostics: publication.diagnostics.map(item => item.message) }
@@ -154,8 +158,11 @@ export class ViewObservationDesktopService implements PublishedActionPreviewPort
     try {
       if (this.stopped.has(input.runId) || input.signal?.aborted) throw new Error('课件观察已停止')
       const current = await host.read()
-      if (current.locationId !== input.identity.locationId || current.stateId !== (input.identity.stateId ?? null)) {
-        const size = observationViewport(input.snapshot.model.project, input.identity.locationId)
+      const locationChanged = current.locationId !== input.identity.locationId || current.stateId !== (input.identity.stateId ?? null)
+      const [width, height] = host.worker.getContentSize()
+      const size = viewport ?? (sameSource && !locationChanged ? { width, height }
+        : observationViewport(input.snapshot.model.project, input.identity.locationId))
+      if (locationChanged || width !== size.width || height !== size.height) {
         host.worker.setContentSize(Math.ceil(size.width), Math.ceil(size.height))
         await host.select(input.identity.locationId, input.identity.stateId ?? null, size)
       }
@@ -163,7 +170,7 @@ export class ViewObservationDesktopService implements PublishedActionPreviewPort
       const context: PublishedActionAutomationContext = { kind: 'published', runId: input.runId,
         identity: { ...input.identity, viewGeneration: host.token }, webContentsId: host.worker.webContents.id,
         frameProcessId: frame.processId, frameToken: frame.frameToken, url: frame.url }
-      this.owned.set(input.runId, { context, host })
+      this.owned.set(input.runId, { context, host, viewport })
       await this.currentContext(context)
       return context
     } catch (error) { this.owned.delete(input.runId); await host.close(); throw error }
@@ -244,7 +251,7 @@ export class ViewObservationDesktopService implements PublishedActionPreviewPort
     const payloadPath = `/_observation/${token}/payload/${randomUUID()}`
     const payloadUrl = `courseware-editor://app${payloadPath}`
     const workerInput = (diagnostics: string[]) => ({ published: project, locationId: target.locationId, stateId: target.stateId ?? null,
-      viewport: observationViewport(project, target.locationId),
+      viewport: target.viewport ?? observationViewport(project, target.locationId),
       bootstrapBaseUrl: bootstrap.baseUrl, diagnostics,
       instanceId: target.instanceId, spatialFrameId: target.spatialFrameId, staticExport: target.staticExport, interactive: target.interactive })
     let payload = workerInput(publication.diagnostics)
@@ -278,7 +285,7 @@ export class ViewObservationDesktopService implements PublishedActionPreviewPort
     network.activateDocument(owner)
     network.replacePreviewLease({ leaseId: token, connectOrigins: project.logic?.network?.connectOrigins ?? [], remoteAssetUrls: [] }, owner)
     configureRestrictedSession(isolatedSession, url => network.allowsRequest(url))
-    const size = observationViewport(project, input.locationId)
+    const size = input.viewport ?? observationViewport(project, input.locationId)
     const worker = new BrowserWindow({ width: size.width, height: size.height, useContentSize: true, frame: false, show: false,
       ...(input.interactive !== true ? { transparent: true, backgroundColor: '#00000000' } : {}),
       skipTaskbar: true, webPreferences: { session: isolatedSession, contextIsolation: true, sandbox: true,
@@ -336,7 +343,7 @@ export class ViewObservationDesktopService implements PublishedActionPreviewPort
           target = next; project = publication.payload; binarySources.clear(); bootstrap.clear()
           payload = workerInput(publication.diagnostics)
           network.replacePreviewLease({ leaseId: token, connectOrigins: project.logic?.network?.connectOrigins ?? [], remoteAssetUrls: [] }, owner)
-          const size = observationViewport(project, target.locationId)
+          const size = target.viewport ?? observationViewport(project, target.locationId)
           worker.setContentSize(Math.ceil(size.width), Math.ceil(size.height))
           initial = await run()
         }, '观察宿主准备或截图无响应'),

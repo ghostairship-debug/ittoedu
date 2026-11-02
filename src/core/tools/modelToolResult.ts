@@ -138,7 +138,8 @@ function legacyModelToolResult(toolName: string, result: ToolResult): ToolResult
     if (toolName === 'job.status' && result.data.detail === 'diagnostic') return result
     if (['job.status', 'job.wait', 'job.cancel'].includes(toolName) && record(result.data.snapshot))
       return { ...result, data: { kind: result.data.kind, jobId: result.data.jobId, status: result.data.status,
-        terminal: result.data.terminal, snapshot: projectModelJobSnapshot(result.data.snapshot) } }
+        terminal: result.data.terminal, snapshot: projectModelJobSnapshot(result.data.snapshot),
+        ...(toolName === 'job.wait' && result.data.output ? { output: result.data.output } : {}) } }
     if (['delegate.start', 'delegate.agent', 'delegate.resume', 'delegate.readonly', 'local.run'].includes(toolName))
       return { ...result, data: projectModelJobSnapshot(result.data) }
   }

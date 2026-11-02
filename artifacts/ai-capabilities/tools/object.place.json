@@ -314,7 +314,8 @@
                     "enum": [
                       "none",
                       "left",
-                      "right"
+                      "right",
+                      "both"
                     ],
                     "type": "string"
                   }

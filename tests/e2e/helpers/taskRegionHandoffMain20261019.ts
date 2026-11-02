@@ -2,6 +2,7 @@ import { testContainerInstance } from '../../helpers/glxWorkFixture'
 import { app, BrowserWindow, webContents } from 'electron'
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
+import { isDeepStrictEqual } from 'node:util'
 import { registerPrivilegedSchemes } from '../../../src/main/protocols'
 import { TaskHtmlPreview } from '../../../src/main/workbench/observation/TaskHtmlPreview'
 import { HtmlActionService } from '../../../src/main/workbench/observation/HtmlActionService'
@@ -72,7 +73,10 @@ Reflect.set(globalThis, 'runTaskRegionHandoff', async () => {
     dirty: true, saving: false, recoverable: true, undoDepth: 0, redoDepth: 0 }
   const preview = new TaskHtmlPreview({ readDocument: async () => candidate,
     agentBundlePath: path.join(root, 'dist-renderer/html-preview-agent.iife.js'), taskTargetContext: async () => frozen })
-  const actions = new HtmlActionService({ preview, frames: new HtmlActionDesktopPort(), images: new ObservationImageStore() })
+  const frames = new HtmlActionDesktopPort(), originalFrameToken = frames.frameToken.bind(frames)
+  let failFrameToken = false
+  frames.frameToken = async context => { if (failFrameToken) { failFrameToken = false; throw new Error('Fixture: resized frame identity unavailable once') } return originalFrameToken(context) }
+  const actions = new HtmlActionService({ preview, frames, images: new ObservationImageStore() })
   const baselineWindows = BrowserWindow.getAllWindows().length
   try {
     await actions.beginDocumentRun('child', { documentId: candidate.documentId, epoch: candidate.epoch, revision: candidate.revision })
@@ -83,6 +87,25 @@ Reflect.set(globalThis, 'runTaskRegionHandoff', async () => {
     const clicked = await actions.click('child', { operationId: 'actual-click', handle: observed.elements.find(element => element.label === '运行')!.handle })
     const feedback = await frame.executeJavaScript(`document.getElementById('feedback').textContent`)
     await fs.writeFile(path.join(directory, 'candidate-clicked.png'), (await actions.readResource('child', clicked.image.resourceId)).bytes)
+    const documentTarget = { documentId: candidate.documentId, epoch: candidate.epoch, revision: 0 }
+    const resized = await actions.executeDocumentAction('child', documentTarget, { name: 'html.observe', input: { viewport: { width: 400, height: 300 } } })
+    const again = await actions.executeDocumentAction('child', documentTarget, { name: 'html.observe', input: {} })
+    let oldHandleRejected = false, spentRejected = false
+    try { await actions.click('child', { operationId: 'after-size-old', handle: clicked.elements[0]!.handle }) } catch { oldHandleRejected = true }
+    try { await actions.click('child', { operationId: 'actual-click', handle: 'unused' }) } catch { spentRejected = true }
+    const resizedFrame = await frame.executeJavaScript(`({width:innerWidth,height:innerHeight,feedback:document.getElementById('feedback').textContent})`)
+    const resizeFacts = { viewport: 'viewport' in resized ? resized.viewport : undefined, repeatedViewport: 'viewport' in again ? again.viewport : undefined,
+      actual: resizedFrame, oldHandleRejected, spentRejected, sameContext: (await preview.automationContextForDocument({ ...documentTarget, runId:'child' })).lease.loadId === context.lease.loadId }
+    failFrameToken = true
+    let resizeFailureRetired = false
+    try { await actions.executeDocumentAction('child', documentTarget, { name: 'html.observe', input: { viewport: { width: 500, height: 320 } } }) }
+    catch (error) { resizeFailureRetired = String(error).includes('Fixture: resized frame identity unavailable once') }
+    const recovered = await actions.executeDocumentAction('child', documentTarget, { name: 'html.observe', input: {} })
+    candidate.revision = 1
+    if (candidate.model.kind === 'text') candidate.model.source += '\n<!-- new canonical revision -->'
+    const afterRevision = await actions.executeDocumentAction('child', { ...documentTarget, revision: 1 }, { name: 'html.observe', input: {} })
+    const viewportRecovery = { resizeFailureRetired, recovered: 'viewport' in recovered ? recovered.viewport : undefined,
+      afterRevision: 'viewport' in afterRevision ? afterRevision.viewport : undefined }
     const before = snapshot()
     const result = await coordinator.execute('parent', 'adopt', 'adopt', 'project.apply', { path: targetPath, intent: 'insert', from: 'delegate-fixture@candidate.html' })
     if (result.kind !== 'read' || (result.data as { commit?: string }).commit !== 'committed') throw new Error(`Adoption did not commit: ${JSON.stringify(result)}`)
@@ -98,9 +121,10 @@ Reflect.set(globalThis, 'runTaskRegionHandoff', async () => {
     const undo = await session.execute({ documentId: current.documentId, epoch: current.epoch, baseRevision: current.revision,
       operationId: 'undo-adoption', actor: 'human', mutation: { type: 'undo' } })
     actions.stopRun('child')
-    return { geometry, feedback, source: observed.source, region, prepared, measured, formalFrame, reopenedFrame,
+    return { geometry, feedback, source: observed.source, region, prepared, measured, formalFrame, reopenedFrame, resizeFacts, viewportRecovery,
       receipt: { frame: receipt.frame, viewport: receipt.viewport }, preservedHeading, undoDepth,
-      undo: undo.status, undoPreservedHeading: JSON.stringify(snapshot().model.project.instances) === JSON.stringify({ heading }),
+      undo: undo.status, undoPreservedHeading: isDeepStrictEqual(snapshot().model.project.instances, before.model.project.instances),
+      undoInstances: { before: before.model.project.instances, after: snapshot().model.project.instances },
       windowsRestored: BrowserWindow.getAllWindows().length === baselineWindows }
   } finally { actions.stopRun('child'); preview.dispose() }
 })

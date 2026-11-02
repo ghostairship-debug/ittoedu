@@ -140,6 +140,7 @@ export interface ObservationImageResource {
   byteLength: number
 }
 export interface ObservationClip { x: number; y: number; width: number; height: number }
+export interface ObservationViewport { width: number; height: number }
 
 export interface ObservationServicePort {
   /**
@@ -159,6 +160,8 @@ export interface ObservationServicePort {
     viewGeneration?: string
     /** Rectangle in the original preview viewport's CSS pixels. */
     clip?: ObservationClip
+    /** Actual task-owned preview size; never changes the author's viewport. */
+    viewport?: ObservationViewport
     signal?: AbortSignal
   }): Promise<ObservationResult>
   /** Runtime-only input in the same isolated observation session, never an author edit. */

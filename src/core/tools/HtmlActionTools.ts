@@ -1,6 +1,7 @@
 import { z } from 'zod'
 import type { ToolDefinition, ToolResult } from '../../shared/workbench/tools'
 import { toolRegistrationFor } from './ToolRegistration'
+import { observationViewportSchema } from '../../shared/workbench/viewObservation'
 
 const noInput = z.object({}).strict()
 /** Transient handle from the most recent html.observe or action receipt. */
@@ -10,6 +11,7 @@ const handle = z.string().min(1).max(256)
  * action operationId are supplied and checked by Main. */
 export const htmlActionToolSchemas = {
   'html.observe': z.object({ purpose: z.enum(['required', 'diagnostic']).optional(), query: z.string().optional(),
+    viewport: observationViewportSchema.optional(),
     offset: z.number().int().nonnegative().optional(), limit: z.number().int().positive().optional(),
     cursor: z.string().min(1).optional(), detail: z.enum(['overview', 'full']).optional() }).strict(),
   'html.navigate': z.object({ index: z.number().int().min(0).max(10_000) }).strict(),
@@ -23,7 +25,7 @@ export const isHtmlActionTool = (name: string): name is HtmlActionToolName =>
   Object.hasOwn(htmlActionToolSchemas, name)
 
 const descriptions: Record<HtmlActionToolName, string> = {
-  'html.observe': '观察本任务冻结的当前 HTML 文档在受管预览中的真实状态和截图；返回本次观察的 generation 和短元素句柄。无 cursor 时新捕获；query 过滤元素，offset/limit 分页，detail 默认 overview，full 返回所需完整详情。cursor 续页沿用原 generation 和过滤条件；旧 cursor 失效时直接 html.observe 携原 query 重新捕获，无需先查目录。优先复用当前版本预览；没有可用预览时由宿主准备任务独立预览，不切换用户标签。源码修改后重新观察；未观察到真实画面时明确失败。purpose 默认 required；用户明确要求的检查必须保持 required，仅你自行添加的可选诊断可用 diagnostic。诊断不可用保留未验证说明，不表示检查通过，也不改变权限。',
+  'html.observe': '可用 viewport:{width,height} 指定隔离预览 CSS 尺寸；后续省略沿用，尺寸变更不与 cursor 同传，新观察使用新句柄并保留同版本运行状态。观察本任务冻结的当前 HTML 文档在受管预览中的真实状态和截图；返回本次观察的 generation 和短元素句柄。无 cursor 时新捕获；query 过滤元素，offset/limit 分页，detail 默认 overview，full 返回所需完整详情。cursor 续页沿用原 generation 和过滤条件；旧 cursor 失效时直接 html.observe 携原 query 重新捕获，无需先查目录。优先复用当前版本预览；没有可用预览时由宿主准备任务独立预览，不切换用户标签。源码修改后重新观察；未观察到真实画面时明确失败。purpose 默认 required；用户明确要求的检查必须保持 required，仅你自行添加的可选诊断可用 diagnostic。诊断不可用保留未验证说明，不表示检查通过，也不改变权限。',
   'html.navigate': '将当前 HTML 预览翻到指定页码（从 0 开始），随后返回该页真实状态和截图；只在本任务绑定的页面内操作。',
   'html.click': '点击最近一次 HTML 观察返回的元素句柄，随后重新读取真实状态和截图。旧句柄或页面变化会冲突；不得重复猜测同一点击是否发生。',
   'html.input': '向最近一次 HTML 观察返回的可编辑元素句柄输入 value，并触发页面输入事件，随后重新读取真实状态和截图。不可输入密码或文件控件。',

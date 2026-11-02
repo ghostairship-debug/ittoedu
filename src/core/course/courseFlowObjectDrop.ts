@@ -3,7 +3,7 @@ import type {ComponentEdit} from '../../shared/contracts/component-platform/oper
 import {componentContainerForInstance,componentDefinitionBuiltinKey,owningContainer,componentIsLocked} from '../../shared/contracts/component-platform/project'
 import {isNativeFlowLayoutGroup} from '../../shared/flowNativeLayout'
 import {flowPlacementEdits,flowReadingMembers,flowBodyLayoutEdits} from './courseFlowEdits'
-export interface FlowObjectDrop {sourceId:string;targetId:string;side:'before'|'after'|'inside';wrap:'none'|'left'|'right';widthPercent?:number}
+export interface FlowObjectDrop {sourceId:string;targetId:string;side:'before'|'after'|'inside';wrap:'none'|'left'|'right'|'both';widthPercent?:number}
 export function flowObjectCanWrap(project:CourseProjectV10,id:string):boolean {
  const instance=project.instances[id],definition=instance&&project.definitions[instance.definitionId],key=componentDefinitionBuiltinKey(definition)
  if(!instance||instance.flowPlacement||instance.container||componentIsLocked(project,id)||['guoling.text','guoling.document-block'].includes(key??''))return false

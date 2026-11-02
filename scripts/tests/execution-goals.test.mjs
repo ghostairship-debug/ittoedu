@@ -1,4 +1,51 @@
 import test from 'node:test'
+
+const scope = { kind: 'scope', reason: 'Separate product acceptance from investigation', reviewRef: 'decision.md', decisionRef: 'decision.md' };
+
+test('purpose is part of the preserved contract, while legacy omitted purpose remains valid', t => {
+  const f=fixture(t);
+  f.ok('goal-audit');
+  const criteria=f.ppt.criteria.map(c=>({...c,purpose:'capability'}));
+  f.reject(/scope change/,'goals',f.write('purpose-without-scope.json',{goals:[{...f.ppt,criteria}]}));
+  f.ok('goals',f.write('purpose-with-scope.json',{goals:[{...f.ppt,criteria,change:scope}]}));
+  f.ok('goal-audit');
+});
+
+test('invalid explicit acceptance purposes are rejected atomically', t => {
+  const f=fixture(t), before=f.state();
+  for(const purpose of [null,'','investigated'])
+    f.reject(/invalid acceptance purpose/,'goals',f.write('invalid-purpose.json',{goals:[{...f.ppt,criteria:f.ppt.criteria.map(c=>({...c,purpose})),change:scope}]}));
+  assert.deepEqual(f.state(),before);
+});
+
+test('partial cannot hide an unrecorded product gap behind all verified conditions', t => {
+  const f=fixture(t);
+  f.write('preview.json',{passed:true,objectCoediting:true,savedAndColdOpened:true});
+  const criteria=f.ppt.criteria.map(c=>({...c,status:'verified',evidence:[f.evidence('PPT.'+c.id,c.requires)]}));
+  f.reject(/partial goal has no unfinished necessary condition/,'goals',f.write('all-verified-partial.json',{goals:[{...f.ppt,criteria}]}));
+  f.ok('goals',f.write('actually-achieved.json',{goals:[{...f.ppt,status:'achieved',criteria}]}));
+});
+
+test('experiments and blocker reviews retain their results but cannot replace a required product condition', t => {
+  const f=fixture(t);
+  for(const purpose of ['experiment','blocker']){
+    const criteria=f.ppt.criteria.map(c=>({...c,purpose}));
+    f.reject(/required capability\/effect condition/,'goals',f.write('no-product.json',{goals:[{...f.ppt,criteria,change:scope}]}));
+    f.reject(/required capability\/effect condition/,'goals',f.write('optional-product.json',{goals:[{...f.ppt,criteria:[criteria[0],{...criteria[1],purpose:'capability',required:false}],change:scope}]}));
+  }
+});
+
+test('completed investigations and blockers leave a separately identified product capability pending', t => {
+  const f=fixture(t);
+  for(const purpose of ['experiment','blocker']){
+    const criteria=[{...f.ppt.criteria[0],purpose,status:'verified',evidence:[f.evidence('PPT.preview')]},{...f.ppt.criteria[1],purpose:'capability'}];
+    const result=f.ok('goals',f.write('honest-partial.json',{goals:[{...f.ppt,criteria,change:scope}]}));
+    assert.deepEqual(result.goals.find(g=>g.id==='PPT').remaining.map(c=>({id:c.id,purpose:c.purpose})),[{id:'coedit',purpose:'capability'}]);
+    f.reject(/every necessary condition/,'goals',f.write('investigation-is-not-product.json',{goals:[{id:'PPT',status:'achieved'}]}));
+    f.reject(/acceptance scope/,'goals',f.write('relabel-old-evidence.json',{goals:[{id:'PPT',criteria:[criteria[0],{...criteria[1],status:'verified',evidence:[f.evidence('PPT.preview',['human-ai','save-cold'])]}]}]}));
+  }
+});
+
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import os from 'node:os'

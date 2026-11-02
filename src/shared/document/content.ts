@@ -27,21 +27,21 @@ export type DocumentBlock = { id: string } & (
    * `source` is a written `assets/...` reference kept as written; software binds `assetId` to the asset
    * now at that path and drops the binding when it goes. Without `source`, `assetId` is required.
    */
-  | { type: 'media'; assetId?: string; source?: string; mediaKind: 'image' | 'audio' | 'video'; altText?: string; caption?: FlowTextContent; layout: 'content-width' | 'wide' | 'full-width'; wrap?: 'none' | 'left' | 'right'; crop?: { left: number; top: number; right: number; bottom: number }; cropX?: number; cropY?: number }
+  | { type: 'media'; assetId?: string; source?: string; mediaKind: 'image' | 'audio' | 'video'; altText?: string; caption?: FlowTextContent; layout: 'content-width' | 'wide' | 'full-width'; wrap?: 'none' | 'left' | 'right' | 'both'; crop?: { left: number; top: number; right: number; bottom: number }; cropX?: number; cropY?: number }
   | { type: 'table'; caption?: FlowTextContent; headerEnabled?: boolean; columns: { id: string; header: FlowTextContent }[]; rows: { id: string; cells: Record<string, FlowTextContent> }[]; merges?: TableMergeRegion[] }
   | { type: 'chart'; chart: NativeChartContent; height: number }
   | { type: 'formula'; formulaId: string; latex: string; accessibleText: string; style?: MathStyle }
   | { type: 'code'; code: string; language?: string }
   | { type: 'callout'; tone: 'note' | 'example' | 'warning' | 'conclusion'; title?: FlowTextContent; body: FlowTextContent }
   | { type: 'section'; title: FlowTextContent; collapsedByDefault: boolean; blocks: DocumentBlock[] }
-  | { type: 'component'; component: { packageId: string; version: string }; props: Record<string, unknown>; staticFallbackAssetId: string; wrap?: 'none' | 'left' | 'right' }
+  | { type: 'component'; component: { packageId: string; version: string }; props: Record<string, unknown>; staticFallbackAssetId: string; wrap?: 'none' | 'left' | 'right' | 'both' }
   /** A V10 editor projection. `id` is the formal instance identity; the host owns content and geometry. */
   | { type: 'course-instance'; title?: string; blocks?: DocumentBlock[] }
   /**
    * A named course component (`components/<name>.html`). `project.components` owns its definition; the block
    * keeps only the name and its own instance fields, and shows a placeholder titled `title` until the name exists.
    */
-  | { type: 'course-component'; name: string; title?: string; height?: number; wrap?: 'none' | 'left' | 'right' }
+  | { type: 'course-component'; name: string; title?: string; height?: number; wrap?: 'none' | 'left' | 'right' | 'both' }
 )
 
 export const documentIdSchema = z.string().min(1)
@@ -79,7 +79,7 @@ const media = z.object({ ...base, type: z.literal('media'), assetId: documentIdS
   source: z.string().min(1).max(2000).refine(value => assetReferencePath(value) !== null, '素材引用须指向 assets/ 下的文件').optional(),
   mediaKind: z.enum(['image', 'audio', 'video']), altText: z.string().max(4000).optional(),
   caption: documentTextContentSchema.optional(), layout: z.enum(['content-width', 'wide', 'full-width']),
-  wrap: z.enum(['none', 'left', 'right']).optional(), crop: documentMediaCropSchema.optional(),
+  wrap: z.enum(['none', 'left', 'right', 'both']).optional(), crop: documentMediaCropSchema.optional(),
   cropX: cropFraction.optional(), cropY: cropFraction.optional(),
 }).strict().superRefine((block, ctx) => {
   if (block.assetId === undefined && block.source === undefined) ctx.addIssue({ code: 'custom', path: ['assetId'], message: '媒体正文块需要素材或素材引用' })
@@ -121,13 +121,13 @@ export const documentBlockSchema: z.ZodType<DocumentBlock> = z.lazy(() => z.disc
   z.object({ ...base, type: z.literal('code'), code: z.string().max(5000000), language: z.string().trim().min(1).max(100).optional() }).strict(),
   z.object({ ...base, type: z.literal('callout'), tone: z.enum(['note', 'example', 'warning', 'conclusion']), title: documentTextContentSchema.optional(), body: documentTextContentSchema }).strict(),
   z.object({ ...base, type: z.literal('section'), title: documentTextContentSchema, collapsedByDefault: z.boolean(), blocks: z.array(documentBlockSchema).max(100000) }).strict(),
-  z.object({ ...base, type: z.literal('component'), component: z.object({ packageId: documentIdSchema, version: z.string().trim().min(1).max(100) }).strict(), props: ownRecordSchema(z.string(), ownJsonValueSchema), staticFallbackAssetId: documentIdSchema, wrap: z.enum(['none', 'left', 'right']).optional() }).strict(),
+  z.object({ ...base, type: z.literal('component'), component: z.object({ packageId: documentIdSchema, version: z.string().trim().min(1).max(100) }).strict(), props: ownRecordSchema(z.string(), ownJsonValueSchema), staticFallbackAssetId: documentIdSchema, wrap: z.enum(['none', 'left', 'right', 'both']).optional() }).strict(),
   // Match the formal V10 identity contract, without a filename or display-name restriction.
   z.object({ id: z.string().min(1), type: z.literal('course-instance'), title: z.string().optional(), blocks: z.array(documentBlockSchema).max(100000).optional() }).strict(),
   z.object({ ...base, type: z.literal('course-component'),
     name: z.string().superRefine((value, ctx) => { const issue = courseComponentNameIssue(value); if (issue) ctx.addIssue({ code: 'custom', message: issue }) }),
     title: z.string().max(500).optional(), height: z.number().finite().positive().max(10_000).optional(),
-    wrap: z.enum(['none', 'left', 'right']).optional() }).strict(),
+    wrap: z.enum(['none', 'left', 'right', 'both']).optional() }).strict(),
 ]))
 
 /** All editable body slots, including headers/captions that were formerly strings. */

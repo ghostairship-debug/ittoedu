@@ -22,6 +22,7 @@ import {flowParagraphAnchoredFrame,type FlowParagraphBlockRect} from '../../shar
 import {createFlowReadingNavigation,observeFlowReading} from '../../shared/flowReading'
 import {resolveFlowChapterEntry} from '../../shared/flowChapterEntry'
 import {flowPaperMaxWidth,flowPaperPadding,flowScrollPadding} from '../../shared/flowBodyPresentation'
+import {observeFlowBilateralLayout,applyFlowBilateralDomGaps} from '../../shared/flowBilateralLayout'
 import {mountComponentFlowToc} from './flowToc'
 import {flowRuntimeTocShellLayout} from '../surfaces/flow/flowRuntimeToc'
 import {attachComponentPlatformNavigationKeys} from '../behaviors/navigation/shortcuts'
@@ -249,6 +250,12 @@ export async function mountCompiledCourse(artifact:CompiledCoursePlayback,root:H
   releases.push(navigation.registerObservation(surface.id,flowObservation),view.subscribe(navigation.changed))
   releases.push(reading.dispose)
   if(flowScroll&&flowBody)releases.push(observeFlowReading(flowScroll,flowBody,navigation.changed))
+  if(flowBody){const bilateral=observeFlowBilateralLayout(flowBody,{
+    textRoots:()=>[...targets].flatMap(([id,node])=>{const instance=project.instances[id];return instance&&flowBody.contains(node)
+      &&componentDefinitionBuiltinKey(project.definitions[instance.definitionId])==='guoling.text'&&!instance.implementationOverride
+      ?[node.querySelector<HTMLElement>('[data-compiled-runtime-root]')??node]:[]}),
+    apply:gaps=>applyFlowBilateralDomGaps(flowBody,gaps),error:message=>report(message,{severity:'error',code:'flow-bilateral-layout'}),
+  });releases.push(()=>bilateral.destroy())}
   if(surface.kind==='spatial'){const camera=createComponentSpatialCameraPort(surface.spatial?.home??{x:0,y:0,zoom:1}),session={frameId:null as string|null,stepIndex:null as number|null};entry.camera=camera;releases.push(camera.subscribe(relayout),bindSpatialInput(content,camera),navigation.registerCamera(surface.id,camera,{frameId:()=>session.frameId,selectFrame:value=>{session.frameId=value},stepIndex:()=>session.stepIndex,selectStep:index=>{session.stepIndex=index},viewport:()=>viewport(surface.id)}))}
    if(surface.kind==='flow'&&surface.flow?.layout.toc!=='hidden'&&!hostNavigationExplicitlyHidden(artifact.course.playback))entry.toc=mountComponentFlowToc(section,surface.id,teacher.forContainer?.(surface.id)??teacher,{onOpenChange:relayout})
  }

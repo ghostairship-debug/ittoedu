@@ -111,11 +111,11 @@ export function resolveFlowMediaLayoutInlineSize(
 }
 
 /** Separate the reading lane from the object's allocated width, so resize feedback cannot shrink its own input. */
-export function resolveFlowObjectWidth(layout: {wrap?:'none'|'left'|'right';widthPercent?:number}|undefined,availableInlineSize:number) {
+export function resolveFlowObjectWidth(layout: {wrap?:'none'|'left'|'right'|'both';widthPercent?:number}|undefined,availableInlineSize:number) {
  const wrap=layout?.wrap??'none',requested=layout?.widthPercent??(wrap==='none'?100:48)
  const percent=Math.max(.01,Math.min(100,requested))
  const available=Math.max(0,availableInlineSize)
- const hasTextLane=available<=0 || available*(1-percent/100)-20>=160
+ const hasTextLane=available<=0 || available*(1-percent/100)/(wrap==='both'?2:1)-20>=160
  const resolvedWrap=wrap!=='none'&&!hasTextLane?'none':wrap
  // Explicit sizing is retained; only an implicit half-width image grows to a full mobile line.
  const actualPercent=wrap!=='none'&&resolvedWrap==='none'&&layout?.widthPercent===undefined?100:percent

@@ -1,6 +1,6 @@
 export interface FlowBodyResizePorts<T> {
  enabled():boolean
- wrap():'none'|'left'|'right'
+ wrap():'none'|'left'|'right'|'both'
  widthPercent():number
  begin():Promise<T>
  preview(value:number|undefined):void
@@ -29,7 +29,7 @@ export function mountFlowBodyResize<T>(shell:HTMLElement,ports:FlowBodyResizePor
    const lane=shell.parentElement?.getBoundingClientRect().width??0
    if(lane<=0)return
    const wrap=ports.wrap(),value=ports.widthPercent()
-   const current={id:event.pointerId,start:event.clientX,value,initial:value,lane,scale:1,direction:wrap==='right'?-1:wrap==='none'?2:1,target:undefined as T|undefined,ended:false,cancel:false};gesture=current
+   const current={id:event.pointerId,start:event.clientX,value,initial:value,lane,scale:1,direction:wrap==='right'?-1:wrap==='none'||wrap==='both'?2:1,target:undefined as T|undefined,ended:false,cancel:false};gesture=current
    button.setPointerCapture(event.pointerId);pending=true
    void ports.begin().then(target=>{if(gesture!==current||disposed)return;current.target=target;void finish()},error=>{if(gesture===current){gesture=undefined;ports.preview(undefined);ports.report(String(error))}}).finally(()=>{pending=false})
  }

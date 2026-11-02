@@ -110,7 +110,7 @@ export interface ResolvedComponentBackground {
 }
 export interface ComponentFlowBodyLayout {
   width: 'content-width' | 'wide' | 'full-width'
-  wrap?: 'none' | 'left' | 'right'
+  wrap?: 'none' | 'left' | 'right' | 'both'
   /** Author width as a percentage of the current reading lane; omitted preserves the historical width policy. */
   widthPercent?: number
   caption?: FlowTextContent

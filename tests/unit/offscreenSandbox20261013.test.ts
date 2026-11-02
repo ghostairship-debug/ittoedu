@@ -60,6 +60,51 @@ async function record(name: string, value: unknown) {
   await mkdir(directory, { recursive: true }); await writeFile(join(directory, `${name}.json`), JSON.stringify(value, null, 2))
 }
 
+it('keeps hidden parking out of Flow size reports and still measures a visible empty document', async () => {
+  const f = await fixture()
+  try {
+    await f.page.evaluate(async () => {
+      const q = (window as any).__offscreenSandbox, api = (window as any).OffscreenSandbox
+      q.sizes = []; q.layoutInput = { mode: 'flow-content', inlineSize: 640 }
+      const root = document.getElementById('source')!
+      q.prepared = await api.preparePublishedNativeComponent({ format: 'esm', code: api.webContentRealmSource(), css: '', diagnostics: [] }, q.abort.signal,
+        { builtinKey: 'guoling.web', nativeDocument: true, state: () => ({}), targets: () => [] })
+      q.mounted = await q.prepared.implementation.mount({ root, scope: q.scope,
+        instance: { id: 'source', definitionId: 'guoling.web', data: { html: '<!doctype html><html><body style="margin:0"><div id="content" style="height:80px"><input id="human" value="original"></div></body></html>' } },
+        layout: { read: () => q.layoutInput, subscribe(listener: (value: any) => void) { q.layoutChanged = listener; return () => { q.layoutChanged = undefined } },
+          reportSize(size: any) { q.sizes.push(size); root.style.height = size.blockSize + 'px' } } })
+      q.frame = root.querySelector('iframe'); q.frameUrl = q.frame.src
+    })
+    const frame = await (await f.page.locator('#source iframe').elementHandle())!.contentFrame()
+    if (!frame) throw new Error('Expected retained content frame')
+    await expect.poll(() => f.page.evaluate(() => (window as any).__offscreenSandbox.sizes.at(-1)?.blockSize)).toBe(80)
+    await frame.locator('#human').fill('human retained')
+    await f.page.evaluate(() => {
+      const q = (window as any).__offscreenSandbox, parking = document.createElement('div')
+      parking.id = 'parking'; parking.hidden = true; document.body.append(parking)
+      ;(parking as HTMLElement & { moveBefore(element: Element, before: Node | null): void }).moveBefore(q.frame, null)
+    })
+    await expect.poll(() => frame.evaluate(() => document.body.getClientRects().length)).toBe(0)
+    await f.page.evaluate(() => { const q = (window as any).__offscreenSandbox; q.hiddenStart = q.sizes.length; q.layoutChanged(q.layoutInput) })
+    await frame.locator('#content').evaluate(el => { (el as HTMLElement).style.height = '140px' })
+    await f.page.waitForTimeout(120)
+    expect(await f.page.evaluate(() => { const q = (window as any).__offscreenSandbox; return q.sizes.slice(q.hiddenStart) })).toEqual([])
+    await f.page.evaluate(() => {
+      const q = (window as any).__offscreenSandbox
+      ;(document.getElementById('source')! as HTMLElement & { moveBefore(element: Element, before: Node | null): void }).moveBefore(q.frame, null)
+    })
+    await expect.poll(() => f.page.evaluate(() => (window as any).__offscreenSandbox.sizes.at(-1)?.blockSize)).toBe(140)
+    expect(await frame.locator('#human').inputValue()).toBe('human retained')
+    expect(await f.page.evaluate(() => { const q = (window as any).__offscreenSandbox; return q.frame === document.querySelector('#source iframe') && q.frame.src === q.frameUrl })).toBe(true)
+    await frame.evaluate(() => { document.getElementById('content')!.style.height = '0px'; document.getElementById('human')!.style.display = 'none' })
+    await expect.poll(() => f.page.evaluate(() => (window as any).__offscreenSandbox.sizes.at(-1)?.blockSize)).toBe(0)
+    expect(await frame.evaluate(() => document.body.getClientRects().length)).toBe(1)
+    await record('flow-parking-layout-20261102', { hiddenReportsRejected: true, sameWidthRestored: true, realEmptyZeroAccepted: true, inputAndFrameRetained: true, errors: f.errors })
+    await f.page.evaluate(async () => { const q = (window as any).__offscreenSandbox; await q.mounted.dispose(); q.prepared.release() })
+    expect(f.errors).toEqual([])
+  } finally { await f.close() }
+}, 20000)
+
 it('prepares opaque parser resource URLs once, preserves parser scripts and exposes the formal navigation promise', async () => {
   const f = await fixture()
   try {

@@ -10,6 +10,8 @@
 
 素材独立预览只能说明它在该预览中的逻辑与绘制；正式页中的尺寸、滚动、控制台遮挡和变化后的反馈，需要在正式工程或其实际导出消费者中观察。已有 HTML 观察动作可以检查实际导出页面，不必读回全量 HTML，也不要修改导出 HTML 后再重导覆盖工程。只有初始图或独立素材自检时，如实说明尚未观察的嵌入互动状态，不宣称整体通过；按当前受影响范围选择必要检查，不为每次编辑额外导出。
 
+需要窄屏或指定尺寸检查时，沿同一 view.observe/html.observe 增加 viewport:{width,height}（CSS 像素）；宿主只改变本任务的隔离预览，同版本保留实验状态，后续省略沿用。尺寸变更须重新观察，不与 cursor 续页同传，旧句柄不能继续点击；回执中的实际 viewport 才是检查范围。无需为改变观察尺寸另起计算或探测未开放浏览器 API。
+
 需要局部反馈或细节时，可给`view.observe`添加`clip:{x,y,width,height}`，坐标使用原观察viewport的CSS像素。回执coverage明确viewport、clip和scale，`originalImage`保留完整原图读取引用；控件rect和handle继续使用原viewport坐标，不按裁图再次减偏移。可见文字及有效控件由实际DOM提供，style/script和无独有内容的重复祖先不占普通概览。新generation或修订取代旧观察后，旧结构转为历史来源引用；原图和完整回执仍可回读，旧图片不授予当前操作句柄。
 
 HTML观察用`html.observe {query?,offset?,limit?,cursor?,detail?}`：默认给概览，`detail:"full"`读取所需完整详情；query过滤可见内容及控件。续页使用回执cursor，沿用同一capture/generation和筛选，不重拍或换句柄；过期时按错误中的原query刷新入口新捕获。课件/HTML的`fullObservationSource`供`context.read`回读完整历史；显式imageIndexes读取历史图片，普通文本不包含内部像素编码。Stop清理临时操作会话，历史来源仍不能作为当前点击凭据。

@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "semanticVersion": "beabe357d5401ef0d6d586baae9755016261bfb866fc1244db006e67b9a3b1d9",
+  "semanticVersion": "074d2da9fcf74a49a16a9ce514eb3327f32336e09e74a587a34936ba42d41710",
   "entries": [
     {
       "id": "artifact.save",
@@ -629,7 +629,7 @@
       "carriers": [
         "component"
       ],
-      "summary": "将已授权课件的当前内容导出；省略 format 默认离线单 HTML，保留互动并可直接运行。也可明确选择 html-online、web-package、pptx、pdf 或 Flow 讲义 docx；PPTX/PDF/DOCX 是静态格式，不承载自编程序互动。相对 destination 使用任务工作空间根目录。消费与人工导出相同的 V10 格式生产器。返回 generated 或 written 的真实状态。同任务同文档的既有导出未被修改时可原位更新，其他同名文件不覆盖。"
+      "summary": "将已授权课件的当前内容导出；省略 format 默认离线单 HTML，保留互动并可直接运行。也可明确选择 html-online、web-package、pptx、pdf 或 Flow 讲义 docx；PPTX/PDF/DOCX 是静态格式，不承载自编程序互动。相对 destination 使用任务工作空间根目录。消费与人工导出相同的 V10 格式生产器。返回 generated 或 written 的真实状态。同任务同文档的既有导出未被修改时可原位更新；新一轮修改也可通过明确 destination 更新当前仍打开文档的原导出，软件核实文件归属与版本。其他同名文件或已外改文件不覆盖。"
     },
     {
       "id": "file.copy",
@@ -1112,7 +1112,7 @@
       "carriers": [
         "component"
       ],
-      "summary": "观察本任务冻结的当前 HTML 文档在受管预览中的真实状态和截图；返回本次观察的 generation 和短元素句柄。无 cursor 时新捕获；query 过滤元素，offset/limit 分页，detail 默认 overview，full 返回所需完整详情。cursor 续页沿用原 generation 和过滤条件；旧 cursor 失效时直接 html.observe 携原 query 重新捕获，无需先查目录。优先复用当前版本预览；没有可用预览时由宿主准备任务独立预览，不切换用户标签。源码修改后重新观察；未观察到真实画面时明确失败。purpose 默认 required；用户明确要求的检查必须保持 required，仅你自行添加的可选诊断可用 diagnostic。诊断不可用保留未验证说明，不表示检查通过，也不改变权限。"
+      "summary": "可用 viewport:{width,height} 指定隔离预览 CSS 尺寸；后续省略沿用，尺寸变更不与 cursor 同传，新观察使用新句柄并保留同版本运行状态。观察本任务冻结的当前 HTML 文档在受管预览中的真实状态和截图；返回本次观察的 generation 和短元素句柄。无 cursor 时新捕获；query 过滤元素，offset/limit 分页，detail 默认 overview，full 返回所需完整详情。cursor 续页沿用原 generation 和过滤条件；旧 cursor 失效时直接 html.observe 携原 query 重新捕获，无需先查目录。优先复用当前版本预览；没有可用预览时由宿主准备任务独立预览，不切换用户标签。源码修改后重新观察；未观察到真实画面时明确失败。purpose 默认 required；用户明确要求的检查必须保持 required，仅你自行添加的可选诊断可用 diagnostic。诊断不可用保留未验证说明，不表示检查通过，也不改变权限。"
     },
     {
       "id": "image.edit",
@@ -1894,7 +1894,7 @@
       "carriers": [
         "component"
       ],
-      "summary": "局部修改现有 Office 原文件。content 只表达要改的内容，软件保留其他文本、版式和媒体并保存原格式；可用唯一 oldText 或 inspect 提供的位置。先 inspect 后修改，软件自动沿用本任务读取的文件版本；expectedVersion 可省略，提供时要求当前版本一致。Excel 公式实际计算；不支持的公式保留并返回局部诊断。"
+      "summary": "局部修改现有 Office 原文件并保存原格式，保全非目标文本、版式和媒体。先 office.inspect 读取当前原件：DOCX可用唯一oldText或返回位置；PPTX每项必须带返回的零基slide及shapeId，新对象操作还须带part/partVersion。软件沿用本任务读取的文件版本；expectedVersion可省略，提供时要求当前版本一致。Excel公式实际计算；不支持的公式保留并返回局部诊断。"
     },
     {
       "id": "office.inspect",
@@ -3312,7 +3312,7 @@
       "carriers": [
         "component"
       ],
-      "summary": "观察已授权课件或 HTML 的真实画面、结构和元素 handle；软件按 target/path 的载体分发，view.click/input 操作最近观察。课件用 project.list 的页面/对象 path 与可选 project，或 target；HTML 用已打开文件 target/path，已通过 file.open 固定唯一 HTML 后可省略目标。HTML 支持 query/offset/limit/cursor，cursor 续同次观察；课件局部画面用 clip:{x,y,width,height}（viewport CSS 像素），结构仍为全 viewport，元素保留原坐标。回执 source/identity/coverage 说明版本与范围；同一版本隔离会话保留运行状态，源码变化后重建。观察和输入不改作者工程或用户现场。purpose 默认 required；可选诊断用 diagnostic，不可用时明确未验证。"
+      "summary": "可用 viewport:{width,height} 指定隔离预览的 CSS 尺寸检查窄屏；不改变用户窗口，同版本保留运行状态，后续省略沿用，尺寸变更须新捕获并使用新句柄。观察已授权课件或 HTML 的真实画面、结构和元素 handle；软件按 target/path 的载体分发，view.click/input 操作最近观察。课件用 project.list 的页面/对象 path 与可选 project，或 target；HTML 用已打开文件 target/path，已通过 file.open 固定唯一 HTML 后可省略目标。HTML 支持 query/offset/limit/cursor，cursor 续同次观察；课件局部画面用 clip:{x,y,width,height}（viewport CSS 像素），结构仍为全 viewport，元素保留原坐标。回执 source/identity/coverage 说明版本与范围；同一版本隔离会话保留运行状态，源码变化后重建。观察和输入不改作者工程或用户现场。purpose 默认 required；可选诊断用 diagnostic，不可用时明确未验证。"
     },
     {
       "id": "web.open",

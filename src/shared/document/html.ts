@@ -286,7 +286,7 @@ export function parseFlowHtml(html: string, options: { parse?: PageParsePort; as
       ...(altText !== undefined ? { altText } : {}),
       ...(caption ? { caption: content(caption.children) } : {}),
       layout: layout === 'wide' || layout === 'full-width' ? layout : 'content-width',
-      ...(wrap === 'none' || wrap === 'left' || wrap === 'right' ? { wrap } : {}),
+      ...(wrap === 'none' || wrap === 'left' || wrap === 'right' || wrap === 'both' ? { wrap } : {}),
       ...(crop?.length === 4 && crop.every(Number.isFinite) ? { crop: { left: crop[0]!, top: crop[1]!, right: crop[2]!, bottom: crop[3]! } } : {}),
       ...(holder.attributes['data-crop-x'] !== undefined && Number.isFinite(Number(holder.attributes['data-crop-x'])) ? { cropX: Number(holder.attributes['data-crop-x']) } : {}),
       ...(holder.attributes['data-crop-y'] !== undefined && Number.isFinite(Number(holder.attributes['data-crop-y'])) ? { cropY: Number(holder.attributes['data-crop-y']) } : {}) }
@@ -304,7 +304,7 @@ export function parseFlowHtml(html: string, options: { parse?: PageParsePort; as
     return { id: stableFlowId('block'), type: 'course-component', name,
       ...(element.attributes.title ? { title: element.attributes.title } : {}),
       ...(height !== undefined && height > 0 && height <= 10_000 ? { height } : {}),
-      ...(wrap === 'none' || wrap === 'left' || wrap === 'right' ? { wrap } : {}) }
+      ...(wrap === 'none' || wrap === 'left' || wrap === 'right' || wrap === 'both' ? { wrap } : {}) }
   }
 
   function table(element: ElementNode): Of<'table'> {

@@ -147,12 +147,12 @@ it(mode === 'boundary' ? 'reserves Flow floating DOM controls for run mode and e
     const businessObservation = { businessExpanded: await button.getAttribute('aria-expanded'),
       businessClicks: await page.evaluate(() => (window as any).businessClicks) }
     // The default builtin teacher is a host DOM control, rather than an iframe surrogate.
-    await page.getByRole('button', { name: '展开教师控制器', exact: true }).click()
+    await page.getByRole('button', { name: '展开全局控制台', exact: true }).click()
     const runObservation = { ...businessObservation,
-      teacherExpanded: await page.getByRole('button', { name: '收起教师控制器', exact: true }).count() === 1 }
+      teacherExpanded: await page.getByRole('button', { name: '收起全局控制台', exact: true }).count() === 1 }
     await writeFile(join(directory, sourceRoot === resolve(process.cwd()) ? 'fixed-run-clicks.json' : 'unfixed-run-clicks.json'), JSON.stringify(runObservation, null, 2))
     expect(runObservation).toEqual({ businessExpanded: 'true', businessClicks: 1, teacherExpanded: true })
-    await page.getByRole('button', { name: '收起教师控制器', exact: true }).waitFor()
+    await page.getByRole('button', { name: '收起全局控制台', exact: true }).waitFor()
     await page.getByRole('button', { name: '编辑', exact: true }).click()
     await button.click()
     await expect.poll(() => selected(page)).toEqual(['floating'])

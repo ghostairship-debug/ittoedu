@@ -26,6 +26,7 @@ import { editorTextChangeBlockIds } from './documentTransactionChanges'
 import { DocumentInsertionTargetError } from '../../shared/document/blockInsertion'
 import { flowSelectionSlice, flowSelectionTransaction, isFlowCompositionPreparation, preserveFlowTextTransaction, withFlowSelection } from './documentFlowEditing'
 import { editorShortcut, type TextFormatShortcut } from '../../shared/editorShortcuts'
+import { observeFlowBilateralLayout, createFlowBilateralGap } from '../../shared/flowBilateralLayout'
 
 /** Sent from a document object (picture, chart, component) that was right-clicked, after selecting it (M21). */
 export const DOCUMENT_OBJECT_CONTEXT_MENU_EVENT = 'document-object-context-menu'
@@ -278,6 +279,8 @@ export function createLayoutEditor(element: HTMLElement, initial: LayoutEditorOp
     dispatch?.(state.tr.setSelection(extend ? TextSelection.between(state.selection.$anchor, edge.$head) : edge).scrollIntoView())
     return true
   }
+  let bilateralDecorations = DecorationSet.empty
+  let bilateralLayout: ReturnType<typeof observeFlowBilateralLayout> | undefined
   const view = new EditorView(element, {
     state: EditorState.create({ doc: toEditorDocument(initial.document.content), plugins: [...(initial.projectionPlugins ?? []), new Plugin({
       props: { handleKeyDown(current, event) {
@@ -320,7 +323,7 @@ export function createLayoutEditor(element: HTMLElement, initial: LayoutEditorOp
     attributes: () => ({ tabindex: '0', role: 'textbox', 'aria-label': '正文编辑', 'aria-multiline': 'true', ...(usesObjectSelection() ? { 'data-flow-input-active': String(inputActive) } : {}) }),
     editable: canInput,
     decorations: state => {
-      const decorations: Decoration[] = []
+      const decorations: Decoration[] = [...bilateralDecorations.find()]
       const spacers = options.presentation === 'flow'
         ? new Map(options.runtimeSpacers?.map(spacer => [spacer.blockId, spacer.height]) ?? []) : new Map<string, number>()
       state.doc.descendants((node, pos) => {
@@ -431,7 +434,7 @@ export function createLayoutEditor(element: HTMLElement, initial: LayoutEditorOp
         queueMicrotask(() => { startingComposition = false })
         return false
       },
-      compositionend: () => { composing = false; queueMicrotask(() => { if (view.isDestroyed) return; publish(); if (deferred) { const next = deferred; deferred = null; update(next) } }); return false },
+      compositionend: () => { composing = false; queueMicrotask(() => { if (view.isDestroyed) return; publish(); if (deferred) { const next = deferred; deferred = null; update(next) } bilateralLayout?.invalidate() }); return false },
       blur: () => { boundary(); return false },
       keyup: (_view, event) => {
         if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End'].includes(event.key)) syncDomTextSelection()
@@ -574,7 +577,9 @@ export function createLayoutEditor(element: HTMLElement, initial: LayoutEditorOp
         if (textBlocks === undefined) pendingTextBlocks = undefined
         else if (pendingTextBlocks) textBlocks.forEach(id => pendingTextBlocks!.add(id))
       }
+      for (const item of applied.transactions) bilateralDecorations = bilateralDecorations.map(item.mapping, item.doc)
       mapBookmarks(applied.transactions); applyState(state)
+      if (changed) bilateralLayout?.invalidate()
       if (transaction.docChanged && !composing) {
          const prepared=transaction.getMeta('preparedResources')
          if(initial.presentation==='flow'&&textBlocks!==undefined&&!prepared&&view.hasFocus()){
@@ -604,6 +609,34 @@ export function createLayoutEditor(element: HTMLElement, initial: LayoutEditorOp
     observingDomChange = true
     try { return handleDOMChange.apply(observer, args) } finally { observingDomChange = previous }
   }
+  if (initial.presentation === 'flow') bilateralLayout = observeFlowBilateralLayout(view.dom, {
+    textRoots: () => [...view.dom.querySelectorAll<HTMLElement>('[data-flow-body-block="paragraph"],[data-flow-body-block="heading"]')],
+    paused: () => composing || view.composing,
+    beforeMeasure: () => { observer.forceFlush(); observer.flush() },
+    apply: gaps => {
+      if (!gaps.length && !bilateralDecorations.find().length) return true
+      const plannedDoc = view.state.doc
+      let applied = false
+      paintProjection(() => {
+        // paintProjection flushes pending native input. Resolve DOM positions only
+        // after that boundary, and discard a plan whose text nodes/state changed.
+        if (composing || view.composing || view.state.doc !== plannedDoc
+          || gaps.some(gap => !view.dom.contains(gap.node))) return
+        const located = gaps.map(gap => ({ gap, position: view.posAtDOM(gap.node, gap.offset) }))
+        const counts = new Map<number, number>(), ordinals = new Map<number, number>()
+        for (const { position } of located) counts.set(position, (counts.get(position) ?? 0) + 1)
+        const widgets = located.map(({ gap, position }) => {
+          const ordinal = ordinals.get(position) ?? 0; ordinals.set(position, ordinal + 1)
+          return Decoration.widget(position, () => createFlowBilateralGap(view.dom.ownerDocument, gap.width),
+            { key: `flow-bilateral:${position}:${ordinal}:${gap.width}`, side: ordinal - counts.get(position)!, ignoreSelection: true })
+        })
+        bilateralDecorations = DecorationSet.create(view.state.doc, widgets)
+        view.setProps({ decorations: view.props.decorations }); applied = true
+      })
+      return applied
+    },
+    error: message => options.diagnostic(message),
+  })
   function projectionMutation<T>(work:()=>T):T {
     options.beforeProjectionMutation?.()
     try{return work()}finally{options.afterProjectionMutation?.()}
@@ -972,6 +1005,7 @@ export function createLayoutEditor(element: HTMLElement, initial: LayoutEditorOp
           ? view.state.tr.replaceWith(closed.from, closed.beforeEnd, document.content.cut(closed.from, closed.afterEnd))
           : view.state.tr.replace(from, to, document.slice(from, nextTo))
         transaction.setMeta('canonicalUpdate', true)
+        bilateralDecorations = bilateralDecorations.map(transaction.mapping, transaction.doc)
         mapBookmarks([transaction]); applyState(view.state.apply(transaction))
         if (closed) restoreTextSelection(kept)
         reselect(kept)
@@ -983,6 +1017,7 @@ export function createLayoutEditor(element: HTMLElement, initial: LayoutEditorOp
     })
     // ProseMirror caches editable and contenteditable until its view props/state refresh.
     if (refreshSpacers || refreshEditability) view.setProps({ decorations: view.props.decorations, editable: view.props.editable })
+    if (changed || refreshObjects || refreshSpacers) bilateralLayout?.invalidate()
   }
   async function drain() {
     if (composing || view.composing) return false
@@ -1029,7 +1064,7 @@ export function createLayoutEditor(element: HTMLElement, initial: LayoutEditorOp
     flush: () => { if (composing || view.composing || preparations.size) return false; publish(); boundary(); return !draftSession.rejected },
     drain,
     discardDraft: async (next: LayoutEditorOptions) => { if (!await draftSession.discard(next.document)) return false; update(next); return true },
-    destroy: () => { if(publishTimer!==null&&!composing&&!view.isDestroyed)publish();clearPublishTimer();clearPlainPaste(); for (const target of bookmarks) if (!target.insertion) bookmarks.delete(target); projectionMutation(()=>view.destroy()) },
+    destroy: () => { bilateralLayout?.destroy(); if(publishTimer!==null&&!composing&&!view.isDestroyed)publish();clearPublishTimer();clearPlainPaste(); for (const target of bookmarks) if (!target.insertion) bookmarks.delete(target); projectionMutation(()=>view.destroy()) },
     /** Current selection at the current revision, for re-reporting it after a committed edit such as formatting. */
     readSelection: () => describeSelection(view.state) ?? null }
 }

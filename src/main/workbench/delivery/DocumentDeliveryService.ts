@@ -207,6 +207,7 @@ export class DocumentDeliveryService implements DocumentDeliveryServicePort {
           if (existing && (!this.options.writer.replaceExisting || !await this.options.operations.ownsExportVersion({
             runId: input.runId, documentId: input.documentId, epoch: input.epoch, path: filename, format: input.format, fileVersion: existing.fileVersion,
             taskRunIds: await this.options.taskRunIds?.(input.runId),
+            explicitDestination: input.destination !== undefined,
           }))) throw new Error('导出目标已有其他内容或已被修改，请选择新文件名；原文件未变更')
           const operationId = files.length > 1 ? `${input.operationId}/file/${index}` : input.operationId
           const childReceipt: ExportReceipt = { ...generated!, files: undefined }

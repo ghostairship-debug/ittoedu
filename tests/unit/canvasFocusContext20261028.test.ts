@@ -135,7 +135,25 @@ it('keeps default page/document references and multiple targets on the general d
   ] })).toBe('general')
 })
 
-it.each(['object', 'text-range'] as const)('gives a %s focus the actual model catalog and expands Source and file reads without changing authority', async focus => {
+it('recognizes a canvas object with its own page context without merging independent pages or display states', () => {
+  const object: ToolTarget = { kind: 'course-instance', surfaceId: 'page', instanceId: 'heading', stateId: null }
+  const page: ToolTarget = { kind: 'course-surface', surfaceId: 'page' }
+  for (const selection of [[page, object], [object, page]]) {
+    const input = { documents: [{ documentId, writable: [{ kind: 'document' as const }], selection }] }
+    const before = structuredClone(input)
+    expect(executionContextToolProfile(input)).toBe('content-edit')
+    expect(input).toEqual(before)
+  }
+  for (const selection of [
+    [{ ...page, surfaceId: 'other' }, object],
+    [{ ...page, stateId: 'reveal' }, object],
+    [page, object, { ...object, instanceId: 'body' }],
+  ]) expect(executionContextToolProfile({ documents: [{ documentId, writable: [], selection }] })).toBe('general')
+  expect(executionContextToolProfile({ documents: [{ documentId, writable: [], selection: [page,
+    { ...object, dataPath: ['title'], from: 0, to: 4 }] }] })).toBe('text')
+})
+
+it.each(['object', 'object-with-page', 'text-range'] as const)('gives a %s focus the actual model catalog and expands Source and file reads without changing authority', async focus => {
   const directory = await mkdtemp(path.join(tmpdir(), 'canvas-focus-context-'))
   directories.push(directory)
   const host = new DocumentHostService(path.join(directory, 'documents'))
@@ -154,6 +172,7 @@ it.each(['object', 'text-range'] as const)('gives a %s focus the actual model ca
     ? captureCourseInstanceRange(initial, 'focus-page', 'focused', ['title'], 0, Array.from('Selected object context').length)
     : captureSelection(initial, [{ kind: 'course-instance', surfaceId: 'focus-page', instanceId: 'focused', stateId: null }], 'Selected object')
   const documents = [selectionReference(captured, true)] // The default card does not restrict the document write grant.
+  if (focus === 'object-with-page') documents[0].selection = [{ kind: 'course-surface', surfaceId: 'focus-page' }, ...documents[0].selection!]
   const requests: ModelRequest[] = []
   let projectTarget = ''
   const provider: ModelProvider = { async *stream(request) {
@@ -166,8 +185,9 @@ it.each(['object', 'text-range'] as const)('gives a %s focus the actual model ca
       const references = JSON.parse((context!.content as string).slice(prefix.length))
       projectTarget = references[0].target
       expect(references[0].writable).toMatchObject([{ kind: 'document' }])
-      expect(references[0].selection[0]).toMatchObject({ kind: 'course-instance', writableTarget: expect.any(String) })
-      expect(references[0].selection[0].content.text).toContain('Selected object context')
+      const selectedObject = references[0].selection.find((item: { kind: string }) => item.kind === 'course-instance')
+      expect(selectedObject).toMatchObject({ kind: 'course-instance', writableTarget: expect.any(String) })
+      expect(selectedObject.content.text).toContain('Selected object context')
       expect(JSON.stringify(request.messages)).not.toContain('focused source fixture')
     }
     const call = index === 0 ? { name: 'tools.load', input: { names: ['project.read', 'project.apply', 'file.read'] } }
@@ -192,7 +212,7 @@ it.each(['object', 'text-range'] as const)('gives a %s focus the actual model ca
   expect(requests).toHaveLength(4)
   const initialNames = requests[0].tools!.map(tool => tool.name)
   expect(initialNames).toEqual(expect.arrayContaining(['read', 'text.replace', 'tools.load']))
-  if (focus === 'object') expect(initialNames).toContain('project.apply')
+  if (focus !== 'text-range') expect(initialNames).toContain('project.apply')
   else {
     expect(initialNames).not.toContain('project.apply')
     expect(initialNames).not.toContain('project.read')

@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { htmlActionToolSchemas, type HtmlActionToolName } from '../../../core/tools/HtmlActionTools'
-import type { ObservationImageResource, ObservationResult } from '../../../shared/workbench/toolPorts'
+import type { ObservationImageResource, ObservationResult, ObservationViewport } from '../../../shared/workbench/toolPorts'
 import type { HtmlPreviewAutomationContext } from '../htmlPreview/HtmlPreviewService'
 import { ObservationImageStore } from './ObservationImageStore'
 import type { HtmlActionCapture, HtmlActionDiagnostic, HtmlActionFramePort } from './HtmlActionDesktopPort'
@@ -21,6 +21,11 @@ function reportUrl(value: string): string {
 }
 
 const reportErrors = (errors: HtmlActionDiagnostic[]) => errors.map(error => ({ ...error, source: reportUrl(error.source) }))
+const sameViewport = (a?: ObservationViewport, b?: ObservationViewport) => a?.width === b?.width && a?.height === b?.height
+function assertViewport(requested?: ObservationViewport, actual?: ObservationViewport): void {
+  if (requested && (!actual || Math.abs(requested.width - actual.width) > 1 || Math.abs(requested.height - actual.height) > 1))
+    throw new Error(`观察视口尚未达到请求尺寸 ${requested.width}×${requested.height}；实际 ${actual ? `${actual.width}×${actual.height}` : '未知'}，本次尺寸检查未完成`)
+}
 
 /** Facts about this invocation, kept independently from follow-up evidence. */
 export interface ActionReceiptFacts {
@@ -33,7 +38,7 @@ export interface ActionReceiptFacts {
 
 export interface HtmlActionPreviewPort {
   automationContext(leaseId: string, loadId: string, revision: number): Promise<HtmlPreviewAutomationContext>
-  automationContextForDocument(input: { documentId: string; epoch: string; revision: number; tabId?: string; runId?: string }): Promise<HtmlPreviewAutomationContext>
+  automationContextForDocument(input: { documentId: string; epoch: string; revision: number; tabId?: string; runId?: string; viewport?: ObservationViewport }): Promise<HtmlPreviewAutomationContext>
   releaseRun?(runId: string): void
 }
 
@@ -64,10 +69,11 @@ export interface HtmlActionObservation {
   elements: Array<Omit<HtmlPageElement, 'path' | 'fingerprint'> & { handle: string }>
   elementsPage?: { generation: number; query: string; offset: number; limit: number; total: number; nextCursor?: string }
   observationScope?: HtmlPageState['observationScope']
+  viewport?: ObservationViewport
   image: ObservationImageResource
 }
 export type PublishedActionIdentity = ViewObservationIdentity & { projectId: string }
-export interface PublishedActionTarget { identity: PublishedActionIdentity; snapshot: ViewObservationSnapshot; signal?: AbortSignal }
+export interface PublishedActionTarget { identity: PublishedActionIdentity; snapshot: ViewObservationSnapshot; viewport?: ObservationViewport; signal?: AbortSignal }
 export interface PublishedActionPreviewPort {
   contextForTarget(input: PublishedActionTarget & { runId: string }): Promise<PublishedActionAutomationContext>
   currentContext(context: PublishedActionAutomationContext): Promise<PublishedActionAutomationContext>
@@ -82,6 +88,7 @@ export interface PublishedActionObservation extends Omit<HtmlActionObservation, 
 }
 type PageActionObservation = HtmlActionObservation | PublishedActionObservation
 export interface HtmlObservationInput {
+  viewport?: ObservationViewport
   purpose?: 'required' | 'diagnostic'
   query?: string
   offset?: number
@@ -98,6 +105,7 @@ interface ObservationCursor {
 }
 
 interface SessionState {
+  previewViewport?: ObservationViewport
   runId: string
   frameToken: string
   generation: number
@@ -158,6 +166,7 @@ export class HtmlActionService {
     const input = htmlActionToolSchemas[action.name].parse(action.input) as HtmlObservationInput & { index?: number; handle?: string; value?: string }
     const current = this.runs.get(runId)
     if (action.name === 'html.observe' && input.cursor) {
+      if (input.viewport) throw new Error('改变观察尺寸需要新捕获，请省略 cursor')
       const query = current?.cursors.get(input.cursor)?.query ?? input.query ?? ''
       if (current?.kind !== 'html' || current.identity.documentId !== document.documentId
         || current.identity.epoch !== document.epoch || current.identity.revision !== document.revision)
@@ -174,9 +183,14 @@ export class HtmlActionService {
     if (changedDocument && action.name !== 'html.observe')
       throw new Error('HTML 任务目标已变化，不能沿用其他文档的观察会话')
     if (action.name === 'html.observe') {
-      if (!session) await this.beginDocumentRun(runId, document)
-      else if (changedDocument || session.identity.revision !== document.revision) await this.restartDocumentRun(runId, document)
-      return this.observe(runId, input)
+      const viewport = input.viewport ?? (!changedDocument ? session?.previewViewport : undefined)
+      const request = { ...document, ...(viewport ? { viewport } : {}) }
+      if (!session) await this.beginDocumentRun(runId, request)
+      else if (changedDocument || session.identity.revision !== document.revision
+        || !sameViewport(viewport, session.previewViewport)) await this.restartDocumentRun(runId, request)
+      const result = await this.observe(runId, input)
+      assertViewport(viewport, result.viewport ?? result.observationScope?.viewport)
+      return result
     }
     if (!session || session.identity.revision !== document.revision)
       throw new Error('请先观察当前 HTML 源码版本，再执行页面动作')
@@ -195,22 +209,28 @@ export class HtmlActionService {
   }
 
   async beginDocumentRun(runId: string, input: { documentId: string; epoch: string; revision: number;
-    tabId?: string }): Promise<HtmlActionIdentity> {
+    tabId?: string; viewport?: ObservationViewport }): Promise<HtmlActionIdentity> {
     if (!runId || !input.documentId || !input.epoch || !Number.isSafeInteger(input.revision) || input.revision < 0)
       throw new Error('HTML 文档观察身份无效')
-    return this.beginFromContext(runId, () => this.options.preview.automationContextForDocument({ ...input, runId }))
+    const identity = await this.beginFromContext(runId, () => this.options.preview.automationContextForDocument({ ...input, runId }))
+    this.requireHtml(runId).previewViewport = input.viewport
+    return identity
   }
 
   /** Explicit observation captures the current authorized document or revision.
    * Old handles retire; action identities remain spent and Stop stays irreversible. */
   async restartDocumentRun(runId: string, input: { documentId: string; epoch: string; revision: number;
-    tabId?: string }): Promise<HtmlActionIdentity> {
+    tabId?: string; viewport?: ObservationViewport }): Promise<HtmlActionIdentity> {
     const old = this.requireHtml(runId)
     if (old.busy || this.opening.has(runId)) throw new Error('HTML 操作尚未完成，不能重开观察')
     const sameDocument = input.documentId === old.identity.documentId && input.epoch === old.identity.epoch
+    const viewportChanged = !sameViewport(input.viewport, old.previewViewport)
     if (!input.documentId || !input.epoch || !Number.isSafeInteger(input.revision) || input.revision < 0
-      || sameDocument && input.revision === old.identity.revision) throw new Error('HTML 重开需要当前文档的新观察')
+      || sameDocument && input.revision === old.identity.revision && !viewportChanged) throw new Error('HTML 重开需要当前文档的新观察')
     this.opening.add(runId)
+    // Resize can change geometry before acknowledgement. Retire old input
+    // handles even if the new observation later fails; action IDs remain spent.
+    if (viewportChanged) { old.handles.clear(); old.cursors.clear(); old.lastObservation = undefined }
     try {
       const context = await this.waitForRun(runId, () => this.options.preview.automationContextForDocument({ ...input, runId }),
         () => this.options.preview.releaseRun?.(runId))
@@ -223,8 +243,11 @@ export class HtmlActionService {
           || context.bindingPath !== old.context.bindingPath)) throw new Error('HTML 文档绑定与本次观察不一致')
       const previous = { generation: old.generation, cursors: new Map(old.cursors) }
       this.retire(old, sameDocument)
-      return this.attach(runId, context, frameToken, previous)
-    } finally { this.opening.delete(runId) }
+      const identity = this.attach(runId, context, frameToken, previous)
+      this.requireHtml(runId).previewViewport = input.viewport
+      return identity
+    } catch (error) { if (viewportChanged && this.runs.get(runId) === old) this.retire(old, true); throw error }
+    finally { this.opening.delete(runId) }
   }
 
   private async beginFromContext(runId: string,
@@ -386,6 +409,7 @@ export class HtmlActionService {
     const common = { generation: session.generation,
       currentUrl: reportUrl(state.url),
       title: state.title, readyState: state.readyState, pageIndex: state.pageIndex, pageCount: state.pageCount,
+      viewport: state.observationScope?.viewport ?? state.viewport,
       structure: state.structure, diagnostics: state.diagnostics,
       errors: reportErrors(session.errors), elements, image, observationScope: state.observationScope && { ...state.observationScope,
         frames: state.observationScope.frames.map(frame => ({ ...frame, url: reportUrl(frame.url) })),
@@ -594,7 +618,11 @@ export class HtmlActionService {
         this.runs.set(runId, session)
       }
       session.busy = true
-      try { return await this.observeCurrent(session, undefined, input.signal) } finally { session.busy = false }
+      try {
+        const result = await this.observeCurrent(session, undefined, input.signal)
+        assertViewport(input.viewport, result.viewport ?? result.observationScope?.viewport)
+        return result
+      } finally { session.busy = false }
     } finally { this.opening.delete(runId) }
   }
 

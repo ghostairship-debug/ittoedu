@@ -9,9 +9,11 @@ import { HtmlActionService, type HtmlActionPreviewPort } from './HtmlActionServi
 import { HtmlActionDesktopPort } from './HtmlActionDesktopPort'
 import { ObservationImageStore } from './ObservationImageStore'
 import { taskTargetViewport } from '../../../shared/workbench/taskTargetContext'
+import type { ObservationViewport } from '../../../shared/workbench/toolPorts'
 
 interface OwnedPreview {
   documentId: string
+  epoch: string
   key: string
   context: Promise<HtmlPreviewAutomationContext>
   preview: HtmlPreviewService
@@ -20,6 +22,7 @@ interface OwnedPreview {
   releaseProtocol(): void
   rejectClosed(error: Error): void
   closed: boolean
+  viewport?: ObservationViewport
 }
 type DocumentRequest = Parameters<HtmlActionPreviewPort['automationContextForDocument']>[0]
 
@@ -47,13 +50,29 @@ export class TaskHtmlPreview implements HtmlActionPreviewPort {
 
   async automationContextForDocument(input: DocumentRequest): Promise<HtmlPreviewAutomationContext> {
     if (this.disposed || input.runId && this.stopped.has(input.runId)) throw new Error('HTML 观察已停止')
-    const viewport = input.runId && this.options.taskTargetContext
+    const targetViewport = input.runId && this.options.taskTargetContext
       ? taskTargetViewport(await this.options.taskTargetContext(input.runId)) : undefined
     if (this.disposed || input.runId && this.stopped.has(input.runId)) throw new Error('HTML 观察已停止')
-    const key = JSON.stringify([input.documentId, input.epoch, input.revision, viewport])
     const existing = input.runId ? this.owned.get(input.runId) : undefined
+    const key = JSON.stringify([input.documentId, input.epoch, input.revision])
+    const viewport = input.viewport ?? (existing?.documentId === input.documentId && existing.epoch === input.epoch
+      ? existing.viewport : undefined) ?? targetViewport
     // Preserve this task's interaction state even if a live tab opens in the meantime.
-    if (existing?.key === key && !existing.closed) return existing.context
+    if (existing?.key === key && !existing.closed) {
+      const context = await existing.context
+      if (viewport && (existing.viewport?.width !== viewport.width || existing.viewport?.height !== viewport.height)) {
+        try {
+          existing.window.setContentSize(viewport.width, viewport.height)
+          await existing.window.webContents.mainFrame.executeJavaScript(`(() => {
+            const frame = document.querySelector('iframe'); if (!frame) throw new Error('HTML 任务预览不存在');
+            frame.style.width = ${JSON.stringify(viewport.width + 'px')}; frame.style.height = ${JSON.stringify(viewport.height + 'px')};
+          })()`)
+          if (existing.closed || this.stopped.has(input.runId!)) throw new Error('HTML 观察已停止')
+          existing.viewport = viewport
+        } catch (error) { this.close(existing); throw error }
+      }
+      return context
+    }
     try {
       // A live editor tab may have a different viewport. Candidate geometry is
       // frozen by the task owner, so render that candidate at its actual size.
@@ -88,7 +107,7 @@ export class TaskHtmlPreview implements HtmlActionPreviewPort {
     partition.protocol.handle(HTML_PREVIEW_SCHEME, preview.handleProtocolRequest)
     let rejectClosed!: (error: Error) => void
     const closed = new Promise<never>((_, reject) => { rejectClosed = reject })
-    const owner: OwnedPreview = { documentId: input.documentId, key, preview, window, closed: false, rejectClosed,
+    const owner: OwnedPreview = { documentId: input.documentId, epoch: input.epoch, key, viewport, preview, window, closed: false, rejectClosed,
       releaseProtocol: () => partition.protocol.unhandle(HTML_PREVIEW_SCHEME),
       context: Promise.resolve(null as never) }
     this.owned.set(input.runId, owner)

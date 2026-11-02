@@ -4,6 +4,9 @@ import crypto from 'node:crypto'
 
 const statuses = new Set(['achieved', 'partial', 'unmet', 'unverified', 'deferred', 'decision'])
 const dispositions = new Set(['active', 'later', 'blocked', 'decision', 'authorized-defer'])
+const purposes = new Set(['capability', 'effect', 'experiment', 'blocker'])
+const purpose = (goal, criterion) => criterion.purpose ?? goal.kind
+const productCriterion = (goal, criterion) => ['capability', 'effect'].includes(purpose(goal, criterion))
 const digest = value => crypto.createHash('sha256').update(value).digest('hex')
 const nonempty = value => typeof value === 'string' && value.trim().length > 0
 const fail = message => { throw new Error('Goal guard: ' + message) }
@@ -24,7 +27,7 @@ export function requireTaskEvidence(root, evidence) {
 
 function contract(goal) {
   return { source: goal.source, promise: goal.promise, kind: goal.kind,
-    criteria: goal.criteria.map(({ id, text, required = true, requires, assertions, reviewRequired }) => ({ id, text, required, requires, assertions, reviewRequired })) }
+    criteria: goal.criteria.map(({ id, text, required = true, requires, assertions, reviewRequired, purpose }) => ({ id, text, required, requires, assertions, reviewRequired, ...(purpose === undefined ? {} : { purpose }) })) }
 }
 function contractHash(goal) { return digest(JSON.stringify(contract(goal))) }
 
@@ -66,7 +69,7 @@ function checkEvidence(root, goal, criterion, evidence) {
 export function goalSummary(state) {
   const goals = Object.values(state.goals ?? {})
   return { goals: goals.map(goal => ({ id: goal.id, promise: goal.promise, kind: goal.kind, status: goal.status,
-    remaining: goal.criteria.filter(c => c.required !== false && c.status !== 'verified').map(c => ({ id: c.id, text: c.text })),
+    remaining: goal.criteria.filter(c => c.required !== false && c.status !== 'verified').map(c => ({ id: c.id, text: c.text, purpose: purpose(goal, c) })),
     continuation: goal.continuation, decisionRef: goal.decisionRef })),
     productComplete: goals.length > 0 && goals.every(goal => goal.status === 'achieved'),
     incompleteGoalIds: goals.filter(goal => goal.status !== 'achieved').map(goal => goal.id) }
@@ -93,6 +96,7 @@ export function validateGoals(state, root, options = {}) {
     for (const c of goal.criteria) {
       if (!nonempty(c.id) || !nonempty(c.text) || !['pending', 'verified'].includes(c.status)
           || !Array.isArray(c.requires) || !c.requires.length) fail(id + ': invalid acceptance condition')
+      if (c.purpose !== undefined && !purposes.has(c.purpose)) fail(id + '.' + c.id + ': invalid acceptance purpose')
       if (c.status === 'verified') {
         if (!Array.isArray(c.evidence) || !c.evidence.length) fail(id + '.' + c.id + ': verified condition needs evidence')
         if (!c.assertions?.length && !c.reviewRequired) fail(id + '.' + c.id + ': acceptance contract needs fixed assertions or an independent review')
@@ -104,6 +108,11 @@ export function validateGoals(state, root, options = {}) {
         }
       }
     }
+    const required = goal.criteria.filter(c => c.required !== false)
+    if (['achieved', 'partial'].includes(goal.status) && !required.some(c => productCriterion(goal, c)))
+      fail(id + ': a product goal needs a required capability/effect condition; experiments and blocker checks cannot replace it')
+    if (goal.status === 'partial' && required.every(c => c.status === 'verified'))
+      fail(id + ': partial goal has no unfinished necessary condition; record the actual product gap')
     if (goal.status === 'achieved') {
       if (goal.criteria.some(c => c.required !== false && c.status !== 'verified')) fail(id + ': product completion requires every necessary condition')
     } else {

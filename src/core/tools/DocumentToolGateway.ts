@@ -2324,10 +2324,10 @@ export class DocumentToolGateway implements ToolGateway {
       }
       if (snapshot && isSourceDocumentModel(snapshot.model) && snapshot.binding.kind === 'file' && /\.html?$/i.test(snapshot.binding.path)) {
         this.authorizeDocument(run, snapshot)
-        const { query, offset, limit, cursor, purpose, detail, clip } = input
+        const { query, offset, limit, cursor, purpose, detail, clip, viewport } = input
         if (clip) throw new ToolError('unsupported-clip', 'HTML 观察当前不接受 clip；省略 clip 获取实际 viewport 画面')
         const result = await this.hostTools.executeHtmlAction(runId, snapshot, { name: 'html.observe', operationId,
-          input: { query, offset, limit, cursor, purpose, detail: detail === 'high' ? 'full' : 'overview' } })
+          input: { query, offset, limit, cursor, purpose, viewport, detail: detail === 'high' ? 'full' : 'overview' } })
         if (result.kind === 'read') {
           run.currentHtmlDocumentId = snapshot.documentId
           run.currentObservationCarrier = 'html'

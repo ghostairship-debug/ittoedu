@@ -39,7 +39,11 @@ it('keeps usable CSV available when an auxiliary declared output is missing and 
     const jobs = new HostJobService({ images, compute: service })
     host.tools.configureHostServices({ jobs })
     await host.tools.beginRun({ runId: 'run', actor: 'agent', documents: [], fileAccess: { permission: 'read-only', workspaceRoot: directory } })
+    await host.tools.loadToolFamilies('run', [], ['job.wait', 'job.logs'])
     expect((await host.tools.describeRun('run')).map(tool => tool.name)).toContain('job.logs')
+    const waited = await host.tools.execute('run', 'wait-summary', { name: 'job.wait', input: { job: 'compute-summary', milliseconds: 1000 } })
+    expect(waited).toMatchObject({ kind: 'read', data: { status: 'ready', terminal: true,
+      output: { complete: false, nextAfter: 32, source: { input: { job: 'compute-summary', after: 32 } } } } })
     const retained: string[] = []
     let cursor = 0
     while (true) {

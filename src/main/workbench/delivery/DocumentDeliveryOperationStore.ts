@@ -69,7 +69,7 @@ export class DocumentDeliveryOperationStore {
       return { record, created: true }
     })
   }
-  async ownsExportVersion(input: { runId: string; documentId: string; epoch: string; path: string; format: string; fileVersion: string; taskRunIds?: readonly string[] }): Promise<boolean> {
+  async ownsExportVersion(input: { runId: string; documentId: string; epoch: string; path: string; format: string; fileVersion: string; taskRunIds?: readonly string[]; explicitDestination?: boolean }): Promise<boolean> {
     await Promise.all([...this.tails.values()].map(tail => tail.catch(() => undefined)))
     let names: string[]
     try { names = await fs.readdir(this.directory) } catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false; throw error }
@@ -80,7 +80,11 @@ export class DocumentDeliveryOperationStore {
       if (record.kind !== 'export' || !record.path || key(record.path) !== key(input.path)) continue
       if (record.status === 'writing') return false // An unresolved write is never replaced by a new attempt.
       const receipt = record.receipt as ExportReceipt | undefined
-      if ((record.runId === input.runId || input.taskRunIds?.includes(record.runId)) && record.status === 'completed' && receipt?.status === 'written'
+      // A new UI message is a new task. Its current write/path grant can update
+      // an explicitly named, unchanged export of this still-open document.
+      // History alone does not authorize a default-name collision or a new epoch.
+      const currentDocumentUpdate = input.explicitDestination === true && receipt?.epoch === input.epoch
+      if ((record.runId === input.runId || input.taskRunIds?.includes(record.runId) || currentDocumentUpdate) && record.status === 'completed' && receipt?.status === 'written'
         && receipt.documentId === input.documentId && (receipt.epoch === input.epoch
           || record.runId !== input.runId && input.taskRunIds?.includes(record.runId))
         && receipt.format === input.format && receipt.fileVersion === input.fileVersion) owned = true

@@ -1,5 +1,5 @@
 {
-  "description": "局部修改现有 Office 原文件。content 只表达要改的内容，软件保留其他文本、版式和媒体并保存原格式；可用唯一 oldText 或 inspect 提供的位置。先 inspect 后修改，软件自动沿用本任务读取的文件版本；expectedVersion 可省略，提供时要求当前版本一致。Excel 公式实际计算；不支持的公式保留并返回局部诊断。",
+  "description": "局部修改现有 Office 原文件并保存原格式，保全非目标文本、版式和媒体。先 office.inspect 读取当前原件：DOCX可用唯一oldText或返回位置；PPTX每项必须带返回的零基slide及shapeId，新对象操作还须带part/partVersion。软件沿用本任务读取的文件版本；expectedVersion可省略，提供时要求当前版本一致。Excel公式实际计算；不支持的公式保留并返回局部诊断。",
   "inputSchema": {
     "$defs": {
       "__schema0": {
@@ -133,43 +133,283 @@
         "type": "object"
       },
       "__schema10": {
-        "$ref": "#/$defs/__schema11",
-        "description": "原样沿用 inspect 返回的 partVersion，不能自行生成或复用旧值"
+        "minLength": 1,
+        "type": "string"
       },
       "__schema11": {
+        "$ref": "#/$defs/__schema12",
+        "description": "原样沿用 inspect 返回的 partVersion，不能自行生成或复用旧值"
+      },
+      "__schema12": {
         "pattern": "^[a-f0-9]{64}$",
         "type": "string"
       },
-      "__schema12": {
-        "type": "string"
-      },
       "__schema13": {
-        "maximum": 9007199254740991,
-        "minimum": 0,
-        "type": "integer"
-      },
-      "__schema2": {
         "properties": {
           "paragraph": {
-            "$ref": "#/$defs/__schema13"
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
           },
           "part": {
-            "$ref": "#/$defs/__schema8"
+            "$ref": "#/$defs/__schema15"
           },
           "partVersion": {
-            "$ref": "#/$defs/__schema10"
+            "$ref": "#/$defs/__schema16"
+          },
+          "run": {
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
           },
           "shape": {
-            "$ref": "#/$defs/__schema4"
+            "$ref": "#/$defs/__schema5"
           },
           "shapeId": {
-            "$ref": "#/$defs/__schema6"
+            "$ref": "#/$defs/__schema14"
           },
           "slide": {
-            "$ref": "#/$defs/__schema3"
+            "$ref": "#/$defs/__schema4"
           },
           "text": {
-            "$ref": "#/$defs/__schema12"
+            "type": "string"
+          },
+          "type": {
+            "const": "runText",
+            "type": "string"
+          }
+        },
+        "required": [
+          "slide",
+          "shapeId",
+          "part",
+          "partVersion",
+          "type",
+          "paragraph",
+          "run",
+          "text"
+        ],
+        "type": "object"
+      },
+      "__schema14": {
+        "$ref": "#/$defs/__schema7"
+      },
+      "__schema15": {
+        "$ref": "#/$defs/__schema9"
+      },
+      "__schema16": {
+        "$ref": "#/$defs/__schema11"
+      },
+      "__schema17": {
+        "properties": {
+          "height": {
+            "$ref": "#/$defs/__schema25"
+          },
+          "part": {
+            "$ref": "#/$defs/__schema15"
+          },
+          "partVersion": {
+            "$ref": "#/$defs/__schema16"
+          },
+          "rotation": {
+            "$ref": "#/$defs/__schema27"
+          },
+          "shape": {
+            "$ref": "#/$defs/__schema5"
+          },
+          "shapeId": {
+            "$ref": "#/$defs/__schema14"
+          },
+          "slide": {
+            "$ref": "#/$defs/__schema4"
+          },
+          "type": {
+            "$ref": "#/$defs/__schema18"
+          },
+          "width": {
+            "$ref": "#/$defs/__schema23"
+          },
+          "x": {
+            "$ref": "#/$defs/__schema19"
+          },
+          "y": {
+            "$ref": "#/$defs/__schema21"
+          }
+        },
+        "required": [
+          "slide",
+          "shapeId",
+          "part",
+          "partVersion",
+          "type"
+        ],
+        "type": "object"
+      },
+      "__schema18": {
+        "const": "transform",
+        "type": "string"
+      },
+      "__schema19": {
+        "$ref": "#/$defs/__schema20",
+        "description": "对象父坐标中的横向位置，单位磅；沿用inspect的frame单位"
+      },
+      "__schema2": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/__schema3"
+          },
+          {
+            "$ref": "#/$defs/__schema13"
+          },
+          {
+            "$ref": "#/$defs/__schema17"
+          },
+          {
+            "$ref": "#/$defs/__schema29"
+          },
+          {
+            "$ref": "#/$defs/__schema37"
+          },
+          {
+            "$ref": "#/$defs/__schema42"
+          },
+          {
+            "$ref": "#/$defs/__schema43"
+          },
+          {
+            "$ref": "#/$defs/__schema44"
+          },
+          {
+            "$ref": "#/$defs/__schema50"
+          }
+        ]
+      },
+      "__schema20": {
+        "type": "number"
+      },
+      "__schema21": {
+        "$ref": "#/$defs/__schema22",
+        "description": "对象父坐标中的纵向位置，单位磅"
+      },
+      "__schema22": {
+        "type": "number"
+      },
+      "__schema23": {
+        "$ref": "#/$defs/__schema24",
+        "description": "宽度，单位磅"
+      },
+      "__schema24": {
+        "exclusiveMinimum": 0,
+        "type": "number"
+      },
+      "__schema25": {
+        "$ref": "#/$defs/__schema26",
+        "description": "高度，单位磅"
+      },
+      "__schema26": {
+        "exclusiveMinimum": 0,
+        "type": "number"
+      },
+      "__schema27": {
+        "$ref": "#/$defs/__schema28",
+        "description": "旋转角，单位度"
+      },
+      "__schema28": {
+        "type": "number"
+      },
+      "__schema29": {
+        "properties": {
+          "paragraph": {
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "part": {
+            "$ref": "#/$defs/__schema15"
+          },
+          "partVersion": {
+            "$ref": "#/$defs/__schema16"
+          },
+          "run": {
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "shape": {
+            "$ref": "#/$defs/__schema5"
+          },
+          "shapeId": {
+            "$ref": "#/$defs/__schema14"
+          },
+          "slide": {
+            "$ref": "#/$defs/__schema4"
+          },
+          "style": {
+            "properties": {
+              "bold": {
+                "$ref": "#/$defs/__schema30"
+              },
+              "color": {
+                "$ref": "#/$defs/__schema36"
+              },
+              "fontFamily": {
+                "$ref": "#/$defs/__schema35"
+              },
+              "fontSize": {
+                "$ref": "#/$defs/__schema33"
+              },
+              "italic": {
+                "$ref": "#/$defs/__schema31"
+              },
+              "underline": {
+                "$ref": "#/$defs/__schema32"
+              }
+            },
+            "type": "object"
+          },
+          "type": {
+            "const": "textStyle",
+            "type": "string"
+          }
+        },
+        "required": [
+          "slide",
+          "shapeId",
+          "part",
+          "partVersion",
+          "type",
+          "style"
+        ],
+        "type": "object"
+      },
+      "__schema3": {
+        "properties": {
+          "paragraph": {
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "part": {
+            "$ref": "#/$defs/__schema9"
+          },
+          "partVersion": {
+            "$ref": "#/$defs/__schema11"
+          },
+          "shape": {
+            "$ref": "#/$defs/__schema5"
+          },
+          "shapeId": {
+            "$ref": "#/$defs/__schema7"
+          },
+          "slide": {
+            "$ref": "#/$defs/__schema4"
+          },
+          "text": {
+            "type": "string"
+          },
+          "type": {
+            "const": "text",
+            "type": "string"
           }
         },
         "required": [
@@ -178,33 +418,326 @@
         ],
         "type": "object"
       },
-      "__schema3": {
+      "__schema30": {
+        "type": "boolean"
+      },
+      "__schema31": {
+        "type": "boolean"
+      },
+      "__schema32": {
+        "type": "boolean"
+      },
+      "__schema33": {
+        "$ref": "#/$defs/__schema34",
+        "description": "字号，单位为磅"
+      },
+      "__schema34": {
+        "exclusiveMinimum": 0,
+        "type": "number"
+      },
+      "__schema35": {
+        "minLength": 1,
+        "type": "string"
+      },
+      "__schema36": {
+        "pattern": "^[a-fA-F0-9]{6}$",
+        "type": "string"
+      },
+      "__schema37": {
+        "properties": {
+          "fill": {
+            "$ref": "#/$defs/__schema39"
+          },
+          "part": {
+            "$ref": "#/$defs/__schema15"
+          },
+          "partVersion": {
+            "$ref": "#/$defs/__schema16"
+          },
+          "shape": {
+            "$ref": "#/$defs/__schema5"
+          },
+          "shapeId": {
+            "$ref": "#/$defs/__schema14"
+          },
+          "slide": {
+            "$ref": "#/$defs/__schema4"
+          },
+          "stroke": {
+            "$ref": "#/$defs/__schema40"
+          },
+          "strokeWidth": {
+            "$ref": "#/$defs/__schema41"
+          },
+          "type": {
+            "$ref": "#/$defs/__schema38"
+          }
+        },
+        "required": [
+          "slide",
+          "shapeId",
+          "part",
+          "partVersion",
+          "type"
+        ],
+        "type": "object"
+      },
+      "__schema38": {
+        "const": "shapeStyle",
+        "type": "string"
+      },
+      "__schema39": {
+        "anyOf": [
+          {
+            "pattern": "^[a-fA-F0-9]{6}$",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "__schema4": {
         "maximum": 9007199254740991,
         "minimum": 0,
         "type": "integer"
       },
-      "__schema4": {
-        "$ref": "#/$defs/__schema5",
-        "description": "兼容按唯一名称定位；重名时请使用 inspect 返回的 shapeId"
+      "__schema40": {
+        "anyOf": [
+          {
+            "pattern": "^[a-fA-F0-9]{6}$",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "__schema41": {
+        "minimum": 0,
+        "type": "number"
+      },
+      "__schema42": {
+        "properties": {
+          "part": {
+            "$ref": "#/$defs/__schema15"
+          },
+          "partVersion": {
+            "$ref": "#/$defs/__schema16"
+          },
+          "position": {
+            "enum": [
+              "front",
+              "back",
+              "forward",
+              "backward"
+            ],
+            "type": "string"
+          },
+          "shape": {
+            "$ref": "#/$defs/__schema5"
+          },
+          "shapeId": {
+            "$ref": "#/$defs/__schema14"
+          },
+          "slide": {
+            "$ref": "#/$defs/__schema4"
+          },
+          "type": {
+            "const": "layer",
+            "type": "string"
+          }
+        },
+        "required": [
+          "slide",
+          "shapeId",
+          "part",
+          "partVersion",
+          "type",
+          "position"
+        ],
+        "type": "object"
+      },
+      "__schema43": {
+        "properties": {
+          "image": {
+            "properties": {
+              "base64": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "contentType": {
+                "enum": [
+                  "image/png",
+                  "image/jpeg",
+                  "image/gif"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "contentType",
+              "base64"
+            ],
+            "type": "object"
+          },
+          "part": {
+            "$ref": "#/$defs/__schema15"
+          },
+          "partVersion": {
+            "$ref": "#/$defs/__schema16"
+          },
+          "shape": {
+            "$ref": "#/$defs/__schema5"
+          },
+          "shapeId": {
+            "$ref": "#/$defs/__schema14"
+          },
+          "slide": {
+            "$ref": "#/$defs/__schema4"
+          },
+          "type": {
+            "const": "replaceImage",
+            "type": "string"
+          }
+        },
+        "required": [
+          "slide",
+          "shapeId",
+          "part",
+          "partVersion",
+          "type",
+          "image"
+        ],
+        "type": "object"
+      },
+      "__schema44": {
+        "properties": {
+          "bottom": {
+            "$ref": "#/$defs/__schema49"
+          },
+          "left": {
+            "$ref": "#/$defs/__schema46"
+          },
+          "part": {
+            "$ref": "#/$defs/__schema15"
+          },
+          "partVersion": {
+            "$ref": "#/$defs/__schema16"
+          },
+          "right": {
+            "$ref": "#/$defs/__schema48"
+          },
+          "shape": {
+            "$ref": "#/$defs/__schema5"
+          },
+          "shapeId": {
+            "$ref": "#/$defs/__schema14"
+          },
+          "slide": {
+            "$ref": "#/$defs/__schema4"
+          },
+          "top": {
+            "$ref": "#/$defs/__schema47"
+          },
+          "type": {
+            "$ref": "#/$defs/__schema45"
+          }
+        },
+        "required": [
+          "slide",
+          "shapeId",
+          "part",
+          "partVersion",
+          "type",
+          "left",
+          "top",
+          "right",
+          "bottom"
+        ],
+        "type": "object"
+      },
+      "__schema45": {
+        "const": "imageCrop",
+        "type": "string"
+      },
+      "__schema46": {
+        "type": "number"
+      },
+      "__schema47": {
+        "type": "number"
+      },
+      "__schema48": {
+        "type": "number"
+      },
+      "__schema49": {
+        "type": "number"
       },
       "__schema5": {
-        "type": "string"
+        "$ref": "#/$defs/__schema6",
+        "description": "兼容按唯一名称定位；重名时请使用 inspect 返回的 shapeId"
+      },
+      "__schema50": {
+        "properties": {
+          "column": {
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "part": {
+            "$ref": "#/$defs/__schema15"
+          },
+          "partVersion": {
+            "$ref": "#/$defs/__schema16"
+          },
+          "row": {
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "shape": {
+            "$ref": "#/$defs/__schema5"
+          },
+          "shapeId": {
+            "$ref": "#/$defs/__schema14"
+          },
+          "slide": {
+            "$ref": "#/$defs/__schema4"
+          },
+          "text": {
+            "type": "string"
+          },
+          "type": {
+            "const": "tableCell",
+            "type": "string"
+          }
+        },
+        "required": [
+          "slide",
+          "shapeId",
+          "part",
+          "partVersion",
+          "type",
+          "row",
+          "column",
+          "text"
+        ],
+        "type": "object"
       },
       "__schema6": {
-        "$ref": "#/$defs/__schema7",
-        "description": "inspect 返回的原件形状标识；提供时优先于名称定位"
+        "type": "string"
       },
       "__schema7": {
-        "minLength": 1,
-        "type": "string"
+        "$ref": "#/$defs/__schema8",
+        "description": "inspect 返回的原件形状标识；提供时优先于名称定位"
       },
       "__schema8": {
-        "$ref": "#/$defs/__schema9",
-        "description": "原样沿用 inspect 返回的幻灯片 part，防止幻灯片顺序变化后误改"
-      },
-      "__schema9": {
         "minLength": 1,
         "type": "string"
+      },
+      "__schema9": {
+        "$ref": "#/$defs/__schema10",
+        "description": "原样沿用 inspect 返回的幻灯片 part，防止幻灯片顺序变化后误改"
       }
     },
     "$schema": "https://json-schema.org/draft/2020-12/schema",

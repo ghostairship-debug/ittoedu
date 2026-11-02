@@ -68,7 +68,10 @@ const previousPresentationStyles = new WeakMap<HTMLElement, string[]>()
 export function applyComponentPresentationStyle(element: HTMLElement, style: Readonly<Record<string, string>>): void {
   for (const key of previousPresentationStyles.get(element) ?? []) if (!(key in style))
     element.style.removeProperty(key.replace(/[A-Z]/g, letter => `-${letter.toLowerCase()}`))
-  Object.assign(element.style, style)
+  for (const [key, value] of Object.entries(style)) {
+    if (key.startsWith('--')) element.style.setProperty(key, value)
+    else (element.style as unknown as Record<string, string>)[key] = value
+  }
   previousPresentationStyles.set(element, Object.keys(style))
 }
 
@@ -117,6 +120,8 @@ export function resolveComponentOuterPresentation(project: CourseProjectV10, ins
     Object.assign(outerStyle, { width: explicit ? allocation.inlineSize : presentation.inlineSize,
       maxWidth: explicit ? allocation.inlineSize : presentation.maxInlineSize, float: wrapped ? wrap : 'none',
       margin: wrap === 'left' ? '8px 20px 8px 0' : wrap === 'right' ? '8px 0 8px 20px' : explicit ? '16px auto' : `16px calc((100% - ${presentation.inlineSize}) / 2)` })
+    if (wrap === 'both') Object.assign(outerStyle, { '--flow-bilateral': '1', float: 'left', clear: 'both', boxSizing: 'border-box', zIndex: '1',
+      margin: `8px ${-(100 + allocation.widthPercent) / 2}% 8px ${(100 - allocation.widthPercent) / 2}%` })
   }
   if (nativeLayout || nativeItem) Object.assign(outerStyle, { display: 'block', minWidth: '0px', boxSizing: 'border-box',
     ...(nativeItem ? { margin: '0px' } : {}), ...nativeFlowItemStyle(instance) })
