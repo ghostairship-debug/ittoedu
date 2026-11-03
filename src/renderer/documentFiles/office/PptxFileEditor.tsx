@@ -493,6 +493,7 @@ export const PptxFileEditor = forwardRef<OfficeEditorHandle, PptxFileEditorProps
         }}><option value="">段落</option><option value="left">左对齐</option><option value="center">居中</option><option value="right">右对齐</option><option value="justify">两端对齐</option><option value="bullet">项目符号</option><option value="number">编号</option><option value="noBullet">取消列表</option><option value="clear">清除字符格式</option></select>
         {button('格式刷', '复制文字与对象格式', () => canvas(() => view.current?.startFormatPainter()), selectedIds.length !== 1)}
       </div>
+      <div className="pptx-editor__context-tools">
       {canEdit && single?.src.kind === 'image' && <div className="pptx-editor__tools" role="group" aria-label="图片工具">
         <span>图片</span>{button('裁剪', '裁剪选中图片', () => canvas(() => view.current?.startImageCrop()))}
         {button('完成裁剪', '完成图片裁剪', () => view.current?.endImageCrop())}
@@ -510,6 +511,7 @@ export const PptxFileEditor = forwardRef<OfficeEditorHandle, PptxFileEditorProps
         {button('合并', '合并所选单元格', () => tableAction('merge'), selection.kind !== 'table' || selection.cells.length < 2)}
         {button('拆分', '拆分所选单元格', () => tableAction('split'), !tableHasCell)}
       </div>}
+      </div>
     </div>
     {error && <div className="pptx-editor__notice" role="alert">{error}</div>}
     {openError ? <><div className="pptx-editor__notice" role="alert">{openError}</div>

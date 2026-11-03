@@ -166,7 +166,7 @@ export function WorkspaceContentHost({ props, layout, editorFocus, enterEditor, 
             )
           ) : tab.kind === 'presentation' || tab.kind === 'word' || tab.kind === 'spreadsheet' ? (
             <div className="office-file-view">
-              {tab.officePending && <p className="office-file-view__message" role="status">
+              {tab.officePending && <p className={`office-file-view__message${tab.pptxSnapshot || tab.officeSnapshot || tab.docxSnapshot ? ' office-file-view__message--transient' : ''}`} role="status">
                 {tab.officeMessage}{tab.officeStale ? ' 当前仍显示上一版本，载入完成后更新。' : ''}
               </p>}
               {tab.officeError && <p className="office-file-view__message" role="alert">{tab.officeError}</p>}

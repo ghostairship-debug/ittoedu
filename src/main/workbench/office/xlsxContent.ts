@@ -128,7 +128,9 @@ function assertWorkbookStructureEditable(pkg: OfficePackage) {
   if (protection && ['1', 'true', 'on'].includes(protection.getAttribute('lockStructure') ?? '')) throw new Error('工作簿结构受保护，请先在原软件中解除结构保护。')
 }
 /** Refuse unsupported dependency changes rather than silently breaking names, charts or formulas. */
-function assertNoSheetReferences(pkg: OfficePackage, target: Sheet, deleting: boolean) {
+function assertSheetReferencesEditable(pkg: OfficePackage, target: Sheet, operation: 'rename' | 'delete' | 'move') {
+  const deleting = operation === 'delete', moving = operation === 'move'
+  const action = deleting ? '删除' : moving ? '移动' : '改名'
   const escaped = target.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
   const quoted = target.name.replaceAll("'", "''").replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
   const reference = new RegExp(`(?:'${quoted}'|(?:^|[^A-Za-z0-9_.])${escaped})\\s*!`, 'i')
@@ -142,9 +144,10 @@ function assertNoSheetReferences(pkg: OfficePackage, target: Sheet, deleting: bo
       if (['f', 'formula', 'formula1', 'formula2', 'definedName', 'calculatedColumnFormula', 'totalsRowFormula'].includes(name ?? '')) {
         const formula = node.textContent ?? ''
         // 3-D and external references require a dedicated dependency-aware operation.
-        if (reference.test(formula) || /(?:'[^']*'|[A-Za-z0-9_.]+):(?:'[^']*'|[A-Za-z0-9_.]+)!/.test(formula) || /'(?:[^']|'')*:(?:[^']|'')*'\s*!/.test(formula)) throw new Error(`工作表 ${target.name} 被公式、名称或图表引用；当前简单${deleting ? '删除' : '改名'}不能可靠维护该依赖，请使用专业格式操作。`)
+        // MS-XLSX 2.2.2 excludes operators and delimiters, not Unicode or symbols, from unquoted sheet names.
+        if ((!moving && reference.test(formula)) || /(?:'[^']*'|[^ :'\[\]\\?^*\/+&=<>%,-]+):(?:'[^']*'|[^ :'\[\]\\?^*\/+&=<>%,-]+)!/.test(formula) || /'(?:[^']|'')*:(?:[^']|'')*'\s*!/.test(formula)) throw new Error(`工作表 ${target.name} 被公式、名称或图表引用；当前简单${action}不能可靠维护该依赖，请使用专业格式操作。`)
       }
-      if (node.getAttribute('sheet')?.toLocaleLowerCase() === target.name.toLocaleLowerCase()) throw new Error(`工作表 ${target.name} 被透视表或其他结构引用；请先处理依赖。`)
+      if (!moving && node.getAttribute('sheet')?.toLocaleLowerCase() === target.name.toLocaleLowerCase()) throw new Error(`工作表 ${target.name} 被透视表或其他结构引用；请先处理依赖。`)
     }
   }
 }
@@ -225,16 +228,19 @@ export function editXlsx(pkg: OfficePackage, request: OfficeRequest<'xlsx', 'edi
       if (!sheet) throw new Error(`Excel 工作表不存在：${edit.sheet}`)
       if (edit.type === 'sheetRename') {
         validateSheetName(allSheets, edit.name, sheet.name)
-        if (sheet.name !== edit.name) assertNoSheetReferences(pkg, sheet, false)
+        if (sheet.name !== edit.name) assertSheetReferencesEditable(pkg, sheet, 'rename')
         sheet.node.setAttribute('name', edit.name)
       } else if (edit.type === 'sheetMove') {
         if (edit.index >= allSheets.length) throw new Error('工作表排序位置超出范围。')
+        // Reversing 3-D endpoints can require rewriting the reference itself.
+        // Preserve the original formula by refusing moves we cannot maintain.
+        assertSheetReferencesEditable(pkg, sheet, 'move')
         const container = sheet.node.parentNode!, remaining = allSheets.filter(value => value !== sheet)
         container.removeChild(sheet.node); container.insertBefore(sheet.node, remaining[edit.index]?.node ?? null)
         remapSheetPositions(pkg, allSheets, sheets(pkg))
       } else {
         if (allSheets.length <= 1 || (!['hidden', 'veryHidden'].includes(sheet.node.getAttribute('state') ?? '') && allSheets.filter(value => !['hidden', 'veryHidden'].includes(value.node.getAttribute('state') ?? '')).length <= 1)) throw new Error('工作簿必须保留至少一张可见工作表。')
-        assertNoSheetReferences(pkg, sheet, true)
+        assertSheetReferencesEditable(pkg, sheet, 'delete')
         const id = sheet.node.getAttributeNS(NS.officeRelationship, 'id')
         sheet.node.parentNode?.removeChild(sheet.node)
         const relationsName = relationPart(pkg.main()), relations = pkg.xml(relationsName)

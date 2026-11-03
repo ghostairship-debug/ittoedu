@@ -23,7 +23,9 @@ export async function applyOfficeContent(bytes: Uint8Array | undefined, input: O
     else if (request.format === 'xlsx') editXlsx(pkg, request)
     else editPptx(pkg, request)
   }
-  const calculation = request.format === 'xlsx' && (request.operation === 'create' || request.edits.some(edit => 'cell' in edit))
+  // Sheet structure also changes formula meaning (SHEET/SHEETS, dynamic references).
+  // Width-only edits retain the existing formatting/cache preservation contract.
+  const calculation = request.format === 'xlsx' && (request.operation === 'create' || request.edits.some(edit => !('type' in edit) || edit.type !== 'columnWidth'))
     ? recalculateXlsx(pkg) : undefined
   return {
     format: request.format, bytes: pkg.save(), changedParts: created ? Object.keys(pkg.parts) : [...pkg.changed],

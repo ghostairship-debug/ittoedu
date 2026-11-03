@@ -14,13 +14,63 @@ const canonicalPath=(filename:string)=>process.platform==='win32'?resolve(filena
 const ppt = (filename: string) => {
  const data=inspectOfficeContent(readFileSync(filename),'pptx');if(data.format!=='pptx')throw new Error('format');return data
 }
-async function replaceTitle(page: Page, from: string, to: string, save = true) {
+async function replaceTitle(page: Page, from: string, to: string, save = true, probes?: Array<Record<string, unknown>>) {
  const stage=page.getByTestId('pptx-edit-surface').filter({visible:true})
  await expect(stage).toContainText(from,{timeout:45000})
- await stage.getByText(from,{exact:true}).first().dblclick()
- await expect(stage.locator('[contenteditable="true"]').filter({visible:true}).first()).toBeVisible()
- await page.keyboard.press('Control+A');await page.keyboard.insertText(to);await page.keyboard.press('Escape')
- if(save)await page.locator('.pptx-editor').filter({visible:true}).getByRole('button',{name:'保存',exact:true}).click()
+ const probe:Record<string,unknown>={from,to,save,status:'running'};probes?.push(probe)
+ await stage.evaluate(root=>{
+  const ids=new WeakMap<Node,number>();let nextId=1
+  const brief=(value:EventTarget|null):unknown=>{
+   if(value===window)return 'window'
+   if(!(value instanceof Node))return String(value)
+   if(!ids.has(value))ids.set(value,nextId++)
+   return value instanceof Element?{id:ids.get(value),tag:value.tagName,cls:value.getAttribute('class'),editId:value.getAttribute('data-edit-id'),label:value.getAttribute('aria-label'),connected:value.isConnected,text:value.textContent?.slice(0,100)}:{id:ids.get(value),type:value.nodeType}
+  }
+  const state=()=>({at:performance.now(),documentFocus:document.hasFocus(),active:brief(document.activeElement),roots:[...root.children].map(brief),editable:[...root.querySelectorAll('[contenteditable="true"]')].map(brief)})
+  const events:unknown[]=[],mutations:unknown[]=[]
+  const receive=(event:Event)=>{
+   if(events.length>=120)return
+   const mouse=event as MouseEvent
+   events.push({at:performance.now(),type:event.type,trusted:event.isTrusted,detail:mouse.detail,x:mouse.clientX,y:mouse.clientY,target:brief(event.target),path:event.composedPath().slice(0,8).map(brief),state:state()})
+  }
+  const names=['pointerdown','pointerup','click','dblclick','focus','blur','focusin','focusout']
+  names.forEach(name=>window.addEventListener(name,receive,true))
+  const containsEditor=(node:Node)=>node instanceof Element&&(node.hasAttribute('contenteditable')||Boolean(node.querySelector('[contenteditable]')))
+  const observer=new MutationObserver(records=>records.forEach(record=>{
+   if(mutations.length>=80)return
+   if(record.target!==root&&record.attributeName!=='contenteditable'&&![...record.addedNodes,...record.removedNodes].some(containsEditor))return
+   mutations.push({at:performance.now(),target:brief(record.target),attribute:record.attributeName,added:[...record.addedNodes].map(brief),removed:[...record.removedNodes].map(brief),state:state()})
+  }))
+  observer.observe(root,{subtree:true,childList:true,attributes:true,attributeFilter:['contenteditable']})
+  const initial=state()
+  ;(window as any).__officeTitleProbe={finish:()=>{
+   observer.disconnect();names.forEach(name=>window.removeEventListener(name,receive,true))
+   return {initial,events,mutations,final:state()}
+  }}
+ })
+ try{
+  const title=stage.getByText(from,{exact:true}).first()
+  probe.before=await title.evaluate(element=>{
+   const rect=(value:DOMRect)=>({x:value.x,y:value.y,width:value.width,height:value.height})
+   const walker=document.createTreeWalker(element,NodeFilter.SHOW_TEXT),ranges=[];let node:Node|null
+   while(node=walker.nextNode()){if(!node.textContent?.trim())continue;const range=document.createRange();range.selectNodeContents(node);ranges.push({text:node.textContent,rect:rect(range.getBoundingClientRect())})}
+   return {at:performance.now(),html:element.outerHTML,rect:rect(element.getBoundingClientRect()),ranges}
+  })
+  await title.dblclick()
+  probe.afterDoubleClick=await stage.evaluate((root,text)=>{
+   const rect=(value:DOMRect)=>({x:value.x,y:value.y,width:value.width,height:value.height})
+   const walker=document.createTreeWalker(root,NodeFilter.SHOW_TEXT),ranges=[];let node:Node|null
+   while(node=walker.nextNode()){if(node.textContent!==text)continue;const range=document.createRange();range.selectNodeContents(node);ranges.push({html:node.parentElement?.outerHTML,rect:rect(range.getBoundingClientRect())})}
+   return {at:performance.now(),editable:root.querySelectorAll('[contenteditable="true"]').length,roots:root.children.length,documentFocus:document.hasFocus(),ranges}
+  },from)
+  await expect(stage.locator('[contenteditable="true"]').filter({visible:true}).first()).toBeVisible()
+  await page.keyboard.press('Control+A');await page.keyboard.insertText(to);await page.keyboard.press('Escape')
+  if(save)await page.locator('.pptx-editor').filter({visible:true}).getByRole('button',{name:'保存',exact:true}).click()
+  probe.status='passed'
+ }finally{
+  if(probe.status!=='passed')probe.status='failed'
+  probe.trace=await page.evaluate(()=>{const active=(window as any).__officeTitleProbe;delete (window as any).__officeTitleProbe;return active?.finish()}).catch(error=>({captureError:String(error)}))
+ }
 }
 test.use({trace:'off',video:'off'})
 test('real model and human alternate on PPT while discovering other open Office and GLX files',async ({},info)=>{
@@ -38,7 +88,8 @@ test('real model and human alternate on PPT while discovering other open Office 
  const nativeProject=createBlankCourseProjectV10('教学')
  writeFileSync(join(workspace,'教学.glx'),createCourseProjectV10Archive({project:nativeProject,resources:{assets:{},components:{}}}))
  const initialParts=unzipSync(readFileSync(presentation)),original=ppt(presentation)
- const facts:Record<string,unknown>={status:'running',phase:'launch',directory,provider:'teamorouter',model:'deepseek-flash',nativeSource:existsSync(native),rounds:[]}
+ const titleEditProbes:Array<Record<string,unknown>>=[]
+ const facts:Record<string,unknown>={status:'running',phase:'launch',directory,provider:'teamorouter',model:'deepseek-flash',nativeSource:existsSync(native),rounds:[],titleEditProbes}
  const childEnv=Object.fromEntries(Object.entries(process.env).filter(([name])=>!['TEAMOROUTER_API_KEY','DEEPSEEK_API_KEY'].includes(name.toUpperCase())))
  const start=Date.now()
  const executablePath=process.env.COURSEWARE_E2E_PACKAGED_EXECUTABLE?.trim()
@@ -113,7 +164,7 @@ test('real model and human alternate on PPT while discovering other open Office 
   await page.locator('.workspace-document-tabs').getByRole('tab',{name:/预算.xlsx/}).click()
   await page.locator('.office-sheet-editor').filter({visible:true}).getByRole('textbox',{name:'预算!B2',exact:true}).fill('21')
   await page.locator('.workspace-document-tabs').getByRole('tab',{name:/项目汇报.pptx/}).click()
-  await replaceTitle(page,'Complex original title','人工阶段标题',false)
+  await replaceTitle(page,'Complex original title','人工阶段标题',false,titleEditProbes)
   expect(ppt(presentation).slides[0].shapes.find(s=>s.name==='title')?.text).toBe('Complex original title')
   const humanParts=unzipSync(readFileSync(presentation))
   for(const [name,bytes]of Object.entries(initialParts))if(/\/(charts|embeddings)\//.test(name))expect(humanParts[name],name).toEqual(bytes)
@@ -166,7 +217,7 @@ test('real model and human alternate on PPT while discovering other open Office 
   expect(excel.format==='xlsx'&&excel.sheets[0].cells.find(c=>c.cell==='B3')?.formula).toBe('SUM(B2:B2)')
   facts.phase='human-after-ai'
   const aiParts=unzipSync(readFileSync(presentation))
-  await replaceTitle(page,'AI接续标题','用户接续标题')
+  await replaceTitle(page,'AI接续标题','用户接续标题',true,titleEditProbes)
   await expect.poll(()=>ppt(presentation).slides[0].shapes.find(s=>s.name==='title')?.text).toBe('用户接续标题')
   const editor=page.locator('.pptx-editor').filter({visible:true})
   await editor.getByRole('button',{name:'撤销',exact:true}).click()
