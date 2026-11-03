@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "semanticVersion": "074d2da9fcf74a49a16a9ce514eb3327f32336e09e74a587a34936ba42d41710",
+  "semanticVersion": "a2694290317133491d2f9d1f3ac72d9f8ff7a09c84c16ade9178d7dd0077b57f",
   "entries": [
     {
       "id": "artifact.save",
@@ -1894,7 +1894,7 @@
       "carriers": [
         "component"
       ],
-      "summary": "局部修改现有 Office 原文件并保存原格式，保全非目标文本、版式和媒体。先 office.inspect 读取当前原件：DOCX可用唯一oldText或返回位置；PPTX每项必须带返回的零基slide及shapeId，新对象操作还须带part/partVersion。软件沿用本任务读取的文件版本；expectedVersion可省略，提供时要求当前版本一致。Excel公式实际计算；不支持的公式保留并返回局部诊断。"
+      "summary": "局部修改并保存 Office 原件，保全非目标结构，进入统一撤销历史。先 office.inspect：DOCX支持正文、段落和基础样式；XLSX支持单元格/公式及工作表管理，复杂依赖无法安全维护时拒绝；PPTX对象沿用零基slide、shapeId、part/partVersion。chartValue还须沿用chartPart/chartVersion及系列/点index，同步数值缓存和内嵌工作簿；animationTiming只修改inspect标为editable的已有行为时长。软件沿用本次读取的文件版本；不支持的公式保留并报告计算范围。不扩大文件写入授权。"
     },
     {
       "id": "office.inspect",
@@ -1917,7 +1917,7 @@
       "carriers": [
         "component"
       ],
-      "summary": "读取现有 DOCX、XLSX 或 PPTX 的真实正文、表格、单元格或幻灯片文字。宿主识别原文件格式并提供可编辑位置和当前版本，不要求处理压缩包或 XML。"
+      "summary": "读取现有 DOCX、XLSX 或 PPTX 的正文、格式、表格、工作表与单元格、幻灯片对象，以及可定位的图表数值和动画行为。提供文件版本、原件 part/partVersion 和可编辑位置；按返回身份进行修改。"
     },
     {
       "id": "presentation.update",

@@ -47,7 +47,10 @@ describe('Office agent file authority and observed versions', () => {
     expect((await f.files.executeOffice(readGrant, 'office.inspect', { path: external }, 'inspect-granted')).data).toMatchObject({ writable: false })
     expect(await f.files.preflightOffice(readGrant, 'office.edit', { path: external, content: editedContent })).toEqual({ paths: [external], outside: true })
     await expect(f.files.executeOffice(readGrant, 'office.edit', { path: external, content: editedContent }, 'edit-outside-denied')).rejects.toThrow('明确批准')
-    const writeGrant = { ...readGrant, approvedOutsidePaths: [external] }
+    // A path approval never converts an explicit read-only root into a writer.
+    await expect(f.files.executeOffice({ ...readGrant, approvedOutsidePaths: [external] }, 'office.edit', { path: external, content: editedContent }, 'protected-root')).rejects.toThrow('明确批准')
+    const writeGrant = { ...f.context, runId: 'separate-approved-task', boundPaths: [external], approvedOutsidePaths: [external] }
+    expect((await f.files.executeOffice(writeGrant, 'office.inspect', { path: external }, 'inspect-approved')).data).toMatchObject({ writable: true })
     expect((await f.files.executeOffice(writeGrant, 'office.edit', { path: external, content: editedContent }, 'edit-granted')).data).toMatchObject({ status: 'saved', saved: true })
     expect(f.host.registry.list()).toHaveLength(0)
     await expect(f.files.execute(f.context, 'file.open', { path: 'lesson.docx' }, 'binary-text-denied')).rejects.toThrow()

@@ -1,3 +1,4 @@
+import type { ExecutionFileContext } from './fileContext'
 import type { ModelChatMessage, ModelFailure, ModelSelection } from './modelProvider'
 import type { ModelToolCall, ToolResult, ToolTarget } from './tools'
 import type { InputContext, PayloadManifest } from './attachments'
@@ -39,6 +40,8 @@ export interface ExecutionStart {
   contentOutput?: ExecutionContentOutput
   materials?: ExecutionMaterials
   webAuthorization?: WebTaskAuthorization
+  /** Frozen discovery and references, independent of write authority. */
+  fileContext?: ExecutionFileContext
   /** Compiled, frozen attachment/context messages. No path implies a new grant. */
   context?: readonly ModelChatMessage[]
   inputContext?: InputContext

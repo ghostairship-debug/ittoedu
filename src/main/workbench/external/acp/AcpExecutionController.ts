@@ -1,3 +1,4 @@
+import { formatExecutionFileContext } from '../../../../shared/workbench/fileContext';
 import { randomUUID } from 'node:crypto';
 import type { ConversationPatch, ConversationRecord } from '../../../../shared/workbench/conversations';
 import type { ExecutionBlobRef, ExecutionEventInput, ExecutionProjection } from '../../../../shared/workbench/executionEvents';
@@ -145,8 +146,10 @@ export class AcpExecutionController {
     try { await this.emit(turn, 'state', 'run.state', { status: 'running', label: '原生 Agent 处理中', phase: 'waiting-response' }); }
     catch (error) { if (this.turn === turn) this.turn = undefined; throw error; }
     if (!this.currentAuthority(authority)) return this.stopAcceptedBeforePrompt(turn);
-    const prompt = documents.length ? input.text + '\n\n果铃文档引用（当前版本与范围，调用领域工具前重新读取）：\n'
+    const documentPrompt = documents.length ? input.text + '\n\n果铃文档引用（当前版本与范围，调用领域工具前重新读取）：\n'
       + JSON.stringify(documents.map(({ documentId, epoch, revision, writable, selection }) => ({ documentId, epoch, revision, writable, selection }))) : input.text;
+    const fileContext = formatExecutionFileContext(input.fileContext);
+    const prompt = documentPrompt + (fileContext ? '\n\n' + fileContext : '');
     this.settlingTurn = this.host.prompt(prompt).then(async result => {
       const cancelled = result.stopReason === 'cancelled';
       if (turn.finalText) await this.options.update(current => current.messages.some(message => message.messageId === `${turn.taskId}:reply`) ? null : ({

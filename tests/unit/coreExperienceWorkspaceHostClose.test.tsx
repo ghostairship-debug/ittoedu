@@ -19,6 +19,7 @@ vi.mock('../../src/renderer/lessonWorkspace/LessonWorkspaceShell', async () => {
       captureNavigationIdentity: () => '0',
       cancelNavigation() {},
       preserveAll: inputOwners.preserveAll, hasDirtyInputs: inputOwners.hasDirtyInputs, captureMediaDrafts: () => [],
+      prepareOfficeFiles: async () => true,
       flushAll: async () => true, saveActiveDocument: async () => 'none', closeAll: async () => true,
       suspendForClose() {}, resumeAfterCloseCancelled() {}, openFile: async () => {}, focusDocument: async () => {},
       detachLesson() {}, showProject() {},
@@ -46,7 +47,7 @@ afterEach(() => {
 
 it('returns a close preparation result through the actual outer Handle and forwards the document scope to its input owner', async () => {
   Object.defineProperty(window, 'desktopAPI', { configurable: true, value: {
-    lesson: {}, workspaceFiles: {}, lessonFiles: {}, documents: {}, execution: {},
+    lesson: {}, workspaceFiles: {}, lessonFiles: {}, documents: { subscribe: () => () => {} }, execution: {},
   } })
   const host = createRef<LessonWorkspaceShellHandle>()
   const course = await createCourseDocumentHost()

@@ -13,9 +13,9 @@ export const isOfficeContentTool = (name: string): name is OfficeContentToolName
 export const officeContentTools = (Object.keys(officeContentSchemas) as OfficeContentToolName[]).map(name => ({
   name,
   description: ({
-    'office.inspect': '读取现有 DOCX、XLSX 或 PPTX 的真实正文、表格、单元格或幻灯片文字。宿主识别原文件格式并提供可编辑位置和当前版本，不要求处理压缩包或 XML。',
+    'office.inspect': '读取现有 DOCX、XLSX 或 PPTX 的正文、格式、表格、工作表与单元格、幻灯片对象，以及可定位的图表数值和动画行为。提供文件版本、原件 part/partVersion 和可编辑位置；按返回身份进行修改。',
     'office.create': '用内容新建并保存 Word、Excel 或 PowerPoint 原格式文件。content 提供段落/表格、工作表数据/公式或幻灯片内容；软件负责文件组装、登记和保存。path 为目标目录，省略时用会话所属位置；name 为文件名。',
-    'office.edit': '局部修改现有 Office 原文件并保存原格式，保全非目标文本、版式和媒体。先 office.inspect 读取当前原件：DOCX可用唯一oldText或返回位置；PPTX每项必须带返回的零基slide及shapeId，新对象操作还须带part/partVersion。软件沿用本任务读取的文件版本；expectedVersion可省略，提供时要求当前版本一致。Excel公式实际计算；不支持的公式保留并返回局部诊断。',
+    'office.edit': '局部修改并保存 Office 原件，保全非目标结构，进入统一撤销历史。先 office.inspect：DOCX支持正文、段落和基础样式；XLSX支持单元格/公式及工作表管理，复杂依赖无法安全维护时拒绝；PPTX对象沿用零基slide、shapeId、part/partVersion。chartValue还须沿用chartPart/chartVersion及系列/点index，同步数值缓存和内嵌工作簿；animationTiming只修改inspect标为editable的已有行为时长。软件沿用本次读取的文件版本；不支持的公式保留并报告计算范围。不扩大文件写入授权。',
   })[name],
   inputSchema: { ...(z.toJSONSchema(officeContentSchemas[name]) as ModelJsonObject), type: 'object' },
 }))

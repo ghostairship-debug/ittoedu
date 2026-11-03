@@ -1,3 +1,6 @@
+import { officeFocus } from './officeFocus'
+import { captureFileContext, refreshFileContextVersions, fileFocusReference, fileReferenceIdentity, fileReferenceLabel, type FileReferenceChoice } from './composerFileReferences'
+import type { ExecutionFileReference } from '../../shared/workbench/fileContext'
 import { AcpAgentSelector, AcpConfigurationPicker, AcpPermissionRequests, findAcpConfigurationControl } from '../components/AcpAgentSelector'
 import type { AcpHostSnapshot } from '../../shared/workbench/acp'
 import type { AcpDesktopRequest, AcpDesktopResult } from '../../shared/workbench/acpDesktop'
@@ -57,7 +60,7 @@ export interface ExecutionAssistantProps {
   root: string | null
   captureDocuments(writable: boolean, prepare?: boolean): Promise<ExecutionDocumentReference[]>
   captureMaterials?(): Promise<{ target: LessonMaterialTarget; selections: LessonAuthoringMaterialSelection[] } | undefined>
-  prepareSend(documents?: readonly Pick<ExecutionDocumentReference, 'documentId' | 'epoch'>[]): Promise<boolean>
+  prepareSend(documents?: readonly Pick<ExecutionDocumentReference, 'documentId' | 'epoch'>[], officePaths?: readonly string[]): Promise<boolean>
   api?: ExecutionDesktopAPI
   settingsAPI?: ExecutionSettingsAPI
   externalAPI?: ExternalMcpAPI
@@ -154,6 +157,7 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
   const sessionDock = useWorkbenchSessionDock()
   const sessionScope = sessionDock.scope
   const selectionVersion = useSyncExternalStore(workbenchSelection.subscribe, workbenchSelection.readVersion)
+  const fileFocusVersion = useSyncExternalStore(officeFocus.subscribe, officeFocus.readVersion)
   const api = suppliedAPI ?? defaultExecutionAPI()
   const timelineConsumerId = useId(), timelineGeneration = useRef(0)
   const settingsAPI = suppliedSettingsAPI ?? window.desktopAPI?.executionSettings
@@ -200,6 +204,10 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
   const emptyDelegationInteraction = useMemo(createExecutionDelegationInteraction, [active?.workspaceId, active?.conversationId])
   const [draft, setDraft] = useState('')
   const [documents, setDocuments] = useState<ExecutionDocumentReference[]>([])
+  const [filePins, setFilePins] = useState<ExecutionFileReference[]>([])
+  const filePinsRef = useRef<ExecutionFileReference[]>([]), filePinsByConversation = useRef(new Map<string, ExecutionFileReference[]>())
+  const [referenceTurn, setReferenceTurn] = useState(0)
+  const removedFileAutomatic = useRef(new Set<string>())
   const [attachments, setAttachments] = useState<InputAttachmentReference[]>([])
   const [permission, setPermissionState] = useState<ExecutionPermissionMode>(DEFAULT_PERMISSION_MODE)
   const [permissionOpen, setPermissionOpen] = useState(false), [plusOpen, setPlusOpen] = useState(false)
@@ -276,6 +284,15 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
   const persistQueue = useRef<Promise<unknown>>(Promise.resolve())
   const submittingRef = useRef(false), composingRef = useRef(false)
   const referenceCapture = useRef(0), removedAutomatic = useRef(new Set<string>()), automaticFocus = useRef('')
+
+  const captureFiles = () => captureFileContext(officeFocus.capture(), filePinsRef.current, removedFileAutomatic.current, documentsRef.current.some(reference => reference.pinned))
+  const fileReferences = captureFileContext(officeFocus.capture(), filePins, removedFileAutomatic.current, documents.some(reference => reference.pinned)).references
+  const beginNextInput = () => { removedAutomatic.current.clear(); removedFileAutomatic.current.clear(); setReferenceTurn(value => value + 1) }
+  const updateFilePins = (next: ExecutionFileReference[]) => {
+    filePinsRef.current = next; setFilePins(next)
+    const id = activeRef.current?.conversationId
+    if (id) filePinsByConversation.current.set(id, next)
+  }
 
   useEffect(() => { activeRef.current = active }, [active])
   useEffect(() => { runRef.current = run }, [run])
@@ -367,6 +384,8 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
     setModelMenuOpen(false)
     if (moreRef.current) moreRef.current.open = false
     setActive(conversation); activeRef.current = conversation
+    updateFilePins(filePinsByConversation.current.get(conversation.conversationId) ?? [])
+    beginNextInput()
     setDraft(conversation.inputDraft); draftRef.current = conversation.inputDraft
     setAttachments(conversation.inputAttachments); attachmentsRef.current = conversation.inputAttachments
     setRun(null); setSubmissions([]); setProjection(emptyExecutionProjection(conversation.conversationId)); setTimelinePage(null); timelinePageRef.current = null; setError('')
@@ -424,14 +443,14 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
       const automatic = splitComposerReferences(captured)
       const focus = automatic.filter(reference => reference.displayLabel === '当前页面' || reference.displayLabel === '文档').map(referenceIdentity).join('|')
       if (focus !== automaticFocus.current) { automaticFocus.current = focus; removedAutomatic.current.clear() }
-      const refs = mergeAutomaticReferences(documentsRef.current, automatic, removedAutomatic.current)
+      const refs = mergeAutomaticReferences(documentsRef.current, filePinsRef.current.length ? [] : automatic, removedAutomatic.current)
       elementCards.setFocus(automatic[0]?.documentId ?? null, automatic[0]?.selection?.find(target => target.kind === 'course-surface')?.surfaceId ?? null)
       if (!sameDocuments(refs, documentsRef.current)) { setDocuments(refs); documentsRef.current = refs; documentsByConversation.current.set(selected.conversationId, refs) }
       return refs
     }).catch(() => documentsRef.current).finally(() => { if (capturePromise.current === pending) capturePromise.current = null })
     capturePromise.current = pending
     return () => { if (referenceCapture.current === ticket) ++referenceCapture.current }
-  }, [captureDocuments, active?.conversationId, selectionVersion])
+  }, [captureDocuments, active?.conversationId, selectionVersion, referenceTurn, fileFocusVersion, filePins])
 
   useEffect(() => {
     const subscribe = window.desktopAPI?.onWorkspaceFilesChanged
@@ -1168,6 +1187,7 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
     setDraft(result.conversation.inputDraft); draftRef.current = result.conversation.inputDraft
     setAttachments(result.conversation.inputAttachments); attachmentsRef.current = result.conversation.inputAttachments
     if (result.submission.state === 'queued' || result.submission.state === 'accepted') {
+      beginNextInput()
       documentsByConversation.current.set(result.conversation.conversationId, documentsRef.current)
       const frozen = documentsRef.current.some(reference => reference.pinned)
       setContextFrozen(frozen); contextFrozenRef.current = frozen
@@ -1187,7 +1207,7 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
       if (accepted && draftRef.current === pending.text && !attachmentsRef.current.length) {
         setDraft(result.conversation.inputDraft); draftRef.current = result.conversation.inputDraft
       }
-      if (accepted) { setUserHistoryOffsets(value => ({ ...value, [pending.conversationId]: 0 })); setLatestRequest(undefined) }
+      if (accepted) { beginNextInput(); setUserHistoryOffsets(value => ({ ...value, [pending.conversationId]: 0 })); setLatestRequest(undefined) }
     }
     forgetPendingAcp(pending)
     return Boolean(accepted)
@@ -1213,15 +1233,17 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
     if (attachmentsRef.current.length) { setError('当前原生 Agent 接入先支持文字与果铃文档引用；附件已保留，可切回果铃内置发送。'); return }
     submittingRef.current = true; setBusy(true); setError('')
     try {
-      const references = await (capturePromise.current ?? Promise.resolve(documentsRef.current))
-      if (!await prepareSend(references)) throw new Error('引用文档的输入尚未同步，请处理后再发送。')
+      const fileCapture = captureFiles()
+      const capturedReferences = await (capturePromise.current ?? Promise.resolve(documentsRef.current))
+      const references = mergeAutomaticReferences(capturedReferences, filePinsRef.current.length ? [] : capturedReferences, removedAutomatic.current)
+      if (!await prepareSend(references, fileCapture.openFiles.map(file => file.path))) throw new Error('引用文档的输入尚未同步，请处理后再发送。')
       const persisted = await persist()
       if (!persisted || activeRef.current?.conversationId !== current.conversationId) throw new Error('会话已切换，消息没有发送。')
       const pending = { workspaceId: current.workspaceId, conversationId: current.conversationId,
         submissionId: crypto.randomUUID(), text: draftRef.current }
       rememberPendingAcp(pending)
       const result = await api.sendAcp({ ...pending, expectedRevision: persisted.revision,
-        documents: documentsForPermission(references, permission), permission })
+        documents: documentsForPermission(references, permission), permission, fileContext: refreshFileContextVersions(fileCapture, officeFocus.capture()) })
       applyAcpAcknowledgement(pending, result)
     } catch (failure) { setError(failure instanceof Error ? failure.message : '原生 Agent 消息未确认，请核对原提交；当前输入保留。') }
     finally { submittingRef.current = false; setBusy(false) }
@@ -1239,12 +1261,13 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
     if (!configured && mode !== 'adjust') { setError('尚未配置可用的对话模型。请先在模型设置中选择连接、模型和账号。'); return }
     submittingRef.current = true; setBusy(true); setError('')
     let request: ExecutionSendInput | undefined, sendInvoked = false
+    const fileCapture = captureFiles()
     try {
       if (retry) request = { workspaceId: retry.workspaceId, conversationId: retry.conversationId, submissionId: retry.submissionId,
         expectedRevision: selected.revision, text: retry.text, documents: structuredClone(retry.documents), attachments: structuredClone(retry.attachments),
         mode: retry.mode, ...(retry.retryOfRunId ? { retryOfRunId: retry.retryOfRunId } : {}), ...(retry.permission ? { permission: retry.permission } : {}), ...(retry.contentOutput ? { contentOutput: retry.contentOutput } : {}),
         ...(retry.advancementMode ? { advancementMode: retry.advancementMode } : {}),
-        ...(retry.materials ? { materials: structuredClone(retry.materials) } : {}) }
+        ...(retry.materials ? { materials: structuredClone(retry.materials) } : {}), ...(retry.fileContext ? { fileContext: structuredClone(retry.fileContext) } : {}) }
       else if (continueRun) {
         const source = submissions.find(item => item.runId === continueRun.runId)
         if (!source) throw new Error('原任务提交记录不可读取，尚未重试。')
@@ -1258,13 +1281,14 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
         const consumable = (text: string, attachments: readonly InputAttachmentReference[]) =>
           (!text || text === source.text) && (attachments.length === 0 || sameAttachments(attachments, source.attachments))
         if (!consumable(draftRef.current, attachmentsRef.current) || !consumable(persisted.inputDraft, persisted.inputAttachments)
-          || !sameExecutionReferences(restoredDocuments(persisted).filter(reference => reference.pinned), source.documents.filter(reference => reference.pinned !== false)))
+          || !sameExecutionReferences(restoredDocuments(persisted).filter(reference => reference.pinned), source.documents.filter(reference => reference.pinned !== false))
+          || JSON.stringify(filePinsRef.current.map(fileReferenceIdentity)) !== JSON.stringify((source.fileContext?.references ?? []).filter(reference => reference.pinned).map(fileReferenceIdentity)))
           throw new Error('输入框已有新的文字、附件或文档引用；新草稿已保留。请先处理新草稿，再继续原任务。')
         request = { workspaceId: source.workspaceId, conversationId: source.conversationId, submissionId: crypto.randomUUID(),
           expectedRevision: persisted.revision, text: source.text, documents: structuredClone(source.documents),
           attachments: structuredClone(source.attachments), mode: 'queue', retryOfRunId: continueRun.runId,
           permission: recordedPermissionMode(source.permission), ...(source.contentOutput ? { contentOutput: source.contentOutput } : {}),
-          ...(source.materials ? { materials: structuredClone(source.materials) } : {}) }
+          ...(source.materials ? { materials: structuredClone(source.materials) } : {}), ...(source.fileContext ? { fileContext: structuredClone(source.fileContext) } : {}) }
       }
       else if (mode === 'adjust') {
         const original = runRef.current
@@ -1280,8 +1304,9 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
       }
       else {
         const materials = await captureMaterials?.()
-        const pinned = await (capturePromise.current ?? Promise.resolve(documentsRef.current))
-        const ready = await prepareSend(pinned)
+        const capturedReferences = await (capturePromise.current ?? Promise.resolve(documentsRef.current))
+        const pinned = mergeAutomaticReferences(capturedReferences, filePinsRef.current.length ? [] : capturedReferences, removedAutomatic.current)
+        const ready = await prepareSend(pinned, fileCapture.openFiles.map(file => file.path))
         if (!ready) { setError('引用文档的输入尚未同步；请处理对应文档后重试。'); return }
         const preparedDocuments = api.prepareDocuments ? await api.prepareDocuments({ workspaceId: selected.workspaceId,
           conversationId: selected.conversationId, documents: pinned, permission: permissionOverride ?? permission }) : pinned
@@ -1293,7 +1318,7 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
         const level = permissionOverride ?? permission
         request = { workspaceId: current.workspaceId, conversationId: current.conversationId, submissionId: crypto.randomUUID(),
           expectedRevision: current.revision, text: draftRef.current, documents: documentsForPermission(captured, level), attachments: structuredClone(attachmentsRef.current), mode, permission: level, ...(contentOutput ? { contentOutput } : {}),
-          ...(materials ? { materials: structuredClone(materials) } : {}) }
+          ...(materials ? { materials: structuredClone(materials) } : {}), fileContext: refreshFileContextVersions(fileCapture, officeFocus.capture()) }
       }
       // Owner 2026-09-24: no service notice. The route shown in the model menu is frozen with the task.
       if (mode !== 'adjust') {
@@ -1312,6 +1337,7 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
           ...(request.contentOutput ? { contentOutput: request.contentOutput } : {}),
           ...(request.advancementMode ? { advancementMode: request.advancementMode } : {}),
           ...(request.materials ? { materials: structuredClone(request.materials) } : {}),
+          ...(request.fileContext ? { fileContext: structuredClone(request.fileContext) } : {}),
           ...(request.retryOfRunId ? { retryOfRunId: request.retryOfRunId } : {}), ...(request.permission ? { permission: request.permission } : {}),
           model: { provider: connection?.connection.provider ?? '当前连接', model: conversationSelection?.model ?? '当前模型',
             accountId: connection?.connection.accountId ?? '', billing: connection?.connection.billing.kind ?? 'unknown' }, createdAt: now, updatedAt: now })
@@ -1347,6 +1373,7 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
         if (latest) { setConversations(value => updateConversation(value, latest)); setActive(latest); activeRef.current = latest }
         if (known.state === 'accepted' || known.state === 'queued') {
           setDraft(''); draftRef.current = ''; setAttachments([]); attachmentsRef.current = []
+          beginNextInput()
           revealSubmission(known)
         }
         setError(known.state === 'starting' ? '提交状态尚在确认中；再次确认会复用同一提交，不会创建第二次运行。' : known.failure?.message ?? '')
@@ -1360,6 +1387,7 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
           ...(request.contentOutput ? { contentOutput: request.contentOutput } : {}),
           ...(request.advancementMode ? { advancementMode: request.advancementMode } : {}),
           ...(request.materials ? { materials: structuredClone(request.materials) } : {}),
+          ...(request.fileContext ? { fileContext: structuredClone(request.fileContext) } : {}),
           ...(request.retryOfRunId ? { retryOfRunId: request.retryOfRunId } : {}),
           model: { provider: connection?.connection.provider ?? '当前连接', model: conversationSelection?.model ?? '当前模型', accountId: connection?.connection.accountId ?? '', billing: connection?.connection.billing.kind ?? 'unknown' },
           createdAt: Date.now(), updatedAt: Date.now(), failure: closedDocument
@@ -1386,7 +1414,7 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
   }
   useEffect(() => workbenchSelection.onRequest(request => contextualHandler.current(request)), [])
   /** "+" menu: reference the current document, or its current selection, for this message. */
-  const changeSelection = async (requireSelection = true, replaceStale = false) => {
+  const changeSelection = async (requireSelection = true, replaceStale = false, wholeDocument = false) => {
     const owner = activeRef.current, ticket = generation.current
     if (!owner) return
     const stillOwned = () => ticket === generation.current && activeRef.current?.workspaceId === owner.workspaceId && activeRef.current?.conversationId === owner.conversationId
@@ -1397,14 +1425,31 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
       if (!captured.length) throw new Error('当前没有打开的文档，原引用仍保留。')
       if (requireSelection && !captured.some(value => value.selection?.length)) throw new Error('当前没有有效选区，原引用仍保留。')
       const split = splitComposerReferences(captured)
-      const added = requireSelection ? split.filter(reference => reference.selection?.some(target => target.kind !== 'course-surface'))
+      const added = wholeDocument ? captured.map(reference => ({ ...reference, selection: undefined, referenceId: `${reference.documentId}:file`, displayLabel: '文档' }))
+        : requireSelection ? split.filter(reference => reference.selection?.some(target => target.kind !== 'course-surface'))
         : split.filter(reference => reference.displayLabel === '当前页面' || reference.displayLabel === '文档')
+      if (!added.length) throw new Error('当前没有有效选区，原引用仍保留。')
       const base = replaceStale ? documentsRef.current.filter(reference => !captured.some(value => value.documentId === reference.documentId && value.epoch !== reference.epoch)) : documentsRef.current
       const refs = pinReferences(base, added)
       setDocuments(refs); documentsRef.current = refs; contextFrozenRef.current = true; setContextFrozen(true)
       documentsByConversation.current.set(owner.conversationId, refs); frozenByConversation.current.set(owner.conversationId, true)
       await persist(refs)
     } catch (failure) { if (stillOwned()) setError(failure instanceof Error ? failure.message : '选区未改变。') }
+  }
+  const changeFocusedReference = async (choice: FileReferenceChoice) => {
+    const current = officeFocus.current()
+    if (!current || current.documentId) { await changeSelection(choice === 'focus' || choice === 'object' || choice === 'range', false, choice === 'file'); return }
+    setPlusOpen(false)
+    if (!activeRef.current) return
+    try {
+      // Pinning observes focus only. Sending prepares bytes and refreshes this same target's
+      // version; an asynchronous save here could race Send or unexpectedly save while citing.
+      const reference = fileFocusReference(current, choice, true)
+      if (!reference) throw new Error('当前文件没有可引用的对应页面或对象，请先在编辑区选择。')
+      const identity = fileReferenceIdentity(reference)
+      updateFilePins([...filePinsRef.current.filter(value => fileReferenceIdentity(value) !== identity), reference])
+      removedFileAutomatic.current.delete(identity)
+    } catch (failure) { setError(failure instanceof Error ? failure.message : '文件引用没有改变。') }
   }
   /** Chip ×: drop one document reference (or all) from this message; the other references stay. */
   const removeDocumentReferences = async (referenceId?: string) => {
@@ -1420,7 +1465,7 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
         || removesPage && value.pinned === false && value.documentId === clicked.documentId) : documentsRef.current
       for (const reference of removed) {
         removedAutomatic.current.add(referenceIdentity(reference))
-        if (reference.selection?.some(target => target.kind !== 'course-surface')) workbenchSelection.removeSelection(reference.documentId, reference.selection)
+        // Removing a composer chip does not deselect the editor or disable later automatic focus.
       }
       const removedIds = new Set(removed.map(referenceIdentity))
       const remaining = documentsRef.current.filter(value => !removedIds.has(referenceIdentity(value)))
@@ -1446,6 +1491,8 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
     setDraft(submission.text); draftRef.current = submission.text
     setAttachments(submission.attachments); attachmentsRef.current = submission.attachments
     setDocuments(submission.documents); documentsRef.current = submission.documents
+    updateFilePins((submission.fileContext?.references ?? []).filter(reference => reference.pinned))
+    beginNextInput()
     setContextFrozen(true); contextFrozenRef.current = true
     if (activeRef.current) {
       documentsByConversation.current.set(activeRef.current.conversationId, submission.documents)
@@ -1721,6 +1768,22 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
           <div><button type="button" disabled={busy} onClick={() => void changeSelection(false, true)}>重新引用当前文档</button>
             <button type="button" disabled={busy} onClick={() => void changeSelection(true, true)}>重新引用当前选区</button></div>
         </div>}
+        {fileReferences.length > 0 && <div className="execution-assistant__references" aria-label="本条消息的文件引用">
+          {fileReferences.map(value => {
+            const identity = fileReferenceIdentity(value), name = value.path.split(/[\\/]/).at(-1) ?? value.path
+            return <span className="execution-assistant__chip" key={identity}>
+              <span className="execution-assistant__chip-label" title={value.path}>{name} · {fileReferenceLabel(value)}</span>
+              <button type="button" aria-label={`${value.pinned ? '取消固定' : '固定'} ${name}`} disabled={busy} title={value.pinned ? '取消固定' : '固定引用'}
+                onClick={() => updateFilePins(value.pinned ? filePinsRef.current.filter(item => fileReferenceIdentity(item) !== identity)
+                  : [...filePinsRef.current, { ...value, pinned: true }])}>{value.pinned ? <Pin size={13} /> : <PinOff size={13} />}</button>
+              <button type="button" aria-label={`移除文件引用 ${name}`} title="仅移除本次输入的引用" disabled={busy} onClick={() => {
+                removedFileAutomatic.current.add(identity)
+                updateFilePins(filePinsRef.current.filter(item => fileReferenceIdentity(item) !== identity))
+                setReferenceTurn(turn => turn + 1)
+              }}><X size={13} /></button>
+            </span>
+          })}
+        </div>}
         {(documents.length > 0 || contextFrozen) && <div className="execution-assistant__references" aria-label="本条消息的引用">
           {documents.map(value => {
             const name = documentNames[value.documentId] ?? '已绑定文档'
@@ -1751,8 +1814,10 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
               {plusOpen && <div ref={popupRef} className="execution-assistant__popup" role="menu" aria-label="添加内容" style={{ left: popupPosition.left, bottom: popupPosition.bottom }}>
                 <button type="button" role="menuitem" disabled={!actions.canAdd} onClick={() => { setPlusOpen(false); actions.addFiles() }}>添加附件（图片或文档）</button>
                 <button type="button" role="menuitem" disabled={!actions.canReference} onClick={() => { setPlusOpen(false); actions.referenceWorkspace() }}>引用工作空间文件</button>
-                <button type="button" role="menuitem" onClick={() => void changeSelection(false)}>引用当前文档</button>
-                <button type="button" role="menuitem" onClick={() => void changeSelection(true)}>引用当前选区</button>
+                <button type="button" role="menuitem" onClick={() => void changeFocusedReference('file')}>引用当前文件</button>
+                <button type="button" role="menuitem" onClick={() => void changeFocusedReference('focus')}>引用当前选区</button>
+                <button type="button" role="menuitem" onClick={() => void changeFocusedReference('page')}>引用当前页</button>
+                <button type="button" role="menuitem" onClick={() => void changeFocusedReference('object')}>引用当前对象</button>
                 <p>也可以直接粘贴或拖入图片、文档。</p>
               </div>}
             </div>
@@ -1761,7 +1826,8 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
               onCompositionStart={() => { composingRef.current = true }} onCompositionEnd={() => { composingRef.current = false }} onKeyDown={onComposerKeyDown}
               onChange={value => { setDraft(value); draftRef.current = value }} onBlur={() => { void persist().catch(failure => setError(failure instanceof Error ? failure.message : '草稿未保存，请重试。')) }}
               onModel={acpExternal ? () => nativeModelRef.current?.querySelector<HTMLButtonElement>('button[aria-label="切换模型"]')?.click() : toggleModelMenu} onPermission={() => { const anchor = permissionRef.current?.querySelector<HTMLButtonElement>('button'); if (anchor) togglePopup('permission', anchor) }}
-              onNewConversation={() => void create()} onReference={selection => void changeSelection(selection)} />
+              onNewConversation={() => void create()} onReference={selection => void changeFocusedReference(selection ? 'focus' : 'file')}
+              onReferencePage={() => void changeFocusedReference('page')} onReferenceObject={() => void changeFocusedReference('object')} />
             {owner.conversation.conversationId === active?.conversationId && <div className="execution-assistant__actions">
             {acpExternal && (acpState?.phase === 'prompting' || acpState?.phase === 'authenticating') && <button type="button" aria-label="停止原生 Agent" title="停止原生 Agent" onClick={() => { void operateAcp({ action: 'cancel' }).catch(failure => setError(failure instanceof Error ? failure.message : '停止未完成')) }}><Square size={15} /></button>}
             {run && run.status === 'running' && api?.browserControl && taskBrowser?.runId === run.runId

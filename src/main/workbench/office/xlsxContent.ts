@@ -1,4 +1,5 @@
 import path from 'node:path'
+import { strToU8 } from 'fflate'
 import { children, descendants, NS, OfficePackage, textOf } from './officePackage'
 import type { OfficeCalculation, OfficeCellValue, OfficeContentInspection, OfficeDiagnostic, OfficeRequest } from '../../../shared/workbench/officeFiles'
 
@@ -36,14 +37,14 @@ function address(value: string): { name: string; row: number; column: number } {
   if (column > 16384 || row > 1048576) throw new Error(`Excel 单元格超出格式范围：${value}`)
   return { name, row, column }
 }
-interface Sheet { name: string; part: string; xml: Document }
+interface Sheet { name: string; part: string; xml: Document; node: Element; sheetId: string }
 function sheets(pkg: OfficePackage): Sheet[] {
   const main = pkg.main(); const workbook = pkg.xml(main); const relationships = pkg.relationships(main)
   if (workbook.documentElement.namespaceURI !== NS.sheet) throw new Error('该文件不是支持的 XLSX 工作簿')
   return descendants(workbook, NS.sheet, 'sheet').map(sheet => {
     const part = relationships.get(sheet.getAttributeNS(NS.officeRelationship, 'id') ?? '')
     if (!part) throw new Error('Excel 工作表关系不存在')
-    return { name: sheet.getAttribute('name') ?? '', part, xml: pkg.xml(part) }
+    return { name: sheet.getAttribute('name') ?? '', part, xml: pkg.xml(part), node: sheet, sheetId: sheet.getAttribute('sheetId') ?? '' }
   })
 }
 function sharedStrings(pkg: OfficePackage): string[] {
@@ -117,9 +118,136 @@ function updateDimension(sheet: Sheet) {
   dimension.setAttribute('ref', `${columnName(minColumn)}${minRow}:${columnName(maxColumn)}${maxRow}`)
 }
 
+function relationPart(main: string): string { return path.posix.join(path.posix.dirname(main), '_rels', path.posix.basename(main) + '.rels') }
+function validateSheetName(allSheets: Sheet[], name: string, previous?: string) {
+  if (!name.trim() || name.length > 31 || /[\\/?*\[\]:\x00-\x1f]/.test(name) || name.startsWith("'") || name.endsWith("'")) throw new Error('工作表名须为 1—31 个字符，不能包含 \\ / ? * [ ] : 或首尾单引号。')
+  if (allSheets.some(sheet => sheet.name !== previous && sheet.name.toLocaleLowerCase() === name.toLocaleLowerCase())) throw new Error(`工作表名称已存在：${name}`)
+}
+function assertWorkbookStructureEditable(pkg: OfficePackage) {
+  const protection = descendants(pkg.xml(pkg.main()), NS.sheet, 'workbookProtection')[0]
+  if (protection && ['1', 'true', 'on'].includes(protection.getAttribute('lockStructure') ?? '')) throw new Error('工作簿结构受保护，请先在原软件中解除结构保护。')
+}
+/** Refuse unsupported dependency changes rather than silently breaking names, charts or formulas. */
+function assertNoSheetReferences(pkg: OfficePackage, target: Sheet, deleting: boolean) {
+  const escaped = target.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const quoted = target.name.replaceAll("'", "''").replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const reference = new RegExp(`(?:'${quoted}'|(?:^|[^A-Za-z0-9_.])${escaped})\\s*!`, 'i')
+  const index = sheets(pkg).findIndex(sheet => sheet.part === target.part)
+  for (const part of Object.keys(pkg.parts).filter(name => name.endsWith('.xml'))) {
+    if (deleting && part === target.part) continue
+    const xml = pkg.xml(part)
+    for (const node of Array.from(xml.getElementsByTagName('*'))) {
+      const name = node.localName ?? node.nodeName.split(':').pop()
+      if (name === 'definedName' && deleting && Number(node.getAttribute('localSheetId')) === index && node.hasAttribute('localSheetId')) continue
+      if (['f', 'formula', 'formula1', 'formula2', 'definedName', 'calculatedColumnFormula', 'totalsRowFormula'].includes(name ?? '')) {
+        const formula = node.textContent ?? ''
+        // 3-D and external references require a dedicated dependency-aware operation.
+        if (reference.test(formula) || /(?:'[^']*'|[A-Za-z0-9_.]+):(?:'[^']*'|[A-Za-z0-9_.]+)!/.test(formula) || /'(?:[^']|'')*:(?:[^']|'')*'\s*!/.test(formula)) throw new Error(`工作表 ${target.name} 被公式、名称或图表引用；当前简单${deleting ? '删除' : '改名'}不能可靠维护该依赖，请使用专业格式操作。`)
+      }
+      if (node.getAttribute('sheet')?.toLocaleLowerCase() === target.name.toLocaleLowerCase()) throw new Error(`工作表 ${target.name} 被透视表或其他结构引用；请先处理依赖。`)
+    }
+  }
+}
+function remapSheetPositions(pkg: OfficePackage, previous: Sheet[], current: Sheet[], deleted?: Sheet) {
+  const xml = pkg.xml(pkg.main())
+  for (const name of descendants(xml, NS.sheet, 'definedName')) {
+    if (!name.hasAttribute('localSheetId')) continue
+    const owner = previous[Number(name.getAttribute('localSheetId'))]
+    if (!owner) throw new Error('工作簿包含无效的局部名称范围，不能安全调整工作表顺序。')
+    const next = current.findIndex(sheet => sheet.part === owner.part)
+    if (next < 0 && owner.part === deleted?.part) name.parentNode?.removeChild(name)
+    else if (next < 0) throw new Error('工作表名称范围无法重定位。')
+    else name.setAttribute('localSheetId', String(next))
+  }
+  for (const view of descendants(xml, NS.sheet, 'workbookView')) for (const attribute of ['activeTab', 'firstSheet']) {
+    if (!view.hasAttribute(attribute)) continue
+    const owner = previous[Number(view.getAttribute(attribute))]
+    const next = owner ? current.findIndex(sheet => sheet.part === owner.part) : -1
+    const fallback = current.findIndex(sheet => !['hidden', 'veryHidden'].includes(sheet.node.getAttribute('state') ?? ''))
+    view.setAttribute(attribute, String(next < 0 ? Math.max(0, fallback) : next))
+  }
+}
+function addSheet(pkg: OfficePackage, name: string) {
+  const main = pkg.main(), workbook = pkg.xml(main), existing = sheets(pkg)
+  validateSheetName(existing, name)
+  const container = children(workbook.documentElement, NS.sheet, 'sheets')[0]
+  if (!container) throw new Error('工作簿缺少工作表列表。')
+  let ordinal = 1, part = ''
+  do { part = path.posix.join(path.posix.dirname(main), 'worksheets', `sheet${ordinal++}.xml`) } while (pkg.parts[part])
+  const relationsName = relationPart(main)
+  if (!pkg.parts[relationsName]) pkg.setBinary(relationsName, strToU8(`<Relationships xmlns="${NS.relationship}"/>`))
+  const relations = pkg.xml(relationsName), usedIds = new Set(descendants(relations, NS.relationship, 'Relationship').map(value => value.getAttribute('Id')))
+  let relationshipId = 1
+  while (usedIds.has(`rId${relationshipId}`)) relationshipId++
+  const relation = relations.createElementNS(NS.relationship, 'Relationship')
+  relation.setAttribute('Id', `rId${relationshipId}`); relation.setAttribute('Type', `${NS.officeRelationship}/worksheet`); relation.setAttribute('Target', path.posix.relative(path.posix.dirname(main), part))
+  relations.documentElement.appendChild(relation); pkg.write(relationsName)
+  const node = element(workbook, 'sheet'); node.setAttribute('name', name)
+  node.setAttribute('sheetId', String(Math.max(0, ...existing.map(sheet => Number(sheet.sheetId) || 0)) + 1)); node.setAttributeNS(NS.officeRelationship, 'r:id', `rId${relationshipId}`)
+  container.appendChild(node); pkg.write(main)
+  pkg.setBinary(part, strToU8(`<worksheet xmlns="${NS.sheet}"><dimension ref="A1"/><sheetViews><sheetView workbookViewId="0"/></sheetViews><sheetFormatPr defaultRowHeight="15"/><sheetData/></worksheet>`))
+  const types = pkg.xml('[Content_Types].xml'), type = types.createElementNS(types.documentElement.namespaceURI!, 'Override')
+  type.setAttribute('PartName', '/' + part); type.setAttribute('ContentType', 'application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml')
+  types.documentElement.appendChild(type); pkg.write('[Content_Types].xml')
+}
+
+/** Split only the touched column interval; retain styles, outline and unrelated parts. */
+function setColumnWidth(sheet: Sheet, column: number, width: number) {
+  const root = sheet.xml.documentElement, protection = children(root, NS.sheet, 'sheetProtection')[0]
+  if (protection && ['1', 'true', 'on'].includes(protection.getAttribute('sheet') ?? '') && !['0', 'false', 'off'].includes(protection.getAttribute('formatColumns') ?? '')) throw new Error('工作表受保护，当前不能调整列宽。')
+  let cols = children(root, NS.sheet, 'cols')[0]
+  if (!cols) { cols = element(sheet.xml, 'cols'); root.insertBefore(cols, children(root, NS.sheet, 'sheetData')[0] ?? null) }
+  const existing = children(cols, NS.sheet, 'col'), matches = existing.filter(node => column >= Number(node.getAttribute('min')) && column <= Number(node.getAttribute('max')))
+  if (matches.length > 1) throw new Error('该列含重叠列格式范围，当前不能可靠调整列宽。')
+  const previous = matches[0], target = previous ? previous.cloneNode(true) as Element : element(sheet.xml, 'col')
+  target.setAttribute('min', String(column)); target.setAttribute('max', String(column)); target.setAttribute('width', String(width)); target.setAttribute('customWidth', '1'); target.removeAttribute('bestFit')
+  if (previous) {
+    const first = Number(previous.getAttribute('min')), last = Number(previous.getAttribute('max'))
+    if (first < column) { const before = previous.cloneNode(true) as Element; before.setAttribute('max', String(column - 1)); cols.insertBefore(before, previous) }
+    cols.insertBefore(target, previous)
+    if (last > column) { const after = previous.cloneNode(true) as Element; after.setAttribute('min', String(column + 1)); cols.insertBefore(after, previous) }
+    cols.removeChild(previous)
+  } else cols.insertBefore(target, existing.find(node => Number(node.getAttribute('min')) > column) ?? null)
+}
+
 export function editXlsx(pkg: OfficePackage, request: OfficeRequest<'xlsx', 'edit'>) {
-  const allSheets = sheets(pkg)
   for (const edit of request.edits) {
+    const allSheets = sheets(pkg)
+    if ('type' in edit) {
+      if (edit.type === 'columnWidth') {
+        const sheet = allSheets.find(value => value.name === edit.sheet)
+        if (!sheet) throw new Error(`Excel 工作表不存在：${edit.sheet}`)
+        setColumnWidth(sheet, edit.column, edit.width); pkg.write(sheet.part); continue
+      }
+      assertWorkbookStructureEditable(pkg)
+      if (edit.type === 'sheetAdd') { addSheet(pkg, edit.name); continue }
+      const sheet = allSheets.find(value => value.name === edit.sheet)
+      if (!sheet) throw new Error(`Excel 工作表不存在：${edit.sheet}`)
+      if (edit.type === 'sheetRename') {
+        validateSheetName(allSheets, edit.name, sheet.name)
+        if (sheet.name !== edit.name) assertNoSheetReferences(pkg, sheet, false)
+        sheet.node.setAttribute('name', edit.name)
+      } else if (edit.type === 'sheetMove') {
+        if (edit.index >= allSheets.length) throw new Error('工作表排序位置超出范围。')
+        const container = sheet.node.parentNode!, remaining = allSheets.filter(value => value !== sheet)
+        container.removeChild(sheet.node); container.insertBefore(sheet.node, remaining[edit.index]?.node ?? null)
+        remapSheetPositions(pkg, allSheets, sheets(pkg))
+      } else {
+        if (allSheets.length <= 1 || (!['hidden', 'veryHidden'].includes(sheet.node.getAttribute('state') ?? '') && allSheets.filter(value => !['hidden', 'veryHidden'].includes(value.node.getAttribute('state') ?? '')).length <= 1)) throw new Error('工作簿必须保留至少一张可见工作表。')
+        assertNoSheetReferences(pkg, sheet, true)
+        const id = sheet.node.getAttributeNS(NS.officeRelationship, 'id')
+        sheet.node.parentNode?.removeChild(sheet.node)
+        const relationsName = relationPart(pkg.main()), relations = pkg.xml(relationsName)
+        for (const relation of descendants(relations, NS.relationship, 'Relationship')) if (relation.getAttribute('Id') === id) relation.parentNode?.removeChild(relation)
+        pkg.write(relationsName)
+        const types = pkg.xml('[Content_Types].xml')
+        for (const type of Array.from(types.documentElement.childNodes)) if (type.nodeType === 1 && (type as Element).getAttribute('PartName') === '/' + sheet.part) type.parentNode?.removeChild(type)
+        pkg.write('[Content_Types].xml'); pkg.remove(sheet.part)
+        const sheetRelations = relationPart(sheet.part); if (pkg.parts[sheetRelations]) pkg.remove(sheetRelations)
+        remapSheetPositions(pkg, allSheets, sheets(pkg), sheet)
+      }
+      pkg.write(pkg.main()); continue
+    }
     const sheet = allSheets.find(value => value.name === edit.sheet)
     if (!sheet) throw new Error(`Excel 工作表不存在：${edit.sheet}`)
     const cell = cellAt(sheet, edit.cell)
@@ -214,7 +342,10 @@ export function recalculateXlsx(pkg: OfficePackage): { calculation: OfficeCalcul
 
 export function inspectXlsx(pkg: OfficePackage): Extract<OfficeContentInspection, { format: 'xlsx' }> {
   const strings = sharedStrings(pkg)
-  return { format: 'xlsx', sheets: sheets(pkg).map(sheet => ({ name: sheet.name, cells: descendants(sheet.xml, NS.sheet, 'c').map(cell => {
+  return { format: 'xlsx', sheets: sheets(pkg).map(sheet => ({ name: sheet.name, part: sheet.part, sheetId: sheet.sheetId,
+    columnWidths: descendants(sheet.xml, NS.sheet, 'col').filter(node => node.hasAttribute('width')).map(node => ({ min: Number(node.getAttribute('min')), max: Number(node.getAttribute('max')), width: Number(node.getAttribute('width')) })).filter(value => Number.isInteger(value.min) && Number.isInteger(value.max) && value.min >= 1 && value.max <= 16384 && value.max >= value.min && Number.isFinite(value.width) && value.width >= 0),
+    mergedRanges: descendants(sheet.xml, NS.sheet, 'mergeCell').map(node => node.getAttribute('ref') ?? '').filter(Boolean),
+    cells: descendants(sheet.xml, NS.sheet, 'c').map(cell => {
     const formula = children(cell, NS.sheet, 'f')[0]
     return { cell: cell.getAttribute('r') ?? '', value: cellScalar(cell, strings), ...(formula ? { formula: formula.textContent ?? '' } : {}) }
   }) })) }

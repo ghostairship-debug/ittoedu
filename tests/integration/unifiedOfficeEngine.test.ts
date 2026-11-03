@@ -48,18 +48,23 @@ async function fixture(provider: ModelProvider) {
 }
 
 describe('Office content tools in the general execution engine', () => {
-  it('marks an Office edit as unknown after a committed-file reopen failure and stops without replaying it', async () => {
+  it('reports an unknown Office commit after a reopen failure and ends without replaying it', async () => {
     let turn = 0
     const provider: ModelProvider = { async *stream(request) {
       turn++
       if (turn === 1) yield complete(request, 'load-office', 'tools.load', { families: ['office'] })
-      else if (turn === 2) yield complete(request, 'create-word', 'office.create', { name: 'lesson.docx', content: {
+      else if (turn === 2) yield complete(request, 'create-word', 'office.create', { path: 'lesson', name: 'lesson.docx', content: {
         format: 'docx', blocks: [{ type: 'paragraph', text: 'Before saved edit' }],
       } })
       else if (turn === 3) yield complete(request, 'edit-word', 'office.edit', { path: 'lesson/lesson.docx', content: {
         format: 'docx', edits: [{ type: 'replaceText', oldText: 'Before saved edit', text: 'Committed new content' }],
       } })
-      else throw new Error('A model retry cannot repair or replay an unknown Office commit')
+      else if (turn === 4) {
+        expect(JSON.stringify(request.messages)).toContain('tool-outcome-unknown')
+        const response = complete(request)
+        response.assistant.content = '文件修改结果尚未得到正式回执确认，未重复写入。'
+        yield response
+      } else throw new Error('The fixture has already explained the unknown Office commit')
     } }
     const f = await fixture(provider)
     let committed = false
@@ -82,25 +87,82 @@ describe('Office content tools in the general execution engine', () => {
     expect(final.tools[2].result, JSON.stringify(final.tools[2].result)).toMatchObject({ kind: 'error', code: 'tool-outcome-unknown' })
     expect(final.tools[2].effectPaths).toEqual([path.join(f.lesson, 'lesson.docx')])
     expect(write).toHaveBeenCalledTimes(1)
-    expect(turn).toBe(3)
+    expect(turn).toBe(4)
+    expect(final.failure).toBeUndefined()
+    expect(final.requests.at(-1)).toMatchObject({ state: 'completed', finishReason: 'stop' })
     expect(inspectOfficeContent(await fs.readFile(path.join(f.lesson, 'lesson.docx')), 'docx')).toMatchObject({ paragraphs: [{ text: 'Committed new content' }] })
     expect(await fs.readdir(f.lesson)).toEqual(['lesson.docx'])
     expect(f.host.registry.list()).toHaveLength(0)
   })
 
-  it('advertises configured Office and idempotently expands its family, then creates and edits a saved DOCX using software-owned binding', async () => {
+  it('blocks a new Office edit call after an unknown commit even when a fresh inspect succeeds', async () => {
+    let turn = 0
+    const provider: ModelProvider = { async *stream(request) {
+      turn++
+      if (turn === 1) yield complete(request, 'load-office', 'tools.load', { families: ['office'] })
+      else if (turn === 2) yield complete(request, 'create-word', 'office.create', { path: 'lesson', name: 'lesson.docx', content: {
+        format: 'docx', blocks: [{ type: 'paragraph', text: 'Before saved edit' }],
+      } })
+      else if (turn === 3) yield complete(request, 'original-edit', 'office.edit', { path: 'lesson/lesson.docx', content: {
+        format: 'docx', edits: [{ type: 'paragraph', index: 0, text: 'Committed once' }],
+      } })
+      else if (turn === 4) {
+        expect(JSON.stringify(request.messages)).toContain('tool-outcome-unknown')
+        yield complete(request, 'inspect-committed-version', 'office.inspect', { path: 'lesson/lesson.docx' })
+      } else if (turn === 5) {
+        expect(JSON.stringify(request.messages)).toContain('Committed once')
+        // This is a valid edit against the freshly observed file: neither an old
+        // binding nor a missing replaceText match can mask a failed replay guard.
+        yield complete(request, 'new-number-same-target', 'office.edit', { path: 'lesson/lesson.docx', content: {
+          format: 'docx', edits: [{ type: 'paragraph', index: 0, text: 'Must never be committed' }],
+        } })
+      } else if (turn === 6) {
+        expect(JSON.stringify(request.messages)).toContain('unresolved-prior-tool')
+        const response = complete(request)
+        response.assistant.content = '已核对当前内容；原写入回执仍未确认，未重放写入。'
+        yield response
+      } else throw new Error('Unexpected continuation after the blocked Office replay')
+    } }
+    const f = await fixture(provider)
+    let failNextRead = false
+    const replace = f.host.artifacts.replace.bind(f.host.artifacts)
+    const write = vi.spyOn(f.host.artifacts, 'replace').mockImplementation(async (...args) => {
+      const saved = await replace(...args); failNextRead = true; return saved
+    })
+    const read = f.host.artifacts.read.bind(f.host.artifacts)
+    vi.spyOn(f.host.artifacts, 'read').mockImplementation((...args) => {
+      if (failNextRead) { failNextRead = false; return Promise.reject(new Error('Injected one saved-file readback failure')) }
+      return read(...args)
+    })
+    const execute = vi.spyOn(f.host.agentFiles, 'executeOffice')
+    const started = await f.engine.start({ conversationId: 'conversation', taskId: 'office-no-replay', instruction: '新建并修改 Word；结果未知时核对内容，但不要重放。',
+      documents: [], workspaceRoot: f.workspace, conversationHome: { kind: 'folder', path: 'lesson' }, permission: 'workspace', selection })
+    const final = await f.engine.wait(started.runId)
+    expect(final.status, JSON.stringify({ failure: final.failure, tools: final.tools.map(tool => tool.result) })).toBe('partial')
+    expect(final.failure).toBeUndefined()
+    expect(final.requests.at(-1)).toMatchObject({ state: 'completed', finishReason: 'stop' })
+    expect(final.tools[2].result).toMatchObject({ kind: 'error', code: 'tool-outcome-unknown' })
+    expect(final.tools[3].result).toMatchObject({ kind: 'read', data: { inspection: { paragraphs: [{ text: 'Committed once' }] } } })
+    expect(final.tools[4].result).toMatchObject({ kind: 'error', code: 'unresolved-prior-tool' })
+    expect(execute.mock.calls.filter(([, name]) => name === 'office.edit')).toHaveLength(1)
+    expect(write).toHaveBeenCalledTimes(1)
+    expect(inspectOfficeContent(await fs.readFile(path.join(f.lesson, 'lesson.docx')), 'docx')).toMatchObject({ paragraphs: [{ text: 'Committed once' }] })
+    expect(await fs.readdir(f.lesson)).toEqual(['lesson.docx'])
+  })
+
+  it('discovers configured Office on demand, then creates and edits a saved DOCX using software-owned binding', async () => {
     let turn = 0
     const provider: ModelProvider = { async *stream(request) {
       turn++
       const names = request.tools?.map(tool => tool.name) ?? []
       if (turn === 1) {
         expect(names).toContain('tools.load')
-        expect(names.filter(name => name.startsWith('office.'))).toEqual(expect.arrayContaining(['office.inspect', 'office.create', 'office.edit']))
-        expect(request.tools?.find(tool => tool.name === 'tools.load')?.description).toContain('office')
+        expect(names.filter(name => name.startsWith('office.'))).toEqual([])
+        expect(JSON.stringify(request.tools?.find(tool => tool.name === 'tools.load')?.inputSchema)).toContain('office')
         yield complete(request, 'load-office', 'tools.load', { families: ['office'] })
       } else if (turn === 2) {
         expect(names).toEqual(expect.arrayContaining(['office.inspect', 'office.create', 'office.edit']))
-        yield complete(request, 'create-word', 'office.create', { name: 'lesson.docx', content: { format: 'docx', blocks: [
+        yield complete(request, 'create-word', 'office.create', { path: 'lesson', name: 'lesson.docx', content: { format: 'docx', blocks: [
           { type: 'paragraph', heading: 'title', text: '实验讨论' },
           { type: 'paragraph', text: '先预测结果，再操作观察。' },
           { type: 'paragraph', text: '观察后解释结论。' },
@@ -133,7 +195,7 @@ describe('Office content tools in the general execution engine', () => {
       turn++
       const names = request.tools?.map(tool => tool.name) ?? []
       if (turn === 1) {
-        expect(names.filter(name => name.startsWith('office.'))).toEqual(['office.inspect'])
+        expect(names.filter(name => name.startsWith('office.'))).toEqual([])
         yield complete(request, 'load-readonly-office', 'tools.load', { families: ['office'] })
       } else if (turn === 2) {
         expect(names.filter(name => name.startsWith('office.'))).toEqual(['office.inspect'])

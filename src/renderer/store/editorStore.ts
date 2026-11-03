@@ -52,7 +52,7 @@ export type EditorState = EditorOwnedState
     retainTextEdit(): Promise<boolean>
     createCourseDocument(kind: ComponentSurface['kind'], canvas?: { width: number; height: number }, activateIf?: () => boolean): Promise<void | boolean | CourseDocumentActivationResult>
     createCourseDocumentFrom(project: CourseProjectV10, resources?: DocumentResources, activateIf?: () => boolean): Promise<void | boolean | CourseDocumentActivationResult>
-    openCourseDocument(path: string, activateIf?: () => boolean): Promise<void | boolean | CourseDocumentActivationResult>
+    openCourseDocument(path: string, activateIf?: () => boolean, openIf?: () => boolean): Promise<void | boolean | CourseDocumentActivationResult>
     drainCourseDocument(documentId?: string): Promise<DocumentSnapshot>
     drainAllCourseDocuments(documentIds?: readonly string[]): Promise<DocumentSnapshot[]>
     flushAllCourseDocuments(documentIds?: readonly string[]): Promise<void>
@@ -199,9 +199,10 @@ export const useEditorStore = create<EditorState>((set, get) => {
       patch({ flowDocumentDrafts: drafts, ...(get().slideContentEdit?.target.documentId === id ? { slideContentEdit: null } : {}) })
       return true
     },
-    async openCourseDocument(path, activateIf) {
+    async openCourseDocument(path, activateIf, openIf) {
       const current = courseBridge.read().activeDocumentId; if (current) await retainBeforeNavigation(current)
-      if (activateIf && !activateIf()) return false
+      // Admission belongs to the explicit file request; focus only controls activation.
+      if ((openIf ?? activateIf)?.() === false) return false
       return await courseBridge.open(path, activateIf)
     },
     async createCourseDocument(kind, canvas, activateIf) {

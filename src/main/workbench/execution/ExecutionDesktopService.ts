@@ -629,6 +629,7 @@ export class ExecutionDesktopService {
       retryOfRunId: input.retryOfRunId ?? null, permission: input.permission ?? DEFAULT_PERMISSION_MODE,
       ...(input.contentOutput ? { contentOutput: input.contentOutput } : {}),
       ...(input.materials ? { materials: input.materials } : {}),
+      ...(input.fileContext ? { fileContext: input.fileContext } : {}),
       ...(input.webAuthorization ? { webAuthorization: input.webAuthorization } : {}) })).digest('hex')
   }
   private async publicSubmission(record: StoredExecutionSubmission): Promise<ExecutionSubmissionRecord> {
@@ -805,6 +806,7 @@ export class ExecutionDesktopService {
       state: 'queued', mode: input.mode ?? 'queue', text: input.text, advancementMode: input.advancementMode, documents: structuredClone(input.documents), attachments: structuredClone(attachments), permission,
       ...(input.contentOutput ? { contentOutput: structuredClone(input.contentOutput) } : {}),
       ...(input.materials ? { materials: structuredClone(input.materials) } : {}),
+      ...(input.fileContext ? { fileContext: structuredClone(input.fileContext) } : {}),
       ...(input.webAuthorization ? { webAuthorization: structuredClone(input.webAuthorization) } : {}),
       model: { provider: selection.connection.provider, model: selection.model, accountId: selection.connection.accountId, billing: selection.connection.billing.kind },
       createdAt: now, updatedAt: now, digest, attachmentIds,
@@ -813,6 +815,7 @@ export class ExecutionDesktopService {
         ...(compressionSelection ? { compressionSelection } : {}), ...(compressionUnavailableReason ? { compressionUnavailableReason } : {}),
         ...(contentOutput ? { contentOutput: structuredClone(contentOutput) } : {}),
         ...(input.materials ? { materials: structuredClone(input.materials) } : {}),
+        ...(input.fileContext ? { fileContext: structuredClone(input.fileContext) } : {}),
         ...(input.webAuthorization ? { webAuthorization: structuredClone(input.webAuthorization) } : {}),
         ...(visionSelection ? { visionSelection } : {}), ...(visionUnavailableReason ? { visionUnavailableReason } : {}),
         permission, workspaceRoot: space.rootPath, boundReadPaths: [...new Set(boundReadPaths)],
@@ -987,6 +990,7 @@ export class ExecutionDesktopService {
       if (input.text !== source.text || JSON.stringify(input.documents) !== JSON.stringify(source.documents)
         || JSON.stringify(input.contentOutput ?? null) !== JSON.stringify(source.contentOutput ?? null)
         || JSON.stringify(input.materials ?? null) !== JSON.stringify(source.start.materials ?? null)
+        || JSON.stringify(input.fileContext ?? null) !== JSON.stringify(source.start.fileContext ?? null)
         || JSON.stringify(input.webAuthorization ?? null) !== JSON.stringify(source.start.webAuthorization ?? null)
         || JSON.stringify(input.attachments ?? []) !== JSON.stringify(source.attachments)
         || (input.permission ?? recordedPermissionMode(source.permission)) !== recordedPermissionMode(source.permission))
@@ -1071,7 +1075,7 @@ export class ExecutionDesktopService {
   }
   private async steerSubmission(input: ExecutionSendInput, current: ConversationRecord, digest: string, original: ExecutionRunRecord): Promise<ExecutionSendResult> {
     if (!input.text.trim()) throw refused('调整当前任务需要补充文字')
-    if (input.attachments?.length || input.materials || input.webAuthorization
+    if (input.attachments?.length || input.materials || input.webAuthorization || input.fileContext
       || input.permission !== undefined && input.permission !== recordedPermissionMode(original.input.permission))
       throw refused('当前调整沿用原任务的材料、权限与范围；新增材料或权限请加入队列作为新任务。')
     const now = Date.now(), documents: ExecutionDocumentReference[] = original.input.documents.map(document => executionDocumentReferenceSchema.parse({
@@ -1084,6 +1088,7 @@ export class ExecutionDesktopService {
       model: { provider: original.input.selection.connection.provider, model: original.input.selection.model,
         accountId: original.input.selection.connection.accountId, billing: original.input.selection.connection.billing.kind },
       ...(original.input.contentOutput ? { contentOutput: structuredClone(original.input.contentOutput) } : {}),
+      ...(original.input.fileContext ? { fileContext: structuredClone(original.input.fileContext) } : {}),
       start: { ...structuredClone(original.input), taskId: input.submissionId, instruction: input.text } }
     record = (await this.submissions.create(record)).record
     try {

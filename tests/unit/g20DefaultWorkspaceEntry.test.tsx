@@ -11,16 +11,27 @@ import { useEditorStore } from '../../src/renderer/store/editorStore'
 
 // Keep App's actual composition, lifecycle and canonical course bridge. Only the
 // expensive editor paint and outer shell chrome are outside this mount check.
-vi.mock('../../src/renderer/app/LessonWorkspaceHost', () => ({
-  LessonWorkspaceHost: ({ children, onNewProject }: { children: ReactNode; onNewProject(): Promise<boolean> }) =>
-    <><button onClick={() => void onNewProject()}>新建测试课件</button>{children}</>,
-}))
+vi.mock('../../src/renderer/app/LessonWorkspaceHost', async () => {
+  const { forwardRef, useImperativeHandle, useRef } = await import('react')
+  return { LessonWorkspaceHost: forwardRef(({ children, onNewProject }: { children: ReactNode; onNewProject(): Promise<boolean> }, ref) => {
+    const navigation = useRef(0)
+    useImperativeHandle(ref, () => ({
+      captureNavigationIdentity: () => String(navigation.current),
+      cancelNavigation: () => { navigation.current++ },
+      preserveAll: async () => true, hasDirtyInputs: () => false,
+      flushAll: async () => true, prepareOfficeFiles: async () => true,
+      showProject() {}, detachLesson() {},
+    }), [])
+    return <><button onClick={() => void onNewProject()}>新建测试课件</button>{children}</>
+  }) }
+})
 vi.mock('../../src/renderer/ui/Workspace', () => ({ Workspace: () => <div data-testid="course-paint" /> }))
 vi.mock('../../src/renderer/ui/ScenePanel', () => ({ ScenePanel: () => null }))
 vi.mock('../../src/renderer/ui/SceneStateStrip', () => ({ SceneStateStrip: () => null }))
 vi.mock('../../src/renderer/ui/RightSidebar', () => ({ RightSidebar: () => null }))
 vi.mock('../../src/renderer/ui/TopToolbar', () => ({ TopToolbar: () => null }))
 vi.mock('../../src/renderer/export/loadPlayerBundle', () => ({ loadPlayerBundle: () => '/* not exercised by entry tests */' }))
+vi.mock('../../src/renderer/export/loadCompiledPlayerBundle', () => ({ loadCompiledPlayerBundle: () => '/* not exercised by entry tests */' }))
 import App from '../../src/renderer/App'
 
 afterEach(() => { cleanup(); useEditorStore.getState().courseBridge.dispose(); localStorage.clear(); Reflect.deleteProperty(window, 'desktopAPI') })
@@ -79,10 +90,11 @@ describe('G20 default workspace entry has no embedded CLI dependency', () => {
       registerEditor: vi.fn(), editorRef: () => () => {}, mediaEditorRef: () => () => {},
       mediaFiles: async () => { throw new Error('Media is outside this workspace entry check') },
       reloadPptx: async () => { throw new Error('PPTX preview is outside this workspace entry check') },
-      editPptx: vi.fn(), movePptxHistory: vi.fn(), reloadDocx: vi.fn(),
+      editPptx: vi.fn(), commitPptx: vi.fn(), officeEditorRef: () => vi.fn(), movePptxHistory: vi.fn(), reloadDocx: vi.fn(), reloadOffice: vi.fn(), editOffice: vi.fn(), moveOfficeHistory: vi.fn(),
       updateMediaSnapshot: vi.fn(), updateDirty: vi.fn(), flushAll: vi.fn(async () => true),
       captureMediaDrafts: vi.fn(() => []), hasDirtyInputs: vi.fn(() => false), suspendForClose: vi.fn(), resumeAfterCloseCancelled: vi.fn(),
       saveActiveDocument: vi.fn(async (): Promise<'course'> => 'course'), drainAll: vi.fn(async () => true),
+      prepareOfficeFiles: vi.fn(async () => true),
       preserveAll: vi.fn(async () => true), closeAll: vi.fn(async () => true), disposeDocuments: vi.fn(async () => {}),
       activeDocumentTarget: () => undefined, selectionChanged: vi.fn(), sendContextualCommand: vi.fn(),
     }

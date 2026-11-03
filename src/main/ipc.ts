@@ -15,6 +15,8 @@ import { trashWorkspaceWithDialog } from './workbench/workspaceTrashDialog'
 import { workspaceFilesRequestSchema } from '../shared/workbench/workspaceFiles'
 import { mediaFilesRequestSchema, mediaFileDraftInputSchema, fileArtifactBindingSchema } from '../shared/workbench/mediaFiles'
 import { operateMediaFiles } from './workbench/mediaFilesDesktopService'
+import { officeDocumentRequestSchema } from '../shared/workbench/officeDocument'
+import { operateOfficeDocument } from './workbench/officeDocumentDesktopService'
 import { docxPreviewCancelSchema, docxPreviewRequestSchema, pptxPreviewRequestSchema } from '../shared/workbench/officePreview'
 import { WordPreviewError } from './workbench/office/WordPreviewError'
 import { UserFacingError } from '../shared/errors'
@@ -654,6 +656,10 @@ export function registerIpcHandlers(context: IpcContext): void {
     code: 'COMPONENT_COMPILE_FAILED', title: '组件源码未能编译',
     message: '源码和参数已保留。', suggestion: '请查看组件诊断并修复源码。',
   }, async (_event, args) => documents.compilation.compile(componentCompilationInputSchema.parse(requireSingleArgument(args))))
+  registerSafeHandler(IPC_CHANNELS.officeDocument, context, {
+    code: 'OFFICE_EDIT_FAILED', title: 'Office 编辑未完成',
+    message: '当前输入仍保留。', suggestion: '请核对原件版本和具体提示。',
+  }, async (_event, args) => operateOfficeDocument(officeDocumentRequestSchema.parse(requireSingleArgument(args))))
   registerSafeHandler(IPC_CHANNELS.pptxPreview, context, {
     code: 'PPTX_PREVIEW_FAILED', title: 'PPTX 操作未完成',
     message: '请保留当前输入并核查原件最新状态。', suggestion: '请查看具体原因后重新载入。',

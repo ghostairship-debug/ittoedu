@@ -1,0 +1,30 @@
+/*! react-data-grid 7.0.0-beta.63 — MIT License
+Original work Copyright (c) 2014 Prometheus Research
+Modified work Copyright 2015 Comcast
+For the original source code please see https://github.com/prometheusresearch-archive/react-grid
+Permission is hereby granted, free of charge, to any person obtaining a copy of
+this software and associated documentation files (the "Software"), to deal in
+the Software without restriction, including without limitation the rights to
+use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies
+of the Software, and to permit persons to whom the Software is furnished to do
+so, subject to the following conditions:
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+*/
+.office-xlsx-grid-shell{display:flex;flex:1;min-height:0;flex-direction:column}
+.office-xlsx-grid{flex:1;min-height:0;height:auto;color-scheme:light;--rdg-background-color:#fff;--rdg-color:#17212e;--rdg-border-color:#dce3ec;--rdg-header-background-color:#f0f3f7;--rdg-row-hover-background-color:#f7faff;--rdg-selection-color:#387fbd;font:13px/1.5 system-ui,sans-serif;border:0}
+.office-xlsx-grid .office-xlsx-cell{padding:0}
+.office-xlsx-grid .office-xlsx-cell--selected{background:#edf6ff}
+.office-xlsx-grid .office-xlsx-row-number{background:#f0f3f7;color:#556478;text-align:center;font-size:12px}
+.office-xlsx-cell-input{display:block;width:100%;height:100%;box-sizing:border-box;border:0;border-radius:0;outline:none;background:transparent;color:inherit;padding:3px 7px;font:inherit;min-width:0}
+.office-xlsx-cell-input:focus{box-shadow:inset 0 0 0 2px #387fbd;background:#f6fbff}
+.office-xlsx-cell-input[readonly]{background:#f2f4f7;color:#718091;cursor:default}
+.office-xlsx-selection-status{display:flex;align-items:center;gap:16px;padding:3px 10px;background:var(--panel-bg,#fff);border-top:1px solid #d5dde6;color:#657488;font-size:12px;flex-shrink:0}
+.office-xlsx-selection-status>span{margin-left:auto;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}

@@ -1,9 +1,64 @@
 {
-  "description": "局部修改现有 Office 原文件并保存原格式，保全非目标文本、版式和媒体。先 office.inspect 读取当前原件：DOCX可用唯一oldText或返回位置；PPTX每项必须带返回的零基slide及shapeId，新对象操作还须带part/partVersion。软件沿用本任务读取的文件版本；expectedVersion可省略，提供时要求当前版本一致。Excel公式实际计算；不支持的公式保留并返回局部诊断。",
+  "description": "局部修改并保存 Office 原件，保全非目标结构，进入统一撤销历史。先 office.inspect：DOCX支持正文、段落和基础样式；XLSX支持单元格/公式及工作表管理，复杂依赖无法安全维护时拒绝；PPTX对象沿用零基slide、shapeId、part/partVersion。chartValue还须沿用chartPart/chartVersion及系列/点index，同步数值缓存和内嵌工作簿；animationTiming只修改inspect标为editable的已有行为时长。软件沿用本次读取的文件版本；不支持的公式保留并报告计算范围。不扩大文件写入授权。",
   "inputSchema": {
     "$defs": {
       "__schema0": {
         "anyOf": [
+          {
+            "properties": {
+              "end": {
+                "$ref": "#/$defs/__schema1"
+              },
+              "paragraphs": {
+                "items": {
+                  "$ref": "#/$defs/__schema2"
+                },
+                "minItems": 1,
+                "type": "array"
+              },
+              "start": {
+                "$ref": "#/$defs/__schema1"
+              },
+              "type": {
+                "const": "replaceRange",
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "start",
+              "end",
+              "paragraphs"
+            ],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "from": {
+                "$ref": "#/$defs/__schema12"
+              },
+              "index": {
+                "$ref": "#/$defs/__schema11"
+              },
+              "style": {
+                "$ref": "#/$defs/__schema14"
+              },
+              "to": {
+                "$ref": "#/$defs/__schema13"
+              },
+              "type": {
+                "$ref": "#/$defs/__schema10"
+              }
+            },
+            "required": [
+              "type",
+              "index",
+              "from",
+              "to",
+              "style"
+            ],
+            "type": "object"
+          },
           {
             "properties": {
               "index": {
@@ -23,6 +78,68 @@
               "type",
               "index",
               "text"
+            ],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "index": {
+                "maximum": 9007199254740991,
+                "minimum": 0,
+                "type": "integer"
+              },
+              "style": {
+                "$ref": "#/$defs/__schema7"
+              },
+              "type": {
+                "const": "paragraphStyle",
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "index",
+              "style"
+            ],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "after": {
+                "maximum": 9007199254740991,
+                "minimum": -1,
+                "type": "integer"
+              },
+              "text": {
+                "type": "string"
+              },
+              "type": {
+                "const": "insertParagraph",
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "after",
+              "text"
+            ],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "index": {
+                "maximum": 9007199254740991,
+                "minimum": 0,
+                "type": "integer"
+              },
+              "type": {
+                "const": "deleteParagraph",
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "index"
             ],
             "type": "object"
           },
@@ -85,66 +202,339 @@
       },
       "__schema1": {
         "properties": {
-          "cell": {
-            "pattern": "^[A-Z]{1,3}[1-9][0-9]*$",
-            "type": "string"
+          "offset": {
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
           },
-          "sheet": {
-            "type": "string"
-          },
-          "value": {
-            "anyOf": [
-              {
+          "paragraph": {
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "paragraph",
+          "offset"
+        ],
+        "type": "object"
+      },
+      "__schema10": {
+        "const": "textStyle",
+        "type": "string"
+      },
+      "__schema11": {
+        "maximum": 9007199254740991,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "__schema12": {
+        "maximum": 9007199254740991,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "__schema13": {
+        "maximum": 9007199254740991,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "__schema14": {
+        "$ref": "#/$defs/__schema3"
+      },
+      "__schema15": {
+        "anyOf": [
+          {
+            "properties": {
+              "cell": {
+                "pattern": "^[A-Z]{1,3}[1-9][0-9]*$",
+                "type": "string"
+              },
+              "sheet": {
+                "type": "string"
+              },
+              "value": {
                 "anyOf": [
                   {
-                    "type": "string"
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "type": "boolean"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
                   },
                   {
-                    "type": "number"
-                  },
-                  {
-                    "type": "boolean"
-                  },
-                  {
-                    "type": "null"
+                    "properties": {
+                      "formula": {
+                        "minLength": 1,
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "formula"
+                    ],
+                    "type": "object"
                   }
                 ]
+              }
+            },
+            "required": [
+              "sheet",
+              "cell",
+              "value"
+            ],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "name": {
+                "maxLength": 31,
+                "minLength": 1,
+                "type": "string"
+              },
+              "type": {
+                "const": "sheetAdd",
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "name"
+            ],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "name": {
+                "maxLength": 31,
+                "minLength": 1,
+                "type": "string"
+              },
+              "sheet": {
+                "type": "string"
+              },
+              "type": {
+                "const": "sheetRename",
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "sheet",
+              "name"
+            ],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "sheet": {
+                "type": "string"
+              },
+              "type": {
+                "const": "sheetDelete",
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "sheet"
+            ],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "index": {
+                "maximum": 9007199254740991,
+                "minimum": 0,
+                "type": "integer"
+              },
+              "sheet": {
+                "type": "string"
+              },
+              "type": {
+                "const": "sheetMove",
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "sheet",
+              "index"
+            ],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "column": {
+                "maximum": 16384,
+                "minimum": 1,
+                "type": "integer"
+              },
+              "sheet": {
+                "type": "string"
+              },
+              "type": {
+                "const": "columnWidth",
+                "type": "string"
+              },
+              "width": {
+                "maximum": 255,
+                "minimum": 0,
+                "type": "number"
+              }
+            },
+            "required": [
+              "type",
+              "sheet",
+              "column",
+              "width"
+            ],
+            "type": "object"
+          }
+        ]
+      },
+      "__schema16": {
+        "anyOf": [
+          {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/__schema17"
+              },
+              {
+                "$ref": "#/$defs/__schema27"
+              },
+              {
+                "$ref": "#/$defs/__schema31"
+              },
+              {
+                "$ref": "#/$defs/__schema43"
+              },
+              {
+                "$ref": "#/$defs/__schema51"
+              },
+              {
+                "$ref": "#/$defs/__schema56"
+              },
+              {
+                "$ref": "#/$defs/__schema57"
+              },
+              {
+                "$ref": "#/$defs/__schema58"
+              },
+              {
+                "$ref": "#/$defs/__schema64"
+              }
+            ]
+          },
+          {
+            "anyOf": [
+              {
+                "properties": {
+                  "chartPart": {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "chartVersion": {
+                    "pattern": "^[a-f0-9]{64}$",
+                    "type": "string"
+                  },
+                  "part": {
+                    "$ref": "#/$defs/__schema29"
+                  },
+                  "partVersion": {
+                    "$ref": "#/$defs/__schema30"
+                  },
+                  "point": {
+                    "description": "inspect 返回的数值点 index",
+                    "maximum": 9007199254740991,
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "series": {
+                    "description": "inspect 返回的系列 index",
+                    "maximum": 9007199254740991,
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "shape": {
+                    "$ref": "#/$defs/__schema19"
+                  },
+                  "shapeId": {
+                    "$ref": "#/$defs/__schema28"
+                  },
+                  "slide": {
+                    "$ref": "#/$defs/__schema18"
+                  },
+                  "type": {
+                    "const": "chartValue",
+                    "type": "string"
+                  },
+                  "value": {
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "slide",
+                  "shapeId",
+                  "part",
+                  "partVersion",
+                  "type",
+                  "chartPart",
+                  "chartVersion",
+                  "series",
+                  "point",
+                  "value"
+                ],
+                "type": "object"
               },
               {
                 "properties": {
-                  "formula": {
+                  "durationMs": {
+                    "description": "已有动画行为的持续毫秒数；不改变触发和对象关系",
+                    "maximum": 86400000,
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "part": {
+                    "$ref": "#/$defs/__schema23"
+                  },
+                  "partVersion": {
+                    "$ref": "#/$defs/__schema25"
+                  },
+                  "slide": {
+                    "$ref": "#/$defs/__schema18"
+                  },
+                  "timingId": {
                     "minLength": 1,
+                    "type": "string"
+                  },
+                  "type": {
+                    "const": "animationTiming",
                     "type": "string"
                   }
                 },
                 "required": [
-                  "formula"
+                  "slide",
+                  "part",
+                  "partVersion",
+                  "type",
+                  "timingId",
+                  "durationMs"
                 ],
                 "type": "object"
               }
             ]
           }
-        },
-        "required": [
-          "sheet",
-          "cell",
-          "value"
-        ],
-        "type": "object"
+        ]
       },
-      "__schema10": {
-        "minLength": 1,
-        "type": "string"
-      },
-      "__schema11": {
-        "$ref": "#/$defs/__schema12",
-        "description": "原样沿用 inspect 返回的 partVersion，不能自行生成或复用旧值"
-      },
-      "__schema12": {
-        "pattern": "^[a-f0-9]{64}$",
-        "type": "string"
-      },
-      "__schema13": {
+      "__schema17": {
         "properties": {
           "paragraph": {
             "maximum": 9007199254740991,
@@ -152,10 +542,110 @@
             "type": "integer"
           },
           "part": {
-            "$ref": "#/$defs/__schema15"
+            "$ref": "#/$defs/__schema23"
           },
           "partVersion": {
-            "$ref": "#/$defs/__schema16"
+            "$ref": "#/$defs/__schema25"
+          },
+          "shape": {
+            "$ref": "#/$defs/__schema19"
+          },
+          "shapeId": {
+            "$ref": "#/$defs/__schema21"
+          },
+          "slide": {
+            "$ref": "#/$defs/__schema18"
+          },
+          "text": {
+            "type": "string"
+          },
+          "type": {
+            "const": "text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "slide",
+          "text"
+        ],
+        "type": "object"
+      },
+      "__schema18": {
+        "maximum": 9007199254740991,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "__schema19": {
+        "$ref": "#/$defs/__schema20",
+        "description": "兼容按唯一名称定位；重名时请使用 inspect 返回的 shapeId"
+      },
+      "__schema2": {
+        "properties": {
+          "runs": {
+            "items": {
+              "properties": {
+                "style": {
+                  "$ref": "#/$defs/__schema3"
+                },
+                "text": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "text"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "style": {
+            "$ref": "#/$defs/__schema7"
+          }
+        },
+        "required": [
+          "runs"
+        ],
+        "type": "object"
+      },
+      "__schema20": {
+        "type": "string"
+      },
+      "__schema21": {
+        "$ref": "#/$defs/__schema22",
+        "description": "inspect 返回的原件形状标识；提供时优先于名称定位"
+      },
+      "__schema22": {
+        "minLength": 1,
+        "type": "string"
+      },
+      "__schema23": {
+        "$ref": "#/$defs/__schema24",
+        "description": "原样沿用 inspect 返回的幻灯片 part，防止幻灯片顺序变化后误改"
+      },
+      "__schema24": {
+        "minLength": 1,
+        "type": "string"
+      },
+      "__schema25": {
+        "$ref": "#/$defs/__schema26",
+        "description": "原样沿用 inspect 返回的 partVersion，不能自行生成或复用旧值"
+      },
+      "__schema26": {
+        "pattern": "^[a-f0-9]{64}$",
+        "type": "string"
+      },
+      "__schema27": {
+        "properties": {
+          "paragraph": {
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "part": {
+            "$ref": "#/$defs/__schema29"
+          },
+          "partVersion": {
+            "$ref": "#/$defs/__schema30"
           },
           "run": {
             "maximum": 9007199254740991,
@@ -163,13 +653,13 @@
             "type": "integer"
           },
           "shape": {
-            "$ref": "#/$defs/__schema5"
+            "$ref": "#/$defs/__schema19"
           },
           "shapeId": {
-            "$ref": "#/$defs/__schema14"
+            "$ref": "#/$defs/__schema28"
           },
           "slide": {
-            "$ref": "#/$defs/__schema4"
+            "$ref": "#/$defs/__schema18"
           },
           "text": {
             "type": "string"
@@ -191,49 +681,63 @@
         ],
         "type": "object"
       },
-      "__schema14": {
-        "$ref": "#/$defs/__schema7"
+      "__schema28": {
+        "$ref": "#/$defs/__schema21"
       },
-      "__schema15": {
-        "$ref": "#/$defs/__schema9"
+      "__schema29": {
+        "$ref": "#/$defs/__schema23"
       },
-      "__schema16": {
-        "$ref": "#/$defs/__schema11"
-      },
-      "__schema17": {
+      "__schema3": {
         "properties": {
-          "height": {
-            "$ref": "#/$defs/__schema25"
-          },
-          "part": {
-            "$ref": "#/$defs/__schema15"
-          },
-          "partVersion": {
-            "$ref": "#/$defs/__schema16"
-          },
-          "rotation": {
-            "$ref": "#/$defs/__schema27"
-          },
-          "shape": {
-            "$ref": "#/$defs/__schema5"
-          },
-          "shapeId": {
-            "$ref": "#/$defs/__schema14"
-          },
-          "slide": {
+          "bold": {
             "$ref": "#/$defs/__schema4"
           },
-          "type": {
-            "$ref": "#/$defs/__schema18"
+          "italic": {
+            "$ref": "#/$defs/__schema5"
           },
-          "width": {
-            "$ref": "#/$defs/__schema23"
+          "underline": {
+            "$ref": "#/$defs/__schema6"
+          }
+        },
+        "type": "object"
+      },
+      "__schema30": {
+        "$ref": "#/$defs/__schema25"
+      },
+      "__schema31": {
+        "properties": {
+          "height": {
+            "$ref": "#/$defs/__schema39"
           },
-          "x": {
+          "part": {
+            "$ref": "#/$defs/__schema29"
+          },
+          "partVersion": {
+            "$ref": "#/$defs/__schema30"
+          },
+          "rotation": {
+            "$ref": "#/$defs/__schema41"
+          },
+          "shape": {
             "$ref": "#/$defs/__schema19"
           },
+          "shapeId": {
+            "$ref": "#/$defs/__schema28"
+          },
+          "slide": {
+            "$ref": "#/$defs/__schema18"
+          },
+          "type": {
+            "$ref": "#/$defs/__schema32"
+          },
+          "width": {
+            "$ref": "#/$defs/__schema37"
+          },
+          "x": {
+            "$ref": "#/$defs/__schema33"
+          },
           "y": {
-            "$ref": "#/$defs/__schema21"
+            "$ref": "#/$defs/__schema35"
           }
         },
         "required": [
@@ -245,79 +749,51 @@
         ],
         "type": "object"
       },
-      "__schema18": {
+      "__schema32": {
         "const": "transform",
         "type": "string"
       },
-      "__schema19": {
-        "$ref": "#/$defs/__schema20",
+      "__schema33": {
+        "$ref": "#/$defs/__schema34",
         "description": "对象父坐标中的横向位置，单位磅；沿用inspect的frame单位"
       },
-      "__schema2": {
-        "anyOf": [
-          {
-            "$ref": "#/$defs/__schema3"
-          },
-          {
-            "$ref": "#/$defs/__schema13"
-          },
-          {
-            "$ref": "#/$defs/__schema17"
-          },
-          {
-            "$ref": "#/$defs/__schema29"
-          },
-          {
-            "$ref": "#/$defs/__schema37"
-          },
-          {
-            "$ref": "#/$defs/__schema42"
-          },
-          {
-            "$ref": "#/$defs/__schema43"
-          },
-          {
-            "$ref": "#/$defs/__schema44"
-          },
-          {
-            "$ref": "#/$defs/__schema50"
-          }
-        ]
-      },
-      "__schema20": {
+      "__schema34": {
         "type": "number"
       },
-      "__schema21": {
-        "$ref": "#/$defs/__schema22",
+      "__schema35": {
+        "$ref": "#/$defs/__schema36",
         "description": "对象父坐标中的纵向位置，单位磅"
       },
-      "__schema22": {
+      "__schema36": {
         "type": "number"
       },
-      "__schema23": {
-        "$ref": "#/$defs/__schema24",
+      "__schema37": {
+        "$ref": "#/$defs/__schema38",
         "description": "宽度，单位磅"
       },
-      "__schema24": {
+      "__schema38": {
         "exclusiveMinimum": 0,
         "type": "number"
       },
-      "__schema25": {
-        "$ref": "#/$defs/__schema26",
+      "__schema39": {
+        "$ref": "#/$defs/__schema40",
         "description": "高度，单位磅"
       },
-      "__schema26": {
+      "__schema4": {
+        "type": "boolean"
+      },
+      "__schema40": {
         "exclusiveMinimum": 0,
         "type": "number"
       },
-      "__schema27": {
-        "$ref": "#/$defs/__schema28",
+      "__schema41": {
+        "$ref": "#/$defs/__schema42",
         "description": "旋转角，单位度"
       },
-      "__schema28": {
+      "__schema42": {
         "type": "number"
       },
-      "__schema29": {
+      "__schema43": {
         "properties": {
           "paragraph": {
             "maximum": 9007199254740991,
@@ -325,10 +801,10 @@
             "type": "integer"
           },
           "part": {
-            "$ref": "#/$defs/__schema15"
+            "$ref": "#/$defs/__schema29"
           },
           "partVersion": {
-            "$ref": "#/$defs/__schema16"
+            "$ref": "#/$defs/__schema30"
           },
           "run": {
             "maximum": 9007199254740991,
@@ -336,33 +812,33 @@
             "type": "integer"
           },
           "shape": {
-            "$ref": "#/$defs/__schema5"
+            "$ref": "#/$defs/__schema19"
           },
           "shapeId": {
-            "$ref": "#/$defs/__schema14"
+            "$ref": "#/$defs/__schema28"
           },
           "slide": {
-            "$ref": "#/$defs/__schema4"
+            "$ref": "#/$defs/__schema18"
           },
           "style": {
             "properties": {
               "bold": {
-                "$ref": "#/$defs/__schema30"
+                "$ref": "#/$defs/__schema44"
               },
               "color": {
-                "$ref": "#/$defs/__schema36"
+                "$ref": "#/$defs/__schema50"
               },
               "fontFamily": {
-                "$ref": "#/$defs/__schema35"
+                "$ref": "#/$defs/__schema49"
               },
               "fontSize": {
-                "$ref": "#/$defs/__schema33"
+                "$ref": "#/$defs/__schema47"
               },
               "italic": {
-                "$ref": "#/$defs/__schema31"
+                "$ref": "#/$defs/__schema45"
               },
               "underline": {
-                "$ref": "#/$defs/__schema32"
+                "$ref": "#/$defs/__schema46"
               }
             },
             "type": "object"
@@ -382,95 +858,62 @@
         ],
         "type": "object"
       },
-      "__schema3": {
-        "properties": {
-          "paragraph": {
-            "maximum": 9007199254740991,
-            "minimum": 0,
-            "type": "integer"
-          },
-          "part": {
-            "$ref": "#/$defs/__schema9"
-          },
-          "partVersion": {
-            "$ref": "#/$defs/__schema11"
-          },
-          "shape": {
-            "$ref": "#/$defs/__schema5"
-          },
-          "shapeId": {
-            "$ref": "#/$defs/__schema7"
-          },
-          "slide": {
-            "$ref": "#/$defs/__schema4"
-          },
-          "text": {
-            "type": "string"
-          },
-          "type": {
-            "const": "text",
-            "type": "string"
-          }
-        },
-        "required": [
-          "slide",
-          "text"
-        ],
-        "type": "object"
-      },
-      "__schema30": {
+      "__schema44": {
         "type": "boolean"
       },
-      "__schema31": {
+      "__schema45": {
         "type": "boolean"
       },
-      "__schema32": {
+      "__schema46": {
         "type": "boolean"
       },
-      "__schema33": {
-        "$ref": "#/$defs/__schema34",
+      "__schema47": {
+        "$ref": "#/$defs/__schema48",
         "description": "字号，单位为磅"
       },
-      "__schema34": {
+      "__schema48": {
         "exclusiveMinimum": 0,
         "type": "number"
       },
-      "__schema35": {
+      "__schema49": {
         "minLength": 1,
         "type": "string"
       },
-      "__schema36": {
+      "__schema5": {
+        "type": "boolean"
+      },
+      "__schema50": {
         "pattern": "^[a-fA-F0-9]{6}$",
         "type": "string"
       },
-      "__schema37": {
+      "__schema51": {
         "properties": {
           "fill": {
-            "$ref": "#/$defs/__schema39"
+            "$ref": "#/$defs/__schema53"
           },
           "part": {
-            "$ref": "#/$defs/__schema15"
+            "$ref": "#/$defs/__schema29"
           },
           "partVersion": {
-            "$ref": "#/$defs/__schema16"
+            "$ref": "#/$defs/__schema30"
           },
           "shape": {
-            "$ref": "#/$defs/__schema5"
+            "$ref": "#/$defs/__schema19"
           },
           "shapeId": {
-            "$ref": "#/$defs/__schema14"
+            "$ref": "#/$defs/__schema28"
           },
           "slide": {
-            "$ref": "#/$defs/__schema4"
+            "$ref": "#/$defs/__schema18"
           },
           "stroke": {
-            "$ref": "#/$defs/__schema40"
+            "$ref": "#/$defs/__schema54"
           },
           "strokeWidth": {
-            "$ref": "#/$defs/__schema41"
+            "$ref": "#/$defs/__schema55"
           },
           "type": {
-            "$ref": "#/$defs/__schema38"
+            "$ref": "#/$defs/__schema52"
           }
         },
         "required": [
@@ -482,11 +925,11 @@
         ],
         "type": "object"
       },
-      "__schema38": {
+      "__schema52": {
         "const": "shapeStyle",
         "type": "string"
       },
-      "__schema39": {
+      "__schema53": {
         "anyOf": [
           {
             "pattern": "^[a-fA-F0-9]{6}$",
@@ -497,12 +940,7 @@
           }
         ]
       },
-      "__schema4": {
-        "maximum": 9007199254740991,
-        "minimum": 0,
-        "type": "integer"
-      },
-      "__schema40": {
+      "__schema54": {
         "anyOf": [
           {
             "pattern": "^[a-fA-F0-9]{6}$",
@@ -513,17 +951,17 @@
           }
         ]
       },
-      "__schema41": {
+      "__schema55": {
         "minimum": 0,
         "type": "number"
       },
-      "__schema42": {
+      "__schema56": {
         "properties": {
           "part": {
-            "$ref": "#/$defs/__schema15"
+            "$ref": "#/$defs/__schema29"
           },
           "partVersion": {
-            "$ref": "#/$defs/__schema16"
+            "$ref": "#/$defs/__schema30"
           },
           "position": {
             "enum": [
@@ -535,13 +973,13 @@
             "type": "string"
           },
           "shape": {
-            "$ref": "#/$defs/__schema5"
+            "$ref": "#/$defs/__schema19"
           },
           "shapeId": {
-            "$ref": "#/$defs/__schema14"
+            "$ref": "#/$defs/__schema28"
           },
           "slide": {
-            "$ref": "#/$defs/__schema4"
+            "$ref": "#/$defs/__schema18"
           },
           "type": {
             "const": "layer",
@@ -558,7 +996,7 @@
         ],
         "type": "object"
       },
-      "__schema43": {
+      "__schema57": {
         "properties": {
           "image": {
             "properties": {
@@ -582,19 +1020,19 @@
             "type": "object"
           },
           "part": {
-            "$ref": "#/$defs/__schema15"
+            "$ref": "#/$defs/__schema29"
           },
           "partVersion": {
-            "$ref": "#/$defs/__schema16"
+            "$ref": "#/$defs/__schema30"
           },
           "shape": {
-            "$ref": "#/$defs/__schema5"
+            "$ref": "#/$defs/__schema19"
           },
           "shapeId": {
-            "$ref": "#/$defs/__schema14"
+            "$ref": "#/$defs/__schema28"
           },
           "slide": {
-            "$ref": "#/$defs/__schema4"
+            "$ref": "#/$defs/__schema18"
           },
           "type": {
             "const": "replaceImage",
@@ -611,37 +1049,37 @@
         ],
         "type": "object"
       },
-      "__schema44": {
+      "__schema58": {
         "properties": {
           "bottom": {
-            "$ref": "#/$defs/__schema49"
+            "$ref": "#/$defs/__schema63"
           },
           "left": {
-            "$ref": "#/$defs/__schema46"
+            "$ref": "#/$defs/__schema60"
           },
           "part": {
-            "$ref": "#/$defs/__schema15"
+            "$ref": "#/$defs/__schema29"
           },
           "partVersion": {
-            "$ref": "#/$defs/__schema16"
+            "$ref": "#/$defs/__schema30"
           },
           "right": {
-            "$ref": "#/$defs/__schema48"
+            "$ref": "#/$defs/__schema62"
           },
           "shape": {
-            "$ref": "#/$defs/__schema5"
+            "$ref": "#/$defs/__schema19"
           },
           "shapeId": {
-            "$ref": "#/$defs/__schema14"
+            "$ref": "#/$defs/__schema28"
           },
           "slide": {
-            "$ref": "#/$defs/__schema4"
+            "$ref": "#/$defs/__schema18"
           },
           "top": {
-            "$ref": "#/$defs/__schema47"
+            "$ref": "#/$defs/__schema61"
           },
           "type": {
-            "$ref": "#/$defs/__schema45"
+            "$ref": "#/$defs/__schema59"
           }
         },
         "required": [
@@ -657,27 +1095,26 @@
         ],
         "type": "object"
       },
-      "__schema45": {
+      "__schema59": {
         "const": "imageCrop",
         "type": "string"
       },
-      "__schema46": {
+      "__schema6": {
+        "type": "boolean"
+      },
+      "__schema60": {
         "type": "number"
       },
-      "__schema47": {
+      "__schema61": {
         "type": "number"
       },
-      "__schema48": {
+      "__schema62": {
         "type": "number"
       },
-      "__schema49": {
+      "__schema63": {
         "type": "number"
       },
-      "__schema5": {
-        "$ref": "#/$defs/__schema6",
-        "description": "兼容按唯一名称定位；重名时请使用 inspect 返回的 shapeId"
-      },
-      "__schema50": {
+      "__schema64": {
         "properties": {
           "column": {
             "maximum": 9007199254740991,
@@ -685,10 +1122,10 @@
             "type": "integer"
           },
           "part": {
-            "$ref": "#/$defs/__schema15"
+            "$ref": "#/$defs/__schema29"
           },
           "partVersion": {
-            "$ref": "#/$defs/__schema16"
+            "$ref": "#/$defs/__schema30"
           },
           "row": {
             "maximum": 9007199254740991,
@@ -696,13 +1133,13 @@
             "type": "integer"
           },
           "shape": {
-            "$ref": "#/$defs/__schema5"
+            "$ref": "#/$defs/__schema19"
           },
           "shapeId": {
-            "$ref": "#/$defs/__schema14"
+            "$ref": "#/$defs/__schema28"
           },
           "slide": {
-            "$ref": "#/$defs/__schema4"
+            "$ref": "#/$defs/__schema18"
           },
           "text": {
             "type": "string"
@@ -724,20 +1161,44 @@
         ],
         "type": "object"
       },
-      "__schema6": {
-        "type": "string"
-      },
       "__schema7": {
-        "$ref": "#/$defs/__schema8",
-        "description": "inspect 返回的原件形状标识；提供时优先于名称定位"
+        "properties": {
+          "alignment": {
+            "$ref": "#/$defs/__schema8"
+          },
+          "bold": {
+            "$ref": "#/$defs/__schema4"
+          },
+          "heading": {
+            "$ref": "#/$defs/__schema9"
+          },
+          "italic": {
+            "$ref": "#/$defs/__schema5"
+          },
+          "underline": {
+            "$ref": "#/$defs/__schema6"
+          }
+        },
+        "type": "object"
       },
       "__schema8": {
-        "minLength": 1,
+        "enum": [
+          "left",
+          "center",
+          "right",
+          "both"
+        ],
         "type": "string"
       },
       "__schema9": {
-        "$ref": "#/$defs/__schema10",
-        "description": "原样沿用 inspect 返回的幻灯片 part，防止幻灯片顺序变化后误改"
+        "enum": [
+          "Normal",
+          "Title",
+          "Heading1",
+          "Heading2",
+          "Heading3"
+        ],
+        "type": "string"
       }
     },
     "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -769,7 +1230,7 @@
             "properties": {
               "edits": {
                 "items": {
-                  "$ref": "#/$defs/__schema1"
+                  "$ref": "#/$defs/__schema15"
                 },
                 "minItems": 1,
                 "type": "array"
@@ -789,7 +1250,7 @@
             "properties": {
               "edits": {
                 "items": {
-                  "$ref": "#/$defs/__schema2"
+                  "$ref": "#/$defs/__schema16"
                 },
                 "minItems": 1,
                 "type": "array"

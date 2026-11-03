@@ -3,6 +3,7 @@ import path from 'node:path'
 import { createHash } from 'node:crypto'
 import { Buffer } from 'node:buffer'
 import { strToU8 } from 'fflate'
+import { editAnimationTiming, editChartValue, inspectAnimations, inspectChart } from './pptxAdvanced'
 import { children, descendants, NS, OfficePackage, replaceTextRange, textOf } from './officePackage'
 import type { OfficeContentInspection, OfficeRequest, PptxObjectEdit, PptxObjectFrame, PptxObjectInspection, PptxTextStyle } from '../../../shared/workbench/officeFiles'
 
@@ -363,9 +364,11 @@ export function editPptx(pkg: OfficePackage, request: OfficeRequest<'pptx', 'edi
     if (!part) throw new Error(`PPT 幻灯片不存在：${edit.slide}`)
     if (edit.part !== undefined && edit.part !== part) throw new Error('PPT 幻灯片位置已改变，请重新读取原件后修改')
     if (edit.partVersion !== undefined && edit.partVersion !== pkg.partVersion(part)) throw new Error('PPT 幻灯片内容已改变，请重新读取原件后修改')
+    if (edit.type === 'animationTiming') { editAnimationTiming(pkg, part, edit); continue }
     const targets = objects(pkg, part).filter(object => edit.shapeId !== undefined ? object.shapeId === edit.shapeId : object.name === edit.shape)
     if (targets.length !== 1) throw new Error(`PPT 对象须唯一：${edit.shapeId ?? edit.shape}（匹配 ${targets.length}）`)
     const object = targets[0]
+    if (edit.type === 'chartValue') { editChartValue(pkg, part, object.node, edit); continue }
     let changed = false
     if (edit.type === undefined || edit.type === 'text') {
       const body = children(object.node, NS.slide, 'txBody')[0]
@@ -412,7 +415,7 @@ export function editPptx(pkg: OfficePackage, request: OfficeRequest<'pptx', 'edi
 export function inspectPptx(pkg: OfficePackage): Extract<OfficeContentInspection, { format: 'pptx' }> {
   const size = descendants(pkg.xml(pkg.main()), NS.slide, 'sldSz')[0]
   return { format: 'pptx', width: numericAttribute(size, 'cx') / EMU_PER_POINT, height: numericAttribute(size, 'cy') / EMU_PER_POINT,
-    slides: slideParts(pkg).map((part, index) => ({ index, part, partVersion: pkg.partVersion(part), shapes: objects(pkg, part).map(object => {
+    slides: slideParts(pkg).map((part, index) => ({ index, part, partVersion: pkg.partVersion(part), animations: inspectAnimations(pkg, part), shapes: objects(pkg, part).map(object => {
       const frame = frameOf(object, effectiveTransform(pkg, part, object)), properties = propertyContainer(object)
       const hasFields = object.paragraphs.some(paragraph => descendants(paragraph, NS.drawing, 'fld').length > 0)
       const editable: PptxObjectInspection['editable'] = ['layer']
@@ -426,6 +429,6 @@ export function inspectPptx(pkg: OfficePackage): Extract<OfficeContentInspection
         text: object.paragraphs.map(paragraphText).join('\n'), paragraphs: object.paragraphs.map(paragraphText), frame, runs,
         textStyle: runs[0]?.[0]?.style, fill: colorOf(properties), stroke: colorOf(properties ? children(properties, NS.drawing, 'ln')[0] : undefined),
         crop: cropOf(object), cells: object.kind === 'table' ? tableCells(object).map(row => row.map(cell => descendants(cell, NS.drawing, 'p').map(paragraphText).join('\n'))) : undefined,
-        editable }
+        chart: inspectChart(pkg, part, object.node), editable }
     }) })) }
 }

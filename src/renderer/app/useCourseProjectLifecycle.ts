@@ -74,7 +74,7 @@ export interface CourseProjectLifecyclePorts<TDraftToken = unknown> {
     create(surface: 'slide' | 'flow' | 'spatial', canvas?: SlideCanvasSize, activateIf?: () => boolean): Promise<void | boolean>
     /** A new untitled course with given content, e.g. made from a PPT (M21). */
     createFrom?(content: CourseProjectContent, activateIf?: () => boolean): Promise<void | boolean>
-    open(path: string, activateIf?: () => boolean): Promise<void | boolean>
+    open(path: string, activateIf?: () => boolean, openIf?: () => boolean): Promise<void | boolean>
     save(saveAs?: boolean, documentId?: string): Promise<DocumentSnapshot | null>
     drain(): Promise<DocumentSnapshot>
     /** Settles already admitted operations while raw recovery input stays local. */
@@ -170,12 +170,15 @@ export function useCourseProjectLifecycle<TDraftToken>(ports: CourseProjectLifec
     const now = ref.current.captureIdentity()
     return before.projectId === now.projectId && before.revision === now.revision && before.documentId === now.documentId && before.epoch === now.epoch
   }
-  const replace = useCallback(async (work: (isCurrent: () => boolean) => Promise<void | boolean>, options?: CourseProjectReplacementOptions): Promise<boolean> => {
+  const replace = useCallback(async (work: (isCurrent: () => boolean) => Promise<void | boolean>, options?: CourseProjectReplacementOptions, retainOpenedFile = false): Promise<boolean> => {
     const foreground = options?.foreground ?? ref.current.beginForeground?.()
     const isCurrent = () => options?.isCurrent?.() !== false && foreground?.() !== false
+    // Opening an explicitly selected file creates a retained Main session. A later
+    // tab click only expires its activation; leaving the workspace still cancels it.
+    const mayOpen = () => options?.isCurrent?.() !== false && (retainOpenedFile || foreground?.() !== false)
     const result = await ref.current.runBusy(async () => {
       await service().ready()
-      if (!isCurrent()) return false
+      if (!mayOpen()) return false
       const identity = service().snapshot()
       const sameDocument = () => {
         const now = service().snapshot()
@@ -184,9 +187,9 @@ export function useCourseProjectLifecycle<TDraftToken>(ports: CourseProjectLifec
       if (ref.current.beforeReplace && !(await ref.current.beforeReplace())) return false
       // Switching views retains the previous main-owned document and its History.
       // Only unfinished renderer input needs admission; nothing is discarded here.
-      if (!sameDocument() || !isCurrent()) return false
+      if ((!sameDocument() && !retainOpenedFile) || !mayOpen()) return false
       if (identity) await (service().settle?.() ?? service().drain())
-      if (!sameDocument() || !isCurrent()) return false
+      if ((!sameDocument() && !retainOpenedFile) || !mayOpen()) return false
       const epoch = ++replacement.current
       if (await work(isCurrent) === false) return false
       // A completed writer remains completed. Only its foreground effect expires.
@@ -217,7 +220,7 @@ export function useCourseProjectLifecycle<TDraftToken>(ports: CourseProjectLifec
       if (isCurrent()) ref.current.commitStatus(`工程已打开，可继续编辑；最近工程记录确认失败，请稍后重新打开：${error instanceof Error ? error.message : String(error)}`)
     }
   }) }, [replace])
-  const openRecentProject = useCallback((path: string, options?: CourseProjectReplacementOptions) => replace(isCurrent => service().open(path, isCurrent), options), [replace])
+  const openRecentProject = useCallback((path: string, options?: CourseProjectReplacementOptions) => replace(isCurrent => service().open(path, isCurrent, () => options?.isCurrent?.() !== false), options, true), [replace])
   const saveProject = useCallback(async (saveAs = false, options?: CourseProjectOperationOptions): Promise<boolean> => {
     if (saving.current || options?.isCurrent?.() === false) return false
     // The action queue may wait while the user selects another course. Retain

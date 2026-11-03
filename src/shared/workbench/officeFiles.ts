@@ -12,9 +12,31 @@ const docxCreate = z.object({
   format: z.literal('docx'), operation: z.literal('create'), title: z.string().optional(),
   blocks: z.array(z.union([paragraph, z.object({ type: z.literal('table'), rows: z.array(z.array(z.string())).min(1) })])).min(1),
 })
+export const docxParagraphStyleSchema = z.object({
+  bold: z.boolean().optional(), italic: z.boolean().optional(), underline: z.boolean().optional(),
+  alignment: z.enum(['left', 'center', 'right', 'both']).optional(),
+  heading: z.enum(['Normal', 'Title', 'Heading1', 'Heading2', 'Heading3']).optional(),
+})
+export type DocxParagraphStyle = z.infer<typeof docxParagraphStyleSchema>
+export const docxTextStyleSchema = docxParagraphStyleSchema.pick({ bold: true, italic: true, underline: true })
+export type DocxTextStyle = z.infer<typeof docxTextStyleSchema>
+const docxTextPosition = z.object({ paragraph: z.number().int().nonnegative(), offset: z.number().int().nonnegative() })
+export type DocxBodyBlock =
+  | { type: 'paragraph'; index: number }
+  | { type: 'table'; index: number; rows: number[][][]; paragraphs: number[]; simple: boolean }
+  | { type: 'container'; paragraphs: number[]; notice: string }
 const docxEdit = z.object({
   format: z.literal('docx'), operation: z.literal('edit'), edits: z.array(z.union([
+    z.object({ type: z.literal('replaceRange'), start: docxTextPosition, end: docxTextPosition,
+      paragraphs: z.array(z.object({ runs: z.array(z.object({ text: z.string(), style: docxTextStyleSchema.optional() })), style: docxParagraphStyleSchema.optional() })).min(1),
+    }),
+    z.object({ type: z.literal('textStyle'), index: z.number().int().nonnegative(), from: z.number().int().nonnegative(), to: z.number().int().nonnegative(),
+      style: docxTextStyleSchema.refine(style => Object.values(style).some(value => value !== undefined), '请提供文字样式'),
+    }).refine(edit => edit.to > edit.from, '请选择文字范围'),
     z.object({ type: z.literal('paragraph'), index: z.number().int().nonnegative(), text: z.string() }),
+    z.object({ type: z.literal('paragraphStyle'), index: z.number().int().nonnegative(), style: docxParagraphStyleSchema.refine(style => Object.keys(style).length > 0, '请提供段落样式') }),
+    z.object({ type: z.literal('insertParagraph'), after: z.number().int().min(-1), text: z.string() }),
+    z.object({ type: z.literal('deleteParagraph'), index: z.number().int().nonnegative() }),
     z.object({ type: z.literal('tableCell'), table: z.number().int().nonnegative(), row: z.number().int().nonnegative(), column: z.number().int().nonnegative(), text: z.string() }),
     z.object({ type: z.literal('replaceText'), oldText: z.string().min(1), text: z.string() }),
   ])).min(1),
@@ -27,7 +49,14 @@ const xlsxCreate = z.object({
 })
 const xlsxEdit = z.object({
   format: z.literal('xlsx'), operation: z.literal('edit'),
-  edits: z.array(z.object({ sheet: z.string(), cell: z.string().regex(/^[A-Z]{1,3}[1-9][0-9]*$/i), value: cellValue })).min(1),
+  edits: z.array(z.union([
+    z.object({ sheet: z.string(), cell: z.string().regex(/^[A-Z]{1,3}[1-9][0-9]*$/i), value: cellValue }),
+    z.object({ type: z.literal('sheetAdd'), name: z.string().min(1).max(31) }),
+    z.object({ type: z.literal('sheetRename'), sheet: z.string(), name: z.string().min(1).max(31) }),
+    z.object({ type: z.literal('sheetDelete'), sheet: z.string() }),
+    z.object({ type: z.literal('sheetMove'), sheet: z.string(), index: z.number().int().nonnegative() }),
+    z.object({ type: z.literal('columnWidth'), sheet: z.string(), column: z.number().int().min(1).max(16384), width: z.number().finite().min(0).max(255) }),
+  ])).min(1),
 })
 const pptxCreate = z.object({
   format: z.literal('pptx'), operation: z.literal('create'), title: z.string().optional(),
@@ -78,8 +107,20 @@ export type PptxTextStyle = z.infer<typeof pptxTextStyle>
 export interface OfficeHistoryEntry { id: string; actor: 'human' | 'ai'; label: string; at: string }
 export interface OfficeHistorySnapshot { undoDepth: number; redoDepth: number; entries: OfficeHistoryEntry[]; notice?: string }
 
+const pptxAdvancedEdit = z.union([
+  pptxModernTarget.extend({
+    type: z.literal('chartValue'), chartPart: z.string().min(1), chartVersion: z.string().regex(/^[a-f0-9]{64}$/),
+    series: z.number().int().nonnegative().describe('inspect 返回的系列 index'),
+    point: z.number().int().nonnegative().describe('inspect 返回的数值点 index'), value: z.number().finite(),
+  }),
+  pptxObjectTarget.omit({ shape: true, shapeId: true }).required({ part: true, partVersion: true }).extend({
+    type: z.literal('animationTiming'), timingId: z.string().min(1),
+    durationMs: z.number().int().nonnegative().max(86400000).describe('已有动画行为的持续毫秒数；不改变触发和对象关系'),
+  }),
+])
+export type PptxAdvancedEdit = z.infer<typeof pptxAdvancedEdit>
 const pptxEdit = z.object({
-  format: z.literal('pptx'), operation: z.literal('edit'), edits: z.array(pptxObjectEdit).min(1),
+  format: z.literal('pptx'), operation: z.literal('edit'), edits: z.array(z.union([pptxObjectEdit, pptxAdvancedEdit])).min(1),
 })
 
 /** Semantic tool content does not repeat the mechanical create/edit operation. */
@@ -103,6 +144,11 @@ export interface OfficeContentResult {
 }
 /** Coordinates are points in the object's parent space; 72 points equal one inch. */
 export interface PptxObjectFrame { x: number; y: number; width: number; height: number; rotation: number }
+export interface PptxChartInspection {
+  part: string; partVersion: string; embeddedWorkbook?: string
+  series: Array<{ index: number; name: string; values: Array<{ index: number; value: number }> }>
+}
+export interface PptxAnimationInspection { id: string; duration: string; kind: string; shapeIds: string[]; editable: boolean }
 export interface PptxObjectInspection {
   shapeId: string; name: string; kind: 'shape' | 'picture' | 'table' | 'group' | 'unsupported'
   text: string; paragraphs: string[]; groupPath: string[]
@@ -112,9 +158,10 @@ export interface PptxObjectInspection {
   fill?: string | null; stroke?: string | null
   crop?: { left: number; top: number; right: number; bottom: number }
   cells?: string[][]
+  chart?: PptxChartInspection
   editable: Array<'text' | 'runText' | 'transform' | 'textStyle' | 'shapeStyle' | 'layer' | 'replaceImage' | 'imageCrop' | 'tableCell'>
 }
 export type OfficeContentInspection =
-  | { format: 'docx'; paragraphs: Array<{ index: number; text: string }>; tables: string[][][] }
-  | { format: 'xlsx'; sheets: Array<{ name: string; cells: Array<{ cell: string; value: string | number | boolean | null; formula?: string }> }> }
-  | { format: 'pptx'; width: number; height: number; slides: Array<{ index: number; part: string; partVersion: string; shapes: PptxObjectInspection[] }> }
+  | { format: 'docx'; paragraphs: Array<{ index: number; text: string; style?: DocxParagraphStyle; runs?: Array<{ text: string; style: DocxTextStyle }>; editable?: boolean; structureEditable?: boolean; notice?: string }>; tables: string[][][]; body?: DocxBodyBlock[] }
+  | { format: 'xlsx'; sheets: Array<{ name: string; part?: string; sheetId?: string; mergedRanges?: string[]; columnWidths?: Array<{ min: number; max: number; width: number }>; cells: Array<{ cell: string; value: string | number | boolean | null; formula?: string }> }> }
+  | { format: 'pptx'; width: number; height: number; slides: Array<{ index: number; part: string; partVersion: string; shapes: PptxObjectInspection[]; animations?: PptxAnimationInspection[] }> }

@@ -1,3 +1,4 @@
+import { executionFileContextSchema, type ExecutionFileContext } from './fileContext'
 import { acpDesktopRequestSchema, type AcpDesktopRequest, type AcpDesktopResult, type AcpSendInput, type AcpSnapshotEvent } from './acpDesktop'
 import { documentSlotSchema } from '../document/selectionSchema'
 import { z } from 'zod'
@@ -102,7 +103,7 @@ export function captureRendererTiming(): RendererTimingStamp {
 }
 export const executionDesktopRequestSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('acp'), request: acpDesktopRequestSchema }).strict(),
-  z.object({ type: z.literal('acp-send'), ...identity, submissionId: z.uuid(), expectedRevision: index, text: z.string().refine(value => value.trim().length > 0), documents: z.array(executionDocumentReferenceSchema), permission: executionPermissionModeSchema }).strict(),
+  z.object({ type: z.literal('acp-send'), ...identity, submissionId: z.uuid(), expectedRevision: index, text: z.string().refine(value => value.trim().length > 0), documents: z.array(executionDocumentReferenceSchema), permission: executionPermissionModeSchema, fileContext: executionFileContextSchema.optional() }).strict(),
   z.object({ type: z.literal('workspace'), root: z.string().min(1).max(32767).nullable() }).strict(),
   z.object({ type: z.literal('conversations'), workspaceId: id }).strict(),
   z.object({ type: z.literal('create-conversation'), workspaceId: id, title: z.string().optional(), home: conversationHomeSchema.optional(),
@@ -116,7 +117,7 @@ export const executionDesktopRequestSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('delete-conversation'), ...identity, expectedRevision: index }).strict(),
   z.object({ type: z.literal('send'), ...identity, submissionId: z.uuid(), expectedRevision: index, text: z.string(), documents: z.array(executionDocumentReferenceSchema), attachments: z.array(inputAttachmentReferenceSchema).default([]), mode: executionSubmissionModeSchema.default('queue'), retryOfRunId: id.optional(), disclosedSettings: disclosedSettingsSchema.optional(), permission: executionPermissionModeSchema.optional(),
     advancementMode: executionAdvancementModeSchema.optional(), contentOutput: executionContentOutputSchema.optional(),
-    materials: executionMaterialsSchema.optional(), webAuthorization: webTaskAuthorizationSchema.optional(),
+    materials: executionMaterialsSchema.optional(), webAuthorization: webTaskAuthorizationSchema.optional(), fileContext: executionFileContextSchema.optional(),
     clientTiming: z.object({ click: rendererTimingStampSchema, invoke: rendererTimingStampSchema }).strict().optional() }).strict(),
   z.object({ type: z.literal('timing'), ...identity, submissionId: z.uuid(), stage: z.literal('renderer.first-visible'),
     stamp: rendererTimingStampSchema, itemId: id }).strict(),
@@ -172,6 +173,8 @@ export interface ExecutionSendInput {
   contentOutput?: ExecutionContentOutput
   materials?: ExecutionMaterials
   webAuthorization?: WebTaskAuthorization
+  /** Open-file discovery and references; never grants write scope. */
+  fileContext?: ExecutionFileContext
   attachments?: InputAttachmentReference[]
   mode?: ExecutionSubmissionMode
   /** Explicit continuation of a terminal run. Repeated requests for that run reuse its child submission. */
@@ -195,6 +198,8 @@ export interface ExecutionSubmissionRecord {
   contentOutput?: ExecutionContentOutput
   materials?: ExecutionMaterials
   webAuthorization?: WebTaskAuthorization
+  /** Open-file discovery and references; never grants write scope. */
+  fileContext?: ExecutionFileContext
   attachments: InputAttachmentReference[]
   /** Frozen when main accepts the submission. Later settings changes affect only later submissions. */
   model: { provider: string; model: string; accountId: string; billing: string }

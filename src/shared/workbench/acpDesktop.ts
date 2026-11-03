@@ -1,3 +1,4 @@
+import type { ExecutionFileContext } from './fileContext';
 import { z } from 'zod';
 import { executionPermissionModeSchema } from './executionPermission';
 import type { AcpHostSnapshot } from './acp';
@@ -27,5 +28,7 @@ export interface AcpSendInput {
   expectedRevision: number;
   text: string;
   documents: ExecutionDocumentReference[];
+  /** Discovery and references, not authority. */
+  fileContext?: ExecutionFileContext;
   permission: z.infer<typeof executionPermissionModeSchema>;
 }

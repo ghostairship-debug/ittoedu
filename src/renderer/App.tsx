@@ -466,7 +466,7 @@ export default function App() {
       },
       create: async (surface, canvas, activateIf) => completeCourseActivation(await useEditorStore.getState().createCourseDocument(surface, canvas, activateIf), activateIf),
       createFrom: async (content, activateIf) => completeCourseActivation(await useEditorStore.getState().createCourseDocumentFrom(content.project, content.resources, activateIf), activateIf),
-      open: async (path, activateIf) => completeCourseActivation(await useEditorStore.getState().openCourseDocument(path, activateIf), activateIf),
+      open: async (path, activateIf, openIf) => completeCourseActivation(await useEditorStore.getState().openCourseDocument(path, activateIf, openIf), activateIf),
       save: (saveAs, documentId) => useEditorStore.getState().saveCourseDocument(saveAs, saveDirectory.current ?? undefined, documentId),
       drain: () => drainCourseDocument(),
       settle: async () => {
@@ -1056,7 +1056,7 @@ export default function App() {
         return [await captureCourseDocumentReference({ documentId: activeDocumentId, surfaceId }, writable,
           id => prepare ? state.drainCourseDocument(id) : rawDocuments!.read(id))]
       }}
-      onOpenProject={(path, foreground) => courseProjectLifecycle.openRecentProject(path, { origin: 'lesson', foreground })} onNewProject={foreground => courseProjectLifecycle.newProject({ origin: 'lesson', foreground })} onNewProjectFromPptx={newProjectFromPptx} onDirtyChange={setLessonDirty} onActiveDocumentChange={setActiveWorkspaceDocument}
+      onOpenProject={(path, foreground, isCurrent) => courseProjectLifecycle.openRecentProject(path, { origin: 'lesson', foreground, isCurrent })} onNewProject={foreground => courseProjectLifecycle.newProject({ origin: 'lesson', foreground })} onNewProjectFromPptx={newProjectFromPptx} onDirtyChange={setLessonDirty} onActiveDocumentChange={setActiveWorkspaceDocument}
       onImportHtml={(directory, sourceEntryId) => { void openHtmlImport(directory, sourceEntryId) }} onImportFlow={(directory, sourceEntryId) => { void openFlowImport(directory, sourceEntryId) }}
       toolbarExtras={<>
         {flowRecovery.retained.length + preservedInputCount > 0 && <button type="button" title="查看保留的输入原稿" onClick={() => setRetainedFlowOpen(true)}><FileClock size={14} />输入原稿 ({flowRecovery.retained.length + preservedInputCount})</button>}

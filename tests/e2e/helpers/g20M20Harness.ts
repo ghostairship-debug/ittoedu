@@ -12,7 +12,7 @@ export function m20Fixture() {
   return { directory, workspace, profile: join(directory, 'profile') }
 }
 
-export async function launchM20(fixture: ReturnType<typeof m20Fixture>) {
+export async function launchM20(fixture: ReturnType<typeof m20Fixture>, options?: { visible?: boolean }) {
   const packagedPath = process.env.COURSEWARE_E2E_PACKAGED_EXECUTABLE?.trim()
   const executablePath = packagedPath ? resolve(packagedPath) : undefined
   if (executablePath && !existsSync(executablePath)) throw new Error(`Packaged executable does not exist: ${executablePath}`)
@@ -20,7 +20,7 @@ export async function launchM20(fixture: ReturnType<typeof m20Fixture>) {
     .filter((entry): entry is [string, string] => typeof entry[1] === 'string'))
   // Packaged acceptance runs on-screen; an off-screen Windows compositor can
   // stall screenshot capture while the actual document is already ready.
-  Object.assign(env, { VITE_DEV_SERVER_URL: '', [BACKGROUND_E2E_ENV]: executablePath ? '0' : '1' })
+  Object.assign(env, { VITE_DEV_SERVER_URL: '', [BACKGROUND_E2E_ENV]: executablePath || options?.visible ? '0' : '1' })
   if (executablePath) {
     delete env.ELECTRON_RUN_AS_NODE
     // As in the existing portability consumer, prove packaged resources work
@@ -46,6 +46,16 @@ export async function launchM20(fixture: ReturnType<typeof m20Fixture>) {
       expect(canonical(identity.userData)).toBe(canonical(fixture.profile))
     }
   } catch (error) { await closeM20(app); throw error }
+  if (process.env.GUOLING_OFFICE_OFFLINE_ACCEPTANCE === '1') {
+    // Scope this network simulation to the private acceptance process/session.
+    // It does not disable the Windows host network or claim a physical air gap.
+    await app.evaluate(({ session }) => session.defaultSession.webRequest.onBeforeRequest(
+      { urls: ['http://*/*', 'https://*/*'] }, (_request, callback) => callback({ cancel: true })))
+    await page.context().setOffline(true)
+    writeFileSync(join(fixture.directory, 'electron-session-offline.json'), JSON.stringify({
+      httpAndHttpsBlocked: true, chromiumOffline: true, hostNetworkDisabled: false,
+    }, null, 2) + '\n')
+  }
   page.setDefaultTimeout(15_000)
   await app.evaluate(({ BrowserWindow }) => { BrowserWindow.getAllWindows()[0]?.setContentSize(1600, 900) })
   return { app, page }
@@ -75,7 +85,7 @@ export async function m20Snapshot(page: Page, path: string) {
 }
 
 export async function m20Evidence(info: TestInfo, fixture: ReturnType<typeof m20Fixture>, page: Page, facts: Record<string, unknown>, error?: unknown) {
-  if (error) facts.failure = error instanceof Error ? error.message : String(error)
+  if (error) { facts.status = 'failed'; facts.failure = error instanceof Error ? error.message : String(error) }
   const shot = join(fixture.directory, error ? 'failure.png' : 'accepted.png')
   await page.screenshot({ path: shot, fullPage: true }).catch(() => undefined)
   if (existsSync(shot)) await info.attach(error ? 'M20 failure' : 'M20 result', { path: shot, contentType: 'image/png' })

@@ -11,7 +11,7 @@ export interface LessonWorkspaceControllerProps {
   lessonOperation(request: LessonDesktopRequest): Promise<LessonDesktopResult>
   projectPath: string | null
   onBeforeWorkspaceChange?(): Promise<void>
-  onOpenProject(path: string, foreground?: () => boolean): Promise<boolean>
+  onOpenProject(path: string, foreground?: () => boolean, isInWorkspace?: () => boolean): Promise<boolean>
   onNewProject(foreground?: () => boolean): Promise<boolean>
   onNewProjectFromPptx?(file: { name: string; bytes: Uint8Array }, signal?: AbortSignal, foreground?: () => boolean): Promise<boolean>
   tabs: DocumentTabsController
@@ -173,10 +173,12 @@ export function useLessonWorkspaceController(props: LessonWorkspaceControllerPro
     props.tabs.cancelNavigation()
     const navigation = captureCurrentNavigation()
     const isCurrent = () => navigation === captureCurrentNavigation()
+    const generation = workspaceGeneration.current
+    const isInWorkspace = () => generation === workspaceGeneration.current
     await stopAndFlush()
-    if (!isCurrent()) return
     const projectPath = lessonProjectPath(next)
-    if (!(projectPath ? await props.onOpenProject(projectPath, isCurrent) : await props.onNewProject(isCurrent))) return
+    if (!isInWorkspace() || !projectPath && !isCurrent()) return
+    if (!(projectPath ? await props.onOpenProject(projectPath, isCurrent, isInWorkspace) : await props.onNewProject(isCurrent))) return
     if (!isCurrent()) return
     props.tabs.showCurrentCourse(isCurrent)
     setLesson(next); setStandalone(true); setMobilePane('workbench')
@@ -200,9 +202,10 @@ export function useLessonWorkspaceController(props: LessonWorkspaceControllerPro
         props.tabs.cancelNavigation()
         const navigation = captureCurrentNavigation()
         const isCurrent = () => navigation === captureCurrentNavigation()
+        const isInWorkspace = () => generation === workspaceGeneration.current
         await stopAndFlush()
-        if (!isCurrent()) return
-        if (await props.onOpenProject(entry.path, isCurrent)) {
+        if (!isInWorkspace()) return
+        if (await props.onOpenProject(entry.path, isCurrent, isInWorkspace)) {
           if (!isCurrent()) return
           if (!sameWorkspacePath(entry.path, props.projectPath)) detachLesson(isCurrent)
         }
@@ -225,7 +228,7 @@ export function useLessonWorkspaceController(props: LessonWorkspaceControllerPro
         if (generation === workspaceGeneration.current) setMobilePane('workbench')
         return
       }
-      if (capability.openKind === 'presentation' || capability.openKind === 'word') {
+      if (capability.openKind === 'presentation' || capability.openKind === 'word' || capability.openKind === 'spreadsheet') {
         await props.tabs.openTab({ path: entry.path, name: entry.name, kind: capability.openKind, lesson: current.current.lesson })
         if (generation === workspaceGeneration.current) setMobilePane('workbench')
         return

@@ -6,6 +6,7 @@ import { validateWorkspaceEntryName } from '../WorkspaceFiles'
 import { AgentFileOutcomeUnknown } from '../../../core/tools/AgentFileTools'
 import { applyOfficeContentOffThread, inspectOfficeContentOffThread } from './officeContentWorker'
 import { officeContentRequestSchema, type OfficeCalculation, type OfficeContentInspection, type OfficeContentRequest, type OfficeDiagnostic, type OfficeFormat, type OfficeHistorySnapshot } from '../../../shared/workbench/officeFiles'
+import { validateOfficeCandidate } from './officeCandidate'
 import type { ArtifactHistoryMetadata } from '../FileArtifactHistory'
 
 export interface OfficeFileContext {
@@ -95,16 +96,32 @@ export class OfficeFileService {
       return { status: 'saved', binding, inspection, diagnostics: prepared.diagnostics,
         ...(prepared.calculation ? { calculation: prepared.calculation } : {}) }
     }
-    const metadata: ArtifactHistoryMetadata | undefined = request.format === 'pptx' && path.extname(binding.path).toLowerCase() === '.pptx' ? {
-      actor: context.actor ?? 'ai', label: context.historyLabel ?? (context.actor === 'human' ? '手动编辑演示文稿' : 'AI 编辑演示文稿'),
+    const metadata: ArtifactHistoryMetadata = {
+      actor: context.actor ?? 'ai', label: context.historyLabel ?? (context.actor === 'human' ? '手动编辑 Office 文件' : 'AI 编辑 Office 文件'),
       ...(context.operationId ? { operationId: context.operationId } : {}),
-    } : undefined
+    }
     const saved = await this.host.artifacts.replace(binding, prepared.bytes, context.signal, () => this.active(context), metadata)
     let inspection: OfficeContentInspection
     try { inspection = await inspectOfficeContentOffThread(await this.host.artifacts.read(saved), request.format) }
     catch (cause) { throw new AgentFileOutcomeUnknown(`Office 修改已写入，但回读结果未确认；请先读取原件后继续：${cause instanceof Error ? cause.message : String(cause)}`) }
     return { status: 'saved', binding: saved, inspection, diagnostics: prepared.diagnostics,
       ...(prepared.calculation ? { calculation: prepared.calculation } : {}) }
+  }
+  /** Editor bytes are candidates, never a second physical save path. */
+  async commitCandidate(binding: FileArtifactBinding, bytes: Uint8Array, format: OfficeFormat, context: OfficeFileContext = {}): Promise<OfficeFileResult> {
+    this.active(context)
+    if (context.expectedVersion !== binding.fileVersion) throw new Error('候选文件须绑定当前原件版本')
+    if (path.extname(binding.path).toLowerCase() !== '.' + format) throw new Error('候选文件格式与原件不一致')
+    const current = await this.host.artifacts.read(binding, context.signal)
+    validateOfficeCandidate(current, bytes, format)
+    const inspection = await inspectOfficeContentOffThread(bytes, format, context.signal)
+    this.active(context)
+    if (Buffer.from(current).equals(bytes)) return { status: 'saved', binding, inspection, diagnostics: [] }
+    const saved = await this.host.artifacts.replace(binding, bytes, context.signal, () => this.active(context), {
+      actor: context.actor ?? 'human', label: context.historyLabel ?? '手动编辑 Office 文件',
+      ...(context.operationId ? { operationId: context.operationId } : {}),
+    })
+    return { status: 'saved', binding: saved, inspection, diagnostics: [] }
   }
   async history(binding: FileArtifactBinding, context: OfficeFileContext = {}): Promise<OfficeHistorySnapshot> {
     this.active(context)
@@ -117,8 +134,8 @@ export class OfficeFileService {
     if (!this.host.artifacts.moveHistory) throw new Error('当前文件 owner 尚未提供共同编辑历史')
     const saved = await this.host.artifacts.moveHistory(binding, action, context.signal, () => this.active(context))
     let inspection: OfficeContentInspection
-    try { inspection = await inspectOfficeContentOffThread(await this.host.artifacts.read(saved), 'pptx') }
-    catch (cause) { throw new AgentFileOutcomeUnknown(`PPT 撤销/重做已写入，但回读未确认；请重新读取原件：${cause instanceof Error ? cause.message : String(cause)}`) }
+    try { inspection = await inspectOfficeContentOffThread(await this.host.artifacts.read(saved), path.extname(saved.path).slice(1).toLowerCase() as OfficeFormat) }
+    catch (cause) { throw new AgentFileOutcomeUnknown(`Office 撤销/重做已写入，但回读未确认；请重新读取原件：${cause instanceof Error ? cause.message : String(cause)}`) }
     return { status: 'saved', binding: saved, inspection, diagnostics: [] }
   }
 }

@@ -1,7 +1,7 @@
 import { isNativeProjectFilename } from '../nativeProjectFile'
 import type { DocumentKind } from './document'
 
-export type FileOpenKind = 'project' | 'document' | 'media' | 'presentation' | 'word' | 'external' | 'blocked'
+export type FileOpenKind = 'project' | 'document' | 'media' | 'presentation' | 'word' | 'spreadsheet' | 'external' | 'blocked'
 export interface FileCapabilities {
   /** The default action shared by the file tree and launch arguments. */
   openKind: FileOpenKind
@@ -26,6 +26,7 @@ export function fileCapabilities(filename: string): FileCapabilities {
   if (mediaExtensions.has(extension)) return { openKind: 'media', sourceKind: extension === 'svg' ? 'text' : null, externalOpenAllowed: true }
   if (extension === 'pptx') return { openKind: 'presentation', sourceKind: null, externalOpenAllowed: true }
   if (extension === 'docx') return { openKind: 'word', sourceKind: null, externalOpenAllowed: true }
+  if (extension === 'xlsx') return { openKind: 'spreadsheet', sourceKind: null, externalOpenAllowed: true }
   if (binaryExtensions.has(extension)) return { openKind: 'external', sourceKind: null, externalOpenAllowed: true }
   return { openKind: 'document', sourceKind: 'text', externalOpenAllowed: !scriptExtensions.has(extension) }
 }

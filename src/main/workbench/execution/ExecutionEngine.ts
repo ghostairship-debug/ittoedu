@@ -1,3 +1,4 @@
+import { executionFileContextSchema, formatExecutionFileContext } from '../../../shared/workbench/fileContext'
 import { componentContainers } from '../../../shared/contracts/component-platform/project'
 import { estimateSerializedTokens, isContextLengthFailure, modelContextBudget, PreparedPayloadTokenEstimator } from '../../../core/execution/modelContextBudget'
 import { createHash, randomUUID } from 'node:crypto'
@@ -823,6 +824,7 @@ export class ExecutionEngine {
     let continuedDocumentIds = new Map<string, string>()
     if (!frozen.conversationId || !frozen.taskId || !frozen.instruction.trim() && !frozen.context?.length && !frozen.inputContext?.attachments.length) throw new Error('请提供内容或附件')
     if (frozen.contentOutput) executionContentOutputSchema.parse(frozen.contentOutput)
+    if (frozen.fileContext) frozen.fileContext = executionFileContextSchema.parse(frozen.fileContext)
     if (frozen.selection.connection.capabilities.tools === 'unsupported') throw new Error('所选模型不支持文档工具，请在设置中选择支持工具的模型')
     // Queue/adjust submissions may carry an older fact string. Always rebuild it from the run journal.
     if (continuation) {
@@ -1083,6 +1085,8 @@ export class ExecutionEngine {
         ...(continuation && (reissuedImages.length || unavailableImages.length) ? [{ role: 'system' as const,
           content: `以下旧运行图片经宿主核验后重新签发给本次运行；只有 resource 字段是本次可用短句柄，仍须遵守当前文档权限。无法重签的图片不可使用，不要因此自动重新付费生成：${JSON.stringify({ ready: hostContinuationImages, unavailable: unavailableImages })}` }] : []),
       ]
+      const fileContext = formatExecutionFileContext(frozen.fileContext)
+      if (fileContext) automatic.push({ role: 'system', content: fileContext })
       automatic.push({ role: 'system', content: `根据当前任务和用户最新原话持续完成已授权目标。创作默认迅速交付可继续编辑的可用首版；达到当前要求后直接报告成果，不默认导出、全路径验用、复位、逐页观察或反复精修。已知严重运行、数据或核心功能错误仍须修复；用户明确要求终稿、导出或完整验用时，完成其要求再交付。不要询问用户选择自动或逐步模式，不为开始工作先调用 task.setMode。用户正文明确要求先审阅、逐步确认或在某个阶段停下时，遵从该要求；否则仅在影响结果且无法合理推断的取舍、必要输入或权限决定处用 ask_user。不要逐页或逐工具确认。推进方式不扩大权限，不把只读讨论变成创作；必要工作未完成或存在真实阻断时如实说明。` })
       automatic.push({ role: 'system', content: '用户本次请求明确继续先前目标时，先用 task.note 的 continuationRunId 指向已提供历史的 runId，宿主承接原目标和最近工作笔记；短词“继续”不替换原完整目标。只要求阶段成果、新讨论或新任务不冒充旧目标续作。笔记 remaining 只包含达到用户当前要求仍必需的未完成事项；可选精修、额外验用和未要求的导出写入 followUps，不因此继续执行。可用首版已达到当前要求或旧必需项已解决、取消、不属本次范围时，可明确更新 remaining=[]。笔记不是完成证据，不能抵消真实未结算操作或保存失败；无需机械创建或清空所有任务笔记。' })
       if (!frozen.contentOutput) automatic.push({ role: 'system', content: '本次冻结授权内可用能力族与结果用途（不是新增权限，缺少具体工具时按需展开）：\n'

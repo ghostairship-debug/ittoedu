@@ -18,7 +18,7 @@ export interface LessonWorkspaceHostProps {
   projectPath: string | null
   captureCourseDocument?(writable: boolean, prepare?: boolean): Promise<ExecutionDocumentReference[]>
   prepareCourseDocuments?(documentIds?: readonly string[]): Promise<void>
-  onOpenProject(path: string, foreground?: () => boolean): Promise<boolean>
+  onOpenProject(path: string, foreground?: () => boolean, isInWorkspace?: () => boolean): Promise<boolean>
   onNewProject(foreground?: () => boolean): Promise<boolean>
   onNewProjectFromPptx?(file: { name: string; bytes: Uint8Array }, signal?: AbortSignal, foreground?: () => boolean): Promise<boolean>
   onDirtyChange?(dirty: boolean): void
@@ -43,6 +43,7 @@ export const LessonWorkspaceHost = forwardRef<LessonWorkspaceShellHandle, Lesson
     showProject: foreground => shell.current?.showProject(foreground),
     detachLesson: foreground => shell.current?.detachLesson(foreground),
     flushAll: () => shell.current?.flushAll() ?? Promise.resolve(true),
+    prepareOfficeFiles: paths => shell.current?.prepareOfficeFiles(paths) ?? Promise.resolve(false),
     saveActiveDocument: () => shell.current?.saveActiveDocument() ?? Promise.resolve('none'),
     closeAll: () => shell.current?.closeAll() ?? Promise.resolve(true),
     preserveAll: async (mode, documentIds) => { await assistant.current?.preserveDraft(); return shell.current?.preserveAll(mode, documentIds) ?? true },
@@ -106,12 +107,15 @@ export const LessonWorkspaceHost = forwardRef<LessonWorkspaceShellHandle, Lesson
         return { target, selections: chosen }
       }}
       onLocateDocument={async id => { await shell.current?.focusDocument(id) }}
-      prepareSend={(ids = []) => prepareSendDocuments(ids, {
+      prepareSend={async (ids = [], officePaths = []) => {
+        if (!await prepareSendDocuments(ids, {
         read: id => api.documents!.read(id), drainDocuments, prepareCourses: props.prepareCourseDocuments,
         reportFailure: (error, context) => api.reportDiagnostic({ source: 'renderer',
           message: error instanceof Error ? error.message : '界面操作未完成', stack: error instanceof Error ? error.stack : undefined,
           details: context }),
-      })}
+        })) return false
+        return !officePaths.length || Boolean(await shell.current?.prepareOfficeFiles(officePaths))
+      }}
       captureDocuments={async (writable, prepare = true) => {
         const editor = documentTarget?.getEditor()
         if (editor) {

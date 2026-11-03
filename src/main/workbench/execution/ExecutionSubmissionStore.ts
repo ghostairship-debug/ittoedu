@@ -1,3 +1,4 @@
+import { executionFileContextSchema } from '../../../shared/workbench/fileContext'
 import { createHash, randomUUID } from 'node:crypto'
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
@@ -47,6 +48,10 @@ export class ExecutionSubmissionStore {
     if (record.steeringRunId && (record.mode !== 'adjust' || typeof record.steeringRunId !== 'string')) throw new Error('调整提交的原运行身份无效')
     if (record.contentOutput) record.contentOutput = restored ? restoreStoredContentOutput(record.contentOutput) : executionContentOutputSchema.parse(record.contentOutput)
     if (record.start.contentOutput) record.start.contentOutput = restored ? restoreStoredContentOutput(record.start.contentOutput) : executionContentOutputSchema.parse(record.start.contentOutput)
+    if (record.fileContext) record.fileContext = executionFileContextSchema.parse(record.fileContext)
+    if (record.start.fileContext) record.start.fileContext = executionFileContextSchema.parse(record.start.fileContext)
+    if (JSON.stringify(record.fileContext ?? null) !== JSON.stringify(record.start.fileContext ?? null))
+      throw new Error('文件引用的冻结上下文不一致')
     // Public retry retains the original selection; Main may rebind the same indexed document in start.
     const documentIndex = record.contentOutput ? record.documents.findIndex(document => document.documentId === record.contentOutput!.documentId) : -1
     const continuedDocument = Boolean(record.retryOfRunId) && documentIndex >= 0

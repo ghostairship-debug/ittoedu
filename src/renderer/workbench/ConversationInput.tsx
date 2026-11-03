@@ -11,7 +11,7 @@ interface Props {
   workspaceDirectory?: string; actions: AttachmentActions
   onKeyDown(event: KeyboardEvent<HTMLTextAreaElement>): void
   onCompositionStart(): void; onCompositionEnd(): void
-  onModel(): void; onPermission(): void; onNewConversation(): void; onReference(selection: boolean): void
+  onModel(): void; onPermission(): void; onNewConversation(): void; onReference(selection: boolean): void; onReferencePage?(): void; onReferenceObject?(): void
 }
 interface WorkspaceEntry { entryId: string; name: string; kind: 'file' | 'directory' }
 interface Directory { id: string; name: string }
@@ -89,8 +89,10 @@ export function ConversationInput(props: Props) {
   ] : trigger?.kind === '@' ? [
     ...entries.map(entry => ({ id: entry.entryId, label: entry.name, detail: directories.map(item => item.name).join('/'), group: '工作空间文件', icon: entry.kind === 'directory' ? Folder : FileText,
       select: () => { if (entry.kind === 'directory') { setActive(0); void loadDirectory(entry.entryId, [...directories, { id: entry.entryId, name: entry.name }]) } else if (props.actions.canReference) { consume(); props.actions.referenceEntries(workspaceId, [entry.entryId]) } else setError('附件正在处理，请稍后再引用文件。') } })),
-    { id: 'document', label: '当前文档', group: '当前上下文', icon: FileText, select: () => { consume(); props.onReference(false) } },
+    { id: 'document', label: '当前文件', group: '当前上下文', icon: FileText, select: () => { consume(); props.onReference(false) } },
     { id: 'selection', label: '当前选区', group: '当前上下文', icon: FileText, select: () => { consume(); props.onReference(true) } },
+    ...(props.onReferencePage ? [{ id: 'page', label: '当前页', group: '当前上下文', icon: FileText, select: () => { consume(); props.onReferencePage?.() } }] : []),
+    ...(props.onReferenceObject ? [{ id: 'object', label: '当前对象', group: '当前上下文', icon: FileText, select: () => { consume(); props.onReferenceObject?.() } }] : []),
   ] : []
   const query = trigger?.query.toLocaleLowerCase() ?? ''
   const filtered = choices.filter(choice => `${choice.label} ${choice.detail ?? ''} ${choice.id}`.toLocaleLowerCase().includes(query))

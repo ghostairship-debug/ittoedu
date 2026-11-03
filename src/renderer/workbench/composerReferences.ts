@@ -28,10 +28,9 @@ export function splitComposerReferences(captured: readonly ExecutionDocumentRefe
 }
 export function mergeAutomaticReferences(current: readonly ExecutionDocumentReference[], automatic: readonly ExecutionDocumentReference[], removed: ReadonlySet<string> = new Set()): ExecutionDocumentReference[] {
   const pinned = current.filter(reference => reference.pinned)
-  const identities = new Set(pinned.map(referenceIdentity))
-  return [...pinned, ...automatic.filter(reference => !identities.has(referenceIdentity(reference))
-    && !pinned.some(value => value.documentId === reference.documentId && JSON.stringify(value.selection ?? []) === JSON.stringify(reference.selection ?? []))
-    && !removed.has(referenceIdentity(reference)))]
+  // Main coalesces selections for the same document. Sending competing automatic
+  // targets would erase which location the user fixed, so pins take precedence here.
+  return pinned.length ? [...pinned] : automatic.filter(reference => !removed.has(referenceIdentity(reference)))
 }
 export function pinReferences(current: readonly ExecutionDocumentReference[], added: readonly ExecutionDocumentReference[]): ExecutionDocumentReference[] {
   const replacements = new Map(added.map(reference => [referenceIdentity(reference), { ...structuredClone(reference), pinned: true }]))

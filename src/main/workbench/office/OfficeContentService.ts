@@ -23,7 +23,8 @@ export async function applyOfficeContent(bytes: Uint8Array | undefined, input: O
     else if (request.format === 'xlsx') editXlsx(pkg, request)
     else editPptx(pkg, request)
   }
-  const calculation = request.format === 'xlsx' ? recalculateXlsx(pkg) : undefined
+  const calculation = request.format === 'xlsx' && (request.operation === 'create' || request.edits.some(edit => 'cell' in edit))
+    ? recalculateXlsx(pkg) : undefined
   return {
     format: request.format, bytes: pkg.save(), changedParts: created ? Object.keys(pkg.parts) : [...pkg.changed],
     diagnostics: calculation?.diagnostics ?? [], ...(calculation ? { calculation: calculation.calculation } : {}),

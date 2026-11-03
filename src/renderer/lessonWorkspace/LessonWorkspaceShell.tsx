@@ -18,7 +18,7 @@ export interface LessonWorkspaceShellProps {
   documentPort: RecoverableDocumentFilePort
   projectPath: string | null
   onBeforeWorkspaceChange?(): Promise<void>
-  onOpenProject(path: string, foreground?: () => boolean): Promise<boolean>
+  onOpenProject(path: string, foreground?: () => boolean, isInWorkspace?: () => boolean): Promise<boolean>
   onNewProject(foreground?: () => boolean): Promise<boolean>
   /** Content import creates an untitled course when no course is open. */
   onNewProjectFromPptx?(file: { name: string; bytes: Uint8Array }, signal?: AbortSignal, foreground?: () => boolean): Promise<boolean>
@@ -41,6 +41,7 @@ export interface LessonWorkspaceShellHandle {
   cancelNavigation(): void
   captureMediaDrafts(source: string, kind: 'file' | 'directory'): MediaFileDraftInput[]
   flushAll(): Promise<boolean>
+  prepareOfficeFiles(paths: readonly string[]): Promise<boolean>
   saveActiveDocument(): Promise<'course' | 'document' | 'none'>
   closeAll(): Promise<boolean>
   preserveAll(mode?: 'save' | 'preserve', documentIds?: readonly string[]): Promise<boolean>
@@ -75,6 +76,7 @@ export const LessonWorkspaceShell = forwardRef<LessonWorkspaceShellHandle, Lesso
     cancelNavigation: tabs.cancelNavigation,
     captureMediaDrafts: tabs.captureMediaDrafts,
     flushAll: tabs.flushAll,
+    prepareOfficeFiles: tabs.prepareOfficeFiles,
     saveActiveDocument: tabs.saveActiveDocument,
     closeAll: tabs.closeAll,
     preserveAll: tabs.preserveAll,

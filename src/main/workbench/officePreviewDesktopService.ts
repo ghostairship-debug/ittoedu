@@ -6,6 +6,7 @@ import { docxPreviewRequestSchema, pptxPreviewRequestSchema, type DocxPreviewReq
 import { documentHost } from './documentHost'
 import { assertAuthorizedWorkspacePath } from './workspaceFilesDesktopService'
 import { OfficeFileService } from './office/OfficeFileService'
+import type { FileArtifactBinding } from '../../shared/workbench/mediaFiles'
 import { inspectOfficeContentOffThread } from './office/officeContentWorker'
 import { WordPreviewService } from './office/WordPreviewService'
 import { createWordPreviewConverter, WordLayoutRuntime } from './office/WordLayoutRuntime'
@@ -21,15 +22,21 @@ export async function readPptxPreview(request: PptxPreviewRequest): Promise<Pptx
   const authorized = await assertAuthorizedWorkspacePath(filename)
   if (path.extname(authorized).toLowerCase() !== '.pptx') throw new Error('此预览入口仅支持 PPTX 文件')
   const office = new OfficeFileService(documentHost())
+  let committed: FileArtifactBinding | undefined
   if (input.type === 'pptx-preview.edit') {
     if (input.content.format !== 'pptx') throw new Error('演示文稿对象编辑需要 PPTX 内容请求')
-    await office.edit(input.binding, { ...input.content, operation: 'edit' }, {
+    committed = (await office.edit(input.binding, { ...input.content, operation: 'edit' }, {
       actor: 'human', expectedVersion: input.binding.fileVersion, historyLabel: '手动编辑演示文稿',
-    })
+    })).binding
+  } else if (input.type === 'pptx-preview.commit') {
+    committed = (await office.commitCandidate(input.binding, input.bytes, 'pptx', {
+      actor: 'human', expectedVersion: input.binding.fileVersion, historyLabel: '画布编辑演示文稿',
+    })).binding
   } else if (input.type === 'pptx-preview.undo' || input.type === 'pptx-preview.redo') {
-    await office.moveHistory(input.binding, input.type === 'pptx-preview.undo' ? 'undo' : 'redo', { expectedVersion: input.binding.fileVersion })
+    committed = (await office.moveHistory(input.binding, input.type === 'pptx-preview.undo' ? 'undo' : 'redo', { expectedVersion: input.binding.fileVersion })).binding
   }
-  const binding = await artifacts.bind(authorized)
+  // A write receipt belongs to its committed version, never a subsequent writer.
+  const binding = committed ?? await artifacts.bind(authorized)
   const bytes = await artifacts.read(binding)
   const snapshot: PptxPreviewSnapshot = { binding, bytes }
   try {

@@ -1,0 +1,31 @@
+.pptx-editor{position:relative;display:flex;flex-direction:column;height:100%;min-height:0;background:var(--bg,#f3f4f6);color:var(--text,#23262d)}
+.pptx-editor__toolbar{display:flex;align-items:center;gap:6px;flex-wrap:wrap;padding:8px 12px;background:var(--panel,#fff);border-bottom:1px solid var(--border,#ddd)}
+.pptx-editor button,.pptx-editor select{font:inherit;font-size:12px;padding:5px 8px;border:1px solid var(--border,#d9dce2);border-radius:5px;background:var(--panel,#fff);color:inherit;cursor:pointer}
+.pptx-editor button:disabled{opacity:.45;cursor:default}.pptx-editor button:hover:not(:disabled){background:var(--hover,#eef3ff)}
+.pptx-editor__toolbar strong{max-width:190px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px;margin-right:8px}
+.pptx-editor__divider{height:20px;border-left:1px solid var(--border,#ddd);margin:0 4px}
+.pptx-editor__status{margin-left:auto;font-size:11px;color:var(--muted,#687180)}
+.pptx-editor__tools{display:flex;align-items:center;gap:5px;flex-wrap:wrap;flex-basis:100%;padding-top:6px;border-top:1px solid var(--border,#ddd)}
+.pptx-editor__tools>span:not(.pptx-editor__divider){font-size:11px;color:var(--muted,#687180);padding:0 4px}
+.pptx-editor__tools select[aria-label="字体"]{max-width:135px}.pptx-editor__tools select[aria-label="字号"]{width:65px}
+.pptx-editor__format-b{font-weight:700!important}.pptx-editor__format-i{font-style:italic!important}.pptx-editor__format-u{text-decoration:underline}
+.pptx-editor button[aria-pressed="true"]{background:#e8efff;border-color:#557ad8;color:#1f489e}
+.pptx-editor button[aria-pressed="mixed"]{background:repeating-linear-gradient(135deg,#edf1f7,#edf1f7 4px,#fff 4px,#fff 8px)}
+.pptx-editor__color{display:flex;align-items:center;gap:4px;font-size:11px;white-space:nowrap}.pptx-editor__color input{padding:1px;width:27px;height:26px;border:1px solid var(--border,#ddd);border-radius:4px;background:transparent;cursor:pointer}
+.pptx-editor__body{display:flex;flex:1;min-height:0;overflow:hidden}
+.pptx-editor__pages{width:172px;flex:none;display:flex;flex-direction:column;padding:8px;background:var(--panel,#fff);border-right:1px solid var(--border,#ddd)}
+.pptx-editor__pages ol{list-style:none;padding:0;margin:8px 0;overflow:auto;flex:1}.pptx-editor__pages li{margin:0 0 9px}
+.pptx-editor__pages li button{display:flex;align-items:flex-start;gap:8px;width:100%;min-height:82px;text-align:left;line-height:1.6;padding:10px;background:var(--bg,#f7f8fa)}
+.pptx-editor__pages li button.is-active{border-color:#4d76e5;box-shadow:0 0 0 1px #4d76e5;background:#edf3ff;color:#172b56}
+.pptx-editor__page-number{font-size:11px;opacity:.7}.pptx-editor__page-actions{display:flex;gap:4px;justify-content:center}
+.pptx-editor__viewport{position:relative;display:flex;align-items:center;justify-content:center;flex:1;min-width:0;overflow:auto;padding:24px;box-sizing:border-box}
+.pptx-editor__surface{flex:none;background:white;box-shadow:0 3px 16px #0002;position:relative;color:#000;user-select:none}
+.pptx-editor__surface [contenteditable]{user-select:text}
+.pptx-editor__objects{display:flex;flex-direction:column;flex:0 0 210px;min-width:0;background:var(--panel,#fff);border-left:1px solid var(--border,#ddd);overflow:hidden}
+.pptx-editor__objects-heading{display:flex;align-items:center;justify-content:space-between;padding:8px 10px;font-size:12px;border-bottom:1px solid var(--border,#ddd)}
+.pptx-editor__object-list{flex:1;min-height:0;overflow:auto;padding:5px}
+.pptx-editor__context-menu{position:absolute;z-index:30;display:flex;flex-direction:column;width:182px;padding:4px;background:var(--panel,#fff);border:1px solid var(--border,#ddd);border-radius:7px;box-shadow:0 6px 24px #0003}
+.pptx-editor__context-menu button{text-align:left;border:0;background:transparent;min-height:31px}
+.pptx-editor__footer{display:flex;align-items:center;gap:16px;padding:5px 12px;font-size:11px;color:var(--muted,#687180);background:var(--panel,#fff);border-top:1px solid var(--border,#ddd)}
+.pptx-editor__footer button{margin-left:auto}.pptx-editor__notice{padding:8px 12px;background:#fff4d8;color:#664d03;font-size:12px}
+@media(max-width:850px){.pptx-editor__pages{width:124px}.pptx-editor__toolbar strong{max-width:120px}.pptx-editor__footer span:nth-child(2){display:none}.pptx-editor__objects{flex-basis:170px}.pptx-editor__tools{gap:4px}.pptx-editor__viewport{padding:16px}}

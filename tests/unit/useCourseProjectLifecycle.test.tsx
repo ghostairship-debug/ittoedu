@@ -9,6 +9,7 @@ import { createCourseDocumentHost, deferred, type CourseDocumentTestHost } from 
 import { createBlankCourseProjectV10 } from '../../src/core/course/createCourseProjectV10'
 import type { ComponentFrame } from '../../src/shared/contracts/component-platform/frame'
 import { APP_NAME } from '../../src/shared/constants'
+import { withTestTeacherController } from '../helpers/glxWorkFixture'
 
 const WATCH: CourseProjectLifecycleWatch = {
   dirty: false, projectTitle: '课件', projectPath: null,
@@ -79,7 +80,9 @@ describe('useCourseProjectLifecycle main document sessions', () => {
     const current = host.read()
     expect(current.documentId).not.toBe(previous.documentId)
     expect(current).toMatchObject({ binding: { kind: 'untitled' }, dirty: true, undoDepth: 0 })
-    expect(current.model).toMatchObject({ kind: 'course-v10', project: { schemaVersion: 10, surfaces: [{ kind }] } })
+    expect(current.model).toMatchObject({ kind: 'course-v10', project: { schemaVersion: 11 } })
+    if (current.model.kind !== 'course-v10') throw new Error('Expected the current course document')
+    expect(current.model.project.instances[current.model.project.rootIds[0]]?.container?.kind).toBe(kind)
     expect(current.epoch).not.toBe(previous.epoch)
     expect(host.registry.get(previous.documentId).read()).toEqual(previous)
     expect(ports.onProjectReplaced).toHaveBeenCalledOnce()
@@ -126,10 +129,16 @@ describe('useCourseProjectLifecycle main document sessions', () => {
 
   it('keeps instance identity and manual frame through formal History, save and a cold reopen', async () => {
     const host = await createCourseDocumentHost()
+    const source = host.read().model
+    if (source.kind !== 'course-v10') throw new Error('Expected a course fixture')
+    // Current blank courses have no implicit controller; this case explicitly
+    // requests that editable component so its History contract remains tested.
+    host.disk.set('manual-controller.glx', host.driver.serialize({ ...source, project: withTestTeacherController(structuredClone(source.project)) }))
+    await host.documents.open('manual-controller.glx')
     const initial = host.read()
     if (initial.model.kind !== 'course-v10') throw new Error('Expected a V10 fixture')
     const instanceId = initial.model.project.global.overlay[0]
-    if (!instanceId) throw new Error('Expected the default controller instance')
+    if (!instanceId) throw new Error('Expected the fixture controller instance')
     const original = initial.model.project.instances[instanceId]
     const frame: ComponentFrame = { width: 333, height: 111, transform: [1, 0, 0, 1, 82, 47] }
     const { result } = await mount(host)
@@ -146,8 +155,8 @@ describe('useCourseProjectLifecycle main document sessions', () => {
       model: { project: { instances: { [instanceId]: { frame } } } } })
     await act(async () => { expect(await result.current.saveProject()).toBe(true) })
     const saved = host.read()
-    expect(saved).toMatchObject({ dirty: false, undoDepth: 1, binding: { kind: 'file', path: 'initial.h5lesson' } })
-    await act(async () => { await host.restart(); await host.documents.open('initial.h5lesson') })
+    expect(saved).toMatchObject({ dirty: false, undoDepth: 1, binding: { kind: 'file', path: 'manual-controller.glx' } })
+    await act(async () => { await host.restart(); await host.documents.open('manual-controller.glx') })
     const reopened = host.read()
     expect(reopened.documentId).not.toBe(initial.documentId)
     expect(reopened.epoch).not.toBe(initial.epoch)

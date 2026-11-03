@@ -188,6 +188,57 @@ async function lifecycleFixture() {
   return { host, ports, hook }
 }
 
+it('retains an explicitly opened file after another tab takes focus while opening waits', async () => {
+  const { host, ports, hook } = await lifecycleFixture(), previous = host.read().documentId
+  await host.seedFile('retained.glx', 'background course')
+  const queued = deferred<void>()
+  let foreground = true, result!: Promise<boolean>
+  ports.runBusy = async work => { await queued.promise; return work() }
+  act(() => { result = hook.result.current.openRecentProject('retained.glx', { foreground: () => foreground, isCurrent: () => true }) })
+  foreground = false
+  await act(async () => { queued.resolve(); expect(await result).toBe(true) })
+  expect(host.bridge.read().documents.some(snapshot => snapshot.binding.kind === 'file' && snapshot.binding.path === 'retained.glx')).toBe(true)
+  expect(host.read().documentId).toBe(previous)
+  expect(ports.onProjectReplaced).not.toHaveBeenCalled()
+})
+
+it('still cancels a queued explicit open when its workspace scope expires', async () => {
+  const { host, ports, hook } = await lifecycleFixture()
+  await host.seedFile('expired.glx', 'previous workspace')
+  const queued = deferred<void>()
+  let workspace = true, result!: Promise<boolean>
+  ports.runBusy = async work => { await queued.promise; return work() }
+  act(() => { result = hook.result.current.openRecentProject('expired.glx', { foreground: () => false, isCurrent: () => workspace }) })
+  workspace = false
+  await act(async () => { queued.resolve(); expect(await result).toBe(false) })
+  expect(host.bridge.read().documents.some(snapshot => snapshot.binding.kind === 'file' && snapshot.binding.path === 'expired.glx')).toBe(false)
+})
+
+it('keeps the requested GLX open through draft preparation when a file tab is clicked next', async () => {
+  const f = tabFixture(), prepared = deferred<void>()
+  const onBeforeWorkspaceChange = vi.fn(() => prepared.promise)
+  const onOpenProject = vi.fn(async (_path: string, foreground?: () => boolean, isInWorkspace?: () => boolean) => {
+    expect(foreground?.()).toBe(false)
+    expect(isInWorkspace?.()).toBe(true)
+    return true
+  })
+  const lessonOperation = async () => ({ recent: [] })
+  const hook = renderHook(() => {
+    const tabs = useDocumentTabsController({ documentPort: f.port, courseDocuments: f.courses })
+    const workspace = useLessonWorkspaceController({ lessonOperation, projectPath: null, tabs,
+      onNewProject: async () => true, onOpenProject, onBeforeWorkspaceChange })
+    return { tabs, workspace }
+  })
+  let opening!: Promise<void>
+  act(() => { opening = hook.result.current.workspace.actions.openFile({ name: 'first.glx', path: 'first.glx', kind: 'file' }) })
+  await waitFor(() => expect(onBeforeWorkspaceChange).toHaveBeenCalledOnce())
+  await act(async () => { await hook.result.current.tabs.createText('last.txt') })
+  const foregroundTab = hook.result.current.tabs.activeTab
+  await act(async () => { prepared.resolve(); await opening })
+  expect(onOpenProject).toHaveBeenCalledOnce()
+  expect(hook.result.current.tabs.activeTab).toBe(foregroundTab)
+})
+
 it('does not report replacement or change the active course when the native open picker is cancelled', async () => {
   const { host, ports, hook } = await lifecycleFixture(), previous = host.read().documentId
   act(() => hook.result.current.openProject())

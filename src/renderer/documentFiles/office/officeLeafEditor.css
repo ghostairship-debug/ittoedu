@@ -1,0 +1,32 @@
+.office-leaf-editor{display:flex;flex-direction:column;height:100%;min-height:0;background:var(--canvas-bg,#e9edf2);color:var(--text-primary,#17212e);font:14px/1.5 system-ui,sans-serif}
+.office-leaf-editor[hidden]{display:none}
+.office-leaf-toolbar{display:flex;align-items:center;flex-wrap:wrap;gap:6px;padding:9px 12px;background:var(--panel-bg,#fff);border-bottom:1px solid var(--border-color,#d9e0e8);flex-shrink:0}
+.office-leaf-toolbar>strong{max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-right:8px}
+.office-leaf-toolbar button,.office-leaf-toolbar select,.office-leaf-toolbar input,.office-sheet-tabs button{font:inherit;min-height:29px;border:1px solid #d1d9e3;border-radius:5px;background:var(--panel-bg,#fff);color:inherit;padding:3px 9px}
+.office-leaf-toolbar button:hover:not(:disabled),.office-sheet-tabs button:hover:not(:disabled){background:#edf3fa}
+.office-leaf-toolbar button:disabled,.office-sheet-tabs button:disabled{opacity:.45}
+.office-leaf-toolbar button[aria-pressed=true],.office-sheet-tabs button[aria-pressed=true]{background:#e1edff;border-color:#6799d5;color:#1d4f8a}
+.office-leaf-toolbar__divider{height:20px;width:1px;background:#d7dfe8;margin:0 4px}
+.office-leaf-status,.office-leaf-hint{color:#657488;font-size:12px}
+.office-leaf-message{margin:0;padding:7px 14px;background:#fff6dd;color:#764c13;flex-shrink:0;border-bottom:1px solid #ecd69d}
+.office-leaf-scroll{flex:1;min-height:0;overflow:auto;padding:26px}
+.office-word-paper{width:min(794px,100%);box-sizing:border-box;min-height:900px;margin:0 auto;background:white;color:#17212e;padding:44px 54px;box-shadow:0 2px 14px #2639561a}
+.office-word-paper>.office-leaf-hint{margin:0 0 25px;padding-bottom:12px;border-bottom:1px solid #ecedf1}
+.office-word-block{border-left:2px solid transparent;padding:0 8px;margin:0 -10px 10px}
+.office-word-block.is-selected{border-left-color:#4285c5}
+.office-word-paragraph{outline:none;min-height:1.6em;line-height:1.65;white-space:pre-wrap;overflow-wrap:anywhere}
+.office-word-paragraph:focus{background:#f8fbff}
+.office-word-paragraph[contenteditable=false]{color:#566174;background:#f7f8fa}
+.office-sheet-formula{display:flex;gap:8px;align-items:center;padding:6px 12px;background:var(--panel-bg,#fff);border-bottom:1px solid #d5dde6;flex-shrink:0}
+.office-sheet-formula input{font:inherit;padding:5px 7px;border:1px solid #d1d9e3;border-radius:3px;color:inherit;background:inherit;min-width:0}
+.office-sheet-formula input:first-child{width:100px}.office-sheet-formula input:last-child{flex:1}
+.office-sheet-formula>span{color:#738293;font-style:italic}
+.office-sheet-grid{flex:1;min-height:0;overflow:auto;background:white;position:relative;color:#17212e}
+.office-sheet-grid__space{position:relative}
+.office-sheet-cell{position:absolute;box-sizing:border-box;border:0;border-right:1px solid #e0e5eb;border-bottom:1px solid #e0e5eb;border-radius:0;background:white;outline:none;padding:3px 7px;font:13px/22px system-ui,sans-serif;color:#17212e}
+.office-sheet-cell:focus,.office-sheet-cell.is-selected{box-shadow:inset 0 0 0 2px #387fbd;z-index:1;background:#f6fbff}
+.office-sheet-column,.office-sheet-row,.office-sheet-corner{position:absolute;box-sizing:border-box;background:#f0f3f7;display:flex;align-items:center;justify-content:center;border-right:1px solid #cfd8e3;border-bottom:1px solid #cfd8e3;font:12px system-ui,sans-serif;color:#556478;z-index:2}
+.office-sheet-corner{z-index:3}
+.office-sheet-tabs{display:flex;gap:5px;align-items:center;overflow:auto;flex-shrink:0;padding:7px 10px;background:var(--panel-bg,#fff);border-top:1px solid #d5dde6}
+.office-sheet-tabs>.office-leaf-hint{margin-right:10px;min-width:45px}
+@media(max-width:700px){.office-leaf-scroll{padding:12px}.office-word-paper{padding:24px 18px}.office-leaf-toolbar>strong{max-width:150px}}

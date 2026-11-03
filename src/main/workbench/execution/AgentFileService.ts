@@ -383,7 +383,7 @@ export class AgentFileService implements AgentFilePort {
     if (!input.expectedVersion && !observed) throw new Error('请先使用 office.inspect 读取当前 Office 内容和可编辑位置，再执行局部修改')
     const binding = input.expectedVersion ? await this.host.artifacts.bind(filename) : observed!
     const saved = await service.edit(binding, { ...input.content, operation: 'edit' }, {
-      assertActive: context.assertActive, expectedVersion: input.expectedVersion,
+      assertActive: context.assertActive, expectedVersion: input.expectedVersion, actor: 'ai', operationId,
     })
     this.rememberOfficeBinding(context.runId, saved.binding)
     return { data: { ...saved, path: saved.binding.path, saved: true } }

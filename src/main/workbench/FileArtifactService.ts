@@ -97,7 +97,7 @@ export class FileArtifactService {
     return captured
   }
   private historyOwner(binding: FileArtifactBinding): FileArtifactHistory {
-    if (path.extname(binding.path).toLowerCase() !== '.pptx') throw new Error('此共同编辑历史入口仅支持 PPTX 原件')
+    if (!['.pptx', '.docx', '.xlsx'].includes(path.extname(binding.path).toLowerCase())) throw new Error('此共同编辑历史入口支持 PPTX、DOCX、XLSX 原件')
     if (!this.histories) throw new Error('文件历史存储未配置；原件未修改')
     return this.histories
   }

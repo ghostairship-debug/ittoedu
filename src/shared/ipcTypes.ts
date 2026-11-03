@@ -134,6 +134,7 @@ export interface DesktopAPI {
   pixabaySettings?: import('./workbench/pixabaySettingsDesktop').PixabaySettingsAPI
   workspaceFiles?: import('./workbench/workspaceFiles').WorkspaceFilesAPI
   skillCatalog?: import('./workbench/skillCatalogDesktop').SkillCatalogAPI
+  officeDocument?(input: import('./workbench/officeDocument').OfficeDocumentRequest): Promise<import('./workbench/officeDocument').OfficeDocumentSnapshot>
   pptxPreview?(input: import('./workbench/officePreview').PptxPreviewRequest): Promise<import('./workbench/officePreview').PptxPreviewSnapshot>
   docxPreview?(input: import('./workbench/officePreview').DocxPreviewRequest): Promise<import('./workbench/officePreview').DocxPreviewSnapshot>
   cancelDocxPreview?(input: { requestId: string }): Promise<void>
@@ -260,6 +261,7 @@ export const IPC_CHANNELS = {
   pixabaySettings: 'pixabay-settings:operate',
   workspaceFiles: 'workspace-files:operate',
   skillCatalog: 'skills:catalog',
+  officeDocument: 'office-document:operate',
   pptxPreview: 'pptx-preview:read',
   docxPreview: 'docx-preview:read',
   docxPreviewCancel: 'docx-preview:cancel',

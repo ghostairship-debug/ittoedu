@@ -1,0 +1,13 @@
+.office-word-prosemirror{outline:none;white-space:pre-wrap;overflow-wrap:anywhere}
+.office-word-prosemirror .office-word-paragraph{margin:0 0 12px;padding:2px 4px;border-left:2px solid transparent}
+.office-word-prosemirror .office-word-paragraph:focus-within{border-left-color:#4285c5}
+.office-word-prosemirror h1{font-size:1.6em;font-weight:500}.office-word-prosemirror h2{font-size:1.3em;font-weight:500}.office-word-prosemirror h3{font-size:1.1em;font-weight:500}
+.office-word-prosemirror table{border-collapse:collapse;table-layout:fixed;width:100%;margin:16px 0;overflow:visible}
+.office-word-prosemirror td,.office-word-prosemirror th{border:1px solid #c9d2de;min-width:50px;vertical-align:top;box-sizing:border-box;padding:7px;position:relative}
+.office-word-prosemirror td>.office-word-paragraph:last-child,.office-word-prosemirror th>.office-word-paragraph:last-child{margin-bottom:0}
+.office-word-prosemirror .selectedCell:after{position:absolute;inset:0;background:#94bff547;content:'';pointer-events:none}
+.office-word-prosemirror .ProseMirror-selectednode{outline:2px solid #68a0da}
+.office-word-prosemirror .office-word-preserved{border:1px dashed #c9d2de;padding:10px;margin:12px 0;background:#f9fafc}
+.office-word-preserved>small{display:block;color:#657488;margin-bottom:9px}
+.office-word-prosemirror [contenteditable=false]{cursor:default}
+.office-word-prosemirror.ProseMirror-hideselection *::selection{background:transparent}
