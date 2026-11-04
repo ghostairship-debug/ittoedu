@@ -47,7 +47,7 @@ import { USER_QUESTION_TOOL, USER_QUESTION_USAGE_GUIDANCE, answerForModel, answe
 import { DEFAULT_PERMISSION_MODE, recordedPermissionMode, isInsideRoot, type ApprovalDecision, type ApprovalView, type ExecutionPermissionMode } from '../../../shared/workbench/executionPermission'
 import { modelGenerationRetry, waitForGenerationRetry } from './modelGenerationRetry'
 import { AgentFileMissingParent, AgentFileOutcomeUnknown, agentFileRegistration, agentFileTools, agentFileMutationNames, isAgentFileTool, type AgentFileService } from '../../../core/tools/AgentFileTools'
-import { isOfficeContentTool } from '../../../core/tools/OfficeContentTools'
+import { isOfficeContentTool, officeContentSchemas } from '../../../core/tools/OfficeContentTools'
 import { taskNoteTool, taskNoteInputSchema, initialWorkingNote, continuedWorkingNote, prepareTaskNote } from '../../../core/tools/TaskNoteTools'
 import { hostArtifactSaveSchema, hostArtifactSaveTool } from '../../../core/tools/HostArtifactTools'
 import { isHtmlActionTool } from '../../../core/tools/HtmlActionTools'
@@ -68,6 +68,7 @@ import { programmaticTools } from '../../../core/tools/ProgrammaticTools'
 import type { NativeCollaborationPeer, NativeDelegationMessage, NativeRunIdentity } from '../../../shared/workbench/delegation'
 import { hostWorkFactSignature } from './hostWorkFacts'
 import { ExecutionModelImageProjection } from './ExecutionModelImageProjection'
+import { bindOfficeCardEdit, officeCardProposal, validateOfficeCardPath } from './officeCardScope'
 
 interface EditProjectionPort {
   begin(input: { runId: string; editId: string; toolCallId?: string; targetHandle: string }): Promise<unknown>
@@ -473,7 +474,17 @@ export class ExecutionEngine {
     return { ready, unavailable }
   }
   private async runTools(runId: string, permission: ExecutionPermissionMode, workspaceRoot?: string | null,
-    narrow = false, loadedHostFamilies?: ReadonlySet<string>, loadedHostNames?: ReadonlySet<string>): Promise<ModelToolDefinition[]> {
+    narrow = false, loadedHostFamilies?: ReadonlySet<string>, loadedHostNames?: ReadonlySet<string>, officeCard = false): Promise<ModelToolDefinition[]> {
+    if (officeCard) {
+      const names = permission === 'read-only' ? ['office.inspect'] : ['office.inspect', 'office.edit', 'office.deepEdit']
+      const tools: ModelToolDefinition[] = [structuredClone(userQuestionToolDefinition)]
+      for (const name of names) {
+        const tool = await this.options.gateway.resolveRunTool(runId, name)
+        if (tool) tools.push({ name, description: tool.description,
+          inputSchema: tool.schema as ModelJsonObject })
+      }
+      return tools
+    }
     const definitions = await this.options.gateway.describeRun(runId)
     const hostVisible = (name: string) => !narrow || loadedHostNames?.has(name)
       || !!familyOfTool(name) && !!loadedHostFamilies?.has(familyOfTool(name)!)
@@ -488,7 +499,7 @@ export class ExecutionEngine {
   }
   private async refreshTools(active: ActiveRun): Promise<void> {
     const next = await this.runTools(active.record.runId, active.permission, active.record.input.workspaceRoot,
-      executionContextToolProfile(active.record.input) !== 'general', active.loadedHostFamilies, active.loadedHostNames)
+      executionContextToolProfile(active.record.input) !== 'general', active.loadedHostFamilies, active.loadedHostNames, Boolean(active.record.input.fileContext?.officeCard))
     const current = new Map(next.map(tool => [tool.name, tool]))
     const previousNames = new Set(active.tools.map(tool => tool.name))
     // Refresh definitions and authorization from the current catalog while keeping
@@ -937,6 +948,12 @@ export class ExecutionEngine {
         if (snapshot.binding.kind === 'file') boundPaths[document.documentId] = snapshot.binding.path
       }
       for (const [index, filename] of (frozen.boundReadPaths ?? []).entries()) boundPaths[`material:${index}`] = filename
+      if (frozen.fileContext?.officeCard) {
+        const verify = this.options.files?.verifyOfficeDraftTarget
+        if (!verify) throw new Error('Office 草稿服务尚未就绪。')
+        boundPaths.officeCard = await verify.call(this.options.files, frozen.fileContext.officeCard)
+      }
+      if (frozen.fileContext) this.options.files?.captureOfficeDraftTargets?.(runId, frozen.fileContext)
       const fileReadPaths = [...new Set(Object.values(boundPaths))]
       options?.signal?.throwIfAborted()
       const assemblyRoot = frozen.workspaceRoot && recordedPermissionMode(frozen.permission) !== 'read-only'
@@ -1089,10 +1106,10 @@ export class ExecutionEngine {
       if (fileContext) automatic.push({ role: 'system', content: fileContext })
       automatic.push({ role: 'system', content: `根据当前任务和用户最新原话持续完成已授权目标。创作默认迅速交付可继续编辑的可用首版；达到当前要求后直接报告成果，不默认导出、全路径验用、复位、逐页观察或反复精修。已知严重运行、数据或核心功能错误仍须修复；用户明确要求终稿、导出或完整验用时，完成其要求再交付。不要询问用户选择自动或逐步模式，不为开始工作先调用 task.setMode。用户正文明确要求先审阅、逐步确认或在某个阶段停下时，遵从该要求；否则仅在影响结果且无法合理推断的取舍、必要输入或权限决定处用 ask_user。不要逐页或逐工具确认。推进方式不扩大权限，不把只读讨论变成创作；必要工作未完成或存在真实阻断时如实说明。` })
       automatic.push({ role: 'system', content: '用户本次请求明确继续先前目标时，先用 task.note 的 continuationRunId 指向已提供历史的 runId，宿主承接原目标和最近工作笔记；短词“继续”不替换原完整目标。只要求阶段成果、新讨论或新任务不冒充旧目标续作。笔记 remaining 只包含达到用户当前要求仍必需的未完成事项；可选精修、额外验用和未要求的导出写入 followUps，不因此继续执行。可用首版已达到当前要求或旧必需项已解决、取消、不属本次范围时，可明确更新 remaining=[]。笔记不是完成证据，不能抵消真实未结算操作或保存失败；无需机械创建或清空所有任务笔记。' })
-      if (!frozen.contentOutput) automatic.push({ role: 'system', content: '本次冻结授权内可用能力族与结果用途（不是新增权限，缺少具体工具时按需展开）：\n'
+      if (!frozen.contentOutput && !frozen.fileContext?.officeCard) automatic.push({ role: 'system', content: '本次冻结授权内可用能力族与结果用途（不是新增权限，缺少具体工具时按需展开）：\n'
         + JSON.stringify(await this.options.gateway.availableToolFamilies(runId)) })
       // The question tool belongs to this loop, not to the shared document catalog that external MCP also sees.
-      const tools = await this.runTools(runId, permission, frozen.workspaceRoot, toolProfile !== 'general')
+      const tools = await this.runTools(runId, permission, frozen.workspaceRoot, toolProfile !== 'general', undefined, undefined, Boolean(frozen.fileContext?.officeCard))
       if (frozen.inputContext?.attachments.length && !this.options.initialCompiler) throw new Error('附件输入编译器尚未配置')
       let compiled: Awaited<ReturnType<PayloadCompiler['compile']>> | undefined
       if (this.options.initialCompiler) {
@@ -1442,15 +1459,15 @@ export class ExecutionEngine {
     if (registration && !modifies) {
       try {
         const effect = typeof registration.effect === 'function' ? registration.effect(tool.call.input) : registration.effect
-        modifies = effect === 'document-edit' || effect === 'html-preview-action'
+        modifies = effect === 'document-edit' || effect === 'html-preview-action' || effect === 'office-write'
       }
       catch { /* Invalid arguments fail in their parser without requesting write approval. */ }
     }
     // These retained services have their own physical-file and preview owners.
-    if (!registration) modifies = name === 'office.create' || name === 'office.edit' || name === hostArtifactSaveTool.name || name === 'task.delivery'
+    if (!registration) modifies = isOfficeContentTool(name) && name !== 'office.inspect' || name === hostArtifactSaveTool.name || name === 'task.delivery'
     if (active.approveAll || !modifies) return null
     if (active.permission === 'ask') return 'ask'
-    if (fileMutationNames.has(name) || name === 'office.create' || name === 'office.edit') return null
+    if (fileMutationNames.has(name) || isOfficeContentTool(name)) return null
     if (active.permission === 'workspace' && active.outsideDocuments.size) {
       const touched = this.options.gateway.documentsOfHandles(active.record.runId, stringsIn(tool.call.input))
       // Unknown targets are treated as possibly outside: the user decides, never a guess.
@@ -1459,6 +1476,11 @@ export class ExecutionEngine {
     return null
   }
   private async approvalPreview(active: ActiveRun, tool: ExecutionToolRecord, local?: LocalToolRunPreview): Promise<string> {
+    const officeCard = active.record.input.fileContext?.officeCard
+    if (officeCard && tool.call.name === 'office.edit') {
+      const proposal = safeDetailString(officeCardProposal(officeCard, tool.call))
+      return proposal.length > 3900 ? proposal.slice(0, 3800) + '\n内容较长，完整参数见工具调用详情。' : proposal
+    }
     if (local) {
       const input = workbenchServiceSchemas['local.run'].parse(tool.call.input)
       // These authorized host facts are the command the user must approve, including its actual paths.
@@ -1846,7 +1868,7 @@ export class ExecutionEngine {
   }
   /** Direct and batch mutations share their canonical mutation names for the no-replay guard. */
   private effectNames(call: ExecutionToolRecord['call']): string[] {
-    if (call.name === 'office.create' || call.name === 'office.edit') return ['office.create', 'office.edit']
+    if (isOfficeContentTool(call.name) && call.name !== 'office.inspect') return ['office.create', 'office.edit', 'office.deepEdit']
     if (call.name === 'task.delivery') return toolEffectNames({ name: call.input && typeof call.input === 'object'
       && 'format' in call.input && call.input.format ? 'document.export' : 'file.save', input: call.input })
     return toolEffectNames(call)
@@ -2319,6 +2341,30 @@ export class ExecutionEngine {
   private async execute(active: ActiveRun, tool: ExecutionToolRecord, precomputed?: ToolResult): Promise<void> {
     if (tool.call.name === USER_QUESTION_TOOL) return this.ask(active, tool)
     const { record } = active
+    const officeCard = record.input.fileContext?.officeCard
+    let filePreflightError: string | undefined
+    if (officeCard && tool.state !== 'returned') try {
+      if (tool.call.name === 'office.edit' || tool.call.name === 'office.deepEdit') {
+        const input = officeContentSchemas[tool.call.name].parse(tool.call.input)
+        const previousEdits = record.tools.slice(0, record.tools.indexOf(tool))
+          .filter(prior => prior.call.name === 'office.edit' || prior.call.name === 'office.deepEdit')
+        const restricted = officeCard.restrictToSelection || input.onlySelection || previousEdits.some(prior =>
+          (prior.call.input as { onlySelection?: boolean } | null)?.onlySelection === true)
+        if (restricted) {
+          bindOfficeCardEdit(officeCard, tool.call)
+          const selection = officeCard.selection
+          const lastScoped = previousEdits.findLast(prior => (prior.call.input as { onlySelection?: boolean } | null)?.onlySelection === true
+            && prior.result?.kind === 'read')
+          // Object identities and cell addresses survive confined edits. Text offsets do not.
+          const stable = selection?.format === 'xlsx' || selection?.format === 'pptx' && !selection.text
+          const previousVersion = stable && lastScoped?.result?.kind === 'read'
+            ? (lastScoped.result.data as { binding?: { fileVersion?: string } }).binding?.fileVersion : undefined
+          const expectedVersion = (stable ? input.expectedVersion ?? previousVersion : undefined) ?? officeCard.fileVersion
+          if (input.expectedVersion && input.expectedVersion !== expectedVersion) throw new Error('精确文字选区已变化。请核对原文字范围，避免覆盖其他输入。')
+          tool.call = { ...tool.call, input: { ...input, onlySelection: true, expectedVersion } }
+        }
+      } else if (tool.call.name !== 'office.inspect') throw new Error('此编辑卡只支持读取和修改当前 Office 文件。')
+    } catch (error) { filePreflightError = error instanceof Error ? error.message : String(error) }
     let webSource: { url: string; version?: string } | undefined
     this.options.gateway.captureHostOperation(record.runId, this.options.gateway.operationIdentity(record.runId, tool.callId), tool.call)
     if (active.unresolvedToolNames.size || active.unresolvedEffects.length
@@ -2330,8 +2376,7 @@ export class ExecutionEngine {
     tool.effectTargets ??= await this.options.gateway.effectTargets(record.runId, tool.call)
     tool.writeScopes ??= await this.options.gateway.effectWriteScopes(record.runId, tool.call)
     let filePreflight: { paths: string[]; outside: boolean } | undefined
-    let filePreflightError: string | undefined
-    if (tool.state !== 'returned' && fileMutationNames.has(tool.call.name) && this.options.files && record.input.workspaceRoot) try {
+    if (!filePreflightError && tool.state !== 'returned' && fileMutationNames.has(tool.call.name) && this.options.files && record.input.workspaceRoot) try {
       filePreflight = await this.options.files.preflightMutation({ runId: record.runId, workspaceRoot: record.input.workspaceRoot,
         assemblyRoot: active.assemblyRoot, readOnlyRoots: active.assemblyReadRoots,
         conversationHomeRoot: record.input.conversationHomeRoot, conversationHome: record.input.conversationHome,
@@ -2341,13 +2386,17 @@ export class ExecutionEngine {
       if (error instanceof AgentFileMissingParent) tool.rejectedCreationPath = error.pendingCreationPath
       filePreflightError = error instanceof Error ? error.message : String(error)
     }
-    if (tool.state !== 'returned' && isOfficeContentTool(tool.call.name) && this.options.files?.preflightOffice && record.input.workspaceRoot) try {
+    if (!filePreflightError && tool.state !== 'returned' && isOfficeContentTool(tool.call.name) && this.options.files?.preflightOffice && record.input.workspaceRoot) try {
       filePreflight = await this.options.files.preflightOffice({ runId: record.runId, workspaceRoot: record.input.workspaceRoot,
         assemblyRoot: active.assemblyRoot, readOnlyRoots: active.assemblyReadRoots,
         conversationHomeRoot: record.input.conversationHomeRoot, conversationHome: record.input.conversationHome,
         permission: active.permission, boundPaths: active.boundPaths }, tool.call.name, tool.call.input)
       if (tool.call.name !== 'office.inspect') tool.effectPaths = filePreflight.paths
+      if (officeCard) {
+        validateOfficeCardPath(officeCard, filePreflight.paths[0]!)
+      }
     } catch (error) { filePreflightError = error instanceof Error ? error.message : String(error) }
+    else if (officeCard && !filePreflightError && tool.state !== 'returned') filePreflightError = 'Office 文件服务尚未就绪。'
     // Resolve only the writable text target. Keep the full source local until the
     // canonical receipt proves which revision was changed; never publish the document.
     let beforeEdit: { documentId: string; revision: number; from: number; to: number; source: string } | undefined
@@ -2374,6 +2423,7 @@ export class ExecutionEngine {
         : await this.options.gateway.lookup(record.runId, tool.callId, tool.call))
       if (known) tool.result = known
       else if (active.stopped) tool.result = { kind: 'error', code: 'run-stopped', message: '运行已停止' }
+      else if (officeCard && filePreflightError) tool.result = { kind: 'error', code: 'office-selection', message: filePreflightError }
       else if (active.unresolvedScopelessCalls?.some(prior => sameScopelessOperation(prior, tool.call))
         || conflictsWithUnresolvedEffects(active.unresolvedEffects, this.effectNames(tool.call), tool.effectTargets, tool.effectPaths)) {
         tool.result = { kind: 'error', code: 'unresolved-prior-tool', message: '先前同类工具结果未确认；不能以新调用编号重放副作用。请查询旧结果或结束当前未完成项。' }
@@ -2408,7 +2458,7 @@ export class ExecutionEngine {
           } catch (error) { browserApprovalError = error instanceof Error ? error.message : String(error) }
         }
         const reason = preflightError || batchPreflight || browserApprovalError || browserTaskAuthorized ? null : this.approvalReason(active, tool)
-          ?? ((fileMutationNames.has(tool.call.name) || tool.call.name === 'office.create' || tool.call.name === 'office.edit') && active.permission === 'workspace' && filePreflight?.outside ? 'outside-workspace' : null)
+          ?? ((fileMutationNames.has(tool.call.name) || isOfficeContentTool(tool.call.name) && tool.call.name !== 'office.inspect') && active.permission === 'workspace' && filePreflight?.outside ? 'outside-workspace' : null)
           ?? (artifactPreflight?.approvalRequired ? artifactPreflight.outsideWorkspace ? 'outside-workspace' : 'ask' : null)
         const decision = reason ? await this.requestApproval(active, tool, reason,
           filePreflight?.paths ?? (local ? [local.cwd, ...local.sources.map(source => source.name)] : artifactPreflight ? [artifactPreflight.path] : undefined), local) : 'allow'
@@ -2681,7 +2731,7 @@ export class ExecutionEngine {
               if (tool.result && ['file.create', 'file.write', 'file.patch'].includes(tool.call.name))
                 await this.options.changeReview?.completeFileMutation({ runId: record.runId, callId: tool.callId, result: tool.result })
             } else {
-              const officeMutation = isOfficeContentTool(tool.call.name) && toolRegistration(tool.call.name)?.effect === 'office-write'
+              const officeMutation = !officeCard && isOfficeContentTool(tool.call.name) && toolRegistration(tool.call.name)?.effect === 'office-write'
               if (officeMutation && filePreflight?.paths)
                 await this.options.changeReview?.prepareFileMutation({ runId: record.runId, callId: tool.callId,
                   name: tool.call.name, paths: filePreflight.paths, toolInput: tool.call.input })
@@ -2707,8 +2757,9 @@ export class ExecutionEngine {
             } else if (tool.call.name === LOAD_TOOLS) {
               tool.result = { kind: 'error', code: 'tool-load-failed', message: error instanceof Error ? error.message : String(error) }
             } else if ((isAgentFileTool(tool.call.name) || isOfficeContentTool(tool.call.name)) && !(error instanceof AgentFileOutcomeUnknown)) {
-              tool.result = { kind: 'error', code: tool.call.name === 'file.reconcile' && (error instanceof RangeError || error instanceof TypeError)
-                ? 'file-tool-runtime-failed' : 'file-tool-failed',
+              tool.result = { kind: 'error', code: isOfficeContentTool(tool.call.name) && error instanceof Error && 'code' in error && typeof error.code === 'string'
+                ? error.code : tool.call.name === 'file.reconcile' && (error instanceof RangeError || error instanceof TypeError)
+                  ? 'file-tool-runtime-failed' : 'file-tool-failed',
                 message: error instanceof Error ? error.message : String(error) }
             } else if (tool.call.name === 'artifact.save' && this.options.artifacts) {
               const receipt = await this.options.artifacts.lookup(this.options.gateway.operationIdentity(record.runId, tool.callId))
@@ -3399,6 +3450,7 @@ export class ExecutionEngine {
         if (new Set(calls.map(call => call.providerCallId)).size !== calls.length) throw new Error('模型工具调用编号重复')
         record.tools.push(...calls); await this.checkpoint(record)
         const parallelReads = new Set(calls.filter(tool => tool.state === 'pending'
+          && !record.input.fileContext?.officeCard
           && ['read', 'inspect', 'listChildren', 'skills.list', 'skills.read'].includes(tool.call.name)))
         let observationsDeliveredThrough = 0, supersededRound = false
         await runToolRoundInOrder(calls, {

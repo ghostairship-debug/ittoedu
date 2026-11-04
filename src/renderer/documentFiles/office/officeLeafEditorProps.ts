@@ -6,6 +6,10 @@ export interface OfficeLeafEditorProps {
   snapshot: OfficeDocumentSnapshot
   name: string
   active?: boolean
+  autoSave?: boolean
+  onAutoSaveChange?(enabled: boolean): void
+  onSave?(): Promise<boolean>
+  onSaveAs?(): Promise<boolean>
   onEdit(binding: FileArtifactBinding, content: OfficeEditContent): Promise<OfficeDocumentSnapshot>
   onUndo(): Promise<void>
   onRedo(): Promise<void>

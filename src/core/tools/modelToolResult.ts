@@ -249,7 +249,7 @@ export function reconciledToolResult(name: string, previous: ToolResult | undefi
     commit: receipt.result.status === 'applied' ? 'committed' : receipt.result.status === 'unchanged' ? 'unchanged' : 'not_committed' } }
 }
 
-export interface ServiceToolOutcome { status: 'failed' | 'unknown' | 'pending' | 'stopped' | 'saved' | 'generated' | 'written' | 'applied-with-diagnostics'; message: string }
+export interface ServiceToolOutcome { status: 'failed' | 'unknown' | 'pending' | 'stopped' | 'saved' | 'generated' | 'written' | 'draft-applied' | 'applied-with-diagnostics'; message: string }
 const fileMutations = new Set<string>(agentFileMutationNames)
 
 /** Only tools whose read receipt is itself a service job use its status for task settlement. */
@@ -299,6 +299,8 @@ export const serviceToolOutcome = (name: string, result?: ToolResult): ServiceTo
     return { status: 'saved', message: 'PPTX 已导入并保存为新课件' }
   if ((name === 'office.create' || name === 'office.edit') && data.status === 'saved' && data.saved === true)
     return { status: 'saved', message: 'Office 文件已保存' }
+  if ((name === 'office.edit' || name === 'office.deepEdit') && data.status === 'draft' && data.applied === true)
+    return { status: 'draft-applied', message: '已应用到 Office 编辑稿，原件尚未保存' }
   if (fileMutations.has(name) && data.operation && typeof data.operation === 'object') {
     const operation = data.operation as { status?: unknown; items?: { error?: { message?: string } }[] }
     if (operation.status === 'failed' || operation.status === 'cancelled' || operation.status === 'partial')

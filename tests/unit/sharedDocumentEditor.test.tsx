@@ -75,6 +75,13 @@ describe('sharedDocumentEditor', () => {
       const flow = render(<SharedDocumentEditor {...props} target="flow" />)
       const flowEditor = factory.mock.results.at(-1)!.value as ReturnType<typeof createLayoutEditor>
       act(() => { flowEditor.view.focus(); flowEditor.view.dispatch(flowEditor.view.state.tr.setSelection(TextSelection.create(flowEditor.view.state.doc, 1, 6))) })
+      const top = within(flow.getByRole('toolbar', { name: '正文工具' }))
+      expect(top.getByLabelText('字号')).toBeVisible()
+      expect(top.getByLabelText('字体')).toBeVisible()
+      fireEvent.click(top.getByRole('button', { name: '上标' }))
+      const superscript = fromEditorDocument(flowEditor.view.state.doc).blocks[0]
+      expect(superscript.type === 'paragraph' && superscript.content.inlines[0]).toMatchObject({ text: 'alpha', style: { baseline: 0.35 } })
+      expect(top.getByRole('button', { name: '下标' })).toBeVisible()
       const compact = flow.getByRole('toolbar', { name: '选中内容快捷工具' })
       expect(within(compact).getByRole('button', { name: '加粗' })).toBeVisible()
       fireEvent.click(within(compact).getByRole('button', { name: '加粗' }))
@@ -205,7 +212,8 @@ describe('sharedDocumentEditor', () => {
       expect(change.mock.calls[0][1].preparedResources).toBe(handle)
       expect(change.mock.calls[0][0].content.blocks.some((block: { assetId?: string }) => block.assetId === 'target-image')).toBe(true)
     } else expect(change).toHaveBeenCalledOnce()
-    expect(diagnostic).not.toHaveBeenCalled()
+    if (stale) expect(diagnostic).toHaveBeenCalledWith('粘贴目标已改变，素材未应用；请在需要的位置重新粘贴。')
+    else expect(diagnostic).not.toHaveBeenCalled()
     editor.destroy(); element.remove()
   })
   it('round trips mixed body slots and maps Unicode plus math atoms', () => {

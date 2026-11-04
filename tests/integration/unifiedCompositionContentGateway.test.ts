@@ -106,10 +106,12 @@ it('isolates identical author keys by document/run and refuses read-only, stale,
   const rejected = await gateway.execute('run-a', 'locked', { name: 'text.replace', input: { target: lockedField, content: '锁定错误修改' } }); expect(rejected, JSON.stringify(rejected)).toMatchObject({ kind: 'error', code: 'invalid-operation', message: expect.stringContaining('锁定') })
   expect(a.read()).toEqual(locked)
   await gateway.stop('run-a')
+  const stopped = a.read()
   expect(await gateway.execute('run-a', 'stopped', { name: 'text.replace', input: { target: fresh, content: '停止后错误修改' } })).toMatchObject({ kind: 'error', code: 'run-stopped' })
-  expect(a.read()).toEqual(locked)
+  expect(stopped).toMatchObject({ model: locked.model, revision: locked.revision, undoDepth: locked.undoDepth })
+  expect(a.read()).toEqual(stopped)
   applied(await gateway.execute('run-b', 'b', { name: 'text.replace', input: { target: targetB, content: 'B 的独立正文' } }))
-  expect(currentCompositionText(b.read().model)).toBe('B 的独立正文'); expect(b.read().undoDepth).toBe(1); expect(a.read()).toEqual(locked)
+  expect(currentCompositionText(b.read().model)).toBe('B 的独立正文'); expect(b.read().undoDepth).toBe(1); expect(a.read()).toEqual(stopped)
 })
 
 it('enforces final Session CAS when a human edits the bound text after AI planning and before canonical submission', async () => {
@@ -118,13 +120,39 @@ it('enforces final Session CAS when a human edits the bound text after AI planni
   const session = await registry.create(source.model, 'cas.glx')
   await gateway.beginRun({ runId: 'cas', actor: 'agent', documents: [{ documentId: session.documentId, writable: [{ kind: 'document' }] }] })
   const text = await gateway.issueTarget('cas', session.documentId, source.textTarget), before = session.read(), execute = session.execute.bind(session)
-  const spy = vi.spyOn(session, 'execute').mockImplementationOnce(async request => {
+  const spy = vi.spyOn(session, 'execute').mockImplementationOnce(async (request, options) => {
     expect(request).toMatchObject({ actor: 'agent', baseRevision: before.revision, mutation: { type: 'command', command: { type: 'component-platform.apply' } } })
     expect(await execute(operation(before, [{ type: 'authoring.set', instanceId: 'paragraph', path: source.textTarget.dataPath, value: '教师刚刚修改的正文' }]))).toMatchObject({ status: 'applied' })
-    return execute(request)
+    return execute(request, options)
   })
-  expect(await gateway.execute('cas', 'racing', { name: 'text.replace', input: { target: text, content: '过期 AI 正文' } })).toMatchObject({ kind: 'document-operation', result: { status: 'conflict', code: 'stale-revision' } })
+  expect(await gateway.execute('cas', 'racing', { name: 'text.replace', input: { target: text, content: '过期 AI 正文' } })).toMatchObject({ kind: 'document-operation', result: { status: 'conflict', code: 'component-field-conflict' } })
   expect(spy).toHaveBeenCalledTimes(1); expect(currentCompositionText(session.read().model)).toBe('教师刚刚修改的正文')
   expect(currentCompositionProject(session.read().model).instances.left).toEqual(source.project.instances.left)
   expect(session.read()).toMatchObject({ revision: before.revision + 1, undoDepth: before.undoDepth + 1, undoHead: { actor: 'human' } })
+})
+
+it('merges concurrent human styling and unrelated edits during AI submission and undoes only the AI edit', async () => {
+  const { registry, gateway } = harness(), source = currentCompositionGatewayFixture()
+  const session = await registry.create(source.model, 'disjoint.glx')
+  await gateway.beginRun({ runId: 'disjoint', actor: 'agent', documents: [{ documentId: session.documentId, writable: [{ kind: 'document' }] }] })
+  const object = await gateway.issueTarget('disjoint', session.documentId, source.textTarget)
+  const before = session.read(), execute = session.execute.bind(session)
+  vi.spyOn(session, 'execute').mockImplementationOnce(async (request, options) => {
+    expect(await execute(operation(before, [
+      { type: 'style.set', instanceId: 'paragraph', path: ['opacity'], value: .5 },
+      { type: 'style.set', instanceId: 'left', path: ['color'], value: 'navy' },
+    ]))).toMatchObject({ status: 'applied' })
+    return execute(request, options)
+  })
+  applied(await gateway.execute('disjoint', 'merge', { name: 'text.replace', input: { target: object, content: 'Merged AI content' } }))
+  const after = session.read()
+  expect(currentCompositionText(after.model)).toBe('Merged AI content')
+  expect(currentCompositionProject(after.model).instances.paragraph.style).toMatchObject({ opacity: .5 })
+  expect(currentCompositionProject(after.model).instances.left.style).toMatchObject({ color: 'navy' })
+  expect(await session.execute({ documentId: after.documentId, epoch: after.epoch, baseRevision: after.revision,
+    operationId: 'undo-ai-only', actor: 'human', mutation: { type: 'undo' } })).toMatchObject({ status: 'applied' })
+  const undone = session.read()
+  expect(currentCompositionText(undone.model)).toBe(currentCompositionText(before.model))
+  expect(currentCompositionProject(undone.model).instances.paragraph.style).toMatchObject({ opacity: .5 })
+  expect(currentCompositionProject(undone.model).instances.left.style).toMatchObject({ color: 'navy' })
 })

@@ -9,13 +9,29 @@ import { applyOfficeContent, inspectOfficeContent } from '../../src/main/workben
 import { readPptxPreview } from '../../src/main/workbench/officePreviewDesktopService'
 import { operateOfficeDocument } from '../../src/main/workbench/officeDocumentDesktopService'
 import type { OfficeContentRequest } from '../../src/shared/workbench/officeFiles'
-const runtime = vi.hoisted(() => ({ host: null as unknown as DocumentHostService }))
+const runtime = vi.hoisted(() => ({ host: null as unknown as DocumentHostService, authorize: vi.fn(async (filename: string) => filename) }))
 vi.mock('electron', () => ({ app: { getPath: () => '', getAppPath: () => '', isPackaged: false }, net: {} }))
 vi.mock('../../src/main/workbench/documentHost', () => ({ documentHost: () => runtime.host }))
-vi.mock('../../src/main/workbench/workspaceFilesDesktopService', () => ({ assertAuthorizedWorkspacePath: async (filename: string) => filename }))
+vi.mock('../../src/main/workbench/workspaceFilesDesktopService', () => ({ assertAuthorizedWorkspacePath: runtime.authorize }))
 const roots: string[] = []
 afterEach(async () => { vi.restoreAllMocks(); for (const root of roots.splice(0)) await fs.rm(root,{recursive:true,force:true}) })
 describe('Office IPC receipts stay pinned to the version that actually committed', () => {
+ it('discards an open draft after the original is removed without accessing the former path', async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'office-close-missing-')); roots.push(directory)
+  const filename = path.join(directory, 'removed.docx'), host = new DocumentHostService(path.join(directory, 'owner'))
+  runtime.host = host
+  const original = await applyOfficeContent(undefined, { format: 'docx', operation: 'create', blocks: [{ type: 'paragraph', text: 'Before' }] })
+  await fs.writeFile(filename, original.bytes)
+  const draft = await operateOfficeDocument({ type: 'office-document.open', path: filename, draft: true })
+  const staged = await operateOfficeDocument({ type: 'office-document.edit', binding: draft!.binding,
+    content: { format: 'docx', edits: [{ type: 'paragraph', index: 0, text: 'Draft' }] } })
+  await fs.unlink(filename)
+  runtime.authorize.mockClear()
+  await expect(operateOfficeDocument({ type: 'office-document.close', path: filename, discard: false })).rejects.toThrow('未保存')
+  await expect(operateOfficeDocument({ type: 'office-document.close', path: filename, discard: true })).resolves.toBeUndefined()
+  expect(runtime.authorize).not.toHaveBeenCalled()
+  expect(() => new OfficeFileService(host).verifyDraftTarget(staged!.binding)).toThrow('已关闭')
+ }, 15_000)
  it.each(['pptx','docx','xlsx'] as const)('does not acknowledge a later writer as the %s human save', async format => {
   const directory=await fs.mkdtemp(path.join(os.tmpdir(),'office-receipt-'));roots.push(directory)
   const workspace=path.join(directory,'workspace');await fs.mkdir(workspace)

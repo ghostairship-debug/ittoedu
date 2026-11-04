@@ -164,10 +164,30 @@ it('checks the captured revision inside the real Session after compilation when 
   })
   const result = await h.link()
   expect(changed).toBe(true)
-  expect(result).toMatchObject({ kind: 'read', data: { commit: 'not_committed', receipt: { status: 'conflict' } } })
+  expect(result).toMatchObject({ kind: 'read', data: { commit: 'not_committed', receipt: { status: 'conflict', code: 'component-field-conflict' } } })
   const after = course(await h.read())
   expect(after.project.definitions.record!.implementation).toMatchObject({ moduleBindings: { './unrelated': 'unchanged' } })
   expect(new TextDecoder().decode(after.resources.components['bench-owner']!['model.js'])).toBe(modelText(90))
+}, 15_000)
+
+it('connects the observed Source dependencies across unrelated changes before and during compilation', async () => {
+  const h = await fixture(); await h.observe()
+  await h.human([{ type: 'project.title.set', title: 'Human title before compiling' }])
+  const originalCompile = h.host.compilation.compile.bind(h.host.compilation)
+  let changed = false
+  vi.spyOn(h.host.compilation, 'compile').mockImplementation(async (...args) => {
+    const result = await originalCompile(...args)
+    if (!changed) {
+      changed = true
+      await h.human([{ type: 'project.title.set', title: 'Human title during compilation' }])
+    }
+    return result
+  })
+  expect(await h.link()).toMatchObject({ kind: 'read', data: { commit: 'committed' } })
+  expect(changed).toBe(true)
+  const after = await h.read()
+  expect(course(after).project.title).toBe('Human title during compilation')
+  expect(await executeResult(h.host, after, 'record')).toEqual({ initial: 60, used: 20, remaining: 40 })
 }, 15_000)
 
 it('reports actual missing-export compiler diagnostics and rejects workspace leaf aliases and shared writes under an instance-only grant', async () => {

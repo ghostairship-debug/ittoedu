@@ -5,6 +5,8 @@ import type { DocumentEvent, DocumentModel } from '../../src/shared/workbench/do
 import { authoringDraftRecoverySchema, type AuthoringDraftRecovery, type DocumentHostAPI } from '../../src/shared/workbench/desktop'
 import type { DocumentFileRef } from '../../src/shared/document/ports'
 import { EditorView } from '@codemirror/view'
+import { TextSelection } from 'prosemirror-state'
+import * as documentEditorSession from '../../src/renderer/document/editorSession'
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { createRef, StrictMode } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -101,6 +103,7 @@ describe('LessonDocumentEditor mounted shared core', () => {
     const close = vi.spyOn(host.documents, 'closeWithDialog').mockImplementation(async id => { await host.documents.save(id); await host.documents.close(id); return true })
     const handle = createRef<LessonDocumentEditorHandle>()
     render(<LessonDocumentEditor ref={handle} documentRef={ref} port={port} />)
+    fireEvent.click(await screen.findByRole('button', { name: '源码' }))
     const box = await screen.findByRole('textbox', { name: '正文源文编辑' })
     const view = EditorView.findFromDOM(box)
     if (!view) throw new Error('源文编辑器尚未挂载')
@@ -174,6 +177,47 @@ describe('LessonDocumentEditor mounted shared core', () => {
     expect(save.mock.calls[0]![0].source).toBe('A磁盘\nB本地\nC外部')
     expect(screen.queryByRole('button', { name: '采用磁盘稿' })).not.toBeInTheDocument()
   })
+  it('keeps TXT source through view changes and saves formatting as text that reopens visually', async () => {
+    const ref = { kind: 'file' as const, path: '/lesson/light-format.txt' }
+    const original = 'alpha beta\n\nraw * a_b\n'
+    let disk: OpenDocumentResult = { ref, source: original, version: { contentVersion: 'v1', attachments: [] }, diagnostics: [] }
+    const save = vi.fn<RecoverableDocumentFilePort['saveDocument']>(async request => {
+      disk = { ...disk, source: request.source, version: { contentVersion: 'v2', attachments: [] } }
+      return { status: 'saved', operationId: request.operationId, version: disk.version }
+    })
+    const port: RecoverableDocumentFilePort = { openDocument: async () => disk, watchDocument: () => () => {}, saveDocument: save }
+    attachTextRendererHost(port, ref)
+    const factory = vi.spyOn(documentEditorSession, 'createLayoutEditor')
+    const handle = createRef<LessonDocumentEditorHandle>()
+    try {
+      const mounted = render(<LessonDocumentEditor ref={handle} documentRef={ref} port={port} />)
+      await screen.findByRole('textbox', { name: '纯文本编辑' })
+      fireEvent.click(screen.getByRole('button', { name: '启用轻量格式' }))
+      await screen.findByRole('button', { name: /^粗体$/ })
+      fireEvent.click(screen.getByRole('button', { name: '查看纯文本' }))
+      await screen.findByRole('textbox', { name: '纯文本编辑' })
+      expect(handle.current!.session.getSnapshot().source).toBe(original)
+      expect(handle.current!.session.getSnapshot().dirty).toBe(false)
+      fireEvent.click(screen.getByRole('button', { name: '启用轻量格式' }))
+      const bold = await screen.findByRole('button', { name: /^粗体$/ })
+      const editor = factory.mock.results.at(-1)!.value as ReturnType<typeof documentEditorSession.createLayoutEditor>
+      act(() => { editor.view.focus(); editor.view.dispatch(editor.view.state.tr.setSelection(TextSelection.create(editor.view.state.doc, 1, 6))) })
+      fireEvent.click(bold)
+      act(() => editor.view.dispatch(editor.view.state.tr.setSelection(TextSelection.create(editor.view.state.doc, 7, 11))))
+      fireEvent.click(screen.getByRole('button', { name: /^斜体$/ }))
+      await act(async () => { expect(await handle.current!.flush()).toBe(true) })
+      expect(disk.source).toBe('**alpha** *beta*\n\nraw * a_b\n')
+      mounted.unmount()
+      await waitFor(() => expect(handle.current).toBeNull())
+      attachTextRendererHost(port, ref)
+      render(<LessonDocumentEditor documentRef={ref} port={port} />)
+      await screen.findByRole('button', { name: '查看纯文本' })
+      expect(document.querySelector('.ProseMirror')?.textContent).toContain('alpha beta')
+    } finally {
+      factory.mockRestore()
+      window.localStorage.removeItem('workbench.textFormatting:/lesson/light-format.txt')
+    }
+  })
   it('renders a plain text editor, becomes dirty, and saves without Markdown tools', async () => {
     const ref = { kind: 'file' as const, path: '/lesson/notes.txt' }
     let disk: OpenDocumentResult = { ref, source: '原文', version: { contentVersion: 'v1', attachments: [] }, diagnostics: [] }
@@ -187,7 +231,7 @@ describe('LessonDocumentEditor mounted shared core', () => {
     render(<LessonDocumentEditor ref={handle} documentRef={ref} port={port} />)
     const box = await screen.findByRole('textbox', { name: '纯文本编辑' })
     const undo = screen.getByRole('button', { name: '撤销' }), redo = screen.getByRole('button', { name: '重做' })
-    const autoSave = screen.getByRole('checkbox', { name: '自动保存' })
+    const autoSave = screen.getByRole('switch', { name: '自动保存' })
     expect(autoSave).not.toBeChecked()
     expect(undo).toBeDisabled(); expect(redo).toBeDisabled()
     expect(screen.queryByRole('button', { name: '源码' })).not.toBeInTheDocument()

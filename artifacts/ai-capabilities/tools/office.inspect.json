@@ -1,9 +1,289 @@
 {
-  "description": "读取现有 DOCX、XLSX 或 PPTX 的正文、格式、表格、工作表与单元格、幻灯片对象，以及可定位的图表数值和动画行为。提供文件版本、原件 part/partVersion 和可编辑位置；按返回身份进行修改。",
+  "description": "读取当前 DOCX、XLSX 或 PPTX 的正文、表格、工作表、幻灯片对象、图表和动画。可按 object 读取原生 XML 和依赖。对页眉、工作簿等需要直接定位的结构，可列出包内部件或按部件路径读取。按返回的文件版本、部件版本及对象身份修改。",
   "inputSchema": {
+    "$defs": {
+      "__schema0": {
+        "anyOf": [
+          {
+            "oneOf": [
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "dependency": {
+                    "$ref": "#/$defs/__schema1"
+                  },
+                  "format": {
+                    "const": "pptx",
+                    "type": "string"
+                  },
+                  "target": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "shapeId": {
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "slide": {
+                        "maximum": 9007199254740991,
+                        "minimum": 0,
+                        "type": "integer"
+                      }
+                    },
+                    "required": [
+                      "slide",
+                      "shapeId"
+                    ],
+                    "type": "object"
+                  }
+                },
+                "required": [
+                  "format",
+                  "target"
+                ],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "dependency": {
+                    "$ref": "#/$defs/__schema1"
+                  },
+                  "format": {
+                    "const": "docx",
+                    "type": "string"
+                  },
+                  "target": {
+                    "description": "段落、文字段、表格、行、单元格索引均从 0 开始，使用原件检查返回的位置。",
+                    "oneOf": [
+                      {
+                        "$ref": "#/$defs/__schema3"
+                      },
+                      {
+                        "$ref": "#/$defs/__schema5"
+                      },
+                      {
+                        "$ref": "#/$defs/__schema6"
+                      },
+                      {
+                        "$ref": "#/$defs/__schema7"
+                      },
+                      {
+                        "$ref": "#/$defs/__schema8"
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "format",
+                  "target"
+                ],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "dependency": {
+                    "$ref": "#/$defs/__schema1"
+                  },
+                  "format": {
+                    "const": "xlsx",
+                    "type": "string"
+                  },
+                  "target": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "cell": {
+                        "pattern": "^[A-Z]{1,3}[1-9][0-9]*$",
+                        "type": "string"
+                      },
+                      "sheet": {
+                        "minLength": 1,
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "sheet",
+                      "cell"
+                    ],
+                    "type": "object"
+                  }
+                },
+                "required": [
+                  "format",
+                  "target"
+                ],
+                "type": "object"
+              }
+            ]
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "format": {
+                "$ref": "#/$defs/__schema9"
+              },
+              "packagePart": {
+                "description": "读取指定现有原生包部件",
+                "minLength": 1,
+                "type": "string"
+              }
+            },
+            "required": [
+              "format",
+              "packagePart"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "format": {
+                "$ref": "#/$defs/__schema9"
+              },
+              "packageParts": {
+                "const": true,
+                "description": "列出原生包部件路径、类型与版本",
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "format",
+              "packageParts"
+            ],
+            "type": "object"
+          }
+        ]
+      },
+      "__schema1": {
+        "$ref": "#/$defs/__schema2",
+        "description": "读取该对象实际引用的包内部件路径，从对象源码回执的 relationships[].part 取得。"
+      },
+      "__schema2": {
+        "minLength": 1,
+        "type": "string"
+      },
+      "__schema3": {
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "const": "paragraph",
+            "type": "string"
+          },
+          "paragraph": {
+            "$ref": "#/$defs/__schema4"
+          }
+        },
+        "required": [
+          "kind",
+          "paragraph"
+        ],
+        "type": "object"
+      },
+      "__schema4": {
+        "maximum": 9007199254740991,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "__schema5": {
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "const": "run",
+            "type": "string"
+          },
+          "paragraph": {
+            "$ref": "#/$defs/__schema4"
+          },
+          "run": {
+            "$ref": "#/$defs/__schema4"
+          }
+        },
+        "required": [
+          "kind",
+          "paragraph",
+          "run"
+        ],
+        "type": "object"
+      },
+      "__schema6": {
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "const": "table",
+            "type": "string"
+          },
+          "table": {
+            "$ref": "#/$defs/__schema4"
+          }
+        },
+        "required": [
+          "kind",
+          "table"
+        ],
+        "type": "object"
+      },
+      "__schema7": {
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "const": "row",
+            "type": "string"
+          },
+          "row": {
+            "$ref": "#/$defs/__schema4"
+          },
+          "table": {
+            "$ref": "#/$defs/__schema4"
+          }
+        },
+        "required": [
+          "kind",
+          "table",
+          "row"
+        ],
+        "type": "object"
+      },
+      "__schema8": {
+        "additionalProperties": false,
+        "properties": {
+          "column": {
+            "$ref": "#/$defs/__schema4"
+          },
+          "kind": {
+            "const": "cell",
+            "type": "string"
+          },
+          "row": {
+            "$ref": "#/$defs/__schema4"
+          },
+          "table": {
+            "$ref": "#/$defs/__schema4"
+          }
+        },
+        "required": [
+          "kind",
+          "table",
+          "row",
+          "column"
+        ],
+        "type": "object"
+      },
+      "__schema9": {
+        "enum": [
+          "docx",
+          "xlsx",
+          "pptx"
+        ],
+        "type": "string"
+      }
+    },
     "$schema": "https://json-schema.org/draft/2020-12/schema",
     "additionalProperties": false,
     "properties": {
+      "object": {
+        "$ref": "#/$defs/__schema0",
+        "description": "底层修改前读取指定对象的原生内容。页、段落和表格索引从 0 开始。"
+      },
       "path": {
         "maxLength": 32767,
         "minLength": 1,

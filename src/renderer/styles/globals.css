@@ -6059,41 +6059,11 @@ button:disabled {
   background: #17221d;
 }
 
-.flow-workspace-toolbar-host {
-  position: absolute;
-  top: 6px;
-  left: 9px;
-  right: 9px;
-  height: calc(var(--flow-workspace-header-height) - 12px);
-  min-width: 0;
-  z-index: 7;
-}
-
-.workspace--flow .canvas-label {
-  top: 42px;
-  left: auto;
-  right: 9px;
-  max-width: 240px;
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-  transform: none;
-}
-
 .workspace--flow .canvas-viewport {
   top: var(--flow-workspace-header-height);
   overflow: hidden;
   background: #17221d;
   pointer-events: auto;
-}
-
-@container flow-workspace (max-width: 560px) {
-  .workspace--flow .canvas-label {
-    top: 9px;
-    left: 9px;
-    right: auto;
-    max-width: calc(100% - 270px);
-  }
 }
 
 .workspace--flow .flow-workspace {
@@ -6262,3 +6232,4 @@ button:disabled {
 .shared-document-editor .ProseMirror[data-flow-input-active="false"] [data-flow-object-movable="true"] { cursor: move; }
 .shared-document-editor .ProseMirror[data-flow-input-active="false"] [data-flow-object-movable="false"] { cursor: default; }
 .shared-document-editor .ProseMirror[data-flow-input-active="true"] { cursor: text; }
+.file-save-pair { display: inline-flex; align-items: center; gap: inherit; flex: none; }

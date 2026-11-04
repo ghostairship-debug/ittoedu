@@ -20,7 +20,7 @@ export async function createDocx(request: OfficeRequest<'docx', 'create'>): Prom
   })))
 }
 
-function wordBody(pkg: OfficePackage): { main: string; body: Element } {
+export function wordBody(pkg: OfficePackage): { main: string; body: Element } {
   const main = pkg.main()
   const body = descendants(pkg.xml(main), NS.word, 'body')[0]
   if (!body) throw new Error('该文件不是支持的 DOCX 正文')

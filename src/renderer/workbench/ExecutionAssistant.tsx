@@ -1,5 +1,5 @@
-import { officeFocus } from './officeFocus'
-import { captureFileContext, refreshFileContextVersions, fileFocusReference, fileReferenceIdentity, fileReferenceLabel, type FileReferenceChoice } from './composerFileReferences'
+import { focusPathKey, officeFocus } from './officeFocus'
+import { captureFileContext, refreshFileContextVersions, fileFocusReference, fileReferenceIdentity, fileReferenceLabel, fileReferenceLocation, fileScopeOptions, type FileReferenceChoice } from './composerFileReferences'
 import type { ExecutionFileReference } from '../../shared/workbench/fileContext'
 import { AcpAgentSelector, AcpConfigurationPicker, AcpPermissionRequests, findAcpConfigurationControl } from '../components/AcpAgentSelector'
 import type { AcpHostSnapshot } from '../../shared/workbench/acp'
@@ -51,7 +51,8 @@ import { TaskBrowserViewport } from './browserEmbedded/TaskBrowserViewport'
 import type { LessonMaterialTarget } from '../../shared/materialExtraction'
 import type { LessonAuthoringMaterialSelection } from '../../shared/lessonAuthoring'
 import { currentSave, saveFact } from '../../core/tools/modelToolResult'
-import { mergeAutomaticReferences, pinReferences, referenceIdentity, splitComposerReferences } from './composerReferences'
+import { documentReferenceLocation, documentScopeOptions, mergeAutomaticReferences, pinReferences, referenceIdentity, splitComposerReferences } from './composerReferences'
+import { ReferenceFilename, ReferenceScopePicker } from './ReferenceScopePicker'
 
 export interface ExecutionAssistantHandle { preserveDraft(): Promise<void> }
 type BrowserControlState = Awaited<ReturnType<NonNullable<ExecutionDesktopAPI['browserControl']>>>
@@ -258,6 +259,8 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
   const [renamingId, setRenamingId] = useState<string | null>(null)
   const [renameDraft, setRenameDraft] = useState('')
   const [documentNames, setDocumentNames] = useState<Record<string, string>>({})
+  const [documentReferenceDetails, setDocumentReferenceDetails] = useState<Record<string, { path?: string; location?: string }>>({})
+  const [currentDocuments, setCurrentDocuments] = useState<ExecutionDocumentReference[]>([])
   const [documentReferenceIssues, setDocumentReferenceIssues] = useState<Record<string, string>>({})
   const [pendingRestore, setPendingRestore] = useState<ExecutionSubmissionRecord | null>(null)
   const composerRef = useRef<HTMLTextAreaElement>(null)
@@ -285,8 +288,11 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
   const submittingRef = useRef(false), composingRef = useRef(false)
   const referenceCapture = useRef(0), removedAutomatic = useRef(new Set<string>()), automaticFocus = useRef('')
 
-  const captureFiles = () => captureFileContext(officeFocus.capture(), filePinsRef.current, removedFileAutomatic.current, documentsRef.current.some(reference => reference.pinned))
-  const fileReferences = captureFileContext(officeFocus.capture(), filePins, removedFileAutomatic.current, documents.some(reference => reference.pinned)).references
+  const captureFiles = () => captureFileContext(officeFocus.capture(), filePinsRef.current, removedFileAutomatic.current)
+  const openFiles = officeFocus.capture()
+  const currentFile = openFiles.find(file => file.active)
+  const currentFileScopes = currentFile && !currentFile.documentId ? fileScopeOptions(currentFile.path, currentFile) : undefined
+  const fileReferences = captureFileContext(openFiles, filePins, removedFileAutomatic.current).references
   const beginNextInput = () => { removedAutomatic.current.clear(); removedFileAutomatic.current.clear(); setReferenceTurn(value => value + 1) }
   const updateFilePins = (next: ExecutionFileReference[]) => {
     filePinsRef.current = next; setFilePins(next)
@@ -412,7 +418,7 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
     const ticket = ++generation.current
     documentsByConversation.current.clear(); frozenByConversation.current.clear()
     activeRef.current = null; draftRef.current = ''; documentsRef.current = []; attachmentsRef.current = []; contextFrozenRef.current = false
-    setWorkspaceId(''); setConversations([]); setActive(null); setDraft(''); setDocuments([]); setAttachments([]); setSubmissions([]); setUserHistoryOffsets({})
+    setWorkspaceId(''); setConversations([]); setActive(null); setDraft(''); setDocuments([]); setCurrentDocuments([]); setAttachments([]); setSubmissions([]); setUserHistoryOffsets({})
     setLatestRequest(undefined)
     setContextFrozen(false); setRun(null); setError('')
     if (!api) { setError('当前环境没有统一执行服务。'); return }
@@ -440,10 +446,11 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
     // document view, which renders the host and recaptures these references.
     const pending = captureDocuments(true, false).then(captured => {
       if (ticket !== referenceCapture.current || activeRef.current?.conversationId !== selected.conversationId) return documentsRef.current
+      setCurrentDocuments(previous => sameDocuments(previous, captured) ? previous : captured)
       const automatic = splitComposerReferences(captured)
       const focus = automatic.filter(reference => reference.displayLabel === '当前页面' || reference.displayLabel === '文档').map(referenceIdentity).join('|')
       if (focus !== automaticFocus.current) { automaticFocus.current = focus; removedAutomatic.current.clear() }
-      const refs = mergeAutomaticReferences(documentsRef.current, filePinsRef.current.length ? [] : automatic, removedAutomatic.current)
+      const refs = mergeAutomaticReferences(documentsRef.current, automatic, removedAutomatic.current)
       elementCards.setFocus(automatic[0]?.documentId ?? null, automatic[0]?.selection?.find(target => target.kind === 'course-surface')?.surfaceId ?? null)
       if (!sameDocuments(refs, documentsRef.current)) { setDocuments(refs); documentsRef.current = refs; documentsByConversation.current.set(selected.conversationId, refs) }
       return refs
@@ -580,18 +587,25 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
   useEffect(() => {
     const documentsAPI = window.desktopAPI?.documents
     let disposed = false
-    if (!documentsAPI || documents.length === 0) { setDocumentNames({}); setDocumentReferenceIssues({}); return }
-    const latestMetadata = new Map<string, { id: string; name: string; issue: string }>()
+    if (!documentsAPI || documents.length === 0) { setDocumentNames({}); setDocumentReferenceDetails({}); setDocumentReferenceIssues({}); return }
+    const latestMetadata = new Map<string, { id: string; name: string; issue: string; path?: string }>()
     void Promise.all(documents.map(async reference => {
       try {
         const snapshot = await documentsAPI.read(reference.documentId)
         const name = snapshot.binding.kind === 'file' ? snapshot.binding.path.split(/[\\/]/).at(-1) || '已绑定文档' : snapshot.binding.suggestedName
-        return { id: reference.documentId, name, issue: snapshot.epoch !== reference.epoch ? '原引用需要重新选择' : '' }
-      } catch { return { id: reference.documentId, name: documentNames[reference.documentId] ?? '原文档', issue: '原文档尚未打开' } }
+        const path = snapshot.binding.kind === 'file' ? snapshot.binding.path : undefined
+        return { id: reference.documentId, name, path, identity: referenceIdentity(reference), details: { path, location: documentReferenceLocation(reference, snapshot) },
+          issue: snapshot.epoch !== reference.epoch ? '原引用需要重新选择' : '' }
+      } catch { return { id: reference.documentId, name: documentNames[reference.documentId] ?? '原文档', identity: referenceIdentity(reference), issue: '原文档尚未打开' } }
     })).then(entries => { if (!disposed) {
       for (const entry of entries) if (!latestMetadata.has(entry.id)) latestMetadata.set(entry.id, entry)
       const current = entries.map(value => latestMetadata.get(value.id) ?? value)
       setDocumentNames(Object.fromEntries(current.map(value => [value.id, value.name])))
+      setDocumentReferenceDetails(previous => Object.fromEntries(entries.map(value => {
+        const details = value.details ?? previous[value.identity]
+        const path = latestMetadata.get(value.id)?.path ?? details?.path
+        return [value.identity, { ...details, path }]
+      })))
       setDocumentReferenceIssues(Object.fromEntries(current.filter(value => value.issue).map(value => [value.id, value.issue])))
     } })
     const unsubscribe = documentsAPI.subscribe?.(event => {
@@ -603,7 +617,16 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
       const name = snapshot ? snapshot.binding.kind === 'file' ? snapshot.binding.path.split(/[\\/]/).at(-1) || '已绑定文档' : snapshot.binding.suggestedName
         : latestMetadata.get(id)?.name ?? documentNames[id] ?? '原文档'
       const issue = snapshot ? snapshot.epoch !== reference.epoch ? '原引用需要重新选择' : '' : '原文档尚未打开'
-      latestMetadata.set(id, { id, name, issue })
+      const path = snapshot?.binding.kind === 'file' ? snapshot.binding.path : latestMetadata.get(id)?.path
+      latestMetadata.set(id, { id, name, issue, path })
+      if (path) setDocumentReferenceDetails(previous => {
+        const next = { ...previous }
+        for (const value of documents) if (value.documentId === id) {
+          const identity = referenceIdentity(value)
+          next[identity] = { ...previous[identity], path }
+        }
+        return next
+      })
       setDocumentNames(previous => previous[id] === name ? previous : { ...previous, [id]: name })
       setDocumentReferenceIssues(previous => {
         if ((previous[id] ?? '') === issue) return previous
@@ -1234,8 +1257,7 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
     submittingRef.current = true; setBusy(true); setError('')
     try {
       const fileCapture = captureFiles()
-      const capturedReferences = await (capturePromise.current ?? Promise.resolve(documentsRef.current))
-      const references = mergeAutomaticReferences(capturedReferences, filePinsRef.current.length ? [] : capturedReferences, removedAutomatic.current)
+      const references = structuredClone(documentsRef.current)
       if (!await prepareSend(references, fileCapture.openFiles.map(file => file.path))) throw new Error('引用文档的输入尚未同步，请处理后再发送。')
       const persisted = await persist()
       if (!persisted || activeRef.current?.conversationId !== current.conversationId) throw new Error('会话已切换，消息没有发送。')
@@ -1262,6 +1284,7 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
     submittingRef.current = true; setBusy(true); setError('')
     let request: ExecutionSendInput | undefined, sendInvoked = false
     const fileCapture = captureFiles()
+    const capturedReferences = structuredClone(documentsRef.current)
     try {
       if (retry) request = { workspaceId: retry.workspaceId, conversationId: retry.conversationId, submissionId: retry.submissionId,
         expectedRevision: selected.revision, text: retry.text, documents: structuredClone(retry.documents), attachments: structuredClone(retry.attachments),
@@ -1304,12 +1327,10 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
       }
       else {
         const materials = await captureMaterials?.()
-        const capturedReferences = await (capturePromise.current ?? Promise.resolve(documentsRef.current))
-        const pinned = mergeAutomaticReferences(capturedReferences, filePinsRef.current.length ? [] : capturedReferences, removedAutomatic.current)
-        const ready = await prepareSend(pinned, fileCapture.openFiles.map(file => file.path))
+        const ready = await prepareSend(capturedReferences, fileCapture.openFiles.map(file => file.path))
         if (!ready) { setError('引用文档的输入尚未同步；请处理对应文档后重试。'); return }
         const preparedDocuments = api.prepareDocuments ? await api.prepareDocuments({ workspaceId: selected.workspaceId,
-          conversationId: selected.conversationId, documents: pinned, permission: permissionOverride ?? permission }) : pinned
+          conversationId: selected.conversationId, documents: capturedReferences, permission: permissionOverride ?? permission }) : capturedReferences
         // A click blurs the textarea first. Wait for that CAS, then freeze one exact payload.
         const persisted = await persist()
         const current = activeRef.current
@@ -1420,7 +1441,7 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
     const stillOwned = () => ticket === generation.current && activeRef.current?.workspaceId === owner.workspaceId && activeRef.current?.conversationId === owner.conversationId
     setPlusOpen(false)
     try {
-      const captured = await captureDocuments(true)
+      const captured = await captureDocuments(true, false)
       if (!stillOwned()) return
       if (!captured.length) throw new Error('当前没有打开的文档，原引用仍保留。')
       if (requireSelection && !captured.some(value => value.selection?.length)) throw new Error('当前没有有效选区，原引用仍保留。')
@@ -1429,7 +1450,8 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
         : requireSelection ? split.filter(reference => reference.selection?.some(target => target.kind !== 'course-surface'))
         : split.filter(reference => reference.displayLabel === '当前页面' || reference.displayLabel === '文档')
       if (!added.length) throw new Error('当前没有有效选区，原引用仍保留。')
-      const base = replaceStale ? documentsRef.current.filter(reference => !captured.some(value => value.documentId === reference.documentId && value.epoch !== reference.epoch)) : documentsRef.current
+      const base = documentsRef.current.filter(reference => !captured.some(value => value.documentId === reference.documentId
+        && (replaceStale && value.epoch !== reference.epoch || wholeDocument && !reference.pinned)))
       const refs = pinReferences(base, added)
       setDocuments(refs); documentsRef.current = refs; contextFrozenRef.current = true; setContextFrozen(true)
       documentsByConversation.current.set(owner.conversationId, refs); frozenByConversation.current.set(owner.conversationId, true)
@@ -1450,6 +1472,32 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
       updateFilePins([...filePinsRef.current.filter(value => fileReferenceIdentity(value) !== identity), reference])
       removedFileAutomatic.current.delete(identity)
     } catch (failure) { setError(failure instanceof Error ? failure.message : '文件引用没有改变。') }
+  }
+  const switchFileScope = (reference: ExecutionFileReference, choice: FileReferenceChoice) => {
+    if (busy || !activeRef.current) return
+    const focused = officeFocus.current()
+    const current = focused && focusPathKey(focused.path) === focusPathKey(reference.path) ? focused : undefined
+    const next = choice === 'file'
+      ? { ...reference, scope: 'file' as const, focus: undefined, pinned: true }
+      : fileFocusReference(current, choice, true)
+    if (!next) { setError('请先在该文件中选择要引用的位置。'); return }
+    const oldIdentity = fileReferenceIdentity(reference), newIdentity = fileReferenceIdentity(next)
+    updateFilePins([...filePinsRef.current.filter(value => {
+      const identity = fileReferenceIdentity(value)
+      return identity !== oldIdentity && identity !== newIdentity
+    }), next])
+    removedFileAutomatic.current.delete(newIdentity)
+  }
+  const switchDocumentScope = (reference: ExecutionDocumentReference, target: ExecutionDocumentReference) => {
+    const owner = activeRef.current
+    if (busy || !owner) return
+    const next = pinReferences(documentsRef.current.filter(value => referenceIdentity(value) !== referenceIdentity(reference)
+      && (value.pinned || value.documentId !== reference.documentId)), [target])
+    documentsRef.current = next; setDocuments(next)
+    contextFrozenRef.current = true; setContextFrozen(true)
+    documentsByConversation.current.set(owner.conversationId, next)
+    frozenByConversation.current.set(owner.conversationId, true)
+    void persist(next).catch(() => setError('引用草稿未保存，请重试。'))
   }
   /** Chip ×: drop one document reference (or all) from this message; the other references stay. */
   const removeDocumentReferences = async (referenceId?: string) => {
@@ -1771,8 +1819,11 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
         {fileReferences.length > 0 && <div className="execution-assistant__references" aria-label="本条消息的文件引用">
           {fileReferences.map(value => {
             const identity = fileReferenceIdentity(value), name = value.path.split(/[\\/]/).at(-1) ?? value.path
-            return <span className="execution-assistant__chip" key={identity}>
-              <span className="execution-assistant__chip-label" title={value.path}>{name} · {fileReferenceLabel(value)}</span>
+            const focused = currentFile && focusPathKey(currentFile.path) === focusPathKey(value.path) ? currentFile : undefined
+            return <div className="execution-assistant__chip" key={identity}>
+              <ReferenceFilename name={name} path={value.path} />
+              <ReferenceScopePicker name={name} path={value.path} label={fileReferenceLabel(value)} location={fileReferenceLocation(value)}
+                options={fileScopeOptions(value.path, focused)} disabled={busy} onSelect={choice => switchFileScope(value, choice)} />
               <button type="button" aria-label={`${value.pinned ? '取消固定' : '固定'} ${name}`} disabled={busy} title={value.pinned ? '取消固定' : '固定引用'}
                 onClick={() => updateFilePins(value.pinned ? filePinsRef.current.filter(item => fileReferenceIdentity(item) !== identity)
                   : [...filePinsRef.current, { ...value, pinned: true }])}>{value.pinned ? <Pin size={13} /> : <PinOff size={13} />}</button>
@@ -1781,21 +1832,31 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
                 updateFilePins(filePinsRef.current.filter(item => fileReferenceIdentity(item) !== identity))
                 setReferenceTurn(turn => turn + 1)
               }}><X size={13} /></button>
-            </span>
+            </div>
           })}
         </div>}
         {(documents.length > 0 || contextFrozen) && <div className="execution-assistant__references" aria-label="本条消息的引用">
           {documents.map(value => {
-            const name = documentNames[value.documentId] ?? '已绑定文档'
-            return <span className="execution-assistant__chip" key={referenceIdentity(value)}>
-              <span className="execution-assistant__chip-label" title={name}>{name}{value.displayLabel ? ` · ${value.displayLabel}` : ''}</span>
+            const identity = referenceIdentity(value), name = documentNames[value.documentId] ?? '已绑定文档'
+            const file = openFiles.find(file => file.documentId === value.documentId)
+            const details = documentReferenceDetails[identity]
+            const path = file?.path ?? details?.path
+            const choices = documentScopeOptions(value, currentDocuments.find(current => current.documentId === value.documentId),
+              file?.format === 'glx' || file?.format === 'flow' || Boolean(value.selection?.some(target => 'surfaceId' in target || target.kind === 'course-object')))
+            return <div className="execution-assistant__chip" key={identity}>
+              <ReferenceFilename name={name} path={path} />
+              <ReferenceScopePicker name={name} path={path} label={value.selection?.length ? value.displayLabel ?? '所选内容' : '整个文档'}
+                location={details?.location ?? documentReferenceLocation(value)}
+                options={choices.map(option => ({ ...option, available: Boolean(option.target) }))} disabled={busy}
+                onSelect={choice => { const target = choices.find(option => option.id === choice)?.target; if (target) switchDocumentScope(value, target) }} />
               <button type="button" aria-label={`${value.pinned ? '取消固定' : '固定'} ${name} ${value.displayLabel ?? ''}`} disabled={busy} onClick={() => {
-                const refs = documentsRef.current.map(reference => referenceIdentity(reference) === referenceIdentity(value) ? { ...reference, pinned: !reference.pinned } : reference)
+                const toggled = documentsRef.current.map(reference => referenceIdentity(reference) === referenceIdentity(value) ? { ...reference, pinned: !reference.pinned } : reference)
+                const refs = mergeAutomaticReferences(toggled, splitComposerReferences(currentDocuments), removedAutomatic.current)
                 documentsRef.current = refs; setDocuments(refs); const frozen = refs.some(reference => reference.pinned); contextFrozenRef.current = frozen; setContextFrozen(frozen)
-                void persist().catch(() => setError('引用草稿未保存，请重试。'))
+                void persist(refs).catch(() => setError('引用草稿未保存，请重试。'))
               }} title={value.pinned ? '取消固定' : '固定引用'}>{value.pinned ? <Pin size={13} /> : <PinOff size={13} />}</button>
               <button type="button" aria-label={`移除引用 ${name}${value.displayLabel ? ` ${value.displayLabel}` : ''}`} title="移除引用" disabled={busy} onClick={() => void removeDocumentReferences(referenceIdentity(value))}><X size={13} /></button>
-            </span>
+            </div>
           })}
           {contextFrozen && documents.length === 0 && <span className="execution-assistant__chip is-muted">本条消息不引用文档</span>}
         </div>}
@@ -1814,10 +1875,10 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
               {plusOpen && <div ref={popupRef} className="execution-assistant__popup" role="menu" aria-label="添加内容" style={{ left: popupPosition.left, bottom: popupPosition.bottom }}>
                 <button type="button" role="menuitem" disabled={!actions.canAdd} onClick={() => { setPlusOpen(false); actions.addFiles() }}>添加附件（图片或文档）</button>
                 <button type="button" role="menuitem" disabled={!actions.canReference} onClick={() => { setPlusOpen(false); actions.referenceWorkspace() }}>引用工作空间文件</button>
-                <button type="button" role="menuitem" onClick={() => void changeFocusedReference('file')}>引用当前文件</button>
+                <button type="button" role="menuitem" onClick={() => void changeFocusedReference('file')}>{currentFileScopes ? '引用当前文件' : '引用当前文档'}</button>
                 <button type="button" role="menuitem" onClick={() => void changeFocusedReference('focus')}>引用当前选区</button>
-                <button type="button" role="menuitem" onClick={() => void changeFocusedReference('page')}>引用当前页</button>
-                <button type="button" role="menuitem" onClick={() => void changeFocusedReference('object')}>引用当前对象</button>
+                {currentFileScopes?.filter(option => option.id !== 'file').map(option => <button key={option.id} type="button" role="menuitem"
+                  disabled={!option.available} onClick={() => void changeFocusedReference(option.id)}>引用{option.label}</button>)}
                 <p>也可以直接粘贴或拖入图片、文档。</p>
               </div>}
             </div>

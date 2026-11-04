@@ -133,6 +133,8 @@ test((process.env.GUOLING_OFFICE_SOURCE_DIAGNOSTIC === '1' ? 'SOURCE DIAGNOSTIC:
 
     for (const kind of kinds) {
       facts.phase = kind + '-edit-save'; await activate(kind)
+      const autoSave = (kind === 'slide' || kind === 'flow' ? frame() : region(kind)).getByRole('switch', { name: '自动保存', exact: true })
+      await expect(autoSave).not.toBeChecked()
       if (kind === 'slide') {
         const title = frame().locator('.canvas-stage [data-component-instance="smoke-title"]').first()
         const point = await firstGlyph(title); await page.mouse.dblclick(point.x, point.y)
@@ -140,7 +142,8 @@ test((process.env.GUOLING_OFFICE_SOURCE_DIAGNOSTIC === '1' ? 'SOURCE DIAGNOSTIC:
         await expect(input).toBeVisible(); await input.click(); await page.keyboard.press('Control+A')
         await page.keyboard.insertText(next.slide); await page.keyboard.press('Control+Enter')
         await expect(title).toContainText(next.slide)
-        await page.keyboard.press('Control+s')
+        expect(courseText(files.slide, 'smoke-title')).toContain(texts.slide)
+        await autoSave.check()
         await expect.poll(() => courseText(files.slide, 'smoke-title'), poll).toContain(next.slide)
       } else if (kind === 'flow') {
         const paragraph = frame().locator('.ProseMirror [data-flow-block-id="d5-tail"]').first()

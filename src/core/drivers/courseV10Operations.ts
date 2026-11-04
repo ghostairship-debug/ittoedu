@@ -14,6 +14,7 @@ import type { ComponentFrame } from '../../shared/contracts/component-platform/f
 import { DEFAULT_SLIDE_CANVAS, sharedSlideFrameMapping } from '../../shared/slideCanvas'
 import { IDENTITY_MATRIX, multiplyMatrices, type AffineMatrix } from '../components/geometry'
 import { isNativeFlowLayoutGroup } from '../../shared/flowNativeLayout'
+import { documentOperationDigest } from '../documents/documentDigest'
 
 /** The formal parent chain defines coordinates for every authoring entry. */
 export function componentParentMatrix(project: CourseProjectV10, id: string): AffineMatrix {
@@ -74,7 +75,11 @@ function insertSurface(project: CourseProjectV10, surface: ComponentSurface, ind
   if (wasEmpty && !project.entry) project.entry = { rootInstanceId: surface.id }
 }
 
-export function componentValueAt(project: CourseProjectV10, path: string[]): { exists: boolean; value?: JsonValue } {
+export function componentValueAt(project: CourseProjectV10, path: string[], resources?: DocumentResources): { exists: boolean; value?: JsonValue } {
+  if (path[0] === '@component-files' && path.length === 2) {
+    const files = resources?.components[path[1]!]
+    return files ? { exists: true, value: documentOperationDigest(files) } : { exists: false }
+  }
   if (path[0] === '@surfaceOrder') return { exists: true, value: componentSurfaces(project).map(surface => surface.id) }
   if (path[0] === '@surface') {
     const surface = componentSurface(project, path[1])
@@ -512,17 +517,17 @@ export function prepareComponentTextRelationships(project: CourseProjectV10, edi
 }
 
 export function captureComponentOperation(project: CourseProjectV10, edits: ComponentEdit[], readPaths: readonly string[][] = [],
-  options: { deferTextRelationships?: boolean } = {}): ComponentOperationBatch {
+  options: { deferTextRelationships?: boolean; resources?: DocumentResources } = {}): ComponentOperationBatch {
   const bounds=expandFreeGroupBounds(project,options.deferTextRelationships ? edits : prepareComponentTextRelationships(project, edits))
   const prepared=bounds.edits
   return { type: 'component-platform.apply', edits: structuredClone(prepared), expected: [...new Map([...dependencyPaths(project, prepared), ...bounds.reads, ...readPaths].map(path => [JSON.stringify(path), path])).values()]
-    .map(path => ({ path, ...structuredClone(componentValueAt(project, path)) })) }
+    .map(path => ({ path, ...structuredClone(componentValueAt(project, path, options.resources)) })) }
 }
 
-export function checkComponentExpectations(project: CourseProjectV10, command: ComponentOperationBatch): void {
+export function checkComponentExpectations(project: CourseProjectV10, command: ComponentOperationBatch, resources?: DocumentResources): void {
   const captured = new Map(command.expected.map(expected => [JSON.stringify(expected.path), expected]))
   for (const expected of command.expected) {
-    const actual = componentValueAt(project, expected.path)
+    const actual = componentValueAt(project, expected.path, resources)
     if (actual.exists !== expected.exists || actual.exists && !equalComponentValue(actual.value, expected.value)) throw new ComponentOperationConflict(expected.path)
   }
   for (const path of dependencyPaths(project, command.edits)) if (!captured.has(JSON.stringify(path))) {
@@ -812,7 +817,7 @@ export function beginComponentOperationPlanning(project: CourseProjectV10) {
 
 function applyComponentOperationCandidate(project: CourseProjectV10, raw: ComponentOperationBatch, resources?:DocumentResources, local = false): CourseProjectV10 {
   const command = componentOperationBatchSchema.parse(raw)
-  checkComponentExpectations(project, command)
+  checkComponentExpectations(project, command, resources)
   const next = local ? { ...project } : structuredClone(project)
   const owned = new WeakSet<object>([next])
   const detach = (path: readonly string[]) => {

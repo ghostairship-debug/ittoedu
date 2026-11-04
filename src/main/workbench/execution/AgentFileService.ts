@@ -10,8 +10,10 @@ import type { AgentFileContext, AgentFileMutationName, AgentFileOutcome, AgentFi
 import { AgentFileMissingParent, AgentFileOutcomeUnknown, agentFileSchemas } from '../../../core/tools/AgentFileTools'
 import { officeContentSchemas, type OfficeContentToolName } from '../../../core/tools/OfficeContentTools'
 import type { FileArtifactBinding } from '../../../shared/workbench/mediaFiles'
+import type { ExecutionFileContext } from '../../../shared/workbench/fileContext'
 import type { OfficeFormat } from '../../../shared/workbench/officeFiles'
 import type { OfficeFileService } from '../office/OfficeFileService'
+import { officeDraftSession } from '../office/OfficeDrafts'
 import { isSourceDocumentModel, type DocumentSnapshot } from '../../../shared/workbench/document'
 import { isInsideRoot } from '../../../shared/workbench/executionPermission'
 import type { DocumentHostService } from '../DocumentHostService'
@@ -51,7 +53,11 @@ export class AgentFileService implements AgentFilePort {
   private readonly grepPages = new FileGrepPages()
   private readonly text: AgentFileText
   private office?: Promise<OfficeFileService>
-  private readonly officeBindings = new Map<string, Map<string, FileArtifactBinding>>()
+  private readonly officeBindings = new Map<string, Map<string, {
+    latest: FileArtifactBinding
+    observed: Map<string, { binding: FileArtifactBinding; bytes: Uint8Array }>
+  }>>()
+  private readonly capturedOfficeDrafts = new Map<string, Map<string, string>>()
   /** Only the tuple from an explicit comparison is retained, never a second disk model. */
   private readonly fileObservations = new Map<string, Map<string, { documentId: string; epoch: string; baseRevision: number; bindingVersion: number; version: string | null }>>()
   private readonly hostReadOnlyRoots: readonly string[]
@@ -64,13 +70,42 @@ export class AgentFileService implements AgentFilePort {
   private readOnlyRoots(context: AgentFileContext): readonly string[] {
     return [...this.hostReadOnlyRoots, ...(context.readOnlyRoots ?? [])]
   }
-  releaseRun(runId: string): void { this.pages.releaseRun(runId); this.grepPages.releaseRun(runId); this.text.releaseRun(runId); this.officeBindings.delete(runId); this.fileObservations.delete(runId) }
+  releaseRun(runId: string): void {
+    this.pages.releaseRun(runId); this.grepPages.releaseRun(runId); this.text.releaseRun(runId)
+    this.officeBindings.delete(runId); this.capturedOfficeDrafts.delete(runId); this.fileObservations.delete(runId)
+  }
+  captureOfficeDraftTargets(runId: string, fileContext: ExecutionFileContext | undefined): void {
+    if (!fileContext) return
+    const targets = new Map<string, string>()
+    for (const target of [...fileContext.references, ...fileContext.openFiles]) {
+      const session = officeDraftSession(target.fileVersion), key = this.officeKey(path.normalize(target.path))
+      if (session && !targets.has(key)) targets.set(key, session)
+    }
+    if (targets.size) this.capturedOfficeDrafts.set(runId, targets)
+  }
   private officeService(): Promise<OfficeFileService> { return this.office ??= import('../office/OfficeFileService.js').then(module => new module.OfficeFileService(this.host)) }
+  async verifyOfficeDraftTarget(target: FileArtifactBinding): Promise<string> {
+    return (await this.officeService()).verifyDraftSession(target)
+  }
   private officeKey(filename: string): string { return process.platform === 'win32' ? filename.toLowerCase() : filename }
-  private rememberOfficeBinding(runId: string, binding: FileArtifactBinding): void {
+  private rememberOfficeBinding(runId: string, binding: FileArtifactBinding, bytes?: Uint8Array): void {
     let bindings = this.officeBindings.get(runId)
     if (!bindings) { bindings = new Map(); this.officeBindings.set(runId, bindings) }
-    bindings.set(this.officeKey(binding.path), binding)
+    const key = this.officeKey(binding.path)
+    const observed = bindings.get(key)?.observed ?? new Map()
+    if (bytes && officeDraftSession(binding.fileVersion)) observed.set(binding.fileVersion, { binding, bytes })
+    bindings.set(key, { latest: binding, observed })
+  }
+  private capturedOfficeSession(runId: string, filename: string): string | undefined {
+    const key = this.officeKey(filename)
+    return this.capturedOfficeDrafts.get(runId)?.get(key)
+      ?? officeDraftSession(this.officeBindings.get(runId)?.get(key)?.latest.fileVersion)
+  }
+  private async bindOfficeForRun(runId: string, service: OfficeFileService, filename: string): Promise<FileArtifactBinding> {
+    const binding = await service.bindWorking(filename), captured = this.capturedOfficeSession(runId, binding.path)
+    if (captured && officeDraftSession(binding.fileVersion) !== captured)
+      throw new Error('本次任务引用的 Office 草稿已关闭或重新打开，请从当前标签重新发起。')
+    return binding
   }
   private inWriteRoot(context: AgentFileContext, resolved: string): boolean {
     return isInsideRoot(context.workspaceRoot, resolved)
@@ -329,6 +364,12 @@ export class AgentFileService implements AgentFilePort {
   async readAuthorizedFile(context: AgentFileContext, raw: string): Promise<{ path: string; name: string; version: string; bytes: Uint8Array }> {
     context.assertActive?.()
     const filename = await this.filenameOrDirectory(context, raw, false)
+    if (/\.(?:docx|xlsx|pptx)$/i.test(filename)) {
+      const office = await this.officeService(), binding = await this.bindOfficeForRun(context.runId, office, filename)
+      const bytes = await office.readWorking(binding, { actor: 'ai', assertActive: context.assertActive })
+      context.assertActive?.()
+      return { path: binding.path, name: path.basename(binding.path), version: binding.fileVersion, bytes }
+    }
     const binding = await this.host.artifacts.bind(filename)
     const bytes = await this.host.artifacts.read(binding)
     context.assertActive?.()
@@ -345,7 +386,7 @@ export class AgentFileService implements AgentFilePort {
     } else {
       const input = officeContentSchemas[name].parse(raw)
       filename = await this.filename(context, input.path, name === 'office.inspect' ? 'read' : 'write', name !== 'office.inspect', true)
-      if (name === 'office.edit' && officeFormat(filename) !== officeContentSchemas['office.edit'].parse(raw).content.format) throw new Error('Office 文件原格式与修改内容不符')
+      if (name !== 'office.inspect' && officeFormat(filename) !== officeContentSchemas[name].parse(raw).content.format) throw new Error('Office 文件原格式与修改内容不符')
     }
     return { paths: [filename], outside: !this.inWriteRoot(context, filename) }
   }
@@ -364,9 +405,20 @@ export class AgentFileService implements AgentFilePort {
     const scope = await this.preflightOffice(context, name, raw)
     const service = await this.officeService()
     if (name === 'office.inspect') {
-      const filename = scope.paths[0]!, binding = await this.host.artifacts.bind(filename)
-      const inspected = await service.inspect(binding, officeFormat(filename), { assertActive: context.assertActive })
-      this.rememberOfficeBinding(context.runId, binding)
+      const filename = scope.paths[0]!, binding = await this.bindOfficeForRun(context.runId, service, filename)
+      const { object } = officeContentSchemas[name].parse(raw)
+      if (object) {
+        if (officeFormat(filename) !== object.format) throw new Error('对象原生结构的格式与当前文件不符。')
+        const { inspectOfficeObjectSourceOffThread } = await import('../office/officeContentWorker.js')
+        const observedBytes = await service.readWorking(binding, { actor: 'ai', assertActive: context.assertActive })
+        const source = await inspectOfficeObjectSourceOffThread(observedBytes, object)
+        context.assertActive?.()
+        if (officeDraftSession(binding.fileVersion)) service.verifyDraftSession(binding)
+        this.rememberOfficeBinding(context.runId, binding, observedBytes)
+        return { data: { path: filename, binding, object: source, writable: this.mayWrite(context, filename) } }
+      }
+      const { observedBytes, ...inspected } = await service.inspect(binding, officeFormat(filename), { actor: 'ai', assertActive: context.assertActive })
+      this.rememberOfficeBinding(context.runId, binding, observedBytes)
       return { data: { path: filename, ...inspected, writable: this.mayWrite(context, filename) } }
     }
     await this.requireMutationScope(context, scope.paths)
@@ -379,14 +431,20 @@ export class AgentFileService implements AgentFilePort {
       return { data: { ...saved, path: saved.binding.path, saved: true } }
     }
     const input = officeContentSchemas[name].parse(raw), filename = scope.paths[0]!
-    const observed = this.officeBindings.get(context.runId)?.get(this.officeKey(filename))
-    if (!input.expectedVersion && !observed) throw new Error('请先使用 office.inspect 读取当前 Office 内容和可编辑位置，再执行局部修改')
-    const binding = input.expectedVersion ? await this.host.artifacts.bind(filename) : observed!
-    const saved = await service.edit(binding, { ...input.content, operation: 'edit' }, {
-      assertActive: context.assertActive, expectedVersion: input.expectedVersion, actor: 'ai', operationId,
-    })
-    this.rememberOfficeBinding(context.runId, saved.binding)
-    return { data: { ...saved, path: saved.binding.path, saved: true } }
+    const known = this.officeBindings.get(context.runId)?.get(this.officeKey(filename))
+    if (!input.expectedVersion && !known) throw new Error('请先使用 office.inspect 读取当前 Office 内容和可编辑位置，再执行局部修改')
+    const observed = known?.observed.get(input.expectedVersion ?? known.latest.fileVersion)
+    const current = input.expectedVersion || this.capturedOfficeSession(context.runId, filename)
+      ? await this.bindOfficeForRun(context.runId, service, filename) : undefined
+    const binding = observed?.binding ?? (input.expectedVersion ? current! : known!.latest)
+    const editContext = { assertActive: context.assertActive, expectedVersion: input.expectedVersion, observedBytes: observed?.bytes,
+      actor: 'ai' as const, operationId, historyGroup: context.runId }
+    const { observedBytes, ...saved } = name === 'office.deepEdit'
+      ? await service.editObject(binding, officeContentSchemas[name].parse(raw).content, editContext)
+      : await service.edit(binding, { ...officeContentSchemas[name].parse(raw).content, operation: 'edit' }, editContext)
+    this.rememberOfficeBinding(context.runId, saved.binding, observedBytes)
+    return { data: { ...saved, path: saved.binding.path, saved: saved.status === 'saved',
+      applied: saved.applied ?? saved.binding.fileVersion !== binding.fileVersion } }
   }
   async execute(context: AgentFileContext, name: AgentFileToolName, raw: unknown, operationId: string): Promise<AgentFileOutcome> {
     return this.assemblyOutcome(context, await this.executeWithinScope(context, name, raw, operationId))

@@ -1,7 +1,7 @@
 import { documentSaveLabel } from '../lessonWorkspace/view/WorkspaceDocumentStatus'
 import { editorShortcut } from '../../shared/editorShortcuts'
 import type { MarkdownProjection } from '../../shared/document/markdownIdentity'
-import { captureMarkdownSelection, usePinnedSelection, workbenchSelection } from '../workbench/SelectionContextController'
+import { captureMarkdownSelection, capturePlainTextSelection, usePinnedSelection, workbenchSelection } from '../workbench/SelectionContextController'
 import { TextAiButton, textCardLabel } from '../workbench/elementCards/ElementTextCards'
 import { prepareDocumentTextEdit, requestDocumentSelection } from '../document/documentSelectionCommands'
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState, useSyncExternalStore } from 'react'
@@ -41,11 +41,22 @@ export interface LessonDocumentEditorProps {
   port: RecoverableDocumentFilePort
   onDirtyChange?(dirty: boolean): void
   onClosed?(): void
+  onOpenMarkdownCopy?(path: string): Promise<void>
   onSelectionChange?(target: ContextualEditTarget | null): void
   onContextualCommand?(instruction: string, target: ContextualEditTarget): void
   onContextualDismiss?(target: ContextualEditTarget | null): void
 }
 const empty: MarkdownDocument = { content: { blocks: [] }, resources: { assets: [], components: [] } }
+const lightFormatKey = (filename: string) => `workbench.textFormatting:${filename.replace(/\\/g, '/').toLowerCase()}`
+function prefersLightFormat(filename: string) {
+  try { return window.localStorage.getItem(lightFormatKey(filename)) === 'true' } catch { return false }
+}
+function rememberLightFormat(filename: string, enabled: boolean) {
+  try {
+    if (enabled) window.localStorage.setItem(lightFormatKey(filename), 'true')
+    else window.localStorage.removeItem(lightFormatKey(filename))
+  } catch { /* The current view remains usable. */ }
+}
 type PreparedFileInput = { ready: boolean; source: string; issue?: string; sourceChangeHints?: Array<{ from: number; to: number; inserted: number }> }
 function ConflictHunk({ hunk, index, session }: { hunk: DocumentConflictHunk; index: number; session: DocumentFileSession }) {
   const merged = session.getSnapshot().conflictDrafts[hunk.id] ?? hunk.local
@@ -59,7 +70,7 @@ function ConflictHunk({ hunk, index, session }: { hunk: DocumentConflictHunk; in
   </fieldset>
 }
 
-export const LessonDocumentEditor = forwardRef<LessonDocumentEditorHandle, LessonDocumentEditorProps>(function LessonDocumentEditor({ documentRef, documentId, sessionKey, active = true, port, onDirtyChange, onClosed, onSelectionChange, onContextualCommand, onContextualDismiss }, ref) {
+export const LessonDocumentEditor = forwardRef<LessonDocumentEditorHandle, LessonDocumentEditorProps>(function LessonDocumentEditor({ documentRef, documentId, sessionKey, active = true, port, onDirtyChange, onClosed, onOpenMarkdownCopy, onSelectionChange, onContextualCommand, onContextualDismiss }, ref) {
   const identity = sessionKey ?? JSON.stringify(documentRef)
   const session = useMemo(() => new DocumentFileSession(documentRef, port, documentId), [identity, port])
   const lifetime = useMemo(() => ({ leases: 0, opened: false }), [session])
@@ -113,14 +124,24 @@ export const LessonDocumentEditor = forwardRef<LessonDocumentEditorHandle, Lesso
   const resolveImage = (href: string) => resolveFileDocumentImage(href)
   const isText = committed?.model.kind === 'text'
   const isHtml = isText && /\.html?$/i.test(committed.binding.kind === 'file' ? committed.binding.path : committed.binding.suggestedName)
-  const isMarkdown = committed?.model.kind === 'markdown'
+  const textPath = committed?.binding.kind === 'file' ? committed.binding.path : undefined
+  const isTxt = isText && /\.txt$/i.test(textPath ?? (committed.binding.kind === 'untitled' ? committed.binding.suggestedName : ''))
+  const [lightFormatChoice, setLightFormatChoice] = useState<{ session: DocumentFileSession; enabled: boolean }>()
+  const [switchingView, setSwitchingView] = useState(false)
+  const [copyingMarkdown, setCopyingMarkdown] = useState(false)
+  const lightFormat = Boolean(isTxt && (lightFormatChoice?.session === session ? lightFormatChoice.enabled : textPath && prefersLightFormat(textPath)))
+  const captureSelection = lightFormat ? capturePlainTextSelection : captureMarkdownSelection
+  const isMarkdown = committed?.model.kind === 'markdown' || lightFormat
+  useEffect(() => {
+    if (isTxt && textPath && lightFormatChoice?.session === session) rememberLightFormat(textPath, lightFormatChoice.enabled)
+  }, [isTxt, textPath, lightFormatChoice, session])
   const [markdownToolbar, setMarkdownToolbar] = useState<HTMLDivElement | null>(null)
   const parsedSource = useMemo(() => {
-    if (isText) return null
+    if (!isMarkdown) return null
     const parsed = parseDocumentMarkdown(state.source, { createId: () => crypto.randomUUID(), target: 'file', recoverUnsupportedBlocks: true, resolveImage, previous: lastProjection.current })
     if (parsed.status === 'valid') lastProjection.current = parsed
     return parsed
-  }, [state.source, currentRef, isText])
+  }, [state.source, currentRef, isMarkdown])
   const document = parsedSource?.status === 'valid' ? parsedSource.document : lastProjection.current?.document ?? empty
   useEffect(() => {
     lifetime.leases++
@@ -159,7 +180,8 @@ export const LessonDocumentEditor = forwardRef<LessonDocumentEditorHandle, Lesso
     for (;;) {
       const ticket = draftTicket.current, current = session.committedDocument
       const name = current?.binding.kind === 'file' ? current.binding.path : current?.binding.suggestedName
-      const draft: PreparedFileInput | undefined = current?.model.kind === 'text' ? (/\.html?$/i.test(name ?? '') ? await htmlEditor.current?.prepare() : textEditor.current?.flush()) : await editor.current?.drainSource()
+      const draft: PreparedFileInput | undefined = editor.current ? await editor.current.drainSource()
+        : current?.model.kind === 'text' ? (/\.html?$/i.test(name ?? '') ? await htmlEditor.current?.prepare() : textEditor.current?.flush()) : undefined
       if (ticket !== draftTicket.current) continue
       const detail = draft && 'issue' in draft && typeof draft.issue === 'string' ? draft.issue : undefined
       const message = detail ?? '正文输入尚未确认，请完成输入后重试。'
@@ -182,7 +204,45 @@ export const LessonDocumentEditor = forwardRef<LessonDocumentEditorHandle, Lesso
   async function saveAs() {
     const current = await activeDraft()
     if (current && !current.ready) return false
-    return session.saveAs()
+    const saved = await session.saveAs()
+    const binding = session.committedDocument?.binding
+    if (saved && isTxt && binding?.kind === 'file') {
+      rememberLightFormat(binding.path, lightFormat)
+      setLightFormatChoice({ session, enabled: lightFormat })
+    }
+    return saved
+  }
+  async function switchTextView() {
+    setSwitchingView(true)
+    try {
+      const draft = await activeDraft()
+      if (draft?.ready === false || !await session.drain()) return
+      if (session.documentId) workbenchSelection.setManual(session.documentId, null)
+      lastProjection.current = undefined
+      setLightFormatChoice({ session, enabled: !lightFormat })
+    } finally { setSwitchingView(false) }
+  }
+  async function saveMarkdownCopy() {
+    const documents = port.documents
+    if (!documents || !onOpenMarkdownCopy || copyingMarkdown) return
+    setCopyingMarkdown(true)
+    let copyId: string | undefined
+    try {
+      const current = await activeDraft()
+      if (current?.ready === false || !await session.drain()) return
+      const name = documentRefLabel(session.ref).split(/[\\/]/).at(-1)!.replace(/\.txt$/i, '.md')
+      const copy = await documents.create({ kind: 'markdown', source: session.getSnapshot().source, resources: { assets: {}, components: {} } }, name)
+      copyId = copy.documentId
+      const saved = await documents.saveWithDialog(copyId)
+      if (saved?.binding.kind === 'file') {
+        await onOpenMarkdownCopy(saved.binding.path)
+        copyId = undefined
+      }
+    } catch (reason) { setError((reason as Error).message) }
+    finally {
+      if (copyId) await documents.close(copyId, true).catch(reason => setError((reason as Error).message))
+      setCopyingMarkdown(false)
+    }
   }
   async function preserveDraft() {
     const current = await activeDraft()
@@ -224,7 +284,7 @@ export const LessonDocumentEditor = forwardRef<LessonDocumentEditorHandle, Lesso
     container.append(element)
     return () => URL.revokeObjectURL(url)
   }
-  useImperativeHandle(ref, () => ({ session, getContextualEditTarget: () => isText ? null : bindTarget(editor.current?.getContextualEditTarget() ?? null), flush, saveAs, preserveDraft, close: async () => {
+  useImperativeHandle(ref, () => ({ session, getContextualEditTarget: () => bindTarget(editor.current?.getContextualEditTarget() ?? null), flush, saveAs, preserveDraft, close: async () => {
     const current = await activeDraft()
     if (current && !current.ready) return false
     return session.close()
@@ -234,20 +294,26 @@ export const LessonDocumentEditor = forwardRef<LessonDocumentEditorHandle, Lesso
     <span role="status" className="lesson-document-status">{status}</span>
     <button type="button" aria-label="撤销" title="撤销" disabled={!committed?.undoDepth || state.saving || state.composing || Boolean(state.conflict) || state.recovery} onClick={() => { void session.undo() }}><Undo2 size={16} aria-hidden="true" /></button>
     <button type="button" aria-label="重做" title="重做" disabled={!committed?.redoDepth || state.saving || state.composing || Boolean(state.conflict) || state.recovery} onClick={() => { void session.redo() }}><Redo2 size={16} aria-hidden="true" /></button>
-    <button type="button" disabled={state.saving || state.composing || Boolean(state.conflict) || state.recovery} onClick={() => { void flush() }}>保存</button>
-    <label><input type="checkbox" checked={state.autoSave} disabled={state.saving || state.composing || Boolean(state.conflict) || state.recovery} onChange={event => session.setAutoSave(event.target.checked)} />自动保存</label>
-    <details className="lesson-document-more"><summary aria-label="文档更多操作">文件</summary>
+    <span className="file-save-pair">
+      <button type="button" disabled={state.saving || state.composing || Boolean(state.conflict) || state.recovery} onClick={() => { void flush() }}>保存</button>
+      <button type="button" disabled={!committed || state.saving || state.composing || state.conflictHunks.length > 0} onClick={() => { void saveAs() }}>另存为</button>
+    </span>
+    <label><input type="checkbox" role="switch" checked={state.autoSave} disabled={state.saving || state.composing || Boolean(state.conflict) || state.recovery} onChange={event => session.setAutoSave(event.target.checked)} />自动保存</label>
+    {committed?.undoHead?.actor === 'agent' && !state.recovery && !state.conflict && <details className="lesson-document-more"><summary aria-label="文档更多操作">文件</summary>
       <div className="lesson-document-more__menu">
-      <button type="button" disabled={state.saving || state.composing || state.conflictHunks.length > 0} onClick={event => { event.currentTarget.closest('details')?.removeAttribute('open'); void saveAs() }}>另存为</button>
-      {committed?.undoHead?.actor === 'agent' && !state.recovery && !state.conflict && <button type="button" onClick={event => { event.currentTarget.closest('details')?.removeAttribute('open'); void session.undoLatestAgent() }}>撤销最近 AI 修改</button>}
+      <button type="button" onClick={event => { event.currentTarget.closest('details')?.removeAttribute('open'); void session.undoLatestAgent() }}>撤销最近 AI 修改</button>
       </div>
-    </details>
+    </details>}
   </>
   return <section className={isHtml ? 'lesson-document-editor--html' : isMarkdown ? 'lesson-document-editor--markdown' : undefined} aria-label={`教学文档 ${documentRefLabel(currentRef)}`} onCompositionStartCapture={() => session.setComposing(true)} onCompositionEndCapture={() => { queueMicrotask(() => session.setComposing(false)) }} onKeyDownCapture={event => {
     const shortcut = editorShortcut(event.nativeEvent)
     if (shortcut === 'save' || shortcut === 'save-as') { event.preventDefault(); event.stopPropagation(); void (shortcut === 'save-as' ? saveAs() : flush()) }
   }}>
-    {!isHtml && <header><strong>{documentRefLabel(currentRef)}</strong>{documentActions}</header>}
+    {!isHtml && <header><strong>{documentRefLabel(currentRef)}</strong>{documentActions}
+      {isTxt && <button type="button" aria-pressed={lightFormat} disabled={switchingView || state.composing || state.saving || state.conflictHunks.length > 0} onClick={() => { void switchTextView() }}>{lightFormat ? '查看纯文本' : '启用轻量格式'}</button>}
+      {lightFormat && onOpenMarkdownCopy && <button type="button" disabled={copyingMarkdown || state.composing || state.saving || state.conflictHunks.length > 0} onClick={() => { void saveMarkdownCopy() }}>另存为 Markdown</button>}
+      {isMarkdown && <div ref={setMarkdownToolbar} className="lesson-document-editor__markdown-toolbar" inert={state.conflictHunks.length > 0} />}
+    </header>}
     {(error || state.error) && <div role="alert">{error ?? state.error}<button type="button" onClick={() => { void flush() }}>重试保存</button>{onClosed && <><button type="button" onClick={() => { void preserveAndClose().then(closed => { if (closed) onClosed() }) }}>保留恢复稿后关闭</button><button type="button" onClick={() => { void session.discardAndClose().then(closed => { if (closed) onClosed() }) }}>放弃未保存更改并关闭</button></>}</div>}
     {state.recovery && <aside role="alert">已找到未保存恢复稿，请比较后继续。{state.conflictHunks.length ? <span>请逐处处理下方冲突。</span> : <button type="button" onClick={() => { void session.resolveConflict('recovery') }}>保留恢复稿并保存</button>}</aside>}
     {state.retainedSourceConflicts.length > 0 && <aside aria-label="保留的手动合并恢复稿"><p>原冲突上下文尚未匹配，以下输入可复制到当前冲突处，原记录继续保留。</p>{state.retainedSourceConflicts.map((candidate, index) => <details key={index}><summary>手动合并候选 {index + 1}</summary><details><summary>原始源文</summary><pre>{candidate.source}</pre></details>{candidate.hunks.map((hunk, hunkIndex) => <label key={hunkIndex}>未应用输入<textarea readOnly value={hunk.text} /></label>)}</details>)}</aside>}
@@ -259,13 +325,12 @@ export const LessonDocumentEditor = forwardRef<LessonDocumentEditorHandle, Lesso
       <button type="button" disabled={state.saving || state.composing || state.conflictHunks.length > 0} onClick={() => { void (state.conflict === 'deleted' ? saveAs() : session.resolveConflict('local')) }}>{state.conflict === 'deleted' ? '另存当前稿' : '保留当前稿并保存'}</button></>}
     </aside>}
     {isHtml && committed && <div className="lesson-document-editor__html-body" inert={state.conflictHunks.length > 0}><HtmlDocumentEditor ref={htmlEditor} active={active} tabId={htmlTabId} committed={committed} source={state.source} documents={port.documents} documentActions={documentActions} onPendingDraftChange={setHtmlPendingDraft} onDraft={source => { const ticket = ++draftTicket.current; queueMicrotask(() => { if (ticket === draftTicket.current) session.edit(source, operationGroup.current) }) }} onUndo={() => session.undo()} onRedo={() => session.redo()} onSave={() => { void flush() }} /></div>}
-    {isText && !isHtml && committed && <div inert={state.conflictHunks.length > 0}><PlainTextDocumentEditor snapshot={committed} documentEpoch={committed.epoch} documentId={session.documentId ?? undefined} active={active} ref={textEditor} source={state.source} revision={committed.revision} onDraft={source => { const ticket = ++draftTicket.current; queueMicrotask(() => { if (ticket === draftTicket.current) session.edit(source, operationGroup.current) }) }} onUndo={() => session.undo()} onRedo={() => session.redo()} /></div>}
-    {isMarkdown && <div ref={setMarkdownToolbar} className="lesson-document-editor__markdown-toolbar" inert={state.conflictHunks.length > 0} />}
-    {committed && committed.model.kind !== 'text' && parsedSource && <div className="lesson-document-editor__markdown-body" inert={state.conflictHunks.length > 0}><SharedDocumentEditor ref={editor} toolbarHost={markdownToolbar} cardDocumentId={session.documentId ?? undefined} active={active} document={document} revision={state.source} sourceDraft={state.source} target="file" initialMode={parsedSource.status === 'valid' ? 'layout' : 'source'} resolveImage={resolveImage}
+    {isText && !isHtml && !lightFormat && committed && <div inert={state.conflictHunks.length > 0}><PlainTextDocumentEditor snapshot={committed} documentEpoch={committed.epoch} documentId={session.documentId ?? undefined} active={active} ref={textEditor} source={state.source} revision={committed.revision} onDraft={source => { const ticket = ++draftTicket.current; queueMicrotask(() => { if (ticket === draftTicket.current) session.edit(source, operationGroup.current) }) }} onUndo={() => session.undo()} onRedo={() => session.redo()} /></div>}
+    {committed && isMarkdown && parsedSource && <div className="lesson-document-editor__markdown-body" inert={state.conflictHunks.length > 0}><SharedDocumentEditor ref={editor} toolbarHost={markdownToolbar} compactDocumentToolbar lightTextFormatting={lightFormat} cardDocumentId={session.documentId ?? undefined} active={active} document={document} revision={state.source} sourceDraft={state.source} target="file" initialMode={parsedSource.status === 'valid' ? 'layout' : 'source'} resolveImage={resolveImage}
       projectionDiagnostics={parsedSource.diagnostics}
       sourceMap={parsedSource.status === 'valid' ? parsedSource.sourceMap : undefined}
       editPreviews={editPreviews}
-      clipboardContext={(resources: MarkdownDocument['resources']) => selectedFileClipboardContext(clipboard, resources)} clipboardResourcePort={fileClipboardResourcePort}
+      clipboardContext={lightFormat ? undefined : (resources: MarkdownDocument['resources']) => selectedFileClipboardContext(clipboard, resources)} clipboardResourcePort={lightFormat ? undefined : fileClipboardResourcePort}
       renderObject={renderObject} objectRevision={clipboard} objectRevisionFor={block => {
         const assetId = block.type === 'media' ? block.assetId : block.type === 'component' ? block.staticFallbackAssetId : null
         return assetId ? clipboard?.assets[assetId] : undefined
@@ -278,7 +343,7 @@ export const LessonDocumentEditor = forwardRef<LessonDocumentEditorHandle, Lesso
        onContextualTargetChange={target => {
          onSelectionChange?.(bindTarget(target))
          const snapshot = session.committedDocument
-         if (snapshot) { try { workbenchSelection.setManual(snapshot.documentId, target ? captureMarkdownSelection(snapshot, target) : null) } catch { workbenchSelection.setManual(snapshot.documentId, null) } }
+         if (snapshot) { try { workbenchSelection.setManual(snapshot.documentId, target ? captureSelection(snapshot, target) : null) } catch { workbenchSelection.setManual(snapshot.documentId, null) } }
        }}
        renderAiButton={(target, issue) => {
          // Selected text opens a text card (M15); objects and table cells keep the assistant.
@@ -287,12 +352,12 @@ export const LessonDocumentEditor = forwardRef<LessonDocumentEditorHandle, Lesso
          const label = textCardLabel(target.ranges.map(range => range.before).join(''))
          return <TextAiButton documentId={documentId} selectionIdentity={JSON.stringify(target.ranges.map(range => [range.from, range.to, range.before]))}
            disabledReason={issue} start={async () => {
-           return prepareDocumentTextEdit(documentId, target, captureMarkdownSelection, label)
+           return prepareDocumentTextEdit(documentId, target, captureSelection, label)
          }} />
        }}
        onContextualCommand={async (instruction, selection) => {
          if (!session.documentId) throw new Error('文档尚未就绪。')
-         await requestDocumentSelection(session.documentId, selection, instruction, captureMarkdownSelection)
+         await requestDocumentSelection(session.documentId, selection, instruction, captureSelection)
        }}
        onContextualDismiss={target => onContextualDismiss?.(bindTarget(target))} onUndo={() => session.undo()} onRedo={() => session.redo()} /></div>}
   </section>

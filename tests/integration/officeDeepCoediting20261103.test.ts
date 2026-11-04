@@ -26,6 +26,122 @@ const ppt = (bytes: Uint8Array) => {
   return result
 }
 describe('controlled deeper PPT editing through the existing transaction owner', () => {
+  it('undoes one AI instruction across draft and save boundaries without absorbing human edits', async () => {
+    const f = await setup(), filename = f.binding.path
+    const ai = { actor: 'ai' as const, historyGroup: 'instruction-1' }
+    let binding = await f.office.bindWorking(filename, true)
+    const editTiming = async (durationMs: number, context: typeof ai | { actor: 'human' }) => {
+      const slide = ppt(await f.office.readWorking(binding)).slides[0]
+      const result = await f.office.edit(binding, { operation: 'edit', format: 'pptx', edits: [
+        { type: 'animationTiming', slide: 0, part: slide.part, partVersion: slide.partVersion, timingId: '2', durationMs },
+      ] }, context)
+      binding = result.binding
+    }
+    const timing = (bytes: Uint8Array) => ppt(bytes).slides[0].animations?.find(item => item.id === '2')?.duration
+    const title = (bytes: Uint8Array) => ppt(bytes).slides[0].shapes.find(item => item.name === 'title')?.text
+    await editTiming(1100, ai)
+    binding = await f.office.saveWorking(binding)
+    const slide = ppt(await f.office.readWorking(binding)).slides[0], shape = slide.shapes.find(item => item.name === 'title')!
+    binding = (await f.office.editObject(binding, { format: 'pptx',
+      target: { slide: 0, part: slide.part, partVersion: slide.partVersion, shapeId: shape.shapeId },
+      edit: { path: ['p:txBody', 'a:p', 'a:r', 'a:t'].map(name => ({ name, index: 0 })),
+        xml: `<a:t xmlns:a="${NS.drawing}">Instruction title</a:t>` },
+    }, ai)).binding
+    await editTiming(1300, ai)
+    expect((await f.office.history(binding)).undoDepth).toBe(1)
+    const undone = await f.office.moveHistory(binding, 'undo')
+    expect(timing(await f.office.readWorking(undone.binding))).toBe(timing(f.original))
+    expect(title(await f.office.readWorking(undone.binding))).toBe(title(f.original))
+    expect(timing(await fs.readFile(filename))).toBe('1100')
+    binding = (await f.office.moveHistory(undone.binding, 'redo')).binding
+    expect(timing(await f.office.readWorking(binding))).toBe('1300')
+    expect(title(await f.office.readWorking(binding))).toBe('Instruction title')
+    await editTiming(1400, { actor: 'human' })
+    await editTiming(1500, ai)
+    expect((await f.office.history(binding)).entries.map(entry => entry.actor)).toEqual(['ai', 'human', 'ai'])
+    await f.office.saveWorking(binding)
+    const reopened = new OfficeFileService(new DocumentHostService(f.owner))
+    const saved = await reopened.bindWorking(filename, true)
+    const firstUndo = await reopened.moveHistory(saved, 'undo')
+    expect(timing(await reopened.readWorking(firstUndo.binding))).toBe('1400')
+    const secondUndo = await reopened.moveHistory(firstUndo.binding, 'undo')
+    expect(timing(await reopened.readWorking(secondUndo.binding))).toBe('1300')
+    const thirdUndo = await reopened.moveHistory(secondUndo.binding, 'undo')
+    expect(timing(await reopened.readWorking(thirdUndo.binding))).toBe(timing(f.original))
+    expect(timing(await fs.readFile(filename))).toBe('1500')
+  }, 20_000)
+  it('retains the new redo branch when saved from an earlier persisted revision', async () => {
+    const f = await setup(), filename = f.binding.path
+    let binding = await f.office.bindWorking(filename, true)
+    const editTiming = async (durationMs: number) => {
+      const slide = ppt(await f.office.readWorking(binding)).slides[0]
+      const result = await f.office.edit(binding, { operation: 'edit', format: 'pptx', edits: [
+        { type: 'animationTiming', slide: 0, part: slide.part, partVersion: slide.partVersion, timingId: '2', durationMs },
+      ] }, { actor: 'human' })
+      binding = result.binding
+    }
+    const timing = (bytes: Uint8Array) => ppt(bytes).slides[0].animations?.find(item => item.id === '2')?.duration
+    await editTiming(1100)
+    await editTiming(1200)
+    binding = await f.office.saveWorking(binding)
+    binding = (await f.office.moveHistory(binding, 'undo')).binding
+    await editTiming(1300)
+    binding = (await f.office.moveHistory(binding, 'undo')).binding
+    binding = (await f.office.moveHistory(binding, 'undo')).binding
+    expect(timing(await f.office.readWorking(binding))).toBe(timing(f.original))
+    await f.office.saveWorking(binding)
+    const reopened = new OfficeFileService(new DocumentHostService(f.owner))
+    const saved = await reopened.bindWorking(filename, true)
+    const firstRedo = await reopened.moveHistory(saved, 'redo')
+    expect(timing(await reopened.readWorking(firstRedo.binding))).toBe('1100')
+    const secondRedo = await reopened.moveHistory(firstRedo.binding, 'redo')
+    expect(timing(await reopened.readWorking(secondRedo.binding))).toBe('1300')
+    expect((await reopened.history(secondRedo.binding)).redoDepth).toBe(0)
+  }, 20_000)
+  it('shares a manual-save draft with AI, persists both history entries in one save, and stages cold undo', async () => {
+    const f = await setup(), filename = f.binding.path
+    const draft = await f.office.bindWorking(filename, true)
+    const slide = ppt(f.original).slides[0]
+    const timing = { type: 'animationTiming' as const, slide: 0, part: slide.part, partVersion: slide.partVersion, timingId: '2', durationMs: 1250 }
+    const human = await f.office.edit(draft, { format: 'pptx', operation: 'edit', edits: [timing] }, { actor: 'human' })
+    const agent = new OfficeFileService(f.host)
+    const seen = await agent.inspect(await agent.bindWorking(filename), 'pptx')
+    expect(seen.binding).toEqual(human.binding)
+    if (seen.inspection.format !== 'pptx') throw new Error('wrong format')
+    expect(seen.inspection.slides[0].animations?.find(item => item.id === '2')?.duration).toBe('1250')
+    const ai = await agent.edit(seen.binding, { format: 'pptx', operation: 'edit', edits: [
+      { ...timing, partVersion: seen.inspection.slides[0].partVersion, durationMs: 1800 },
+    ] }, { actor: 'ai', expectedVersion: seen.binding.fileVersion })
+    expect(ai.status).toBe('draft')
+    expect(await fs.readFile(filename)).toEqual(Buffer.from(f.original))
+    await expect(agent.edit(seen.binding, { format: 'pptx', operation: 'edit', edits: [
+      { ...timing, partVersion: seen.inspection.slides[0].partVersion, durationMs: 1600 },
+    ] }, { actor: 'ai', observedBytes: seen.observedBytes })).rejects.toMatchObject({ code: 'office-merge-conflict',
+      location: expect.stringContaining('/@dur') })
+    await f.host.artifacts.preserveOfficeDrafts()
+    const restored = new OfficeFileService(new DocumentHostService(f.owner))
+    const recovery = await restored.bindWorking(filename, true)
+    expect(restored.isDraftDirty(filename)).toBe(true)
+    expect((await restored.history(recovery)).entries.map(item => item.actor)).toEqual(['human', 'ai'])
+    const saved = await restored.saveWorking(recovery)
+    expect(saved).toEqual(recovery)
+    expect(ppt(await fs.readFile(filename)).slides[0].animations?.find(item => item.id === '2')?.duration).toBe('1800')
+    const cold = new OfficeFileService(new DocumentHostService(f.owner))
+    const reopened = await cold.bindWorking(filename, true)
+    expect((await cold.history(reopened)).entries.map(item => item.actor)).toEqual(['human', 'ai'])
+    const undone = await cold.moveHistory(reopened, 'undo')
+    expect(ppt(await cold.readWorking(undone.binding)).slides[0].animations?.find(item => item.id === '2')?.duration).toBe('1250')
+    expect(ppt(await fs.readFile(filename)).slides[0].animations?.find(item => item.id === '2')?.duration).toBe('1800')
+    const savedUndo = await cold.saveWorking(undone.binding)
+    expect((await cold.history(savedUndo)).redoDepth).toBe(1)
+    expect(ppt(await fs.readFile(filename)).slides[0].animations?.find(item => item.id === '2')?.duration).toBe('1250')
+    await cold.closeWorking(filename, false)
+    const physical = await cold.bindWorking(filename)
+    expect(physical.fileVersion).not.toBe(savedUndo.fileVersion)
+    await expect(cold.edit(physical, { format: 'pptx', operation: 'edit', edits: [timing] }, {
+      expectedVersion: savedUndo.fileVersion,
+    })).rejects.toThrow('文件版本已改变')
+  }, 15_000)
   it('changes a chart point in both cache and embedded workbook, preserves animation and unrelated parts, then cold undoes', async () => {
     const f = await setup(), before = new OfficePackage(f.original), slide = ppt(f.original).slides[0]
     const shape = slide.shapes.find(object => object.chart)!, chart = shape.chart!

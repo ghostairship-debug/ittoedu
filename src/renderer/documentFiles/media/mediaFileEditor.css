@@ -1,5 +1,6 @@
 .media-file-editor { display: flex; flex-direction: column; height: 100%; min-height: 0; color: var(--text-primary, #263041); background: var(--bg-primary, #f4f6fa); }
 .media-file-editor__toolbar, .media-file-editor__pages { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 10px 14px; background: var(--bg-secondary, white); border-bottom: 1px solid var(--border-color, #dde3eb); }
+.media-file-editor__autosave { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; font-size: 12px; }
 .media-file-editor button, .media-file-editor select { border: 1px solid var(--border-color, #d6dee8); border-radius: 6px; background: var(--bg-secondary, white); color: inherit; padding: 5px 9px; font: inherit; font-size: 12px; }
 .media-file-editor button:disabled { opacity: .4; cursor: default; }
 .media-file-editor button[aria-pressed="true"] { color: #2457a7; border-color: #83a9e7; background: #eaf2ff; }

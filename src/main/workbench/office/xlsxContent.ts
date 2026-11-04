@@ -6,7 +6,25 @@ import type { OfficeCalculation, OfficeCellValue, OfficeContentInspection, Offic
 interface CalcCell { f?: string; v?: string | number | boolean; t?: string; w?: string }
 interface CalcWorkbook { Sheets: Record<string, Record<string, CalcCell | string>> }
 // xlsx-calc ships JavaScript without declarations. Keep its untyped boundary local.
-const calculate = require('xlsx-calc') as (workbook: CalcWorkbook) => void
+const calculate = require('xlsx-calc') as ((workbook: CalcWorkbook) => void) & { set_fx: (name: string, fn: (...args: unknown[]) => number) => void }
+// xlsx-calc uses Math.round directly, which rounds negative ties toward zero.
+// Shift through decimal notation to avoid introducing a binary multiplication error
+// before rounding values such as 1.475 at two decimal places.
+calculate.set_fx('ROUND', (...args: unknown[]) => {
+  if (args.length !== 2) throw new Error('#VALUE!')
+  const value = Number(args[0]), places = Math.trunc(Number(args[1]))
+  if (!Number.isFinite(value) || !Number.isFinite(places)) throw new Error('#VALUE!')
+  const shift = (number: number, exponent: number) => {
+    const [mantissa, current = '0'] = String(number).split('e')
+    return Number(`${mantissa}e${Number(current) + exponent}`)
+  }
+  const shifted = shift(Math.abs(value), places)
+  if (!Number.isFinite(shifted)) return value
+  if (shifted === 0) return 0
+  const result = shift(Math.round(shifted), -places)
+  if (!Number.isFinite(result)) throw new Error('#NUM!')
+  return value < 0 ? -result : result
+})
 const supportedFunctions = new Set(['SUM', 'MIN', 'MAX', 'AVERAGE', 'ROUND', 'ABS', 'SQRT', 'IF'])
 
 export async function createXlsx(request: OfficeRequest<'xlsx', 'create'>): Promise<Uint8Array> {
@@ -28,7 +46,7 @@ export async function createXlsx(request: OfficeRequest<'xlsx', 'create'>): Prom
 
 function isFormula(value: OfficeCellValue): value is { formula: string } { return typeof value === 'object' && value !== null }
 function normalizeFormula(value: string) { return value.trim().replace(/^=/, '') }
-function address(value: string): { name: string; row: number; column: number } {
+export function address(value: string): { name: string; row: number; column: number } {
   const name = value.toUpperCase()
   const match = /^([A-Z]{1,3})([1-9]\d*)$/.exec(name)
   if (!match) throw new Error(`Excel 单元格位置无效：${value}`)
@@ -38,7 +56,7 @@ function address(value: string): { name: string; row: number; column: number } {
   return { name, row, column }
 }
 interface Sheet { name: string; part: string; xml: Document; node: Element; sheetId: string }
-function sheets(pkg: OfficePackage): Sheet[] {
+export function sheets(pkg: OfficePackage): Sheet[] {
   const main = pkg.main(); const workbook = pkg.xml(main); const relationships = pkg.relationships(main)
   if (workbook.documentElement.namespaceURI !== NS.sheet) throw new Error('该文件不是支持的 XLSX 工作簿')
   return descendants(workbook, NS.sheet, 'sheet').map(sheet => {
@@ -85,7 +103,7 @@ function writeScalar(cell: Element, value: string | number | boolean | null, for
     cell.appendChild(element(xml, 'v', typeof value === 'boolean' ? value ? '1' : '0' : String(value)))
   }
 }
-function cellAt(sheet: Sheet, input: string): Element {
+export function cellAt(sheet: Sheet, input: string): Element {
   const target = address(input)
   const sheetData = descendants(sheet.xml, NS.sheet, 'sheetData')[0]
   if (!sheetData) throw new Error(`工作表不含普通单元格：${sheet.name}`)
@@ -108,7 +126,7 @@ function includesCell(range: string, target: string): boolean {
   const cell = address(target)
   return cell.row >= from.row && cell.row <= to.row && cell.column >= from.column && cell.column <= to.column
 }
-function updateDimension(sheet: Sheet) {
+export function updateDimension(sheet: Sheet) {
   const refs = descendants(sheet.xml, NS.sheet, 'c').map(cell => address(cell.getAttribute('r') ?? ''))
   const dimension = descendants(sheet.xml, NS.sheet, 'dimension')[0]
   if (!dimension || !refs.length) return
@@ -119,6 +137,12 @@ function updateDimension(sheet: Sheet) {
 }
 
 function relationPart(main: string): string { return path.posix.join(path.posix.dirname(main), '_rels', path.posix.basename(main) + '.rels') }
+export function xlsxStylePart(pkg: OfficePackage): string | undefined {
+  const main = pkg.main(), relation = relationPart(main)
+  if (!pkg.parts[relation]) return undefined
+  const style = descendants(pkg.xml(relation), NS.relationship, 'Relationship').find(node => node.getAttribute('Type')?.endsWith('/styles'))
+  return style ? pkg.relationships(main).get(style.getAttribute('Id') ?? '') : undefined
+}
 function validateSheetName(allSheets: Sheet[], name: string, previous?: string) {
   if (!name.trim() || name.length > 31 || /[\\/?*\[\]:\x00-\x1f]/.test(name) || name.startsWith("'") || name.endsWith("'")) throw new Error('工作表名须为 1—31 个字符，不能包含 \\ / ? * [ ] : 或首尾单引号。')
   if (allSheets.some(sheet => sheet.name !== previous && sheet.name.toLocaleLowerCase() === name.toLocaleLowerCase())) throw new Error(`工作表名称已存在：${name}`)
@@ -346,13 +370,29 @@ export function recalculateXlsx(pkg: OfficePackage): { calculation: OfficeCalcul
   return { calculation: { engine: 'xlsx-calc', status: complete ? 'complete' : 'partial', values }, diagnostics }
 }
 
+function basicNumberDisplay(value: number, code: string): string | undefined {
+  // Keep complex native format codes intact and show the raw value when the preview cannot represent them.
+  const match = /^(0|#,##0)(?:\.(0{1,20}))?(%)?$/.exec(code)
+  if (!match) return undefined
+  const decimals = match[2]?.length ?? 0
+  return value.toLocaleString('en-US', { style: match[3] ? 'percent' : 'decimal', useGrouping: match[1] === '#,##0', minimumFractionDigits: decimals, maximumFractionDigits: decimals })
+}
+
 export function inspectXlsx(pkg: OfficePackage): Extract<OfficeContentInspection, { format: 'xlsx' }> {
   const strings = sharedStrings(pkg)
+  const styles = xlsxStylePart(pkg)
+  const styleRoot = styles && pkg.parts[styles] ? pkg.xml(styles).documentElement : undefined
+  const formats = styleRoot && children(styleRoot, NS.sheet, 'cellXfs')[0]
+  const numberFormats = new Map(styleRoot ? descendants(styleRoot, NS.sheet, 'numFmt').map(node => [node.getAttribute('numFmtId'), node.getAttribute('formatCode')]) : [])
+  const styleCodes = formats ? children(formats, NS.sheet, 'xf').map(node => numberFormats.get(node.getAttribute('numFmtId'))) : []
   return { format: 'xlsx', sheets: sheets(pkg).map(sheet => ({ name: sheet.name, part: sheet.part, sheetId: sheet.sheetId,
     columnWidths: descendants(sheet.xml, NS.sheet, 'col').filter(node => node.hasAttribute('width')).map(node => ({ min: Number(node.getAttribute('min')), max: Number(node.getAttribute('max')), width: Number(node.getAttribute('width')) })).filter(value => Number.isInteger(value.min) && Number.isInteger(value.max) && value.min >= 1 && value.max <= 16384 && value.max >= value.min && Number.isFinite(value.width) && value.width >= 0),
     mergedRanges: descendants(sheet.xml, NS.sheet, 'mergeCell').map(node => node.getAttribute('ref') ?? '').filter(Boolean),
     cells: descendants(sheet.xml, NS.sheet, 'c').map(cell => {
     const formula = children(cell, NS.sheet, 'f')[0]
-    return { cell: cell.getAttribute('r') ?? '', value: cellScalar(cell, strings), ...(formula ? { formula: formula.textContent ?? '' } : {}) }
+    const value = cellScalar(cell, strings), numberFormat = styleCodes[Number(cell.getAttribute('s') || 0)]
+    const display = typeof value === 'number' && numberFormat ? basicNumberDisplay(value, numberFormat) : undefined
+    return { cell: cell.getAttribute('r') ?? '', value, ...(formula ? { formula: formula.textContent ?? '' } : {}),
+      ...(numberFormat ? { numberFormat } : {}), ...(display !== undefined ? { display } : {}) }
   }) })) }
 }

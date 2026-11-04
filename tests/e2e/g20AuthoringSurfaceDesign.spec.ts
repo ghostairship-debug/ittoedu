@@ -71,14 +71,13 @@ test('HTML authoring toolbar shows readable edit state and a reachable file menu
         tabsThroughToolbarHeight: tabs && frame ? frame.y - tabs.y : null }
     })
     await m23Shot(fixture, runtime.page, info, '02-edit-resting', runtime.app)
-    await editor.getByLabel('文档更多操作', { exact: true }).click()
     const saveAs = editor.getByRole('button', { name: '另存为', exact: true })
     await expect(saveAs).toBeVisible()
     await expect(saveAs).toBeEnabled()
     await saveAs.click({ trial: true })
-    facts.fileMenu = { saveAsVisible: true, saveAsEnabled: true, saveAsHitTestPassed: true, bounds: await saveAs.boundingBox() }
+    facts.saveAsToolbar = { saveAsVisible: true, saveAsEnabled: true, saveAsHitTestPassed: true, bounds: await saveAs.boundingBox() }
     await runtime.page.mouse.move(2, 2)
-    await m23Shot(fixture, runtime.page, info, '03-file-menu', runtime.app)
+    await m23Shot(fixture, runtime.page, info, '03-save-as-toolbar', runtime.app)
     expect((facts.editHovered as { colorContrast: number }).colorContrast, 'Finish-edit text should be legible immediately when its state changes').toBeGreaterThanOrEqual(4.5)
     expect((facts.editResting as { colorContrast: number }).colorContrast, 'Resting finish-edit text should be legible').toBeGreaterThanOrEqual(4.5)
   } catch (error) {

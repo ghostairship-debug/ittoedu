@@ -2,7 +2,6 @@ import { componentSurface } from '../../../shared/contracts/component-platform/p
 import { useEffect, useLayoutEffect, useState, type CSSProperties } from 'react'
 import type { FlowWorkspaceProps } from '../FlowWorkspace'
 import { FlowWorkspace } from '../FlowWorkspace'
-import { FLOW_WORKSPACE_HEADER_HEIGHT } from '../FlowBlockContextToolbar'
 import { useCourseV10Runtime } from '../../components/CourseV10RuntimeView'
 import { CourseNavigationControls } from './CourseNavigationControls'
 export type FlowCanvasMode = 'edit' | 'run'
@@ -22,30 +21,33 @@ export function FlowLocationWorkspace(props: FlowLocationWorkspaceProps) {
     return () => runtime.setPlaying(false)
   }, [runtime.documentId, runtime.setPlaying, props.canvasMode])
   const [toolbarContainer, setToolbarContainer] = useState<HTMLDivElement | null>(null)
-  const [headerHeight, setHeaderHeight] = useState(FLOW_WORKSPACE_HEADER_HEIGHT)
+  const [header, setHeader] = useState<HTMLDivElement | null>(null)
+  const [headerHeight, setHeaderHeight] = useState(44)
   useLayoutEffect(() => {
-    if (!toolbarContainer) return
-    const measure = () => setHeaderHeight(Math.max(FLOW_WORKSPACE_HEADER_HEIGHT, Math.ceil(toolbarContainer.getBoundingClientRect().height) + 12))
+    if (!header) return
+    const measure = () => setHeaderHeight(Math.ceil(header.getBoundingClientRect().height) || 44)
     measure()
     const observer = new ResizeObserver(measure)
-    observer.observe(toolbarContainer)
+    observer.observe(header)
     return () => observer.disconnect()
-  }, [toolbarContainer])
+  }, [header])
   const surface = componentSurface(props.project, props.surfaceId)
   const nested = !props.project.rootIds.includes(props.surfaceId)
   const editorNavigation = runtime.navigation.editorPort()
   const navigation = nested ? editorNavigation.forContainer?.(props.surfaceId) ?? editorNavigation : editorNavigation
   return <main className={`workspace workspace--${props.canvasMode} workspace--flow`} data-testid="flow-workspace-shell"
     data-flow-not-slide-stage="true" style={{ '--flow-workspace-header-height': `${headerHeight}px` } as CSSProperties}>
-    <div ref={setToolbarContainer} className="flow-workspace-toolbar-host" data-testid="flow-workspace-toolbar-host" style={{ height: 'auto' }} />
-    <CourseNavigationControls canvasMode={props.canvasMode} onCanvasModeChange={props.onCanvasModeChange}
-      navigation={navigation} beforeNavigate={props.beforeNavigate}
-      resetPlayback={async playing => {
-        await props.beforeNavigate?.()
-        await runtime.resetPlayback(playing, nested ? props.surfaceId : undefined)
-      }}
-      report={message => props.onStatus?.(message)} />
-    <div className={`canvas-label${props.editingScope === 'global' ? ' canvas-label--global' : ''}`}>{props.editingScope === 'global' ? '全局层 · 视口浮层' : surface?.title}</div>
+    <div ref={setHeader} className="flow-workspace-header">
+      <div ref={setToolbarContainer} className="flow-workspace-toolbar-host" data-testid="flow-workspace-toolbar-host" />
+      <div className={`canvas-label${props.editingScope === 'global' ? ' canvas-label--global' : ''}`}>{props.editingScope === 'global' ? '全局层 · 视口浮层' : surface?.title}</div>
+      <CourseNavigationControls canvasMode={props.canvasMode} onCanvasModeChange={props.onCanvasModeChange}
+        navigation={navigation} beforeNavigate={props.beforeNavigate}
+        resetPlayback={async playing => {
+          await props.beforeNavigate?.()
+          await runtime.resetPlayback(playing, nested ? props.surfaceId : undefined)
+        }}
+        report={message => props.onStatus?.(message)} />
+    </div>
     <div className="canvas-viewport"><FlowWorkspace {...props} toolbarContainer={toolbarContainer} readOnly={props.canvasMode === 'run'} /></div>
   </main>
 }

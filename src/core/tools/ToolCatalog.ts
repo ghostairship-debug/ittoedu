@@ -16,7 +16,7 @@ import bundledSkills from '../../shared/generated/bundledSkills.json'
 import { nativeContentInputSchemaByType } from '../../shared/contracts/native-v1/schema'
 import { z } from 'zod'
 import type { ModelToolCall, ToolDefinition, ToolResult } from '../../shared/workbench/tools'
-import { textFormatInputSchema, objectUpdateInputSchema, objectConvertInputSchema, courseConfigureInputSchema, surfaceConfigureInputSchema, objectStructureInputSchema, objectPlaceInputSchema, objectAuthorInputSchema, interactionUpdateInputSchema, courseLogicInputSchema, courseMediaInputSchema, surfaceRecipeInputSchema, courseProductivityInputSchema, surfaceDuplicateInputSchema, surfaceRemixInputSchema, objectInsertInputSchema, objectLayoutInputSchema, teacherEnsureInputSchema } from './toolSchemas'
+import { contentDependenciesSchema, textFormatInputSchema, objectUpdateInputSchema, objectConvertInputSchema, courseConfigureInputSchema, surfaceConfigureInputSchema, objectStructureInputSchema, objectPlaceInputSchema, objectAuthorInputSchema, interactionUpdateInputSchema, courseLogicInputSchema, courseMediaInputSchema, surfaceRecipeInputSchema, courseProductivityInputSchema, surfaceDuplicateInputSchema, surfaceRemixInputSchema, objectInsertInputSchema, objectLayoutInputSchema, teacherEnsureInputSchema } from './toolSchemas'
 import { coursePresentationInputSchema } from './coursePresentationEdits'
 import { componentFrameSchema } from '../../shared/contracts/component-platform/schema'
 import { handleToolTarget, hasRunDocument, hasRunWrite, hasRunDelivery, projectToolTarget, registeredEffectNames,
@@ -48,7 +48,7 @@ export const officeToolRegistrations = officeContentTools.map(tool => registerOf
 export function officeToolRegistration(name: string) { return officeToolRegistrations.find(tool => tool.name === name) }
 export const canonicalMutationTools = [
   registerCanonical({ name: 'text.replace', description: '替换已授权文字字段或精确范围；保留范围外文字及富文本格式。Project V11 使用宿主捕获的组件文字字段句柄，展示状态仍固定在原目标。对象样式使用 object.update；纯文本文档保持纯文本。',
-    inputSchema: z.object({ target: target.optional().describe('省略时使用本次文字卡由宿主固定的默认目标；其它任务必须提供。'), content: z.string(), format: z.enum(['text', 'html']).optional().describe('原生富文本省略时，普通正文沿用选区文字格式，HTML 标记或实体按 HTML 替换；text 将内容视为纯文字并沿用选区格式，html 按内容所带格式替换。') }).strict(), manual: { label: '替换正文', group: 'edit', targetKinds: ['markdown-range', 'html-author-field', 'course-instance', 'text-selection'] } },
+    inputSchema: z.object({ target: target.optional().describe('省略时使用本次文字卡由宿主固定的默认目标；其它任务必须提供。'), content: z.string(), dependsOn: contentDependenciesSchema, format: z.enum(['text', 'html']).optional().describe('原生富文本省略时，普通正文沿用选区文字格式，HTML 标记或实体按 HTML 替换；text 将内容视为纯文字并沿用选区格式，html 按内容所带格式替换。') }).strict(), manual: { label: '替换正文', group: 'edit', targetKinds: ['markdown-range', 'html-author-field', 'course-instance', 'text-selection'] } },
   { capability: 'write', effect: 'document-edit', supports: context => hasRunWrite(context, ['markdown-range', 'html-author-field', 'course-instance', 'text-selection']), targets: (input, resolver) => input.target ? handleToolTarget({ target: input.target }, resolver) : undefined,
     handler: (context, input) => context.mutate({ name: 'text.replace', input }) }),
   registerCanonical({ name: 'text.format', description: '对已观察且获授权的 Markdown 或课件原生正文范围设置加粗、斜体、字号、字体、颜色等真实文字格式，保留原文、范围外格式和对象位置。style 只应用提供字段。纯文本文件没有格式；普通 HTML 源文件的范围格式当前不支持，不扩大为父元素样式。',

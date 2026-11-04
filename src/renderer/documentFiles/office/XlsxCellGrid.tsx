@@ -1,17 +1,18 @@
-import { forwardRef, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, type ClipboardEvent } from 'react'
+import { forwardRef, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, type ClipboardEvent } from 'react'
 import { DataGrid, type Column, type ColumnWidths, type DataGridHandle } from 'react-data-grid'
 import { cellName, columnName, parsedMergedRanges, position, rangeBetween, rangeContains, serializeTsv } from './xlsxGridModel'
 import 'react-data-grid/lib/styles.css'
 import './xlsxCellGrid.css'
 
 export interface XlsxCellPresentation { display: string; editor: string; formula: boolean }
-export interface XlsxCellGridHandle { jump(cell: string): void }
+export interface XlsxCellGridHandle { jump(cell: string): void; editCell(): void; viewport(): HTMLElement | null; selectionRect(): DOMRect | null }
 interface Props {
   sheetName: string; rowCount: number; columnCount: number; busy: boolean; selectedCell: string
   mergedRanges?: string[]
   cell(cell: string): XlsxCellPresentation
   columnWidth(column: number): number
   onFocus(cell: string): void
+  onSelection(range: string | null): void
   onDraft(cell: string, text: string): void
   onColumnWidth(column: number, pixels: number): void
   onPaste(text: string, cell: string): void
@@ -22,11 +23,16 @@ const rowKey = (row: number) => row
 export const XlsxCellGrid = forwardRef<XlsxCellGridHandle, Props>(function XlsxCellGrid(props, ref) {
   const grid = useRef<DataGridHandle>(null), extensionTarget = useRef<string | null>(null)
   const [selection, setSelection] = useState({ anchor: props.selectedCell, end: props.selectedCell }), [rawCell, setRawCell] = useState<string | null>(null)
+  const [engaged, setEngaged] = useState(false)
   const rows = useMemo(() => Array.from({ length: props.rowCount }, (_, index) => index + 1), [props.rowCount])
   const merges = useMemo(() => parsedMergedRanges(props.mergedRanges), [props.mergedRanges])
   const range = rangeBetween(selection.anchor, selection.end), multiple = selection.anchor !== selection.end
   const merged = (cell: string) => { const target = position(cell)!; return merges.find(value => rangeContains(value, target)) }
   const input = (cell: string) => grid.current?.element?.querySelector<HTMLInputElement>(`[data-cell="${cell}"]`)
+  const selectionLabel = multiple ? `${cellName(range.first)}:${cellName(range.last)}` : selection.end
+  const selectionCallback = useRef(props.onSelection); selectionCallback.current = props.onSelection
+  useEffect(() => { selectionCallback.current(engaged && !rawCell ? selectionLabel : null) }, [engaged, selectionLabel, rawCell])
+  useEffect(() => () => selectionCallback.current(null), [])
   function select(cell: string, extend = false, focus = true) {
     const target = position(cell)!
     extensionTarget.current = extend ? cell : null
@@ -35,7 +41,8 @@ export const XlsxCellGrid = forwardRef<XlsxCellGridHandle, Props>(function XlsxC
     props.onFocus(cell)
     grid.current?.setActivePosition({ idx: target.column, rowIdx: target.row - 1 }, { shouldFocus: focus })
   }
-  useImperativeHandle(ref, () => ({ jump: cell => select(cell) }))
+  useImperativeHandle(ref, () => ({ jump: cell => select(cell), editCell: () => editRaw(selection.end), viewport: () => grid.current?.element ?? null,
+    selectionRect: () => input(selection.end)?.getBoundingClientRect() ?? null }))
   useLayoutEffect(() => { const target = position(props.selectedCell)!; grid.current?.setActivePosition({ idx: target.column, rowIdx: target.row - 1 }, { shouldFocus: false }) }, [])
   function editRaw(cell: string) {
     const merge = merged(cell)
@@ -74,7 +81,7 @@ export const XlsxCellGrid = forwardRef<XlsxCellGridHandle, Props>(function XlsxC
       },
     }
   })]
-  return <div className="office-xlsx-grid-shell" onCopy={copy} onPaste={event => {
+  return <div className="office-xlsx-grid-shell" onFocusCapture={() => setEngaged(true)} onCopy={copy} onPaste={event => {
     const text = event.clipboardData.getData('text/plain')
     if (props.busy) { event.preventDefault(); return }
     if (multiple || rawCell !== selection.end || /[\t\r\n]/.test(text) || !(event.target instanceof HTMLInputElement)) { event.preventDefault(); props.onPaste(text, cellName(range.first)) }
@@ -111,6 +118,6 @@ export const XlsxCellGrid = forwardRef<XlsxCellGridHandle, Props>(function XlsxC
           requestAnimationFrame(() => { const target = input(cell); target?.focus(); if (target) target.setSelectionRange(target.value.length, target.value.length) })
         }
       }} />
-    <div className="office-xlsx-selection-status" aria-live="polite">{multiple ? `${cellName(range.first)}:${cellName(range.last)}` : selection.end}<span>Shift + 单击或方向键选择区域 · 双击或 F2 编辑原内容</span></div>
+    <div className="office-xlsx-selection-status" aria-live="polite">{selectionLabel}<span>Shift + 单击或方向键选择区域 · 双击或 F2 编辑原内容</span></div>
   </div>
 })

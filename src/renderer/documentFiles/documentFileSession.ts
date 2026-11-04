@@ -151,6 +151,7 @@ export class DocumentFileSession {
       if (!current.saveError) this.receiveSavedSource(current)
       this.poll()
     }
+    this.schedule()
   }
   async open() {
     const documents = this.documents
@@ -426,7 +427,7 @@ export class DocumentFileSession {
   }
   private schedule() {
     clearTimeout(this.timer)
-    if (this.disposed || this.closeSuspended || !this.state.autoSave) return
+    if (this.disposed || this.closeSuspended || this.pending || this.state.saving || this.state.error || !this.state.autoSave) return
     if (!this.savingAs && this.committedDocument?.binding.kind === 'file' && this.state.dirty && !this.state.composing && !this.state.conflict && !this.state.recovery) this.timer = setTimeout(() => { if (this.state.autoSave && !this.closeSuspended && this.committedDocument?.binding.kind === 'file') void this.flush() }, 800)
   }
   setAutoSave(autoSave: boolean) {

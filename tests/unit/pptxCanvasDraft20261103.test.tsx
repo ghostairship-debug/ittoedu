@@ -149,6 +149,7 @@ describe('PPT host draft, clipboard and focus boundaries', () => {
     const callbacks = props(); render(<PptxFileEditor {...callbacks} />)
     const editor = await ready(), slideId = editor.doc.slideOrder[0], ids = [...editor.doc.slides[slideId].children]
     act(() => editor.select({ kind: 'elements', ids: [ids[0]], enteredGroup: null }))
+    fireEvent.click(await screen.findByRole('button', { name: '更多对象与文字操作' }))
     fireEvent.click(screen.getByRole('button', { name: '剪切对象（Ctrl+X）' }))
     expect(writeText).toHaveBeenCalledTimes(1)
     act(() => editor.select({ kind: 'elements', ids: [ids[1]], enteredGroup: null }))
@@ -169,6 +170,7 @@ describe('PPT host draft, clipboard and focus boundaries', () => {
     const group = editor.selection.ids[0]
     act(() => editor.select({ kind: 'elements', ids: [ids[0]], enteredGroup: group }))
     const payload = JSON.stringify(copyPptxObjects(editor, slideId)), count = Object.keys(editor.doc.elements).length
+    fireEvent.click(screen.getByRole('button', { name: '页面操作' }))
     fireEvent.click(screen.getByRole('button', { name: '粘贴对象（Ctrl+V）' }))
     act(() => editor.select({ kind: 'elements', ids: [group], enteredGroup: null }))
     await act(async () => { finish(payload); await Promise.resolve() })
@@ -180,6 +182,7 @@ describe('PPT host draft, clipboard and focus boundaries', () => {
     const callbacks = props(), ref = createRef<OfficeEditorHandle>(); render(<PptxFileEditor ref={ref} {...callbacks} />)
     const editor = await ready(), slideId = editor.doc.slideOrder[0]
     fireEvent.click(screen.getByRole('button', { name: '插入文本框' }))
+    fireEvent.click(await screen.findByRole('button', { name: '更多对象与文字操作' }))
     expect(screen.getByRole('combobox', { name: '字号' })).toBeEnabled()
     expect(screen.getByLabelText('文字颜色')).toHaveValue('#202124')
     fireEvent.change(screen.getByRole('combobox', { name: '字号' }), { target: { value: '40' } })

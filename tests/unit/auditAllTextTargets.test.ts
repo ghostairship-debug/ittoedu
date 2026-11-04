@@ -56,21 +56,32 @@ it('CA011 an exact range read survives human text appended outside it while an o
   expect(plainDocumentText(textComponentDataSchema.parse(f.model().project.instances.a.data).content)).toBe('EDITED tail human')
   const current=await f.issue({...range,to:6});await f.read(current)
   await f.human([{type:'data.set',instanceId:'a',path:['content'],value:json(text('HUMAN tail human'))}])
-  expect(await f.execute('text.replace',{target:await f.issue(f.target('b',{dataPath:['content']})),content:'stale summary'})).toMatchObject({kind:'error',code:'read-basis-changed'})
+  expect(await f.execute('text.replace',{target:await f.issue(f.target('b',{dataPath:['content']})),content:'stale summary',dependsOn:[current]})).toMatchObject({kind:'error',code:'read-basis-changed'})
 })
 it('CA036 a read Flow caption participates in the same canonical content basis',async()=>{
   const value=project(true);value.definitions.video={id:'video',role:'mixed',implementation:{kind:'builtin',key:'guoling.video'}}
   value.instances.a={id:'a',definitionId:'video',data:{assetId:'remote-video'},flowLayout:{width:'content-width',caption:text('串联电流相等')}}
   const f=await fixture(value),caption=await f.issue(f.target('a',{fieldScope:'flowLayout',dataPath:['caption']}));await f.read(caption)
   await f.human([{type:'instance.flowLayout.set',instanceId:'a',flowLayout:{width:'content-width',caption:text('并联电压相等')}}])
-  expect(await f.execute('text.replace',{target:await f.issue(f.target('b',{dataPath:['content']})),content:'stale summary'})).toMatchObject({kind:'error',code:'read-basis-changed'})
+  expect(await f.execute('text.replace',{target:await f.issue(f.target('b',{dataPath:['content']})),content:'stale summary',dependsOn:[caption]})).toMatchObject({kind:'error',code:'read-basis-changed'})
 })
 it('CA123 a failed stale page never acknowledges changed unread content',async()=>{
   const value=project();value.instances.a.data=json(createTextComponentData('2'.repeat(160)+'5'));const f=await fixture(value),handle=await f.issue(f.target('a',{dataPath:['content']})),first=await f.read(handle,{limit:1})
   expect(first.kind).toBe('read');if(first.kind!=='read'||!first.nextCursor)throw new Error('pagination')
   await f.human([{type:'data.set',instanceId:'a',path:['content'],value:json(text('9'.repeat(160)+'5'))}])
   expect(await f.read(handle,{cursor:first.nextCursor,limit:1})).toMatchObject({kind:'error',code:'stale-cursor'})
-  expect(await f.execute('text.replace',{target:await f.issue(f.target('b',{dataPath:['content']})),content:'stale summary'})).toMatchObject({kind:'error',code:'read-basis-changed'})
+  expect(await f.execute('text.replace',{target:await f.issue(f.target('b',{dataPath:['content']})),content:'stale summary',dependsOn:[handle]})).toMatchObject({kind:'error',code:'read-basis-changed'})
+})
+it('keeps a prior unrelated read from blocking a different object edit', async () => {
+  const f = await fixture()
+  const a = await f.issue(f.target('a', { dataPath: ['content'] }))
+  const b = await f.issue(f.target('b', { dataPath: ['content'] }))
+  await f.read(a); await f.read(b)
+  await f.human([{ type: 'data.set', instanceId: 'b', path: ['content'], value: json(text('human changed B')) }])
+  expect(await f.execute('text.replace', { target: a, content: 'AI changed A' }))
+    .toMatchObject({ kind: 'document-operation', result: { status: 'applied' } })
+  expect(['a', 'b'].map(id => plainDocumentText(textComponentDataSchema.parse(f.model().project.instances[id]!.data).content)))
+    .toEqual(['AI changed A', 'human changed B'])
 })
 it('CA012 named surface state reaches observation through both target and project-file routes',async()=>{
   const value=project();testContainerInstance(value, 0).container.presentation={states:[{id:'answer',title:'答案',overrides:{}}]}
@@ -113,7 +124,7 @@ it('CA249 a completed card follows the original row ID after an inserted row and
   expect(await f.execute('text.replace',{target:await f.issue(target),content:'CHANGED'})).toMatchObject({result:{status:'applied'}});tracker.finish()
   const current=parseTableData(f.model().project.instances.table.data),added=structuredClone(data.rows[0]);added.id='new-row';added.cells.forEach(cell=>{cell.id=crypto.randomUUID();cell.text='NEW';delete cell.content})
   await f.human([{type:'data.set',instanceId:'table',path:['rows'],value:json([added,...current.rows])}])
-  expect(tracker.view('submission')).toMatchObject({state:'applied',target:{dataPath:['rows','1','cells','0','content']}})
+  expect(tracker.view('submission')).toMatchObject({state:'applied',target:{dataPath:['rows','1','cells','0','text']}})
   expect(JSON.parse(tracker.view('submission').content!)).toEqual(text('CHANGED'))
   expect(await tracker.revert('submission','undo')).toMatchObject({status:'applied'});const restored=parseTableData(f.model().project.instances.table.data).rows[1].cells[0];expect(restored.content ? plainDocumentText(restored.content) : restored.text).toBe('TARGET outside');tracker.dispose()
 })
@@ -209,5 +220,5 @@ it('CA254 copying a frameless Flow table to Slide prepares an editable free fram
 it('CA302 a course clipboard carries the selected object closure without unrelated pages or private prose',()=>{
   const value=project(true);testContainerInstance(value, 0).childIds=['a'];appendRootContainers(value, {id:'private-page',title:'PRIVATE_PAGE',kind:'flow',childIds:['b']});value.instances.b.data=json(createTextComponentData('PRIVATE_TEXT'))
   const context=createCourseDocumentClipboardContext({documentId:'source',project:value,resources:{assets:{},components:{}},roots:['a']}),encoded=JSON.stringify(context)
-  expect(encoded).not.toContain('PRIVATE_PAGE');expect(encoded).not.toContain('PRIVATE_TEXT');expect(Object.keys(context.project.instances)).toEqual(['a']);expect(componentSurfaces(context.project)).toHaveLength(1);expect(readCourseDocumentClipboardContext(context).project.instances.a.data).toEqual(value.instances.a.data)
+  expect(encoded).not.toContain('PRIVATE_PAGE');expect(encoded).not.toContain('PRIVATE_TEXT');expect(Object.keys(context.project.instances).sort()).toEqual(['a',testContainerInstance(value, 0).id].sort());expect(componentSurfaces(context.project)).toHaveLength(1);expect(readCourseDocumentClipboardContext(context).project.instances.a.data).toEqual(value.instances.a.data)
 })

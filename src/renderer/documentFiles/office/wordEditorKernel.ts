@@ -12,6 +12,7 @@ export interface WordKernelOptions {
   composition(active: boolean): void
   input?(pending: boolean): void
   error(message: string): void
+  stage(): void
   save(): void
   history(redo: boolean): void
 }
@@ -50,7 +51,7 @@ export function createWordEditor(element: HTMLElement, inspection: WordInspectio
         view.updateState(next)
         if (edits.length) options.changed(edits)
         options.selection(next)
-        if (edits.some(edit => edit.type === 'textStyle' || edit.type === 'paragraphStyle' || edit.type === 'replaceRange' && (edit.paragraphs.length > 1 || edit.start.paragraph !== edit.end.paragraph))) queueMicrotask(() => { if (!view.composing) options.save() })
+        if (edits.some(edit => edit.type === 'textStyle' || edit.type === 'paragraphStyle' || edit.type === 'replaceRange' && (edit.paragraphs.length > 1 || edit.start.paragraph !== edit.end.paragraph))) queueMicrotask(() => { if (!view.composing) options.stage() })
       } catch (error) {
         view.updateState(view.state)
         options.error(error instanceof Error ? error.message : String(error))

@@ -7,6 +7,7 @@ import { DocumentHostService } from '../../src/main/workbench/DocumentHostServic
 import { AgentFileService } from '../../src/main/workbench/execution/AgentFileService'
 import type { AgentFileContext } from '../../src/core/tools/AgentFileTools'
 import { applyOfficeContent, inspectOfficeContent } from '../../src/main/workbench/office/OfficeContentService'
+import { OfficeFileService } from '../../src/main/workbench/office/OfficeFileService'
 
 const roots: string[] = []
 afterEach(async () => {
@@ -36,6 +37,26 @@ function deferred() {
 }
 
 describe('Office agent file authority and observed versions', () => {
+  it('keeps a captured open Office session across draft revisions and rejects disk fallback after close', async () => {
+    const f = await fixture(), filename = path.join(f.workspace, 'lesson.docx')
+    const office = new OfficeFileService(f.host), draft = await office.bindWorking(filename, true)
+    f.files.captureOfficeDraftTargets(f.context.runId, {
+      openFiles: [{ path: filename, format: 'docx', active: true, fileVersion: draft.fileVersion }],
+      references: [{ path: filename, scope: 'file', pinned: true, fileVersion: draft.fileVersion }],
+    })
+    await office.edit(draft, { operation: 'edit', ...editedContent }, { actor: 'human' })
+    expect((await f.files.executeOffice(f.context, 'office.inspect', { path: 'lesson.docx' }, 'new-draft-revision')).data)
+      .toMatchObject({ inspection: { paragraphs: [{ text: 'After' }] } })
+    await office.closeWorking(filename, true)
+    await expect(f.files.executeOffice(f.context, 'office.inspect', { path: 'lesson.docx' }, 'closed-inspect')).rejects.toThrow('草稿已关闭')
+    await expect(f.files.executeOffice(f.context, 'office.edit', { path: 'lesson.docx', content: editedContent }, 'closed-edit')).rejects.toThrow('草稿已关闭')
+    await office.bindWorking(filename, true)
+    await expect(f.files.executeOffice(f.context, 'office.inspect', { path: 'lesson.docx' }, 'replacement-inspect')).rejects.toThrow('草稿已关闭')
+    f.files.releaseRun(f.context.runId)
+    expect((await f.files.executeOffice(f.context, 'office.inspect', { path: 'lesson.docx' }, 'fresh-inspect')).data)
+      .toMatchObject({ inspection: { paragraphs: [{ text: 'Before' }] } })
+    expect(inspectOfficeContent(await fs.readFile(filename), 'docx')).toMatchObject({ paragraphs: [{ text: 'Before' }] })
+  }, 15_000)
   it('allows read-only inspection, forbids read-only writes and requires the existing outside-path grant', async () => {
     const f = await fixture(), readonly = { ...f.context, permission: 'read-only' as const }
     expect((await f.files.executeOffice(readonly, 'office.inspect', { path: 'lesson.docx' }, 'inspect-readonly')).data).toMatchObject({ writable: false, inspection: { format: 'docx' } })

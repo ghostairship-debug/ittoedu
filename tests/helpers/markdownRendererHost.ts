@@ -2,7 +2,7 @@ import { DocumentRegistry } from '../../src/core/documents/DocumentRegistry'
 import { MarkdownDriver } from '../../src/core/drivers/MarkdownDriver'
 import type { DocumentSession } from '../../src/core/documents/DocumentSession'
 import type { DocumentEvent, DocumentModel, DurableDocumentState } from '../../src/shared/workbench/document'
-import { authoringDraftRecoverySchema, type AuthoringDraftRecovery, type DocumentHostAPI } from '../../src/shared/workbench/desktop'
+import { authoringDraftWriteSchema, type AuthoringDraftRecovery, type DocumentHostAPI } from '../../src/shared/workbench/desktop'
 import type { DocumentFileRef } from '../../src/shared/document/ports'
 import type { RecoverableDocumentFilePort } from '../../src/renderer/documentFiles/documentFileSession'
 
@@ -50,7 +50,8 @@ export function attachMarkdownRendererHost(port: RecoverableDocumentFilePort, fi
     },
     writeAuthoringDrafts: async (id, drafts) => {
       registry.get(id)
-      authoringDrafts.set(id, structuredClone(authoringDraftRecoverySchema.parse(drafts)))
+      const { retainedRecords: _retained, flowSurfaceId: _surface, ...values } = authoringDraftWriteSchema.parse(drafts)
+      authoringDrafts.set(id, structuredClone({ advanced: [], properties: [], ...authoringDrafts.get(id), ...values }))
     },
     clearAuthoringDrafts: async id => {
       registry.get(id)

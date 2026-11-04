@@ -5,59 +5,44 @@
   right: 0;
 }
 
-/* Share one compact row with Markdown; low-frequency formats live in the menu. */
-.workspace.workspace--flow .flow-workspace-toolbar-host .shared-document-toolbar {
-  --flow-format-control-size: 26px;
+.flow-workspace-header {
+  position: absolute;
+  inset: 0 9px auto;
+  z-index: 7;
   display: flex;
   align-items: center;
-  flex-wrap: nowrap;
-  width: 100%;
-  min-width: 0;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  box-sizing: border-box;
+  min-height: 44px;
+  padding: 6px 0;
+}
+.workspace.workspace--flow .flow-workspace-header > .flow-workspace-toolbar-host,
+.workspace.workspace--flow .flow-workspace-header > .canvas-mode-switch {
+  position: static;
   height: auto;
-  gap: 2px;
-  padding: 4px 6px;
-  overflow: visible;
-  font-size: 12px;
-}
-.workspace.workspace--flow .flow-workspace-toolbar-host .shared-document-toolbar > button {
   flex: 0 0 auto;
-  min-width: var(--flow-format-control-size);
-  min-height: var(--flow-format-control-size);
-  padding: 3px 5px;
+  max-width: 100%;
 }
-.workspace.workspace--flow .flow-workspace-toolbar-host .shared-document-toolbar svg {
-  width: clamp(14px, 1.9cqw, 16px);
-  height: clamp(14px, 1.9cqw, 16px);
-  flex: none;
-}
-.workspace.workspace--flow .flow-workspace-toolbar-host .shared-document-toolbar > label {
-  flex: 0 0 auto;
+.flow-workspace-header > .flow-workspace-toolbar-host:empty { display: none; }
+.workspace.workspace--flow .flow-workspace-header > .canvas-label {
+  position: static;
+  flex: 1 1 55px;
   min-width: 0;
+  max-width: max-content;
+  margin-left: auto;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  transform: none;
 }
-.workspace.workspace--flow .flow-workspace-toolbar-host .shared-document-toolbar > label > input[type="number"] {
-  width: 48px;
-  min-width: 48px;
-  max-width: 48px;
-  min-height: var(--flow-format-control-size);
-  padding: 3px 4px;
-  text-align: center;
+.workspace.workspace--flow .flow-workspace-toolbar-host .shared-document-toolbar {
+  flex-wrap: wrap;
+  padding: 0 4px;
 }
-.workspace.workspace--flow .flow-workspace-toolbar-host .shared-document-toolbar > label > select {
-  width: 112px;
-  min-width: 0;
-  max-width: none;
-  min-height: var(--flow-format-control-size);
-  padding: 3px 5px;
-}
-.workspace.workspace--flow .flow-workspace-toolbar-host .shared-document-toolbar > select {
-  width: 76px;
-  min-width: 0;
-  min-height: var(--flow-format-control-size);
-  padding: 3px 5px;
-}
-.flow-text-interactions { position:relative; flex:none; font-size:12px; }
-.flow-text-interactions > summary { cursor:pointer; white-space:nowrap; }
-.flow-text-interactions > [role=group] { position:absolute; top:100%; right:0; z-index:5; max-height:60vh; overflow:auto; background:var(--panel-bg,#fff); border:1px solid var(--border,#cbd5e1); box-shadow:0 4px 12px #0002; }
+.flow-text-interactions { display:grid; gap:8px; box-sizing:border-box; width:min(270px, calc(100vw - 16px)); padding:8px; border:1px solid var(--border,#cbd5e1); border-radius:8px; background:var(--panel-bg,#fff); color:var(--ink,#17221d); font-size:12px; }
+.flow-text-interactions > label { display:grid; gap:3px; }
+.flow-text-interactions textarea { min-height:54px; resize:vertical; }
 
 /* Allocation handles belong to the document shell, never to a Source program. */
 [data-flow-body-resize]{visibility:hidden}

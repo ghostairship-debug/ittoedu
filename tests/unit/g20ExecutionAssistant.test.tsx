@@ -197,12 +197,15 @@ it('releases the actual timeline consumer when the mounted Assistant closes', as
 it('does not pin or save a late current-document capture into a different conversation', async () => {
   const { api, state } = executionFixture([conversation('a', '原会话', '原稿'), conversation('b', '新会话', '另一稿')])
   const incoming = deferred<any>()
-  const capture = vi.fn((_writable: boolean, prepare?: boolean) => prepare === false ? Promise.resolve([]) : incoming.promise)
+  const capture = vi.fn(async (_writable: boolean, _prepare?: boolean) => [])
   render(<ExecutionAssistant root="C:/workspace" api={api} settingsAPI={settingsFixture(true)} captureDocuments={capture} prepareSend={async () => true} />)
   await waitFor(() => expect(screen.getByRole('textbox', { name: '给果铃AI发消息' })).toHaveValue('原稿'))
+  await waitFor(() => expect(capture).toHaveBeenCalledWith(true, false))
+  capture.mockClear()
+  capture.mockImplementationOnce(() => incoming.promise)
   fireEvent.click(screen.getByRole('button', { name: '添加' }))
   fireEvent.click(screen.getByRole('menuitem', { name: '引用当前文档' }))
-  expect(capture).toHaveBeenCalledWith(true)
+  expect(capture).toHaveBeenCalledExactlyOnceWith(true, false)
   fireEvent.click(screen.getByRole('button', { name: '新会话' }))
   await waitFor(() => expect(screen.getByRole('textbox', { name: '给果铃AI发消息' })).toHaveValue('另一稿'))
   fireEvent.change(screen.getByRole('textbox', { name: '给果铃AI发消息' }), { target: { value: '另一稿的新输入' } })
@@ -537,7 +540,10 @@ it('restoring an old failed message keeps a different new draft until an explici
 it('labels a recovered stale document reference and only refreshes it after explicit reselection', async () => {
   const recovered: ConversationRecord = { ...conversation('a', '恢复的草稿', '继续改这段文字'), frozenContextRefs: [{ contextRefId: 'old', documentId: 'doc', epoch: 'old-epoch', revision: 1, writeScope: [{ kind: 'document' }] }] }
   const { api } = executionFixture([recovered])
-  vi.stubGlobal('desktopAPI', { documents: { read: vi.fn(async () => ({ epoch: 'new-epoch', binding: { kind: 'file', path: 'C:/workspace/reopened.html' } })) } })
+  vi.stubGlobal('desktopAPI', { documents: { read: vi.fn(async () => ({
+    documentId: 'doc', epoch: 'new-epoch', revision: 2, binding: { kind: 'file', path: 'C:/workspace/reopened.html' },
+    model: { kind: 'text', source: '<p>正文</p>' },
+  })) } })
   const captureDocuments = vi.fn(async () => [{ documentId: 'doc', epoch: 'new-epoch', revision: 2, writable: [{ kind: 'document' as const }] }])
   render(<ExecutionAssistant root="C:/workspace" api={api} settingsAPI={settingsFixture(false)} captureDocuments={captureDocuments} prepareSend={vi.fn(async () => true)} />)
   await screen.findByText(/原引用需要重新选择/)
@@ -550,9 +556,12 @@ it('labels a recovered stale document reference and only refreshes it after expl
 })
 
 it('keeps a visible reference name current after save-as without rebinding the frozen reference', async () => {
-  const { api } = executionFixture([conversation('renamed', '引用另存为')])
+  const { api } = executionFixture([{ ...conversation('renamed', '引用另存为'), frozenContextRefs: [
+    { contextRefId: 'doc-rename:file', documentId: 'doc-rename', epoch: 'same-epoch', revision: 1, writeScope: [{ kind: 'document' }] },
+  ] }])
   let notify!: (event: any) => void
-  const snapshot = { documentId: 'doc-rename', epoch: 'same-epoch', binding: { kind: 'file', path: 'C:/workspace/原文件.glx' } }
+  const snapshot = { documentId: 'doc-rename', epoch: 'same-epoch', revision: 1, binding: { kind: 'file', path: 'C:/workspace/原文件.glx' },
+    model: { kind: 'text', source: '正文' } }
   const read = vi.fn(async (_id: string) => snapshot)
   vi.stubGlobal('desktopAPI', { documents: { read, subscribe: (listener: typeof notify) => { notify = listener; return () => {} } } })
   const capture = vi.fn(async () => [{ documentId: snapshot.documentId, epoch: snapshot.epoch, revision: 1, writable: [{ kind: 'document' as const }] }])
@@ -561,6 +570,7 @@ it('keeps a visible reference name current after save-as without rebinding the f
   await screen.findByRole('button', { name: /移除引用 原文件.glx/ })
   await act(async () => notify({ type: 'changed', snapshot: { ...snapshot, binding: { kind: 'file', path: 'C:/workspace/另存为.glx' } } }))
   expect(screen.getByRole('button', { name: /移除引用 另存为.glx/ })).toBeInTheDocument()
+  expect(screen.getByLabelText('另存为.glx')).toHaveAttribute('title', 'C:/workspace/另存为.glx')
   expect(api.draft).not.toHaveBeenCalled()
   await act(async () => notify({ type: 'closed', documentId: snapshot.documentId, epoch: snapshot.epoch }))
   expect(screen.getByRole('button', { name: /移除引用 另存为.glx/ })).toBeInTheDocument()
@@ -570,7 +580,7 @@ it('keeps a visible reference name current after save-as without rebinding the f
     return { ...snapshot, documentId: id, binding: { kind: 'file', path: 'C:/workspace/另一文档.txt' } }
   })
   view.rerender(<ExecutionAssistant root="C:/workspace" api={api} settingsAPI={settings} captureDocuments={async () => [
-    ...(await capture()), { documentId: 'another-document', epoch: snapshot.epoch, revision: 1, writable: [{ kind: 'document' }] },
+    { documentId: 'another-document', epoch: snapshot.epoch, revision: 1, writable: [{ kind: 'document' }] },
   ]} prepareSend={async () => true} />)
   await screen.findByRole('button', { name: /移除引用 另一文档.txt/ })
   expect(screen.getByRole('button', { name: /移除引用 另存为.glx/ })).toBeInTheDocument()
@@ -661,7 +671,7 @@ it('M07-T07/S10-T05 freezes the exact send without a service notice, pins the sh
   fireEvent.click(screen.getByRole('button', { name: '会话 B' }))
   await waitFor(() => expect(screen.getByRole('button', { name: '会话 B' })).toHaveAttribute('aria-current', 'page'))
   expect(api.draft).toHaveBeenCalledWith({ workspaceId: 'workspace', conversationId: 'a', expectedRevision: 1,
-    text: '保留这份草稿', documents: [{ documentId: 'document-a', epoch: 'epoch', revision: 3, writable: [{ kind: 'document' }], referenceId: 'document-a:page:', pinned: false, displayLabel: '文档' }], attachments: [] })
+    text: '保留这份草稿', documents: [{ documentId: 'document-a', epoch: 'epoch', revision: 3, writable: [{ kind: 'document' }], referenceId: 'document-a:file', pinned: false, displayLabel: '文档' }], attachments: [] })
   fireEvent.click(screen.getByRole('button', { name: '会话 A' }))
   await waitFor(() => expect(screen.getByRole('textbox', { name: '给果铃AI发消息' })).toHaveValue('保留这份草稿'))
   expect(captureDocuments).toHaveBeenCalledWith(true, false)
@@ -1476,7 +1486,7 @@ it('sends a text-only adjustment on the existing task without capturing temporar
   expect(screen.getByRole('button', { name: '加入队列' })).toBeEnabled()
 })
 
-it('removing the current automatic page drops its dependent automatic elements and actual point selection while keeping an independent pin', async () => {
+it('removing the current automatic page drops dependent references while preserving the pin and canvas selection', async () => {
   const { api } = executionFixture([conversation('page-context', '当前页面')])
   const a1 = { kind: 'course-instance' as const, surfaceId: 'A', instanceId: 'A1' }
   const a2 = { kind: 'course-instance' as const, surfaceId: 'A', instanceId: 'A2' }
@@ -1491,8 +1501,8 @@ it('removing the current automatic page drops its dependent automatic elements a
   fireEvent.click(screen.getByRole('button', { name: /移除引用.*当前页面/ }))
   await waitFor(() => expect(screen.queryByRole('button', { name: /移除引用.*当前页面/ })).toBeNull())
   expect(screen.getAllByRole('button', { name: /移除引用.*所选对象/ })).toHaveLength(1)
-  expect(clear).toHaveBeenCalledWith([a2])
-  expect(workbenchSelection.getManual('page-project')?.targets).toEqual([a1])
+  expect(clear).not.toHaveBeenCalled()
+  expect(workbenchSelection.getManual('page-project')?.targets).toEqual([a1, a2])
   await act(async () => workbenchSelection.setManual('unrelated-focus', null))
   expect(screen.getAllByRole('button', { name: /移除引用.*所选对象/ })).toHaveLength(1)
   release(); workbenchSelection.setManual('page-project', null)

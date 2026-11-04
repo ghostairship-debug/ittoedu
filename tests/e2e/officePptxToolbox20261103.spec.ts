@@ -31,6 +31,10 @@ test('PPT toolbox edits multiple objects, native clipboard, text and tables with
     const editor = page.locator('.pptx-editor'), stage = editor.getByTestId('pptx-edit-surface')
     await expect(stage).toContainText('工具验收', { timeout: 45000 })
     const save = async () => { await editor.getByRole('button', { name: '保存', exact: true }).click() }
+    const openMore = async () => {
+      const more = page.getByRole('button', { name: '更多对象与文字操作', exact: true })
+      if (await more.getAttribute('aria-expanded') !== 'true') await more.click()
+    }
     facts.phase = 'shift-select-and-handles'
     await stage.evaluate(root => {
       const host=root.closest('.office-file-view')!,viewport=root.parentElement!,toolbar=host.querySelector('.pptx-editor__toolbar')!
@@ -101,29 +105,37 @@ test('PPT toolbox edits multiple objects, native clipboard, text and tables with
     expect(rotated.y + rotated.height / 2).toBeCloseTo(resized.y + resized.height / 2, 1)
     await page.screenshot({ path: join(directory, '00-canvas-handles.png'), fullPage: true })
     facts.phase = 'group-and-clipboard'
+    await editor.getByRole('button', { name: '页面操作', exact: true }).click()
     await editor.getByRole('button', { name: '全选本页对象（Ctrl+A）', exact: true }).click()
-    await editor.getByRole('button', { name: '组合选中对象', exact: true }).click(); await save()
+    await openMore()
+    await page.getByRole('button', { name: '组合选中对象', exact: true }).click(); await save()
     await expect.poll(() => inspect(filename).slides[0].shapes.filter(shape => shape.kind === 'group').length).toBe(1)
-    await editor.getByRole('button', { name: '解组', exact: true }).click(); await save()
+    await openMore()
+    await page.getByRole('button', { name: '解组', exact: true }).click(); await save()
     await expect.poll(() => inspect(filename).slides[0].shapes.filter(shape => shape.kind === 'group').length).toBe(0)
-    await editor.getByRole('button', { name: '创建对象副本（Ctrl+D）', exact: true }).click(); await save()
+    await page.getByRole('button', { name: '创建对象副本（Ctrl+D）', exact: true }).click(); await save()
     await expect.poll(() => inspect(filename).slides[0].shapes.length).toBe(6)
     await stage.locator('[data-web-ppt-editor]').first().focus()
     await page.keyboard.press('Control+C'); await page.keyboard.press('Control+V'); await save()
     await expect.poll(() => inspect(filename).slides[0].shapes.length).toBe(9)
-    await editor.getByRole('combobox', { name: '排列对象', exact: true }).selectOption('left'); await save()
+    await openMore()
+    await page.getByRole('combobox', { name: '排列对象', exact: true }).selectOption('left'); await save()
     await editor.getByRole('button', { name: '对象选择窗格', exact: true }).click()
     await expect(editor.locator('.pptx-editor__object-list')).toContainText('source-a')
     facts.phase = 'text-and-table'
     await editor.getByRole('button', { name: '插入文本框', exact: true }).click()
-    await editor.getByRole('combobox', { name: '字号', exact: true }).selectOption('40')
-    await editor.getByRole('button', { name: '加粗', exact: true }).click(); await save()
+    await openMore()
+    await page.getByRole('combobox', { name: '字号', exact: true }).selectOption('40')
+    await page.getByRole('button', { name: '加粗', exact: true }).click(); await save()
     await expect.poll(() => inspect(filename).slides[0].shapes.find(shape => shape.text === '双击编辑文字')?.runs[0]?.[0]?.style.fontSize).toBe(40)
     expect(inspect(filename).slides[0].shapes.find(shape => shape.text === '双击编辑文字')?.runs[0]?.[0]?.style.bold).toBe(true)
     expect(inspect(filename).slides[0].shapes.find(shape => shape.text === '双击编辑文字')?.runs[0]?.[0]?.style.color).toBe('202124')
+    await editor.getByRole('button', { name: '插入对象', exact: true }).click()
     await editor.getByRole('button', { name: '插入表格', exact: true }).click()
-    await editor.getByRole('button', { name: '表格添加行', exact: true }).click()
-    await editor.getByRole('button', { name: '表格添加列', exact: true }).click(); await save()
+    await openMore()
+    await page.getByRole('button', { name: '表格添加行', exact: true }).click()
+    await openMore()
+    await page.getByRole('button', { name: '表格添加列', exact: true }).click(); await save()
     await expect.poll(() => inspect(filename).slides[0].shapes.find(shape => shape.kind === 'table')?.cells?.length).toBe(4)
     expect(inspect(filename).slides[0].shapes.find(shape => shape.kind === 'table')?.cells?.[0]).toHaveLength(4)
     await stage.locator('[data-edit-id]').last().click({ button: 'right' })
@@ -131,9 +143,9 @@ test('PPT toolbox edits multiple objects, native clipboard, text and tables with
     await expect.poll(() => inspect(filename).slides[0].shapes.filter(shape => shape.kind === 'table').length).toBe(2)
     await page.screenshot({ path: join(directory, '01-toolbox.png'), fullPage: true })
     facts.phase = 'shared-history'
-    await editor.getByRole('button', { name: '撤销', exact: true }).click()
+    await editor.getByRole('button', { name: '撤销', exact: true }).click(); await save()
     await expect.poll(() => inspect(filename).slides[0].shapes.filter(shape => shape.kind === 'table').length).toBe(1)
-    await editor.getByRole('button', { name: '重做', exact: true }).click()
+    await editor.getByRole('button', { name: '重做', exact: true }).click(); await save()
     await expect.poll(() => inspect(filename).slides[0].shapes.filter(shape => shape.kind === 'table').length).toBe(2)
     expect(inspect(filename).slides[1].shapes[0].text).toBe('范围外保持')
     facts.phase = 'cold-reopen'; await closeM20(app); ({ app, page } = await launchM20(fixture, { visible: true }))
@@ -175,7 +187,13 @@ test('PPT selection geometry stays fixed for shapes, text, images, tables and cl
     const check=async(kind:string)=>{const frame=await stage.boundingBox();transitions.push({kind,frame});expect(frame).not.toBeNull();for(const key of ['x','y','width','height'] as const)expect(Math.abs(frame![key]-initial[key]),kind+' canvas '+key).toBeLessThan(.5)}
     const objects=stage.locator('[data-edit-id]');await expect(objects).toHaveCount(4)
     const object=(kind:'shape'|'image'|'table')=>objects.nth(authored.findIndex(shape=>kind==='table'?shape.kind==='table':shape.name===kind))
-    facts.phase='shape';await object('shape').click();await expect(editor.getByRole('group',{name:'形状工具',exact:true})).toBeVisible();await check('shape')
+    const showGroup = async (kind: string) => {
+      await page.getByRole('button',{name:'更多对象与文字操作',exact:true}).click()
+      const group=page.getByRole('group',{name:kind,exact:true})
+      await expect(group).toBeVisible()
+      return group
+    }
+    facts.phase='shape';await object('shape').click();await showGroup('形状工具');await check('shape');await page.keyboard.press('Escape')
     await stage.evaluate(root=>{
       const rect=(value:Element)=>{const r=value.getBoundingClientRect();return{x:r.x,y:r.y,width:r.width,height:r.height}}
       const brief=(value:EventTarget|null)=>value instanceof Element?{tag:value.tagName,cls:value.getAttribute('class'),editId:value.getAttribute('data-edit-id'),owner:value.closest('[data-edit-id]')?.getAttribute('data-edit-id'),text:value.textContent?.slice(0,60),rect:rect(value)}:String(value)
@@ -192,8 +210,8 @@ test('PPT selection geometry stays fixed for shapes, text, images, tables and cl
     })
     await stage.getByText('固定文字',{exact:true}).first().dblclick()
     await expect(stage.locator('[contenteditable="true"]').filter({visible:true}).first()).toBeVisible();await check('text');await page.keyboard.press('Escape');await check('text-exit')
-    facts.phase='image';await object('image').click();await expect(editor.getByRole('group',{name:'图片工具',exact:true})).toBeVisible();await check('image')
-    facts.phase='table';await object('table').click();await expect(editor.getByRole('group',{name:'表格工具',exact:true})).toBeVisible();await check('table')
+    facts.phase='image';await object('image').click();await showGroup('图片工具');await check('image');await page.keyboard.press('Escape')
+    facts.phase='table';await object('table').click();await showGroup('表格工具');await check('table');await page.keyboard.press('Escape')
     facts.phase='none';await page.mouse.click(initial.x+initial.width*.96,initial.y+initial.height*.95)
     await expect(editor.locator('.pptx-editor__footer')).not.toContainText('已选');await check('none')
     facts.selectionTrace=await page.evaluate(()=>(window as any).__pptSelectionGeometry?.finish())
@@ -203,16 +221,13 @@ test('PPT selection geometry stays fixed for shapes, text, images, tables and cl
     facts.narrowWindowWidth=await page.evaluate(()=>innerWidth)
     const narrow:unknown[]=[];facts.narrow=narrow
     for(const kind of ['table','image'] as const){
-      await object(kind).click();const group=editor.getByRole('group',{name:kind==='table'?'表格工具':'图片工具',exact:true});await expect(group).toBeVisible()
-      const controls=await group.evaluate(element=>{
-        const row=element.parentElement!,box=row.getBoundingClientRect(),top=box.top+row.clientTop,bottom=top+row.clientHeight
-        return{row:{x:box.x,y:box.y,width:box.width,height:box.height,clientHeight:row.clientHeight,scrollWidth:row.scrollWidth,clientWidth:row.clientWidth},top,bottom,buttons:[...element.querySelectorAll('button')].map(button=>{const r=button.getBoundingClientRect();return{label:button.getAttribute('aria-label'),top:r.top,bottom:r.bottom,height:r.height}})}
-      })
-      narrow.push({kind,controls});await page.screenshot({path:join(directory,'narrow-'+kind+'.png'),fullPage:true})
-      if(kind==='table')expect(controls.row.scrollWidth).toBeGreaterThan(controls.row.clientWidth)
-      for(const button of controls.buttons){expect(button.top,button.label+' top').toBeGreaterThanOrEqual(controls.top-.5);expect(button.bottom,button.label+' bottom').toBeLessThanOrEqual(controls.bottom+.5)}
+      await object(kind).click();const before=await stage.boundingBox()
+      const group=await showGroup(kind==='table'?'表格工具':'图片工具')
       await group.getByRole('button').last().scrollIntoViewIfNeeded()
-      if(kind==='table')expect(await group.evaluate(element=>element.parentElement!.scrollLeft)).toBeGreaterThan(0)
+      await expect(group.getByRole('button').last()).toBeInViewport()
+      expect(await stage.boundingBox()).toEqual(before)
+      narrow.push({kind,viewport:before});await page.screenshot({path:join(directory,'narrow-'+kind+'.png'),fullPage:true})
+      await page.keyboard.press('Escape')
     }
     expect(readFileSync(filename)).toEqual(Buffer.from(bytes));facts.status='passed';facts.phase='complete'
     await m20Evidence(info,fixture,page,facts)

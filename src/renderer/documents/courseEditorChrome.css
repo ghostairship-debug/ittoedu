@@ -13,6 +13,7 @@
 .course-light-tools { box-sizing: border-box; min-height: 44px; padding: 5px 7px; container-type: inline-size; border-bottom: 1px solid var(--border-color, #d8dee6); background: var(--panel-bg, #fff); }
 .course-light-tools__row { display: flex; flex-wrap: wrap; align-items: center; gap: clamp(2px, .6cqi, 6px); min-height: 32px; min-width: 0; }
 .course-light-tools__row > button, .course-light-tools__insert > button, .course-light-tools__more > button { flex: none; min-height: 30px; white-space: nowrap; }
+.course-light-tools__autosave { display: inline-flex; align-items: center; gap: 3px; flex: none; white-space: nowrap; font-size: 11px; }
 .course-light-tools__document-actions { display: contents; }
 .course-light-tools__document-actions > .workbench-editor-focus { flex: none; min-height: 30px; white-space: nowrap; }
 .course-light-tools__status { min-width: 0; max-width: 120px; margin-right: auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
@@ -40,7 +41,7 @@
 .course-light-tools .export-menu--light[open] > .export-menu__trigger--light { background: var(--surface-muted, #ece9e1); color: var(--ink, #17221d); }
 .course-light-tools .export-menu--light .export-menu__panel { top: calc(100% + 5px); }
 
-.course-light-tools__row > button, .course-light-tools__document-actions > button,
+.course-light-tools__row > button, .course-light-tools__document-actions > button, .course-light-tools .file-save-pair > button,
 .course-light-tools__insert > button, .course-light-tools__more > button {
   min-width: clamp(28px, 4.2cqi, 32px);
   min-height: 30px;

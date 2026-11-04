@@ -180,7 +180,9 @@ it('binding journal failure rolls the directory and every live binding back befo
       const originalWrite = handle.writeFile.bind(handle)
       handle.writeFile = async (data, options) => {
         const bytes = Buffer.from(data as Uint8Array)
-        const state = deserialize(bytes.subarray(48, -8)) as { binding: { kind: string; path?: string } }
+        const payload = deserialize(bytes.subarray(48, -8)) as { journalVersion?: number; value?: Uint8Array; binding?: { kind: string; path?: string } }
+        const state = payload.journalVersion === 3 ? deserialize(payload.value!) as { binding: { kind: string; path?: string } }
+          : payload as { binding: { kind: string; path?: string } }
         if (state.binding.kind === 'file' && state.binding.path?.startsWith(target + path.sep) && ++movedWrites === 2) throw new Error('injected second binding write failure')
         return originalWrite(data, options)
       }

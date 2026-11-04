@@ -5,6 +5,7 @@ import type { DocumentKind } from '../../shared/workbench/document'
 import type { ModelJsonObject } from '../../shared/workbench/modelProvider'
 import type { OfficeContentToolName } from './OfficeContentTools'
 import type { ToolResult } from '../../shared/workbench/tools'
+import type { ExecutionFileContext } from '../../shared/workbench/fileContext'
 import { toolRegistrationFor } from './ToolRegistration'
 
 const path = z.string().min(1).max(32767)
@@ -109,6 +110,8 @@ export interface AgentFileOutcome {
 }
 export interface AgentFileService {
   releaseRun?(runId: string): void
+  captureOfficeDraftTargets?(runId: string, context: ExecutionFileContext): void
+  verifyOfficeDraftTarget?(target: { path: string; fileVersion: string; bindingVersion: number }): Promise<string>
   preflightCreate(context: AgentFileContext, input: unknown): Promise<{ directory: string; outside: boolean }>
   preflightMutation(context: AgentFileContext, name: AgentFileMutationName, input: unknown): Promise<{ paths: string[]; outside: boolean }>
   execute(context: AgentFileContext, name: AgentFileToolName, input: unknown, operationId: string): Promise<AgentFileOutcome>

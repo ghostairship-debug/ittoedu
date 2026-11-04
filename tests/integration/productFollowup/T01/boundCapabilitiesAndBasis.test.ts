@@ -105,16 +105,18 @@ async function card(h: Awaited<ReturnType<typeof fixture>>, instruction: string)
   return { requested: requested!, started: result }
 }
 
-it('a simple card rewrite explicitly applies and finishes in one real tool-call response without another model round', async () => {
+it('a simple card rewrite explicitly applies once and reports completion after reading the receipt', async () => {
   let turns = 0
   const h = await fixture({ async *stream(request) {
-    turns++; yield finish(request, '', [{ name: offered(request, 'text.replace'), args: { content: '简单修订正文' } }, { name: offered(request, 'task.finish'), args: {} }])
+    if (++turns === 1) { yield finish(request, '', { name: offered(request, 'text.replace'), args: { content: '简单修订正文' } }); return }
+    expect(lastTool(request)).toMatchObject({ kind: 'document-operation', result: { status: 'applied' } })
+    yield finish(request, '已修改。')
   } }, false)
   const sent = await card(h, '将所选正文改写得简洁')
   const ended = await h.engine.wait(sent.started.runId)
   expect(ended.status, JSON.stringify({ failure: ended.failure, tools: ended.tools })).toBe('completed')
-  expect(turns).toBe(1)
-  expect(ended.tools.map(value => value.call.name)).toEqual(['text.replace', 'task.finish'])
+  expect(turns).toBe(2)
+  expect(ended.tools.map(value => value.call.name)).toEqual(['text.replace'])
   expect(ended.tools[0]).toMatchObject({ call: { name: 'text.replace', input: { content: '简单修订正文' } }, result: { kind: 'document-operation', result: { status: 'applied' } } })
   expect(await h.host.internalAPI.read(h.snapshot.documentId)).toMatchObject({ undoDepth: 1, model: { project: { instances: { body: { data: { content: { inlines: [{ type: 'text', text: '简单修订正文' }] } } } } } } })
 })
@@ -136,11 +138,14 @@ it('the actual rich card reads teacher material in the same task, keeps dialogue
   h = await fixture({ async *stream(request) {
     if (++turns === 1) {
       expect(JSON.stringify(request.messages)).toContain('https://example.org/source')
+      yield finish(request, '', { name: offered(request, 'tools.load'), args: { names: ['file.read'] } }); return
+    }
+    if (turns === 2) {
       yield { type: 'text.delta', requestId: request.requestId, sequence: 1, text: '正在读取资料，不是正文。' }
       expect(await h.host.internalAPI.read(h.snapshot.documentId)).toMatchObject({ undoDepth: 0 })
       yield finish(request, '读取资料', { name: offered(request, 'file.read'), args: { path: '资料.md' } }); return
     }
-    if (turns === 2) {
+    if (turns === 3) {
       expect(JSON.stringify(lastTool(request))).toContain('资料中的定论：平方关系')
       expect(await h.host.internalAPI.read(h.snapshot.documentId)).toMatchObject({ undoDepth: 0 })
       yield finish(request, '根据资料改写', { name: offered(request, 'text.replace'), args: { content: '<a href="https://example.org/source"><strong>平方关系说明</strong></a>\\(x^2\\)' } }); return
@@ -152,7 +157,7 @@ it('the actual rich card reads teacher material in the same task, keeps dialogue
   const sent = await card(h, '按资料.md改写所选文字，保留链接与公式。')
   const ended = await h.engine.wait(sent.started.runId)
   expect(ended.status, JSON.stringify({ failure: ended.failure, tools: ended.tools })).toBe('completed')
-  expect(ended.tools.map(value => value.call.name)).toEqual(['file.read', 'text.replace'])
+  expect(ended.tools.map(value => value.call.name)).toEqual(['tools.load', 'file.read', 'text.replace'])
   const current = await h.host.internalAPI.read(h.snapshot.documentId)
   expect(current.undoDepth).toBe(1)
   if (current.model.kind !== 'course-v10') throw new Error('V10 required')
@@ -165,7 +170,8 @@ it('the actual rich card reads teacher material in the same task, keeps dialogue
 it('a card query with a real read tool returns progress and explanation without any body transaction', async () => {
   let turns = 0
   const h = await fixture({ async *stream(request) {
-    if (++turns === 1) { yield finish(request, '查看资料', { name: offered(request, 'file.read'), args: { path: '资料.md' } }); return }
+    if (++turns === 1) { yield finish(request, '', { name: offered(request, 'tools.load'), args: { names: ['file.read'] } }); return }
+    if (turns === 2) { yield finish(request, '查看资料', { name: offered(request, 'file.read'), args: { path: '资料.md' } }); return }
     expect(JSON.stringify(lastTool(request))).toContain('只做解释')
     yield { type: 'text.delta', requestId: request.requestId, sequence: 1, text: '已经读取，正在解释。' }
     yield finish(request, '这是查询结果与公式解释，正文没有改动。')
@@ -174,25 +180,24 @@ it('a card query with a real read tool returns progress and explanation without 
   const sent = await card(h, '读资料.md，解释当前公式；不要修改正文。')
   const ended = await h.engine.wait(sent.started.runId)
   expect(ended.status, JSON.stringify({ failure: ended.failure, tools: ended.tools })).toBe('completed')
-  expect(ended.tools.map(value => value.call.name)).toEqual(['file.read'])
+  expect(ended.tools.map(value => value.call.name)).toEqual(['tools.load', 'file.read'])
   expect(await h.host.internalAPI.read(h.snapshot.documentId)).toMatchObject({ revision: 0, undoDepth: 0, model: { project: { instances: { body: { data: h.data } } } } })
 })
 
 it('reads and repairs a failed bound application despite another completed write in the same response, without replaying rejected content', async () => {
   let turns = 0
   const h = await fixture({ async *stream(request) {
-    if (++turns === 1) { yield finish(request, '', [
+    if (++turns === 1) { yield finish(request, '', { name: offered(request, 'tools.load'), args: { names: ['file.write'] } }); return }
+    if (turns === 2) { yield finish(request, '', [
       { name: offered(request, 'file.write'), args: { mode: 'create', path: '附加说明.md', content: '独立说明' } },
       { name: offered(request, 'text.replace'), args: { content: '<table><tr><td>此正文无法承载表格</td></tr></table>' } },
-      { name: offered(request, 'task.finish'), args: {} },
     ]); return }
-    if (turns === 2) {
+    if (turns === 3) {
       expect(lastTool(request)).toMatchObject({ kind: 'error' })
       expect(JSON.stringify(request.messages)).toContain('https://example.org/source')
-      yield finish(request, '', [
-        { name: offered(request, 'text.replace'), args: { content: '<a href="https://example.org/source"><strong>修正后的说明</strong></a>\\(x^2\\)' } },
-        { name: offered(request, 'task.finish'), args: {} },
-      ]); return
+      yield finish(request, '', {
+        name: offered(request, 'text.replace'), args: { content: '<a href="https://example.org/source"><strong>修正后的说明</strong></a>\\(x^2\\)' },
+      }); return
     }
     yield finish(request, '已修正并应用。')
   } })
@@ -200,18 +205,21 @@ it('reads and repairs a failed bound application despite another completed write
   const ended = await h.engine.wait(sent.started.runId)
   expect(ended.status, JSON.stringify({ failure: ended.failure, tools: ended.tools })).toBe('completed')
   expect(ended.tools.filter(value => value.result?.kind === 'document-operation')).toHaveLength(1)
-  expect(ended.tools.filter(value => value.result?.kind === 'error')).toHaveLength(2)
-  expect(turns).toBe(2)
+  expect(ended.tools.filter(value => value.result?.kind === 'error')).toHaveLength(1)
+  expect(turns).toBe(4)
   expect(await h.host.internalAPI.read(h.snapshot.documentId)).toMatchObject({ undoDepth: 1 })
   expect(await fs.readFile(path.join(h.directory, '附加说明.md'), 'utf8')).toBe('独立说明')
 })
 
-it('a complex bound task continues after its first successful write when the actual tool response does not request task.finish', async () => {
+it('a complex bound task continues after its first successful write and reads material before completing', async () => {
   let turns = 0
   const h = await fixture({ async *stream(request) {
     if (++turns === 1) { yield finish(request, '先修改正文，任务还有读取资料。', { name: offered(request, 'text.replace'), args: { content: '已经正式修改的正文' } }); return }
     if (turns === 2) {
       expect(lastTool(request)).toMatchObject({ kind: 'document-operation', result: { status: 'applied' } })
+      yield finish(request, '', { name: offered(request, 'tools.load'), args: { names: ['file.read'] } }); return
+    }
+    if (turns === 3) {
       yield finish(request, '继续读取资料', { name: offered(request, 'file.read'), args: { path: '资料.md' } }); return
     }
     expect(JSON.stringify(lastTool(request))).toContain('继续任务的依据')
@@ -221,8 +229,8 @@ it('a complex bound task continues after its first successful write when the act
   const sent = await card(h, '先改写所选正文，再读资料.md解释下一步。')
   const ended = await h.engine.wait(sent.started.runId)
   expect(ended.status, JSON.stringify({ failure: ended.failure, tools: ended.tools })).toBe('completed')
-  expect(turns).toBe(3)
-  expect(ended.tools.map(value => value.call.name)).toEqual(['text.replace', 'file.read'])
+  expect(turns).toBe(4)
+  expect(ended.tools.map(value => value.call.name)).toEqual(['text.replace', 'tools.load', 'file.read'])
   expect(await h.host.internalAPI.read(h.snapshot.documentId)).toMatchObject({ undoDepth: 1, model: { project: { instances: { body: { data: { content: { inlines: [{ type: 'text', text: '已经正式修改的正文' }] } } } } } } })
 })
 
@@ -248,7 +256,7 @@ it.each(['table-data', 'unrelated-layout'] as const)('a chart derived from an ac
     if (turns === 4) {
       chart = chartDataSchema.parse(JSON.parse(sourceReceiptSchema.parse(lastTool(request)).data.content))
       reached(); await delayed
-      yield finish(request, '依据已读取表格更新图表', { name: offered(request, 'object.update'), args: { path: chartPath, properties: { data: derive() } } }); return
+      yield finish(request, '依据已读取表格更新图表', { name: offered(request, 'object.update'), args: { path: chartPath, properties: { data: derive() }, dependsOn: [tablePath] } }); return
     }
     if (turns === 5 && change === 'table-data') {
       const failed = lastTool(request)
@@ -263,7 +271,7 @@ it.each(['table-data', 'unrelated-layout'] as const)('a chart derived from an ac
     if (turns === 6 && change === 'table-data') {
       const table = parseTableData(JSON.parse(sourceReceiptSchema.parse(lastTool(request)).data.content))
       values = table.rows.map(row => Number(row.cells[0].text))
-      yield finish(request, '', { name: offered(request, 'object.update'), args: { path: chartPath, properties: { data: derive() } } }); return
+      yield finish(request, '', { name: offered(request, 'object.update'), args: { path: chartPath, properties: { data: derive() }, dependsOn: [tablePath] } }); return
     }
     expect(lastTool(request)).toMatchObject({ kind: 'document-operation', result: { status: 'applied' } })
     yield finish(request, '图表已按当前数据更新。')

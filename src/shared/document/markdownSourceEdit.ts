@@ -20,7 +20,7 @@ function structureWithoutText(block: DocumentBlock): string {
   for (const slot of documentTextSlots(copy)) slot.content.inlines = []
   return stable(copy)
 }
-function slotEdit(source: string, slot: SlotMap | undefined, before: FlowTextContent, after: FlowTextContent): Edit | null {
+function slotEdit(source: string, slot: SlotMap | undefined, before: FlowTextContent, after: FlowTextContent, preferStandardFormatting?: boolean): Edit | null {
   if (!slot) return null
   const old = atoms(before), next = atoms(after), units = slot.units
   if (units.length !== old.length) return null
@@ -36,7 +36,7 @@ function slotEdit(source: string, slot: SlotMap | undefined, before: FlowTextCon
   const context = removed[0] ?? old[from - 1] ?? old[from]
   const inherited = context?.type === 'text' && removed.every(value => meta(value) === meta(context)) && inserted.every(value => meta(value) === meta(context))
   let insert = inherited && context.code ? inserted.map(value => value.type === 'text' ? value.text : '').join('')
-    : serializeMarkdownInline({ inlines: inherited ? inserted.map(value => ({ type: 'text', text: value.type === 'text' ? value.text : '' })) : inserted })
+    : serializeMarkdownInline({ inlines: inherited ? inserted.map(value => ({ type: 'text', text: value.type === 'text' ? value.text : '' })) : inserted }, preferStandardFormatting)
   if (insert.includes('\n')) {
     const lineStart = source.lastIndexOf('\n', start - 1) + 1
     const prefix = source.slice(lineStart, start).match(/^( {0,3}>[ \t]?|[ \t]*(?:[-+*]|\d+[.)])[ \t]+)/)?.[0]
@@ -44,9 +44,9 @@ function slotEdit(source: string, slot: SlotMap | undefined, before: FlowTextCon
   }
   return { from: start, to: end, insert }
 }
-function blockSource(block: DocumentBlock, resources: MarkdownDocument['resources'], map?: MarkdownSourceMap) {
+function blockSource(block: DocumentBlock, resources: MarkdownDocument['resources'], map: MarkdownSourceMap, preferStandardFormatting?: boolean) {
   if(block.type==='list') {
-    const slots=map?.blocks.find(value=>value.blockId===block.id)?.slots
+    const slots=map.blocks.find(value=>value.blockId===block.id)?.slots
     if(slots?.some(slot=>(slot.depth ?? 0)>0)) {
       let depth=0,ordered=block.ordered
       const ordinals = new Map<number, number>()
@@ -57,10 +57,10 @@ function blockSource(block: DocumentBlock, resources: MarkdownDocument['resource
         if(ordered) ordinals.set(depth,ordinal+1); else ordinals.delete(depth)
         const marker=ordered ? `${ordinal}.`:'-',indent=indents.get(depth) ?? '  '.repeat(depth)
         indents.set(depth+1,indent+' '.repeat(marker.length+1))
-        return `${indent}${marker} ${serializeMarkdownInline(item.content)}`}).join('\n')
+        return `${indent}${marker} ${serializeMarkdownInline(item.content, preferStandardFormatting)}`}).join('\n')
     }
   }
-  return serializeDocumentMarkdown({ content: { blocks: [block] }, resources }, 'file')
+  return serializeDocumentMarkdown({ content: { blocks: [block] }, resources }, 'file', preferStandardFormatting)
     .replace(/<!--cw:(?:item|row|column) [^\n]*?-->/g, '').replace(/\n$/, '')
 }
 function apply(source: string, edits: Edit[]) { for (const edit of edits.sort((a, b) => b.from - a.from || b.to - a.to)) source = source.slice(0, edit.from) + edit.insert + source.slice(edit.to); return source }
@@ -100,7 +100,7 @@ export function editMarkdownSource(source: string, before: MarkdownDocument, aft
       const updated = newSlots.find(value => value.key === slot.key)
       if (!updated) { local = false; break }
       if (stable(slot.content) === stable(updated.content)) continue
-      const edit = slotEdit(source, blockMap?.slots.find(value => value.key === slot.key), slot.content, updated.content)
+      const edit = slotEdit(source, blockMap?.slots.find(value => value.key === slot.key), slot.content, updated.content, options.preferStandardFormatting)
       if (!edit) { local = false; break }; patches.push(edit)
     }
     edits.push(...patches)
@@ -125,7 +125,7 @@ export function editMarkdownSource(source: string, before: MarkdownDocument, aft
     const rawEdit = old && rawSourceEdit(source, span, old, block)
     if (rawEdit && span) return { index, text: source.slice(span.from, rawEdit.from) + rawEdit.insert + source.slice(rawEdit.to, span.to) }
     const ending = span ? source.slice(span.from, span.to).match(/(?:\r\n|\r|\n)+$/)?.[0] ?? '' : newline
-    return { index, text: blockSource(block, after.resources, map).replace(/\n/g, newline) + ending }
+    return { index, text: blockSource(block, after.resources, map, options.preferStandardFormatting).replace(/\n/g, newline) + ending }
   })
   let body = ''
   pieces.forEach((piece, index) => {
@@ -143,6 +143,9 @@ export function editMarkdownSource(source: string, before: MarkdownDocument, aft
     if (start < source.length) { const count = insertion.match(/(?:\r\n|\r|\n)+$/)?.[0].match(/\r\n|\r|\n/g)?.length ?? 0; insertion += newline.repeat(Math.max(0, 2 - count)) }
   }
   const candidate = source.slice(0, start) + insertion + source.slice(end)
-  if (!valid(candidate)) throw new Error('这次正文结构无法完整对应源文，输入仍保留；请撤销该步后重试。')
+  if (!valid(candidate)) {
+    if (options.preferStandardFormatting) return editMarkdownSource(source, before, after, map, { ...options, preferStandardFormatting: false })
+    throw new Error('这次正文结构无法完整对应源文，输入仍保留；请撤销该步后重试。')
+  }
   return candidate
 }

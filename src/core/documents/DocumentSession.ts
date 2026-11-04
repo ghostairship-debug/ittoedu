@@ -342,7 +342,7 @@ export class DocumentSession {
       if (stopIdentity && this.state.stoppedRuns.includes(stopIdentity)) return this.reject(id, 'cancelled', 'run-stopped', '任务已停止，未写入后续操作')
       if (options?.rebaseComponentExpectations && operation.mutation.type === 'command' && operation.mutation.command.type === 'component-platform.apply'
         && this.state.model.kind === 'course-v10' && operation.baseRevision <= this.state.revision) {
-        try { checkComponentExpectations(this.state.model.project, operation.mutation.command) }
+        try { checkComponentExpectations(this.state.model.project, operation.mutation.command, this.state.model.resources) }
         catch (error) {
           if (!(error instanceof ComponentOperationConflict)) throw error
           return this.reject(id, 'conflict', error.code, error.message)

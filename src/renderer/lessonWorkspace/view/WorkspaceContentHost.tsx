@@ -13,6 +13,7 @@ import { PptxFileEditor } from '../../documentFiles/office/PptxFileEditor'
 import { DocxFilePreview } from '../../documentFiles/office/DocxFilePreview'
 import { DocxFileEditor } from '../../documentFiles/office/DocxFileEditor'
 import { XlsxFileEditor } from '../../documentFiles/office/XlsxFileEditor'
+import { OfficeSelectionHost } from '../../documentFiles/office/OfficeSelectionTools'
 import './officeFileView.css'
 import { usePptxPicker } from './usePptxPicker'
 import { CourseImportMenu } from '../../ui/CourseImportMenu'
@@ -44,6 +45,12 @@ export function WorkspaceContentHost({ props, layout, editorFocus, enterEditor, 
   const showDocumentHeader = (activeFileTab?.kind === 'material' || activeFileTab?.kind === 'media') && !editorFocus;
   const pptx = usePptxPicker(file => {
     void actions.run(async () => { if (!await actions.newCourseFromPptx(file)) return; layout.setContentClosed(false); actions.setMobilePane('workbench') });
+  });
+  const openWordLayout = (tabId: string) => void actions.run(async () => {
+    const target = tabs.tabs.find(tab => tab.id === tabId)
+    if (!target || !await tabs.prepareOfficeFiles([target.path])) return
+    await tabs.reloadDocx(tabId)
+    setLayoutPreview(target.path)
   });
   const openActiveExternal = async () => {
     if (!activeFileTab) return;
@@ -146,6 +153,7 @@ export function WorkspaceContentHost({ props, layout, editorFocus, enterEditor, 
                 }}
                 port={props.documentPort}
                 onClosed={() => tabs.removeTab(tab.id)}
+                onOpenMarkdownCopy={(path) => tabs.openTab({ kind: 'document', name: path.split(/[\\/]/).at(-1) ?? path, path, lesson: null })}
                 onDirtyChange={(dirty) => tabs.updateDirty(tab.id, dirty)}
                 onSelectionChange={() => tabs.selectionChanged(tab.id)}
                 onContextualCommand={(instruction, target) => tabs.sendContextualCommand(tab.id, instruction, target)}
@@ -159,27 +167,38 @@ export function WorkspaceContentHost({ props, layout, editorFocus, enterEditor, 
                 documentRef={{ kind: "file", path: tab.path || tab.name }}
                 port={props.documentPort}
                 onClosed={() => tabs.removeTab(tab.id)}
+                onOpenMarkdownCopy={(path) => tabs.openTab({ kind: 'document', name: path.split(/[\\/]/).at(-1) ?? path, path, lesson: null })}
                 onDirtyChange={(dirty) => tabs.updateDirty(tab.id, dirty)}
                 onSelectionChange={() => tabs.selectionChanged(tab.id)}
                 onContextualCommand={(instruction, target) => tabs.sendContextualCommand(tab.id, instruction, target)}
               />
             )
           ) : tab.kind === 'presentation' || tab.kind === 'word' || tab.kind === 'spreadsheet' ? (
-            <div className="office-file-view">
+            <OfficeSelectionHost.Provider value={{ path: tab.path, prepare: () => tabs.prepareOfficeFiles([tab.path]), inputPending: tab.officeInputDirty, closing: tab.officeClosePending || tab.officeCloseLocked || tab.officeWindowSuspended,
+              toolbarTrailing: tab.kind === 'word' && layoutPreview !== tab.path ? <button type="button" disabled={tab.officePending}
+                onClick={() => openWordLayout(tab.id)}>版式预览</button> : undefined }}>
+            {tab.officeClosePending && <div className="office-file-view__modes" role="group" aria-label="关闭前处理未保存的修改">
+              <span>关闭前保存修改？</span>
+              <button type="button" disabled={tab.officePending || tab.officeCloseLocked || tab.officeWindowSuspended} onClick={() => void tabs.resolveOfficeClose(tab.id, 'save')}>保存并关闭</button>
+              <button type="button" disabled={tab.officePending || tab.officeCloseLocked || tab.officeWindowSuspended} onClick={() => void tabs.resolveOfficeClose(tab.id, 'discard')}>放弃更改</button>
+              <button type="button" disabled={tab.officeCloseLocked || tab.officeWindowSuspended} onClick={() => void tabs.resolveOfficeClose(tab.id, 'cancel')}>取消关闭</button>
+            </div>}
+            <div className="office-file-view" inert={tab.officeSaveAsPending || tab.officeCloseLocked || tab.officeWindowSuspended || undefined}>
               {tab.officePending && <p className={`office-file-view__message${tab.pptxSnapshot || tab.officeSnapshot || tab.docxSnapshot ? ' office-file-view__message--transient' : ''}`} role="status">
                 {tab.officeMessage}{tab.officeStale ? ' 当前仍显示上一版本，载入完成后更新。' : ''}
               </p>}
-              {tab.officeError && <p className="office-file-view__message" role="alert">{tab.officeError}</p>}
-              {tab.kind === 'word' && <div className="office-file-view__modes">
-                <button type="button" aria-pressed={layoutPreview !== tab.id} onClick={() => setLayoutPreview(null)}>正文编辑</button>
-                <button type="button" disabled={tab.officePending} aria-pressed={layoutPreview === tab.id} onClick={() => void actions.run(async () => {
-                  if (!await tabs.drainAll()) return
-                  await tabs.reloadDocx(tab.id); setLayoutPreview(tab.id)
-                })}>版式预览</button>
+              {tab.officeError && <p className="office-file-view__message" role="alert">{tab.officeError}{!tab.officePending && (tab.officeSnapshot || tab.pptxSnapshot)
+                && <button type="button" onClick={() => void actions.run(async () => {
+                  if (tab.kind === 'presentation') await tabs.reloadPptx(tab.id)
+                  else await tabs.reloadOffice(tab.id)
+                })}>重新读取文件状态</button>}</p>}
+              {tab.kind === 'word' && layoutPreview === tab.path && <div className="office-file-view__modes">
+                <button type="button" onClick={() => setLayoutPreview(null)}>返回正文编辑</button>
               </div>}
               {tab.pptxSnapshot?.editingError && <p className="office-file-view__message" role="alert">{tab.pptxSnapshot.editingError}</p>}
               {tab.kind === 'presentation' && tab.pptxSnapshot ? <PptxFileEditor
                 ref={tabs.officeEditorRef(tab.id)} snapshot={tab.pptxSnapshot} name={tab.name} active={tabs.activeTab === tab.id && !layout.prefs.contentClosed}
+                autoSave={Boolean(tab.officeAutoSave)} onAutoSaveChange={enabled => tabs.setOfficeAutoSave(tab.id, enabled)} onSave={() => tabs.saveOffice(tab.id)} onSaveAs={() => tabs.saveOfficeAs(tab.id)}
                 onCommit={(binding, bytes) => tabs.commitPptx(tab.id, binding, bytes)}
                 onEdit={edits => tabs.editPptx(tab.id, edits)}
                 onFocusChange={focus => officeFocus.updateLocation(tab.path, focus)}
@@ -191,24 +210,30 @@ export function WorkspaceContentHost({ props, layout, editorFocus, enterEditor, 
                   if (result.opened === false) throw new Error(result.openError ?? '没有可用的关联程序')
                 }}
                 onImportToCourse={async () => {
+                  if (!await tabs.prepareOfficeFiles([tab.path])) return
                   const snapshot = await tabs.reloadPptx(tab.id)
                   const file = new File([Uint8Array.from(snapshot.bytes)], snapshot.binding.path.split(/[\\/]/).pop() ?? tab.name,
                     { type: 'application/vnd.openxmlformats-officedocument.presentationml.presentation' })
                   if (await actions.newCourseFromPptx(file)) { layout.setContentClosed(false); actions.setMobilePane('workbench') }
-                }} /> : tab.kind === 'word' && layoutPreview !== tab.id && tab.officeSnapshot ? <DocxFileEditor
+                }} /> : tab.kind === 'word' && layoutPreview !== tab.path && tab.officeSnapshot ? <DocxFileEditor
                   ref={tabs.officeEditorRef(tab.id)} snapshot={tab.officeSnapshot} name={tab.name} active={tabs.activeTab === tab.id && !layout.prefs.contentClosed}
+                  autoSave={Boolean(tab.officeAutoSave)} onAutoSaveChange={enabled => tabs.setOfficeAutoSave(tab.id, enabled)} onSave={() => tabs.saveOffice(tab.id)} onSaveAs={() => tabs.saveOfficeAs(tab.id)}
                   onEdit={(binding, content) => tabs.editOffice(tab.id, binding, content)}
                   onFocusChange={({ cell, ...focus }) => officeFocus.updateLocation(tab.path, { ...focus, ...(cell ? { range: cell } : {}) })}
                   onUndo={async () => { await tabs.moveOfficeHistory(tab.id, 'undo') }} onRedo={async () => { await tabs.moveOfficeHistory(tab.id, 'redo') }}
                   onDirtyChange={dirty => tabs.updateDirty(tab.id, dirty)}
                 /> : tab.kind === 'spreadsheet' && tab.officeSnapshot ? <XlsxFileEditor
                   ref={tabs.officeEditorRef(tab.id)} snapshot={tab.officeSnapshot} name={tab.name} active={tabs.activeTab === tab.id && !layout.prefs.contentClosed}
+                  autoSave={Boolean(tab.officeAutoSave)} onAutoSaveChange={enabled => tabs.setOfficeAutoSave(tab.id, enabled)} onSave={() => tabs.saveOffice(tab.id)} onSaveAs={() => tabs.saveOfficeAs(tab.id)}
                   onEdit={(binding, content) => tabs.editOffice(tab.id, binding, content)}
                   onFocusChange={({ cell, ...focus }) => officeFocus.updateLocation(tab.path, { ...focus, ...(cell ? { range: cell } : {}) })}
                   onUndo={async () => { await tabs.moveOfficeHistory(tab.id, 'undo') }} onRedo={async () => { await tabs.moveOfficeHistory(tab.id, 'redo') }}
                   onDirtyChange={dirty => tabs.updateDirty(tab.id, dirty)}
-                /> : tab.kind === 'word' && layoutPreview === tab.id && tab.docxSnapshot ? <DocxFilePreview
+                /> : tab.kind === 'word' && layoutPreview === tab.path && tab.docxSnapshot ? <DocxFilePreview
                   bytes={tab.docxSnapshot.pdfBytes} name={tab.name} pageCount={tab.docxSnapshot.pageCount}
+                  dirty={tab.dirty} autoSave={Boolean(tab.officeAutoSave)} onAutoSaveChange={enabled => tabs.setOfficeAutoSave(tab.id, enabled)}
+                  onSave={async () => { await tabs.saveOffice(tab.id) }}
+                  onSaveAs={async () => { if (await tabs.saveOfficeAs(tab.id)) setLayoutPreview(null) }}
                   sourceSha256={tab.docxSnapshot.sourceSha256} engine={tab.docxSnapshot.engine} notices={tab.docxSnapshot.notices}
                   active={tabs.activeTab === tab.id && !layout.prefs.contentClosed}
                   onReload={async () => { await tabs.reloadDocx(tab.id) }}
@@ -230,7 +255,7 @@ export function WorkspaceContentHost({ props, layout, editorFocus, enterEditor, 
                       {tab.officePending && <button type="button" onClick={() => { void tabs.closeTab(tab) }}>取消并关闭</button>}
                     </div>
                   </section>}
-            </div>
+            </div></OfficeSelectionHost.Provider>
           ) : tab.kind === 'media' && tab.mediaSnapshot ? (
             <MediaFileEditor
               ref={tabs.mediaEditorRef(tab.id)}
@@ -239,6 +264,12 @@ export function WorkspaceContentHost({ props, layout, editorFocus, enterEditor, 
                 release: binding => window.desktopAPI?.releaseMediaFileDraft?.(binding),
                 preview: (binding, operations) => tabs.mediaFiles({ type: 'media-file.preview', binding, operations: [...operations] }),
                 save: (binding, operations) => tabs.mediaFiles({ type: 'media-file.save', binding, operations: [...operations] }),
+                saveAs: async (binding, operations) => {
+                  const result = await window.desktopAPI?.saveFileArtifactAs?.({
+                    kind: 'media', binding, operations: [...operations], openPaths: tabs.tabs.map(item => item.path).filter(Boolean),
+                  })
+                  return result?.kind === 'media' ? result.snapshot : null
+                },
                 reload: binding => tabs.mediaFiles({ type: 'media-file.reload', binding }),
               }}
               onSaved={snapshot => tabs.updateMediaSnapshot(tab.id, snapshot)}

@@ -1,12 +1,11 @@
 .office-leaf-editor{display:flex;flex-direction:column;height:100%;min-height:0;background:var(--canvas-bg,#e9edf2);color:var(--text-primary,#17212e);font:14px/1.5 system-ui,sans-serif}
 .office-leaf-editor[hidden]{display:none}
-.office-leaf-toolbar{display:flex;align-items:center;flex-wrap:wrap;gap:6px;padding:9px 12px;background:var(--panel-bg,#fff);border-bottom:1px solid var(--border-color,#d9e0e8);flex-shrink:0}
+.office-leaf-toolbar{display:flex;align-items:center;flex-wrap:wrap;gap:5px;padding:6px 9px;background:var(--panel-bg,#fff);border-bottom:1px solid var(--border-color,#d9e0e8);flex-shrink:0}
 .office-leaf-toolbar>strong{max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-right:8px}
-.office-leaf-toolbar button,.office-leaf-toolbar select,.office-leaf-toolbar input,.office-sheet-tabs button{font:inherit;min-height:29px;border:1px solid #d1d9e3;border-radius:5px;background:var(--panel-bg,#fff);color:inherit;padding:3px 9px}
+.office-leaf-toolbar button,.office-leaf-toolbar select,.office-leaf-toolbar input:not([type=checkbox]),.office-sheet-tabs button,.office-sheet-tabs select{font:inherit;min-height:29px;border:1px solid #d1d9e3;border-radius:5px;background:var(--panel-bg,#fff);color:inherit;padding:3px 9px}
 .office-leaf-toolbar button:hover:not(:disabled),.office-sheet-tabs button:hover:not(:disabled){background:#edf3fa}
 .office-leaf-toolbar button:disabled,.office-sheet-tabs button:disabled{opacity:.45}
 .office-leaf-toolbar button[aria-pressed=true],.office-sheet-tabs button[aria-pressed=true]{background:#e1edff;border-color:#6799d5;color:#1d4f8a}
-.office-leaf-toolbar__divider{height:20px;width:1px;background:#d7dfe8;margin:0 4px}
 .office-leaf-status,.office-leaf-hint{color:#657488;font-size:12px}
 .office-leaf-message{margin:0;padding:7px 14px;background:#fff6dd;color:#764c13;flex-shrink:0;border-bottom:1px solid #ecd69d}
 .office-leaf-scroll{flex:1;min-height:0;overflow:auto;padding:26px}

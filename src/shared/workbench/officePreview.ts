@@ -8,15 +8,17 @@ export interface PptxPreviewSnapshot {
   bytes: Uint8Array
   inspection?: Extract<OfficeContentInspection, { format: 'pptx' }>
   history?: OfficeHistorySnapshot
+  draftDirty?: boolean
   editingError?: string
 }
 export const pptxPreviewRequestSchema = z.discriminatedUnion('type', [
-  z.object({ type: z.literal('pptx-preview.open'), path: z.string().min(1) }).strict(),
+  z.object({ type: z.literal('pptx-preview.open'), path: z.string().min(1), draft: z.boolean().optional() }).strict(),
   z.object({ type: z.literal('pptx-preview.reload'), binding: fileArtifactBindingSchema }).strict(),
   z.object({ type: z.literal('pptx-preview.edit'), binding: fileArtifactBindingSchema, content: officeEditContentSchema }).strict(),
   z.object({ type: z.literal('pptx-preview.commit'), binding: fileArtifactBindingSchema, bytes: z.instanceof(Uint8Array) }).strict(),
   z.object({ type: z.literal('pptx-preview.undo'), binding: fileArtifactBindingSchema }).strict(),
   z.object({ type: z.literal('pptx-preview.redo'), binding: fileArtifactBindingSchema }).strict(),
+  z.object({ type: z.literal('pptx-preview.save'), binding: fileArtifactBindingSchema }).strict(),
 ])
 export type PptxPreviewRequest = z.infer<typeof pptxPreviewRequestSchema>
 

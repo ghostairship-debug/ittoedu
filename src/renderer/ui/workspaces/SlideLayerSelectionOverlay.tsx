@@ -37,7 +37,7 @@ export function SlideLayerSelectionOverlay({ targets, scale, surfaceToPointer, l
   return <div className="teacher-controller-overlay" data-testid="slide-layer-selection-overlay" aria-hidden="true" style={{ position: surfaceToPointer ? 'fixed' : 'absolute', inset: 0, pointerEvents: 'none' }}>
     <svg width="100%" height="100%" style={{ overflow: 'visible', position: 'absolute' }}>
       <polygon points={overlay.corners.map(p => p.x + ',' + p.y).join(' ')} fill="none" stroke="#2563eb" strokeWidth={1 / pixelScale} />
-      {movable && <polygon data-handle="move" points={overlay.corners.map(p => p.x + ',' + p.y).join(' ')} fill="none" stroke="transparent"
+      {movable && !lineHandles && <polygon data-handle="move" points={overlay.corners.map(p => p.x + ',' + p.y).join(' ')} fill="none" stroke="transparent"
         strokeWidth={8 / pixelScale} style={{ pointerEvents: 'stroke', cursor: 'move' }} />}
       {rotatable && <line x1={overlay.points.n.x} y1={overlay.points.n.y} x2={overlay.points.rotate.x} y2={overlay.points.rotate.y} stroke="#2563eb" strokeWidth={1 / pixelScale} />}
     </svg>

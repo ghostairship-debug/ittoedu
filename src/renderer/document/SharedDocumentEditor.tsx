@@ -10,11 +10,12 @@ import { cancelEditPreview, useEditPreviews } from '../workbench/EditPreviewProj
 import { projectDocumentRanges } from '../../shared/document/textInteraction'
 import { pinnedSelectionKey, pinnedSelectionPlugin, sourcePinnedSelectionEffect, sourcePinnedSelectionField } from './selectionDecorations'
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState, useMemo, type ReactNode } from 'react'
-import { Baseline, Bold, Highlighter, Italic, Underline, Link2, MoreHorizontal, Sigma, SlidersHorizontal, Table2, Superscript, Subscript, Code, Eraser } from 'lucide-react'
+import { Baseline, Bold, Highlighter, Italic, Underline, Link2, List, MoreHorizontal, Sigma, SlidersHorizontal, Strikethrough, Table2, Superscript, Subscript, Code, Eraser } from 'lucide-react'
 import { stepFontSize } from '../../shared/fontSizeStep'
 import { LatexFormulaAuthoringEditor } from '../ui/LatexFormulaAuthoringEditor'
 import { TextFormatControls } from '../editing/quickbar/TextFormatControls'
 import { PaletteButton } from '../editing/color/PaletteButton'
+import { ColorSwatchPanel } from '../editing/color/ColorSwatchPanel'
 import { FONT_FAMILY_OPTIONS } from '../../shared/fonts/fontFamilyCatalog'
 import type { QuickBarBounds, QuickBarRect } from '../editing/quickbar/placeQuickBar'
 import { QuickBarAiButton, QuickBarButton, QuickBarColorButton, QuickBarPopoverButton, QuickBarSeparator, SelectionQuickBar } from '../editing/quickbar/SelectionQuickBar'
@@ -164,6 +165,8 @@ export function readDocumentFormatting(state: EditorState, defaults?: DocumentIn
 export interface SharedDocumentEditorProps {
   active?: boolean
   toolbarHost?: HTMLElement | null
+  compactDocumentToolbar?: boolean
+  lightTextFormatting?: boolean
   toolbarScope?: string
   onCompleteEditing?(): void
   /** The caller's saved field shape; the full document editor remains the default. */
@@ -244,8 +247,9 @@ export interface SharedDocumentEditorProps {
   onRedo(): void
 }
 
-function editorMarkdownOptions(owner: Pick<SharedDocumentEditorProps, 'target' | 'resolveImage'>): MarkdownOptions {
-  return { createId: () => crypto.randomUUID(), target: owner.target, resolveImage: owner.resolveImage, recoverUnsupportedBlocks: owner.target === 'file' }
+function editorMarkdownOptions(owner: Pick<SharedDocumentEditorProps, 'target' | 'resolveImage' | 'lightTextFormatting'>): MarkdownOptions {
+  return { createId: () => crypto.randomUUID(), target: owner.target, resolveImage: owner.resolveImage, recoverUnsupportedBlocks: owner.target === 'file',
+    preferStandardFormatting: owner.lightTextFormatting }
 }
 export interface DocumentObjectPointer { blockId: string; phase: 'start' | 'update' | 'end' | 'cancel'; pointerId: number; point: { x: number; y: number }; button?: number; modifiers?: { shift?: boolean; ctrl?: boolean; meta?: boolean; alt?: boolean } }
 
@@ -1142,7 +1146,8 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
     layout.current?.syncDomTextSelection()
     const state = layout.current?.view.state
     if (!state) return
-    style({ [key]: readDocumentFormatting(state, latest.current.inlineStyleDefaults).flags[key] !== true })
+    const enabled = readDocumentFormatting(state, latest.current.inlineStyleDefaults).flags[key] !== true
+    style({ [key]: !enabled && latest.current.lightTextFormatting ? undefined : enabled })
   }
   function clearFormatting() {
     const editor = layout.current
@@ -1183,6 +1188,29 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
       if (node.type === nodeType || point.parent.canReplaceWith(index, index + 1, nodeType)) positions.add(position)
     })
     return [...positions]
+  }
+  function formatAsList() {
+    const editor = layout.current
+    if (!editor) return
+    editor.syncDomTextSelection()
+    const state = editor.view.state
+    const ids = paragraphTypePositions(state, 'paragraph').map(position => state.doc.nodeAt(position)!.attrs.id as string)
+    let content = fromEditorDocument(state.doc)
+    try {
+      for (const blockId of ids) content = applyDocumentBlockCommand(content, { action: 'convert', blockId, kind: 'list' })
+      if (ids.length) {
+        const selected = new Set(ids)
+        const blocks: DocumentBlock[] = []
+        for (const block of content.blocks) {
+          const previous = blocks.at(-1)
+          if (block.type === 'list' && previous?.type === 'list' && selected.has(block.id) && selected.has(previous.id)) {
+            blocks[blocks.length - 1] = { ...previous, items: [...previous.items, ...block.items] }
+          } else blocks.push(block)
+        }
+        applyDocumentContent({ ...content, blocks })
+      }
+    } catch (error) { fail((error as Error).message) }
+    editor.view.focus()
   }
   function dismissContextualTarget() {
     const current = contextualTargetRef.current
@@ -1321,41 +1349,71 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
       ? <div role="alert" className="shared-document-more__mode-notice">{commandError}</div>
       : null}
   </>
+  const typefaceControls = <>
+    <label><input aria-label="字号" type="number" min="8" max="400" value={format.fontSize === 'mixed' ? '' : format.fontSize ?? ''} placeholder={format.fontSize === 'mixed' ? '混合' : '默认'} onChange={event => { const value = Number(event.target.value); if (value >= 8 && value <= 400) style({ fontSize: value }) }} /></label>
+    <label><select aria-label="字体" value={format.fontFamily === 'mixed' ? '__mixed' : format.fontFamily ?? ''} onChange={event => { if (event.target.value && event.target.value !== '__mixed') style({ fontFamily: event.target.value }) }}><option value="">默认字体</option>{format.fontFamily === 'mixed' && <option value="__mixed">混合字体</option>}{format.fontFamily && format.fontFamily !== 'mixed' && !FONT_FAMILY_OPTIONS.some(option => option.family === format.fontFamily) && <option value={format.fontFamily}>{format.fontFamily}</option>}{FONT_FAMILY_OPTIONS.map(option => <option key={option.family} value={option.family}>{option.label}</option>)}</select></label>
+  </>
+  const formattingCommands: MenuCommand[] = [
+    { id: 'strike', label: '删除线', run: () => toggleStyle('strike') },
+    { id: 'emphasis', label: '着重号', run: () => toggleStyle('emphasis') },
+    { id: 'smaller', label: '减小字号', run: () => style(effective => ({ fontSize: stepFontSize(effective.fontSize ?? 16, -1) })) },
+    { id: 'larger', label: '增大字号', run: () => style(effective => ({ fontSize: stepFontSize(effective.fontSize ?? 16, 1) })) },
+    { id: 'clear', label: '清除文字格式', run: clearFormatting },
+  ]
+  const paragraphTypeControl = <select aria-label="段落类型" value={format.paragraphType} onChange={event => applyParagraphType(event.target.value)}><option value="" disabled>段落类型</option><option value="paragraph">正文</option>{[1, 2, 3, 4, 5, 6].map(level => <option key={level} value={level}>标题 {level}</option>)}</select>
   const toolbar = <div ref={toolbarRef} tabIndex={-1} className="shared-document-toolbar" onPointerDownCapture={() => layout.current?.syncDomTextSelection()} role={props.toolbarHost?.closest('[role="toolbar"]') ? undefined : 'toolbar'} aria-label={props.toolbarHost?.closest('[role="toolbar"]') ? undefined : '正文工具'}>
+      {props.lightTextFormatting ? (mode === 'layout' ? <>
+        {paragraphTypeControl}
+        <QuickBarButton label="列表" icon={<List size={16} />} onClick={formatAsList} />
+        <QuickBarButton label="粗体" icon={<Bold size={16} />} pressed={format.flags.bold} onClick={() => toggleStyle('bold')} />
+        <QuickBarButton label="斜体" icon={<Italic size={16} />} pressed={format.flags.italic} onClick={() => toggleStyle('italic')} />
+        <QuickBarButton label="删除线" icon={<Strikethrough size={16} />} pressed={format.flags.strike} onClick={() => toggleStyle('strike')} />
+        <QuickBarButton label="链接" icon={<Link2 size={16} />} onClick={openLink} />
+        <QuickBarButton label="插入表格" icon={<Table2 size={16} />} onClick={insertTable} />
+        <QuickBarButton label="清除文字格式" icon={<Eraser size={16} />} onClick={clearFormatting} />
+      </> : modeControls) : <>
       {documentScope && modeControls}
       {mode === 'layout' && props.contentScope === 'formula' && <button type="button" onMouseDown={event => event.preventDefault()} onClick={openMath}>编辑公式</button>}
-      {mode === 'layout' && props.contentScope !== 'formula' && !flowObjectSelection && <>
+      {mode === 'layout' && props.contentScope !== 'formula' && <>
         {!documentScope && props.toolbarHost ? <TextFormatControls value={{ fontFamily: format.fontFamily, fontSize: format.fontSize, color: format.color, highlightColor: format.highlightColor, ...format.flags }} onStyle={style} onToggle={toggleStyle}
           onStep={direction => style(effective => ({ fontSize: stepFontSize(effective.fontSize ?? 16, direction) }))}
           scope={<>{props.toolbarScope && `${props.toolbarScope} · `}{(semanticSelection?.kind === 'cells' ? '所选单元格' : semanticSelection?.kind === 'text' && (semanticSelection.anchor.blockId !== semanticSelection.head.blockId || semanticSelection.anchor.offset !== semanticSelection.head.offset || JSON.stringify(semanticSelection.anchor.slot) !== JSON.stringify(semanticSelection.head.slot)) ? '所选文字' : '输入位置')}</>} /> : <>
         {([['bold', '粗体'], ['italic', '斜体'], ['underline', '下划线']] as const).map(([key, label]) => <button key={key} type="button" onMouseDown={event => event.preventDefault()} aria-label={label} title={label} aria-pressed={format.flags[key]} onClick={() => toggleStyle(key)}>{key === 'bold' ? <Bold size={16} /> : key === 'italic' ? <Italic size={16} /> : <Underline size={16} />}</button>)}
-        <label><input aria-label="字号" type="number" min="8" max="400" value={format.fontSize === 'mixed' ? '' : format.fontSize ?? ''} placeholder={format.fontSize === 'mixed' ? '混合' : '默认'} onChange={event => { const value = Number(event.target.value); if (value >= 8 && value <= 400) style({ fontSize: value }) }} /></label>
-        <label><select aria-label="字体" value={format.fontFamily === 'mixed' ? '__mixed' : format.fontFamily ?? ''} onChange={event => { if (event.target.value && event.target.value !== '__mixed') style({ fontFamily: event.target.value }) }}><option value="">默认字体</option>{format.fontFamily === 'mixed' && <option value="__mixed">混合字体</option>}{format.fontFamily && format.fontFamily !== 'mixed' && !FONT_FAMILY_OPTIONS.some(option => option.family === format.fontFamily) && <option value={format.fontFamily}>{format.fontFamily}</option>}{FONT_FAMILY_OPTIONS.map(option => <option key={option.family} value={option.family}>{option.label}</option>)}</select></label>
-        <PaletteButton label="文字颜色" text="颜色" onPick={color => { if (color) style({ color }) }} />
-        <PaletteButton label="高亮颜色" text="高亮" variant="highlight" onPick={highlightColor => style({ highlightColor })} />
+        {typefaceControls}
+        {!props.compactDocumentToolbar && <>
+          <PaletteButton label="文字颜色" text="颜色" onPick={color => { if (color) style({ color }) }} />
+          <PaletteButton label="高亮颜色" text="高亮" variant="highlight" onPick={highlightColor => style({ highlightColor })} />
         </>}
-        <button type="button" aria-label="链接" title="链接" onMouseDown={event => event.preventDefault()} onClick={openLink}><Link2 size={16} /></button>
-        <button type="button" aria-label="公式" title="公式" onMouseDown={event => event.preventDefault()} onClick={openMath}><Sigma size={16} /></button>
+        <QuickBarButton label="上标" icon={<Superscript size={16} />} onClick={() => style({ baseline: 0.35 })} />
+        <QuickBarButton label="下标" icon={<Subscript size={16} />} onClick={() => style({ baseline: -0.25 })} />
+        </>}
+        {!props.compactDocumentToolbar && <>
+          <button type="button" aria-label="链接" title="链接" onMouseDown={event => event.preventDefault()} onClick={openLink}><Link2 size={16} /></button>
+          <button type="button" aria-label="公式" title="公式" onMouseDown={event => event.preventDefault()} onClick={openMath}><Sigma size={16} /></button>
+        </>}
         {documentScope && <button type="button" aria-label="插入表格" title="插入表格" onMouseDown={event => event.preventDefault()} onClick={insertTable}><Table2 size={16} aria-hidden="true" /></button>}
         {!documentScope && <button type="button" aria-label="清除文字格式" title="清除文字格式" onMouseDown={event => event.preventDefault()} onClick={clearFormatting}><Eraser size={16} /></button>}
-        {documentScope && <select aria-label="段落类型" value={format.paragraphType} onChange={event => applyParagraphType(event.target.value)}><option value="" disabled>段落类型</option><option value="paragraph">正文</option>{[1,2,3,4,5,6].map(level => <option key={level} value={level}>标题 {level}</option>)}</select>}
-        <button type="button" aria-label="更多文字格式" title="更多文字格式" aria-haspopup="menu" aria-expanded={formattingMenu.isOpen} onMouseDown={event => event.preventDefault()} onClick={event => {
+        {documentScope && paragraphTypeControl}
+        {props.compactDocumentToolbar ? <QuickBarPopoverButton label="更多正文工具" icon={<MoreHorizontal size={16} />}>
+          {close => <div className="shared-document-toolbar-options">
+            <div role="group" aria-label="文字格式">
+              {formattingCommands.map(command => <button key={command.id} type="button" onMouseDown={event => event.preventDefault()} onClick={() => { command.run(); close() }}>{command.label}</button>)}
+            </div>
+            <div role="group" aria-label="行内工具">
+              <button type="button" onMouseDown={event => event.preventDefault()} onClick={() => { openLink(); close() }}>链接</button>
+              <button type="button" onMouseDown={event => event.preventDefault()} onClick={() => { openMath(); close() }}>公式</button>
+            </div>
+            <details><summary onMouseDown={event => event.preventDefault()}>文字颜色</summary><ColorSwatchPanel label="文字颜色" value={format.color} onPick={color => { if (color) style({ color }); close() }} /></details>
+            <details><summary onMouseDown={event => event.preventDefault()}>高亮颜色</summary><ColorSwatchPanel label="高亮颜色" value={format.highlightColor} variant="highlight" onPick={highlightColor => { style({ highlightColor }); close() }} /></details>
+          </div>}
+        </QuickBarPopoverButton> : <button type="button" aria-label="更多文字格式" title="更多文字格式" aria-haspopup="menu" aria-expanded={formattingMenu.isOpen} onMouseDown={event => event.preventDefault()} onClick={event => {
           if (formattingMenu.isOpen) { formattingMenu.close(); return }
           const rect = event.currentTarget.getBoundingClientRect()
-          formattingMenu.open({ x: rect.left, y: rect.bottom }, '更多文字格式', [
-            { id: 'strike', label: '删除线', run: () => toggleStyle('strike') },
-            { id: 'emphasis', label: '着重号', run: () => toggleStyle('emphasis') },
-            { id: 'superscript', label: '上标', run: () => style({ baseline: 0.35 }) },
-            { id: 'subscript', label: '下标', run: () => style({ baseline: -0.25 }) },
-            { id: 'smaller', label: '减小字号', run: () => style(effective => ({ fontSize: stepFontSize(effective.fontSize ?? 16, -1) })) },
-            { id: 'larger', label: '增大字号', run: () => style(effective => ({ fontSize: stepFontSize(effective.fontSize ?? 16, 1) })) },
-            { id: 'clear', label: '清除文字格式', run: clearFormatting },
-          ])
-        }}><MoreHorizontal size={16} /></button>
+          formattingMenu.open({ x: rect.left, y: rect.bottom }, '更多文字格式', formattingCommands)
+        }}><MoreHorizontal size={16} /></button>}
       </>}
-      {flowObjectSelection && mode === 'layout' && <button type="button" aria-label="插入表格" title="插入表格" onMouseDown={event => event.preventDefault()} onClick={insertTable}><Table2 size={16} aria-hidden="true" /></button>}
-      {mode === 'layout' && !props.readOnly && props.renderTextActions?.(semanticSelection)}
       {props.onCompleteEditing && <QuickBarButton label="完成编辑" text="完成编辑" onClick={props.onCompleteEditing} />}
+      </>}
       {preserveButton}{discardButton}
     </div>
   const editorForms = <>
@@ -1405,7 +1463,12 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
   const quickBar = props.active !== false && documentScope && contextualTarget && !props.readOnly && !props.contextualCardSuppressed && quickBarPlace
     && <SelectionQuickBar anchor={quickBarPlace.anchor} bounds={quickBarPlace.bounds} label="选中内容快捷工具" selectionKey={selectionKey}
       suspended={pointerGesture || dismissedGeneration === targetGeneration}>
-      {(textTools || cellTextTools) && <>
+      {props.lightTextFormatting && (textTools || cellTextTools) && <>
+        <QuickBarButton label="当前选区加粗" icon={<Bold size={14} />} pressed={format.flags.bold} onClick={() => toggleStyle('bold')} />
+        <QuickBarButton label="当前选区斜体" icon={<Italic size={14} />} pressed={format.flags.italic} onClick={() => toggleStyle('italic')} />
+        <QuickBarButton label="当前选区链接" icon={<Link2 size={14} />} onClick={openLink} />
+      </>}
+      {!props.lightTextFormatting && (textTools || cellTextTools) && <>
         {flowObjectSelection ? <TextFormatControls value={{ fontFamily: format.fontFamily, fontSize: format.fontSize, color: format.color, highlightColor: format.highlightColor, ...format.flags }} onStyle={style} onToggle={toggleStyle}
           onStep={direction => style(effective => ({ fontSize: stepFontSize(effective.fontSize ?? 16, direction) }))}
           scope={semanticSelection?.kind === 'object' ? '全文' : semanticSelection?.kind === 'cells' ? '所选单元格' : semanticSelection?.kind === 'text' && semanticSelection.anchor.blockId === semanticSelection.head.blockId && semanticSelection.anchor.offset === semanticSelection.head.offset && JSON.stringify(semanticSelection.anchor.slot) === JSON.stringify(semanticSelection.head.slot) ? '输入位置' : '所选文字'} /> : <>
@@ -1447,6 +1510,7 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
         <QuickBarSeparator />
       </>}
       {flowObjectSelection && inputActive && <QuickBarButton label="完成编辑" text="完成编辑" onClick={() => { void completeFlowInput() }} />}
+      {mode === 'layout' && textSelection && props.renderTextActions?.(textSelection)}
       {tableTools.length > 0 && <QuickBarPopoverButton label="表格操作" text="表格操作" popupRole="menu">
         {close => <div className="selection-quick-bar__menu" role="menu" aria-label="表格操作">
           <CommandMenuItems items={tableTools} onRun={command => { close(); command.run() }} />
@@ -1460,7 +1524,7 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
           const ids = content && documentColumnSelection(content, contextualTarget.selection)
           if (ids) createColumns(ids)
         }} />}
-      {props.target === 'file' && propertyBlock && ['paragraph', 'heading', 'quote', 'table', 'formula', 'media'].includes(propertyBlock.type) && <QuickBarPopoverButton label="属性" icon={<SlidersHorizontal size={16} />} popoverLabel="当前文档块属性">
+      {!props.lightTextFormatting && props.target === 'file' && propertyBlock && ['paragraph', 'heading', 'quote', 'table', 'formula', 'media'].includes(propertyBlock.type) && <QuickBarPopoverButton label="属性" icon={<SlidersHorizontal size={16} />} popoverLabel="当前文档块属性">
         {() => <div className="shared-document-block-properties" data-document-block-id={propertyBlock.id}>
           {(propertyBlock.type === 'paragraph' || propertyBlock.type === 'heading' || propertyBlock.type === 'quote') && <>
             <label>对齐<select aria-label="段落对齐" value={propertyBlock.textAlign ?? 'left'} onChange={event => patchBlockProperties(propertyBlock.id, { textAlign: event.target.value })}>

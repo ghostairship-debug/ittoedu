@@ -2,7 +2,7 @@ import { z } from 'zod'
 
 /** Issued by the existing file owner. A changed path/binding or disk version invalidates it. */
 export interface FileArtifactBinding { path: string; fileVersion: string; bindingVersion: number }
-export interface MediaArtifactBindingChanged { before: FileArtifactBinding; binding: FileArtifactBinding }
+export interface MediaArtifactBindingChanged { before: FileArtifactBinding; binding: FileArtifactBinding; officeDraftSave?: boolean }
 
 const fraction = z.number().finite().min(0).max(1)
 const point = z.object({ x: fraction, y: fraction }).strict()
@@ -50,6 +50,7 @@ export interface MediaFileEditorPort {
   release?(binding: FileArtifactBinding): Promise<void> | void
   preview(binding: FileArtifactBinding, operations: readonly MediaFileOperation[]): Promise<MediaFileSnapshot>
   save(binding: FileArtifactBinding, operations: readonly MediaFileOperation[]): Promise<MediaFileSnapshot>
+  saveAs?(binding: FileArtifactBinding, operations: readonly MediaFileOperation[]): Promise<MediaFileSnapshot | null>
   /** Explicit discard/reload must obtain a fresh binding from the file owner. */
   reload(binding: FileArtifactBinding): Promise<MediaFileSnapshot>
 }

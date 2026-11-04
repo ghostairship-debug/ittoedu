@@ -3,15 +3,22 @@ import path from 'node:path'
 import { ZodError, type ZodIssue } from 'zod'
 import { UserFacingError } from '../../../shared/errors'
 import type { OfficeContentInspection, OfficeContentRequest, OfficeContentResult, OfficeFormat } from '../../../shared/workbench/officeFiles'
+import type { OfficeObjectEdit, OfficeObjectSourceInspection, OfficeObjectSourceTarget,
+  OfficeScopedObjectSourceInspection, OfficeScopedObjectSourceTarget } from '../../../shared/workbench/officeObjectEdit'
+import { OfficeDraftMergeConflict } from './officeDraftMergeError'
 
 export type OfficeContentWorkerRequest =
   | { type: 'apply'; bytes?: Uint8Array; request: OfficeContentRequest }
+  | { type: 'applyObject'; bytes: Uint8Array; request: OfficeObjectEdit }
+  | { type: 'inspectObject'; bytes: Uint8Array; request: OfficeObjectSourceTarget }
   | { type: 'inspect'; bytes: Uint8Array; format: OfficeFormat }
+  | { type: 'merge'; base: Uint8Array; proposed: OfficeContentResult; latest: Uint8Array; objectEdit?: OfficeObjectEdit }
 export interface OfficeContentWorkerError {
   name: string; message: string; stack?: string; issues?: ZodIssue[]; title?: string; suggestion?: string
+  mergeConflict?: { location: string; reason: string }
 }
 export type OfficeContentWorkerReply =
-  | { ok: true; result: OfficeContentResult | OfficeContentInspection }
+  | { ok: true; result: OfficeContentResult | OfficeContentInspection | OfficeObjectSourceInspection }
   | { ok: false; error: OfficeContentWorkerError }
 
 function createWorker(): Worker {
@@ -26,7 +33,8 @@ function createWorker(): Worker {
 
 function restoreError(value: OfficeContentWorkerError): Error {
   const constructors: Record<string, new(message: string) => Error> = { Error, TypeError, RangeError, SyntaxError, ReferenceError, URIError, EvalError }
-  const error = value.title !== undefined && value.suggestion !== undefined
+  const error = value.mergeConflict ? new OfficeDraftMergeConflict(value.mergeConflict.location, value.mergeConflict.reason)
+    : value.title !== undefined && value.suggestion !== undefined
     ? new UserFacingError(value.title, value.message, value.suggestion)
     : value.issues ? new ZodError(value.issues) : new (constructors[value.name] ?? Error)(value.message)
   error.name = value.name
@@ -67,6 +75,18 @@ function run<T>(request: OfficeContentWorkerRequest, signal?: AbortSignal): Prom
 export function applyOfficeContentOffThread(bytes: Uint8Array | undefined, request: OfficeContentRequest, signal?: AbortSignal): Promise<OfficeContentResult> {
   return run<OfficeContentResult>({ type: 'apply', ...(bytes ? { bytes } : {}), request }, signal)
 }
+export function applyOfficeObjectEditOffThread(bytes: Uint8Array, request: OfficeObjectEdit, signal?: AbortSignal): Promise<OfficeContentResult> {
+  return run<OfficeContentResult>({ type: 'applyObject', bytes, request }, signal)
+}
+export function inspectOfficeObjectSourceOffThread(bytes: Uint8Array, request: OfficeScopedObjectSourceTarget, signal?: AbortSignal): Promise<OfficeScopedObjectSourceInspection>
+export function inspectOfficeObjectSourceOffThread(bytes: Uint8Array, request: OfficeObjectSourceTarget, signal?: AbortSignal): Promise<OfficeObjectSourceInspection>
+export function inspectOfficeObjectSourceOffThread(bytes: Uint8Array, request: OfficeObjectSourceTarget, signal?: AbortSignal): Promise<OfficeObjectSourceInspection> {
+  return run<OfficeObjectSourceInspection>({ type: 'inspectObject', bytes, request }, signal)
+}
 export function inspectOfficeContentOffThread(bytes: Uint8Array, format: OfficeFormat, signal?: AbortSignal): Promise<OfficeContentInspection> {
   return run<OfficeContentInspection>({ type: 'inspect', bytes, format }, signal)
+}
+export function mergeOfficeDraftOffThread(base: Uint8Array, proposed: OfficeContentResult, latest: Uint8Array,
+  signal?: AbortSignal, objectEdit?: OfficeObjectEdit): Promise<OfficeContentResult> {
+  return run<OfficeContentResult>({ type: 'merge', base, proposed, latest, objectEdit }, signal)
 }

@@ -31,6 +31,7 @@ const IPC_CHANNELS = {
   docxPreviewCancel: 'docx-preview:cancel',
   docxPreviewProgress: 'docx-preview:progress',
   mediaFiles: 'media-files:operate',
+  saveFileArtifactAs: 'file-artifact:save-as',
   mediaFileRelease: 'media-files:release-draft',
   workspaceFilesChanged: 'workspace-files:changed',
   documents: 'documents:operate',
@@ -377,6 +378,7 @@ const desktopAPI = Object.freeze<DesktopAPI>({
     return () => { ipcRenderer.removeListener(IPC_CHANNELS.docxPreviewProgress, listener) }
   },
   mediaFiles: input => invoke(IPC_CHANNELS.mediaFiles, input),
+  saveFileArtifactAs: input => invoke(IPC_CHANNELS.saveFileArtifactAs, input),
   releaseMediaFileDraft: binding => invoke(IPC_CHANNELS.mediaFileRelease, binding),
   onWorkspaceFilesChanged: listener => {
     const receive = (_event: Electron.IpcRendererEvent, event: import('../shared/workbench/workspaceFiles').WorkspaceFilesChange) => listener(event)

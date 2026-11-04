@@ -11,6 +11,11 @@ export interface DocxFilePreviewProps {
   engine?: { name: string; version: string }
   notices?: readonly string[]
   active?: boolean
+  dirty?: boolean
+  autoSave?: boolean
+  onAutoSaveChange?(enabled: boolean): void
+  onSave?(): Promise<void>
+  onSaveAs?(): Promise<void>
   onOpenExternal?(): Promise<void> | void
   onImportToCourse?(): Promise<void> | void
   onReload?(): Promise<void> | void
@@ -18,7 +23,7 @@ export interface DocxFilePreviewProps {
 
 /** Display-only: all reads and revision changes belong to the existing file owner. */
 export function DocxFilePreview({ bytes, name, pageCount, sourceSha256, engine, notices = [], active = true,
-  onOpenExternal, onImportToCourse, onReload }: DocxFilePreviewProps) {
+  dirty, autoSave, onAutoSaveChange, onSave, onSaveAs, onOpenExternal, onImportToCourse, onReload }: DocxFilePreviewProps) {
   const viewport = useRef<HTMLDivElement>(null)
   const [index, setIndex] = useState(0)
   const [ready, setReady] = useState(false)
@@ -57,8 +62,14 @@ export function DocxFilePreview({ bytes, name, pageCount, sourceSha256, engine, 
   return <section className="docx-file-preview" aria-label={`${name} Word 原件分页预览`} hidden={!active}
     data-source-sha256={sourceSha256} onKeyDown={keydown}>
     <header className="docx-file-preview__toolbar">
-      <span className="docx-file-preview__identity"><strong title={name}>{name}</strong><span>原 Word 文稿 · 只读预览</span></span>
+      <span className="docx-file-preview__identity"><strong title={name}>{name}</strong><span>{dirty ? '未保存稿 · 分页预览' : 'Word 文稿 · 分页预览'}</span></span>
       <div className="docx-file-preview__actions">
+        {(onSave || onSaveAs) && <span className="file-save-pair">
+          {onSave && <button type="button" disabled={busy || !dirty} onClick={() => void runAction(onSave)}>保存</button>}
+          {onSaveAs && <button type="button" disabled={busy} onClick={() => void runAction(onSaveAs)}>另存为</button>}
+        </span>}
+        {onAutoSaveChange && <label><input type="checkbox" role="switch" checked={Boolean(autoSave)}
+          onChange={event => onAutoSaveChange(event.currentTarget.checked)} />自动保存</label>}
         {onImportToCourse && <button type="button" disabled={busy} onClick={() => void runAction(onImportToCourse)}>导入为果铃作品</button>}
         {onOpenExternal && <button type="button" disabled={busy} onClick={() => void runAction(onOpenExternal)}>用系统应用打开</button>}
         {onReload && <button type="button" disabled={busy} onClick={() => void runAction(onReload, true)}>{busy ? '正在处理…' : '重新载入'}</button>}

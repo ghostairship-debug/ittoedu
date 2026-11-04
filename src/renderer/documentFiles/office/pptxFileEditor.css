@@ -1,14 +1,14 @@
 .pptx-editor{position:relative;display:flex;flex-direction:column;height:100%;min-height:0;background:var(--bg,#f3f4f6);color:var(--text,#23262d)}
-.pptx-editor__toolbar{display:flex;align-items:center;gap:6px;flex-wrap:wrap;padding:8px 12px;background:var(--panel,#fff);border-bottom:1px solid var(--border,#ddd)}
+.pptx-editor__toolbar{display:flex;align-items:center;gap:5px;flex-wrap:wrap;padding:6px 9px;background:var(--panel,#fff);border-bottom:1px solid var(--border,#ddd)}
 .pptx-editor button,.pptx-editor select{font:inherit;font-size:12px;padding:5px 8px;border:1px solid var(--border,#d9dce2);border-radius:5px;background:var(--panel,#fff);color:inherit;cursor:pointer}
 .pptx-editor button:disabled{opacity:.45;cursor:default}.pptx-editor button:hover:not(:disabled){background:var(--hover,#eef3ff)}
 .pptx-editor__toolbar strong{max-width:190px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px;margin-right:8px}
 .pptx-editor__divider{height:20px;border-left:1px solid var(--border,#ddd);margin:0 4px}
 .pptx-editor__status{margin-left:auto;font-size:11px;color:var(--muted,#687180)}
-.pptx-editor__tools{display:flex;align-items:center;gap:5px;flex-wrap:wrap;flex-basis:100%;padding-top:6px;border-top:1px solid var(--border,#ddd)}
-/* Selecting objects or entering text keeps the slide's pointer geometry fixed. */
-.pptx-editor__context-tools{display:flex;align-items:center;flex-basis:100%;height:42px;min-width:0;box-sizing:border-box;border-top:1px solid var(--border,#ddd);overflow-x:auto;overflow-y:hidden;scrollbar-width:thin}
-.pptx-editor__context-tools>.pptx-editor__tools{flex-basis:auto;flex-wrap:nowrap;min-width:max-content;padding-top:0;border-top:0}
+.pptx-selection-more{width:min(340px,calc(100vw - 38px));display:grid;gap:6px}
+.pptx-editor__tools{display:flex;align-items:center;gap:5px;flex-wrap:wrap;padding-top:6px;border-top:1px solid var(--border,#ddd)}
+.pptx-selection-more :is(button,select){font:inherit;font-size:12px;padding:5px 8px;border:1px solid var(--border,#d9dce2);border-radius:5px;background:var(--panel,#fff);color:inherit}
+.pptx-selection-more button:disabled{opacity:.45}
 .pptx-editor__tools>span:not(.pptx-editor__divider){font-size:11px;color:var(--muted,#687180);padding:0 4px}
 .pptx-editor__tools select[aria-label="字体"]{max-width:135px}.pptx-editor__tools select[aria-label="字号"]{width:65px}
 .pptx-editor__format-b{font-weight:700!important}.pptx-editor__format-i{font-style:italic!important}.pptx-editor__format-u{text-decoration:underline}
@@ -21,7 +21,8 @@
 .pptx-editor__pages li button{display:flex;align-items:flex-start;gap:8px;width:100%;min-height:82px;text-align:left;line-height:1.6;padding:10px;background:var(--bg,#f7f8fa)}
 .pptx-editor__pages li button.is-active{border-color:#4d76e5;box-shadow:0 0 0 1px #4d76e5;background:#edf3ff;color:#172b56}
 .pptx-editor__page-number{font-size:11px;opacity:.7}.pptx-editor__page-actions{display:flex;gap:4px;justify-content:center}
-.pptx-editor__viewport{position:relative;display:flex;align-items:center;justify-content:center;flex:1;min-width:0;overflow:auto;padding:24px;box-sizing:border-box}
+/* The SDK retains an unscaled inner box after fitting the slide. Keep it from becoming a scroll target when text gains focus. */
+.pptx-editor__viewport{position:relative;display:flex;align-items:center;justify-content:center;flex:1;min-width:0;overflow:clip;padding:24px;box-sizing:border-box}
 .pptx-editor__surface{flex:none;background:white;box-shadow:0 3px 16px #0002;position:relative;color:#000;user-select:none}
 .pptx-editor__surface [contenteditable]{user-select:text}
 .pptx-editor__objects{display:flex;flex-direction:column;flex:0 0 210px;min-width:0;background:var(--panel,#fff);border-left:1px solid var(--border,#ddd);overflow:hidden}

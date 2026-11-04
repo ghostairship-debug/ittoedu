@@ -6,6 +6,7 @@ import { z } from 'zod'
 import { literalTextMatches } from '../../tools/literalTextSearch'
 import { taskTargetRegion, type TaskTargetMetadata } from '../../../shared/workbench/taskTargetContext'
 import { compactToolInputError } from '../../tools/ToolInputDiagnostic'
+import { ToolError } from '../../tools/ToolError'
 import { componentProjectApplyReceiptFiles, sameComponentProjectFile as sameFile } from './applyReceiptFiles'
 import { observeSpatialSource, prepareSpatialSourceEdit, prepareSpatialGraphSourceEdit } from '../../course/courseSpatialEdits'
 import type { ComponentSpatialPose } from '../../../shared/contracts/component-platform'
@@ -13,7 +14,7 @@ import type { DocumentSnapshot } from '../../../shared/workbench/document'
 import type { ToolResult } from '../../../shared/workbench/tools'
 import { componentDefinitionSchema, componentFrameSchema, jsonValueSchema, resolveComponentPresentation, type ComponentAsset, type ComponentEdit, type ComponentFrame, type ComponentOperationBatch, type CourseProjectV10 } from '../../../shared/contracts/component-platform'
 import { contentPlacementRegion } from '../../contentApply/planning/placement'
-import { captureComponentOperation, presentationComponentEdits } from '../../drivers/courseV10Operations'
+import { captureComponentOperation, componentValueAt, presentationComponentEdits } from '../../drivers/courseV10Operations'
 import { equalComponentValue } from '../../../shared/componentValue'
 import { applyComponentStylePatch, cssStyleName } from '../../../shared/componentStylePatch'
 import { CourseV10Driver } from '../../drivers/CourseV10Driver'
@@ -37,6 +38,7 @@ import { MODEL_DELIVERY_BYTES, modelTextEnd, modelJsonBytes } from '../../tools/
 import { loadBuiltinComponentSource } from '../../components/source/builtinSources'
 import { projectDocumentRanges } from '../../../shared/document/textInteraction'
 import { componentModuleSpecifier } from '../../components/source/moduleSpecifier'
+import { liveSourceOwners } from '../../components/compilation/liveSourceReferences'
 
 export type ComponentProjectSnapshot = DocumentSnapshot & { model: Extract<DocumentSnapshot['model'], { kind: 'course-v10' }> }
 export interface ComponentProjectFileInput {
@@ -1090,15 +1092,34 @@ export class ComponentProjectFileCoordinator {
         || file?.target && !['data', 'style', 'source', 'asset'].includes(file.kind)))
         return failure('state-file-target-required', '该工程路径是基础结构或 HTML 源文，不能写入展示状态。请沿用此状态 target 使用 object.update 或 presentation.update；状态 data/style 文件可直接 project.apply。')
       if (input.intent === 'source.imports') {
-        if (!seen?.pagination || !seen.captured || seen.snapshot.revision !== current.revision
-          || seen.snapshot.model.project.revision !== current.model.project.revision
-          || seen.pagination.snapshot.epoch !== current.epoch || seen.pagination.snapshot.revision !== current.revision
-          || seen.pagination.snapshot.model.project.revision !== current.model.project.revision)
+        if (!seen?.pagination || !seen.captured || seen.pagination.snapshot.epoch !== current.epoch)
           return failure('source-file-not-read', '连接模块前请用 project.read 读取使用方和共享 Source 主入口的当前版本；旧观察或修改回执不代替本次读取。')
         if (scope?.state || !file || file.kind !== 'source' || file.builtinSource || !file.implementation || !file.authorSource
           || !['definition-source', 'instance-source'].includes(file.binding?.kind ?? '') || file.authorSource.dependencyId
           || file.sourceFile && file.sourceFile.path !== file.implementation.workspace?.entry)
           return failure('source-import-target-required', '模块连接只作用已读 Source 主入口；使用 components 下的共享定义入口可同步其引用者。')
+        const readPaths: string[][] = []
+        const verifySourceRead = (observed: ComponentProjectSnapshot, source: ComponentProjectFile): boolean => {
+          const binding = source.binding
+          if (!source.implementation || observed.epoch !== current.epoch
+            || binding?.kind !== 'definition-source' && binding?.kind !== 'instance-source') return false
+          const closure = liveSourceOwners(observed.model.project, source.implementation, observed.model.resources)
+          const paths = [...closure.definitions].map(id => ['definitions', id])
+          paths.push(...[...closure.owners].map(id => ['@component-files', id]))
+          if (binding.kind === 'definition-source') paths.push(['definitions', binding.definitionId])
+          else {
+            paths.push(['instances', binding.instanceId, 'implementationOverride'], ['instances', binding.instanceId, 'definitionId'])
+            const definitionId = observed.model.project.instances[binding.instanceId]?.definitionId
+            if (definitionId) paths.push(['definitions', definitionId, 'implementation'])
+          }
+          if (!paths.every(path => equalComponentValue(componentValueAt(observed.model.project, path, observed.model.resources),
+            componentValueAt(current.model.project, path, current.model.resources)))) return false
+          readPaths.push(...paths)
+          return true
+        }
+        if (!verifySourceRead(seen.pagination.snapshot, file))
+          return failure('source-file-not-read', '使用方源码或其依赖已修改，请 project.read 当前主入口后继续。')
+        baseline = current
         const destination = file.binding as Extract<NonNullable<ComponentProjectFile['binding']>, { kind: 'definition-source' | 'instance-source' }>
         const target = destination.kind === 'definition-source'
           ? { kind: 'definition' as const, definition: baseline.model.project.definitions[destination.definitionId]! }
@@ -1108,11 +1129,6 @@ export class ComponentProjectFileCoordinator {
         const previousBindings = file.implementation.moduleBindings
           ?? Object.fromEntries((file.implementation.dependencies ?? []).map(id => [id, id]))
         const bindings = { ...previousBindings }
-        const readPaths: string[][] = [['revision']]
-        // A binding changes only an identity edge. Do not pretend to write the
-        // read-only source's files to obtain a byte CAS. Every Session resource
-        // transaction advances project.revision, so this infrequent operation
-        // conservatively rejects any intervening author/resource transaction.
         for (const [specifier, sourcePath] of Object.entries(input.imports)) {
           const parsed = componentModuleSpecifier(specifier)
           if (!parsed.pathname || parsed.diagnostic || specifier.includes('\0'))
@@ -1121,18 +1137,14 @@ export class ComponentProjectFileCoordinator {
           const sourceSeen = this.reads.get(runId)?.get(fileKey(current.documentId, sourcePath, scope))
           if (!sourceSeen?.pagination || !sourceSeen.captured || sourceSeen.unavailable)
             return failure('source-file-not-read', `共享入口尚未读取：${sourcePath}。请 project.read 后继续。`)
-          if (sourceSeen.snapshot.epoch !== baseline.epoch || sourceSeen.snapshot.revision !== baseline.revision
-            || sourceSeen.snapshot.model.project.revision !== current.model.project.revision
-            || sourceSeen.pagination.snapshot.epoch !== current.epoch || sourceSeen.pagination.snapshot.revision !== current.revision
-            || sourceSeen.pagination.snapshot.model.project.revision !== current.model.project.revision)
-            return failure('source-import-version-mismatch', '使用方与共享入口不是同一已读版本；请重新读取两处主入口后连接。')
           const shared = sourceSeen.file, binding = shared.binding
           if (binding?.kind !== 'definition-source' || shared.kind !== 'source' || shared.builtinSource
             || shared.authorSource?.dependencyId || shared.sourceFile && shared.sourceFile.path !== shared.implementation?.workspace?.entry
             || baseline.model.project.definitions[binding.definitionId]?.implementation.kind !== 'source')
             return failure('source-import-shared-entry-required', `共享模块需使用 components 下已存在的 Source 主入口，不能把工作区子文件或实例依赖地址当作共享定义：${sourcePath}`)
+          if (!verifySourceRead(sourceSeen.pagination.snapshot, shared))
+            return failure('source-import-version-mismatch', `共享入口或其依赖已改变：${sourcePath}。请 project.read 当前入口后继续。`)
           Object.defineProperty(bindings, specifier, { value: binding.definitionId, enumerable: true, configurable: true, writable: true })
-          readPaths.push(['definitions', binding.definitionId])
         }
         const implementation = { ...file.implementation, moduleBindings: bindings }
         const edits = equalComponentValue(previousBindings, bindings) ? []
@@ -1365,6 +1377,7 @@ export class ComponentProjectFileCoordinator {
       return captureApply ? { kind: 'read', data: publicContentApplyReceipt(result) }
         : this.contentReceipt(runId, input.project, input.path, baseline, file, result, scope)
     } catch (error) {
+      if (error instanceof ToolError) throw error
       if (error instanceof z.ZodError) {
         const detail = compactToolInputError(error, { name, input: raw as Record<string, unknown> })
         return { ...detail, data: { ...(detail.data as object), commit: 'not_committed',

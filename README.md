@@ -1,6 +1,6 @@
 # 果铃工作台
 
-面向教师的可编辑课件与通用内容工作台。模型负责内容，软件负责身份、资源、装配、事务、保存与交付；人工编辑与 AI 使用同一正式工程。
+果铃工作台是通用办公 Agent。GLX 工程创作是首要卖点和第一核心能力，Office 居第二，目标是高保真播放与预览、AI 全能力改写，通过轻量编辑与专业工具协作实现，无需完整复制重型 Office 引擎。任务管理、视频编辑、图片编辑和邮件管理列为后续能力。
 
 当前开发目录为 `D:/果铃工作台` 的 `main`。版本及范围见[当前状态](docs/development-plan/CURRENT_STATUS.md)：正式作者工程为 **Project 11**，运行发布投影为 **Published 4**，组件接口为 **Component API 5**。现行 Project 10 在文件及恢复读取边界一次转换，后续写出 11；更老格式和旧 API 记录按历史或遗留范围读取。通用程序和容器的实际入口见[能力交接](docs/development-plan/20261020-glx-work-containers/CAPABILITY_HANDOFF.md)。
 

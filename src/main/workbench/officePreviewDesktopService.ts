@@ -5,7 +5,7 @@ import { docxPreviewRequestSchema, pptxPreviewRequestSchema, type DocxPreviewReq
   type PptxPreviewRequest, type PptxPreviewSnapshot } from '../../shared/workbench/officePreview'
 import { documentHost } from './documentHost'
 import { assertAuthorizedWorkspacePath } from './workspaceFilesDesktopService'
-import { OfficeFileService } from './office/OfficeFileService'
+import { OfficeFileService, type OfficeFileResult } from './office/OfficeFileService'
 import type { FileArtifactBinding } from '../../shared/workbench/mediaFiles'
 import { inspectOfficeContentOffThread } from './office/officeContentWorker'
 import { WordPreviewService } from './office/WordPreviewService'
@@ -13,34 +13,37 @@ import { createWordPreviewConverter, WordLayoutRuntime } from './office/WordLayo
 
 /** Reads and human object edits share authorization, the physical file owner and Office mechanics. */
 export async function readPptxPreview(request: PptxPreviewRequest): Promise<PptxPreviewSnapshot> {
-  const input = pptxPreviewRequestSchema.parse(request), artifacts = documentHost().artifacts
+  const input = pptxPreviewRequestSchema.parse(request), host = documentHost(), artifacts = host.artifacts
+  const office = new OfficeFileService(host)
   const writing = input.type !== 'pptx-preview.open' && input.type !== 'pptx-preview.reload'
   // Reload obtains the latest version of an authorized path. Writes still require
   // the actually issued binding and the physical compare-and-swap boundary.
   const filename = input.type === 'pptx-preview.open' ? input.path
-    : writing ? artifacts.resolveBinding(input.binding).path : input.binding.path
+    : writing ? artifacts.resolveBinding(office.baseBinding(input.binding)).path : input.binding.path
   const authorized = await assertAuthorizedWorkspacePath(filename)
   if (path.extname(authorized).toLowerCase() !== '.pptx') throw new Error('此预览入口仅支持 PPTX 文件')
-  const office = new OfficeFileService(documentHost())
   let committed: FileArtifactBinding | undefined
+  let candidate: OfficeFileResult | undefined
   if (input.type === 'pptx-preview.edit') {
     if (input.content.format !== 'pptx') throw new Error('演示文稿对象编辑需要 PPTX 内容请求')
-    committed = (await office.edit(input.binding, { ...input.content, operation: 'edit' }, {
+    candidate = await office.edit(input.binding, { ...input.content, operation: 'edit' }, {
       actor: 'human', expectedVersion: input.binding.fileVersion, historyLabel: '手动编辑演示文稿',
-    })).binding
+    })
   } else if (input.type === 'pptx-preview.commit') {
-    committed = (await office.commitCandidate(input.binding, input.bytes, 'pptx', {
+    candidate = await office.commitCandidate(input.binding, input.bytes, 'pptx', {
       actor: 'human', expectedVersion: input.binding.fileVersion, historyLabel: '画布编辑演示文稿',
-    })).binding
+    })
   } else if (input.type === 'pptx-preview.undo' || input.type === 'pptx-preview.redo') {
-    committed = (await office.moveHistory(input.binding, input.type === 'pptx-preview.undo' ? 'undo' : 'redo', { expectedVersion: input.binding.fileVersion })).binding
+    candidate = await office.moveHistory(input.binding, input.type === 'pptx-preview.undo' ? 'undo' : 'redo', { expectedVersion: input.binding.fileVersion })
+  } else if (input.type === 'pptx-preview.save') {
+    committed = await office.saveWorking(input.binding)
   }
   // A write receipt belongs to its committed version, never a subsequent writer.
-  const binding = committed ?? await artifacts.bind(authorized)
-  const bytes = await artifacts.read(binding)
-  const snapshot: PptxPreviewSnapshot = { binding, bytes }
+  const binding = candidate?.binding ?? committed ?? await office.bindWorking(authorized, input.type === 'pptx-preview.open' && input.draft)
+  const bytes = await office.readWorking(binding)
+  const snapshot: PptxPreviewSnapshot = { binding, bytes, draftDirty: office.isDraftDirty(binding.path) }
   try {
-    const inspection = await inspectOfficeContentOffThread(bytes, 'pptx')
+    const inspection = candidate?.inspection ?? await inspectOfficeContentOffThread(bytes, 'pptx')
     if (inspection.format !== 'pptx') throw new Error('未找到演示文稿对象')
     snapshot.inspection = inspection
     snapshot.history = await office.history(binding)
@@ -49,7 +52,7 @@ export async function readPptxPreview(request: PptxPreviewRequest): Promise<Pptx
   }
   // Inspector/history await worker IO. Do not publish old bytes after another
   // writer has replaced them while we were preparing the projection.
-  await artifacts.read(binding)
+  await office.readWorking(binding)
   return snapshot
 }
 
@@ -64,16 +67,16 @@ function wordLayoutRuntime(): WordLayoutRuntime {
 
 /** Word preview is a disposable read projection; it has no original-file writer. */
 export async function readDocxPreview(request: DocxPreviewRequest, options: { signal?: AbortSignal; log?(line: string): void } = {}): Promise<DocxPreviewSnapshot> {
-  const input = docxPreviewRequestSchema.parse(request), artifacts = documentHost().artifacts
+  const input = docxPreviewRequestSchema.parse(request), office = new OfficeFileService(documentHost())
   const filename = input.type === 'docx-preview.open' ? input.path : input.binding.path
   const authorized = await assertAuthorizedWorkspacePath(filename)
   if (path.extname(authorized).toLowerCase() !== '.docx') throw new Error('此分页预览入口仅支持 DOCX 原件')
-  const binding = await artifacts.bind(authorized), bytes = await artifacts.read(binding, options.signal)
+  const binding = await office.bindWorking(authorized), bytes = await office.readWorking(binding, options)
   options.log?.('正在为 Word 原件排版…')
   const service = new WordPreviewService(path.join(app.getPath('temp'), 'guoling-word-preview'),
     createWordPreviewConverter(wordLayoutRuntime(), { log: options.log }))
   const preview = await service.render(bytes, { signal: options.signal })
-  const current = await artifacts.read(binding, options.signal)
+  const current = await office.readWorking(binding, options)
   if (createHash('sha256').update(current).digest('hex') !== preview.sourceSha256)
     throw new Error('排版期间 Word 原件已改变，请重新载入最新版本。')
   options.signal?.throwIfAborted()

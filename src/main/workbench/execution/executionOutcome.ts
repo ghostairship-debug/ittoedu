@@ -52,7 +52,7 @@ const fileMutations = new Set<string>(agentFileMutationNames)
 export function persistedToolWork(name: string, result?: ToolResult): boolean {
   if (internalAssembly(result)) return false
   const status = serviceToolOutcome(name, result)?.status
-  return knownApplication(name, result) || fileCreated(name, result) || status === 'saved' || status === 'written'
+  return knownApplication(name, result) || fileCreated(name, result) || status === 'saved' || status === 'written' || status === 'draft-applied'
 }
 /** Only the file/artifact owner supplies this marker from the actual frozen root. */
 const internalAssembly = (result?: ToolResult): boolean => result?.kind === 'read' && !!result.data
@@ -632,6 +632,8 @@ export function runEndSummary(record: ExecutionRunRecord): string | undefined {
       return typeof data?.path === 'string' ? [data.path] : []
     })).size
   if (savedOffice) parts.push(`已保存 ${savedOffice} 个 Office 文件`)
+  const officeDraftEdits = record.tools.filter(tool => serviceToolOutcome(tool.call.name, tool.result)?.status === 'draft-applied').length
+  if (officeDraftEdits) parts.push(`已应用 ${officeDraftEdits} 项 Office 草稿修改，写盘以保存回执为准`)
   const attemptedJobs = new Set(record.tools.filter(tool => tool.call.name.startsWith('build.')).map(jobOf).filter((job): job is string => !!job))
   const imported = importedJobs(record)
   if ([...attemptedJobs].some(job => !imported.has(job))) parts.push('另有暂存构建未导入；正式文档是否保存以保存回执为准')

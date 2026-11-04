@@ -7,8 +7,10 @@ import { readDocumentFileVersion } from './documentJournal'
 import { AgentFileOutcomeUnknown } from '../../core/tools/AgentFileTools'
 import { relocatedDocumentPath } from './DocumentFileCoordinator'
 import { prepareMediaFileContent, MediaFilesService } from './mediaFiles/MediaFilesService'
-import { FileArtifactHistory, type ArtifactHistoryMetadata } from './FileArtifactHistory'
-import type { OfficeHistorySnapshot } from '../../shared/workbench/officeFiles'
+import { FileArtifactHistory, type ArtifactHistoryMetadata, type ArtifactHistorySnapshot, type OfficeDraftRecovery } from './FileArtifactHistory'
+import { findOfficeDraft, officeDrafts, relocateOfficeDraft } from './office/OfficeDrafts'
+import { publishNewFile } from './publishNewFile'
+import { DocumentSaveFailure } from '../../shared/workbench/documentSave'
 
 /** Binary formats share the existing physical file owner, without a second document writer. */
 export class FileArtifactService {
@@ -20,6 +22,12 @@ export class FileArtifactService {
   private readonly histories?: FileArtifactHistory
   constructor(private readonly host: DocumentHostService, historyDirectory?: string) {
     if (historyDirectory) this.histories = new FileArtifactHistory(historyDirectory)
+    host.fileCoordinator.subscribeRelocationChecks?.(async action => {
+      const source = action.sources[0], target = action.target?.resolvedPath
+      if (!source || !target || this.key(path.resolve(source.resolvedPath)) === this.key(path.resolve(target))) return
+      if (source.kind === 'directory' || ['.pptx', '.docx', '.xlsx'].includes(path.extname(target).toLowerCase()))
+        await this.histories?.assertNoOfficeDraftAt(target, source.kind === 'directory')
+    })
     host.fileCoordinator.subscribeRelocations(async action => {
       await this.histories?.relocateMatching(filename => relocatedDocumentPath(action, filename))
       for (const before of [...this.bindings.values()]) {
@@ -31,7 +39,8 @@ export class FileArtifactService {
         this.bindings.delete(this.key(before.path)); this.bindings.set(this.key(filename), binding)
         for (const [token, current] of this.issued) if (current === before) this.issued.set(token, binding)
         this.issued.set(this.token(binding), binding)
-        for (const listener of this.bindingListeners) listener({ before: { ...before }, binding: { ...binding } })
+        const draft = relocateOfficeDraft(this, before, binding)
+        this.notifyChange(draft?.before ?? before, draft?.binding ?? binding)
       }
     })
   }
@@ -55,16 +64,49 @@ export class FileArtifactService {
     return resolved
   }
   async bind(filename: string): Promise<FileArtifactBinding> {
-    return this.host.fileCoordinator.withFileAccess(async () => {
-      const resolved = await this.ordinary(filename)
-      const fileVersion = await readDocumentFileVersion(resolved, 'text')
-      if (!fileVersion) throw new Error('文件已不存在')
-      const previous = this.bindings.get(this.key(resolved))
-      const binding = previous?.fileVersion === fileVersion ? previous : { path: resolved, fileVersion, bindingVersion: ++this.nextBindingVersion }
-      if (previous && binding !== previous) for (const [token, current] of this.issued) if (current === previous) this.issued.delete(token)
-      this.bindings.set(this.key(resolved), binding)
-      this.issued.set(this.token(binding), binding)
-      return { ...binding }
+    return this.host.fileCoordinator.withFileAccess(() => this.bindCurrent(filename))
+  }
+  private async bindCurrent(filename: string): Promise<FileArtifactBinding> {
+    const resolved = await this.ordinary(filename)
+    const fileVersion = await readDocumentFileVersion(resolved, 'text')
+    if (!fileVersion) throw new Error('文件已不存在')
+    const previous = this.bindings.get(this.key(resolved))
+    const binding = previous?.fileVersion === fileVersion ? previous : { path: resolved, fileVersion, bindingVersion: ++this.nextBindingVersion }
+    if (previous && binding !== previous) for (const [token, current] of this.issued) if (current === previous) this.issued.delete(token)
+    this.bindings.set(this.key(resolved), binding)
+    this.issued.set(this.token(binding), binding)
+    return { ...binding }
+  }
+  /** Publish an explicit native-dialog copy, leaving the source binding alone. */
+  async saveCopy(source: FileArtifactBinding, target: string, bytes: Uint8Array, overwrite?: FileArtifactBinding): Promise<FileArtifactBinding> {
+    return this.host.fileCoordinator.withFileOperation(async () => {
+      await this.assertBinding(source)
+      if (this.key(source.path) === this.key(target) || findOfficeDraft(this, target)) throw new Error('请选择不同的、未打开的目标文件。')
+      await this.host.assertFileAvailable(target)
+      const directory = path.dirname(target)
+      if (this.key(await fs.realpath(directory)) !== this.key(directory)) throw new Error('目标文件夹位置已改变，请重新选择。')
+      if (overwrite) {
+        if (this.key(overwrite.path) !== this.key(target)) throw new Error('实际目标与覆盖确认不一致。')
+        return this.replaceBound(overwrite, bytes)
+      }
+      const temporary = path.join(directory, `.${path.basename(target)}.${randomUUID()}.tmp`)
+      let preserveCandidate = false
+      try {
+        const handle = await fs.open(temporary, 'wx')
+        try { await handle.writeFile(bytes); await handle.sync() } finally { await handle.close() }
+        if (this.key(await fs.realpath(directory)) !== this.key(directory)) throw new Error('目标文件夹位置已改变，请重新选择。')
+        await publishNewFile(temporary, target)
+        try { return await this.bindCurrent(target) }
+        catch (cause) { throw new AgentFileOutcomeUnknown(`另存文件已写入，但重新读取未完成：${cause instanceof Error ? cause.message : String(cause)}`) }
+      } catch (cause) {
+        if (cause instanceof DocumentSaveFailure && cause.publication === 'unknown') {
+          preserveCandidate = true
+          throw new AgentFileOutcomeUnknown(`另存结果待确认，请检查目标文件后继续：${target}`)
+        }
+        throw cause
+      } finally {
+        if (!preserveCandidate) await fs.unlink(temporary).catch(() => {})
+      }
     })
   }
   private async assertBinding(binding: FileArtifactBinding): Promise<FileArtifactBinding> {
@@ -101,17 +143,58 @@ export class FileArtifactService {
     if (!this.histories) throw new Error('文件历史存储未配置；原件未修改')
     return this.histories
   }
-  async history(binding: FileArtifactBinding, signal?: AbortSignal): Promise<OfficeHistorySnapshot> {
+  async history(binding: FileArtifactBinding, signal?: AbortSignal, offset = 0): Promise<ArtifactHistorySnapshot> {
     return this.host.fileCoordinator.withFileOperation(async () => {
       const current = await this.assertBinding(binding), bytes = await this.readBound(current, signal)
-      return this.historyOwner(current).snapshot(current.path, bytes)
+      return this.historyOwner(current).snapshot(current.path, bytes, offset)
     })
   }
-  private notifyChange(before: FileArtifactBinding, binding: FileArtifactBinding): void {
+  async readHistoryAtOffset(binding: FileArtifactBinding, offset: number, signal?: AbortSignal): Promise<Uint8Array> {
+    return this.host.fileCoordinator.withFileOperation(async () => {
+      const bytes = await this.readBound(binding, signal)
+      return this.historyOwner(binding).readAtOffset(binding.path, bytes, offset)
+    })
+  }
+  private notifyChange(before: FileArtifactBinding, binding: FileArtifactBinding, officeDraftSave = false): void {
     for (const listener of this.bindingListeners) {
-      try { listener({ before: { ...before }, binding: { ...binding } }) }
+      try { listener({ before: { ...before }, binding: { ...binding }, ...(officeDraftSave ? { officeDraftSave } : {}) }) }
       catch { /* A closed renderer cannot change the result of an accepted file write. */ }
     }
+  }
+  notifyOfficeDraft(before: FileArtifactBinding, binding: FileArtifactBinding): void {
+    this.notifyChange(before, binding)
+  }
+  nextOfficeDraftVersion(): number { return ++this.nextBindingVersion }
+  async preserveOfficeDrafts(): Promise<void> {
+    for (const draft of officeDrafts(this).values()) {
+      if (!draft.dirty || !draft.original || !draft.bytes) continue
+      const binding = draft.binding
+      const previousRecovery = draft.recoveryBinding
+      await this.historyOwner(draft.base).persistOfficeDraft(draft.base.path, {
+        baseVersion: draft.baseVersion, original: draft.original, bytes: draft.bytes,
+        offset: draft.offset, branchOffset: draft.branchOffset, past: draft.past, future: draft.future,
+      })
+      draft.recoveryBinding = draft.base
+      draft.recoveryVersion = binding.fileVersion
+      if (previousRecovery && this.key(previousRecovery.path) !== this.key(draft.base.path)) await this.removeOfficeDraft(previousRecovery)
+      if (draft.binding !== binding) throw new Error('保留期间 Office 草稿有新修改，请重试关闭。')
+    }
+  }
+  async readOfficeDraft(binding: FileArtifactBinding): Promise<OfficeDraftRecovery | undefined> {
+    return this.historyOwner(binding).readOfficeDraft(binding.path)
+  }
+  async removeOfficeDraft(binding: FileArtifactBinding): Promise<void> {
+    await this.historyOwner(binding).removeOfficeDraft(binding.path)
+  }
+  async releaseOfficeDrafts(discard: boolean, preserved: boolean): Promise<void> {
+    const drafts = officeDrafts(this)
+    for (const draft of drafts.values()) {
+      if (draft.recoveryBinding && (discard || !draft.dirty)) await this.removeOfficeDraft(draft.recoveryBinding)
+    }
+    if ([...drafts.values()].some(draft => draft.saving || !discard && draft.dirty
+      && (!preserved || draft.recoveryVersion !== draft.binding.fileVersion)))
+      throw new Error('关闭期间仍有 Office 修改未确认，请重试关闭。')
+    drafts.clear()
   }
   async replace(binding: FileArtifactBinding, bytes: Uint8Array, signal?: AbortSignal, beforeCommit?: () => void, metadata?: ArtifactHistoryMetadata): Promise<FileArtifactBinding> {
     return this.host.fileCoordinator.withFileOperation(async () => {
@@ -128,7 +211,7 @@ export class FileArtifactService {
       }
       // Publication and history acknowledgement are distinct facts. Renderers must be able to
       // reopen the new binding even if the following history acknowledgement is interrupted.
-      this.notifyChange(current, saved)
+      this.notifyChange(current, saved, Boolean(metadata.sequence))
       try { await history.confirm(saved.path, bytes) }
       catch (cause) { throw new AgentFileOutcomeUnknown(`文件已写入，但共同编辑历史结算尚未确认；请重新读取原件，不要重发修改：${cause instanceof Error ? cause.message : String(cause)}`) }
       return saved

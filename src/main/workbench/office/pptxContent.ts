@@ -3,6 +3,7 @@ import path from 'node:path'
 import { createHash } from 'node:crypto'
 import { Buffer } from 'node:buffer'
 import { strToU8 } from 'fflate'
+import { XMLSerializer } from '@xmldom/xmldom'
 import { editAnimationTiming, editChartValue, inspectAnimations, inspectChart } from './pptxAdvanced'
 import { children, descendants, NS, OfficePackage, replaceTextRange, textOf } from './officePackage'
 import type { OfficeContentInspection, OfficeRequest, PptxObjectEdit, PptxObjectFrame, PptxObjectInspection, PptxTextStyle } from '../../../shared/workbench/officeFiles'
@@ -30,7 +31,7 @@ export async function createPptx(request: OfficeRequest<'pptx', 'create'>): Prom
   return result
 }
 
-function slideParts(pkg: OfficePackage): string[] {
+export function slideParts(pkg: OfficePackage): string[] {
   const main = pkg.main()
   const relationships = pkg.relationships(main)
   const presentation = pkg.xml(main)
@@ -43,13 +44,13 @@ function slideParts(pkg: OfficePackage): string[] {
 }
 
 const EMU_PER_POINT = 12700
-const shapeElements = new Set(['sp', 'pic', 'graphicFrame', 'grpSp', 'cxnSp'])
+export const shapeElements = new Set(['sp', 'pic', 'graphicFrame', 'grpSp', 'cxnSp'])
 interface PptxObject {
   shapeId: string; name: string; node: Element; paragraphs: Element[]; groupPath: string[]
   kind: PptxObjectInspection['kind']
 }
 
-function objects(pkg: OfficePackage, part: string): PptxObject[] {
+export function objects(pkg: OfficePackage, part: string): PptxObject[] {
   const result: PptxObject[] = []
   const root = descendants(pkg.xml(part), NS.slide, 'spTree')[0]
   if (!root) return result
@@ -417,7 +418,12 @@ export function inspectPptx(pkg: OfficePackage): Extract<OfficeContentInspection
   return { format: 'pptx', width: numericAttribute(size, 'cx') / EMU_PER_POINT, height: numericAttribute(size, 'cy') / EMU_PER_POINT,
     slides: slideParts(pkg).map((part, index) => ({ index, part, partVersion: pkg.partVersion(part), animations: inspectAnimations(pkg, part), shapes: objects(pkg, part).map(object => {
       const frame = frameOf(object, effectiveTransform(pkg, part, object)), properties = propertyContainer(object)
-      const hasFields = object.paragraphs.some(paragraph => descendants(paragraph, NS.drawing, 'fld').length > 0)
+      const autoFields = object.paragraphs.flatMap((paragraph, paragraphIndex) => children(paragraph, NS.drawing, 'fld').map((field, fieldIndex) => ({
+        paragraph: paragraphIndex, field: fieldIndex, id: field.getAttribute('id') ?? '', type: field.getAttribute('type') ?? '',
+        text: textOf(field, NS.drawing), xml: new XMLSerializer().serializeToString(field),
+        path: [{ name: 'p:txBody', index: 0 }, { name: 'a:p', index: paragraphIndex }, { name: 'a:fld', index: fieldIndex }],
+      })))
+      const hasFields = autoFields.length > 0 || object.paragraphs.some(paragraph => descendants(paragraph, NS.drawing, 'fld').length > 0)
       const editable: PptxObjectInspection['editable'] = ['layer']
       if (object.kind !== 'unsupported') editable.push('transform')
       if (object.paragraphs.length && !hasFields) editable.push('text', 'runText', 'textStyle')
@@ -429,6 +435,6 @@ export function inspectPptx(pkg: OfficePackage): Extract<OfficeContentInspection
         text: object.paragraphs.map(paragraphText).join('\n'), paragraphs: object.paragraphs.map(paragraphText), frame, runs,
         textStyle: runs[0]?.[0]?.style, fill: colorOf(properties), stroke: colorOf(properties ? children(properties, NS.drawing, 'ln')[0] : undefined),
         crop: cropOf(object), cells: object.kind === 'table' ? tableCells(object).map(row => row.map(cell => descendants(cell, NS.drawing, 'p').map(paragraphText).join('\n'))) : undefined,
-        chart: inspectChart(pkg, part, object.node), editable }
+        chart: inspectChart(pkg, part, object.node), ...(autoFields.length ? { autoFields } : {}), editable }
     }) })) }
 }

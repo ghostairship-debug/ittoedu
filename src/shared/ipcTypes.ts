@@ -134,12 +134,13 @@ export interface DesktopAPI {
   pixabaySettings?: import('./workbench/pixabaySettingsDesktop').PixabaySettingsAPI
   workspaceFiles?: import('./workbench/workspaceFiles').WorkspaceFilesAPI
   skillCatalog?: import('./workbench/skillCatalogDesktop').SkillCatalogAPI
-  officeDocument?(input: import('./workbench/officeDocument').OfficeDocumentRequest): Promise<import('./workbench/officeDocument').OfficeDocumentSnapshot>
+  officeDocument?(input: import('./workbench/officeDocument').OfficeDocumentRequest): Promise<import('./workbench/officeDocument').OfficeDocumentSnapshot | undefined>
   pptxPreview?(input: import('./workbench/officePreview').PptxPreviewRequest): Promise<import('./workbench/officePreview').PptxPreviewSnapshot>
   docxPreview?(input: import('./workbench/officePreview').DocxPreviewRequest): Promise<import('./workbench/officePreview').DocxPreviewSnapshot>
   cancelDocxPreview?(input: { requestId: string }): Promise<void>
   onDocxPreviewProgress?(handler: (progress: import('./workbench/officePreview').DocxPreviewProgress) => void): () => void
   mediaFiles?(input: import('./workbench/mediaFiles').MediaFilesRequest): Promise<import('./workbench/mediaFiles').MediaFileSnapshot>
+  saveFileArtifactAs?(input: import('./workbench/fileArtifactSaveAs').FileArtifactSaveAsRequest): Promise<import('./workbench/fileArtifactSaveAs').FileArtifactSaveAsResult | null>
   releaseMediaFileDraft?(binding: import('./workbench/mediaFiles').FileArtifactBinding): Promise<void>
   onWorkspaceFilesChanged?(listener: (event: import('./workbench/workspaceFiles').WorkspaceFilesChange) => void): () => void
   documents?: import('./workbench/desktop').DocumentHostAPI
@@ -267,6 +268,7 @@ export const IPC_CHANNELS = {
   docxPreviewCancel: 'docx-preview:cancel',
   docxPreviewProgress: 'docx-preview:progress',
   mediaFiles: 'media-files:operate',
+  saveFileArtifactAs: 'file-artifact:save-as',
   mediaFileRelease: 'media-files:release-draft',
   workspaceFilesChanged: 'workspace-files:changed',
   documents: 'documents:operate',

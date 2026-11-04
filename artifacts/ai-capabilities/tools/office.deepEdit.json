@@ -1,0 +1,640 @@
+{
+  "description": "当常规 office.edit 无法表达需要的修改时，按对象或原生 XML 部件修改已打开的 Office 草稿。可增删、重组原生节点并更新依赖关系。先用 office.inspect 读取位置及版本。修改直接进入当前草稿和统一撤销历史。发生实际冲突时，按报错位置读取最新稿并在本任务修正。",
+  "inputSchema": {
+    "$defs": {
+      "__schema0": {
+        "type": "boolean"
+      },
+      "__schema1": {
+        "maximum": 9007199254740991,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "__schema10": {
+        "minLength": 1,
+        "type": "string"
+      },
+      "__schema11": {
+        "$ref": "#/$defs/__schema12",
+        "description": "在定位节点前或后插入 XML。省略时替换或删除定位节点。"
+      },
+      "__schema12": {
+        "enum": [
+          "before",
+          "after"
+        ],
+        "type": "string"
+      },
+      "__schema13": {
+        "additionalProperties": false,
+        "properties": {
+          "parts": {
+            "$ref": "#/$defs/__schema14",
+            "description": "需要新建或复制后修改的原生部件。路径必须是新的包内路径。"
+          },
+          "relationships": {
+            "$ref": "#/$defs/__schema21",
+            "description": "由新对象 XML 引用的新关系。ID 在对象所在部件内唯一，内部 Target 相对于该部件。"
+          },
+          "removeParts": {
+            "$ref": "#/$defs/__schema23",
+            "description": "删除原目标依赖图中已不再被任何关系引用的包内部件。"
+          },
+          "removeRelationships": {
+            "$ref": "#/$defs/__schema22",
+            "description": "删除原目标节点曾引用且改后没有其他节点引用的关系 ID。"
+          }
+        },
+        "type": "object"
+      },
+      "__schema14": {
+        "items": {
+          "additionalProperties": false,
+          "properties": {
+            "base64": {
+              "$ref": "#/$defs/__schema18"
+            },
+            "contentType": {
+              "$ref": "#/$defs/__schema16"
+            },
+            "path": {
+              "$ref": "#/$defs/__schema15"
+            },
+            "relationships": {
+              "$ref": "#/$defs/__schema19"
+            },
+            "xml": {
+              "$ref": "#/$defs/__schema17"
+            }
+          },
+          "required": [
+            "path",
+            "contentType"
+          ],
+          "type": "object"
+        },
+        "type": "array"
+      },
+      "__schema15": {
+        "minLength": 1,
+        "type": "string"
+      },
+      "__schema16": {
+        "minLength": 1,
+        "type": "string"
+      },
+      "__schema17": {
+        "minLength": 1,
+        "type": "string"
+      },
+      "__schema18": {
+        "minLength": 1,
+        "type": "string"
+      },
+      "__schema19": {
+        "items": {
+          "$ref": "#/$defs/__schema20"
+        },
+        "type": "array"
+      },
+      "__schema2": {
+        "minLength": 1,
+        "type": "string"
+      },
+      "__schema20": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "target": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "targetMode": {
+            "const": "External",
+            "type": "string"
+          },
+          "type": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "type",
+          "target"
+        ],
+        "type": "object"
+      },
+      "__schema21": {
+        "items": {
+          "$ref": "#/$defs/__schema20"
+        },
+        "type": "array"
+      },
+      "__schema22": {
+        "items": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "type": "array"
+      },
+      "__schema23": {
+        "items": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "type": "array"
+      },
+      "__schema24": {
+        "const": "docx",
+        "type": "string"
+      },
+      "__schema25": {
+        "description": "段落、文字段、表格、行、单元格索引均从 0 开始，使用原件检查返回的位置。",
+        "oneOf": [
+          {
+            "$ref": "#/$defs/__schema26"
+          },
+          {
+            "$ref": "#/$defs/__schema28"
+          },
+          {
+            "$ref": "#/$defs/__schema29"
+          },
+          {
+            "$ref": "#/$defs/__schema30"
+          },
+          {
+            "$ref": "#/$defs/__schema31"
+          }
+        ]
+      },
+      "__schema26": {
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "const": "paragraph",
+            "type": "string"
+          },
+          "paragraph": {
+            "$ref": "#/$defs/__schema27"
+          }
+        },
+        "required": [
+          "kind",
+          "paragraph"
+        ],
+        "type": "object"
+      },
+      "__schema27": {
+        "maximum": 9007199254740991,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "__schema28": {
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "const": "run",
+            "type": "string"
+          },
+          "paragraph": {
+            "$ref": "#/$defs/__schema27"
+          },
+          "run": {
+            "$ref": "#/$defs/__schema27"
+          }
+        },
+        "required": [
+          "kind",
+          "paragraph",
+          "run"
+        ],
+        "type": "object"
+      },
+      "__schema29": {
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "const": "table",
+            "type": "string"
+          },
+          "table": {
+            "$ref": "#/$defs/__schema27"
+          }
+        },
+        "required": [
+          "kind",
+          "table"
+        ],
+        "type": "object"
+      },
+      "__schema3": {
+        "pattern": "^[a-f0-9]{64}$",
+        "type": "string"
+      },
+      "__schema30": {
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "const": "row",
+            "type": "string"
+          },
+          "row": {
+            "$ref": "#/$defs/__schema27"
+          },
+          "table": {
+            "$ref": "#/$defs/__schema27"
+          }
+        },
+        "required": [
+          "kind",
+          "table",
+          "row"
+        ],
+        "type": "object"
+      },
+      "__schema31": {
+        "additionalProperties": false,
+        "properties": {
+          "column": {
+            "$ref": "#/$defs/__schema27"
+          },
+          "kind": {
+            "const": "cell",
+            "type": "string"
+          },
+          "row": {
+            "$ref": "#/$defs/__schema27"
+          },
+          "table": {
+            "$ref": "#/$defs/__schema27"
+          }
+        },
+        "required": [
+          "kind",
+          "table",
+          "row",
+          "column"
+        ],
+        "type": "object"
+      },
+      "__schema32": {
+        "minLength": 1,
+        "type": "string"
+      },
+      "__schema33": {
+        "additionalProperties": false,
+        "properties": {
+          "cell": {
+            "pattern": "^[A-Z]{1,3}[1-9][0-9]*$",
+            "type": "string"
+          },
+          "sheet": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "sheet",
+          "cell"
+        ],
+        "type": "object"
+      },
+      "__schema34": {
+        "$ref": "#/$defs/__schema35",
+        "description": "Excel 原生数字格式代码，例如 0.0%。"
+      },
+      "__schema35": {
+        "maxLength": 255,
+        "minLength": 1,
+        "pattern": "^[\\u0020-\\ud7ff\\ue000-\\ufffd\\u{10000}-\\u{10ffff}]+$",
+        "type": "string"
+      },
+      "__schema36": {
+        "$ref": "#/$defs/__schema32",
+        "description": "SpreadsheetML alignment 元素，例如 <alignment wrapText=\"1\"/>。"
+      },
+      "__schema37": {
+        "$ref": "#/$defs/__schema32",
+        "description": "SpreadsheetML protection 元素。"
+      },
+      "__schema38": {
+        "$ref": "#/$defs/__schema32",
+        "description": "SpreadsheetML font 元素。只覆盖给定的属性子元素。"
+      },
+      "__schema39": {
+        "$ref": "#/$defs/__schema32",
+        "description": "完整的 SpreadsheetML fill 元素。"
+      },
+      "__schema4": {
+        "minLength": 1,
+        "type": "string"
+      },
+      "__schema40": {
+        "$ref": "#/$defs/__schema32",
+        "description": "SpreadsheetML border 元素。只覆盖给定的边和属性。"
+      },
+      "__schema41": {
+        "minLength": 1,
+        "type": "string"
+      },
+      "__schema42": {
+        "pattern": "^[a-f0-9]{64}$",
+        "type": "string"
+      },
+      "__schema5": {
+        "additionalProperties": false,
+        "properties": {
+          "dependencies": {
+            "$ref": "#/$defs/__schema13"
+          },
+          "insert": {
+            "$ref": "#/$defs/__schema11"
+          },
+          "path": {
+            "$ref": "#/$defs/__schema6"
+          },
+          "xml": {
+            "$ref": "#/$defs/__schema9"
+          }
+        },
+        "required": [
+          "path",
+          "xml"
+        ],
+        "type": "object"
+      },
+      "__schema6": {
+        "description": "从对象根逐级定位现有原生节点。空数组定位对象根。替换父节点即可新增或调整其子节点。",
+        "items": {
+          "$ref": "#/$defs/__schema7"
+        },
+        "type": "array"
+      },
+      "__schema7": {
+        "additionalProperties": false,
+        "properties": {
+          "index": {
+            "$ref": "#/$defs/__schema8",
+            "default": 0,
+            "description": "同命名空间且同名的直接子级中的零基序号"
+          },
+          "name": {
+            "description": "原生 XML 直接子级的限定名称，沿用读取时的命名空间前缀",
+            "pattern": "^(?:[a-zA-Z_][a-zA-Z_0-9.-]*:)?[a-zA-Z_][a-zA-Z_0-9.-]*$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "type": "object"
+      },
+      "__schema8": {
+        "maximum": 9007199254740991,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "__schema9": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/__schema10"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "description": "原生 XML 替换内容。null 删除目标节点。"
+      }
+    },
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "additionalProperties": false,
+    "properties": {
+      "content": {
+        "anyOf": [
+          {
+            "additionalProperties": false,
+            "properties": {
+              "edit": {
+                "$ref": "#/$defs/__schema5"
+              },
+              "format": {
+                "const": "pptx",
+                "type": "string"
+              },
+              "target": {
+                "additionalProperties": false,
+                "description": "原样沿用当前检查回执中的页索引、部件、部件版本和形状 ID",
+                "properties": {
+                  "part": {
+                    "$ref": "#/$defs/__schema2"
+                  },
+                  "partVersion": {
+                    "$ref": "#/$defs/__schema3"
+                  },
+                  "shapeId": {
+                    "$ref": "#/$defs/__schema4"
+                  },
+                  "slide": {
+                    "$ref": "#/$defs/__schema1"
+                  }
+                },
+                "required": [
+                  "slide",
+                  "part",
+                  "partVersion",
+                  "shapeId"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "format",
+              "target",
+              "edit"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "format": {
+                "$ref": "#/$defs/__schema24"
+              },
+              "properties": {
+                "description": "每项为一个 WordprocessingML 局部属性元素，使用 w: 前缀。例如 <w:spacing w:after=\"160\"/>。保持编号、分节、修订和合并拓扑。",
+                "items": {
+                  "$ref": "#/$defs/__schema32"
+                },
+                "minItems": 1,
+                "type": "array"
+              },
+              "target": {
+                "$ref": "#/$defs/__schema25"
+              }
+            },
+            "required": [
+              "format",
+              "target",
+              "properties"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "format": {
+                "const": "xlsx",
+                "type": "string"
+              },
+              "style": {
+                "additionalProperties": false,
+                "properties": {
+                  "alignment": {
+                    "$ref": "#/$defs/__schema36"
+                  },
+                  "border": {
+                    "$ref": "#/$defs/__schema40"
+                  },
+                  "fill": {
+                    "$ref": "#/$defs/__schema39"
+                  },
+                  "font": {
+                    "$ref": "#/$defs/__schema38"
+                  },
+                  "numberFormat": {
+                    "$ref": "#/$defs/__schema34"
+                  },
+                  "protection": {
+                    "$ref": "#/$defs/__schema37"
+                  }
+                },
+                "type": "object"
+              },
+              "target": {
+                "$ref": "#/$defs/__schema33"
+              }
+            },
+            "required": [
+              "format",
+              "target",
+              "style"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "format": {
+                "$ref": "#/$defs/__schema24"
+              },
+              "native": {
+                "$ref": "#/$defs/__schema5"
+              },
+              "target": {
+                "$ref": "#/$defs/__schema25"
+              }
+            },
+            "required": [
+              "format",
+              "target",
+              "native"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "format": {
+                "const": "xlsx",
+                "type": "string"
+              },
+              "native": {
+                "$ref": "#/$defs/__schema5"
+              },
+              "target": {
+                "$ref": "#/$defs/__schema33"
+              }
+            },
+            "required": [
+              "format",
+              "target",
+              "native"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "format": {
+                "enum": [
+                  "docx",
+                  "xlsx",
+                  "pptx"
+                ],
+                "type": "string"
+              },
+              "native": {
+                "$ref": "#/$defs/__schema5"
+              },
+              "packagePart": {
+                "additionalProperties": false,
+                "description": "从原生部件读取回执沿用路径及版本。可编辑标题、样式、工作簿等无法通过对象句柄定位的 XML。",
+                "properties": {
+                  "part": {
+                    "$ref": "#/$defs/__schema41"
+                  },
+                  "partVersion": {
+                    "$ref": "#/$defs/__schema42"
+                  }
+                },
+                "required": [
+                  "part",
+                  "partVersion"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "format",
+              "packagePart",
+              "native"
+            ],
+            "type": "object"
+          }
+        ]
+      },
+      "expectedVersion": {
+        "maxLength": 256,
+        "minLength": 1,
+        "type": "string"
+      },
+      "onlySelection": {
+        "$ref": "#/$defs/__schema0",
+        "description": "用户明确要求只改选区时设为 true。"
+      },
+      "path": {
+        "maxLength": 32767,
+        "minLength": 1,
+        "type": "string"
+      }
+    },
+    "required": [
+      "path",
+      "content"
+    ],
+    "type": "object"
+  },
+  "invocation": "静态目录只说明已登记接口；当前运行是否可调用、文档范围、写权限、短句柄和服务配置，以宿主本轮发现与实际回执为准。",
+  "manual": {
+    "group": "edit",
+    "label": "office.deepEdit",
+    "targetKinds": []
+  },
+  "name": "office.deepEdit",
+  "version": 1
+}

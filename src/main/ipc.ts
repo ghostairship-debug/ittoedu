@@ -15,6 +15,8 @@ import { trashWorkspaceWithDialog } from './workbench/workspaceTrashDialog'
 import { workspaceFilesRequestSchema } from '../shared/workbench/workspaceFiles'
 import { mediaFilesRequestSchema, mediaFileDraftInputSchema, fileArtifactBindingSchema } from '../shared/workbench/mediaFiles'
 import { operateMediaFiles } from './workbench/mediaFilesDesktopService'
+import { fileArtifactSaveAsRequestSchema } from '../shared/workbench/fileArtifactSaveAs'
+import { saveFileArtifactAs } from './workbench/fileArtifactSaveAs'
 import { officeDocumentRequestSchema } from '../shared/workbench/officeDocument'
 import { operateOfficeDocument } from './workbench/officeDocumentDesktopService'
 import { docxPreviewCancelSchema, docxPreviewRequestSchema, pptxPreviewRequestSchema } from '../shared/workbench/officePreview'
@@ -697,6 +699,10 @@ export function registerIpcHandlers(context: IpcContext): void {
     code: 'MEDIA_FILE_OPERATION_FAILED', title: '媒体文件操作未完成',
     message: '当前修改已保留。', suggestion: '请查看具体原因后重试。',
   }, async (_event, args) => operateMediaFiles(mediaFilesRequestSchema.parse(requireSingleArgument(args))))
+  registerSafeHandler(IPC_CHANNELS.saveFileArtifactAs, context, {
+    code: 'FILE_ARTIFACT_SAVE_AS_FAILED', title: '另存为未完成',
+    message: '当前修改已保留。', suggestion: '请查看具体原因后重试。',
+  }, async (_event, args) => saveFileArtifactAs(requireWindow(context), fileArtifactSaveAsRequestSchema.parse(requireSingleArgument(args))))
   registerSafeHandler(IPC_CHANNELS.mediaFileRelease, context, {
     code: 'MEDIA_DRAFT_RELEASE_FAILED', title: '媒体预览未能释放', message: '原文件保持不变。', suggestion: '关闭后可重新打开。',
   }, async (_event, args) => { documents.artifacts.media.release(fileArtifactBindingSchema.parse(requireSingleArgument(args))) })

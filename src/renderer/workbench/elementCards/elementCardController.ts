@@ -12,6 +12,7 @@ import { captureSelection, selectionReference, workbenchSelection, type Selectio
 import type { DocumentSnapshot } from '../../../shared/workbench/document'
 import { isExecutionInputError } from '../../../shared/workbench/executionInputMessages'
 import { authorFieldIdentity } from '../../documents/interactionSelection'
+import type { ExecutionFileContext } from '../../../shared/workbench/fileContext'
 
 /**
  * Element AI cards (M15): every element has its own card with its requests and replies. A card is backed by an
@@ -32,10 +33,9 @@ export interface ElementCardEntry {
 }
 /** The request the card's undo (or redo) would take back (or repeat), and what it changed. */
 export interface ElementCardStep { submissionId: string; fields: readonly string[] }
-export interface ElementCardView {
+interface ElementCardViewFields {
   key: string
   /** An element's card lives while its document is open; a text card while it is open on screen. */
-  kind: 'element' | 'text'
   /** Unsent cards may be folded without ending their conversation or discarding input. */
   dismissed: boolean
   /** Where a text card floats (viewport coordinates). */
@@ -46,7 +46,6 @@ export interface ElementCardView {
   workspaceId: string | null
   epoch?: string
   label: string
-  target: ExecutionSelectionTarget
   entries: readonly ElementCardEntry[]
   /** Something is queued or running. */
   busy: boolean
@@ -65,6 +64,9 @@ export interface ElementCardView {
   /** Why the latest request cannot be undone in the card (components and Runtime); the editor's undo still can. */
   undoUnavailable: string | null
 }
+export type ElementCardView = ElementCardViewFields & { kind: 'element' | 'text'; target: ExecutionSelectionTarget }
+export type AnyElementCardView = ElementCardView | (ElementCardViewFields & { kind: 'office'; target: null })
+export interface OfficeCardCapture { fileContext: ExecutionFileContext; selectionInstruction: string }
 export interface ElementCardPorts {
   execution(): ExecutionDesktopAPI | undefined
   settings(): ExecutionSettingsAPI | undefined
@@ -76,7 +78,7 @@ export interface ElementCardPorts {
 interface PendingSend { cancelled: boolean; invoked: boolean; request?: ExecutionSendInput; done: Promise<void>; settle(): void }
 interface CardRecord {
   key: string
-  kind: 'element' | 'text'
+  kind: 'element' | 'text' | 'office'
   anchor: { left: number; top: number } | null
   /** A text card: what its range held after the last request (undefined before the first check, null once lost). */
   content?: string | null
@@ -85,7 +87,9 @@ interface CardRecord {
   dismissed?: boolean
   documentId: string
   label: string
-  target: ExecutionSelectionTarget
+  target: ExecutionSelectionTarget | null
+  prepareOffice?(restrictToSelection: boolean): Promise<OfficeCardCapture>
+  confirmOffice?(): Promise<void> | void
   workspaceId: string | null
   conversation: ConversationRecord | null
   entries: ElementCardEntry[]
@@ -148,7 +152,7 @@ export class ElementCardController {
   private permission: ExecutionPermissionMode = DEFAULT_PERMISSION_MODE
   private events: { api: ExecutionDesktopAPI; stop(): void } | null = null
   private documents: { api: Pick<DocumentHostAPI, 'subscribe'>; stop(): void } | null = null
-  private views = new Map<string, ElementCardView>()
+  private views = new Map<string, AnyElementCardView>()
   private readonly openRequests = new Set<string>()
   private readonly captures = new Map<string, () => Promise<SelectionCapture>>()
   private preserving?: Promise<void>
@@ -166,9 +170,9 @@ export class ElementCardController {
     if (this.focus.documentId === documentId && this.focus.surfaceId === surfaceId) return
     this.focus = { documentId, surfaceId }; this.notify()
   }
-  inFocus(card: ElementCardView) {
+  inFocus(card: AnyElementCardView) {
     const target = card.target
-    const surfaceId = 'surfaceId' in target ? target.surfaceId : target.kind === 'course-object' ? target.locationId : null
+    const surfaceId = target && ('surfaceId' in target ? target.surfaceId : target.kind === 'course-object' ? target.locationId : null)
     return (!card.workspaceId || card.workspaceId === this.workspace?.workspaceId)
       && (this.focus.documentId === null || this.focus.documentId === card.documentId)
       && (!surfaceId || !this.focus.surfaceId || surfaceId === this.focus.surfaceId)
@@ -179,13 +183,14 @@ export class ElementCardController {
     if (card) { card.restrictToSelection = restricted; this.notify() }
   }
 
-  view(key: string): ElementCardView | null {
+  view(key: string): AnyElementCardView | null {
     const card = this.cards.get(key)
     if (!card) return null
     const cached = this.views.get(key)
     if (cached) return cached
-    const view: ElementCardView = {
-      key, kind: card.kind, dismissed: Boolean(card.dismissed), anchor: card.anchor, textLost: card.kind === 'text' && card.content === null ? TEXT_LOST : null, documentId: card.documentId, workspaceId: card.workspaceId, epoch: card.capture?.epoch, label: card.label, target: card.target,
+    const view: AnyElementCardView = {
+      ...(card.kind === 'office' ? { kind: 'office', target: null } as const : { kind: card.kind, target: card.target! }),
+      key, dismissed: Boolean(card.dismissed), anchor: card.anchor, textLost: card.kind === 'text' && card.content === null ? TEXT_LOST : null, documentId: card.documentId, workspaceId: card.workspaceId, epoch: card.capture?.epoch, label: card.label,
       entries: card.entries, projection: card.projection, restrictToSelection: card.restrictToSelection === true,
       busy: Boolean(card.sends.size || card.closing || card.unconfirmed || card.entries.some(entry => entry.state === 'sending' || entry.state === 'queued' || entry.state === 'running')),
       question: pendingQuestion(card.projection), approval: pendingApproval(card.projection), error: card.error, refreshError: card.refreshError ?? '', draft: card.draft, closing: card.closing, unconfirmed: Boolean(card.unconfirmed), ...steps(card.entries),
@@ -195,16 +200,16 @@ export class ElementCardController {
   }
   /** Element cards with work to show in the top bar: running, or waiting for an answer or an approval. */
   active(): ElementCardView[] {
-    return [...this.cards.keys()].map(key => this.view(key)!).filter(view => view.kind === 'element' && (view.busy || view.question || view.approval))
+    return [...this.cards.keys()].map(key => this.view(key)!).filter((view): view is ElementCardView => view.kind === 'element' && Boolean(view.busy || view.question || view.approval))
   }
-  texts(): ElementCardView[] { return [...this.cards.keys()].map(key => this.view(key)!).filter(view => view.kind === 'text') }
-  visible(): ElementCardView[] { return [...this.cards.keys()].map(key => this.view(key)!).filter(view => (!view.dismissed || view.draft.trim()) && this.inFocus(view)) }
+  texts(): ElementCardView[] { return [...this.cards.keys()].map(key => this.view(key)!).filter((view): view is ElementCardView => view.kind === 'text') }
+  visible(): ElementCardView[] { return [...this.cards.keys()].map(key => this.view(key)!).filter((view): view is ElementCardView => view.kind !== 'office' && Boolean(!view.dismissed || view.draft.trim()) && this.inFocus(view)) }
   reveal(key: string) { const card = this.cards.get(key); if (card) { card.dismissed = false; this.notify() } }
   registerCapture(key: string, capture?: () => Promise<SelectionCapture>) { if (capture) this.captures.set(key, capture); else this.captures.delete(key) }
   async captureCurrent(key: string) {
     const registered = this.captures.get(key); if (registered) return registered()
     const card = this.cards.get(key), snapshot = card && await this.ports.snapshot?.(card.documentId)
-    if (!card || !snapshot) throw new Error('原文档尚未就绪，请重新打开目标后发送。')
+    if (!card?.target || !snapshot) throw new Error('原文档尚未就绪，请重新打开目标后发送。')
     return captureSelection(snapshot, [card.target], card.label)
   }
   dismiss(key: string) {
@@ -227,6 +232,14 @@ export class ElementCardController {
     this.cards.set(key, { key, kind: 'element', anchor: null, dismissed: true, documentId: input.documentId, label: input.label, target: structuredClone(input.target), workspaceId: this.workspace?.workspaceId ?? null,
       conversation: null, entries: [], textStart: 0, projection: emptyExecutionProjection(''), error: '', draft: '', closing: false, sends: new Map(), sending: Promise.resolve(), catchUp: Promise.resolve() })
     this.observeDocuments()
+    this.notify()
+    return key
+  }
+  openOffice(label: string, prepareOffice: (restrictToSelection: boolean) => Promise<OfficeCardCapture>, confirmOffice: () => Promise<void> | void): string {
+    const key = `office:${crypto.randomUUID()}`
+    this.cards.set(key, { key, kind: 'office', anchor: null, documentId: key, label, target: null, prepareOffice, confirmOffice,
+      workspaceId: this.workspace?.workspaceId ?? null, conversation: null, entries: [], textStart: 0,
+      projection: emptyExecutionProjection(''), error: '', draft: '', closing: false, sends: new Map(), sending: Promise.resolve(), catchUp: Promise.resolve() })
     this.notify()
     return key
   }
@@ -308,8 +321,8 @@ export class ElementCardController {
         card.workspaceId = workspaceId
         card.projection = emptyExecutionProjection(card.conversation.conversationId); this.listen(api)
       }
-      const snapshot = card.draft && !card.capture ? await this.ports.snapshot?.(card.documentId) : undefined
-      const capture = card.capture ?? (snapshot ? { documentId: card.documentId, epoch: snapshot.epoch,
+      const snapshot = card.target && card.draft && !card.capture ? await this.ports.snapshot?.(card.documentId) : undefined
+      const capture = card.capture ?? (snapshot && card.target ? { documentId: card.documentId, epoch: snapshot.epoch,
         revision: snapshot.revision, targets: [structuredClone(card.target)], label: card.label } : undefined)
       const documents = capture ? [selectionReference(capture, this.permission !== 'read-only', card.restrictToSelection === true)] : []
       for (let attempt = 0; ; attempt++) {
@@ -348,9 +361,10 @@ export class ElementCardController {
     if (latest) await api.deleteConversation({ workspaceId: latest.workspaceId, conversationId: latest.conversationId, expectedRevision: latest.revision })
   }
   /** Preparation can be cancelled immediately; an invoked request keeps its control until settled. */
-  async closeText(key: string): Promise<void> {
+  closeText(key: string): Promise<void> { return this.closeTransient(key) }
+  async closeTransient(key: string): Promise<void> {
     const card = this.cards.get(key)
-    if (card?.kind !== 'text') return
+    if (card?.kind !== 'text' && card?.kind !== 'office') return
     card.closing = true; this.cancelPreparing(card)
     const invoked = [...card.sends.values()].some(value => value.invoked)
     if (!invoked && !card.conversation && !this.preserving) { this.cards.delete(key); this.notify(); return }
@@ -377,8 +391,10 @@ export class ElementCardController {
     if (card.unconfirmed) throw new Error('请先核对上次发送结果；原请求和输入仍保留。')
     if (!api || !workspaceId) throw new Error('AI 执行服务或工作空间尚未就绪。')
     card.workspaceId = workspaceId
-    if (card.kind === 'text' && this.view(key)?.busy) throw new Error('请等 AI 改完这一次再继续追问。')
-    const submissionId = crypto.randomUUID(), previous = card.sending, permission = this.permission, restrictToSelection = card.restrictToSelection === true
+    if ((card.kind === 'text' || card.kind === 'office') && this.view(key)?.busy) throw new Error('请等 AI 改完这一次再继续追问。')
+    const submissionId = crypto.randomUUID(), previous = card.sending
+    const permission = this.permission
+    const restrictToSelection = card.restrictToSelection === true
     let settle!: () => void
     const done = new Promise<void>(resolve => { settle = resolve })
     const pending: PendingSend = { cancelled: false, invoked: false, done, settle }
@@ -388,33 +404,40 @@ export class ElementCardController {
       if (this.cards.get(key) !== card || card.closing || pending.cancelled) throw new Error('发送已取消；未发送的输入保留。')
     }
     // Capture now, before another send finishes. Queuing and subsequent browsing never retarget this request.
-    const prepared = (async (): Promise<(SelectionCapture & { contentOutput?: ExecutionSendInput['contentOutput'] }) | undefined> => card.kind === 'text' ? this.textCapture(card)
-      : typeof selected === 'function' ? selected() : selected)()
+    const prepared = (async (): Promise<(SelectionCapture & { contentOutput?: ExecutionSendInput['contentOutput'] }) | OfficeCardCapture | undefined> =>
+      card.kind === 'office' ? card.prepareOffice?.(restrictToSelection) : card.kind === 'text' ? this.textCapture(card)
+        : typeof selected === 'function' ? selected() : selected)()
       .then(capture => ({ capture }), error => ({ error }))
     try {
       await previous; alive()
       const preparation = await prepared
       if ('error' in preparation) throw preparation.error
       const capture = preparation.capture
+      const office = capture && 'fileContext' in capture ? capture : undefined
+      const document = capture && 'targets' in capture ? capture : undefined
       alive()
-      if (!capture || capture.documentId !== card.documentId || capture.targets.length !== 1
-        || card.kind === 'element' && elementCardKey(capture.documentId, capture.targets[0]!) !== key)
+      if (card.kind === 'office' ? !office : !document || document.documentId !== card.documentId || document.targets.length !== 1
+        || card.kind === 'element' && elementCardKey(document.documentId, document.targets[0]!) !== key)
         throw new Error('选中的对象已改变，请重新选择后发送。')
       const settings = await this.ports.settings()?.read(); alive()
       const role = settings?.profile.roles.conversation
       const connection = settings?.connections.find(value => value.connection.id === role?.connectionId)
       if (!settings || !role || !connection?.hasCredential || connection.revoked) throw new Error('尚未配置可用的对话模型。请先在模型设置中选择连接、模型和账号。')
-      card.target = structuredClone(capture.targets[0]!)
-      card.capture = structuredClone(capture)
+      if (document) {
+        card.target = structuredClone(document.targets[0]!)
+        card.capture = structuredClone(document)
+      }
       let current = card.conversation
       if (!current) {
         current = await api.createConversation(workspaceId, card.label, undefined, { kind: 'element', documentId: card.documentId, label: card.label })
         card.conversation = current
         card.projection = emptyExecutionProjection(current.conversationId); this.listen(api); alive()
       }
-      const contentOutput = card.kind === 'text' ? capture.contentOutput : undefined
-      const request = { workspaceId, conversationId: current.conversationId, submissionId, text,
-        documents: [selectionReference(capture, permission !== 'read-only', restrictToSelection)], attachments: [], mode: 'queue' as const,
+      const contentOutput = card.kind === 'text' ? document?.contentOutput : undefined
+      const request = { workspaceId, conversationId: current.conversationId, submissionId,
+        text: office?.selectionInstruction ? `${text}\n\n${office.selectionInstruction}` : text,
+        documents: document ? [selectionReference(document, permission !== 'read-only', restrictToSelection)] : [], attachments: [], mode: 'queue' as const,
+        ...(office ? { fileContext: office.fileContext } : {}),
         ...(contentOutput ? { contentOutput } : {}),
         permission, disclosedSettings: disclosedExecutionSettings(settings) }
       let result: ExecutionSendResult
@@ -527,6 +550,7 @@ export class ElementCardController {
   async approve(key: string, runId: string, callId: string, decision: ApprovalDecision): Promise<void> {
     const api = this.ports.execution()
     if (!api?.approve) throw new Error('当前版本不能在卡片中批准。')
+    if (decision !== 'deny') await this.cards.get(key)?.confirmOffice?.()
     await api.approve({ runId, callId, decision })
     this.refresh(key)
   }
@@ -638,7 +662,7 @@ export class ElementCardController {
       }
       card.refreshError = undefined
       this.notify()
-      await this.readChanges(card, ticket, conversation.conversationId)
+      if (card.kind !== 'office') await this.readChanges(card, ticket, conversation.conversationId)
     })().catch(() => {
       if (this.cards.get(key) !== card || card.refreshTicket !== ticket) return
       card.refreshError = '任务状态暂不可读取，显示的是上次读取结果；任务可能仍在运行。'
@@ -706,7 +730,7 @@ export function useVisibleCards(): ElementCardView[] {
   return elementCards.visible()
 }
 
-export function useElementCard(key: string | null): ElementCardView | null {
+export function useElementCard(key: string | null): AnyElementCardView | null {
   useSyncExternalStore(elementCards.subscribe, elementCards.readVersion)
   return key ? elementCards.view(key) : null
 }

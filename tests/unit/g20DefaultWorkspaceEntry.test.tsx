@@ -95,6 +95,7 @@ describe('G20 default workspace entry has no embedded CLI dependency', () => {
       captureMediaDrafts: vi.fn(() => []), hasDirtyInputs: vi.fn(() => false), suspendForClose: vi.fn(), resumeAfterCloseCancelled: vi.fn(),
       saveActiveDocument: vi.fn(async (): Promise<'course'> => 'course'), drainAll: vi.fn(async () => true),
       prepareOfficeFiles: vi.fn(async () => true),
+      saveOffice: vi.fn(async () => true), saveOfficeAs: vi.fn(async () => true), setOfficeAutoSave: vi.fn(), resolveOfficeClose: vi.fn(async () => true),
       preserveAll: vi.fn(async () => true), closeAll: vi.fn(async () => true), disposeDocuments: vi.fn(async () => {}),
       activeDocumentTarget: () => undefined, selectionChanged: vi.fn(), sendContextualCommand: vi.fn(),
     }

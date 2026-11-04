@@ -24,6 +24,8 @@ export interface CourseLightToolbarProps {
   undoLatestAgent?(): void
   save(): void
   saveAs(): void
+  autoSave?: boolean
+  setAutoSave?(enabled: boolean): void
   onReplaceImage(): void
   onAddText(): void
   onAddImage(): void
@@ -120,7 +122,6 @@ export function CourseLightToolbar(props: CourseLightToolbarProps) {
   const fitWorld = context.kind === 'spatial-page' || context.kind === 'spatial-graph' ? context.commands.fitWorldContent : null
   const overflow: ReactNode[] = [
     ...(compact ? [
-      <button key="save-as" type="button" role="menuitem" disabled={props.busy} onClick={() => more(props.saveAs)}>另存为</button>,
       <button key="redo" type="button" role="menuitem" disabled={props.busy || !props.canRedo || !editing} onClick={() => more(props.redo)}>重做</button>,
       ...(props.onPreview ? [<button key="preview" type="button" role="menuitem" disabled={props.busy} onClick={() => { if (props.onPreview) more(props.onPreview) }}>整课预览</button>] : []),
     ] : []),
@@ -132,8 +133,11 @@ export function CourseLightToolbar(props: CourseLightToolbarProps) {
   ]
   return <div ref={toolbarRef} className="course-light-tools" data-compact={compact} data-toolbar-mode={toolbarMode} aria-label="常用工具">
     <div className="course-light-tools__row">
-      <button type="button" aria-label="保存" title="保存（Ctrl+S）" disabled={props.busy} onClick={() => invoke(props.save)}><Save size={17} /></button>
-      {!compact && <button type="button" aria-label="另存为" title="另存为" disabled={props.busy} onClick={() => invoke(props.saveAs)}><SaveAll size={17} /></button>}
+      <span className="file-save-pair">
+        <button type="button" aria-label="保存" title="保存（Ctrl+S）" disabled={props.busy} onClick={() => invoke(props.save)}><Save size={17} /></button>
+        <button type="button" aria-label="另存为" title="另存为" disabled={props.busy} onClick={() => invoke(props.saveAs)}><SaveAll size={17} /></button>
+      </span>
+      <label className="course-light-tools__autosave" title="自动保存当前文件，未命名文档需要先手动保存一次"><input type="checkbox" role="switch" checked={props.autoSave ?? false} disabled={!props.setAutoSave} onChange={event => props.setAutoSave?.(event.currentTarget.checked)} />自动保存</label>
       <button type="button" aria-label="撤销" title="撤销（Ctrl+Z）" disabled={props.busy || !props.canUndo || !editing} onClick={() => invoke(props.undo)}><Undo2 size={17} /></button>
       {!compact && <button type="button" aria-label="重做" title="重做（Ctrl+Y）" disabled={props.busy || !props.canRedo || !editing} onClick={() => invoke(props.redo)}><Redo2 size={17} /></button>}
       <div className="course-light-tools__insert" ref={insertRef}>

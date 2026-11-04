@@ -134,7 +134,7 @@ export function drawProfessional(target: PptxDrawingTarget, key: string, instanc
   if (key === 'guoling.shape') {
     const data = shapeDataSchema.parse(instance.data)
     // Keep professional paths/gradients through the existing DrawingML extension.
-    const node: ShapeNode = { ...data, style: { ...data.style, borderWidth: data.style.borderWidth * frame.scaleY,
+    const node: ShapeNode = { ...data, style: { ...data.style,
       cornerRadius: data.style.cornerRadius * Math.min(frame.scaleX, frame.scaleY) }, ...base(instance, frame), type: 'shape' }
     return addPptxShapeNode(reflectedTarget(target, frame.flipY), node, pixelScale, extensions)
   }

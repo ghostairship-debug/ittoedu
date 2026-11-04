@@ -8154,6 +8154,453 @@
         "output/office-coedit-20261103/final-native-ime-review-ae808e8e.json"
       ],
       "historicalRunsPreserved": true
+    },
+    "20261104-OFFICE-COMPLETE": {
+      "id": "20261104-OFFICE-COMPLETE",
+      "status": "pending",
+      "modifiedFiles": [],
+      "changes": [],
+      "tests": [],
+      "blockers": [],
+      "nextAction": "按11/04审查方案第四节：保留RDG，先在既有Office worker接入无界面单一计算权威；随后补全通用候选产物的版本/范围校验、三方合并及唯一提交，按既有任务权限补齐Office卡片引用能力；逐格式完成代表性复杂样本、真实模型、人机接续及原生回存。",
+      "title": "Office 接完整",
+      "goalRefs": [
+        "G14"
+      ],
+      "updatedAt": "2026-11-03T19:06:58.471Z",
+      "evidence": [
+        "果铃工作台-Codex多轮开发审查与后续实施方案-2026-11-04.md"
+      ]
+    },
+    "20261104-CODEX-AUDIT-types": {
+      "id": "20261104-CODEX-AUDIT-types",
+      "status": "in_progress",
+      "modifiedFiles": [],
+      "changes": [],
+      "tests": [
+        {
+          "jobId": "1793729423519-394b9224",
+          "taskId": "20261104-CODEX-AUDIT-types",
+          "label": "Audit three TypeScript targets",
+          "status": "passed",
+          "exitCode": 0,
+          "signal": null,
+          "finishedAt": "2026-11-03T18:10:56.020Z",
+          "log": "output/execution-checkpoints/1793729423519-394b9224/command.log"
+        }
+      ],
+      "blockers": [],
+      "nextAction": "Review type errors against actual changed consumers",
+      "updatedAt": "2026-11-03T18:10:56.051Z"
+    },
+    "20261104-CODEX-AUDIT-regression": {
+      "id": "20261104-CODEX-AUDIT-regression",
+      "status": "blocked",
+      "modifiedFiles": [],
+      "changes": [],
+      "tests": [
+        {
+          "jobId": "1793730130727-86b998e8",
+          "taskId": "20261104-CODEX-AUDIT-regression",
+          "label": "Codex audit integrated targeted regressions",
+          "status": "failed",
+          "exitCode": 1,
+          "signal": null,
+          "finishedAt": "2026-11-03T18:27:42.739Z",
+          "log": "output/execution-checkpoints/1793730130727-86b998e8/command.log"
+        }
+      ],
+      "blockers": [],
+      "nextAction": "Inspect output/execution-checkpoints/1793730130727-86b998e8/command.log; reconcile effects before a retry.",
+      "updatedAt": "2026-11-03T18:27:42.763Z"
+    },
+    "20261104-CODEX-AUDIT": {
+      "id": "20261104-CODEX-AUDIT",
+      "status": "verified",
+      "modifiedFiles": [
+        "docs/development-plan/CURRENT_STATUS.md",
+        "docs/development-plan/EXECUTION_CHECKPOINT.json",
+        "docs/development-plan/NEXT_EXECUTION.md",
+        "src/components/shape/render.ts",
+        "src/main/workbench/DocumentFileCoordinator.ts",
+        "src/main/workbench/FileArtifactHistory.ts",
+        "src/main/workbench/FileArtifactService.ts",
+        "src/main/workbench/office/OfficeDrafts.ts",
+        "src/main/workbench/office/officeObjectCompiler.ts",
+        "src/main/workbench/office/xlsxContent.ts",
+        "src/renderer/App.tsx",
+        "src/renderer/documentFiles/office/OfficeSelectionTools.tsx",
+        "src/renderer/documentFiles/office/PptxFileEditor.tsx",
+        "src/renderer/lessonWorkspace/controller/useDocumentTabsController.ts",
+        "src/renderer/lessonWorkspace/view/WorkspaceContentHost.tsx",
+        "src/shared/generated/componentBuiltinSources/shape.ts",
+        "tests/e2e/officeCloseInputLease20261104.spec.ts",
+        "tests/integration/g20DocumentFiles.test.ts",
+        "tests/integration/officeDraftRelocation20261104.test.ts",
+        "tests/integration/officeDraftRelocationSafety20261104.test.ts",
+        "tests/integration/pptxDraftRedoSave20261104.test.ts",
+        "tests/integration/shapePrefixedPlacementRegression.test.ts",
+        "tests/integration/xlsxNativeCalculationSave20261103.test.ts",
+        "tests/unit/auditAllSaveFiles.test.ts",
+        "tests/unit/g20M15ElementCards.test.tsx",
+        "tests/unit/officeCloseInputLease20261104.test.tsx",
+        "tests/unit/officeSaveDuringSave20261104.test.tsx",
+        "tests/unit/officeSelectionAnchorRace20261104.test.tsx",
+        "tests/unit/officeWindowSavePending20261104.test.tsx",
+        "tests/unit/pptxFlushSuffix20261104.test.tsx",
+        "tests/unit/pptxGroupSaveUngroup20261104.test.ts",
+        "tests/unit/pptxHistoryDuringSave20261104.test.tsx",
+        "tests/unit/sharedDocumentEditor.test.tsx",
+        "tests/unit/xlsxNativeCalculation20261103.test.ts",
+        "tests/unit/xlsxRoundCalculation20261103.test.ts",
+        "果铃工作台-Codex多轮开发审查与后续实施方案-2026-11-04.md"
+      ],
+      "changes": [
+        "保全142份接手改动；三路原生子智能体审查并交叉复核，已确认问题直接修复",
+        "完成Excel舍入/深改重算、Office恢复移动、关闭/保存/History、选区工具条与Flow变换修复",
+        "当前源码构建、三目标类型、代表性真实Electron和精确竞态回归完成；历史失败及5秒门槛限制保留",
+        "完成Univer headless计算实证及可执行后续方案，更新接续文档；G14继续partial",
+        "将6份历史验收源码/测试引用定位到与登记SHA相同的旧提交快照；原验收范围和产品状态未升级"
+      ],
+      "tests": [
+        {
+          "jobId": "1793732527869-17887ec5",
+          "taskId": "20261104-CODEX-AUDIT-build",
+          "label": "Build current audited source for real Electron verification",
+          "status": "passed",
+          "exitCode": 0,
+          "signal": null,
+          "finishedAt": "2026-11-03T19:02:22.586Z",
+          "log": "output/execution-checkpoints/1793732527869-17887ec5/command.log"
+        },
+        {
+          "jobId": "1793732528812-2499aa57",
+          "taskId": "20261104-CODEX-AUDIT-types-final",
+          "label": "Final audit three TypeScript targets",
+          "status": "passed",
+          "exitCode": 0,
+          "signal": null,
+          "finishedAt": "2026-11-03T19:02:15.419Z",
+          "log": "output/execution-checkpoints/1793732528812-2499aa57/command.log"
+        },
+        {
+          "jobId": "1793732565370-072e3eb8",
+          "taskId": "20261104-CODEX-AUDIT-electron",
+          "label": "Current source Office editing and close input real Electron regression",
+          "status": "passed",
+          "exitCode": 0,
+          "signal": null,
+          "finishedAt": "2026-11-03T19:04:43.753Z",
+          "log": "output/execution-checkpoints/1793732565370-072e3eb8/command.log"
+        },
+        {
+          "jobId": "1793732566328-70b450ed",
+          "taskId": "20261104-CODEX-AUDIT-save-races",
+          "label": "Final precise save, History and selection placement regressions",
+          "status": "passed",
+          "exitCode": 0,
+          "signal": null,
+          "finishedAt": "2026-11-03T19:03:10.478Z",
+          "log": "output/execution-checkpoints/1793732566328-70b450ed/command.log"
+        },
+        {
+          "jobId": "1793732005399-ac379668",
+          "taskId": "20261104-CODEX-AUDIT-time-gates",
+          "label": "Serial original five-second timing gates without concurrent build",
+          "status": "failed",
+          "exitCode": 1,
+          "signal": null,
+          "finishedAt": "2026-11-03T18:53:46.294Z",
+          "log": "output/execution-checkpoints/1793732005399-ac379668/command.log"
+        }
+      ],
+      "blockers": [],
+      "nextAction": "审查阶段已完成。按20261104-OFFICE-COMPLETE执行方案：先Excel单一计算权威，再通用候选校验/合并/唯一提交，最后代表性复杂原件闭环；当前PPT 5秒测试门槛留待计时优化，勿抹去原失败。",
+      "goalRefs": [
+        "G03",
+        "G04",
+        "G05",
+        "G09",
+        "G10",
+        "G11",
+        "G12",
+        "G13",
+        "G14"
+      ],
+      "title": "Codex 多轮开发审核、硬缺陷修复与后续实施方案",
+      "owner": "root",
+      "evidence": [
+        "果铃工作台-Codex多轮开发审查与后续实施方案-2026-11-04.md",
+        "output/codex-review-20261104/final-audit.json",
+        "output/codex-review-20261104/audit-changes.json"
+      ],
+      "updatedAt": "2026-11-03T19:14:36.658Z"
+    },
+    "20261104-CODEX-AUDIT-build": {
+      "id": "20261104-CODEX-AUDIT-build",
+      "status": "in_progress",
+      "modifiedFiles": [],
+      "changes": [],
+      "tests": [
+        {
+          "jobId": "1793730623069-0366397b",
+          "taskId": "20261104-CODEX-AUDIT-build",
+          "label": "Build current audited source for real Electron verification",
+          "status": "passed",
+          "exitCode": 0,
+          "signal": null,
+          "finishedAt": "2026-11-03T18:31:02.402Z",
+          "log": "output/execution-checkpoints/1793730623069-0366397b/command.log"
+        },
+        {
+          "jobId": "1793731124159-0c557723",
+          "taskId": "20261104-CODEX-AUDIT-build",
+          "label": "Build current audited source for real Electron verification",
+          "status": "passed",
+          "exitCode": 0,
+          "signal": null,
+          "finishedAt": "2026-11-03T18:38:57.285Z",
+          "log": "output/execution-checkpoints/1793731124159-0c557723/command.log"
+        },
+        {
+          "jobId": "1793731498788-5d560929",
+          "taskId": "20261104-CODEX-AUDIT-build",
+          "label": "Build current audited source for real Electron verification",
+          "status": "passed",
+          "exitCode": 0,
+          "signal": null,
+          "finishedAt": "2026-11-03T18:45:15.273Z",
+          "log": "output/execution-checkpoints/1793731498788-5d560929/command.log"
+        },
+        {
+          "jobId": "1793732072037-1a86d629",
+          "taskId": "20261104-CODEX-AUDIT-build",
+          "label": "Build current audited source for real Electron verification",
+          "status": "passed",
+          "exitCode": 0,
+          "signal": null,
+          "finishedAt": "2026-11-03T18:54:47.876Z",
+          "log": "output/execution-checkpoints/1793732072037-1a86d629/command.log"
+        },
+        {
+          "jobId": "1793732527869-17887ec5",
+          "taskId": "20261104-CODEX-AUDIT-build",
+          "label": "Build current audited source for real Electron verification",
+          "status": "passed",
+          "exitCode": 0,
+          "signal": null,
+          "finishedAt": "2026-11-03T19:02:22.586Z",
+          "log": "output/execution-checkpoints/1793732527869-17887ec5/command.log"
+        }
+      ],
+      "blockers": [],
+      "nextAction": "Run representative Office Electron tests against this source build; do not use prior packaged evidence.",
+      "updatedAt": "2026-11-03T19:02:22.620Z"
+    },
+    "20261104-CODEX-AUDIT-electron": {
+      "id": "20261104-CODEX-AUDIT-electron",
+      "status": "in_progress",
+      "modifiedFiles": [],
+      "changes": [],
+      "tests": [
+        {
+          "jobId": "1793730676719-c9c99e93",
+          "taskId": "20261104-CODEX-AUDIT-electron",
+          "label": "Current source Office editing and close input real Electron regression",
+          "status": "failed",
+          "exitCode": 1,
+          "signal": null,
+          "finishedAt": "2026-11-03T18:33:08.944Z",
+          "log": "output/execution-checkpoints/1793730676719-c9c99e93/command.log"
+        },
+        {
+          "jobId": "1793731173938-e45e9052",
+          "taskId": "20261104-CODEX-AUDIT-electron",
+          "label": "Current source Office editing and close input real Electron regression",
+          "status": "failed",
+          "exitCode": 1,
+          "signal": null,
+          "finishedAt": "2026-11-03T18:41:27.985Z",
+          "log": "output/execution-checkpoints/1793731173938-e45e9052/command.log"
+        },
+        {
+          "jobId": "1793731618122-3db310cb",
+          "taskId": "20261104-CODEX-AUDIT-electron",
+          "label": "Current source Office editing and close input real Electron regression",
+          "status": "failed",
+          "exitCode": 1,
+          "signal": null,
+          "finishedAt": "2026-11-03T18:48:55.654Z",
+          "log": "output/execution-checkpoints/1793731618122-3db310cb/command.log"
+        },
+        {
+          "jobId": "1793732150081-44da464a",
+          "taskId": "20261104-CODEX-AUDIT-electron",
+          "label": "Current source Office editing and close input real Electron regression",
+          "status": "failed",
+          "exitCode": 1,
+          "signal": null,
+          "finishedAt": "2026-11-03T18:57:51.593Z",
+          "log": "output/execution-checkpoints/1793732150081-44da464a/command.log"
+        },
+        {
+          "jobId": "1793732565370-072e3eb8",
+          "taskId": "20261104-CODEX-AUDIT-electron",
+          "label": "Current source Office editing and close input real Electron regression",
+          "status": "passed",
+          "exitCode": 0,
+          "signal": null,
+          "finishedAt": "2026-11-03T19:04:43.753Z",
+          "log": "output/execution-checkpoints/1793732565370-072e3eb8/command.log"
+        }
+      ],
+      "blockers": [],
+      "nextAction": "Review trusted keyboard close-lock test plus current source Word/Excel/PPT editing, explicit saves and cold reopen evidence.",
+      "updatedAt": "2026-11-03T19:04:43.789Z"
+    },
+    "20261104-CODEX-AUDIT-types-final": {
+      "id": "20261104-CODEX-AUDIT-types-final",
+      "status": "in_progress",
+      "modifiedFiles": [],
+      "changes": [],
+      "tests": [
+        {
+          "jobId": "1793730677867-392a81e6",
+          "taskId": "20261104-CODEX-AUDIT-types-final",
+          "label": "Final audit three TypeScript targets",
+          "status": "failed",
+          "exitCode": 1,
+          "signal": null,
+          "finishedAt": "2026-11-03T18:31:41.055Z",
+          "log": "output/execution-checkpoints/1793730677867-392a81e6/command.log"
+        },
+        {
+          "jobId": "1793731124936-7e067fd2",
+          "taskId": "20261104-CODEX-AUDIT-types-final",
+          "label": "Final audit three TypeScript targets",
+          "status": "passed",
+          "exitCode": 0,
+          "signal": null,
+          "finishedAt": "2026-11-03T18:39:06.304Z",
+          "log": "output/execution-checkpoints/1793731124936-7e067fd2/command.log"
+        },
+        {
+          "jobId": "1793731499983-1a4cf6c0",
+          "taskId": "20261104-CODEX-AUDIT-types-final",
+          "label": "Final audit three TypeScript targets",
+          "status": "failed",
+          "exitCode": 1,
+          "signal": null,
+          "finishedAt": "2026-11-03T18:45:03.394Z",
+          "log": "output/execution-checkpoints/1793731499983-1a4cf6c0/command.log"
+        },
+        {
+          "jobId": "1793731658080-7076e32b",
+          "taskId": "20261104-CODEX-AUDIT-types-final",
+          "label": "Final audit three TypeScript targets",
+          "status": "passed",
+          "exitCode": 0,
+          "signal": null,
+          "finishedAt": "2026-11-03T18:47:42.660Z",
+          "log": "output/execution-checkpoints/1793731658080-7076e32b/command.log"
+        },
+        {
+          "jobId": "1793732072802-40a11095",
+          "taskId": "20261104-CODEX-AUDIT-types-final",
+          "label": "Final audit three TypeScript targets",
+          "status": "passed",
+          "exitCode": 0,
+          "signal": null,
+          "finishedAt": "2026-11-03T18:54:38.853Z",
+          "log": "output/execution-checkpoints/1793732072802-40a11095/command.log"
+        },
+        {
+          "jobId": "1793732528812-2499aa57",
+          "taskId": "20261104-CODEX-AUDIT-types-final",
+          "label": "Final audit three TypeScript targets",
+          "status": "passed",
+          "exitCode": 0,
+          "signal": null,
+          "finishedAt": "2026-11-03T19:02:15.419Z",
+          "log": "output/execution-checkpoints/1793732528812-2499aa57/command.log"
+        }
+      ],
+      "blockers": [],
+      "nextAction": "Inspect all three compiler results before final audit completion.",
+      "updatedAt": "2026-11-03T19:02:15.455Z"
+    },
+    "20261104-CODEX-AUDIT-final-regression": {
+      "id": "20261104-CODEX-AUDIT-final-regression",
+      "status": "blocked",
+      "modifiedFiles": [],
+      "changes": [],
+      "tests": [
+        {
+          "jobId": "1793731501712-7e9d1b89",
+          "taskId": "20261104-CODEX-AUDIT-final-regression",
+          "label": "Final focused save, close and History regression after Electron findings",
+          "status": "failed",
+          "exitCode": 1,
+          "signal": null,
+          "finishedAt": "2026-11-03T18:46:15.288Z",
+          "log": "output/execution-checkpoints/1793731501712-7e9d1b89/command.log"
+        }
+      ],
+      "blockers": [],
+      "nextAction": "Inspect output/execution-checkpoints/1793731501712-7e9d1b89/command.log; reconcile effects before a retry.",
+      "updatedAt": "2026-11-03T18:46:15.317Z"
+    },
+    "20261104-CODEX-AUDIT-time-gates": {
+      "id": "20261104-CODEX-AUDIT-time-gates",
+      "status": "blocked",
+      "modifiedFiles": [],
+      "changes": [],
+      "tests": [
+        {
+          "jobId": "1793732005399-ac379668",
+          "taskId": "20261104-CODEX-AUDIT-time-gates",
+          "label": "Serial original five-second timing gates without concurrent build",
+          "status": "failed",
+          "exitCode": 1,
+          "signal": null,
+          "finishedAt": "2026-11-03T18:53:46.294Z",
+          "log": "output/execution-checkpoints/1793732005399-ac379668/command.log"
+        }
+      ],
+      "blockers": [],
+      "nextAction": "Inspect output/execution-checkpoints/1793732005399-ac379668/command.log; reconcile effects before a retry.",
+      "updatedAt": "2026-11-03T18:53:46.324Z"
+    },
+    "20261104-CODEX-AUDIT-save-races": {
+      "id": "20261104-CODEX-AUDIT-save-races",
+      "status": "in_progress",
+      "modifiedFiles": [],
+      "changes": [],
+      "tests": [
+        {
+          "jobId": "1793732151289-2aae5b57",
+          "taskId": "20261104-CODEX-AUDIT-save-races",
+          "label": "Final precise pending save and pending History regressions",
+          "status": "passed",
+          "exitCode": 0,
+          "signal": null,
+          "finishedAt": "2026-11-03T18:56:10.467Z",
+          "log": "output/execution-checkpoints/1793732151289-2aae5b57/command.log"
+        },
+        {
+          "jobId": "1793732566328-70b450ed",
+          "taskId": "20261104-CODEX-AUDIT-save-races",
+          "label": "Final precise save, History and selection placement regressions",
+          "status": "passed",
+          "exitCode": 0,
+          "signal": null,
+          "finishedAt": "2026-11-03T19:03:10.478Z",
+          "log": "output/execution-checkpoints/1793732566328-70b450ed/command.log"
+        }
+      ],
+      "blockers": [],
+      "nextAction": "Review the exact late-dirty and pending-History save regression results.",
+      "updatedAt": "2026-11-03T19:03:10.505Z"
     }
   },
   "runs": {
@@ -15633,42 +16080,561 @@
       "exitCode": 1,
       "signal": null,
       "finishedAt": "2026-11-03T10:41:06.239Z"
+    },
+    "1793729423519-394b9224": {
+      "jobId": "1793729423519-394b9224",
+      "taskId": "20261104-CODEX-AUDIT-types",
+      "label": "Audit three TypeScript targets",
+      "status": "passed",
+      "requestedAt": "2026-11-03T18:10:23.545Z",
+      "specFile": "output/execution-checkpoints/1793729423519-394b9224/spec.json",
+      "log": "output/execution-checkpoints/1793729423519-394b9224/command.log",
+      "statusFile": "output/execution-checkpoints/1793729423519-394b9224/result.json",
+      "supervisorPid": 84632,
+      "childPid": 59236,
+      "startedAt": "2026-11-03T18:10:23.742Z",
+      "lastHeartbeatAt": "2026-11-03T18:10:56.051Z",
+      "exitCode": 0,
+      "signal": null,
+      "finishedAt": "2026-11-03T18:10:56.020Z"
+    },
+    "1793730130727-86b998e8": {
+      "jobId": "1793730130727-86b998e8",
+      "taskId": "20261104-CODEX-AUDIT-regression",
+      "label": "Codex audit integrated targeted regressions",
+      "status": "failed",
+      "requestedAt": "2026-11-03T18:22:10.751Z",
+      "specFile": "output/execution-checkpoints/1793730130727-86b998e8/spec.json",
+      "log": "output/execution-checkpoints/1793730130727-86b998e8/command.log",
+      "statusFile": "output/execution-checkpoints/1793730130727-86b998e8/result.json",
+      "supervisorPid": 24276,
+      "childPid": 95284,
+      "startedAt": "2026-11-03T18:22:10.895Z",
+      "lastHeartbeatAt": "2026-11-03T18:27:42.763Z",
+      "exitCode": 1,
+      "signal": null,
+      "finishedAt": "2026-11-03T18:27:42.739Z"
+    },
+    "1793730623069-0366397b": {
+      "jobId": "1793730623069-0366397b",
+      "taskId": "20261104-CODEX-AUDIT-build",
+      "label": "Build current audited source for real Electron verification",
+      "status": "passed",
+      "requestedAt": "2026-11-03T18:30:23.099Z",
+      "specFile": "output/execution-checkpoints/1793730623069-0366397b/spec.json",
+      "log": "output/execution-checkpoints/1793730623069-0366397b/command.log",
+      "statusFile": "output/execution-checkpoints/1793730623069-0366397b/result.json",
+      "supervisorPid": 19212,
+      "childPid": 59728,
+      "startedAt": "2026-11-03T18:30:23.228Z",
+      "lastHeartbeatAt": "2026-11-03T18:31:02.430Z",
+      "exitCode": 0,
+      "signal": null,
+      "finishedAt": "2026-11-03T18:31:02.402Z"
+    },
+    "1793730676719-c9c99e93": {
+      "jobId": "1793730676719-c9c99e93",
+      "taskId": "20261104-CODEX-AUDIT-electron",
+      "label": "Current source Office editing and close input real Electron regression",
+      "status": "failed",
+      "requestedAt": "2026-11-03T18:31:16.739Z",
+      "specFile": "output/execution-checkpoints/1793730676719-c9c99e93/spec.json",
+      "log": "output/execution-checkpoints/1793730676719-c9c99e93/command.log",
+      "statusFile": "output/execution-checkpoints/1793730676719-c9c99e93/result.json",
+      "supervisorPid": 80996,
+      "childPid": 9780,
+      "startedAt": "2026-11-03T18:31:16.928Z",
+      "lastHeartbeatAt": "2026-11-03T18:33:08.969Z",
+      "exitCode": 1,
+      "signal": null,
+      "finishedAt": "2026-11-03T18:33:08.944Z"
+    },
+    "1793730677867-392a81e6": {
+      "jobId": "1793730677867-392a81e6",
+      "taskId": "20261104-CODEX-AUDIT-types-final",
+      "label": "Final audit three TypeScript targets",
+      "status": "failed",
+      "requestedAt": "2026-11-03T18:31:17.887Z",
+      "specFile": "output/execution-checkpoints/1793730677867-392a81e6/spec.json",
+      "log": "output/execution-checkpoints/1793730677867-392a81e6/command.log",
+      "statusFile": "output/execution-checkpoints/1793730677867-392a81e6/result.json",
+      "supervisorPid": 50948,
+      "childPid": 86176,
+      "startedAt": "2026-11-03T18:31:18.026Z",
+      "lastHeartbeatAt": "2026-11-03T18:31:41.084Z",
+      "exitCode": 1,
+      "signal": null,
+      "finishedAt": "2026-11-03T18:31:41.055Z"
+    },
+    "1793731124159-0c557723": {
+      "jobId": "1793731124159-0c557723",
+      "taskId": "20261104-CODEX-AUDIT-build",
+      "label": "Build current audited source for real Electron verification",
+      "status": "passed",
+      "requestedAt": "2026-11-03T18:38:44.191Z",
+      "specFile": "output/execution-checkpoints/1793731124159-0c557723/spec.json",
+      "log": "output/execution-checkpoints/1793731124159-0c557723/command.log",
+      "statusFile": "output/execution-checkpoints/1793731124159-0c557723/result.json",
+      "supervisorPid": 88584,
+      "childPid": 7372,
+      "startedAt": "2026-11-03T18:38:44.319Z",
+      "lastHeartbeatAt": "2026-11-03T18:38:57.316Z",
+      "exitCode": 0,
+      "signal": null,
+      "finishedAt": "2026-11-03T18:38:57.285Z"
+    },
+    "1793731124936-7e067fd2": {
+      "jobId": "1793731124936-7e067fd2",
+      "taskId": "20261104-CODEX-AUDIT-types-final",
+      "label": "Final audit three TypeScript targets",
+      "status": "passed",
+      "requestedAt": "2026-11-03T18:38:44.959Z",
+      "specFile": "output/execution-checkpoints/1793731124936-7e067fd2/spec.json",
+      "log": "output/execution-checkpoints/1793731124936-7e067fd2/command.log",
+      "statusFile": "output/execution-checkpoints/1793731124936-7e067fd2/result.json",
+      "supervisorPid": 63048,
+      "childPid": 7416,
+      "startedAt": "2026-11-03T18:38:45.084Z",
+      "lastHeartbeatAt": "2026-11-03T18:39:06.338Z",
+      "exitCode": 0,
+      "signal": null,
+      "finishedAt": "2026-11-03T18:39:06.304Z"
+    },
+    "1793731173938-e45e9052": {
+      "jobId": "1793731173938-e45e9052",
+      "taskId": "20261104-CODEX-AUDIT-electron",
+      "label": "Current source Office editing and close input real Electron regression",
+      "status": "failed",
+      "requestedAt": "2026-11-03T18:39:33.969Z",
+      "specFile": "output/execution-checkpoints/1793731173938-e45e9052/spec.json",
+      "log": "output/execution-checkpoints/1793731173938-e45e9052/command.log",
+      "statusFile": "output/execution-checkpoints/1793731173938-e45e9052/result.json",
+      "supervisorPid": 68444,
+      "childPid": 81620,
+      "startedAt": "2026-11-03T18:39:34.164Z",
+      "lastHeartbeatAt": "2026-11-03T18:41:28.022Z",
+      "exitCode": 1,
+      "signal": null,
+      "finishedAt": "2026-11-03T18:41:27.985Z"
+    },
+    "1793731498788-5d560929": {
+      "jobId": "1793731498788-5d560929",
+      "taskId": "20261104-CODEX-AUDIT-build",
+      "label": "Build current audited source for real Electron verification",
+      "status": "passed",
+      "requestedAt": "2026-11-03T18:44:58.818Z",
+      "specFile": "output/execution-checkpoints/1793731498788-5d560929/spec.json",
+      "log": "output/execution-checkpoints/1793731498788-5d560929/command.log",
+      "statusFile": "output/execution-checkpoints/1793731498788-5d560929/result.json",
+      "supervisorPid": 28244,
+      "childPid": 35808,
+      "startedAt": "2026-11-03T18:44:58.945Z",
+      "lastHeartbeatAt": "2026-11-03T18:45:15.299Z",
+      "exitCode": 0,
+      "signal": null,
+      "finishedAt": "2026-11-03T18:45:15.273Z"
+    },
+    "1793731499983-1a4cf6c0": {
+      "jobId": "1793731499983-1a4cf6c0",
+      "taskId": "20261104-CODEX-AUDIT-types-final",
+      "label": "Final audit three TypeScript targets",
+      "status": "failed",
+      "requestedAt": "2026-11-03T18:45:00.013Z",
+      "specFile": "output/execution-checkpoints/1793731499983-1a4cf6c0/spec.json",
+      "log": "output/execution-checkpoints/1793731499983-1a4cf6c0/command.log",
+      "statusFile": "output/execution-checkpoints/1793731499983-1a4cf6c0/result.json",
+      "supervisorPid": 41376,
+      "childPid": 66288,
+      "startedAt": "2026-11-03T18:45:00.243Z",
+      "lastHeartbeatAt": "2026-11-03T18:45:03.428Z",
+      "exitCode": 1,
+      "signal": null,
+      "finishedAt": "2026-11-03T18:45:03.394Z"
+    },
+    "1793731501712-7e9d1b89": {
+      "jobId": "1793731501712-7e9d1b89",
+      "taskId": "20261104-CODEX-AUDIT-final-regression",
+      "label": "Final focused save, close and History regression after Electron findings",
+      "status": "failed",
+      "requestedAt": "2026-11-03T18:45:01.780Z",
+      "specFile": "output/execution-checkpoints/1793731501712-7e9d1b89/spec.json",
+      "log": "output/execution-checkpoints/1793731501712-7e9d1b89/command.log",
+      "statusFile": "output/execution-checkpoints/1793731501712-7e9d1b89/result.json",
+      "supervisorPid": 63604,
+      "childPid": 59840,
+      "startedAt": "2026-11-03T18:45:02.110Z",
+      "lastHeartbeatAt": "2026-11-03T18:46:15.317Z",
+      "exitCode": 1,
+      "signal": null,
+      "finishedAt": "2026-11-03T18:46:15.288Z"
+    },
+    "1793731618122-3db310cb": {
+      "jobId": "1793731618122-3db310cb",
+      "taskId": "20261104-CODEX-AUDIT-electron",
+      "label": "Current source Office editing and close input real Electron regression",
+      "status": "failed",
+      "requestedAt": "2026-11-03T18:46:58.146Z",
+      "specFile": "output/execution-checkpoints/1793731618122-3db310cb/spec.json",
+      "log": "output/execution-checkpoints/1793731618122-3db310cb/command.log",
+      "statusFile": "output/execution-checkpoints/1793731618122-3db310cb/result.json",
+      "supervisorPid": 77728,
+      "childPid": 20636,
+      "startedAt": "2026-11-03T18:46:58.369Z",
+      "lastHeartbeatAt": "2026-11-03T18:48:55.691Z",
+      "exitCode": 1,
+      "signal": null,
+      "finishedAt": "2026-11-03T18:48:55.654Z"
+    },
+    "1793731658080-7076e32b": {
+      "jobId": "1793731658080-7076e32b",
+      "taskId": "20261104-CODEX-AUDIT-types-final",
+      "label": "Final audit three TypeScript targets",
+      "status": "passed",
+      "requestedAt": "2026-11-03T18:47:38.113Z",
+      "specFile": "output/execution-checkpoints/1793731658080-7076e32b/spec.json",
+      "log": "output/execution-checkpoints/1793731658080-7076e32b/command.log",
+      "statusFile": "output/execution-checkpoints/1793731658080-7076e32b/result.json",
+      "supervisorPid": 42216,
+      "childPid": 48952,
+      "startedAt": "2026-11-03T18:47:38.253Z",
+      "lastHeartbeatAt": "2026-11-03T18:47:42.704Z",
+      "exitCode": 0,
+      "signal": null,
+      "finishedAt": "2026-11-03T18:47:42.660Z"
+    },
+    "1793732005399-ac379668": {
+      "jobId": "1793732005399-ac379668",
+      "taskId": "20261104-CODEX-AUDIT-time-gates",
+      "label": "Serial original five-second timing gates without concurrent build",
+      "status": "failed",
+      "requestedAt": "2026-11-03T18:53:25.421Z",
+      "specFile": "output/execution-checkpoints/1793732005399-ac379668/spec.json",
+      "log": "output/execution-checkpoints/1793732005399-ac379668/command.log",
+      "statusFile": "output/execution-checkpoints/1793732005399-ac379668/result.json",
+      "supervisorPid": 62304,
+      "childPid": 88032,
+      "startedAt": "2026-11-03T18:53:25.560Z",
+      "lastHeartbeatAt": "2026-11-03T18:53:46.324Z",
+      "exitCode": 1,
+      "signal": null,
+      "finishedAt": "2026-11-03T18:53:46.294Z"
+    },
+    "1793732072037-1a86d629": {
+      "jobId": "1793732072037-1a86d629",
+      "taskId": "20261104-CODEX-AUDIT-build",
+      "label": "Build current audited source for real Electron verification",
+      "status": "passed",
+      "requestedAt": "2026-11-03T18:54:32.069Z",
+      "specFile": "output/execution-checkpoints/1793732072037-1a86d629/spec.json",
+      "log": "output/execution-checkpoints/1793732072037-1a86d629/command.log",
+      "statusFile": "output/execution-checkpoints/1793732072037-1a86d629/result.json",
+      "supervisorPid": 66784,
+      "childPid": 18520,
+      "startedAt": "2026-11-03T18:54:32.196Z",
+      "lastHeartbeatAt": "2026-11-03T18:54:47.915Z",
+      "exitCode": 0,
+      "signal": null,
+      "finishedAt": "2026-11-03T18:54:47.876Z"
+    },
+    "1793732072802-40a11095": {
+      "jobId": "1793732072802-40a11095",
+      "taskId": "20261104-CODEX-AUDIT-types-final",
+      "label": "Final audit three TypeScript targets",
+      "status": "passed",
+      "requestedAt": "2026-11-03T18:54:32.830Z",
+      "specFile": "output/execution-checkpoints/1793732072802-40a11095/spec.json",
+      "log": "output/execution-checkpoints/1793732072802-40a11095/command.log",
+      "statusFile": "output/execution-checkpoints/1793732072802-40a11095/result.json",
+      "supervisorPid": 47764,
+      "childPid": 43676,
+      "startedAt": "2026-11-03T18:54:32.959Z",
+      "lastHeartbeatAt": "2026-11-03T18:54:38.887Z",
+      "exitCode": 0,
+      "signal": null,
+      "finishedAt": "2026-11-03T18:54:38.853Z"
+    },
+    "1793732150081-44da464a": {
+      "jobId": "1793732150081-44da464a",
+      "taskId": "20261104-CODEX-AUDIT-electron",
+      "label": "Current source Office editing and close input real Electron regression",
+      "status": "failed",
+      "requestedAt": "2026-11-03T18:55:50.111Z",
+      "specFile": "output/execution-checkpoints/1793732150081-44da464a/spec.json",
+      "log": "output/execution-checkpoints/1793732150081-44da464a/command.log",
+      "statusFile": "output/execution-checkpoints/1793732150081-44da464a/result.json",
+      "supervisorPid": 7352,
+      "childPid": 88588,
+      "startedAt": "2026-11-03T18:55:50.293Z",
+      "lastHeartbeatAt": "2026-11-03T18:57:51.622Z",
+      "exitCode": 1,
+      "signal": null,
+      "finishedAt": "2026-11-03T18:57:51.593Z"
+    },
+    "1793732151289-2aae5b57": {
+      "jobId": "1793732151289-2aae5b57",
+      "taskId": "20261104-CODEX-AUDIT-save-races",
+      "label": "Final precise pending save and pending History regressions",
+      "status": "passed",
+      "requestedAt": "2026-11-03T18:55:51.311Z",
+      "specFile": "output/execution-checkpoints/1793732151289-2aae5b57/spec.json",
+      "log": "output/execution-checkpoints/1793732151289-2aae5b57/command.log",
+      "statusFile": "output/execution-checkpoints/1793732151289-2aae5b57/result.json",
+      "supervisorPid": 21000,
+      "childPid": 57388,
+      "startedAt": "2026-11-03T18:55:51.625Z",
+      "lastHeartbeatAt": "2026-11-03T18:56:10.498Z",
+      "exitCode": 0,
+      "signal": null,
+      "finishedAt": "2026-11-03T18:56:10.467Z"
+    },
+    "1793732527869-17887ec5": {
+      "jobId": "1793732527869-17887ec5",
+      "taskId": "20261104-CODEX-AUDIT-build",
+      "label": "Build current audited source for real Electron verification",
+      "status": "passed",
+      "requestedAt": "2026-11-03T19:02:07.894Z",
+      "specFile": "output/execution-checkpoints/1793732527869-17887ec5/spec.json",
+      "log": "output/execution-checkpoints/1793732527869-17887ec5/command.log",
+      "statusFile": "output/execution-checkpoints/1793732527869-17887ec5/result.json",
+      "supervisorPid": 42804,
+      "childPid": 22444,
+      "startedAt": "2026-11-03T19:02:08.021Z",
+      "lastHeartbeatAt": "2026-11-03T19:02:22.620Z",
+      "exitCode": 0,
+      "signal": null,
+      "finishedAt": "2026-11-03T19:02:22.586Z"
+    },
+    "1793732528812-2499aa57": {
+      "jobId": "1793732528812-2499aa57",
+      "taskId": "20261104-CODEX-AUDIT-types-final",
+      "label": "Final audit three TypeScript targets",
+      "status": "passed",
+      "requestedAt": "2026-11-03T19:02:08.831Z",
+      "specFile": "output/execution-checkpoints/1793732528812-2499aa57/spec.json",
+      "log": "output/execution-checkpoints/1793732528812-2499aa57/command.log",
+      "statusFile": "output/execution-checkpoints/1793732528812-2499aa57/result.json",
+      "supervisorPid": 36352,
+      "childPid": 95720,
+      "startedAt": "2026-11-03T19:02:08.969Z",
+      "lastHeartbeatAt": "2026-11-03T19:02:15.455Z",
+      "exitCode": 0,
+      "signal": null,
+      "finishedAt": "2026-11-03T19:02:15.419Z"
+    },
+    "1793732565370-072e3eb8": {
+      "jobId": "1793732565370-072e3eb8",
+      "taskId": "20261104-CODEX-AUDIT-electron",
+      "label": "Current source Office editing and close input real Electron regression",
+      "status": "passed",
+      "requestedAt": "2026-11-03T19:02:45.398Z",
+      "specFile": "output/execution-checkpoints/1793732565370-072e3eb8/spec.json",
+      "log": "output/execution-checkpoints/1793732565370-072e3eb8/command.log",
+      "statusFile": "output/execution-checkpoints/1793732565370-072e3eb8/result.json",
+      "supervisorPid": 94028,
+      "childPid": 85660,
+      "startedAt": "2026-11-03T19:02:45.531Z",
+      "lastHeartbeatAt": "2026-11-03T19:04:43.788Z",
+      "exitCode": 0,
+      "signal": null,
+      "finishedAt": "2026-11-03T19:04:43.753Z"
+    },
+    "1793732566328-70b450ed": {
+      "jobId": "1793732566328-70b450ed",
+      "taskId": "20261104-CODEX-AUDIT-save-races",
+      "label": "Final precise save, History and selection placement regressions",
+      "status": "passed",
+      "requestedAt": "2026-11-03T19:02:46.356Z",
+      "specFile": "output/execution-checkpoints/1793732566328-70b450ed/spec.json",
+      "log": "output/execution-checkpoints/1793732566328-70b450ed/command.log",
+      "statusFile": "output/execution-checkpoints/1793732566328-70b450ed/result.json",
+      "supervisorPid": 62332,
+      "childPid": 15224,
+      "startedAt": "2026-11-03T19:02:46.579Z",
+      "lastHeartbeatAt": "2026-11-03T19:03:10.505Z",
+      "exitCode": 0,
+      "signal": null,
+      "finishedAt": "2026-11-03T19:03:10.478Z"
     }
   },
   "lastSuccessfulOperation": {
-    "taskId": "20261103-CONTINUATION",
+    "taskId": "20261104-CODEX-AUDIT",
     "status": "verified",
-    "at": "2026-11-03T10:57:38.819Z",
+    "at": "2026-11-03T19:14:36.849Z",
     "evidence": [
-      "output/office-coedit-20261103/root-final-goal-patch-review.json",
-      "output/office-coedit-20261103/final-goal-review.json",
-      "output/office-coedit-20261103/final-native-ime-review-ae808e8e.json",
-      "output/office-coedit-20261103/package-current-20261103T094904-ae808e8e/evidence/FINAL_DELIVERY_FACTS.json",
-      "output/office-coedit-20261103/package-current-20261103T094904-ae808e8e/evidence/INSTALL_ACCEPTANCE_FINAL.json",
-      "output/execution-checkpoints/1793699187255-b4297fae/result.json",
-      "output/execution-checkpoints/1793700151704-189bcfdb/result.json",
-      "output/execution-checkpoints/1793700659549-42d449fe/result.json",
-      "output/execution-checkpoints/1793700771890-c5c7d4aa/result.json",
-      "output/execution-checkpoints/1793700832631-e86f9ce1/result.json"
+      "果铃工作台-Codex多轮开发审查与后续实施方案-2026-11-04.md",
+      "output/codex-review-20261104/final-audit.json",
+      "output/codex-review-20261104/audit-changes.json"
     ]
   },
   "workspace": {
-    "checkedAt": "2026-11-03T10:58:44.285Z",
-    "head": "ae808e8ea842fe00d7482e3b529edfc96e6b9e4e",
+    "checkedAt": "2026-11-03T19:14:36.660Z",
+    "head": "ebc4fe6db76018daeed5264881990bb34cfa9408",
     "status": [
+      " M README.md",
+      " M artifacts/ai-capabilities/discovery-data.json",
+      " M artifacts/ai-capabilities/discovery.json",
+      " M artifacts/ai-capabilities/index.json",
+      " M artifacts/ai-capabilities/tools/object.update.json",
+      " M artifacts/ai-capabilities/tools/office.edit.json",
+      " M artifacts/ai-capabilities/tools/office.inspect.json",
+      " M artifacts/ai-capabilities/tools/text.replace.json",
+      " M docs/development-plan/ARCHITECTURE_CONTRACT.md",
       " M docs/development-plan/CURRENT_STATUS.md",
       " M docs/development-plan/EXECUTION_CHECKPOINT.json",
       " M docs/development-plan/NEXT_EXECUTION.md",
-      " M docs/development-plan/TASK_BOARD.md",
-      " M docs/development-plan/tasks/20261027-next-execution/next-execution.md",
+      " M src/components/shape/render.ts",
+      " M src/core/documents/DocumentSession.ts",
+      " M src/core/drivers/courseV10Operations.ts",
+      " M src/core/projectFiles/componentPlatform/coordinator.ts",
+      " M src/core/tools/AgentFileTools.ts",
+      " M src/core/tools/DocumentToolGateway.ts",
+      " M src/core/tools/OfficeContentTools.ts",
+      " M src/core/tools/ToolCatalog.ts",
+      " M src/core/tools/modelToolResult.ts",
+      " M src/core/tools/toolSchemas.ts",
+      " M src/main/createWindow.ts",
+      " M src/main/ipc.ts",
+      " M src/main/workbench/DocumentFileCoordinator.ts",
+      " M src/main/workbench/FileArtifactHistory.ts",
+      " M src/main/workbench/FileArtifactService.ts",
+      " M src/main/workbench/contentApply/applyService.ts",
+      " M src/main/workbench/execution/AgentFileService.ts",
+      " M src/main/workbench/execution/ExecutionEngine.ts",
+      " M src/main/workbench/execution/executionOutcome.ts",
+      " M src/main/workbench/office/OfficeFileService.ts",
+      " M src/main/workbench/office/docxContent.ts",
+      " M src/main/workbench/office/officeContentWorker.ts",
+      " M src/main/workbench/office/officeContentWorkerEntry.ts",
+      " M src/main/workbench/office/officePackage.ts",
+      " M src/main/workbench/office/pptxContent.ts",
+      " M src/main/workbench/office/xlsxContent.ts",
+      " M src/main/workbench/officeDocumentDesktopService.ts",
+      " M src/main/workbench/officePreviewDesktopService.ts",
+      " M src/preload/index.ts",
+      " M src/renderer/App.tsx",
+      " M src/renderer/componentPlatform/surfaces/slide/targets.ts",
+      " M src/renderer/document/SharedDocumentEditor.tsx",
+      " M src/renderer/documentFiles/LessonDocumentEditor.tsx",
+      " M src/renderer/documentFiles/documentFileEditor.css",
+      " M src/renderer/documentFiles/documentFileSession.ts",
+      " M src/renderer/documentFiles/media/MediaFileEditor.tsx",
+      " M src/renderer/documentFiles/media/mediaFileDraft.ts",
+      " M src/renderer/documentFiles/media/mediaFileEditor.css",
+      " M src/renderer/documentFiles/office/DocxFileEditor.tsx",
+      " M src/renderer/documentFiles/office/DocxFilePreview.tsx",
+      " M src/renderer/documentFiles/office/PptxFileEditor.tsx",
+      " M src/renderer/documentFiles/office/XlsxCellGrid.tsx",
+      " M src/renderer/documentFiles/office/XlsxFileEditor.tsx",
+      " M src/renderer/documentFiles/office/officeLeafEditor.css",
+      " M src/renderer/documentFiles/office/officeLeafEditorProps.ts",
+      " M src/renderer/documentFiles/office/pptxFileEditor.css",
+      " M src/renderer/documentFiles/office/wordEditorKernel.ts",
+      " M src/renderer/documents/CourseLightToolbar.tsx",
+      " M src/renderer/documents/courseEditorChrome.css",
+      " M src/renderer/export/componentPlatform/pptx/drawings.ts",
+      " M src/renderer/lessonWorkspace/controller/useDocumentTabsController.ts",
+      " M src/renderer/lessonWorkspace/view/WorkspaceContentHost.tsx",
+      " M src/renderer/styles/globals.css",
+      " M src/renderer/ui/flow/FlowTextInteractionActions.tsx",
+      " M src/renderer/ui/flow/flowWorkspaceLayout.css",
+      " M src/renderer/ui/workspaces/FlowLocationWorkspace.tsx",
+      " M src/renderer/ui/workspaces/SlideLayerSelectionOverlay.tsx",
+      " M src/renderer/workbench/ExecutionAssistant.tsx",
+      " M src/renderer/workbench/composerFileReferences.ts",
+      " M src/renderer/workbench/composerReferences.ts",
+      " M src/renderer/workbench/elementCards/ElementAiCard.tsx",
+      " M src/renderer/workbench/elementCards/elementCardController.ts",
+      " M src/renderer/workbench/executionAssistant.css",
+      " M src/shared/canvasShapeRenderer.ts",
+      " M src/shared/document/markdown.ts",
+      " M src/shared/document/markdownSourceEdit.ts",
+      " M src/shared/generated/componentBuiltinSources/shape.ts",
+      " M src/shared/generated/courseAgentCapabilities.json",
+      " M src/shared/ipcTypes.ts",
+      " M src/shared/workbench/fileContext.ts",
+      " M src/shared/workbench/mediaFiles.ts",
+      " M src/shared/workbench/officeDocument.ts",
+      " M src/shared/workbench/officeFiles.ts",
+      " M src/shared/workbench/officePreview.ts",
+      " M tests/e2e/g20AuthoringSurfaceDesign.spec.ts",
+      " M tests/e2e/g20M20Files.spec.ts",
+      " M tests/e2e/officeNonRegression20261103.spec.ts",
+      " M tests/e2e/officePptxToolbox20261103.spec.ts",
+      " M tests/e2e/officeWordExcelCoediting20261103.spec.ts",
+      " M tests/helpers/markdownRendererHost.ts",
+      " M tests/integration/auditAllGeometryBrowser.test.ts",
+      " M tests/integration/componentSourceImports20261031.test.ts",
+      " M tests/integration/g20DocumentFiles.test.ts",
+      " M tests/integration/g20ToolGateway.test.ts",
+      " M tests/integration/nativeInsertAppearance.test.ts",
+      " M tests/integration/officeDeepCoediting20261103.test.ts",
+      " M tests/integration/officeDesktopReceipt20261103.test.ts",
+      " M tests/integration/productFollowup/T01/boundCapabilitiesAndBasis.test.ts",
+      " M tests/integration/unifiedCompositionContentGateway.test.ts",
+      " M tests/integration/unifiedOfficeAgentFiles.test.ts",
+      " M tests/integration/unifiedOfficeEngine.test.ts",
+      " M tests/unit/LessonDocumentEditor.test.tsx",
+      " M tests/unit/auditAllSaveFiles.test.ts",
+      " M tests/unit/auditAllTextTargets.test.ts",
+      " M tests/unit/g20CourseInsertMenu.test.tsx",
+      " M tests/unit/g20DefaultWorkspaceEntry.test.tsx",
+      " M tests/unit/g20ExecutionAssistant.test.tsx",
+      " M tests/unit/g20M15ElementCards.test.tsx",
+      " M tests/unit/g20PermissionComposer.test.tsx",
+      " M tests/unit/officeDraftPreparation20261103.test.tsx",
+      " M tests/unit/officeFocusReferences20261103.test.ts",
+      " M tests/unit/pptxCanvasDraft20261103.test.tsx",
+      " M tests/unit/sharedDocumentEditor.test.tsx",
+      " M tests/unit/windowCloseRecovery.test.ts",
+      " M tests/unit/wordEditorInput.test.ts",
+      " M 果铃工作台-多格式人机共编技术路线研究与开发方案-2026-11-03.md",
       "?? $null",
       "?? 'src",
+      "?? artifacts/ai-capabilities/tools/office.deepEdit.json",
       "?? docs/development-plan/EXECUTION_CHECKPOINT.json.lock",
       "?? sim.locator('#orders').innerText()",
-      "?? 果铃工作台-多格式人机共编技术路线研究与开发方案-2026-11-03.md"
+      "?? src/core/tools/ToolError.ts",
+      "?? src/main/workbench/execution/officeCardScope.ts",
+      "?? src/main/workbench/fileArtifactSaveAs.ts",
+      "?? src/main/workbench/office/OfficeDrafts.ts",
+      "?? src/main/workbench/office/docxObjectCompiler.ts",
+      "?? src/main/workbench/office/officeDraftMerge.ts",
+      "?? src/main/workbench/office/officeDraftMergeError.ts",
+      "?? src/main/workbench/office/officeNativeDependencies.ts",
+      "?? src/main/workbench/office/officeObjectCompiler.ts",
+      "?? src/main/workbench/office/officeObjectXml.ts",
+      "?? src/main/workbench/office/pptxObjectCompiler.ts",
+      "?? src/main/workbench/office/xlsxObjectCompiler.ts",
+      "?? src/renderer/documentFiles/office/OfficeSelectionTools.tsx",
+      "?? src/renderer/documentFiles/office/officeSelectionTools.css",
+      "?? src/renderer/workbench/ReferenceScopePicker.tsx",
+      "?? src/shared/workbench/fileArtifactSaveAs.ts",
+      "?? src/shared/workbench/officeObjectEdit.ts",
+      "?? src/shared/workbench/officeWordSheetObjects.ts",
+      "?? tests/e2e/officeCloseInputLease20261104.spec.ts",
+      "?? tests/integration/fileArtifactSaveAs.test.ts",
+      "?? tests/integration/officeDraftMerge.test.ts",
+      "?? tests/integration/officeDraftRelocation20261104.test.ts",
+      "?? tests/integration/officeDraftRelocationSafety20261104.test.ts",
+      "?? tests/integration/officeWordSheetObjectCompiler.test.ts",
+      "?? tests/integration/pptxDraftRedoSave20261104.test.ts",
+      "?? tests/integration/shapePrefixedPlacementRegression.test.ts",
+      "?? tests/integration/xlsxNativeCalculationSave20261103.test.ts",
+      "?? tests/unit/officeCardScope.test.ts",
+      "?? tests/unit/officeCloseInputLease20261104.test.tsx",
+      "?? tests/unit/officePptxObjectCompiler.test.ts",
+      "?? tests/unit/officeSaveDuringSave20261104.test.tsx",
+      "?? tests/unit/officeSelectionAnchorRace20261104.test.tsx",
+      "?? tests/unit/officeWindowSavePending20261104.test.tsx",
+      "?? tests/unit/pptxFlushSuffix20261104.test.tsx",
+      "?? tests/unit/pptxGroupSaveUngroup20261104.test.ts",
+      "?? tests/unit/pptxHistoryDuringSave20261104.test.tsx",
+      "?? tests/unit/xlsxNativeCalculation20261103.test.ts",
+      "?? tests/unit/xlsxRoundCalculation20261103.test.ts",
+      "?? 果铃工作台-Codex多轮开发审查与后续实施方案-2026-11-04.md"
     ]
   },
-  "lastSavedAt": "2026-11-03T10:58:44.413Z",
+  "lastSavedAt": "2026-11-03T19:14:36.849Z",
   "goals": {
     "G01": {
       "id": "G01",
@@ -17200,7 +18166,7 @@
                   "sha256": "a1e745c1449acd4cbf73739d75a1ccebd5c2862af552f7f5f560ad058e64880c"
                 },
                 {
-                  "path": "tests/unit/officeFocusReferences20261103.test.ts",
+                  "path": "output/codex-review-20261104/historical-source-ae808e8e/tests/unit/officeFocusReferences20261103.test.ts",
                   "sha256": "5af1d1a21a2f118ec6f22364796f11af9b0497e3087587ab96bb451de28ffffa"
                 },
                 {
@@ -17230,7 +18196,8 @@
       "notes": [
         "初始化依据为2026-11-02主审覆盖核查；历史已验范围保留，新增实现尚未验收。",
         "首轮实际选中P2标题、host稳定target、正式text.replace与非目标保全已核；iframe观察与精确历史回读修复均有实际消费者，但不能推定净context/roundtrip/time下降。证据：output/goal-correction-20261102/d4-effects-review-0740.json",
-        "2026-11-02本轮直接续接最终审阅：同输入工具63→14、87551→24242字节；实际首轮schema归因4611tokens，按需加载/正式应用/人改非目标保全/保存冷开通过。因果仅限定初始工具载荷。 证据：output/product-goals-20261102/product-final-review.json"
+        "2026-11-02本轮直接续接最终审阅：同输入工具63→14、87551→24242字节；实际首轮schema归因4611tokens，按需加载/正式应用/人改非目标保全/保存冷开通过。因果仅限定初始工具载荷。 证据：output/product-goals-20261102/product-final-review.json",
+        "2026-11-04：可变工作树中的历史验收源码/测试引用已迁至验收提交 ae808e8e 的逐字节快照；原 SHA、目标内容、断言、review、承诺和状态不变。该证据仍属于原验收源码/包，不代表当前工作树或新包验收。映射见 output/codex-review-20261104/historical-subject-map.json。"
       ],
       "authorizationRef": "果铃工作台-目标偏移审计与开发纠偏方案-2026-11-02.md#五、重新收敛的下一阶段开发任务、优先级与验收条件",
       "contractHash": "cd365be071b32fc4e432ef60766692de617b79314c8a5d0207802f934fa125c7",
@@ -17249,7 +18216,7 @@
         "sha256": "7578b01ed8530d6a6238e40781d50ec8ad78c488cfb91c96dcd454f31e580e60"
       },
       "currentAcceptanceSource": "ae808e8ea842fe00d7482e3b529edfc96e6b9e4e",
-      "acceptanceBoundary": "Current four-format focus/reference and submitted real-model context are verified. Permission enforcement comes from separate unchanged source/unit coverage; earlier cost measurements retain their original narrow scope."
+      "acceptanceBoundary": "Current four-format focus/reference and submitted real-model context are verified. Permission enforcement comes from separate unchanged source/unit coverage; earlier cost measurements retain their original narrow scope. 2026-11-04 clarification: relocated source/test targets refer to byte-identical historical snapshots from ae808e8e; this does not accept the current working tree or a new package."
     },
     "G06": {
       "id": "G06",
@@ -18424,7 +19391,7 @@
                   "sha256": "a1e745c1449acd4cbf73739d75a1ccebd5c2862af552f7f5f560ad058e64880c"
                 },
                 {
-                  "path": "tests/e2e/officeWordExcelCoediting20261103.spec.ts",
+                  "path": "output/codex-review-20261104/historical-source-ae808e8e/tests/e2e/officeWordExcelCoediting20261103.spec.ts",
                   "sha256": "b1408290d1cbb0912be1f6c9a7fdd4de16a3c4d0034a2cd587a7cbff8977938f"
                 }
               ],
@@ -18462,11 +19429,11 @@
                   "sha256": "a1e745c1449acd4cbf73739d75a1ccebd5c2862af552f7f5f560ad058e64880c"
                 },
                 {
-                  "path": "src/main/workbench/office/docxContent.ts",
+                  "path": "output/codex-review-20261104/historical-source-ae808e8e/src/main/workbench/office/docxContent.ts",
                   "sha256": "9c02a65be1f12889dae74e4cb6bf4e7963812fdc92941cb0e916d7928503c5e0"
                 },
                 {
-                  "path": "src/main/workbench/office/xlsxContent.ts",
+                  "path": "output/codex-review-20261104/historical-source-ae808e8e/src/main/workbench/office/xlsxContent.ts",
                   "sha256": "2690e8c9faca2c4794d452074467d135f59f799140c3e9e37440fdf4a647e439"
                 },
                 {
@@ -18505,7 +19472,8 @@
         }
       ],
       "notes": [
-        "初始化依据为2026-11-02主审覆盖核查；历史已验范围保留，新增实现尚未验收。"
+        "初始化依据为2026-11-02主审覆盖核查；历史已验范围保留，新增实现尚未验收。",
+        "2026-11-04：可变工作树中的历史验收源码/测试引用已迁至验收提交 ae808e8e 的逐字节快照；原 SHA、目标内容、断言、review、承诺和状态不变。该证据仍属于原验收源码/包，不代表当前工作树或新包验收。映射见 output/codex-review-20261104/historical-subject-map.json。"
       ],
       "authorizationRef": "果铃工作台-目标偏移审计与开发纠偏方案-2026-11-02.md#五、重新收敛的下一阶段开发任务、优先级与验收条件",
       "contractHash": "0d07b8d3beedb4cee20d272e564d2ec7361d88c2e307d83590c9f9bc1fabc480",
@@ -18525,7 +19493,7 @@
         "sha256": "7578b01ed8530d6a6238e40781d50ec8ad78c488cfb91c96dcd454f31e580e60"
       },
       "currentAcceptanceSource": "ae808e8ea842fe00d7482e3b529edfc96e6b9e4e",
-      "acceptanceBoundary": "Real grid/formula/sheet management/coediting are verified within bounded formula and OOXML preservation support, not a full Excel calculation/platform migration."
+      "acceptanceBoundary": "Real grid/formula/sheet management/coediting are verified within bounded formula and OOXML preservation support, not a full Excel calculation/platform migration. 2026-11-04 clarification: relocated source/test targets refer to byte-identical historical snapshots from ae808e8e; this does not accept the current working tree or a new package."
     },
     "G11": {
       "id": "G11",
@@ -18589,7 +19557,7 @@
               "sha256": "2dda5a24ca1623bc6655afb5cfbd5a7b054461c41d70cec5420ff1b833e282c6"
             },
             {
-              "path": "src/renderer/documentFiles/office/DocxFilePreview.tsx",
+              "path": "output/codex-review-20261104/historical-source-ae808e8e/src/renderer/documentFiles/office/DocxFilePreview.tsx",
               "sha256": "d361f591d2d98850ef962d7a192e8f4e0e70021bc73955c48ff5cd82ffb36d3d"
             },
             {
@@ -18683,7 +19651,7 @@
                   "sha256": "2dda5a24ca1623bc6655afb5cfbd5a7b054461c41d70cec5420ff1b833e282c6"
                 },
                 {
-                  "path": "src/renderer/documentFiles/office/DocxFilePreview.tsx",
+                  "path": "output/codex-review-20261104/historical-source-ae808e8e/src/renderer/documentFiles/office/DocxFilePreview.tsx",
                   "sha256": "d361f591d2d98850ef962d7a192e8f4e0e70021bc73955c48ff5cd82ffb36d3d"
                 },
                 {
@@ -18801,7 +19769,7 @@
                   "sha256": "2dda5a24ca1623bc6655afb5cfbd5a7b054461c41d70cec5420ff1b833e282c6"
                 },
                 {
-                  "path": "src/renderer/documentFiles/office/DocxFilePreview.tsx",
+                  "path": "output/codex-review-20261104/historical-source-ae808e8e/src/renderer/documentFiles/office/DocxFilePreview.tsx",
                   "sha256": "d361f591d2d98850ef962d7a192e8f4e0e70021bc73955c48ff5cd82ffb36d3d"
                 },
                 {
@@ -18919,7 +19887,7 @@
                   "sha256": "2dda5a24ca1623bc6655afb5cfbd5a7b054461c41d70cec5420ff1b833e282c6"
                 },
                 {
-                  "path": "src/renderer/documentFiles/office/DocxFilePreview.tsx",
+                  "path": "output/codex-review-20261104/historical-source-ae808e8e/src/renderer/documentFiles/office/DocxFilePreview.tsx",
                   "sha256": "d361f591d2d98850ef962d7a192e8f4e0e70021bc73955c48ff5cd82ffb36d3d"
                 },
                 {
@@ -19038,7 +20006,7 @@
               "sha256": "2dda5a24ca1623bc6655afb5cfbd5a7b054461c41d70cec5420ff1b833e282c6"
             },
             {
-              "path": "src/renderer/documentFiles/office/DocxFilePreview.tsx",
+              "path": "output/codex-review-20261104/historical-source-ae808e8e/src/renderer/documentFiles/office/DocxFilePreview.tsx",
               "sha256": "d361f591d2d98850ef962d7a192e8f4e0e70021bc73955c48ff5cd82ffb36d3d"
             },
             {
@@ -19132,7 +20100,7 @@
                   "sha256": "2dda5a24ca1623bc6655afb5cfbd5a7b054461c41d70cec5420ff1b833e282c6"
                 },
                 {
-                  "path": "src/renderer/documentFiles/office/DocxFilePreview.tsx",
+                  "path": "output/codex-review-20261104/historical-source-ae808e8e/src/renderer/documentFiles/office/DocxFilePreview.tsx",
                   "sha256": "d361f591d2d98850ef962d7a192e8f4e0e70021bc73955c48ff5cd82ffb36d3d"
                 },
                 {
@@ -19242,7 +20210,7 @@
                   "sha256": "2dda5a24ca1623bc6655afb5cfbd5a7b054461c41d70cec5420ff1b833e282c6"
                 },
                 {
-                  "path": "src/renderer/documentFiles/office/DocxFilePreview.tsx",
+                  "path": "output/codex-review-20261104/historical-source-ae808e8e/src/renderer/documentFiles/office/DocxFilePreview.tsx",
                   "sha256": "d361f591d2d98850ef962d7a192e8f4e0e70021bc73955c48ff5cd82ffb36d3d"
                 },
                 {
@@ -19352,7 +20320,7 @@
                   "sha256": "2dda5a24ca1623bc6655afb5cfbd5a7b054461c41d70cec5420ff1b833e282c6"
                 },
                 {
-                  "path": "src/renderer/documentFiles/office/DocxFilePreview.tsx",
+                  "path": "output/codex-review-20261104/historical-source-ae808e8e/src/renderer/documentFiles/office/DocxFilePreview.tsx",
                   "sha256": "d361f591d2d98850ef962d7a192e8f4e0e70021bc73955c48ff5cd82ffb36d3d"
                 },
                 {
@@ -19462,7 +20430,7 @@
                   "sha256": "2dda5a24ca1623bc6655afb5cfbd5a7b054461c41d70cec5420ff1b833e282c6"
                 },
                 {
-                  "path": "src/renderer/documentFiles/office/DocxFilePreview.tsx",
+                  "path": "output/codex-review-20261104/historical-source-ae808e8e/src/renderer/documentFiles/office/DocxFilePreview.tsx",
                   "sha256": "d361f591d2d98850ef962d7a192e8f4e0e70021bc73955c48ff5cd82ffb36d3d"
                 },
                 {
@@ -19632,7 +20600,7 @@
                   "sha256": "a1e745c1449acd4cbf73739d75a1ccebd5c2862af552f7f5f560ad058e64880c"
                 },
                 {
-                  "path": "tests/e2e/officeWordExcelCoediting20261103.spec.ts",
+                  "path": "output/codex-review-20261104/historical-source-ae808e8e/tests/e2e/officeWordExcelCoediting20261103.spec.ts",
                   "sha256": "b1408290d1cbb0912be1f6c9a7fdd4de16a3c4d0034a2cd587a7cbff8977938f"
                 }
               ],
@@ -19707,11 +20675,11 @@
                   "sha256": "a1e745c1449acd4cbf73739d75a1ccebd5c2862af552f7f5f560ad058e64880c"
                 },
                 {
-                  "path": "src/main/workbench/office/docxContent.ts",
+                  "path": "output/codex-review-20261104/historical-source-ae808e8e/src/main/workbench/office/docxContent.ts",
                   "sha256": "9c02a65be1f12889dae74e4cb6bf4e7963812fdc92941cb0e916d7928503c5e0"
                 },
                 {
-                  "path": "src/main/workbench/office/xlsxContent.ts",
+                  "path": "output/codex-review-20261104/historical-source-ae808e8e/src/main/workbench/office/xlsxContent.ts",
                   "sha256": "2690e8c9faca2c4794d452074467d135f59f799140c3e9e37440fdf4a647e439"
                 },
                 {
@@ -19753,7 +20721,8 @@
       "notes": [
         "初始化依据为2026-11-02主审覆盖核查；历史已验范围保留，新增实现尚未验收。",
         "DOCX代表样本完成；独立静态对照同属LibreOffice引擎家族。离线证据为Electron默认会话阻断，未主张OS级断网；不外推旧格式或全部复杂内容。",
-        "取消用例按混合任务日志中的独立通过案例认定；该混合任务整体失败，未作为通过测试证据。"
+        "取消用例按混合任务日志中的独立通过案例认定；该混合任务整体失败，未作为通过测试证据。",
+        "2026-11-04：可变工作树中的历史验收源码/测试引用已迁至验收提交 ae808e8e 的逐字节快照；原 SHA、目标内容、断言、review、承诺和状态不变。该证据仍属于原验收源码/包，不代表当前工作树或新包验收。映射见 output/codex-review-20261104/historical-subject-map.json。"
       ],
       "authorizationRef": "果铃工作台-目标偏移审计与开发纠偏方案-2026-11-02.md#五、重新收敛的下一阶段开发任务、优先级与验收条件",
       "contractHash": "c2ce9a0419ec6712eac44a85bebfdd84fcf58a2f35f8ac62b8e4e49055181dc8",
@@ -19772,7 +20741,7 @@
         "sha256": "7578b01ed8530d6a6238e40781d50ec8ad78c488cfb91c96dcd454f31e580e60"
       },
       "currentAcceptanceSource": "ae808e8ea842fe00d7482e3b529edfc96e6b9e4e",
-      "acceptanceBoundary": "Lightweight logical body editing/coediting and normal-save continuous input are verified. Existing independent pagination preview is separate; unsupported/protected nested structure and temporary extra-operation/History lock boundaries remain."
+      "acceptanceBoundary": "Lightweight logical body editing/coediting and normal-save continuous input are verified. Existing independent pagination preview is separate; unsupported/protected nested structure and temporary extra-operation/History lock boundaries remain. 2026-11-04 clarification: relocated source/test targets refer to byte-identical historical snapshots from ae808e8e; this does not accept the current working tree or a new package."
     },
     "G12": {
       "id": "G12",
@@ -19995,7 +20964,7 @@
                   "sha256": "a1e745c1449acd4cbf73739d75a1ccebd5c2862af552f7f5f560ad058e64880c"
                 },
                 {
-                  "path": "tests/e2e/officeWordExcelCoediting20261103.spec.ts",
+                  "path": "output/codex-review-20261104/historical-source-ae808e8e/tests/e2e/officeWordExcelCoediting20261103.spec.ts",
                   "sha256": "b1408290d1cbb0912be1f6c9a7fdd4de16a3c4d0034a2cd587a7cbff8977938f"
                 }
               ],
@@ -20064,7 +21033,7 @@
                   "sha256": "a1e745c1449acd4cbf73739d75a1ccebd5c2862af552f7f5f560ad058e64880c"
                 },
                 {
-                  "path": "tests/e2e/officeNonRegression20261103.spec.ts",
+                  "path": "output/codex-review-20261104/historical-source-ae808e8e/tests/e2e/officeNonRegression20261103.spec.ts",
                   "sha256": "7b603c164fb267f7e28f61a079ddc1cb6b21ac03f5b175b23a76ffff218b8edb"
                 }
               ],
@@ -20754,7 +21723,8 @@
       "notes": [
         "初始化依据为2026-11-02主审覆盖核查；历史已验范围保留，新增实现尚未验收。",
         "0727隔离包asar a4aa74c7…，45份dirty源码、参考资源及实际消费者身份绑定；真实当前ACP/保存冷开与39项Runtime通过。两项本轮条件已验，总目标保留partial，首次授权/独立设备/正式发行未声称完成。output/goal-correction-20261102/d3-current-package-final-review.json",
-        "2026-11-02本轮直接续接最终审阅：1145目录包与同负载便携包已生成并实际消费；902个Electron行为文件继承1110真实人机接力，当前Web修复另验。NSIS安装包已生成并核全部载荷；首次授权、独立设备及安装使用仍pending，不被阻塞核查替代。 证据：output/product-goals-20261102/product-final-review.json"
+        "2026-11-02本轮直接续接最终审阅：1145目录包与同负载便携包已生成并实际消费；902个Electron行为文件继承1110真实人机接力，当前Web修复另验。NSIS安装包已生成并核全部载荷；首次授权、独立设备及安装使用仍pending，不被阻塞核查替代。 证据：output/product-goals-20261102/product-final-review.json",
+        "2026-11-04：可变工作树中的历史验收源码/测试引用已迁至验收提交 ae808e8e 的逐字节快照；原 SHA、目标内容、断言、review、承诺和状态不变。该证据仍属于原验收源码/包，不代表当前工作树或新包验收。映射见 output/codex-review-20261104/historical-subject-map.json。"
       ],
       "authorizationRef": "果铃工作台-目标偏移审计与开发纠偏方案-2026-11-02.md#五、重新收敛的下一阶段开发任务、优先级与验收条件",
       "contractHash": "3603dc379d543f33a5ba57c87cbb139e9c7f3ee38ea11ca18bff72cbd7fcff82",
@@ -20773,10 +21743,390 @@
         "sha256": "7578b01ed8530d6a6238e40781d50ec8ad78c488cfb91c96dcd454f31e580e60"
       },
       "currentAcceptanceSource": "ae808e8ea842fe00d7482e3b529edfc96e6b9e4e",
-      "acceptanceBoundary": "Current ae808 package actual model/UI/runtime and same-machine short-path installed consumer/native uninstall are verified. The 285-character native uninstall left one resource and remains a documented failure despite owned recovery. independentDevice=false, so clean-delivery remains pending/G13 partial. No new OAuth/new account or public release is claimed."
+      "acceptanceBoundary": "Current ae808 package actual model/UI/runtime and same-machine short-path installed consumer/native uninstall are verified. The 285-character native uninstall left one resource and remains a documented failure despite owned recovery. independentDevice=false, so clean-delivery remains pending/G13 partial. No new OAuth/new account or public release is claimed. 2026-11-04 clarification: relocated source/test targets refer to byte-identical historical snapshots from ae808e8e; this does not accept the current working tree or a new package."
+    },
+    "G14": {
+      "id": "G14",
+      "source": "docs/development-plan/NEXT_EXECUTION.md#当前批次office-接完整",
+      "promise": "Office 居 GLX 之后，提供高保真播放或预览、AI 全能力改写及人工常用编辑，结果可保存、冷开及原生回存。",
+      "kind": "capability",
+      "status": "partial",
+      "continuation": {
+        "disposition": "active",
+        "action": "Office 接完整当前批次。",
+        "taskIds": [
+          "20261104-OFFICE-COMPLETE"
+        ]
+      },
+      "criteria": [
+        {
+          "id": "ppt-fidelity",
+          "text": "代表性实际PPTX逐关键页视觉复核，与独立应用关键版面核对，保留未支持复杂效果的真实边界。",
+          "status": "verified",
+          "required": true,
+          "requires": [
+            "ui",
+            "visual-review",
+            "cross-app"
+          ],
+          "reviewRequired": true,
+          "target": [
+            {
+              "path": "output/goal-correction-20261102/real-product-session-2138/workspace/PPT同对象续改验收.pptx",
+              "sha256": "8e2a7c3c24e5accf2e2aad380e6ddd1f5eccc1e69c62fd5fb7a4664f1d3fa044"
+            },
+            {
+              "path": "output/goal-correction-20261102/package-current-0540/win-unpacked/resources/app.asar",
+              "sha256": "907cb5513514f6af8b323b9a9d65f99c25237e27fe9e1930dec41cd5e2b09323"
+            }
+          ],
+          "evidence": [
+            {
+              "path": "output/goal-correction-20261102/ppt-acceptance-0615.json",
+              "sha256": "36711c679eca12e83ced1fb65fb9e0bee0a31f9d2af3a27fc3da9fdad6739ffc",
+              "kinds": [
+                "ui",
+                "visual-review",
+                "cross-app"
+              ],
+              "covers": [
+                "G08.fidelity",
+                "G14.ppt-fidelity"
+              ],
+              "subjects": [
+                {
+                  "path": "output/goal-correction-20261102/real-product-session-2138/workspace/PPT同对象续改验收.pptx",
+                  "sha256": "8e2a7c3c24e5accf2e2aad380e6ddd1f5eccc1e69c62fd5fb7a4664f1d3fa044"
+                },
+                {
+                  "path": "output/goal-correction-20261102/package-current-0540/win-unpacked/resources/app.asar",
+                  "sha256": "907cb5513514f6af8b323b9a9d65f99c25237e27fe9e1930dec41cd5e2b09323"
+                },
+                {
+                  "path": "output/goal-correction-20261102/pptx-original-media/run-o2844T/workspace/原件字体与音视频.pptx",
+                  "sha256": "04c617ad5375c7d36344060945c289559a4e35bd2149aacda8bfa0e9c33bd423"
+                },
+                {
+                  "path": "output/comprehensive-execution-20261101/office/fixtures/original-timeline-opaque.pptx",
+                  "sha256": "7c60ba0525f30d4af1cbd412a33479a3d4baac2d2a53da2b6d6f54bb1dae32fd"
+                },
+                {
+                  "path": "tests/e2e/pptxOriginalMedia20261102.spec.ts",
+                  "sha256": "f5814534435925ccb294b1cbe224924d80dee966312b99e865c5a1cd3534040c"
+                },
+                {
+                  "path": "tests/e2e/pptxReadonlyPreview20261101.spec.ts",
+                  "sha256": "bfc7eba6d050a9e462dd7565bc97149ef78d26a8b1e9af407ac0cdb8cfa848e3"
+                },
+                {
+                  "path": "tests/e2e/pptxObjectCoediting20261102.spec.ts",
+                  "sha256": "596337825b9bb693d713eb9aab791c84d5c17e164b2d71d07deae5041fdd833b"
+                },
+                {
+                  "path": "tests/e2e/pptxRunStyle20261102.spec.ts",
+                  "sha256": "e2ca4d8a388b9abe10874e6a0cd66f2021f15b843414e25db2b83927e4b49953"
+                },
+                {
+                  "path": "tests/integration/pptxSharedHistory20261102.test.ts",
+                  "sha256": "31abc745c0daefa931ca267c972e14ba54c40e01dbfa629550f96809ed481520"
+                }
+              ],
+              "review": {
+                "path": "output/goal-correction-20261102/ppt-visual-review-0615.json",
+                "sha256": "a9928591f1977468e4dfded0fcc350b804483541b23cf545360650df719c0c32"
+              },
+              "checks": [
+                {
+                  "pointer": "/status",
+                  "equals": "passed"
+                }
+              ]
+            }
+          ],
+          "reference": "G08.fidelity"
+        },
+        {
+          "id": "ppt-playback",
+          "text": "真实含嵌入字体、原生音视频及动画的原件验证加载/播放/翻页与切tab停止；图片封面不替代媒体。",
+          "status": "verified",
+          "required": true,
+          "requires": [
+            "ui",
+            "media",
+            "fonts",
+            "animation"
+          ],
+          "reviewRequired": true,
+          "target": [
+            {
+              "path": "output/goal-correction-20261102/pptx-original-media/run-o2844T/workspace/原件字体与音视频.pptx",
+              "sha256": "04c617ad5375c7d36344060945c289559a4e35bd2149aacda8bfa0e9c33bd423"
+            },
+            {
+              "path": "output/comprehensive-execution-20261101/office/fixtures/original-timeline-opaque.pptx",
+              "sha256": "7c60ba0525f30d4af1cbd412a33479a3d4baac2d2a53da2b6d6f54bb1dae32fd"
+            }
+          ],
+          "evidence": [
+            {
+              "path": "output/goal-correction-20261102/ppt-acceptance-0615.json",
+              "sha256": "36711c679eca12e83ced1fb65fb9e0bee0a31f9d2af3a27fc3da9fdad6739ffc",
+              "kinds": [
+                "ui",
+                "media",
+                "fonts",
+                "animation"
+              ],
+              "covers": [
+                "G08.playback",
+                "G14.ppt-playback"
+              ],
+              "subjects": [
+                {
+                  "path": "output/goal-correction-20261102/real-product-session-2138/workspace/PPT同对象续改验收.pptx",
+                  "sha256": "8e2a7c3c24e5accf2e2aad380e6ddd1f5eccc1e69c62fd5fb7a4664f1d3fa044"
+                },
+                {
+                  "path": "output/goal-correction-20261102/package-current-0540/win-unpacked/resources/app.asar",
+                  "sha256": "907cb5513514f6af8b323b9a9d65f99c25237e27fe9e1930dec41cd5e2b09323"
+                },
+                {
+                  "path": "output/goal-correction-20261102/pptx-original-media/run-o2844T/workspace/原件字体与音视频.pptx",
+                  "sha256": "04c617ad5375c7d36344060945c289559a4e35bd2149aacda8bfa0e9c33bd423"
+                },
+                {
+                  "path": "output/comprehensive-execution-20261101/office/fixtures/original-timeline-opaque.pptx",
+                  "sha256": "7c60ba0525f30d4af1cbd412a33479a3d4baac2d2a53da2b6d6f54bb1dae32fd"
+                },
+                {
+                  "path": "tests/e2e/pptxOriginalMedia20261102.spec.ts",
+                  "sha256": "f5814534435925ccb294b1cbe224924d80dee966312b99e865c5a1cd3534040c"
+                },
+                {
+                  "path": "tests/e2e/pptxReadonlyPreview20261101.spec.ts",
+                  "sha256": "bfc7eba6d050a9e462dd7565bc97149ef78d26a8b1e9af407ac0cdb8cfa848e3"
+                },
+                {
+                  "path": "tests/e2e/pptxObjectCoediting20261102.spec.ts",
+                  "sha256": "596337825b9bb693d713eb9aab791c84d5c17e164b2d71d07deae5041fdd833b"
+                },
+                {
+                  "path": "tests/e2e/pptxRunStyle20261102.spec.ts",
+                  "sha256": "e2ca4d8a388b9abe10874e6a0cd66f2021f15b843414e25db2b83927e4b49953"
+                },
+                {
+                  "path": "tests/integration/pptxSharedHistory20261102.test.ts",
+                  "sha256": "31abc745c0daefa931ca267c972e14ba54c40e01dbfa629550f96809ed481520"
+                }
+              ],
+              "review": {
+                "path": "output/goal-correction-20261102/ppt-visual-review-0615.json",
+                "sha256": "a9928591f1977468e4dfded0fcc350b804483541b23cf545360650df719c0c32"
+              },
+              "checks": [
+                {
+                  "pointer": "/status",
+                  "equals": "passed"
+                }
+              ]
+            }
+          ],
+          "reference": "G08.playback"
+        },
+        {
+          "id": "ppt-deep",
+          "text": "从嵌入对象或复杂触发动画中至少选一个含复杂依赖的样本。SmartArt 按 NEXT 的原生样本恢复条件补验。实际走通用改写路径，记录范围、格式和关系引用校验及 FileArtifactService 正式提交。已有专门语义操作的回执不能替代。",
+          "requires": [
+            "real-model",
+            "preservation"
+          ],
+          "status": "pending"
+        },
+        {
+          "id": "ppt-human",
+          "text": "人工完成页面管理、直接文字及常用对象编辑，沿 G09 恢复条件验证原生中文 IME。",
+          "requires": [
+            "ui",
+            "human-edit"
+          ],
+          "status": "pending",
+          "reference": "G09.coedit、G09.professional-canvas"
+        },
+        {
+          "id": "ppt-roundtrip",
+          "text": "本批新增改写结果保存、新进程冷开，并由对应原生 Office 打开、回存和重开。",
+          "requires": [
+            "save-cold",
+            "cross-app"
+          ],
+          "status": "pending",
+          "reference": "G09.history-save；11/03 原生 PowerPoint run 1793700430085-009f8e7d"
+        },
+        {
+          "id": "word-fidelity",
+          "text": "实际中文DOCX正式UI分页预览，字体、表格、图片、页眉页脚及公式关键版面与独立可信输出核对；原件hash不变，窄改后刷新和冷开正确。",
+          "status": "pending",
+          "required": true,
+          "requires": [
+            "ui",
+            "visual-review",
+            "cross-app",
+            "save-cold",
+            "preservation"
+          ],
+          "reviewRequired": true,
+          "reference": "G11.preview（11/03 及此前基线；检查点绑定的被验文件已变更：src/renderer/documentFiles/office/DocxFilePreview.tsx）"
+        },
+        {
+          "id": "word-deep",
+          "text": "从域、批注、修订或文本框中至少选一个含复杂依赖的样本。实际走通用改写路径，记录范围、格式和关系引用校验及 FileArtifactService 正式提交。已有专门语义操作的回执不能替代。",
+          "requires": [
+            "real-model",
+            "preservation"
+          ],
+          "status": "pending"
+        },
+        {
+          "id": "word-human-baseline",
+          "text": "DOCX本地轻量真实文本、段落基础格式编辑与AI指定内容接续、共同History保存关闭重开；基本编辑不依赖重型运行时和付费转换。",
+          "requires": [
+            "ui",
+            "human-edit",
+            "history",
+            "save-cold",
+            "real-model",
+            "preservation"
+          ],
+          "status": "pending",
+          "required": true,
+          "reviewRequired": true,
+          "reference": "G11.docx-coediting（11/03 及此前基线；检查点绑定的被验文件已变更：tests/e2e/officeWordExcelCoediting20261103.spec.ts）"
+        },
+        {
+          "id": "word-human",
+          "text": "人工完成正文格式、拆合段、富文本粘贴和表格输入；复用已验操作证据，补齐其余首批范围。",
+          "requires": [
+            "ui",
+            "human-edit"
+          ],
+          "status": "pending",
+          "reference": "G11.docx-coediting；CURRENT_STATUS 正式实现及包版 UI"
+        },
+        {
+          "id": "word-roundtrip",
+          "text": "本批新增改写结果保存、新进程冷开，并由对应原生 Office 打开、回存和重开。",
+          "requires": [
+            "save-cold",
+            "cross-app"
+          ],
+          "status": "pending",
+          "reference": "CURRENT_STATUS 原生 Office：native-word-excel/run-4HTfqE"
+        },
+        {
+          "id": "excel-fidelity",
+          "text": "代表性工作簿核对数字格式、合并、列宽、图表呈现及公式结果。",
+          "requires": [
+            "ui",
+            "visual-review",
+            "cross-app"
+          ],
+          "status": "pending"
+        },
+        {
+          "id": "excel-deep",
+          "text": "从透视表、条件格式或数据验证中至少选一个含复杂依赖的样本。实际走通用改写路径，记录范围、格式和关系引用校验及 FileArtifactService 正式提交。已有专门语义操作的回执不能替代。",
+          "requires": [
+            "real-model",
+            "preservation"
+          ],
+          "status": "pending"
+        },
+        {
+          "id": "excel-human-baseline",
+          "text": "XLSX在工作台真实网格与公式编辑、工作表管理、AI范围修改、共同History和原件保存关闭重开，非目标高级对象保持。",
+          "requires": [
+            "ui",
+            "human-edit",
+            "history",
+            "save-cold",
+            "real-model",
+            "preservation"
+          ],
+          "status": "pending",
+          "required": true,
+          "reviewRequired": true,
+          "reference": "G10.xlsx-workbench（11/03 及此前基线；检查点绑定的被验文件已变更：tests/e2e/officeWordExcelCoediting20261103.spec.ts）"
+        },
+        {
+          "id": "excel-human",
+          "text": "人工完成值与公式、范围粘贴、列宽及工作表操作；复用已验操作证据，补齐其余首批范围。",
+          "requires": [
+            "ui",
+            "human-edit"
+          ],
+          "status": "pending",
+          "reference": "G10.xlsx-workbench；CURRENT_STATUS 正式实现及包版 UI"
+        },
+        {
+          "id": "excel-roundtrip",
+          "text": "本批新增改写结果保存、新进程冷开，并由对应原生 Office 打开、回存和重开。",
+          "requires": [
+            "save-cold",
+            "cross-app"
+          ],
+          "status": "pending",
+          "reference": "G10.xlsx-workbench；CURRENT_STATUS 原生 Office：native-word-excel/run-4HTfqE"
+        },
+        {
+          "id": "excel-calc",
+          "text": "单一计算权威下，人工和 AI 分别修改含 COUNTIF 或 XLOOKUP 的混合工作簿输入，受影响结果正确更新，无关结果继续显示，保存并新进程冷开后结果一致。",
+          "requires": [
+            "ui",
+            "real-model",
+            "save-cold"
+          ],
+          "status": "pending"
+        }
+      ],
+      "authorizationRef": "用户 2026-11-04 产品定位原话：\n果铃工作台已升级为通用办公agent，虽然主打的是果铃工程本身的创作能力作为首要卖点，但仍需要完整的office能力，以及未来的任务管理、视频编辑、图片编辑、邮件管理等诸多能力，从核心能力来说，应该说glx首位，仅次于glx的就是office，不追求全量复制重型office引擎但需要保证高保真播放及AI全能力改写。\n后续我会接着内容创作质量和效率的专项工作，最近需要先把office接完整。\n\n同日确认：首批 PPT、Word 沿用 G08、G11 的代表样本判法，Excel 看数字格式、合并、列宽、图表呈现及公式结果。Word 人工编辑覆盖正文格式、拆合段、富文本粘贴和表格输入，Excel 覆盖值与公式、范围粘贴、列宽和工作表操作。填充、丰富格式、行列及合并编辑列为后续扩展。随后确认通用深改样本与原件保全判据。",
+      "contractHash": "a20ed367821de9c49fec20712523a271a60f43c0b6efeb555c8b804950e401e1",
+      "contractChanges": [
+        {
+          "at": "2026-11-03T18:04:19.727Z",
+          "before": "b43410b70da7e5ac370d560361756b7426916dc54792c9da864173d5cd50d48f",
+          "kind": "scope",
+          "reason": "用户确认每格式首批通用深改样本及真实路径证据，SmartArt 维持原恢复条件。",
+          "reviewRef": "果铃工作台-多格式人机共编技术路线研究与开发方案-2026-11-03.md#6-验收与后续执行",
+          "decisionRef": "docs/development-plan/EXECUTION_CHECKPOINT.json#G14.authorizationRef"
+        }
+      ]
+    },
+    "G15": {
+      "id": "G15",
+      "source": "docs/development-plan/NEXT_EXECUTION.md#后续产品能力扩展",
+      "promise": "Office 之后开展 GLX 内容创作质量与效率专项。",
+      "kind": "effect",
+      "status": "deferred",
+      "decisionRef": "docs/development-plan/EXECUTION_CHECKPOINT.json#G14.authorizationRef",
+      "continuation": {
+        "disposition": "authorized-defer",
+        "action": "用户已排在 Office 之后的后续批次，届时确定代表性创作任务及验收标准。"
+      },
+      "criteria": [
+        {
+          "id": "creation-quality-efficiency",
+          "text": "在后续批次选定的代表性创作任务上验证产出质量与创作效率。",
+          "requires": [
+            "product-review"
+          ],
+          "status": "pending"
+        }
+      ],
+      "authorizationRef": "docs/development-plan/EXECUTION_CHECKPOINT.json#G14.authorizationRef",
+      "contractHash": "f0db710bcb1797185f9ecfed5197ab9f57280ebc163bb6a5d098bc6d4bd7de4a"
     }
   },
-  "goalSetHash": "66ce6aa430e054d44c98a445343656ba47c2e4bded7f70fcda1fdec629936d17",
+  "goalSetHash": "439b223d46afcabd981d28af3c1377f756d4d7dc7a401f4c7b9530efd3267a84",
   "lastCloseout": {
     "at": "2026-11-03T10:58:44.285Z",
     "mode": "stage",

@@ -32,7 +32,7 @@ describe('professional-file focus and message references', () => {
     focus.updateLocation(ppt.path, { page: 4, part: 'ppt/slides/slide4.xml', shapeIds: [] })
     focus.setOpenFiles([{ ...ppt, fileVersion: 'v2', bindingVersion: 2 }, sheet], sheet.path)
     const captured = captureFileContext(focus.capture(), [pin], new Set())
-    expect(captured.references).toEqual([{ ...pin, fileVersion: 'v2', bindingVersion: 2 }])
+    expect(captured.references).toEqual([{ ...pin, fileVersion: 'v2', bindingVersion: 2 }, fileFocusReference(focus.current())])
     expect(captured.references[0]!.focus).toEqual({ page: 2, part: 'ppt/slides/slide2.xml' })
   })
 
@@ -96,19 +96,19 @@ describe('professional-file focus and message references', () => {
     expect(focus.capture().map(file => file.path)).toEqual([sheet.path])
   })
 
-  it('sends a fixed native page without a competing automatic page after navigation', () => {
+  it('keeps a fixed native page with the automatic page after navigation', () => {
     const fixed: ExecutionDocumentReference = { documentId: 'glx', epoch: 'e', revision: 1, writable: [{ kind: 'document' }],
       referenceId: 'glx:page:one', pinned: true, selection: [{ kind: 'course-surface', surfaceId: 'one' }] }
     const automatic: ExecutionDocumentReference = { ...fixed, referenceId: 'glx:page:two', pinned: false, selection: [{ kind: 'course-surface', surfaceId: 'two' }] }
-    expect(mergeAutomaticReferences([fixed, automatic], [automatic])).toEqual([fixed])
+    expect(mergeAutomaticReferences([fixed, automatic], [automatic])).toEqual([fixed, automatic])
     expect(mergeAutomaticReferences([fixed], [])).toEqual([fixed])
     expect(mergeAutomaticReferences([], [automatic])).toEqual([automatic])
   })
 
-  it('honors an explicit native-document pin instead of adding a competing automatic Office target', () => {
+  it('does not duplicate the current Office target when it is fixed', () => {
     const focus = new OfficeFocusController()
     focus.setOpenFiles([ppt], ppt.path)
-    expect(captureFileContext(focus.capture(), [], new Set(), true).references).toEqual([])
-    expect(captureFileContext(focus.capture(), [], new Set(), true).openFiles).toHaveLength(1)
+    const pin = fileFocusReference(focus.current(), 'file', true)!
+    expect(captureFileContext(focus.capture(), [pin], new Set()).references).toEqual([pin])
   })
 })

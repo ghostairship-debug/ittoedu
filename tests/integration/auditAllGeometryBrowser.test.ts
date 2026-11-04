@@ -28,6 +28,7 @@ beforeAll(async () => {
       import { createBlankCourseProjectV10 } from '/src/core/course/createCourseProjectV10.ts';
       import { createImageData } from '/src/components/image/data.ts';
       import { createTeacherControllerRuntimeImplementation } from '/src/components/teacher-controller/index.ts';
+      import { createTeacherControllerData,createTeacherControllerFrame } from '/src/components/teacher-controller/data.ts';
       window.api={createDomAuthoring,LocalAuthorTransformGesture,shapeRuntimeImplementation,defaultShapeData,createTextComponentData,renderTextComponent,measureTextComponent,applyTextComponentLayout,mountPublishedCourseV3};
       const frame=(width,height,x=0,y=0)=>({width,height,transform:[1,0,0,1,x,y]});
       window.mountFixture=async(mode,size)=>{
@@ -50,13 +51,15 @@ beforeAll(async () => {
         await window.player?.dispose();const root=document.querySelector('#fixture');root.replaceChildren();
         await import('/src/renderer/styles/variables.css');await import('/src/renderer/styles/globals.css');
         const {React,createRoot,SlideLocationWorkspace}=await import('/tests/fixtures/auditAllGeometryReact.ts');
-        const project=createBlankCourseProjectV10('Author'),teacher=structuredClone(project.instances[project.global.overlay[0]]);project.instances={};project.definitions={};project.global={underlay:[],overlay:[]};project.surfaces[0]={id:'S',kind:'slide',title:'Author',childIds:['text','shape'],designSize:{width:600,height:400}};
+        const ids=['author-fixture','S'],project=createBlankCourseProjectV10('Author',()=>ids.shift()),surface=project.instances.S;
+        surface.childIds=['text','shape'];surface.container.designSize={width:600,height:400};
         const add=(id,key,data,placement)=>{project.definitions[key]={id:key,role:'content',implementation:{kind:'builtin',key}};project.instances[id]={id,definitionId:key,data,frame:placement};};
         add('text','guoling.text',createTextComponentData('BACK TEXT'),frame(200,80,50,50));add('shape','guoling.shape',defaultShapeData(),mode==='overlap'?frame(200,80,50,50):frame(100,80,380,180));
         if(mode==='reflow'){const data=createTextComponentData('文字框变窄后根据宽度重新换行，字形比例保持原样。');data.sizing={mode:'fixed',minHeight:0,overflow:'clip'};project.instances.text.data=data;}
-        if(mode==='line'){project.surfaces[0].childIds=['shape'];project.instances.shape.data=defaultShapeData('line');project.instances.shape.frame=frame(200,100,100,100);}
-        if(mode==='guides'){const data=createImageData('image');data.safeAreas=[{id:'important',label:'正文',x:.1,y:.2,width:.5,height:.4}];add('image','guoling.image',data,frame(200,100,100,180));project.surfaces[0].childIds.push('image');}
-        if(mode==='clip'){project.surfaces[0].designSize={width:600,height:120};project.instances.shape.frame=frame(100,80,380,100);project.global.overlay=['teacher','logo'];add('teacher','guoling.navigation',{...teacher.data,defaultCollapsed:false},teacher.frame);add('logo','guoling.shape',{...defaultShapeData(),style:{...defaultShapeData().style,fillColor:'#ff0000'}},frame(100,80,20,100));}
+        if(mode==='line'){surface.childIds=['shape'];project.instances.shape.data=defaultShapeData('line');project.instances.shape.frame=frame(200,2,100,100);}
+        if(mode==='guides'){const data=createImageData('image');data.safeAreas=[{id:'important',label:'正文',x:.1,y:.2,width:.5,height:.4}];add('image','guoling.image',data,frame(200,100,100,180));surface.childIds.push('image');}
+        if(mode==='clip'){surface.container.designSize={width:600,height:120};project.instances.shape.frame=frame(100,80,380,100);project.global.overlay=['teacher','logo'];add('teacher','guoling.navigation',{...createTeacherControllerData(),defaultCollapsed:false},createTeacherControllerFrame());add('logo','guoling.shape',{...defaultShapeData(),style:{...defaultShapeData().style,fillColor:'#ff0000'}},frame(100,80,20,100));}
+        if(mode==='stretched-shape'){delete project.instances.text;surface.childIds=['shape'];project.instances.shape.data={...defaultShapeData(),style:{...defaultShapeData().style,fillOpacity:0,borderWidth:4}};project.instances.shape.frame={width:80,height:80,transform:[4,0,0,1,100,100]};}
         let snapshot={project,documentId:'author',epoch:'e',surfaceId:'S',selectedInstanceIds:['shape'],canvasMode:'edit',contentEdit:null,drawTool:null,activation:1,activeStateId:null,assetUrls:{},editingScope:'scene'};
         const spot={id:'text-spot',instanceId:'text',mountGeneration:1,kind:'text',initialValue:'BACK TEXT',localBounds:frame(200,80)};window.authorCalls=[];const handles=new Map(),reactRoot=createRoot(root);
         const navigation={read:()=>({locationId:'S',interactive:snapshot.canvasMode==='run',scenes:[{id:'S',name:'Author'}],progress:null,collapsed:false,zoom:1,muted:false,fullscreen:false}),subscribe:()=>()=>{},canExecute:()=>true,execute:async()=>true,setCollapsed(){},moveBy(){},setZoom(){},resetView(){}};
@@ -308,13 +311,73 @@ it('CA160/222 actual author default line has endpoint handles and previews on it
     const during=await page.locator('[data-component-instance="shape"] canvas').evaluate((canvas:HTMLCanvasElement)=>{
       const pixels=canvas.getContext('2d')!.getImageData(0,0,canvas.width,canvas.height).data;let ink=0,maxX=0;for(let y=0;y<canvas.height;y++)for(let x=0;x<canvas.width;x++)if(pixels[(y*canvas.width+x)*4+3]!>20){ink++;maxX=Math.max(maxX,x)}return {width:canvas.width,height:canvas.height,ink,maxX}
     })
-    expect(during.width).toBeGreaterThan(before.width+25);expect(during.height).toBeLessThan(before.height-20);expect(during.maxX).toBeGreaterThan(before.width);expect(during.ink).toBeGreaterThan(100)
+    expect(during.width).toBeGreaterThan(before.width+25);expect(during.height).toBeGreaterThan(before.height+20);expect(during.maxX).toBeGreaterThan(before.width);expect(during.ink).toBeGreaterThan(100)
     expect(await page.evaluate(()=>Reflect.get(window,'authorProject').instances.shape.data.lineGeometry)).toBeUndefined()
     expect(await page.evaluate(()=>Reflect.get(window,'authorCalls'))).toEqual([])
     await screenshot(page,'CA160-222-live-line-preview');await page.mouse.up();await page.keyboard.up('Alt')
     const calls=await page.evaluate(()=>Reflect.get(window,'authorCalls'));expect(calls).toHaveLength(1);expect(calls[0]).toEqual(expect.arrayContaining([expect.objectContaining({type:'frame.set'}),expect.objectContaining({type:'data.set',path:['lineGeometry']})]))
+    const [placement, data] = calls[0]
+    const start = data.value.start
+    expect(placement.frame.transform[4] + placement.frame.width * start[0]).toBeCloseTo(100)
+    expect(placement.frame.transform[5] + placement.frame.height * start[1]).toBeCloseTo(101)
+    const first = (await page.locator('[data-line-handle="start"]').boundingBox())!
+    const bodyX = (first.x + first.width / 2 + end.x + end.width / 2) / 2
+    const bodyY = first.y + first.height / 2
+    await page.mouse.move(bodyX, bodyY); await page.mouse.down(); await page.keyboard.down('Alt')
+    await page.mouse.move(bodyX + 25, bodyY + 30, { steps: 3 })
+    await page.mouse.up(); await page.keyboard.up('Alt')
+    const bodyEdit = await page.evaluate(() => Reflect.get(window, 'authorCalls')[1])
+    expect(bodyEdit).toEqual([expect.objectContaining({ type: 'frame.set', frame: expect.objectContaining({ width: 200, height: 2 }) })])
+    expect(bodyEdit[0].frame.transform[4]).toBeGreaterThan(100)
+    expect(bodyEdit[0].frame.transform[5]).toBeGreaterThan(100)
   }finally{await page.close()}
 },30_000)
+
+it('keeps authored shape strokes uniform when stretching and reopening a saved affine frame', async () => {
+  const page = await current()
+  const readStroke = (selector: string) => page.locator(selector).evaluate((canvas: HTMLCanvasElement) => {
+    const { width, height } = canvas
+    const pixels = canvas.getContext('2d')!.getImageData(0, 0, width, height).data
+    const alpha = (x: number, y: number) => pixels[(y * width + x) * 4 + 3] / 255
+    let horizontal = 0, vertical = 0
+    for (let y = 0; y < height / 2; y++) horizontal += alpha(Math.floor(width / 2), y)
+    for (let x = 0; x < width / 2; x++) vertical += alpha(x, Math.floor(height / 2))
+    return { width, height, horizontal, vertical, inverseX: new DOMMatrixReadOnly(canvas.style.transform || undefined).a }
+  })
+  try {
+    await page.evaluate(() => Reflect.get(window, 'mountAuthor')('stretched-shape'))
+    const selector = '[data-component-instance="shape"] canvas'
+    const authored = await readStroke(selector)
+    expect(authored.width).toBeGreaterThan(320)
+    expect(authored.inverseX).toBeCloseTo(.25)
+    expect(authored.horizontal).toBeCloseTo(4)
+    expect(authored.vertical).toBeCloseTo(4)
+
+    const handle = (await page.locator('[data-handle="s"]').boundingBox())!
+    const x = handle.x + handle.width / 2, y = handle.y + handle.height / 2
+    await page.mouse.move(x, y); await page.mouse.down(); await page.keyboard.down('Alt')
+    await page.mouse.move(x, y + 60, { steps: 3 })
+    const preview = await readStroke(selector)
+    expect(preview.height).toBeGreaterThan(authored.height + 30)
+    expect(preview.horizontal).toBeCloseTo(4)
+    expect(preview.vertical).toBeCloseTo(4)
+    await page.mouse.up(); await page.keyboard.up('Alt')
+
+    const observed = await page.evaluate(() => ({ project: Reflect.get(window, 'authorProject'), calls: Reflect.get(window, 'authorCalls') })) as { project: CourseProjectV10; calls: ComponentEdit[][] }
+    expect(observed.calls).toHaveLength(1)
+    const driver = new CourseV10Driver(), model = driver.apply({ kind: 'course-v10', project: observed.project, resources: { assets: {}, components: {} } }, captureComponentOperation(observed.project, observed.calls[0]))
+    const cold = driver.load(driver.serialize(model))
+    if (cold.kind !== 'course-v10') throw new Error('Expected course')
+    const published = await buildPublishedCourseV3({ project: cold.project, assetBytes: {}, componentFiles: {} })
+    await page.evaluate(async (payload: unknown) => {
+      document.querySelector<HTMLElement>('#fixture')!.style.display = 'none'
+      const root = document.createElement('div'); root.id = 'shape-playback'; root.style.cssText = 'position:relative;width:600px;height:400px'; document.body.append(root)
+      Reflect.set(window, 'player', await Reflect.get(window, 'api').mountPublishedCourseV3(payload, root, { capture: true, keyboardNavigation: false }))
+    }, published.payload as unknown)
+    const playback = await readStroke('#shape-playback [data-component-object="shape"] canvas')
+    expect(playback).toEqual(preview)
+  } finally { await page.close() }
+}, 30_000)
 
 it('CA248 author safe area guide uses the saved image fractions and disappears in run mode',async()=>{
   const page=await current()

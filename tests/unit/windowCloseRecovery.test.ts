@@ -10,6 +10,7 @@ const controls = vi.hoisted(() => ({
   choice: 1, recoveryChoice: 0, dirty: true, crashed: false,
   documents: [] as DocumentSnapshot[], order: [] as string[], barrierDepth: 0, maxBarrierDepth: 0,
   stopExecution: vi.fn(), stopExternal: vi.fn(), operate: vi.fn(),
+  preserveOfficeDrafts: vi.fn(async () => undefined), releaseOfficeDrafts: vi.fn(async () => undefined),
   clearRecovery: vi.fn(async () => undefined), clearFrames: vi.fn(), releaseLeases: vi.fn(),
 }))
 vi.mock('electron', async () => {
@@ -56,6 +57,7 @@ vi.mock('../../src/main/workbench/documentHost', () => ({
       try { return await work() } finally { controls.barrierDepth--; controls.order.push('barrier-exit') }
     } },
     operate: controls.operate,
+    artifacts: { preserveOfficeDrafts: controls.preserveOfficeDrafts, releaseOfficeDrafts: controls.releaseOfficeDrafts },
   }),
 }))
 
@@ -77,6 +79,7 @@ beforeEach(() => {
   controls.stopExecution.mockReset().mockImplementation(async () => { controls.order.push('stop-execution') })
   controls.stopExternal.mockReset().mockImplementation(async () => { controls.order.push('stop-external') })
   controls.operate.mockReset()
+  controls.preserveOfficeDrafts.mockClear(); controls.releaseOfficeDrafts.mockClear()
   vi.mocked(dialog.showMessageBox).mockReset().mockImplementation(async (...args: MessageBoxArguments) => {
     const options = args.length === 1 ? args[0] : args[1]
     return { response: options.title === '保存未完成的修改？' ? controls.choice : controls.recoveryChoice, checkboxChecked: false }
@@ -165,6 +168,8 @@ describe('window close recovery handshake', () => {
     expect(controls.operate).not.toHaveBeenCalled()
     stopped(); await settle()
     expect(window.isDestroyed()).toBe(true)
+    expect(controls.preserveOfficeDrafts).toHaveBeenCalledOnce()
+    expect(controls.releaseOfficeDrafts).toHaveBeenCalledWith(false, true)
     expect(controls.order.slice(-4)).toEqual(['stop-external', 'drain', 'barrier-exit', 'closed'])
     expect(controls.operate).not.toHaveBeenCalled()
     expect(controls.clearRecovery).not.toHaveBeenCalled()
@@ -297,7 +302,7 @@ describe('window close recovery handshake', () => {
     controls.choice = 0
     const { window } = await openWindow()
     window.close(); await settle()
-    expect(window.webContents.send).toHaveBeenCalledWith(IPC_CHANNELS.requestSaveAndClose, expect.any(String), [])
+    expect(window.webContents.send).toHaveBeenCalledWith(IPC_CHANNELS.requestSaveAndClose, expect.any(String), undefined)
     ipcMain.emit(IPC_CHANNELS.preserveAndCloseResult, { sender: window.webContents }, requestId(window), true)
     await settle(); expect(window.isDestroyed()).toBe(false)
     ipcMain.emit(IPC_CHANNELS.saveAndCloseResult, { sender: window.webContents }, requestId(window), false)
@@ -307,6 +312,7 @@ describe('window close recovery handshake', () => {
     await settle(); expect(window.isDestroyed()).toBe(false)
     ipcMain.emit(IPC_CHANNELS.saveAndCloseResult, { sender: window.webContents }, requestId(window), true)
     await settle(); expect(window.isDestroyed()).toBe(true)
+    expect(controls.releaseOfficeDrafts).toHaveBeenCalledWith(false, false)
     expect(controls.clearRecovery).not.toHaveBeenCalled()
   })
 })

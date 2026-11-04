@@ -245,7 +245,7 @@ async function courseHarness(setup?: (project: CourseProjectV10) => void) {
   return { ...h, project, session, surfaceId, address, model, call }
 }
 
-it('rereads an externally edited V10 object as read-only without renewing its original write authority', async () => {
+it('merges disjoint fields and refreshes an overlapping V10 object within the original run grant', async () => {
   const h = await courseHarness(), handle = await h.gateway.issueTarget('course', h.session.documentId, h.address)
   expect(await h.call('write', 'object.update', { target: handle, properties: { data: { html: 'Acknowledged content' } } }))
     .toMatchObject({ kind: 'document-operation', result: { status: 'applied' } })
@@ -253,15 +253,23 @@ it('rereads an externally edited V10 object as read-only without renewing its or
   expect(await h.session.execute({ documentId: before.documentId, epoch: before.epoch, baseRevision: before.revision,
     operationId: 'human-opacity', actor: 'human', mutation: { type: 'command', command: captureComponentOperation(h.model().project,
       [{ type: 'style.set', instanceId: 'label', path: ['opacity'], value: .5 }]) } })).toMatchObject({ status: 'applied' })
-  const human = h.session.read(), observed = await h.call('observe-human', 'inspect', { target: handle })
-  expect(observed).toMatchObject({ kind: 'read', data: { writable: false } })
-  if (observed.kind !== 'read') throw new Error('Expected inspection')
-  const readOnly = (observed.data as { target: string }).target
-  expect(await h.call('read-human', 'read', { target: readOnly })).toMatchObject({ kind: 'read' })
-  expect(await h.call('no-renewal', 'object.update', { target: readOnly, properties: { data: { html: 'BAD' } } })).toMatchObject({ code: 'not-authorized' })
+  expect(await h.call('disjoint-old-handle', 'object.update', { target: handle, properties: { data: { html: 'AI content' } } }))
+    .toMatchObject({ kind: 'document-operation', result: { status: 'applied' } })
+  expect(h.model().project.instances.label.style).toMatchObject({ opacity: .5 })
+  const current = h.session.read()
+  expect(await h.session.execute({ documentId: current.documentId, epoch: current.epoch, baseRevision: current.revision,
+    operationId: 'human-body', actor: 'human', mutation: { type: 'command', command: captureComponentOperation(h.model().project,
+      [{ type: 'data.set', instanceId: 'label', path: ['html'], value: 'Human content' }]) } })).toMatchObject({ status: 'applied' })
   expect(await h.call('old-handle', 'object.update', { target: handle, properties: { data: { html: 'BAD' } } })).toMatchObject({ code: 'target-conflict' })
-  expect(h.session.read()).toEqual(human)
-  expect(human.undoDepth).toBe(2)
+  const observed = await h.call('observe-human', 'inspect', { target: handle })
+  expect(observed).toMatchObject({ kind: 'read', data: { writable: true } })
+  if (observed.kind !== 'read') throw new Error('Expected inspection')
+  const fresh = (observed.data as { target: string }).target
+  expect(await h.call('continue-run', 'object.update', { target: fresh, properties: { data: { html: 'Human content, refined' } } }))
+    .toMatchObject({ kind: 'document-operation', result: { status: 'applied' } })
+  expect(h.model().project.instances.label).toMatchObject({ data: { html: 'Human content, refined' }, style: { opacity: .5 } })
+  const readOnly = await h.gateway.issueTarget('course', h.session.documentId, h.address, { readOnly: true })
+  expect(await h.call('read-only-remains', 'inspect', { target: readOnly })).toMatchObject({ kind: 'read', data: { writable: false } })
   await h.gateway.stop('course')
 })
 
@@ -498,6 +506,30 @@ it('keeps Flow rich range grants exact across a concurrent neighbor edit, preser
   expect(h.model().project.instances.paragraph.data).toEqual(original)
   expect(h.model().project.instances.label.data).toEqual({ html: 'Human neighbor content' })
   expect(await h.gateway.execute('range', 'after-undo', replace(handle, 'BAD'))).toMatchObject({ code: 'target-conflict' })
+})
+
+it('recovers an exactly mappable overlapping Flow selection after explicit reread in the same restricted run', async () => {
+  const h = await courseHarness(project => {
+    testContainerInstance(project, 0).container.kind = 'flow'; project.definitions[TEXT_DEFINITION.id] = TEXT_DEFINITION
+    project.instances.paragraph = { id: 'paragraph', definitionId: TEXT_DEFINITION.id, data: JSON.parse(JSON.stringify(createTextComponentData('左旧右'))) }
+    testContainerInstance(project, 0).childIds.push('paragraph')
+  })
+  const range: ToolTarget = { kind: 'course-instance', surfaceId: h.surfaceId, instanceId: 'paragraph', dataPath: ['content'], from: 1, to: 2 }
+  await h.gateway.beginRun({ runId: 'overlap-range', actor: 'agent', documents: [{ documentId: h.session.documentId, writable: [range] }] })
+  const old = await h.gateway.issueTarget('overlap-range', h.session.documentId, range)
+  const before = h.session.read()
+  expect(await h.session.execute({ documentId: before.documentId, epoch: before.epoch, baseRevision: before.revision,
+    operationId: 'human-replaces-exact-range', actor: 'human', mutation: { type: 'command', command: captureComponentOperation(h.model().project,
+      [{ type: 'data.set', instanceId: 'paragraph', path: ['content'], value: { inlines: [{ type: 'text', text: '左教师右' }] } }]) } }))
+    .toMatchObject({ status: 'applied' })
+  expect(await h.gateway.execute('overlap-range', 'stale-write', replace(old, 'BAD'))).toMatchObject({ code: 'target-conflict' })
+  const observed = await h.gateway.execute('overlap-range', 'read-human', { name: 'read', input: { target: old } })
+  expect(observed).toMatchObject({ kind: 'read', data: { text: expect.stringContaining('教师') } })
+  if (observed.kind !== 'read') throw new Error('Expected current selection')
+  const target = (observed.data as { target: string }).target
+  expect(await h.gateway.execute('overlap-range', 'refine-human', replace(target, '教师及AI')))
+    .toMatchObject({ kind: 'document-operation', result: { status: 'applied' } })
+  expect(h.model().project.instances.paragraph.data).toMatchObject({ content: { inlines: [{ type: 'text', text: '左教师及AI右' }] } })
 })
 
 it('moves Flow objects only into authorized destinations and rejects a cyclic move without a partial write', async () => {

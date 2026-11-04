@@ -199,10 +199,12 @@ export const objectUpdatePropertiesInputSchema = z.object({
 }).strict()
 
 /** Paths bind the observed project file to its formal instance inside the Gateway. */
+export const contentDependenciesSchema = z.array(z.string().min(1)).optional()
+  .describe('仅填写生成本次修改确实依赖的其他已读取对象句柄或工程路径。例如用表格值更新图表时填表格路径。')
 export const objectUpdateInputSchema = z.union([
-  z.object({ target: z.string().min(1).max(100), properties: objectUpdatePropertiesInputSchema }).strict(),
+  z.object({ target: z.string().min(1).max(100), properties: objectUpdatePropertiesInputSchema, dependsOn: contentDependenciesSchema }).strict(),
   z.object({ project: z.string().min(1).max(1000).optional(), path: z.string().min(1),
-    properties: objectUpdatePropertiesInputSchema }).strict(),
+    properties: objectUpdatePropertiesInputSchema, dependsOn: contentDependenciesSchema }).strict(),
 ])
 
 export const objectConvertOptionsInputSchema = z.object({

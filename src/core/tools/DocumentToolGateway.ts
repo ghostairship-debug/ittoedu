@@ -18,6 +18,7 @@ import type { ImageAssetResource } from './imageAssetMetadata'
 import { z } from 'zod'
 import { publicWriteToolResult } from './publicWriteReceipt'
 import { compactToolInputError } from './ToolInputDiagnostic'
+import { ToolError } from './ToolError'
 import { componentContainerSchema, componentFrameSchema } from '../../shared/contracts/component-platform/schema'
 import { isSourceDocumentModel, type DocumentCommand, type DocumentDriver, type DocumentSnapshot, type DocumentModel } from '../../shared/workbench/document'
 import type { ModelToolCall, PreparedToolImage, ToolDefinition, ToolGateway, ToolResult, ToolRunGrant, ToolTarget, ToolAdvisory } from '../../shared/workbench/tools'
@@ -114,6 +115,8 @@ interface Handle {
   conflicted: boolean
   /** Only an uninterrupted canonical undo/redo sequence can restore this acknowledged target. */
   historyConflict?: boolean
+  /** A conflict may still have an exact current range for an explicit reread. */
+  recoveryTarget?: ToolTarget
   source?: string
   writable: boolean
   readOnly?: boolean
@@ -121,7 +124,6 @@ interface Handle {
 interface Cursor { runId: string; documentId: string; epoch: string; revision: number; target: string; method: string; digest: string; offset: number }
 interface ImageApplicationCapture { runId: string; operationId: string; requestDigest: string; snapshot: ComponentProjectSnapshot;
   target: Extract<ToolTarget, { kind: 'course-surface' | 'course-instance' }>; mode: 'insert' | 'replace'; handle: Handle; result?: ToolResult }
-class ToolError extends Error { constructor(readonly code: string, message: string, readonly data?: unknown) { super(message) } }
 /** Current Session facts are distinct from a historical save/export receipt. */
 export function documentSnapshotFacts(snapshot: DocumentSnapshot) {
   return { documentId: snapshot.documentId, epoch: snapshot.epoch, revision: snapshot.revision, dirty: snapshot.dirty,
@@ -336,7 +338,12 @@ export class DocumentToolGateway implements ToolGateway {
       }
     }
     assertActive()
-    const readExpectations = this.contentReadExpectations(runId, this.registry.get(baseline.documentId).read())
+    const latest = this.registry.get(baseline.documentId).read()
+    const target = this.componentContentTarget(baseline, request)
+    const dependencyPaths = request.intent === 'canonical'
+      ? captureComponentOperation(baseline.model.project, request.edits, request.readPaths).expected.map(value => value.path)
+      : target ? this.contentTargetPaths(target) ?? [] : []
+    const readExpectations = this.contentReadExpectations(runId, latest, dependencyPaths)
     if (request.intent === 'canonical' && request.edits[0]?.type === 'spatial.set') {
       const edit = request.edits[0]
       const project = baseline.model.project, instance = project.instances[edit.surfaceId]
@@ -422,14 +429,16 @@ export class DocumentToolGateway implements ToolGateway {
       }
     }
     const command = captureComponentOperation(current.model.project, combined)
-    command.expected = [...new Map([...command.expected, ...expected.values(), ...this.contentReadExpectations(runId, current)]
+    command.expected = [...new Map([...command.expected, ...expected.values(), ...this.contentReadExpectations(runId, current,
+      [...command.expected, ...expected.values()].map(item => item.path))]
       .map(item => [JSON.stringify(item.path), item])).values()]
     model = await driver.apply(current.model, command)
     assertActive()
     let receipt: Awaited<ReturnType<typeof session.execute>>
     try {
       receipt = await session.execute({ documentId, epoch: current.epoch, baseRevision: current.revision, operationId, requestDigest,
-        actor: run.grant.actor, runId, runLeaseId: this.operationLease(runId, operationId, documentId), mutation: { type: 'command', command } })
+        actor: run.grant.actor, runId, runLeaseId: this.operationLease(runId, operationId, documentId), mutation: { type: 'command', command } },
+      { rebaseComponentExpectations: true })
     } catch (error) {
       // A failed transport cannot disprove a commit, so leave the original operation for settlement.
       for (const index of usable) results[index] = { ...results[index]!, commit: 'unknown',
@@ -439,7 +448,11 @@ export class DocumentToolGateway implements ToolGateway {
       return results
     }
     const committed = receipt.status === 'applied' || receipt.status === 'unchanged'
-    if (receipt.status === 'applied') this.recordAppliedFootprints(runId, current, model, receipt.revision, [], [])
+    if (receipt.status === 'applied') {
+      const before = session.readRevision(receipt.beforeRevision)
+      const after = session.readRevision(receipt.revision)
+      if (before && after) this.recordAppliedFootprints(runId, before, after.model, receipt.revision, [], [])
+    }
     for (const index of usable) results[index] = { ...results[index]!, receipt,
       commit: receipt.status === 'applied' ? 'committed' : receipt.status === 'unchanged' ? 'unchanged' : 'not_committed',
       usability: committed ? results[index]!.usability : 'unusable', insertedIds: committed ? results[index]!.insertedIds : [],
@@ -1272,12 +1285,16 @@ export class DocumentToolGateway implements ToolGateway {
         for (const handle of this.handles.values()) {
           if (handle.runId !== runId || handle.documentId !== documentId || handle.epoch !== operation.epoch) continue
           if (handle.conflicted) {
+            if (handle.recoveryTarget) try {
+              handle.recoveryTarget = mapExternalCourseTextTarget(before, after, handle.recoveryTarget, true)
+            } catch { delete handle.recoveryTarget }
             if (historyChange && handle.historyConflict) try {
               const target = sourceField(handle.target) && isSourceDocumentModel(after)
                 ? mapSourceTarget(handle.source!, after.source, handle.target) : handle.target
               if (targetFootprint(after, target) === handle.expectedFootprint) {
                 handle.target = target; handle.revision = result.revision; handle.conflicted = false
                 delete handle.historyConflict
+                delete handle.recoveryTarget
                 if (isSourceDocumentModel(after) && sourceField(target)) handle.source = after.source
               }
             } catch { /* Undo has not restored the exact acknowledged target yet. */ }
@@ -1291,7 +1308,14 @@ export class DocumentToolGateway implements ToolGateway {
             if (targetFootprint(after, target) !== handle.expectedFootprint) throw new Error('目标已重叠修改')
             handle.target = target; handle.revision = result.revision
             if (isSourceDocumentModel(after) && sourceField(target)) handle.source = after.source
-          } catch { handle.conflicted = true; handle.historyConflict = historyChange }
+          } catch {
+            handle.conflicted = true; handle.historyConflict = historyChange
+            if (before.kind === 'course-v10' && after.kind === 'course-v10' && componentRange(handle.target)) try {
+              const mapped = mapExternalCourseTextTarget(before, after, handle.target, true)
+              readTarget(after, mapped)
+              handle.recoveryTarget = mapped
+            } catch { /* An ambiguous range needs a newly observed field. */ }
+          }
         }
         const document = run.grant.documents.find(document => document.documentId === documentId)
         if (document) {
@@ -1308,6 +1332,13 @@ export class DocumentToolGateway implements ToolGateway {
               }
               return [mapped]
             } catch {
+              if (!historyChange && before.kind === 'course-v10' && after.kind === 'course-v10' && componentRange(target)) try {
+                const mapped = mapExternalCourseTextTarget(before, after, target, true)
+                const footprint = targetFootprint(after, mapped)
+                run.rangeFootprints.delete(documentDigest({ documentId, target }))
+                run.rangeFootprints.set(documentDigest({ documentId, target: mapped }), footprint)
+                return [mapped]
+              } catch { /* Never expand an ambiguous selected range. */ }
               if (historyChange) try {
                 newlySuspended.push({ target: structuredClone(target), footprint: targetFootprint(before, target),
                   ...(isSourceDocumentModel(before) && sourceField(target) ? { source: before.source } : {}) })
@@ -1574,29 +1605,55 @@ export class DocumentToolGateway implements ToolGateway {
   private refreshReadHandle(handle: Handle, snapshot: DocumentSnapshot, target: ToolTarget): string {
     const run = this.run(handle.runId)
     const unchanged = !handle.conflicted && targetFootprint(snapshot.model, target) === handle.expectedFootprint
-    // A stable object can be inspected after an external edit; the new read does not renew write authority.
+    // A fresh read can renew an originally writable GLX identity within its
+    // existing grant. An externally edited range may no longer address the
+    // same text, so it must be located again from its owning field/object.
+    const stableCourseTarget = snapshot.model.kind === 'course-v10'
+      && target.kind !== 'text-selection' && !(target.kind === 'course-instance' && (isCourseInstanceRange(target) || target.authorField))
+    const renewable = unchanged || stableCourseTarget || !!handle.recoveryTarget
     return this.capture(handle.runId, snapshot, target,
-      unchanged && handle.writable && this.canWrite(run, snapshot, target), handle.readOnly || !unchanged)
+      renewable && handle.writable && this.canWrite(run, snapshot, target), handle.readOnly || !renewable)
   }
   private resolve(handle: Handle, snapshot: DocumentSnapshot, write: boolean, verifyFootprint = write): ToolTarget {
     const run = this.run(handle.runId)
     this.authorizeDocument(run, snapshot)
     if (handle.epoch !== snapshot.epoch) throw new ToolError('stale-epoch', '目标会话已失效')
     if (write && !handle.writable) throw new ToolError('not-authorized', '目标不在本次任务的可写范围')
-    if (handle.conflicted && (write || verifyFootprint)) throw new ToolError('target-conflict', '目标内容已由其他操作改变；旧句柄不可续写，请核对新内容后重新发起任务。')
-    let target = handle.target
+    if (handle.conflicted && verifyFootprint) throw new ToolError('target-conflict', '目标内容已由其他操作改变；请 read 或 inspect 当前目标，核对新内容后继续本任务。')
+    let target = !write && !verifyFootprint ? handle.recoveryTarget ?? handle.target : handle.target
     try {
       if (sourceField(target) && isSourceDocumentModel(snapshot.model)) target = mapSourceTarget(handle.source!, snapshot.model.source, target)
       if (verifyFootprint
         && targetFootprint(snapshot.model, target) !== handle.footprint) {
         throw new Error(targetFootprint(snapshot.model, target) === handle.expectedFootprint && handle.expectedFootprint !== handle.footprint
           ? '本任务已修改目标内容；旧句柄不可续写。请 read 或 inspect 原句柄并使用返回的 data.target；同轮多项编辑请用 batch。'
-          : '目标内容已由其他操作改变；旧句柄不可续写，请核对新内容后重新发起任务。')
+          : '目标内容已由其他操作改变；请 read 或 inspect 当前目标，核对新内容后继续本任务。')
       }
       readTarget(snapshot.model, target)
       if (write && !this.canWrite(run, snapshot, target)) throw new ToolError('not-authorized', '目标不在本次任务的可写范围')
     } catch (error) { throw new ToolError('target-conflict', error instanceof Error ? error.message : '目标已改变') }
     return target
+  }
+
+  /** Whole-object handles also serve field-local tools. Use the observed
+   * revision only to check the fields this operation actually depends on. */
+  private resolveMutationTarget(handle: Handle, snapshot: DocumentSnapshot, mutation: BatchMutationCall): {
+    target: ToolTarget; basis?: ComponentProjectSnapshot
+  } {
+    const target = handle.target
+    if (snapshot.model.kind !== 'course-v10' || target.kind !== 'course-instance' || target.authorField || target.dataPath
+      || target.from !== undefined || (mutation.name !== 'text.replace' && mutation.name !== 'text.format' && mutation.name !== 'object.update')
+      || !handle.conflicted && handle.revision === snapshot.revision)
+      return { target: this.resolve(handle, snapshot, true) }
+    const current = this.resolve(handle, snapshot, true, false)
+    const basis = this.registry.get(handle.documentId).readRevision(handle.revision)
+    if (basis?.epoch !== snapshot.epoch || basis.model.kind !== 'course-v10' || current.kind !== 'course-instance')
+      throw new ToolError('target-conflict', '原对象的读取基线已不可用，请 read 或 inspect 当前对象后继续。')
+    if (mutation.name === 'object.update') return { target: current, basis: basis as ComponentProjectSnapshot }
+    const observedText = courseInstanceTextTarget(basis.model, target), currentText = courseInstanceTextTarget(snapshot.model, current)
+    if (targetFootprint(basis.model, observedText) !== targetFootprint(snapshot.model, currentText))
+      throw new ToolError('target-conflict', '目标文字或其定位已改变，请 read 或 inspect 当前对象后继续。')
+    return { target: currentText }
   }
 
   /** Stable host event correlation; not exposed to model arguments. */
@@ -1813,11 +1870,14 @@ export class DocumentToolGateway implements ToolGateway {
       if (!run.advertised) await this.describeRun(runId)
       if (!run.advertised!.allowed.has('batch')) throw new ToolError('not-authorized', '当前任务没有批量修改权限')
       const mutations = this.parseAllowedBatch(run, input)
-      const handles = [...await this.captureMutationHandles(runId, mutations, input), ...this.additionalMutationHandles(runId, mutations)]
+      const observed = await this.captureMutationHandles(runId, mutations, input)
+      const additional = this.additionalMutationHandles(runId, mutations)
+      const handles = [...observed, ...additional]
       if (handles.some(handle => handle.documentId !== handles[0].documentId))
         throw new ToolError('cross-document-batch', '批量原子操作只能属于同一文档')
       const snapshot = await this.registry.get(handles[0].documentId).drain()
-      for (const handle of handles) this.resolve(handle, snapshot, true)
+      for (const [index, handle] of observed.entries()) this.resolveMutationTarget(handle, snapshot, mutations[index]!)
+      for (const handle of additional) this.resolve(handle, snapshot, true)
       return null
     } catch (error) { return this.error(error, { name: 'batch', input }) }
   }
@@ -1878,7 +1938,7 @@ export class DocumentToolGateway implements ToolGateway {
   }
 
   private async commitComponentAsset(runId: string, operationId: string, requestDigest: string, baseline: ComponentProjectSnapshot,
-    command: ComponentOperationBatch, affected: string[], mergeObserved = false, requiredTarget: ToolTarget = { kind: 'document' }): Promise<ToolResult> {
+    command: ComponentOperationBatch, affected: string[], requiredTarget: ToolTarget = { kind: 'document' }): Promise<ToolResult> {
     const run = this.run(runId), session = this.registry.get(baseline.documentId)
     const current = await session.drain()
     if (run.stopped) throw new ToolError('run-stopped', '任务已停止，修改未提交')
@@ -1887,11 +1947,16 @@ export class DocumentToolGateway implements ToolGateway {
       throw new ToolError('not-authorized', '原工程身份或写权限已变化')
     const driver = this.drivers.find(value => value.kind === 'course-v10')
     if (!driver) throw new Error('V10 Driver 未注册')
-    const next = await driver.apply(current.model, command)
+    await driver.apply(current.model, command)
     if (run.stopped) throw new ToolError('run-stopped', '任务已停止，修改未提交')
     const result = await session.execute({ documentId: baseline.documentId, epoch: baseline.epoch, operationId,
-      baseRevision: mergeObserved ? current.revision : baseline.revision, actor: run.grant.actor, runId, runLeaseId: this.operationLease(runId, operationId, baseline.documentId), requestDigest, mutation: { type: 'command', command } })
-    if (result.status === 'applied') this.recordAppliedFootprints(runId, current, next, result.revision, [], [])
+      baseRevision: baseline.revision, actor: run.grant.actor, runId, runLeaseId: this.operationLease(runId, operationId, baseline.documentId), requestDigest,
+      mutation: { type: 'command', command } }, { rebaseComponentExpectations: true })
+    if (result.status === 'applied') {
+      const before = session.readRevision(result.beforeRevision)
+      const after = session.readRevision(result.revision)
+      if (before && after) this.recordAppliedFootprints(runId, before, after.model, result.revision, [], [])
+    }
     return { kind: 'document-operation', result, affected }
   }
 
@@ -1918,7 +1983,7 @@ export class DocumentToolGateway implements ToolGateway {
       source: fetched.source, container: placement.container, index: placement.index }, { prepareImage: this.options.prepareImage, createId: this.createId })
     const required = placement.target.kind === 'course-instance' && this.isProgramRoot(snapshot.model.project, placement.target.instanceId)
       ? placement.target : undefined
-    return this.commitComponentAsset(runId, operationId, requestDigest, snapshot, prepared.command, [input.path], false, required)
+    return this.commitComponentAsset(runId, operationId, requestDigest, snapshot, prepared.command, [input.path], required)
   }
 
   /** Insert the same complete API 5 graph offered by the component panel as one undoable command. */
@@ -1953,7 +2018,7 @@ export class DocumentToolGateway implements ToolGateway {
     ]) : prepared.command
     const required = placement.target.kind === 'course-instance' && this.isProgramRoot(snapshot.model.project, placement.target.instanceId)
       ? placement.target : undefined
-    return this.commitComponentAsset(runId, operationId, requestDigest, snapshot, command, [input.path], false, required)
+    return this.commitComponentAsset(runId, operationId, requestDigest, snapshot, command, [input.path], required)
   }
 
   /** Ready-image redo retains a plain carrier's geometry and declared interaction identity. */
@@ -2009,9 +2074,9 @@ export class DocumentToolGateway implements ToolGateway {
     }
     const command = captureComponentOperation(project, stateId ? presentationComponentEdits(project, placement.target.surfaceId, stateId, edits) : edits)
     command.expected = [...new Map([...command.expected, ...readPaths.map(dependency => ({ path: dependency, ...componentValueAt(project, dependency) })),
-      ...this.contentReadExpectations(runId, snapshot)]
+      ...this.contentReadExpectations(runId, snapshot, [...command.expected.map(item => item.path), ...readPaths])]
       .map(expected => [JSON.stringify(expected.path), expected])).values()]
-    return this.commitComponentAsset(runId, operationId, requestDigest, snapshot, command, [path], true)
+    return this.commitComponentAsset(runId, operationId, requestDigest, snapshot, command, [path])
   }
 
   private async useLibraryComponent(runId: string, operationId: string, requestDigest: string,
@@ -2347,7 +2412,6 @@ export class DocumentToolGateway implements ToolGateway {
       if (name === 'project.apply') {
         const parsed = componentProjectFileSchemas[name].parse(input)
         const current = await this.componentProjectDocument(runId, parsed.project, 'write', true)
-        this.contentReadExpectations(runId, current)
         if ('from' in parsed && parsed.from && parsed.intent !== 'surface.add' && parsed.intent !== 'enhance' && parsed.intent !== 'program.set' && (this.images.has(parsed.from) || this.hostTools.isImageSource(parsed.from))) {
           const { file } = this.componentProjectFiles.captureFile(runId, current, parsed.path, false, parsed.project)
           // File-bound assets retain their identity through the existing file owner.
@@ -2527,7 +2591,7 @@ export class DocumentToolGateway implements ToolGateway {
             : owner?.kind === 'instance' ? { kind: 'course-instance', surfaceId: capture.target.surfaceId, instanceId: owner.instanceId }
               : owner?.kind === 'global' || owner?.kind === 'project' ? { kind: 'document' } : capture.target
           capture.result = await this.commitComponentAsset(runId, capture.operationId, capture.requestDigest, capture.snapshot,
-            prepared.command, [prepared.instanceId], true, requiredTarget)
+            prepared.command, [prepared.instanceId], requiredTarget)
         }
       } catch (error) { capture.result = this.error(error) }
     }
@@ -2583,7 +2647,10 @@ export class DocumentToolGateway implements ToolGateway {
       const driver=this.drivers.find(driver=>driver.kind===latest.model.kind);if(!driver)throw new ToolError('unsupported-document','当前文档缺少正式驱动')
       const model=await driver.apply(latest.model,command)
       const result=await session.execute({documentId,epoch:latest.epoch,baseRevision:latest.revision,operationId,requestDigest,actor:run.grant.actor,runId,runLeaseId:this.operationLease(runId,operationId,documentId),mutation:{type:'command',command}},{rebaseComponentExpectations:true})
-      if(result.status==='applied')this.recordAppliedFootprints(runId,latest,model,result.revision,[],[])
+      if(result.status==='applied'){
+        const before=session.readRevision(result.beforeRevision),after=session.readRevision(result.revision)
+        if(before&&after)this.recordAppliedFootprints(runId,before,after.model,result.revision,[],[])
+      }
       const affected:string[]=[]
       if(result.status==='applied'||result.status==='unchanged'){
         const committed=session.readRevision(result.revision)??{...latest,model,revision:result.revision}
@@ -2607,17 +2674,21 @@ export class DocumentToolGateway implements ToolGateway {
     if (observedHandles.some(handle => handle.documentId !== observedHandles[0].documentId)) throw new ToolError('cross-document-batch', '批量原子操作只能属于同一文档')
     const session = this.registry.get(observedHandles[0].documentId)
     const snapshot = await session.drain()
-    const readExpectations = this.contentReadExpectations(runId, snapshot)
     const references = mutations.some(mutation => ['interaction.update', 'course.logic', 'object.author', 'object.place'].includes(mutation.name)
       || mutation.name === 'object.insert' && mutation.input.click)
       ? this.authoringReferences(runId, snapshot) : undefined
     const capturedReferences = captureInput && typeof captureInput === 'object' ? this.mutationCaptures.get(captureInput)?.references : undefined
     for (const [value, reference] of capturedReferences ?? []) references?.set(value, reference)
-    const observedTargets = observedHandles.map(handle => this.resolve(handle, snapshot, !sourceOperation, true))
+    const observed = observedHandles.map((handle, index) => sourceOperation
+      ? { target: this.resolve(handle, snapshot, false, true), basis: undefined }
+      : this.resolveMutationTarget(handle, snapshot, mutations[index]!))
+    const observedTargets = observed.map(value => value.target)
+    const objectBaselines = new Map<number, ComponentProjectSnapshot>()
     const handles: Handle[] = [], targets: ToolTarget[] = [], expanded: BatchMutationCall[] = []
     const groups: { start: number; count: number; target: ToolTarget; handle: Handle; sourceIndexes: number[] }[] = []
     for (const [index, mutation] of mutations.entries()) {
       const target = observedTargets[index], handle = observedHandles[index], start = targets.length
+      if (observed[index]!.basis) objectBaselines.set(start, observed[index]!.basis!)
       if (target.kind !== 'text-selection' || snapshot.model.kind === 'markdown' && target.fragments.every(fragment => fragment.target.kind === 'markdown-range')) {
         handles.push(handle); targets.push(target); expanded.push(mutation)
       }
@@ -3167,6 +3238,14 @@ export class DocumentToolGateway implements ToolGateway {
         const mapped = mapPresentation ? mapWorkingPresentation(model.project, target.surfaceId, target.stateId ?? null, edits) : edits
         for (const expected of captureWorkingOperation(model.project, edits, readPaths).expected) componentReadPaths.set(JSON.stringify(expected.path), expected.path)
         const command = captureWorkingOperation(model.project, mapped, readPaths)
+        const basis = objectBaselines.get(i)
+        if (basis && snapshot.model.kind === 'course-v10') {
+          for (const { path } of command.expected) {
+            if (!equalComponentValue(componentValueAt(basis.model.project, path), componentValueAt(snapshot.model.project, path)))
+              throw new ToolError('target-conflict', `目标字段或依赖已改变：${path.join('.')}。请 read 或 inspect 当前对象后继续。`,
+                { documentId: snapshot.documentId, revision: snapshot.revision, path })
+          }
+        }
         model = await applyPlanned(command)
         componentEdits.push(...command.edits)
         if (mutation.name === 'text.replace') target = courseInstanceTextTarget(model, target)
@@ -3218,6 +3297,22 @@ export class DocumentToolGateway implements ToolGateway {
       if (snapshot.model.kind !== 'course-v10') throw new Error('文档格式在操作中改变')
       const project = snapshot.model.project
       command = captureComponentOperation(project, componentEdits)
+      const dependencies = mutations.flatMap(mutation => {
+        if (!('dependsOn' in mutation.input) || !mutation.input.dependsOn) return []
+        const selector = 'project' in mutation.input ? mutation.input.project : undefined
+        return mutation.input.dependsOn.flatMap(reference => {
+          const handle = this.handles.get(reference)
+          if (handle) {
+            const dependency = this.handle(runId, reference)
+            if (dependency.documentId !== snapshot.documentId) throw new ToolError('invalid-target', '引用依据须属于当前 GLX 文档')
+            return this.contentTargetPaths(this.resolve(dependency, snapshot, false)) ?? []
+          }
+          const captured = this.componentProjectFiles.captureFile(runId, snapshot as ComponentProjectSnapshot, reference, true, selector)
+          return this.contentTargetPaths(this.componentAssetPlacement(captured.snapshot, captured.file).target) ?? []
+        })
+      })
+      const paths = [...command.expected.map(item => item.path), ...componentReadPaths.values(), ...dependencies]
+      const readExpectations = this.contentReadExpectations(runId, snapshot, paths)
       command.expected = [...new Map([...command.expected, ...[...componentReadPaths.values()].map(path => ({ path, ...componentValueAt(project, path) })), ...readExpectations]
         .map(expected => [JSON.stringify(expected.path), expected])).values()]
       model = await driver.apply(snapshot.model, command)
@@ -3243,12 +3338,14 @@ export class DocumentToolGateway implements ToolGateway {
     const result = await session.execute({ documentId: snapshot.documentId, epoch: snapshot.epoch, operationId, baseRevision: snapshot.revision,
       actor: run.grant.actor, runId, runLeaseId: this.operationLease(runId, operationId, snapshot.documentId), requestDigest,
       ...(sourceSplices.length || aggregateMappings.length ? { textChanges: { source: sourceSplices, flow: [], ...(aggregateMappings.length ? { aggregateMappings } : {}) } } : {}),
-      mutation: { type: 'command', command } })
-    if (result.status === 'applied') this.recordAppliedFootprints(runId, snapshot, model, result.revision, sourceSplices, componentSplices, acknowledgedTargets)
+      mutation: { type: 'command', command } }, { rebaseComponentExpectations: command.type === 'component-platform.apply' })
+    const committed = result.status === 'applied' || result.status === 'unchanged' ? session.readRevision(result.revision) : undefined
+    if (result.status === 'applied' && committed) {
+      const before = result.beforeRevision === snapshot.revision ? snapshot : session.readRevision(result.beforeRevision)
+      if (before) this.recordAppliedFootprints(runId, before, committed.model, result.revision, sourceSplices, componentSplices, acknowledgedTargets)
+    }
     const affected: string[] = []
-    if (result.status === 'applied' || result.status === 'unchanged') {
-      // Capture the exact acknowledged model, never a later intervening edit.
-      const committed = { ...snapshot, model, revision: result.revision }
+    if (committed) {
       for (const group of groups) {
         const i = group.start
         // Deleted/moved intermediate targets are still affected. Do not turn their durable ACK into a failure.
@@ -3328,23 +3425,59 @@ export class DocumentToolGateway implements ToolGateway {
       basis = { epoch: snapshot.epoch, expected: new Map() }
       run.contentReads.set(snapshot.documentId, basis)
     }
-    for (const path of paths) basis.expected.set(JSON.stringify(path), { path, ...structuredClone(componentValueAt(project, path)) })
+    for (const path of paths) {
+      for (const [key, previous] of basis.expected) if (path.length < previous.path.length
+        && path.every((part, index) => part === previous.path[index])) basis.expected.delete(key)
+      basis.expected.set(JSON.stringify(path), { path, ...structuredClone(componentValueAt(project, path)) })
+    }
   }
 
-  private contentReadExpectations(runId: string, snapshot: DocumentSnapshot): ComponentExpectation[] {
+  private contentTargetPaths(target: ToolTarget): string[][] | undefined {
+    if (target.kind === 'document') return [[]]
+    if (target.kind === 'text-selection') return target.fragments.flatMap(fragment => this.contentTargetPaths(fragment.target) ?? [])
+    if (target.kind === 'course-surface' || target.kind === 'spatial-graph') return [['@surface', target.surfaceId], ['instances', target.surfaceId]]
+    if (target.kind === 'course-instance') return [['instances', target.instanceId, ...(target.dataPath ? [target.fieldScope ?? 'data', ...target.dataPath] : [])]]
+  }
+
+  private contentReadExpectations(runId: string, snapshot: DocumentSnapshot, paths: readonly string[][]): ComponentExpectation[] {
     const basis = this.run(runId).contentReads.get(snapshot.documentId)
     if (!basis || snapshot.model.kind !== 'course-v10') return []
     if (basis.epoch !== snapshot.epoch) throw new ToolError('stale-epoch', '读取依据所属文档已关闭或重开')
+    const project = snapshot.model.project
+    const prefix = (left: readonly string[], right: readonly string[]) => left.length <= right.length && left.every((part, index) => part === right[index])
+    const observed = new Map<string, ComponentExpectation>()
+    for (const expected of [...basis.expected.values()].sort((a, b) => a.path.length - b.path.length)) {
+      if (paths.some(path => prefix(path, expected.path))) {
+        observed.set(JSON.stringify(expected.path), expected)
+        continue
+      }
+      for (const path of paths.filter(path => prefix(expected.path, path))) {
+        let value: unknown = expected.value, exists = expected.exists
+        for (const part of path.slice(expected.path.length)) {
+          if (!value || typeof value !== 'object' || !Object.hasOwn(value, part)) { exists = false; break }
+          value = (value as Record<string, unknown>)[part]
+        }
+        observed.set(JSON.stringify(path), { path, exists, ...(exists ? { value: value as ComponentExpectation['value'] } : {}) })
+      }
+    }
     const changed: ComponentExpectation[] = []
     const rangeChanges:string[]=[]
+    const rangeDependencies: ComponentExpectation[] = []
     for(const [key,entry] of basis.ranges ?? []) {
-      let matches=false;try {matches=!entry.conflicted && targetFootprint(snapshot.model,entry.target)===entry.footprint}catch{}
-      if(matches)continue
       const path=['instances',entry.target.instanceId,entry.target.fieldScope ?? 'data',...(entry.target.dataPath ?? [])]
-      changed.push({path,...structuredClone(componentValueAt(snapshot.model.project,path))});rangeChanges.push(key)
+      let relevant = [path]
+      if (entry.target.authorField) try { relevant = courseAuthorFieldReadPaths(snapshot.model, entry.target) }
+      catch { /* A deleted author field still has an original object identity. */ }
+      if (!paths.some(item => relevant.some(read => prefix(item, read) || prefix(read, item)))) continue
+      let matches=false;try {matches=!entry.conflicted && targetFootprint(snapshot.model,entry.target)===entry.footprint}catch{}
+      if(matches) {
+        if (entry.target.authorField) rangeDependencies.push(...relevant.map(read => ({ path: read, ...componentValueAt(project, read) })))
+      } else {
+        changed.push({path,...structuredClone(componentValueAt(project,path))});rangeChanges.push(key)
+      }
     }
-    for (const expected of basis.expected.values()) {
-      const current = componentValueAt(snapshot.model.project, expected.path)
+    for (const expected of observed.values()) {
+      const current = componentValueAt(project, expected.path)
       if (current.exists !== expected.exists || !equalComponentValue(current.value, expected.value))
         changed.push({ path: expected.path, ...structuredClone(current) })
     }
@@ -3354,8 +3487,7 @@ export class DocumentToolGateway implements ToolGateway {
       throw new ToolError('read-basis-changed', '本次生成直接读取的内容已改变，旧结果未提交。请根据当前事实重新判断并继续本任务。',
         { documentId: snapshot.documentId, revision: snapshot.revision, current: changed })
     }
-    return structuredClone([...basis.expected.values(), ...[...basis.ranges?.values() ?? []].flatMap(entry => entry.target.authorField
-      ? courseAuthorFieldReadPaths(snapshot.model, entry.target).map(path => ({ path, ...componentValueAt(snapshot.model.kind === 'course-v10' ? snapshot.model.project : {} as never, path) })) : [])])
+    return structuredClone([...observed.values(), ...rangeDependencies])
   }
 
   /** Main calls only when the changed-facts reply enters a new model request, never to replay a command. */
@@ -3376,6 +3508,8 @@ export class DocumentToolGateway implements ToolGateway {
     let handle = this.handle(runId, input.target)
     await this.options.prepareInput?.(handle.documentId)
     const snapshot = await this.registry.get(handle.documentId).drain()
+    if (snapshot.model.kind === 'course-v10' && handle.conflicted && componentRange(handle.target) && !handle.recoveryTarget)
+      throw new ToolError('target-conflict', '旧文字范围无法唯一定位。请读取其所属对象并重新选择当前范围。')
     let target = this.resolve(handle, snapshot, false)
     if (input.state !== undefined) {
       if (snapshot.model.kind !== 'course-v10' || target.kind !== 'course-surface' && target.kind !== 'course-instance')
@@ -3436,7 +3570,10 @@ export class DocumentToolGateway implements ToolGateway {
         files: target.kind === 'spatial-graph' ? listing.files.filter(file => file.type !== 'reference') : listing.files,
         ...(listing.nextOffset !== undefined ? { next: { tool: 'project.list', input: { project, offset: listing.nextOffset } } } : {}) } }
     }
-    if(method==='read')this.recordContentRead(runId,snapshot,target)
+    if(method==='read'){
+      if(handle.recoveryTarget)this.run(runId).contentReads.get(snapshot.documentId)?.ranges?.delete(documentDigest(handle.target))
+      this.recordContentRead(runId,snapshot,target)
+    }
     if (end < content.length) {
       const nextCursor = `c${this.createId()}`
       this.cursors.set(nextCursor, { ...this.readIdentity(runId, snapshot, target), method, digest, offset: end })

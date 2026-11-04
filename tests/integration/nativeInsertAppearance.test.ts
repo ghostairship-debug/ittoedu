@@ -170,6 +170,33 @@ it('inserts native content, frame and initial appearance in one history entry an
   } finally { await f.cleanup() }
 })
 
+it('lets the agent draw and add a custom editable path without replacing existing art', async () => {
+  const f = await harness()
+  try {
+    const page = await f.issue({ kind: 'course-surface', surfaceId: 'slide' })
+    applied(await f.call('object.insert', { target: page, kind: 'shape', shapeType: 'ellipse', x: 40, y: 30, width: 240, height: 150 }))
+    const before = course(await f.read()).project
+    const baseId = componentSurfaces(before)[0].childIds.at(-1)!
+    const base = await f.issue({ kind: 'course-instance', surfaceId: 'slide', instanceId: baseId })
+    applied(await f.call('object.insert', { target: page, after: base, kind: 'shape', shapeType: 'rectangle', x: 110, y: 70, width: 100, height: 52 }))
+    const addedId = componentSurfaces(course(await f.read()).project)[0].childIds.at(-1)!
+    const added = await f.issue({ kind: 'course-instance', surfaceId: 'slide', instanceId: addedId })
+    const pathGeometry = { paths: [{ fill: false, stroke: true, commands: [
+      { kind: 'move', to: [0, .65] },
+      { kind: 'quadratic', control: [.18, .86], to: [.33, 1] },
+      { kind: 'cubic', control1: [.54, .73], control2: [.8, .11], to: [1, 0] },
+    ] }] }
+    applied(await f.call('object.update', { target: added, properties: { data: { pathGeometry }, appearance: { borderColor: '#14532d' } } }))
+    const filename = path.join(f.root, 'editable-path.glx')
+    await f.host.internalAPI.save(f.initial.documentId, filename)
+    const cold = await new DocumentHostService(path.join(f.root, 'cold-path')).internalAPI.open(filename)
+    const project = course(cold).project
+    expect(project.instances[baseId]).toEqual(before.instances[baseId])
+    expect(componentSurfaces(project)[0].childIds).toEqual(['slide-old', baseId, addedId])
+    expect(project.instances[addedId].data).toMatchObject({ pathGeometry, style: { borderColor: '#14532d' } })
+  } finally { await f.cleanup() }
+})
+
 it('keeps formula insertion defaults on the same professional appearance planner without inventing an inline override', async () => {
   const f = await harness()
   try {

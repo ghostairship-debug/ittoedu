@@ -77,14 +77,14 @@ export function hitFreeObject(targets: readonly FreeObjectTarget[], point: Geome
     const matrix = frameToSpaceMatrix(target.frame, target.parentToSurface)
     if (matrix[0] * matrix[3] - matrix[1] * matrix[2] === 0) continue
     if (target.stroke) {
-      const screen = multiplyMatrices(surfaceToPointer, matrix), at = transformPoint(surfaceToPointer, point)
-      const points = target.stroke.points
+      const at = transformPoint(surfaceToPointer, point)
+      const points = target.stroke.points.map(value => transformPoint(matrix, value))
       const hit = points.slice(1).some((end, index) => {
         const start = points[index]!, dx = end.x - start.x, dy = end.y - start.y, length = Math.hypot(dx, dy)
         if (!length) return false
         const nx = -dy / length, ny = dx / length
-        const width = target.stroke!.width * Math.hypot(screen[0] * nx + screen[2] * ny, screen[1] * nx + screen[3] * ny)
-        return lineStrokeHit(at, [transformPoint(screen, start), transformPoint(screen, end)], width, 1)
+        const width = target.stroke!.width * Math.hypot(surfaceToPointer[0] * nx + surfaceToPointer[2] * ny, surfaceToPointer[1] * nx + surfaceToPointer[3] * ny)
+        return lineStrokeHit(at, [transformPoint(surfaceToPointer, start), transformPoint(surfaceToPointer, end)], width, 1)
       })
       if (!hit) continue
     } else if (!frameContainsPoint(target.frame, point, target.parentToSurface)) continue

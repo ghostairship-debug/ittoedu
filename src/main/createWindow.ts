@@ -231,6 +231,7 @@ export async function createMainWindow(
     }
     void (async () => {
       let approved = false
+      let closeMode: 'save' | 'discard' | 'preserve' | undefined
       try {
         approved = await prepareDocumentWindowClose({
           ...recoveryPorts,
@@ -243,14 +244,15 @@ export async function createMainWindow(
           ]).then(rendererDirty => rendererDirty || appState.isDirty()),
           confirm: () => confirmClose(window),
           cancelled: () => closing.controller.signal.aborted,
-          prepareRenderer: async (mode, ids) => {
+          prepareRenderer: async mode => {
+            closeMode = mode
             if (window.webContents.isCrashed()) {
               await offerCloseRecovery('界面进程已退出，无法完成关闭前输入保全。')
               return false
             }
             const prepared = await requestRendererBeforeClose(window, mode, closing.controller.signal, () => {
               if (closeAttempt === closing && !closing.controller.signal.aborted) void offerCloseRecovery()
-            }, ids)
+            })
             await closing.recoveryPrompt
             if (prepared.suggestedDirectory) closeSaveDirectory = prepared.suggestedDirectory
             if (!prepared.ready && !closing.controller.signal.aborted) await offerCloseRecovery()
@@ -285,6 +287,10 @@ export async function createMainWindow(
         })
       } else if (closing.controller.signal.aborted) return
       if (!approved || closeAttempt !== closing || window.isDestroyed()) return
+      const artifacts = documentHost().artifacts
+      const preserveOffice = closeMode === 'preserve' || closing.recoveryChoice === 'preserve'
+      if (preserveOffice) await artifacts.preserveOfficeDrafts()
+      await artifacts.releaseOfficeDrafts(!preserveOffice && closeMode === 'discard', preserveOffice)
       if (closing.recoveryChoice !== 'preserve') appState.setDirty(false)
       closeApproved = true
       window.close()

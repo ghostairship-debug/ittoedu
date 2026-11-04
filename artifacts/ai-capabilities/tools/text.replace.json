@@ -8,6 +8,13 @@
         "type": "string"
       },
       "__schema1": {
+        "items": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "type": "array"
+      },
+      "__schema2": {
         "enum": [
           "text",
           "html"
@@ -21,8 +28,12 @@
       "content": {
         "type": "string"
       },
-      "format": {
+      "dependsOn": {
         "$ref": "#/$defs/__schema1",
+        "description": "仅填写生成本次修改确实依赖的其他已读取对象句柄或工程路径。例如用表格值更新图表时填表格路径。"
+      },
+      "format": {
+        "$ref": "#/$defs/__schema2",
         "description": "原生富文本省略时，普通正文沿用选区文字格式，HTML 标记或实体按 HTML 替换；text 将内容视为纯文字并沿用选区格式，html 按内容所带格式替换。"
       },
       "target": {

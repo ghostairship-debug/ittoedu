@@ -159,9 +159,10 @@ export interface PptxObjectInspection {
   crop?: { left: number; top: number; right: number; bottom: number }
   cells?: string[][]
   chart?: PptxChartInspection
+  autoFields?: Array<{ paragraph: number; field: number; id: string; type: string; text: string; xml: string; path: Array<{ name: string; index: number }> }>
   editable: Array<'text' | 'runText' | 'transform' | 'textStyle' | 'shapeStyle' | 'layer' | 'replaceImage' | 'imageCrop' | 'tableCell'>
 }
 export type OfficeContentInspection =
   | { format: 'docx'; paragraphs: Array<{ index: number; text: string; style?: DocxParagraphStyle; runs?: Array<{ text: string; style: DocxTextStyle }>; editable?: boolean; structureEditable?: boolean; notice?: string }>; tables: string[][][]; body?: DocxBodyBlock[] }
-  | { format: 'xlsx'; sheets: Array<{ name: string; part?: string; sheetId?: string; mergedRanges?: string[]; columnWidths?: Array<{ min: number; max: number; width: number }>; cells: Array<{ cell: string; value: string | number | boolean | null; formula?: string }> }> }
+  | { format: 'xlsx'; sheets: Array<{ name: string; part?: string; sheetId?: string; mergedRanges?: string[]; columnWidths?: Array<{ min: number; max: number; width: number }>; cells: Array<{ cell: string; value: string | number | boolean | null; formula?: string; numberFormat?: string; display?: string }> }> }
   | { format: 'pptx'; width: number; height: number; slides: Array<{ index: number; part: string; partVersion: string; shapes: PptxObjectInspection[]; animations?: PptxAnimationInspection[] }> }

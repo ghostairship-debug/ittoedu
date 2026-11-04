@@ -15,6 +15,8 @@ export interface MarkdownOptions {
   target?: 'flow' | 'file'
   /** Retain usable blocks and show a local unsupported fragment as its original source. */
   recoverUnsupportedBlocks?: boolean
+  /** Prefer ordinary Markdown marks when editing a lightweight text view. */
+  preferStandardFormatting?: boolean
   resolveImage?: (href: string) => { assetId: string; source: DocumentResources['assets'][number]['source'] }
 }
 export type MarkdownParseResult =
@@ -62,8 +64,9 @@ const fence = (body: string, language: string): string => {
   return `${'`'.repeat(n)}${language}\n${body}\n${'`'.repeat(n)}`
 }
 
-export function serializeMarkdownInline(content: FlowTextContent): string {
-  return content.inlines.map(atom => {
+export function serializeMarkdownInline(content: FlowTextContent, preferStandardFormatting = false): string {
+  const inlines = preferStandardFormatting ? normalizeDocumentText(content).inlines : content.inlines
+  return inlines.map(atom => {
     let value: string
     if (atom.type === 'component') value = metadata('inline', atom)
     else if (atom.type === 'math') value = `$${atom.latex}$` + attrsText({ formulaId: atom.formulaId, accessibleText: atom.accessibleText, ...atom.style })
@@ -74,7 +77,15 @@ export function serializeMarkdownInline(content: FlowTextContent): string {
         const pad = atom.text.startsWith('`') || atom.text.endsWith('`') || /^ .* $/s.test(atom.text) ? ' ' : ''
         value = `${'`'.repeat(n)}${pad}${atom.text}${pad}${'`'.repeat(n)}`
       }
-      if (atom.style && Object.keys(atom.style).length) value = `[${value}]` + attrsText({ ...atom.style })
+      if (atom.style && Object.keys(atom.style).length) {
+        const { bold, italic, strike, ...rest } = atom.style
+        if (preferStandardFormatting && !Object.keys(rest).length && bold !== false && italic !== false && strike !== false) {
+          value = value.replace(/^\s+|\s+$/g, space => Array.from(space, character => `&#${character.charCodeAt(0)};`).join(''))
+          const marks = bold && italic ? '***' : bold ? '**' : italic ? '*' : ''
+          if (marks) value = marks + value + marks
+          if (strike) value = '~~' + value + '~~'
+        } else value = `[${value}]` + attrsText({ ...atom.style })
+      }
     }
     if (atom.link) value = `[${value}](<${atom.link.href.replace(/&/g, '&amp;')}>${atom.link.title !== undefined ? ` ${JSON.stringify(atom.link.title.replace(/&/g, '&amp;'))}` : ''})`
     if (atom.rangeIds?.length && atom.type !== 'component') value = `[${value}]` + attrsText({ rangeIds: JSON.stringify(atom.rangeIds) })
@@ -82,9 +93,11 @@ export function serializeMarkdownInline(content: FlowTextContent): string {
   }).join('')
 }
 
-export function serializeDocumentMarkdown(document: MarkdownDocument, target: 'flow' | 'file' = 'flow'): string {
+export function serializeDocumentMarkdown(document: MarkdownDocument, target: 'flow' | 'file' = 'flow', preferStandardFormatting = false): string {
   documentContentSchema.parse(document.content)
   validateDocumentResources(document.content.blocks, document.resources, target)
+  const inline = (content: FlowTextContent) => serializeMarkdownInline(content, preferStandardFormatting)
+  const blockHeader = (meta: { id: string }) => preferStandardFormatting && Object.keys(meta).every(key => key === 'id' || key === 'level') ? '' : metadata('block', meta) + '\n'
   const object = (block: DocumentBlock) => fence(JSON.stringify({ kind: 'flow-block', block, resources: resourcesForBlock(block, document.resources) }, null, 2), 'cw-object-v1')
   return document.content.blocks.map(block => {
     // Multiline code atoms/URLs have no lossless ordinary inline representation.
@@ -101,15 +114,15 @@ export function serializeDocumentMarkdown(document: MarkdownDocument, target: 'f
         if (block.type === 'quote' && block.citation) return object(block)
         if (!block.content.inlines.length) return object(block)
         const { content, type, ...meta } = block
-        return `${metadata('block', meta)}\n${type === 'heading' ? '#'.repeat(block.level) + ' ' : type === 'quote' ? '> ' : ''}${serializeMarkdownInline(content).replace(/\n/g, type === 'quote' ? '\n> ' : '\n')}`
+        return `${blockHeader(meta)}${type === 'heading' ? '#'.repeat(block.level) + ' ' : type === 'quote' ? '> ' : ''}${inline(content).replace(/\n/g, type === 'quote' ? '\n> ' : '\n')}`
       }
       case 'list':
-        if (block.items.some(i => serializeMarkdownInline(i.content).includes('\n') || !i.content.inlines.length)) return object(block)
-        return `${metadata('block', { id: block.id })}\n${block.items.map((item, index) => `${block.ordered ? `${(block.start ?? 1) + index}.` : '-'} ${metadata('item', { id: item.id })}${serializeMarkdownInline(item.content)}`).join('\n')}`
+        if (block.items.some(i => inline(i.content).includes('\n') || !i.content.inlines.length)) return object(block)
+        return `${blockHeader({ id: block.id })}${block.items.map((item, index) => `${block.ordered ? `${(block.start ?? 1) + index}.` : '-'} ${preferStandardFormatting ? '' : metadata('item', { id: item.id })}${inline(item.content)}`).join('\n')}`
       case 'table': {
-        if (block.merges !== undefined || block.caption || block.headerEnabled === false || block.columns.some(c => /[|\n]/.test(serializeMarkdownInline(c.header) + c.id)) || block.rows.some(r => /[|\n]/.test(r.id) || Object.values(r.cells).some(c => /[|\n]/.test(serializeMarkdownInline(c))))) return object(block)
-        const headers = block.columns.map(c => `${serializeMarkdownInline(c.header)} ${metadata('column', { id: c.id })}`)
-        return `${metadata('block', { id: block.id })}\n| ${headers.join(' | ')} |\n| ${block.columns.map(() => '---').join(' | ')} |\n${block.rows.map(r => `| ${block.columns.map((c, i) => `${i === 0 ? metadata('row', { id: r.id }) : ''}${serializeMarkdownInline(r.cells[c.id]!)}`).join(' | ')} |`).join('\n')}`
+        if (block.merges !== undefined || block.caption || block.headerEnabled === false || block.columns.some(c => /[|\n]/.test(inline(c.header) + c.id)) || block.rows.some(r => /[|\n]/.test(r.id) || Object.values(r.cells).some(c => /[|\n]/.test(inline(c))))) return object(block)
+        const headers = block.columns.map(c => `${inline(c.header)}${preferStandardFormatting ? '' : ' ' + metadata('column', { id: c.id })}`)
+        return `${blockHeader({ id: block.id })}| ${headers.join(' | ')} |\n| ${block.columns.map(() => '---').join(' | ')} |\n${block.rows.map(r => `| ${block.columns.map((c, i) => `${!preferStandardFormatting && i === 0 ? metadata('row', { id: r.id }) : ''}${inline(r.cells[c.id]!)}`).join(' | ')} |`).join('\n')}`
       }
       case 'formula': { const { type: _type, latex, ...meta } = block; return `${metadata('block', meta)}\n$$\n${latex}\n$$` }
       case 'code': return block.language === 'cw-object-v1' ? object(block) : `${metadata('block', { id: block.id })}\n${fence(block.code, block.language ?? '')}`

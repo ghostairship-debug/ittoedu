@@ -1,0 +1,5 @@
+.office-selection-card{max-width:calc(100vw - 16px)}
+.office-selection-card .element-ai-card{max-height:calc(100vh - 16px)}
+.office-selection-options{display:flex;flex-wrap:wrap;gap:5px;align-items:center;padding:6px}
+.office-selection-options :is(button,select,input){font:inherit}
+.office-autosave-toggle{display:inline-flex;align-items:center;gap:4px;white-space:nowrap;font-size:12px}

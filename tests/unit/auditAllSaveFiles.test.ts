@@ -14,7 +14,7 @@ import type { RegisteredWorkspaceRoot } from '../../src/shared/workbench/workspa
 const roots: string[] = []
 afterEach(async () => { vi.restoreAllMocks(); for (const root of roots.splice(0)) {
   if (!path.resolve(root).startsWith(path.resolve(os.tmpdir()) + path.sep)) throw new Error('unexpected fixture root')
-  await fs.rm(root, { recursive: true, force: true })
+  await fs.rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })
 } })
 async function fixture(trash = false) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'audit-all-files-')); roots.push(root)
@@ -134,9 +134,11 @@ describe('Audit existing file owners', () => {
     const created = await f.host.internalAPI.create({ kind: 'course-v10', project, resources: { assets: {}, components: {} } }, 'A.glx')
     const saved = await f.host.saveToPath(created.documentId, path.join(f.root, 'A.glx'))
     await f.host.writeAuthoringDrafts(saved.documentId, { advanced: [{ kind: 'json', documentId: saved.documentId, epoch: saved.epoch, projectId: project.id, key: 'network', payload: '{raw-window' }], properties: [] })
-    const journal = (f.host as any).journal, save = journal.save.bind(journal)
-    vi.spyOn(journal, 'save').mockImplementation(async input => { await save(input); throw new Error('cut before ACK') })
+    const journal = (f.host as any).journal, save = journal.savePrepared.bind(journal)
+    const lookup = vi.spyOn(f.host, 'lookupSave').mockResolvedValueOnce(null)
+    const interrupted = vi.spyOn(journal, 'savePrepared').mockImplementation(async input => { await save(input); throw new Error('cut before ACK') })
     await expect(f.host.saveToPath(saved.documentId, path.join(f.root, 'B.glx'))).rejects.toThrow('cut before ACK')
+    expect(interrupted).toHaveBeenCalledOnce(); expect(lookup).toHaveBeenCalledOnce()
     const cold = new DocumentHostService(f.journal); await cold.internalAPI.recoverable()
     const reopened = await cold.open(path.join(f.root, 'B.glx'))
     expect((await cold.readAuthoringDrafts(reopened.documentId))?.advanced[0]?.payload).toBe('{raw-window')
@@ -146,9 +148,11 @@ describe('Audit existing file owners', () => {
     const f = await fixture(), filename = path.join(f.root, 'proof.txt'); await fs.writeFile(filename, 'base')
     const opened = await f.host.open(filename)
     await f.host.internalAPI.dispatch({ documentId: opened.documentId, epoch: opened.epoch, operationId: 'proof-edit', baseRevision: opened.revision, actor: 'human', mutation: { type: 'command', command: { type: 'markdown.replace', source: 'captured' } } })
-    const journal = (f.host as any).journal, save = journal.save.bind(journal)
-    vi.spyOn(journal, 'save').mockImplementation(async input => { await save(input); throw new Error('cut ACK') })
+    const journal = (f.host as any).journal, save = journal.savePrepared.bind(journal)
+    const lookup = vi.spyOn(f.host, 'lookupSave').mockResolvedValueOnce(null)
+    const interrupted = vi.spyOn(journal, 'savePrepared').mockImplementation(async input => { await save(input); throw new Error('cut ACK') })
     await expect(f.host.saveToPath(opened.documentId)).rejects.toThrow('cut ACK')
+    expect(interrupted).toHaveBeenCalledOnce(); expect(lookup).toHaveBeenCalledOnce()
     const cold = new DocumentHostService(f.journal), read = fs.readFile.bind(fs)
     let reads = 0
     vi.spyOn(fs, 'readFile').mockImplementation(async (...args: any[]) => {
@@ -203,6 +207,8 @@ describe('Audit existing file owners', () => {
   it('CA372 unavailable journal is visible and explicit saved opening retains the damaged original', async () => {
     const f = await fixture(), filename = path.join(f.root, 'healthy.txt'); await fs.writeFile(filename, 'healthy saved text')
     const opened = await f.host.open(filename), record = path.join(f.journal, createHash('sha256').update(opened.documentId).digest('hex') + '.journal')
+    // This case exercises diagnosis when a durable binding index identifies the damaged log.
+    await vi.waitFor(async () => { expect((await fs.stat(record + '.binding.json')).isFile()).toBe(true) })
     const bytes = await fs.readFile(record); bytes[bytes.length - 9] ^= 1; await fs.writeFile(record, bytes)
     const cold = new DocumentHostService(f.journal), items = await cold.internalAPI.recoverable()
     expect(items.find(item => item.documentId === opened.documentId)).toMatchObject({ recoverable: false, dirty: false, recoveryUnavailable: expect.any(String), model: { source: 'healthy saved text' } })

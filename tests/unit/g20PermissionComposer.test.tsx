@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, expect, it, vi } from 'vitest'
 import { ExecutionAssistant } from '../../src/renderer/workbench/ExecutionAssistant'
 import { pendingApproval } from '../../src/renderer/workbench/executionTimelineModel'
@@ -7,9 +7,10 @@ import type { ExecutionDesktopAPI, ExecutionSubmissionRecord } from '../../src/s
 import { emptyExecutionProjection, foldExecutionEvents, type ExecutionEvent } from '../../src/shared/workbench/executionEvents'
 import type { ExecutionSettingsAPI } from '../../src/shared/workbench/executionSettingsDesktop'
 import type { ExecutionSettingsView } from '../../src/shared/workbench/executionSettings'
+import { officeFocus } from '../../src/renderer/workbench/officeFocus'
 
 // S10-T07 / M07-T07 (Owner 2026-09-24): approval card for "修改前询问", "+" menu and "立即执行" on a queued message.
-afterEach(() => { cleanup(); localStorage.clear() })
+afterEach(() => { cleanup(); localStorage.clear(); officeFocus.setOpenFiles([], null) })
 const workspace: WorkspaceRecord = { workspaceId: 'workspace', rootPath: 'C:/workspace', managed: false, authorization: 'user-selected', revision: 1, createdAt: 1, updatedAt: 1 }
 const conversation: ConversationRecord = { conversationId: 'c1', workspaceId: 'workspace', title: '权限会话', messages: [], attachmentIds: [],
   runIndex: { builtinRunIds: ['run'], externalRunIds: [], externalPortIds: [] }, inputDraft: '', inputAttachments: [], frozenContextRefs: [], revision: 1, createdAt: 1, updatedAt: 1 }
@@ -109,6 +110,69 @@ it('M07-T07 "+" offers attachments and references; referencing a missing selecti
   expect(within(chips).getByRole('button', { name: '移除引用 已绑定文档 文档' })).toBeInTheDocument()
   fireEvent.keyDown(document, { key: 'Escape' })
   expect(screen.queryByRole('menu', { name: '添加内容' })).toBeNull()
+})
+
+it('switches the scope of a long PPT filename and pins the chosen page across navigation', async () => {
+  const name = '年终经营复盘培训材料及项目阶段验收数据汇总最终演示文稿.pptx'
+  const path = `C:/workspace/${name}`
+  officeFocus.setOpenFiles([{ path, name, format: 'pptx' }], path)
+  officeFocus.updateLocation(path, { page: 5, shapeIds: ['7'] })
+  render(<ExecutionAssistant root="C:/workspace" api={api([])} settingsAPI={settingsAPI()}
+    captureDocuments={vi.fn(async () => [])} prepareSend={vi.fn(async () => true)} />)
+  await waitFor(() => expect(screen.getByRole('button', { name: '添加' })).toBeEnabled())
+  const references = screen.getByLabelText('本条消息的文件引用')
+  const trigger = within(references).getByLabelText(`切换引用范围：${name}，第 6 页 · 1 个对象`)
+  fireEvent.click(trigger)
+  const picker = within(references).getByLabelText('引用范围')
+  expect(picker).toHaveTextContent(path)
+  expect(picker).toHaveTextContent('对象 ID 7')
+  fireEvent.click(within(picker).getByRole('button', { name: /^当前页$/ }))
+  act(() => officeFocus.updateLocation(path, { page: 8, shapeIds: [] }))
+  expect(within(references).getByLabelText(`切换引用范围：${name}，第 9 页`)).toBeInTheDocument()
+  const pinned = within(references).getByLabelText(`切换引用范围：${name}，第 6 页`)
+  fireEvent.click(pinned)
+  const pinnedPicker = within(pinned.closest('details')!).getByLabelText('引用范围')
+  expect(within(pinnedPicker).getByRole('button', { name: /^当前对象$/ })).toBeDisabled()
+  fireEvent.click(within(pinnedPicker).getByRole('button', { name: /^整个文档$/ }))
+  expect(within(references).getByLabelText(`切换引用范围：${name}，整个文档`)).toBeInTheDocument()
+  expect(within(references).queryByLabelText(`切换引用范围：${name}，第 6 页`)).toBeNull()
+})
+
+it('sends a fixed GLX object with the active Office page and freezes both during preparation', async () => {
+  const path = 'C:/workspace/讲义.pptx'
+  let showGlx = true
+  const object = { kind: 'course-instance' as const, surfaceId: 'A', instanceId: 'one' }
+  const captureDocuments = async () => showGlx ? [{
+    documentId: 'glx', epoch: 'e', revision: 1, selection: [object], writable: [{ kind: 'document' as const }],
+  }] : []
+  const prepareSend = vi.fn(async () => {
+    officeFocus.updateLocation(path, { page: 8 })
+    return true
+  })
+  const send = vi.fn<ExecutionDesktopAPI['send']>(async input => ({
+    conversation: structuredClone(conversation), submission: {
+      submissionId: input.submissionId, workspaceId: input.workspaceId, conversationId: input.conversationId,
+      state: 'queued', mode: 'queue', text: input.text, documents: input.documents, attachments: [],
+      model: { provider: 'fixture-provider', model: 'fixture-model', accountId: 'account', billing: 'metered' }, createdAt: 1, updatedAt: 1,
+    },
+  }))
+  render(<ExecutionAssistant root="C:/workspace" api={api([], { send })} settingsAPI={settingsAPI()}
+    captureDocuments={captureDocuments} prepareSend={prepareSend} />)
+  fireEvent.click(await screen.findByRole('button', { name: /^固定 .*所选对象$/ }))
+  showGlx = false
+  act(() => {
+    officeFocus.setOpenFiles([{ path, name: '讲义.pptx', format: 'pptx' }], path)
+    officeFocus.updateLocation(path, { page: 2 })
+  })
+  await waitFor(() => expect(screen.queryByRole('button', { name: /移除引用.*当前页面/ })).toBeNull())
+  expect(screen.getByRole('button', { name: /^取消固定 .*所选对象$/ })).toBeInTheDocument()
+  expect(screen.getByLabelText('切换引用范围：讲义.pptx，第 3 页')).toBeInTheDocument()
+  fireEvent.change(screen.getByRole('textbox', { name: '给果铃AI发消息' }), { target: { value: '参考这两个位置' } })
+  fireEvent.click(screen.getByRole('button', { name: '发送' }))
+  await waitFor(() => expect(send).toHaveBeenCalledOnce())
+  const input = send.mock.calls[0]![0]
+  expect(input.documents).toEqual([expect.objectContaining({ pinned: true, selection: [object] })])
+  expect(input.fileContext?.references).toEqual([expect.objectContaining({ path, scope: 'page', focus: { page: 2 } })])
 })
 
 it('M07-T07 a queued message can run now: Main stops the current task and starts that same accepted submission', async () => {

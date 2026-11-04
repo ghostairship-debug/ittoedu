@@ -62,14 +62,18 @@ export class MediaFileDraft {
     if (!this.state.redo.length || this.state.busy) return
     await this.render([...this.state.operations, this.state.redo.at(-1)!], this.state.redo.slice(0, -1))
   }
-  async save(): Promise<MediaFileSnapshot | null> {
-    if (this.state.busy || !this.state.previewReady || !this.state.operations.length) return null
+  async save(asCopy = false): Promise<MediaFileSnapshot | null> {
+    if (this.state.busy || !this.state.previewReady || (!asCopy && !this.state.operations.length)) return null
     const generation = ++this.generation
     this.update({ busy: 'save', error: null })
     try {
-      const saved = await this.port.save(this.state.base.binding, this.state.operations)
-      if (generation === this.generation) this.update({ base: saved, preview: saved, operations: [], redo: [], busy: null, previewReady: true })
-      return saved
+      const saved = asCopy
+        ? await this.port.saveAs?.(this.state.base.binding, this.state.operations)
+        : await this.port.save(this.state.base.binding, this.state.operations)
+      if (generation === this.generation) this.update(saved
+        ? { base: saved, preview: saved, operations: [], redo: [], busy: null, previewReady: true }
+        : { busy: null })
+      return saved ?? null
     } catch (error) {
       if (generation === this.generation) this.update({ busy: null, error: error instanceof Error ? error.message : String(error) })
       return null

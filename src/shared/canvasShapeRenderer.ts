@@ -85,6 +85,7 @@ function verticalBrace(
   width: number,
   height: number,
   side: 'left' | 'right',
+  stroke: () => void,
 ): void {
   const direction = side === 'left' ? 1 : -1
   const edge = side === 'left' ? width * 0.82 : width * 0.18
@@ -97,10 +98,10 @@ function verticalBrace(
   context.bezierCurveTo(inner, middle, cusp, middle, cusp, middle)
   context.bezierCurveTo(inner, middle, inner, middle * 1.16, inner, middle * 1.16)
   context.bezierCurveTo(inner, height, edge, height, edge, height)
-  context.stroke()
+  stroke()
 }
 
-function bracket(context: CanvasRenderingContext2D, width: number, height: number, side: 'left' | 'right'): void {
+function bracket(context: CanvasRenderingContext2D, width: number, height: number, side: 'left' | 'right', stroke: () => void): void {
   const inner = side === 'left' ? width * 0.25 : width * 0.75
   const outer = side === 'left' ? width * 0.75 : width * 0.25
   context.beginPath()
@@ -108,7 +109,7 @@ function bracket(context: CanvasRenderingContext2D, width: number, height: numbe
   context.lineTo(inner, 0)
   context.lineTo(inner, height)
   context.lineTo(outer, height)
-  context.stroke()
+  stroke()
 }
 
 export function renderShapeCanvas(
@@ -116,9 +117,21 @@ export function renderShapeCanvas(
   node: ShapeNode,
   width = node.width,
   height = node.height,
+  geometryTransform?: readonly [number, number, number, number],
 ): void {
   const style = node.style
   context.save()
+  const paintTransform = geometryTransform && context.getTransform()
+  if (geometryTransform) context.transform(...geometryTransform, 0, 0)
+  const stroke = () => {
+    if (!paintTransform) { context.stroke(); return }
+    // The current path already contains the geometry transform. The pen
+    // uses the paint coordinate system, so scaling a path cannot stretch it.
+    context.save()
+    context.setTransform(paintTransform)
+    context.stroke()
+    context.restore()
+  }
   context.lineWidth = style.borderWidth > 0 ? style.borderWidth : 1
   context.strokeStyle = style.borderColor
   context.fillStyle = style.fillColor
@@ -140,7 +153,7 @@ export function renderShapeCanvas(
       context.save(); context.globalAlpha *= style.fillOpacity; context.fill(); context.restore()
     }
     if (style.borderWidth > 0 && style.borderOpacity > 0) {
-      context.save(); context.globalAlpha *= style.borderOpacity; context.stroke(); context.restore()
+      context.save(); context.globalAlpha *= style.borderOpacity; stroke(); context.restore()
     }
   }
 
@@ -161,7 +174,7 @@ export function renderShapeCanvas(
         context.save(); context.globalAlpha *= style.fillOpacity; context.fill(); context.restore()
       }
       if (path.stroke && style.borderWidth > 0 && style.borderOpacity > 0) {
-        context.save(); context.globalAlpha *= style.borderOpacity; context.stroke(); context.restore()
+        context.save(); context.globalAlpha *= style.borderOpacity; stroke(); context.restore()
       }
     }
     context.restore()
@@ -193,7 +206,7 @@ export function renderShapeCanvas(
       if (style.borderWidth <= 0 || style.borderOpacity <= 0) break
       const points = resolveNativeLinePoints(node.lineGeometry, width, height, node.shapeType)
       context.save(); context.globalAlpha *= style.borderOpacity; context.beginPath(); context.moveTo(points[0].x, points[0].y)
-      points.slice(1).forEach((point) => context.lineTo(point.x, point.y)); context.stroke(); context.fillStyle = style.borderColor
+      points.slice(1).forEach((point) => context.lineTo(point.x, point.y)); stroke(); context.fillStyle = style.borderColor
       const first = points[0]!, last = points.at(-1)!
       const forward = points.slice(1).find(point => Math.hypot(point.x - first.x, point.y - first.y) > 1e-9)
       const backward = points.slice(0, -1).reverse().find(point => Math.hypot(point.x - last.x, point.y - last.y) > 1e-9)
@@ -202,18 +215,18 @@ export function renderShapeCanvas(
     }
     case 'brace-left':
       if (style.borderWidth > 0 && style.borderOpacity > 0) {
-        context.save(); context.globalAlpha *= style.borderOpacity; verticalBrace(context, width, height, 'left'); context.restore()
+        context.save(); context.globalAlpha *= style.borderOpacity; verticalBrace(context, width, height, 'left', stroke); context.restore()
       }
       break
     case 'brace-right':
       if (style.borderWidth > 0 && style.borderOpacity > 0) {
-        context.save(); context.globalAlpha *= style.borderOpacity; verticalBrace(context, width, height, 'right'); context.restore()
+        context.save(); context.globalAlpha *= style.borderOpacity; verticalBrace(context, width, height, 'right', stroke); context.restore()
       }
       break
     case 'brace-pair-horizontal':
       if (style.borderWidth > 0 && style.borderOpacity > 0) {
-        context.save(); context.globalAlpha *= style.borderOpacity; verticalBrace(context, width / 2, height, 'left')
-        context.translate(width / 2, 0); verticalBrace(context, width / 2, height, 'right'); context.restore()
+        context.save(); context.globalAlpha *= style.borderOpacity; verticalBrace(context, width / 2, height, 'left', stroke)
+        context.translate(width / 2, 0); verticalBrace(context, width / 2, height, 'right', stroke); context.restore()
       }
       break
     case 'brace-top':
@@ -222,18 +235,18 @@ export function renderShapeCanvas(
       if (style.borderWidth <= 0 || style.borderOpacity <= 0) break
       context.save(); context.globalAlpha *= style.borderOpacity; context.translate(width, 0); context.rotate(Math.PI / 2)
       if (node.shapeType === 'brace-pair-vertical') {
-        verticalBrace(context, height / 2, width, 'left'); context.translate(height / 2, 0); verticalBrace(context, height / 2, width, 'right')
-      } else verticalBrace(context, height, width, node.shapeType === 'brace-top' ? 'left' : 'right')
+        verticalBrace(context, height / 2, width, 'left', stroke); context.translate(height / 2, 0); verticalBrace(context, height / 2, width, 'right', stroke)
+      } else verticalBrace(context, height, width, node.shapeType === 'brace-top' ? 'left' : 'right', stroke)
       context.restore(); break
     }
     case 'bracket-left':
       if (style.borderWidth > 0 && style.borderOpacity > 0) {
-        context.save(); context.globalAlpha *= style.borderOpacity; bracket(context, width, height, 'left'); context.restore()
+        context.save(); context.globalAlpha *= style.borderOpacity; bracket(context, width, height, 'left', stroke); context.restore()
       }
       break
     case 'bracket-right':
       if (style.borderWidth > 0 && style.borderOpacity > 0) {
-        context.save(); context.globalAlpha *= style.borderOpacity; bracket(context, width, height, 'right'); context.restore()
+        context.save(); context.globalAlpha *= style.borderOpacity; bracket(context, width, height, 'right', stroke); context.restore()
       }
       break
   }

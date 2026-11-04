@@ -15,7 +15,7 @@ const STATE_LABEL: Record<ElementCardEntryState, string> = {
 }
 
 /** The element's own AI card (M15): its requests and replies, questions and approvals, and an input for the next one. */
-export function ElementAiCard({ cardKey, capture, onClose, onRebind }: { cardKey: string; capture?(): Promise<SelectionCapture>; onClose(): void; onRebind?(): void }) {
+export function ElementAiCard({ cardKey, capture, onClose, onRebind, canRestrict = true }: { cardKey: string; capture?(): Promise<SelectionCapture>; onClose(): void; onRebind?(): void; canRestrict?: boolean }) {
   const card = useElementCard(cardKey)
   const [sending, setSending] = useState(false), [error, setError] = useState('')
   const draft = card?.draft ?? ''
@@ -25,6 +25,7 @@ export function ElementAiCard({ cardKey, capture, onClose, onRebind }: { cardKey
   const count = card?.entries.length ?? 0
   const follow = useRef(true)
   useEffect(() => { if (body.current && follow.current) body.current.scrollTop = body.current.scrollHeight }, [count, card?.projection.cursor, card?.entries])
+  useEffect(() => { if (card?.kind === 'office') input.current?.focus() }, [cardKey, card?.kind])
   if (!card) return null
   const send = async () => {
     const text = draft.trim()
@@ -42,7 +43,7 @@ export function ElementAiCard({ cardKey, capture, onClose, onRebind }: { cardKey
       else if (result.status === 'unavailable') setError(result.message)
     } catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)) }
   }
-  const question = card.question, approval = card.approval, text = card.kind === 'text'
+  const question = card.question, approval = card.approval, text = card.kind === 'text', office = card.kind === 'office'
   const undoTitle = card.undo ? `撤销 AI 对${card.undo.fields.join('、')}的修改` : card.undoUnavailable ?? '没有可撤销的 AI 修改'
   const redoTitle = card.redo ? `重做 AI 对${card.redo.fields.join('、')}的修改` : '没有可重做的 AI 修改'
   const process = { ...card.projection, items: card.projection.items.filter(item => item.type !== 'text'
@@ -51,13 +52,13 @@ export function ElementAiCard({ cardKey, capture, onClose, onRebind }: { cardKey
     <header className="element-ai-card__header">
       <Sparkles size={14} aria-hidden="true" />
       <strong title={card.label}>{card.label}</strong>
-      <button type="button" aria-label="撤销这张卡的 AI 修改" title={undoTitle} disabled={!card.undo}
+      {!office && <><button type="button" aria-label="撤销这张卡的 AI 修改" title={undoTitle} disabled={!card.undo}
         onClick={() => { if (card.undo) void revert('undo', card.undo.submissionId) }}><Undo2 size={13} aria-hidden="true" /></button>
       <button type="button" aria-label="重做这张卡的 AI 修改" title={redoTitle} disabled={!card.redo}
-        onClick={() => { if (card.redo) void revert('redo', card.redo.submissionId) }}><Redo2 size={13} aria-hidden="true" /></button>
+        onClick={() => { if (card.redo) void revert('redo', card.redo.submissionId) }}><Redo2 size={13} aria-hidden="true" /></button></>}
       {text && onRebind && <button type="button" aria-label="重新选择文字并保留输入" title="重新选择文字并保留输入" onClick={onRebind}>重选</button>}
-      <button type="button" className="element-ai-card__close" aria-label={text ? '关闭 AI 卡' : '收起 AI 卡'}
-        disabled={card.busy || Boolean(card.question || card.approval)} title={card.busy ? '任务结束后可关闭；可先停止任务' : text ? '关闭（修改保留）' : '收起（修改保留）'} onClick={onClose}>×</button>
+      <button type="button" className="element-ai-card__close" aria-label={text || office ? '关闭 AI 卡' : '收起 AI 卡'}
+        disabled={card.busy || Boolean(card.question || card.approval)} title={card.busy ? '任务结束后可关闭；可先停止任务' : '关闭（修改保留）'} onClick={onClose}>×</button>
     </header>
     <div ref={body} className="element-ai-card__body" onScroll={event => { const node = event.currentTarget; follow.current = node.scrollHeight - node.clientHeight - node.scrollTop < 32 }}>
     {process.items.length > 0 && <ExecutionTimeline projection={process}
@@ -70,7 +71,7 @@ export function ElementAiCard({ cardKey, capture, onClose, onRebind }: { cardKey
       </div>
     </div>}
     {count === 0
-      ? <p className="element-ai-card__hint">{text ? '告诉 AI 怎么改这段文字，可以连续追问；选择仅修改选区可限定范围。关闭卡片后修改保留。'
+      ? <p className="element-ai-card__hint">{office ? 'AI 会参考打开卡片时的选区，按你的要求修改文档。修改可在文档中撤销或重做。' : text ? '告诉 AI 怎么改这段文字，可以连续追问；选择仅修改选区可限定范围。关闭卡片后修改保留。'
         : '告诉 AI 怎么改它。AI 会优先处理这个对象，也可按要求协调同文档中的其他内容。'}</p>
       : <ol className="element-ai-card__log" aria-label="修改记录">
         {card.entries.map(entry => <li key={entry.submissionId} className="element-ai-card__entry" data-state={entry.state}>
@@ -83,27 +84,30 @@ export function ElementAiCard({ cardKey, capture, onClose, onRebind }: { cardKey
         </li>)}
       </ol>}
     {question && <ExecutionQuestionCard pending={question} onAnswer={answer => elementCards.answer(cardKey, question.runId, question.callId, answer)} />}
-    {approval && <ExecutionApprovalCard pending={approval} onDecide={decision => elementCards.approve(cardKey, approval.runId, approval.callId, decision)} />}
+    {approval && <ExecutionApprovalCard key={`${approval.runId}:${approval.callId}`} pending={approval}
+      onDecide={decision => elementCards.approve(cardKey, approval.runId, approval.callId, decision)} />}
     {(error || card.error || card.textLost) && <p className="element-ai-card__failure" role="alert">{error || card.error || card.textLost}</p>}
     {card.refreshError && <div className="element-ai-card__failure" role="alert">
       <p>{card.refreshError}</p>
       <div className="element-ai-card__actions">
         <button type="button" onClick={() => elementCards.retryRefresh(cardKey)}>重试读取任务状态</button>
-        {!text && <button type="button" disabled={sending || card.closing || card.unconfirmed}
+        {!text && !office && <button type="button" disabled={sending || card.closing || card.unconfirmed}
           onClick={() => elementCards.dismiss(cardKey)}>收起卡片（任务保留）</button>}
       </div>
     </div>}
     </div>
     <form className="element-ai-card__form" onSubmit={event => { event.preventDefault(); void send() }}>
       <textarea ref={input} aria-label="AI 修改要求" value={draft} rows={2}
-        placeholder={card.busy ? text ? '等 AI 改完再继续追问' : '可以继续提要求，会排在后面' : text ? '继续告诉 AI 怎么改' : '告诉 AI 怎么改'}
+        placeholder={card.busy ? text || office ? '等 AI 改完再继续追问' : '可以继续提要求，会排在后面' : text ? '继续告诉 AI 怎么改' : '告诉 AI 怎么改'}
         onChange={event => setDraft(event.target.value)}
         onKeyDown={event => {
           if (event.key !== 'Enter' || event.shiftKey || event.nativeEvent.isComposing || event.keyCode === 229) return
           event.preventDefault(); void send()
         }} />
       <label className="element-ai-card__scope"><input type="checkbox" checked={card.restrictToSelection}
+        disabled={office && (!canRestrict || card.busy)}
         onChange={event => elementCards.setSelectionRestriction(cardKey, event.target.checked)} />仅修改此选区</label>
+      {office && !canRestrict && <small className="element-ai-card__hint">此选区可以作为参考，暂无法限定为精确修改范围。</small>}
       <div className="element-ai-card__actions">
         {card.unconfirmed && <button type="button" disabled={sending} onClick={() => {
           setSending(true); setError(''); void elementCards.confirmSend(cardKey).catch(reason => setError(reason instanceof Error ? reason.message : String(reason))).finally(() => setSending(false))
@@ -113,7 +117,7 @@ export function ElementAiCard({ cardKey, capture, onClose, onRebind }: { cardKey
           onClick={() => { void elementCards.stop(cardKey, true).catch(reason => setError(String(reason))) }}>停止并暂停后续</button>}
         {card.entries.some(entry => entry.queuePausedReason === 'user') && <button type="button"
           onClick={() => { void elementCards.resumeQueue(cardKey).catch(reason => setError(String(reason))) }}>继续排队任务</button>}
-        <button type="submit" disabled={!draft.trim() || sending || card.closing || card.unconfirmed || text && (card.busy || Boolean(card.textLost))}>{sending ? '发送中…' : '发送'}</button>
+        <button type="submit" disabled={!draft.trim() || sending || card.closing || card.unconfirmed || (text || office) && (card.busy || Boolean(card.textLost))}>{sending ? '发送中…' : '发送'}</button>
       </div>
     </form>
   </section>

@@ -11,6 +11,7 @@ import { readUtf8File } from './readUtf8File'
 
 type FileBinding = Extract<DocumentBinding, { kind: 'file' }>
 interface BindingIntent { schemaVersion: 1; operationId: string; source: string; target?: string; kind: 'rename' | 'move' | 'trash'; action?: WorkspaceMutationAction;
+  sourceIdentity?: string; targetIdentity?: string;
   entries: { documentId: string; before: FileBinding; after: DocumentBinding; fileIdentity?: string; fileVersion?: string | null; documentKind?: DurableDocumentState['model']['kind'] }[] }
 const key = (filename: string) => process.platform === 'win32' ? path.resolve(filename).toLowerCase() : path.resolve(filename)
 const exists = async (filename: string) => { try { await fs.lstat(filename); return true } catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false; throw error } }
@@ -30,6 +31,7 @@ export function relocatedDocumentPath(action: WorkspaceMutationAction, filename:
 export class DocumentFileCoordinator {
   private readonly access = new FileAccessQueue()
   private readonly relocationListeners = new Set<(action: WorkspaceMutationAction) => Promise<void>>()
+  private readonly relocationChecks = new Set<(action: WorkspaceMutationAction) => Promise<void>>()
   /** Acknowledged disk-write versions, not source bytes or another document authority. */
   private readonly sourceWrites = new Map<string, { bases: Set<string>; version: string }>()
   private needsRepair = true
@@ -47,6 +49,10 @@ export class DocumentFileCoordinator {
   subscribeRelocations(listener: (action: WorkspaceMutationAction) => Promise<void>): () => void {
     this.relocationListeners.add(listener)
     return () => { this.relocationListeners.delete(listener) }
+  }
+  subscribeRelocationChecks(check: (action: WorkspaceMutationAction) => Promise<void>): () => void {
+    this.relocationChecks.add(check)
+    return () => { this.relocationChecks.delete(check) }
   }
 
   /** Called inside the successful source writer's file-operation lease. */
@@ -137,9 +143,32 @@ export class DocumentFileCoordinator {
     if (action.kind !== 'rename' && action.kind !== 'move' && action.kind !== 'trash') return perform()
     const source = action.sources[0]
     if (!source) throw new Error('文件操作缺少源句柄')
+    if (action.kind === 'rename' || action.kind === 'move') for (const check of this.relocationChecks) await check(action)
+    const sourceIdentity = await physicalIdentity(source.resolvedPath)
+    if (action.kind !== 'trash' && !sourceIdentity) throw new Error('文件移动源身份无法确认，文件未移动')
     const affected = (await this.states(source.resolvedPath, source.kind === 'directory')).filter(state => state.binding.kind === 'file' &&
       (source.kind === 'directory' ? inside(state.binding.path, source.resolvedPath) : key(state.binding.path) === key(source.resolvedPath)))
-    if (!affected.length) return perform()
+    const performWithoutBindings = async () => {
+      if (action.kind === 'trash' || !sourceIdentity) return perform()
+      const filename = this.filename(action.operationId, source.resolvedPath)
+      const intent: BindingIntent = { schemaVersion: 1, operationId: action.operationId, source: source.resolvedPath,
+        ...(action.target ? { target: action.target.resolvedPath } : {}), kind: action.kind as BindingIntent['kind'], action, sourceIdentity, entries: [] }
+      await this.record(filename, intent)
+      const result = await perform()
+      if (result.status === 'success' && intent.target) {
+        try {
+          const targetIdentity = await physicalIdentity(intent.target)
+          if (!targetIdentity) throw new Error('目标身份无法确认')
+          await this.record(filename, { ...intent, targetIdentity })
+        } catch (error) {
+          return { ...result, status: 'partial' as const, error: { code: 'saved-binding-update-failed',
+            message: `文件已移动，但目标身份记录未完成：${error instanceof Error ? error.message : String(error)}` } }
+        }
+      }
+      if (result.status !== 'success' && result.status !== 'partial') await fs.rm(filename, { force: true })
+      return result
+    }
+    if (!affected.length) return performWithoutBindings()
     const live = new Set(this.registry.list().map(snapshot => snapshot.documentId))
     const entries = await Promise.all(affected.map(async state => ({ documentId: state.documentId, before: state.binding as FileBinding,
       after: this.destination(action, state.binding as FileBinding), fileIdentity: await physicalIdentity((state.binding as FileBinding).path) ?? undefined,
@@ -155,9 +184,10 @@ export class DocumentFileCoordinator {
           } else { entry.before = current; entry.after = this.destination(action, current) }
         }
       }
-      if (!entries.length) return perform()
+      if (!entries.length) return performWithoutBindings()
       const intent: BindingIntent = { schemaVersion: 1, operationId: action.operationId, source: source.resolvedPath,
-        ...(action.target ? { target: action.target.resolvedPath } : {}), kind: action.kind as BindingIntent['kind'], action, entries }
+        ...(action.target ? { target: action.target.resolvedPath } : {}), kind: action.kind as BindingIntent['kind'], action, entries,
+        ...(sourceIdentity ? { sourceIdentity } : {}) }
       const filename = this.filename(action.operationId, source.resolvedPath)
       await this.record(filename, intent)
       const result = await perform()
@@ -237,7 +267,14 @@ export class DocumentFileCoordinator {
         }
       })
       if (pending.size) throw new Error('文件位置尚未确认，已保留相关路径与恢复稿；其他文件可继续使用')
-      if (intent.action && choices.some(choice => choice.physical === 'after')) {
+      let moved = choices.some(choice => choice.physical === 'after')
+      if (!intent.entries.length && intent.sourceIdentity && intent.target) {
+        const sourceMatches = await physicalIdentity(intent.source) === intent.sourceIdentity
+        const targetMatches = await physicalIdentity(intent.target) === (intent.targetIdentity ?? intent.sourceIdentity)
+        if (sourceMatches === targetMatches) throw new Error('文件移动身份尚未确认，已保留相关路径与恢复稿')
+        moved = targetMatches
+      }
+      if (intent.action && moved) {
         for (const listener of this.relocationListeners) await listener(intent.action)
       }
       await fs.rm(filename, { force: true }); this.unresolved.delete(filename)

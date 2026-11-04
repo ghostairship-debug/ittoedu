@@ -28,7 +28,10 @@ export class OfficePackage {
   private readonly documents = new Map<string, Document>()
   private readonly binaryChanges = new Set<string>()
   private readonly original: Uint8Array
-  constructor(bytes: Uint8Array) { this.original = Uint8Array.from(bytes); this.parts = unzipSync(bytes) }
+  constructor(bytes: Uint8Array) {
+    this.original = Uint8Array.from(bytes)
+    this.parts = Object.assign(Object.create(null), unzipSync(bytes))
+  }
   partVersion(name: string): string {
     const bytes = this.parts[name]
     if (!bytes) throw new Error(`Office 文件缺少部件：${name}`)

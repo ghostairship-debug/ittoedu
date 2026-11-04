@@ -16,6 +16,8 @@ import type { ExecutionSettingsView } from '../../src/shared/workbench/execution
 import type { ExecutionSettingsAPI } from '../../src/shared/workbench/executionSettingsDesktop'
 import { executionInputMessages } from '../../src/shared/workbench/executionInputMessages'
 import { USER_QUESTION_TOOL } from '../../src/shared/workbench/userQuestion'
+import { OfficeSelectionHost, OfficeSelectionTools, type OfficeSelection } from '../../src/renderer/documentFiles/office/OfficeSelectionTools'
+import { officeFocus } from '../../src/renderer/workbench/officeFocus'
 
 // M15: every object has its own AI card. A card's AI may change only its object; requests to one object queue.
 beforeEach(() => { vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function () { return new DOMRect(100, 200, 120, 40) }) })
@@ -87,6 +89,7 @@ function executionFixture() {
       return { events, cursor: events.at(-1)?.sequence ?? after, hasMore: false }
     }),
     answer: vi.fn(async () => ({ runId: 'run-1' })),
+    approve: vi.fn(async (_input: { runId: string; callId: string; decision: string }) => undefined),
     deleteConversation: vi.fn(async (input: { conversationId: string }) => { conversations.delete(input.conversationId) }),
     elementChange: vi.fn(async (submissionId: string): Promise<ElementChangeView> => changes.get(submissionId) ?? { submissionId, state: 'pending', fields: [] }),
     revertElement: vi.fn(async (_input: { submissionId: string; direction: 'undo' | 'redo'; force?: boolean }): Promise<ElementRevertResult> => reverts.shift()!),
@@ -100,6 +103,14 @@ function executionFixture() {
       { ...base, eventId: 'e1', itemId: 'run-state', sequence: 1, type: 'run.state', update: 'snapshot', data: { status: 'waiting', label: '等待你的选择' } },
       { ...base, eventId: 'e2', itemId: 'request:0', sequence: 2, type: 'tool', update: 'snapshot', data: { toolName: USER_QUESTION_TOOL, label: '向你提问', status: 'waiting', question, text: question.text } },
     )
+    for (const listener of listeners) listener(timeline.at(-1)!)
+  }
+  const proposeOfficeEdit = (conversationId: string, path: string, callId = 'office-edit-call') => {
+    timeline.push({ conversationId, taskId: 'task', runId: 'run-1', time: 1, source: 'builtin',
+      eventId: `proposal:${callId}`, itemId: callId, sequence: timeline.length + 1, type: 'tool', update: 'snapshot',
+      data: { toolName: 'office.edit', label: '修改表格', status: 'approval',
+        approval: { summary: '将 B2 改成 42', documents: [path], reason: 'ask', preview: 'Data!B2 = 42' } },
+    })
     for (const listener of listeners) listener(timeline.at(-1)!)
   }
   /** The run of a request ends; Main has recorded what it changed on the object. */
@@ -123,7 +134,7 @@ function executionFixture() {
     timeline.push({ ...base, eventId: `text-${runId}`, itemId: 'text', sequence: timeline.length + 1, type: 'text', update: 'snapshot', data: { text } })
     for (const listener of listeners) listener(timeline.at(-1)!)
   }
-  return { api, control, ask, finish, progress, say, reverts, submissions, changes, execution: api as unknown as ExecutionDesktopAPI }
+  return { api, control, ask, finish, progress, say, proposeOfficeEdit, reverts, submissions, changes, execution: api as unknown as ExecutionDesktopAPI }
 }
 
 const settings = (): ExecutionSettingsAPI => ({
@@ -144,6 +155,75 @@ function documentsFixture() {
   const documents = { subscribe: vi.fn((listener: (event: { type: 'closed'; documentId: string }) => void) => { listeners.add(listener); return () => { listeners.delete(listener) } }) }
   return { documents: documents as unknown as Pick<DocumentHostAPI, 'subscribe'>, close: (documentId: string) => { for (const listener of listeners) listener({ type: 'closed', documentId }) } }
 }
+
+it.each(['context', 'restricted', 'unmapped'] as const)('keeps the opening selection of a temporary Office card in %s mode', async mode => {
+  const f = executionFixture(), path = 'D:/example.xlsx', workspace = 'office-card-workspace'
+  const previousAPI = window.desktopAPI
+  window.desktopAPI = { execution: f.execution, executionSettings: settings() } as unknown as typeof window.desktopAPI
+  elementCards.setWorkspace(workspace)
+  const permission = mode === 'restricted' ? 'ask' : 'workspace'
+  elementCards.setPermission(permission)
+  officeFocus.setOpenFiles([{ path, format: 'xlsx', bindingVersion: 1, fileVersion: 'original' }], path)
+  const prepare = vi.fn(async () => officeFocus.updateBinding(path, { path, bindingVersion: 2, fileVersion: 'office-draft:prepared' }))
+  const renderRange = (range: string, inputPending = true) => {
+    const selection: OfficeSelection = { scope: 'range', focus: { sheet: 'Data', range }, label: `Data!${range}`,
+      ...(mode === 'unmapped' ? { text: '供参考的原文' } : { editScope: { format: 'xlsx', sheet: 'Data', range } }) }
+    return <OfficeSelectionHost.Provider value={{ path, prepare, inputPending }}>
+      <div id="office-card-viewport" />
+      <OfficeSelectionTools active selection={selection} selectionKey={range}
+        viewport={() => document.getElementById('office-card-viewport')} measure={() => new DOMRect(100, 200, 120, 40)} />
+    </OfficeSelectionHost.Provider>
+  }
+  const ui = render(renderRange('B2:C3'))
+  try {
+    fireEvent.click(await screen.findByRole('button', { name: 'AI 修改' }))
+    const card = screen.getByRole('dialog', { name: 'AI 修改：Data!B2:C3' })
+    const restrict = within(card).getByRole('checkbox', { name: '仅修改此选区' })
+    expect(restrict).not.toBeChecked()
+    if (mode === 'unmapped') expect(restrict).toBeDisabled()
+    if (mode === 'restricted') fireEvent.click(restrict)
+    ui.rerender(renderRange('D8'))
+    const input = within(card).getByRole('textbox', { name: 'AI 修改要求' })
+    fireEvent.change(input, { target: { value: '将数值翻倍' } })
+    fireEvent.click(within(card).getByRole('button', { name: '发送' }))
+    await waitFor(() => expect(f.api.send).toHaveBeenCalledTimes(1))
+    expect(prepare).toHaveBeenCalledTimes(1)
+    const request = f.api.send.mock.calls[0]![0]
+    expect(request).toMatchObject({
+      permission, documents: [], fileContext: { references: [{ scope: 'range', focus: { sheet: 'Data', range: 'B2:C3' } }],
+        officeCard: { path, bindingVersion: 2, fileVersion: 'office-draft:prepared', restrictToSelection: mode === 'restricted' } },
+    })
+    expect(request.fileContext?.officeCard?.selection).toEqual(mode === 'unmapped' ? undefined : { format: 'xlsx', sheet: 'Data', range: 'B2:C3' })
+    if (mode === 'unmapped') expect(request.text).toContain('供参考的原文')
+    if (permission === 'ask') {
+      ui.rerender(renderRange('D8', false))
+      act(() => f.proposeOfficeEdit('c1', path))
+      expect(await within(card).findByLabelText('修改内容')).toHaveTextContent('Data!B2 = 42')
+      expect(within(card).getByRole('button', { name: '本任务都允许' })).toBeEnabled()
+      fireEvent.click(within(card).getByRole('button', { name: /^允许$/ }))
+      await waitFor(() => expect(f.api.approve).toHaveBeenCalledWith({ runId: 'run-1', callId: 'office-edit-call', decision: 'allow' }))
+      act(() => {
+        officeFocus.updateBinding(path, { path, bindingVersion: 3, fileVersion: 'office-draft:after-first-edit' })
+        f.proposeOfficeEdit('c1', path, 'next-office-edit-call')
+      })
+      await waitFor(() => expect(within(card).getByRole('button', { name: /^允许$/ })).toBeEnabled())
+      fireEvent.click(within(card).getByRole('button', { name: /^允许$/ }))
+      await waitFor(() => expect(f.api.approve).toHaveBeenCalledWith({ runId: 'run-1', callId: 'next-office-edit-call', decision: 'allow' }))
+    }
+    act(() => { f.finish('c1', 'run-1', { state: 'none', fields: [] }) })
+    const close = within(card).getByRole('button', { name: '关闭 AI 卡' })
+    await waitFor(() => expect(close).toBeEnabled())
+    fireEvent.click(close)
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'AI 修改：Data!B2:C3' })).toBeNull())
+    expect(f.api.deleteConversation).toHaveBeenCalledTimes(1)
+  } finally {
+    ui.unmount()
+    officeFocus.setOpenFiles([], null)
+    elementCards.setWorkspace(null)
+    elementCards.setPermission('full')
+    window.desktopAPI = previousAPI
+  }
+})
 
 it.each(['submissions', 'conversation', 'run'] as const)('preserves a task after a failed %s refresh and allows fold, reveal and retry', async read => {
   const f = executionFixture(), cards = new ElementCardController({ execution: () => f.execution, settings: () => settings() })
@@ -279,6 +359,7 @@ it('M15 an explicitly restricted card sends only its object as writable, queues 
   const f = executionFixture(), d = documentsFixture()
   const cards = new ElementCardController({ execution: () => f.execution, settings: () => settings(), documents: () => d.documents })
   cards.setWorkspace('workspace')
+  cards.setPermission('workspace')
   const key = cards.ensure({ documentId: 'doc', target: target('a'), label: '标题' })
   expect(key).toBe(elementCardKey('doc', target('a')))
   expect(cards.view(key)).toMatchObject({ label: '标题', entries: [], busy: false })

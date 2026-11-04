@@ -168,6 +168,17 @@
           }
         ]
       },
+      "__schema11": {
+        "$ref": "#/$defs/__schema12",
+        "description": "仅填写生成本次修改确实依赖的其他已读取对象句柄或工程路径。例如用表格值更新图表时填表格路径。"
+      },
+      "__schema12": {
+        "items": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "type": "array"
+      },
       "__schema2": {
         "type": "boolean"
       },
@@ -277,6 +288,9 @@
       {
         "additionalProperties": false,
         "properties": {
+          "dependsOn": {
+            "$ref": "#/$defs/__schema11"
+          },
           "properties": {
             "$ref": "#/$defs/__schema0"
           },
@@ -295,6 +309,9 @@
       {
         "additionalProperties": false,
         "properties": {
+          "dependsOn": {
+            "$ref": "#/$defs/__schema11"
+          },
           "path": {
             "minLength": 1,
             "type": "string"

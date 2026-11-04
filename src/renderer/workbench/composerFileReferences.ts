@@ -2,6 +2,7 @@ import type { ExecutionFileContext, ExecutionFileReference } from '../../shared/
 import { focusPathKey, type FocusedWorkbenchFile } from './officeFocus'
 
 export type FileReferenceChoice = ExecutionFileReference['scope'] | 'focus'
+export type ExplicitFileReferenceScope = ExecutionFileReference['scope']
 export const fileReferenceIdentity = (reference: ExecutionFileReference): string =>
   `${focusPathKey(reference.path)}:${reference.scope}:${JSON.stringify(reference.focus ?? {})}`
 
@@ -19,7 +20,7 @@ export function fileFocusReference(file: FocusedWorkbenchFile | undefined, choic
     ...(file.fileVersion ? { fileVersion: file.fileVersion } : {}), ...(file.bindingVersion ? { bindingVersion: file.bindingVersion } : {}) }
 }
 
-export function captureFileContext(files: readonly FocusedWorkbenchFile[], pinned: readonly ExecutionFileReference[], removed: ReadonlySet<string>, preferNativePin = false): ExecutionFileContext {
+export function captureFileContext(files: readonly FocusedWorkbenchFile[], pinned: readonly ExecutionFileReference[], removed: ReadonlySet<string>): ExecutionFileContext {
   // A pin retains its target while version metadata follows the open file. Closed pins
   // remain explicit references and must be revalidated by the normal file service.
   const pins = pinned.map(reference => {
@@ -29,8 +30,11 @@ export function captureFileContext(files: readonly FocusedWorkbenchFile[], pinne
   })
   const active = files.find(file => file.active && !file.documentId)
   const automatic = fileFocusReference(active)
-  return { openFiles: structuredClone([...files]), references: pins.length ? pins
-    : preferNativePin || !automatic || removed.has(fileReferenceIdentity(automatic)) ? [] : [automatic] }
+  if (automatic) {
+    const identity = fileReferenceIdentity(automatic)
+    if (!removed.has(identity) && !pins.some(pin => fileReferenceIdentity(pin) === identity)) pins.push(automatic)
+  }
+  return { openFiles: structuredClone([...files]), references: pins }
 }
 
 /** Preparing input can advance file bytes. Refresh versions without changing the target
@@ -48,8 +52,30 @@ export function fileReferenceLabel(reference: ExecutionFileReference): string {
   const focus = reference.focus
   if (reference.scope === 'object') return `第 ${focus?.page !== undefined ? focus.page + 1 : '?'} 页 · ${focus?.shapeIds?.length ?? 0} 个对象`
   if (reference.scope === 'page') return `第 ${focus?.page !== undefined ? focus.page + 1 : '?'} 页`
-  if (reference.scope === 'range') return `${focus?.sheet ?? '工作表'}!${focus?.range ?? ''}`
-  if (reference.scope === 'sheet') return focus?.sheet ?? '工作表'
-  if (reference.scope === 'paragraph') return focus?.paragraphId ?? `第 ${(focus?.paragraph ?? 0) + 1} 段`
-  return '文件'
+  if (reference.scope === 'range') return `单元格 ${focus?.range ?? ''}`
+  if (reference.scope === 'sheet') return focus?.sheet ? `工作表 · ${focus.sheet}` : '工作表'
+  if (reference.scope === 'paragraph') return focus?.paragraph !== undefined ? `第 ${focus.paragraph + 1} 段` : '段落'
+  return /\.xlsx$/i.test(reference.path) ? '整个工作簿' : '整个文档'
+}
+
+export function fileReferenceLocation(reference: ExecutionFileReference): string {
+  const focus = reference.focus
+  if (reference.scope === 'object' && focus?.shapeIds?.length) return `${fileReferenceLabel(reference)}（对象 ID ${focus.shapeIds.join('、')}）`
+  if (reference.scope === 'range' && focus?.sheet) return `${focus.sheet}!${focus.range}`
+  if (reference.scope === 'paragraph' && focus?.paragraph === undefined && focus?.paragraphId) return `段落 ${focus.paragraphId}`
+  return fileReferenceLabel(reference)
+}
+
+export function fileScopeOptions(path: string, current?: FocusedWorkbenchFile) {
+  const format = current?.format ?? path.split('.').at(-1)?.toLowerCase()
+  const options: { id: ExplicitFileReferenceScope; label: string }[] = [
+    { id: 'file', label: format === 'xlsx' ? '整个工作簿' : '整个文档' },
+  ]
+  if (format === 'pptx') options.push({ id: 'page', label: '当前页' }, { id: 'object', label: '当前对象' })
+  if (format === 'xlsx') options.push({ id: 'sheet', label: '当前工作表' }, { id: 'range', label: '所选单元格' })
+  if (format === 'docx') {
+    if (current?.focus?.page !== undefined) options.push({ id: 'page', label: '当前页' })
+    options.push({ id: 'paragraph', label: '当前段落' })
+  }
+  return options.map(option => ({ ...option, available: option.id === 'file' || Boolean(fileFocusReference(current, option.id)) }))
 }

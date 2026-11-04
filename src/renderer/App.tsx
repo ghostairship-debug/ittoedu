@@ -260,6 +260,8 @@ export default function App() {
   const canRedoCourse = useEditorStore(selectCanRedoActiveSurface)
   const courseCanvasMode = useEditorStore(state => state.canvasMode)
   const courseConnection = useEditorStore(state => state.courseView)
+  const [autoSaveCourse, setAutoSaveCourse] = useState<ReadonlySet<string>>(() => new Set())
+  const courseAutoSaveAttempt = useRef(new Map<string, number>())
   useEffect(() => {
     for (const snapshot of courseConnection.documents) void restoreCourseInputs(snapshot.documentId)
       .catch(error => useEditorStore.getState().setError(error instanceof Error ? error.message : '输入恢复暂未完成，原稿保留在本机'))
@@ -504,6 +506,7 @@ export default function App() {
     },
     prepareBeforeClose: (mode, ids) => prepareCourseClose(ids, mode),
     subscribePreserveAndCloseRequest: handler => window.desktopAPI?.onRequestPreserveAndClose?.(async ids => {
+      lessonShell.current?.suspendForClose(ids)
       const ready = await handler(ids)
       return { ready, dirty: courseInputs.hasDirty(ids) || Boolean(lessonShell.current?.hasDirtyInputs(ids)), ...(ready && saveDirectory.current ? { suggestedDirectory: saveDirectory.current } : {}) }
     }) ?? (() => undefined),
@@ -519,6 +522,7 @@ export default function App() {
     subscribeSaveAndCloseRequest: (handler) => {
       if (!window.desktopAPI) return () => undefined
       return window.desktopAPI.onRequestSaveAndClose(async ids => {
+        lessonShell.current?.suspendForClose(ids)
         const ready = await handler(ids)
         return { ready, dirty: courseInputs.hasDirty(ids) || Boolean(lessonShell.current?.hasDirtyInputs(ids)), ...(ready && saveDirectory.current ? { suggestedDirectory: saveDirectory.current } : {}) }
       })
@@ -973,6 +977,27 @@ export default function App() {
     slideLight,
   }), [courseKernel, slideLight])
 
+  const courseSnapshot = courseConnection.snapshot
+  const courseSaveKey = courseSnapshot ? `${courseSnapshot.documentId}:${courseSnapshot.epoch}` : null
+  const courseAutoSaveEnabled = courseSaveKey !== null && autoSaveCourse.has(courseSaveKey)
+  const saveCourseProject = courseProjectLifecycle.saveProject
+  useEffect(() => {
+    if (!courseSaveKey || !courseAutoSaveEnabled || busy || !courseSnapshot?.dirty || courseSnapshot.saving
+      || courseSnapshot.binding.kind !== 'file' || courseAutoSaveAttempt.current.get(courseSaveKey) === courseSnapshot.revision) return
+    const { documentId, epoch, revision, binding } = courseSnapshot
+    const isCurrent = () => {
+      const snapshot = useEditorStore.getState().courseView.snapshot
+      return snapshot?.documentId === documentId && snapshot.epoch === epoch
+        && snapshot.binding.kind === 'file' && snapshot.binding.path === binding.path
+    }
+    const timer = setTimeout(() => {
+      if (!isCurrent()) return
+      courseAutoSaveAttempt.current.set(courseSaveKey, revision)
+      void saveCourseProject(false, { isCurrent: () => isCurrent() && courseAutoSaveAttempt.current.get(courseSaveKey) === revision })
+    }, 800)
+    return () => clearTimeout(timer)
+  }, [busy, courseAutoSaveEnabled, courseSaveKey, courseSnapshot, saveCourseProject])
+
   const courseCommonTools = (toolbarMode: 'light' | 'deep') => <CourseLightToolbar
     toolbarMode={toolbarMode}
     documentId={courseConnection.activeDocumentId}
@@ -983,6 +1008,16 @@ export default function App() {
     undoLatestAgent={() => { void useEditorStore.getState().undoLatestAgentCourseDocument().catch(error => setError(error instanceof Error ? error.message : '撤销最近 AI 修改失败')) }}
     save={() => { void courseProjectLifecycle.saveProject(false) }}
     saveAs={() => { void courseProjectLifecycle.saveProject(true) }}
+    autoSave={courseAutoSaveEnabled}
+    setAutoSave={courseSaveKey ? enabled => {
+      courseAutoSaveAttempt.current.delete(courseSaveKey)
+      setAutoSaveCourse(current => {
+        const next = new Set(current)
+        if (enabled) next.add(courseSaveKey)
+        else next.delete(courseSaveKey)
+        return next
+      })
+    } : undefined}
     onReplaceImage={() => { void mediaImport.selectAndImportImage('replace') }}
     onAddText={() => { void (async () => {
       const before = useEditorStore.getState(), target = before.courseKernel.captureTarget()

@@ -15,6 +15,7 @@ export interface MediaFileEditorProps {
 }
 export interface MediaFileEditorHandle {
   flush(): Promise<boolean>
+  saveAs(): Promise<boolean>
   close(): Promise<boolean>
   preserveDraft(): Promise<boolean>
   drain(): Promise<boolean>
@@ -35,6 +36,7 @@ export const MediaFileEditor = forwardRef<MediaFileEditorHandle, MediaFileEditor
   const draft = useMemo(() => new MediaFileDraft(snapshot, {
     release: binding => currentPort.current.release?.(binding),
     preview: (...args) => currentPort.current.preview(...args), save: (...args) => currentPort.current.save(...args), reload: (...args) => currentPort.current.reload(...args),
+    saveAs: (...args) => currentPort.current.saveAs?.(...args) ?? Promise.resolve(null),
   }), [])
   const state = useSyncExternalStore(draft.subscribe, draft.read)
   const [page, setPage] = useState(0)
@@ -49,6 +51,8 @@ export const MediaFileEditor = forwardRef<MediaFileEditorHandle, MediaFileEditor
   const gestureFrame = useRef<number | null>(null)
   const [imageUrl, setImageUrl] = useState<string | null>(null)
   const [savedMessage, setSavedMessage] = useState('')
+  const [autoSave, setAutoSave] = useState(false)
+  const saveLatest = useRef<() => Promise<boolean>>(async () => false)
   const content = state.preview.content
   const lastPage = content.kind === 'pdf' ? content.pages.length - 1 : 0
   const currentPage = Math.min(page, Math.max(0, lastPage))
@@ -100,8 +104,21 @@ export const MediaFileEditor = forwardRef<MediaFileEditorHandle, MediaFileEditor
     setSavedMessage('已保存到原文件，并重新读取确认。'); onSaved?.(saved)
     return true
   }
+  const saveAs = async () => {
+    if (!port.saveAs || closeSuspended.current || activePointer.current !== null || !await drain() || closeSuspended.current) return false
+    const saved = await draft.save(true)
+    if (!saved) return false
+    setSavedMessage('已另存并切换到新文件。'); onSaved?.(saved)
+    return true
+  }
+  saveLatest.current = save
+  useEffect(() => {
+    if (!autoSave || !state.operations.length || state.busy || state.error || !state.previewReady) return
+    const timer = setTimeout(() => { void saveLatest.current() }, 800)
+    return () => clearTimeout(timer)
+  }, [autoSave, state.operations, state.busy, state.error, state.previewReady])
   useImperativeHandle(ref, () => ({
-    flush: save, drain,
+    flush: save, saveAs, drain,
     binding: () => draft.read().base.binding,
     rebind: binding => draft.rebind(binding),
     captureCopyDraft: () => {
@@ -149,13 +166,17 @@ export const MediaFileEditor = forwardRef<MediaFileEditorHandle, MediaFileEditor
     onKeyDown={event => {
       if (event.defaultPrevented || isEditorTextInputEvent(event.nativeEvent)) return
       const shortcut = editorShortcut(event.nativeEvent)
-      if (shortcut === 'save') { event.preventDefault(); void save() }
+      if (shortcut === 'save' || shortcut === 'save-as') { event.preventDefault(); void (shortcut === 'save-as' ? saveAs() : save()) }
       if (shortcut === 'undo' || shortcut === 'redo') { event.preventDefault(); void (shortcut === 'redo' ? draft.redo() : draft.undo()) }
     }}>
     <div className="media-file-editor__toolbar" role="toolbar" aria-label="文件轻编辑">
       <button type="button" disabled={!state.operations.length || state.busy === 'save' || state.busy === 'reload'} onClick={() => void draft.undo()}>撤销</button>
       <button type="button" disabled={!state.redo.length || Boolean(state.busy)} onClick={() => void draft.redo()}>重做</button>
-      <button type="button" disabled={!state.operations.length || disabled} onClick={() => void save()}>{state.busy === 'save' ? '保存中…' : '保存'}</button>
+      <span className="file-save-pair">
+        <button type="button" disabled={!state.operations.length || disabled} onClick={() => void save()}>{state.busy === 'save' ? '保存中…' : '保存'}</button>
+        {port.saveAs && <button type="button" disabled={Boolean(state.busy) || !state.previewReady} onClick={() => void saveAs()}>另存为</button>}
+      </span>
+      <label className="media-file-editor__autosave" title="自动保存当前文件"><input type="checkbox" role="switch" checked={autoSave} disabled={!content.editable} onChange={event => setAutoSave(event.currentTarget.checked)} />自动保存</label>
       <span className="media-file-editor__divider" />
       <button type="button" aria-pressed={mode === 'select'} onClick={() => setMode('select')}>浏览</button>
       {content.kind === 'image' && <>
